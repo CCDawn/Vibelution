@@ -60,11 +60,12 @@ describe("VUI shadcn route contract", () => {
     expect(development).toContain("vuiShadcnRouteContract.test.ts");
   });
 
-  it("keeps Teams shell on VSplitWorkspace + WORKBENCH_LAYOUT_IDS.teams", () => {
+  it("keeps Teams shell on board/canvas page recipes + WORKBENCH_LAYOUT_IDS.teams", () => {
     const teams = readFileSync(resolve(routesDir, "TeamsRoute.tsx"), "utf-8");
-    expect(teams).toContain("VSplitWorkspace");
+    expect(teams).toContain("VBoardWorkbenchPage");
+    expect(teams).toContain("VCanvasWorkbenchPage");
     expect(teams).toContain("WORKBENCH_LAYOUT_IDS.teams");
-    expect(teams).toContain('data-vui-domain-recipe="teams-organization-workbench"');
+    expect(teams).toContain('domainRecipe="teams-organization-workbench"');
     expect(teams).toContain("TeamShellRail");
     expect(teams).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(teams).not.toMatch(/renderers\/shadcn/);

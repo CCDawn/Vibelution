@@ -301,9 +301,10 @@ import {
   VNativeInput,
   VNativeSelect,
   VNativeTextarea,
+  VBoardWorkbenchPage,
+  VCanvasWorkbenchPage,
   VDenseOpsPage,
   VSelect,
-  VSplitWorkspace,
   VStateSurface,
   VStatusStrip,
   VSurface,
@@ -5444,11 +5445,9 @@ export function TeamsRoute({
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   /** Shell mode owns left/right IA: board = full team workbench, canvas = org graph. */
   const researchCanvasVisible = teamShellMode === "canvas";
-  // shadcn list-detail: VSplitWorkspace owns team-rail width + persistence.
-  // Canvas inspector stays in main (domain shell); rail is the shared sidebar contract.
-  const teamsSplitResize = useMemo(
+  // Board/Canvas page recipes own split geometry; rail width persists via layoutId.
+  const teamsRailResize = useMemo(
     () => ({
-      layoutId: TEAMS_LAYOUT_ID,
       sidebar: {
         id: TEAMS_RAIL_PANE.id,
         defaultWidth: TEAMS_RAIL_PANE.defaultWidth,
@@ -5876,7 +5875,46 @@ export function TeamsRoute({
     return renderResearchStageStandalonePage(stageStandaloneView);
   }
 
-  return (
+  const teamShellRail = (
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" data-vui-region="teams-sidebar">
+      <TeamShellRail
+        lang={lang}
+        teams={visibleTeams}
+        selectedTeamId={effectiveTeamId}
+        onSelectTeam={selectTeamRecord}
+      />
+    </div>
+  );
+
+  const teamShellToolbar = (
+    <>
+      <div className={styles.teamShellToolbarIdentity}>
+        <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
+        <span>
+          {selectedTeam?.purpose
+            || (researchCanvasVisible
+              ? (lang === "zh" ? "组织画布" : "Organization canvas")
+              : (lang === "zh" ? "看板工作台" : "Board workbench"))}
+        </span>
+      </div>
+      <div className={styles.teamShellToolbarActions}>
+        <TeamShellModeSwitch
+          lang={lang}
+          mode={teamShellMode}
+          onChange={selectTeamShellMode}
+        />
+        <VIconButton
+          className={styles.teamRefreshButton}
+          label={lang === "zh" ? "刷新团队" : "Refresh teams"}
+          icon={<RefreshCw size={15} />}
+          onPress={() => void teamsQuery.refetch()}
+        />
+      </div>
+    </>
+  );
+
+  if (showTeamInitialLoadingSurface || showTeamUnavailableSurface || showTeamDetailUnavailableSurface) {
+    return (
     <VDenseOpsPage
       className={styles.route}
       headerClassName={styles.challengeWorkspaceContextHidden}
@@ -5888,7 +5926,7 @@ export function TeamsRoute({
       meta={teamContextMeta}
       actions={null}
     >
-      {/* Team pick + mode chrome live in the shell rail/toolbar (preview-aligned). */}
+
       {showTeamInitialLoadingSurface ? (
         <main className={styles.teamUnavailableSurface} aria-label={teamInitialLoadingTitle}>
           <VStateSurface
@@ -5942,7 +5980,7 @@ export function TeamsRoute({
             {teamUnavailableDetail || teamUnavailableMessage}
           </VStateSurface>
         </main>
-      ) : showTeamDetailUnavailableSurface ? (
+      ) : (
         <main className={styles.teamUnavailableSurface} aria-label={teamWorkspaceUnavailableTitle}>
           <VStateSurface
             className={styles.teamUnavailableCard}
@@ -5963,61 +6001,32 @@ export function TeamsRoute({
             {teamWorkspaceUnavailableDetail || teamWorkspaceUnavailableMessage}
           </VStateSurface>
         </main>
-      ) : (
-      <VSplitWorkspace
-        className={workspaceClassName}
-        data-vui-recipe="teams-organization-workbench"
-        data-vui-domain-recipe="teams-organization-workbench"
-        data-vui-layout-id={TEAMS_LAYOUT_ID}
-        data-team-shell-mode={teamShellMode}
-        data-testid="team-shell-workspace"
-        resize={teamsSplitResize}
-        sidebar={(
-          <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" data-vui-region="teams-sidebar">
-            <TeamShellRail
-              lang={lang}
-              teams={visibleTeams}
-              selectedTeamId={effectiveTeamId}
-              onSelectTeam={selectTeamRecord}
-            />
-          </div>
-        )}
-        main={(
-        <div className={styles.teamShellMain} data-testid="team-shell-main">
-          <div className={styles.teamShellToolbar}>
-            <div className={styles.teamShellToolbarIdentity}>
-              <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
-              <span>
-                {selectedTeam?.purpose
-                  || (researchCanvasVisible
-                    ? (lang === "zh" ? "组织画布" : "Organization canvas")
-                    : (lang === "zh" ? "看板工作台" : "Board workbench"))}
-              </span>
-            </div>
-            <div className={styles.teamShellToolbarActions}>
-              <TeamShellModeSwitch
-                lang={lang}
-                mode={teamShellMode}
-                onChange={selectTeamShellMode}
-              />
-              <VIconButton
-                className={styles.teamRefreshButton}
-                label={lang === "zh" ? "刷新团队" : "Refresh teams"}
-                icon={<RefreshCw size={15} />}
-                onPress={() => void teamsQuery.refetch()}
-              />
-            </div>
-          </div>
-          <div
-            className={[
-              styles.teamShellContent,
-              researchCanvasVisible ? styles.teamShellContentCanvas : styles.teamShellContentBoard,
-            ].filter(Boolean).join(" ")}
-            data-testid="team-shell-content"
-          >
+      )}
+    </VDenseOpsPage>
+    );
+  }
+
+
+  if (researchCanvasVisible) {
+    return (
+      <VCanvasWorkbenchPage
+        className={styles.route}
+        hideHeader
+        domainRecipe="teams-organization-workbench"
+        layoutId={TEAMS_LAYOUT_ID}
+        resize={teamsRailResize}
+        shellTestId="team-shell-workspace"
+        shellMode="canvas"
+        ariaLabel={selectedTeamContextTitle}
+        title={lang === "zh" ? "团队工作台" : "Team workbench"}
+        rail={teamShellRail}
+        toolbar={teamShellToolbar}
+        canvasClassName="!border-0 !rounded-none"
+        inspectorClassName="!border-0 !rounded-none !bg-transparent"
+        canvas={(
         <VSurface
           as="main"
-          className={canvasPanelClassName}
+          className={[styles.canvasPanel, "min-h-0 flex-1 !border-0 !rounded-none"].filter(Boolean).join(" ")}
           elevation="panel"
           padding="none"
           tone="rail"
@@ -6241,15 +6250,16 @@ export function TeamsRoute({
             </div>
           )}
         </VSurface>
-
+        )}
+        inspector={(
         <aside
           className={[
-            inspectorClassName,
-            researchCanvasVisible ? styles.teamShellInspectorPane : "",
+            styles.inspector,
+            researchWorkflowTeamSelected ? styles.researchInspector : "",
+            "min-h-0 h-full flex-1 !border-0 !rounded-none",
           ].filter(Boolean).join(" ")}
           data-vui-region="teams-inspector"
         >
-          {researchCanvasVisible ? (
           <div className={styles.inspectorHeader}>
             <strong>
               {researchCanvasReadOnly
@@ -6258,10 +6268,496 @@ export function TeamsRoute({
             </strong>
             {validation && !validation.valid ? <AlertTriangle size={16} /> : researchCanvasReadOnly ? <Eye size={16} /> : <Link2 size={16} />}
           </div>
-          ) : null}
+          <div className={styles.inspectorBody}>
+            {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
+            {showNodeBindingPanel && !selectedTeam ? (
+              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
+                <div className={styles.empty}>
+                  {lang === "zh"
+                    ? "暂无可用团队。请确认 AI 搜索范围团队和 挑战杯ai科研团队 已初始化。"
+                    : "No available team. Confirm the AI search scope team and Challenge Cup AI research team are initialized."}
+                </div>
+              </section>
+            ) : showNodeBindingPanel && selectedNode ? (
+              <section className={styles.nodeBindingSection}>
+              {selectedNode.agentId ? (
+                <div className={styles.nodeSourceAuthority}>
+                  <div>
+                    <strong>{lang === "zh" ? "Agent 身份只读投影" : "Read-only Agent identity"}</strong>
+                    <span>{selectedNode.agentSourceRef?.owner || "AgentDirectory"} · {selectedNode.agentCode || selectedNode.agentName || selectedNode.agentId}</span>
+                  </div>
+                  <VTooltip content={lang === "zh" ? "到 AgentDirectory 源配置修改" : "Edit in the AgentDirectory source"}>
+                    <Link to={teamCanvasNodeAgentSourceRoute(selectedNode)}>
+                      <Link2 size={14} />
+                      {lang === "zh" ? "源配置" : "Source"}
+                    </Link>
+                  </VTooltip>
+                </div>
+              ) : null}
+              <label>
+                <span>{lang === "zh" ? "节点名称" : "Node label"}</span>
+                <VNativeInput value={nodeDraft.label} onChange={(event) => setNodeDraft((current) => ({ ...current, label: event.target.value }))} />
+              </label>
+              <label>
+                <span>{lang === "zh" ? "组织角色" : "Role"}</span>
+                <VNativeInput value={nodeDraft.role} onChange={(event) => setNodeDraft((current) => ({ ...current, role: event.target.value }))} />
+              </label>
+              <label>
+                <span>{lang === "zh" ? "绑定 Agent" : "Bound Agent"}</span>
+                <VNativeSelect value={nodeDraft.agentId} onChange={(event) => setNodeDraft((current) => ({ ...current, agentId: event.target.value }))}>
+                  <option value="">{lang === "zh" ? "不绑定" : "Unbound"}</option>
+                  {activeAgents.map((agent) => {
+                    const display = agentDisplayInfo(agent, lang);
+                    const membership = agentTeamMembership.get(agent.agentId);
+                    const ownedByOtherTeam = Boolean(membership && membership.teamId !== selectedTeam?.teamId);
+                    return (
+                      <option key={agent.agentId} value={agent.agentId} disabled={ownedByOtherTeam}>
+                        {display.name} · {agent.agentCode}
+                        {ownedByOtherTeam
+                          ? ` · ${lang === "zh" ? "已属于" : "belongs to"} ${membership?.teamName}`
+                          : ""}
+                      </option>
+                    );
+                  })}
+                </VNativeSelect>
+              </label>
+              <label>
+                <span>{lang === "zh" ? "目的" : "Purpose"}</span>
+                <VNativeTextarea value={nodeDraft.purpose} onChange={(event) => setNodeDraft((current) => ({ ...current, purpose: event.target.value }))} />
+              </label>
+              <div className={styles.actionRow}>
+                <VNativeButton type="button" onClick={applyNodeDraft} disabled={!hasWritableCanvas || selectedTeamSaveCanvasPending}>
+                  <Save size={14} />
+                  {lang === "zh" ? "保存节点" : "Save node"}
+                </VNativeButton>
+                <VNativeButton type="button" onClick={connectFromLead} disabled={!hasWritableCanvas || !selectedNode || durableCanvas?.nodes[0]?.id === selectedNode.id}>
+                  <Link2 size={14} />
+                  {lang === "zh" ? "接入主干" : "Connect"}
+                </VNativeButton>
+                <VNativeButton type="button" onClick={unbindSelectedNode} disabled={!hasWritableCanvas || !selectedNode?.agentId || selectedTeamSaveCanvasPending}>
+                  <Unlink size={14} />
+                  {lang === "zh" ? "解绑节点" : "Unbind"}
+                </VNativeButton>
+                <VNativeButton
+                  type="button"
+                  className={styles.dangerButton}
+                  onClick={deleteSelectedNode}
+                  disabled={!hasWritableCanvas || !selectedNode || (durableCanvas?.nodes.length ?? 0) <= 1 || selectedTeamSaveCanvasPending}
+                >
+                  <Trash2 size={14} />
+                  {lang === "zh" ? "删除节点" : "Delete"}
+                </VNativeButton>
+              </div>
+              <div className={styles.issueList}>
+                {(validation?.issues ?? []).length ? (
+                  validation?.issues.map((issue) => (
+                    <div key={`${issue.code}-${issue.nodeId}-${issue.edgeId}`} className={styles.issue}>
+                      <strong>{issue.code}</strong>
+                      <span>{issue.message}</span>
+                    </div>
+                  ))
+                ) : (
+                  <span>{lang === "zh" ? "画布校验通过" : "Canvas validation passed"}</span>
+                )}
+              </div>
+              </section>
+            ) : showNodeBindingPanel ? (
+              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`} aria-busy={teamDetailQuery.isPending || agentSummaryQuery.isPending}>
+                <div className={styles.empty}>
+                  {teamDetailQuery.isPending || agentSummaryQuery.isPending
+                    ? (lang === "zh" ? "正在读取团队节点..." : "Loading team nodes...")
+                    : (lang === "zh" ? "创建或选择一个团队节点。" : "Create or select a team node.")}
+                </div>
+              </section>
+            ) : null}
+            {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
+            {showWorkflowPanel ? (
+              <section className={styles.workflowPanel} id="research-workflow-overview">
+                <div className={styles.sectionTitle}>
+                  <strong>{lang === "zh" ? "科研流程" : "Research workflow"}</strong>
+                  <span>
+                    {researchWorkflowTeamSelected
+                      ? teamWorkflow?.status || (teamWorkflowQuery.isPending ? (lang === "zh" ? "读取中" : "loading") : (lang === "zh" ? "待初始化" : "not initialized"))
+                      : (lang === "zh" ? "非科研团队" : "not research")}
+                  </span>
+                </div>
+                {researchWorkflowTeamSelected ? (
+                  teamWorkflowQuery.isPending ? (
+                    <div className={styles.empty}>{lang === "zh" ? "正在读取 TeamWorkflowOrchestration..." : "Loading TeamWorkflowOrchestration..."}</div>
+                  ) : teamWorkflow ? (
+                    <>
+                      {/* Overview hero/stages/secondary render via ResearchOverviewSurface above the workflow panel. */}
+                      {showResearchSourceCollection ? (
+                      <TeamsSourceCollectionPanel
+                        lang={lang}
+                        title={lang === "zh" ? "资料搜索执行" : "Source collection"}
+                        summary={sourceCollectionOverviewSummary}
+                        statusLabel={sourceCollectionOverviewStatus || (lang === "zh" ? "未启动" : "not started")}
+                        statusClassName={workflowIngestionToneBound(sourceCollectionOverviewStatus)}
+                        draft={sourceCollectionDraft}
+                        modeFields={renderSourceCollectionModeFields()}
+                        canStart={sourceCollectionCanStart}
+                        startPending={selectedTeamStartSourceCollectionPending}
+                        selectedRunId={selectedSourceCollectionRunEffectiveId}
+                        runs={sourceCollectionFindingRunOptions}
+                        stats={sourceCollectionOverviewStats}
+                        assignments={sourceCollectionFindingAssignments}
+                        assignmentEmptyMessage={sourceCollectionOverviewAssignmentEmptyMessage}
+                        queries={sourceCollectionFindingQueries}
+                        phaseCloseGate={(
+                          <TeamSourceCollectionPhaseCloseGatePanel
+                            lang={lang}
+                            selectedRunId={selectedSourceCollectionRunEffectiveId}
+                            gate={sourceCollectionPhaseCloseGate}
+                            loading={Boolean(
+                              selectedSourceCollectionRunEffectiveId
+                              && sourceCollectionSummaryQuery.isPending
+                              && !sourceCollectionSummaryQuery.data,
+                            )}
+                            onOpenStage={selectSourceCollectionStage}
+                          />
+                        )}
+                        storageActions={renderSourceCollectionStorageActions()}
+                        plan={sourceCollectionOverviewPlan}
+                        manualWriteback={renderSourceCollectionManualWritebackPanel({
+                          title: lang === "zh" ? "手工回写一条搜集结果" : "Manual result writeback",
+                          description: lang === "zh" ? "写 DataRecord 后自动导入 source_manifest 候选" : "Writes DataRecord, then imports source_manifest candidate",
+                          wrapInDetails: false,
+                        })}
+                        boundaryItems={sourceCollectionOverviewBoundaryItems}
+                        errorMessages={sourceCollectionOverviewErrors}
+                        result={sourceCollectionOverviewResult}
+                        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+                        onStart={() => {
+                          if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+                            return;
+                          }
+                          startSourceCollectionRunMutation.mutate({
+                            teamId: selectedTeam.teamId,
+                            draft: sourceCollectionDraft,
+                          });
+                        }}
+                        onRunChange={setSelectedSourceCollectionRunId}
+                        onAssignmentSelect={(assignmentId) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId }))}
+                      />
+                      ) : null}
+                      {showResearchCoordination ? (
+                      <TeamWorkflowCoordinationStatusPanel
+                        lang={lang}
+                        status={teamWorkflowCoordinationStatus}
+                        loading={teamWorkflowCoordinationStatusQuery.isPending}
+                        errorMessages={teamWorkflowCoordinationStatusQuery.error instanceof Error ? [teamWorkflowCoordinationStatusQuery.error.message] : []}
+                        statusLabel={(value) => workflowCoordinationStatusLabel(value, lang)}
+                        channelLabel={(value) => workflowCoordinationChannelLabel(value, lang)}
+                        stateLabel={(value) => workflowStateLabel(value, lang)}
+                      />
+                      ) : null}
+                      {showResearchIngestion ? (
+                      <TeamWorkflowKnowledgeIngestionStatusPanel
+                        lang={lang}
+                        status={teamWorkflowKnowledgeIngestionStatus}
+                        loading={teamWorkflowKnowledgeIngestionStatusQuery.isPending}
+                        errorMessages={teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? [teamWorkflowKnowledgeIngestionStatusQuery.error.message] : []}
+                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                      />
+                      ) : null}
+                      {showResearchGraph ? (
+                      <TeamWorkflowCandidateGraphStatusPanel
+                        lang={lang}
+                        graph={teamWorkflowCandidateGraph}
+                        layout={teamWorkflowCandidateGraphLayout}
+                        loading={teamWorkflowCandidateGraphQuery.isPending}
+                        errorMessages={[
+                          ...(teamWorkflowCandidateGraphQuery.error instanceof Error ? [teamWorkflowCandidateGraphQuery.error.message] : []),
+                          ...(selectedTeamBuildCandidateGraphError ? [selectedTeamBuildCandidateGraphError.message] : []),
+                        ]}
+                        actionLabel={sourceCollectionGraphActionLabel}
+                        actionDisabled={sourceCollectionGraphActionDisabled}
+                        actionTitle={sourceCollectionActionDisabledTitle(sourceCollectionGraphActionReadiness, sourceCollectionGraphActionLabel)}
+                        stateLabel={(value) => workflowStateLabel(value, lang)}
+                        onAction={runSourceCollectionGraphAction}
+                      />
+                      ) : null}
+                      {showResearchCandidates ? (
+                        <>
+                      <TeamWorkflowSourceQualityStatusPanel
+                        lang={lang}
+                        status={teamWorkflowSourceQualityStatus}
+                        loading={teamWorkflowSourceQualityStatusQuery.isPending}
+                        errorMessages={[
+                          ...(teamWorkflowSourceQualityStatusQuery.error instanceof Error ? [teamWorkflowSourceQualityStatusQuery.error.message] : []),
+                          ...(selectedTeamSourceQualityError ? [selectedTeamSourceQualityError.message] : []),
+                        ]}
+                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                      />
+                      <TeamWorkflowPaperNoteChunkStatusPanel
+                        lang={lang}
+                        status={teamWorkflowPaperNoteChunkStatus}
+                        loading={teamWorkflowPaperNoteChunkStatusQuery.isPending}
+                        errorMessages={[
+                          ...(teamWorkflowPaperNoteChunkStatusQuery.error instanceof Error ? [teamWorkflowPaperNoteChunkStatusQuery.error.message] : []),
+                          ...(selectedTeamPlanPaperNoteChunksError ? [selectedTeamPlanPaperNoteChunksError.message] : []),
+                        ]}
+                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                      />
+                      <TeamWorkflowCandidatePreviewPanel
+                        lang={lang}
+                        items={teamWorkflowCandidatePreviewItems}
+                        canOpenLibrary={Boolean(selectedTeam?.teamId)}
+                        reviewDisabled={sourceCollectionScreeningDisabled}
+                        reviewTitle={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, lang === "zh" ? "进入资料提炼复核" : "Open review")}
+                        listNeedsScrollHint={teamWorkflowCandidates.length > SOURCE_COLLECTION_RESULT_PAGE_SIZE}
+                        emptyMessage={lang === "zh" ? "候选仓库还没有资料、笔记或机制候选。" : "No sources, notes, or mechanism candidates yet."}
+                        onOpenLibrary={openSourceCollectionCandidatePanel}
+                        onOpenReview={openSourceCollectionScreeningPanel}
+                      />
+                        </>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className={styles.empty}>{lang === "zh" ? "科研流程尚未初始化。" : "Research workflow is not initialized yet."}</div>
+                  )
+                ) : (
+                  <div className={styles.empty}>
+                    {lang === "zh" ? "选择 research-team / 挑战杯ai科研团队 后显示挑战杯科研流程。" : "Select research-team to view the Challenge Cup workflow."}
+                  </div>
+                )}
+                {teamWorkflowQuery.error instanceof Error ? (
+                  <div className={styles.messageError}>{teamWorkflowQuery.error.message}</div>
+                ) : null}
+                {teamWorkflowCandidatesQuery.error instanceof Error ? (
+                  <div className={styles.messageError}>{teamWorkflowCandidatesQuery.error.message}</div>
+                ) : null}
+              </section>
+            ) : null}
+            {showTeamCommunicationPanel ? (
+              <div className={styles.researchDiscussionPanel} id="research-workflow-discussion">
+              <form
+                className={styles.teamTaskForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!selectedTeam?.teamId || !linkedChatRoomId || !teamTaskTopic.trim() || linkedRoomBusy) {
+                    return;
+                  }
+                  startTeamRoundMutation.mutate({
+                    roomId: linkedChatRoomId,
+                    teamId: selectedTeam.teamId,
+                    topic: teamTaskTopic.trim(),
+                    mode: linkedRoomDetail?.mode || selectedTeam.linkedChatRoom?.mode || "round_robin",
+                    purpose: linkedRoomDetail?.purpose || selectedTeam.linkedChatRoom?.purpose || "discussion",
+                  });
+                }}
+              >
+                <div className={styles.sectionTitle}>
+                  <strong>{lang === "zh" ? "团队任务" : "Team task"}</strong>
+                  <span>
+                    {selectedTeam?.linkedChatRoomId
+                      ? linkedRoomBusy
+                        ? (lang === "zh" ? "群聊运行中" : "room running")
+                        : (lang === "zh" ? "发送到群聊 round" : "starts a room round")
+                      : (lang === "zh" ? "需要先同步群聊" : "sync room first")}
+                  </span>
+                </div>
+                <VNativeTextarea
+                  value={teamTaskTopic}
+                  onChange={(event) => setTeamTaskTopic(event.target.value)}
+                  placeholder={lang === "zh" ? "输入团队要协作处理的议题或任务" : "Enter a topic or task for this team"}
+                />
+                <VNativeButton
+                  type="submit"
+                  disabled={!canStartTeamRound || selectedTeamStartRoundPending}
+                >
+                  <Play size={14} />
+                  {selectedTeamStartRoundPending
+                    ? (lang === "zh" ? "启动中" : "Starting")
+                    : (lang === "zh" ? "启动团队讨论" : "Start team round")}
+                </VNativeButton>
+                {selectedTeamStartRoundResult ? (
+                  <div className={styles.messageResult}>
+                    <strong>{selectedTeamStartRoundResult.rounds.length}</strong>
+                    <span>{lang === "zh" ? "轮讨论已写入关联群聊" : "rounds now recorded in the linked room"}</span>
+                    <Link to={teamChatRoomRoute(selectedTeamStartRoundResult.roomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
+                      {lang === "zh" ? "打开群聊" : "Open room"}
+                    </Link>
+                  </div>
+                ) : null}
+                {selectedTeamStartRoundError ? (
+                  <div className={styles.messageError}>{selectedTeamStartRoundError.message}</div>
+                ) : null}
+                <section className={styles.teamRoundPanel}>
+                  <div className={styles.sectionTitle}>
+                    <strong>{lang === "zh" ? "最近团队任务" : "Latest team task"}</strong>
+                    <span>{linkedRoomDetail ? chatRoomStatusLabel(linkedRoomDetail.status, lang) : (lang === "zh" ? "未读取" : "not loaded")}</span>
+                  </div>
+                  {linkedChatRoomQuery.isPending && linkedChatRoomId ? (
+                    <div className={styles.empty}>{lang === "zh" ? "正在读取关联群聊..." : "Loading linked room..."}</div>
+                  ) : latestTeamRound ? (
+                    <article className={styles.teamRoundCard}>
+                      <div className={styles.teamRoundHeader}>
+                        <strong>{latestTeamRound.topic || (lang === "zh" ? "未命名任务" : "Untitled task")}</strong>
+                        <span>{latestTeamRound.status}</span>
+                      </div>
+                      <p>{latestTeamRound.summary || (lang === "zh" ? "任务仍在等待成员输出。" : "Waiting for participant output.")}</p>
+                      <div className={styles.teamRoundMeta}>
+                        <span>{latestTeamRound.messages.length} messages</span>
+                        <span>{latestTeamRound.mode}</span>
+                        <span>{formatTime(latestTeamRound.updatedAt || latestTeamRound.startedAt, lang)}</span>
+                      </div>
+                      <Link to={teamChatRoomRoute(latestTeamRound.roomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
+                        {lang === "zh" ? "查看完整群聊" : "View full room"}
+                      </Link>
+                    </article>
+                  ) : (
+                    <div className={styles.empty}>
+                      {linkedChatRoomId
+                        ? (lang === "zh" ? "关联群聊还没有团队任务记录。" : "No team task rounds in the linked room yet.")
+                        : (lang === "zh" ? "同步群聊后可查看团队任务状态。" : "Sync a room to view team task status.")}
+                    </div>
+                  )}
+                  {linkedChatRoomQuery.error instanceof Error ? (
+                    <div className={styles.messageError}>{linkedChatRoomQuery.error.message}</div>
+                  ) : null}
+                </section>
+              </form>
+              <form
+                className={styles.teamMessageForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!selectedTeam?.teamId || !teamMessage.trim()) {
+                    return;
+                  }
+                  sendTeamMessageMutation.mutate({
+                    teamId: selectedTeam.teamId,
+                    content: teamMessage.trim(),
+                    interruptMode: teamInterrupt ? "interrupt_targets" : "none",
+                  });
+                }}
+              >
+                <div className={styles.sectionTitle}>
+                  <strong>{lang === "zh" ? "团队广播" : "Team broadcast"}</strong>
+                  <span>{activeTeamMemberCount} active agents</span>
+                </div>
+                <VNativeTextarea
+                  value={teamMessage}
+                  onChange={(event) => setTeamMessage(event.target.value)}
+                  placeholder={lang === "zh" ? "发送给当前团队 active 成员" : "Send to active members of this team"}
+                />
+                <label className={styles.inlineToggle}>
+                  <VNativeInput type="checkbox" checked={teamInterrupt} onChange={(event) => setTeamInterrupt(event.target.checked)} />
+                  <span>{lang === "zh" ? "打断正在直聊中的目标 Agent" : "Interrupt targeted running direct sessions"}</span>
+                </label>
+                <VNativeButton
+                  type="submit"
+                  disabled={!selectedTeam || !teamMessage.trim() || activeTeamMemberCount === 0 || selectedTeamMessagePending}
+                >
+                  <Send size={14} />
+                  {lang === "zh" ? "发送给团队" : "Send to team"}
+                </VNativeButton>
+                {selectedTeamMessageResult ? (
+                  <div className={styles.messageResult}>
+                    <strong>{selectedTeamMessageResult.deliveries.length}</strong>
+                    <span>{lang === "zh" ? "条投递已进入项目总群" : "deliveries recorded in project bus"}</span>
+                    {selectedTeamMessageResult.kernel?.taskId ? (
+                      <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(selectedTeamMessageResult.kernel.taskId)}>
+                        {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
+                      </Link>
+                    ) : null}
+                  </div>
+                ) : null}
+                {selectedTeamMessageError ? (
+                  <div className={styles.messageError}>{selectedTeamMessageError.message}</div>
+                ) : null}
+              </form>
+              <section className={styles.teamHistoryPanel}>
+                <div className={styles.sectionTitle}>
+                  <strong>{lang === "zh" ? "最近团队广播" : "Recent team broadcasts"}</strong>
+                  <span>{teamBusEvents.length} events</span>
+                </div>
+                {projectBusQuery.isPending ? (
+                  <div className={styles.empty}>{lang === "zh" ? "正在读取项目总群..." : "Loading project bus..."}</div>
+                ) : teamBusEvents.length ? (
+                  <div className={styles.teamHistoryList}>
+                    {teamBusEvents.map((event) => {
+                      const revoked = isProjectAgentBusEventRevoked(event);
+                      const revokePending =
+                        revokeTeamMessageMutation.isPending
+                        && revokeTeamMessageMutation.variables?.eventId === event.eventId;
+                      return (
+                        <article key={event.eventId} className={revoked ? `${styles.teamHistoryItem} ${styles.teamHistoryItemRevoked}` : styles.teamHistoryItem}>
+                          <div className={styles.teamHistoryHeader}>
+                            <strong>{event.summary || event.content}</strong>
+                            <span>{revoked ? (lang === "zh" ? "已撤回" : "revoked") : event.messageType}</span>
+                          </div>
+                          <p>{revoked ? (lang === "zh" ? "这条团队广播已撤回，目标 Agent 已请求停止。" : "This team broadcast was revoked and target agents were asked to stop.") : event.content}</p>
+                          <div className={styles.teamHistoryMeta}>
+                            <span>{formatTime(event.createdAt, lang)}</span>
+                            <span>{event.deliveries.length} deliveries</span>
+                            <span>{event.interruptions.length} interrupts</span>
+                            {event.kernel?.taskId ? (
+                              <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(event.kernel.taskId)}>
+                                {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
+                              </Link>
+                            ) : null}
+                          </div>
+                          <div className={styles.deliveryList}>
+                            {event.deliveries.map((delivery) => (
+                              <span key={`${event.eventId}-${delivery.targetAgentId}-${delivery.inboxMessageId}`}>
+                                {delivery.targetAgentCode || delivery.targetAgentName || delivery.targetAgentId}: {delivery.revoked ? "revoked" : delivery.wake?.wakeStatus || delivery.status}
+                              </span>
+                            ))}
+                          </div>
+                          {event.createdBy === "user" && !revoked ? (
+                            <VNativeButton
+                              type="button"
+                              className={styles.revokeButton}
+                              disabled={revokePending}
+                              onClick={() => selectedTeam?.teamId && revokeTeamMessageMutation.mutate({ teamId: selectedTeam.teamId, eventId: event.eventId })}
+                            >
+                              {revokePending ? (lang === "zh" ? "撤回中" : "Revoking") : (lang === "zh" ? "撤回" : "Revoke")}
+                            </VNativeButton>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className={styles.empty}>{lang === "zh" ? "当前团队还没有广播记录。" : "No team broadcasts yet."}</div>
+                )}
+                {revokeTeamMessageMutation.error instanceof Error ? (
+                  <div className={styles.messageError}>{revokeTeamMessageMutation.error.message}</div>
+                ) : null}
+              </section>
+              </div>
+            ) : null}
+            </div>
+        </aside>
+        )}
+      />
+    );
+  }
+
+  return (
+    <VBoardWorkbenchPage
+      className={styles.route}
+      hideHeader
+      domainRecipe="teams-organization-workbench"
+      layoutId={TEAMS_LAYOUT_ID}
+      resize={teamsRailResize}
+      shellTestId="team-shell-workspace"
+      shellMode="board"
+      ariaLabel={selectedTeamContextTitle}
+      title={lang === "zh" ? "团队工作台" : "Team workbench"}
+      rail={teamShellRail}
+      toolbar={teamShellToolbar}
+      boardClassName="!p-0"
+      board={(
+        <aside
+          className="min-h-0 w-full flex-1 border-0 bg-transparent"
+          data-vui-region="teams-inspector"
+        >
           <div className={[
-            !researchCanvasVisible && challengeCupResearchTeamSelected ? styles.challengeWorkspaceBody : styles.inspectorBody,
-            !researchCanvasVisible ? styles.teamShellBoardBody : "",
+            challengeCupResearchTeamSelected ? styles.challengeWorkspaceBody : styles.inspectorBody,
+            styles.teamShellBoardBody,
           ].filter(Boolean).join(" ")}>
             {/* Board mode: preview-aligned research board (CTA + 3-column kanban). */}
             {!researchCanvasVisible && researchWorkflowTeamSelected ? (
@@ -6740,11 +7236,7 @@ export function TeamsRoute({
             ) : null}
             </div>
         </aside>
-          </div>
-        </div>
-        )}
-      />
       )}
-    </VDenseOpsPage>
+    />
   );
 }

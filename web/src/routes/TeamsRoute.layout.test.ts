@@ -705,11 +705,12 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps the research overview on a readable workbench surface instead of a transparent card wall", () => {
-    // Shell: VSplitWorkspace rail + right main; board content carries panel fill.
+    // Shell: board/canvas page recipes + panel fill.
     expect(routeStyles.teamShellWorkspace).toContain("!flex");
     expect(routeStyles.teamShellContentBoard).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(routeStyles.teamShellMain).toContain("flex-col");
-    expect(routeSource).toContain("VSplitWorkspace");
+    expect(routeSource).toContain("VBoardWorkbenchPage");
+    expect(routeSource).toContain("VCanvasWorkbenchPage");
 
     expect(routeStyles.researchStageLauncher).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(routeStyles.researchStageLauncher).toContain("rounded-[var(--radius-panel)]");
@@ -922,15 +923,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("buildResearchBoardColumns");
     expect(routeSource).toContain('renderResearchStageLauncher("interactive")');
     expect(routeSource).toContain("styles.researchOverviewSurface");
-    // Shell: VSplitWorkspace (shadcn list-detail) + team rail + board/canvas modes.
-    expect(routeSource).toContain("VSplitWorkspace");
-    expect(routeSource).toContain("teamsSplitResize");
+    // Shell: VBoardWorkbenchPage / VCanvasWorkbenchPage + team rail + board/canvas modes.
+    expect(routeSource).toContain("VBoardWorkbenchPage");
+    expect(routeSource).toContain("VCanvasWorkbenchPage");
+    expect(routeSource).toContain("teamsRailResize");
     expect(routeSource).toContain("TeamShellRail");
     expect(routeSource).toContain("TeamShellModeSwitch");
     expect(routeSource).toContain("selectTeamShellMode");
-    expect(routeSource).toContain('data-testid="team-shell-workspace"');
+    expect(routeSource).toContain('shellTestId="team-shell-workspace"');
     expect(routeSource).toContain("teamShellMode");
-    expect(routeSource).toContain('id: TEAMS_RAIL_PANE.id');
+    expect(routeSource).toContain("id: TEAMS_RAIL_PANE.id");
     expect(routeSource).not.toContain("startTeamsInspectorResize");
     expect(routeSource).not.toContain("usePersistedPaneResize");
     expect(routeSource).not.toContain("科研三阶段索引");
@@ -2487,10 +2489,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workspace).toContain("overflow-hidden");
     expect(routeStyles.teamShellWorkspace).toContain("!flex");
     expect(routeStyles.teamShellInspectorPane).toContain("min-w-[280px]");
-    expect(routeSource).toContain("VSplitWorkspace");
+    expect(routeSource).toContain("VBoardWorkbenchPage");
+    expect(routeSource).toContain("VCanvasWorkbenchPage");
     expect(routeSource).toContain("WORKBENCH_LAYOUT_IDS.teams");
-    expect(routeSource).toContain('data-vui-recipe="teams-organization-workbench"');
-    expect(routeSource).toContain('data-vui-domain-recipe="teams-organization-workbench"');
+    expect(routeSource).toContain('domainRecipe="teams-organization-workbench"');
     expect(routeSource).toContain('data-vui-region="teams-canvas"');
     expect(routeSource).toContain('data-vui-region="teams-inspector"');
     expect(routeSource).toContain('data-vui-region="teams-sidebar"');
@@ -3300,19 +3302,19 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamLoadingInlineSurface).toBeTypeOf("string");
     expect(routeStyles.teamLoadingInlineSurface).toContain("min-h-[96px]");
 
-    const mainRenderSource = routeSource.slice(
-      routeSource.indexOf("showTeamUnavailableSurface ? ("),
-      routeSource.indexOf("className={canvasPanelClassName}"),
+    // Unavailable / empty shells early-return on VDenseOpsPage; success uses board/canvas recipes.
+    const loadingShellSource = routeSource.slice(
+      routeSource.indexOf("if (showTeamInitialLoadingSurface || showTeamUnavailableSurface || showTeamDetailUnavailableSurface)"),
+      routeSource.indexOf("if (researchCanvasVisible)"),
     );
-    expect(mainRenderSource).not.toContain("showTeamLoadingSurface ? (");
-    expect(mainRenderSource).toContain("showTeamDetailUnavailableSurface ? (");
-    expect(mainRenderSource.indexOf("showTeamDetailUnavailableSurface ? (")).toBeLessThan(
-      mainRenderSource.indexOf("className={workspaceClassName}"),
-    );
+    expect(loadingShellSource).toContain("VDenseOpsPage");
+    expect(loadingShellSource).toContain("showTeamUnavailableSurface");
+    expect(loadingShellSource).toContain("showTeamDetailUnavailableSurface");
+    expect(loadingShellSource).not.toContain("showTeamLoadingSurface ? (");
     expect(routeSource).toContain("teamWorkspaceLoadingTitle");
     expect(routeSource).toContain("className={styles.teamLoadingInlineSurface}");
     expect(routeSource.indexOf("className={styles.teamLoadingInlineSurface}")).toBeGreaterThan(
-      routeSource.indexOf("className={workspaceClassName}"),
+      routeSource.indexOf("VCanvasWorkbenchPage"),
     );
 
     const standaloneSource = routeSource.slice(
