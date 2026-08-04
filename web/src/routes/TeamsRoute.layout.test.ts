@@ -3,10 +3,23 @@ import { describe, expect, it } from "vitest";
 import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
-import routeSource from "./TeamsRoute.tsx?raw";
+import routeSourceRaw from "./TeamsRoute.tsx?raw";
 import teamsSourceCollectionPanelSource from "./teams/TeamsSourceCollectionPanel.tsx?raw";
 import researchMemoryEvidencePanelSource from "./teams/ResearchMemoryEvidencePanel.tsx?raw";
 import canvasGeometrySource from "./teams/canvasGeometry.ts?raw";
+import teamOrganizationCanvasSurfaceSource from "./teams/TeamOrganizationCanvasSurface.tsx?raw";
+import teamNodeBindingPanelSource from "./teams/TeamNodeBindingPanel.tsx?raw";
+import teamShellToolbarSource from "./teams/TeamShellToolbar.tsx?raw";
+import teamCanvasReadOnlyInspectorSource from "./teams/TeamCanvasReadOnlyInspector.tsx?raw";
+
+/** Route + extracted shell modules (layout contracts may live in either). */
+const routeSource = [
+  routeSourceRaw,
+  teamOrganizationCanvasSurfaceSource,
+  teamNodeBindingPanelSource,
+  teamShellToolbarSource,
+  teamCanvasReadOnlyInspectorSource,
+].join("\n");
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
 import teamLazyPanelsSource from "./teams/teamLazyPanels.tsx?raw";
@@ -100,6 +113,7 @@ describe("research project workspace", () => {
 
   it("keeps challenge platform surfaces compact and moves explanations into VUI tooltips", () => {
     // Board mode drops dual surface tabs; shell mode switch is the primary chrome.
+    expect(routeSource).toContain("TeamShellToolbar");
     expect(routeSource).toContain("TeamShellModeSwitch");
     expect(routeSource).toContain("selectTeamShellMode");
     expect(routeStyles.challengeSurfaceSwitch).toContain("inline-grid");
@@ -837,7 +851,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("Read-only Agent identity");
     expect(routeSource).toContain("到 AgentDirectory 源配置修改");
     expect(routeSource).toContain("selectedNode.agentSourceRef?.owner");
-    expect(routeSource).toContain("teamCanvasNodeAgentSourceRoute(selectedNode)");
+    expect(routeSource).toContain("teamCanvasNodeAgentSourceRoute");
+    expect(routeSource).toContain("agentSourceRoute");
     expect(routeSource).toContain("正在读取团队节点");
     expect(routeSource).toContain("agentTeamMembership");
     expect(routeSource).toContain("membership.teamId !== selectedTeam?.teamId");
@@ -1636,10 +1651,11 @@ describe("TeamsRoute layout contract", () => {
     expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP");
     expect(canvasGeometrySource).toContain("researchCanvasRoleLayer");
     expect(routeSource).toContain("返回三阶段");
-    expect(routeSource).toContain("researchCanvasReadOnly ? undefined : (event) => startNodeDrag(event, node)");
-    expect(routeSource).toContain("researchCanvasReadOnly ? undefined : moveNodeDrag");
-    expect(routeSource).toContain("researchCanvasReadOnly ? undefined : finishNodeDrag");
-    expect(routeSource).toContain("researchCanvasReadOnly ? styles.nodeReadOnly : \"\"");
+    expect(routeSource).toContain("onNodePointerDown={startNodeDrag}");
+    expect(routeSource).toContain("onPointerDown={researchCanvasReadOnly ? undefined : (event) => onNodePointerDown?.(event, node)}");
+    expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : onNodePointerMove}");
+    expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : onNodePointerUp}");
+    expect(routeSource).toContain("researchCanvasReadOnly ? nodeReadOnlyClassName : \"\"");
     expect(routeSource).toContain("styles.canvasReadOnlyPanel");
     expect(routeSource).toContain("styles.canvasReadOnlyBadge");
     expect(routeSource).toContain("styles.canvasLayoutModeSwitch");
@@ -3275,9 +3291,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("setPointerCapture(event.pointerId)");
     expect(routeSource).toContain("releasePointerCapture(event.pointerId)");
     expect(routeSource).toContain("nodes: durableCanvas.nodes.map((node) => (node.id === dragState.nodeId");
-    expect(routeSource).toContain("onPointerDown={researchCanvasReadOnly ? undefined : (event) => startNodeDrag(event, node)}");
-    expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : moveNodeDrag}");
-    expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : finishNodeDrag}");
+    expect(routeSource).toContain("onPointerDown={researchCanvasReadOnly ? undefined : (event) => onNodePointerDown?.(event, node)}");
+    expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : onNodePointerMove}");
+    expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : onNodePointerUp}");
+    expect(routeSource).toContain("onNodePointerDown={startNodeDrag}");
     expect(routeSource).toContain("edgeLine(edge, displayCanvasNodes, visibleEdges)");
   });
 
