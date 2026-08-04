@@ -32,6 +32,10 @@ export type VBoardWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">,
   resize?: Omit<VSplitWorkspaceResizeConfig, "layoutId">;
   /** Domain recipe marker, e.g. teams-organization-workbench. */
   domainRecipe?: string;
+  /** Stable test id on the split workspace root (e.g. team-shell-workspace). */
+  shellTestId?: string;
+  /** Optional mode attribute for board/canvas shells. */
+  shellMode?: string;
   railClassName?: string;
   boardClassName?: string;
   workspaceClassName?: string;
@@ -57,6 +61,8 @@ export function VBoardWorkbenchPage({
   layoutId,
   resize,
   domainRecipe,
+  shellTestId,
+  shellMode,
   railClassName,
   boardClassName,
   workspaceClassName,
@@ -88,6 +94,9 @@ export function VBoardWorkbenchPage({
       <div data-vui="board-workbench-body" className={VUI_PAGE_BODY_FILL_CLASS}>
         <VSplitWorkspace
           className={cn("h-full min-h-0", workspaceClassName)}
+          data-testid={shellTestId}
+          data-team-shell-mode={shellMode}
+          data-vui-layout-id={layoutId}
           resize={resizeConfig}
           sidebar={(
             <div

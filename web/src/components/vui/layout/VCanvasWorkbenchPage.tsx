@@ -31,6 +31,8 @@ export type VCanvasWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">
   layoutId?: string;
   resize?: Omit<VSplitWorkspaceResizeConfig, "layoutId">;
   domainRecipe?: string;
+  shellTestId?: string;
+  shellMode?: string;
   railClassName?: string;
   canvasClassName?: string;
   inspectorClassName?: string;
@@ -58,6 +60,8 @@ export function VCanvasWorkbenchPage({
   layoutId,
   resize,
   domainRecipe,
+  shellTestId,
+  shellMode,
   railClassName,
   canvasClassName,
   inspectorClassName,
@@ -98,6 +102,9 @@ export function VCanvasWorkbenchPage({
         ) : null}
         <VSplitWorkspace
           className={cn("min-h-0 flex-1", workspaceClassName)}
+          data-testid={shellTestId}
+          data-team-shell-mode={shellMode}
+          data-vui-layout-id={layoutId}
           resize={resizeConfig}
           sidebar={
             rail
