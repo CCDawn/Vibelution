@@ -2329,7 +2329,11 @@ export function ResearchFlowCanvasRoute() {
           <VRouteLinkButton className={styles.secondaryButton} to="/research" icon={<ArrowLeft size={16} />}>
             返回科研页
           </VRouteLinkButton>
-          <VButton className={styles.secondaryButton} type="button" onClick={fitView} isDisabled={!draft} icon={<MousePointer2 size={16}/>}>复位视图</VButton>
+          <VButton className={styles.secondaryButton} type="button" onClick={fitView} isDisabled={!draft}
+            icon={<MousePointer2 size={16}/>}
+          >
+            复位视图
+          </VButton>
           <VButton
             className={styles.secondaryButton}
             type="button"
@@ -2339,14 +2343,18 @@ export function ResearchFlowCanvasRoute() {
               setObservationMessage("已请求刷新科研组织图。");
             }}
             isDisabled={canvasQuery.isFetching || organizationQuery.isFetching}
-            icon={<RefreshCw size={16} />}>刷新组织图</VButton>
+ icon={<RefreshCw size={16} />}>
+              刷新组织图
+            </VButton>
           <VButton
             className={`${styles.primaryButton} ${styles.lockButtonActive}`}
             type="button"
             onClick={toggleCanvasLock}
             title="画布持续锁定，拓扑来自项目组织架构。"
             aria-pressed="true"
-            icon={<Lock size={16}/>}>持续锁定</VButton>
+ icon={<Lock size={16}/>}>
+              持续锁定
+            </VButton>
         </div>
       )}
       toolbar={(
@@ -2801,12 +2809,18 @@ export function ResearchFlowCanvasRoute() {
                         className={styles.primaryButton}
                         type="submit"
                         isDisabled={!canSendOrganizationMessage || sendOrgMessageMutation.isPending}
-                icon={<Send size={16} />}>{sendOrgMessageMutation.isPending ? "发送中" : "发送消息"}</VButton>
+
+                  icon={<Send size={16} />}
+                >
+                  {sendOrgMessageMutation.isPending ? "发送中" : "发送消息"}
+                </VButton>
                       <VButton
                         className={styles.secondaryButton}
                         type="button"
                         onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.researchOrganization() })}
-                        icon={<RefreshCw size={16} />}>刷新</VButton>
+ icon={<RefreshCw size={16} />}>
+                          刷新
+                        </VButton>
                     </div>
                     {orgMessageFeedback ? <p className={styles.fieldHint}>{orgMessageFeedback}</p> : null}
                   </form>
@@ -2869,7 +2883,9 @@ export function ResearchFlowCanvasRoute() {
                               type="button"
                               isDisabled={retryOrgWakeMutation.isPending}
                               onClick={() => retryOrgWakeMutation.mutate(message.messageId)}
-                              icon={<RefreshCw size={16} />}>重试唤醒</VButton>
+ icon={<RefreshCw size={16} />}>
+                                重试唤醒
+                              </VButton>
                           ) : null}
                         </article>
                       );

@@ -200,14 +200,22 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
               aria-selected={rightIndexPanel === "conversations"}
               className={rightIndexPanel === "conversations" ? `${styles.rightIndexTab} ${styles.rightIndexTabActive}` : styles.rightIndexTab}
               onClick={() => setRightIndexPanel("conversations")}
-              icon={<MessageCircleHeart size={14}/>}><span>{lang === "zh" ? "会话" : "Chats"}</span></VButton>
+
+                icon={<MessageCircleHeart size={14}/>}
+              >
+                <span>{lang === "zh" ? "会话" : "Chats"}</span>
+              </VButton>
             <VButton
               type="button"
               role="tab"
               aria-selected={rightIndexPanel === "members"}
               className={rightIndexPanel === "members" ? `${styles.rightIndexTab} ${styles.rightIndexTabActive}` : styles.rightIndexTab}
               onClick={() => setRightIndexPanel("members")}
-              icon={<UsersRound size={14} />}><span>{lang === "zh" ? "成员" : "Members"}</span></VButton>
+
+                icon={<UsersRound size={14} />}
+              >
+                <span>{lang === "zh" ? "成员" : "Members"}</span>
+              </VButton>
           </div>
         ) : null}
 
@@ -512,7 +520,11 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                   className={styles.createGroupButton}
                   onClick={onCreateGroupRoom}
                   isDisabled={createGroupRoomPending || groupSelectedAgentIds.length < 2 || !groupTitleDraft.trim()}
-                icon={<UsersRound size={15} />}><span>{createGroupRoomPending ? (lang === "zh" ? "创建中" : "Creating") : (lang === "zh" ? "创建群聊" : "Create group")}</span></VButton>
+
+                  icon={<UsersRound size={15} />}
+                >
+                  <span>{createGroupRoomPending ? (lang === "zh" ? "创建中" : "Creating") : (lang === "zh" ? "创建群聊" : "Create group")}</span>
+                </VButton>
               </section>
             ) : null}
             </div>

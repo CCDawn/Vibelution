@@ -110,7 +110,9 @@ export function MemoryKnowledgeReviewPanel({
             className={styles.primaryActionButton}
             onClick={onSubmitRefinementProposal}
             isDisabled={!canPropose || knowledgeBusy}
-                icon={<Pencil size={15} />}><span>{copy.submitProposal}</span></VButton>
+ icon={<Pencil size={15} />}>
+                  <span>{copy.submitProposal}</span>
+                </VButton>
         </div>
         <div className={styles.knowledgeFormGrid}>
           <label>
@@ -148,13 +150,19 @@ export function MemoryKnowledgeReviewPanel({
                 className={styles.detailActionButton}
                 isDisabled={!canReview || knowledgeBusy}
                 onClick={() => onReviewProposal(proposal.proposalId, "approved")}
-                icon={<CheckCircle2 size={14}/>}><span>{copy.approveProposal}</span></VButton>
+
+                  icon={<CheckCircle2 size={14}/>}
+                >
+                  <span>{copy.approveProposal}</span>
+                </VButton>
               <VButton
                 type="button"
                 className={styles.detailActionButton}
                 isDisabled={!canReview || knowledgeBusy}
                 onClick={() => onReviewProposal(proposal.proposalId, "rejected")}
-                icon={<XCircle size={14}/>}><span>{copy.rejectProposal}</span></VButton>
+ icon={<XCircle size={14}/>}>
+                  <span>{copy.rejectProposal}</span>
+                </VButton>
             </section>
           ))}
           {activeKnowledgeBase && activeKnowledgeBase.pendingProposals.length === 0 ? (
@@ -196,20 +204,36 @@ export function MemoryKnowledgeReviewPanel({
         </div>
         <div className={styles.bulkActionBar}>
           <span className={styles.countPill}>{copy.selectedSuggestions}: {selectedVisibleRatingSuggestionIds.length}</span>
-          <VButton type="button" className={styles.detailActionButton} onClick={onToggleVisibleRatingSuggestions} isDisabled={!pendingVisibleRatingSuggestions.length || knowledgeBusy} icon={<SquareCheckBig size={14}/>}><span>{copy.selectAllVisibleSuggestions}</span></VButton>
-          <VButton type="button" className={styles.detailActionButton} onClick={onClearRatingSuggestionSelection} isDisabled={!selectedVisibleRatingSuggestionIds.length || knowledgeBusy} icon={<Square size={14} />}><span>{copy.clearSuggestionSelection}</span></VButton>
+          <VButton type="button" className={styles.detailActionButton} onClick={onToggleVisibleRatingSuggestions} isDisabled={!pendingVisibleRatingSuggestions.length || knowledgeBusy}
+            icon={<SquareCheckBig size={14}/>}
+          >
+            <span>{copy.selectAllVisibleSuggestions}</span>
+          </VButton>
+          <VButton type="button" className={styles.detailActionButton} onClick={onClearRatingSuggestionSelection} isDisabled={!selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
+            icon={<Square size={14} />}
+          >
+            <span>{copy.clearSuggestionSelection}</span>
+          </VButton>
           <VButton
             type="button"
             className={styles.detailActionButton}
             isDisabled={!canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
             onClick={() => onReviewSelectedRatingSuggestions("applied")}
-            icon={<CheckCircle2 size={14}/>}><span>{copy.bulkApplySuggestions}</span></VButton>
+
+              icon={<CheckCircle2 size={14}/>}
+            >
+              <span>{copy.bulkApplySuggestions}</span>
+            </VButton>
           <VButton
             type="button"
             className={styles.detailActionButton}
             isDisabled={!canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
             onClick={() => onReviewSelectedRatingSuggestions("rejected")}
-            icon={<XCircle size={14}/>}><span>{copy.bulkRejectSuggestions}</span></VButton>
+
+              icon={<XCircle size={14}/>}
+            >
+              <span>{copy.bulkRejectSuggestions}</span>
+            </VButton>
         </div>
         <div className={styles.knowledgeProposalList}>
           {ratingSuggestions.map((suggestion) => (
@@ -232,13 +256,19 @@ export function MemoryKnowledgeReviewPanel({
                 className={styles.detailActionButton}
                 isDisabled={!canRate || suggestion.status !== "pending" || knowledgeBusy}
                 onClick={() => onReviewRatingSuggestion(suggestion.suggestionId, "applied")}
-                icon={<CheckCircle2 size={14}/>}><span>{copy.applySuggestion}</span></VButton>
+
+                  icon={<CheckCircle2 size={14}/>}
+                >
+                  <span>{copy.applySuggestion}</span>
+                </VButton>
               <VButton
                 type="button"
                 className={styles.detailActionButton}
                 isDisabled={!canRate || suggestion.status !== "pending" || knowledgeBusy}
                 onClick={() => onReviewRatingSuggestion(suggestion.suggestionId, "rejected")}
-                icon={<XCircle size={14}/>}><span>{copy.rejectSuggestion}</span></VButton>
+ icon={<XCircle size={14}/>}>
+                  <span>{copy.rejectSuggestion}</span>
+                </VButton>
             </section>
           ))}
           {!ratingSuggestionsPending && !ratingSuggestions.length ? (

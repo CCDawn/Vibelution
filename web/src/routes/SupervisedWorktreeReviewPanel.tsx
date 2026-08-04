@@ -192,7 +192,11 @@ export function SupervisedWorktreeReviewPanel({
                     isDisabled={disabled}
                     onClick={() => onRunAction(highlightedWorktreeRun, item.action)}
                     title={reason || t(item.labelKey)}
-                    icon={pending ? <LoaderCircle size={15} className={styles.spinClass} /> : <Icon size={15} />}>{t(item.labelKey)}</VButton>
+
+                      icon={pending ? <LoaderCircle size={15} className={styles.spinClass} /> : <Icon size={15} />}
+                    >
+                      {t(item.labelKey)}
+                    </VButton>
                 );
               })}
             </div>
@@ -227,7 +231,11 @@ export function SupervisedWorktreeReviewPanel({
                 }
                 onClick={() => onApproveReview(highlightedWorktreeRun)}
                 title={disabledReason(highlightedApproveReviewAction) || t("approveSelfWorktreeReview")}
-                icon={pending ? <LoaderCircle size={15} className={styles.spinClass} /> : <ShieldCheck size={15} />}>{t("approveSelfWorktreeReview")}</VButton>
+
+                  icon={pending ? <LoaderCircle size={15} className={styles.spinClass} /> : <ShieldCheck size={15} />}
+                >
+                  {t("approveSelfWorktreeReview")}
+                </VButton>
               {!highlightedApproveReviewAction?.enabled && disabledReason(highlightedApproveReviewAction) ? (
                 <p className={styles.gateNoticeTextClass}>{disabledReason(highlightedApproveReviewAction)}</p>
               ) : null}

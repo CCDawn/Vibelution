@@ -166,12 +166,24 @@ export function MemoryManagePanel({
             ))}
           </section>
           <section className={styles.bulkActionBar}>
-            <VButton type="button" className={styles.detailActionButton} onClick={onToggleVisibleSelection} isDisabled={mutationBusy} icon={allVisibleSelected ? <SquareCheckBig size={14} /> : <Square size={14} />}><span>{allVisibleSelected ? copy.clearSelection : copy.selectAllVisible}</span></VButton>
+            <VButton type="button" className={styles.detailActionButton} onClick={onToggleVisibleSelection} isDisabled={mutationBusy}
+              icon={allVisibleSelected ? <SquareCheckBig size={14} /> : <Square size={14} />}
+            >
+              <span>{allVisibleSelected ? copy.clearSelection : copy.selectAllVisible}</span>
+            </VButton>
             <span className={styles.countPill}>
               {copy.selectedCount}: {selectedMemoryCount}
             </span>
-            <VButton type="button" className={styles.detailActionButton} onClick={onBulkDisable} isDisabled={disableBulkDisabled} icon={<Trash2 size={14} />}><span>{disableBulkPending ? copy.loading : copy.bulkDisable}</span></VButton>
-            <VButton type="button" className={styles.detailActionButton} onClick={onBulkRestore} isDisabled={restoreBulkDisabled} icon={<Undo2 size={14}/>}><span>{restoreBulkPending ? copy.loading : copy.bulkRestore}</span></VButton>
+            <VButton type="button" className={styles.detailActionButton} onClick={onBulkDisable} isDisabled={disableBulkDisabled}
+              icon={<Trash2 size={14} />}
+            >
+              <span>{disableBulkPending ? copy.loading : copy.bulkDisable}</span>
+            </VButton>
+            <VButton type="button" className={styles.detailActionButton} onClick={onBulkRestore} isDisabled={restoreBulkDisabled}
+              icon={<Undo2 size={14}/>}
+            >
+              <span>{restoreBulkPending ? copy.loading : copy.bulkRestore}</span>
+            </VButton>
           </section>
           {memoryList}
         </VSurface>
@@ -182,7 +194,11 @@ export function MemoryManagePanel({
               <p className={styles.panelEyebrow}>{copy.management}</p>
               <h2>{editMode ? (editMode === "create" ? copy.addMemory : copy.editMemory) : copy.manageConfigPanel}</h2>
             </div>
-            <VButton type="button" className={styles.primaryActionButton} onClick={onStartCreate} isDisabled={mutationBusy} icon={<Pencil size={15} />}><span>{copy.addMemory}</span></VButton>
+            <VButton type="button" className={styles.primaryActionButton} onClick={onStartCreate} isDisabled={mutationBusy}
+              icon={<Pencil size={15} />}
+            >
+              <span>{copy.addMemory}</span>
+            </VButton>
           </div>
           {managementEditor}
           {selectedConfig}

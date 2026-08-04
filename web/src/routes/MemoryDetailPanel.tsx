@@ -143,16 +143,32 @@ export function MemoryDetailPanel({
           ) : null}
 
           <div className={styles.detailActions}>
-            <VButton type="button" className={styles.detailActionButton} onClick={onCopySourceSummary} icon={<CopyIcon size={14}/>}><span>{copy.copySourceSummary}</span></VButton>
-            <VButton type="button" className={styles.detailActionButton} onClick={onCopySourcePath} icon={<FileText size={14}/>}><span>{copy.copySourcePath}</span></VButton>
+            <VButton type="button" className={styles.detailActionButton} onClick={onCopySourceSummary}
+              icon={<CopyIcon size={14}/>}
+            >
+              <span>{copy.copySourceSummary}</span>
+            </VButton>
+            <VButton type="button" className={styles.detailActionButton} onClick={onCopySourcePath}
+              icon={<FileText size={14}/>}
+            >
+              <span>{copy.copySourcePath}</span>
+            </VButton>
             <VButton
               type="button"
               className={styles.detailActionButton}
               onClick={onCopyRawContent}
               isDisabled={!canCopyRawContent}
               title={!canCopyRawContent ? copy.noContent : undefined}
-              icon={<FileText size={14}/>}><span>{copy.copyRawContentAction}</span></VButton>
-            <VButton type="button" className={styles.detailActionButton} onClick={onCopyCurrentLink} icon={<Link2 size={14} />}><span>{copy.copyCurrentLink}</span></VButton>
+
+                icon={<FileText size={14}/>}
+              >
+                <span>{copy.copyRawContentAction}</span>
+              </VButton>
+            <VButton type="button" className={styles.detailActionButton} onClick={onCopyCurrentLink}
+              icon={<Link2 size={14} />}
+            >
+              <span>{copy.copyCurrentLink}</span>
+            </VButton>
           </div>
 
           {copyFeedback.tone !== "idle" ? (

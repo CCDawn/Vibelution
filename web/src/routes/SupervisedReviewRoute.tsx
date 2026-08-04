@@ -518,7 +518,11 @@ export function SupervisedReviewRoute() {
                   isDisabled={visiblePendingCount === 0}
                   disabledReason={lang === "zh" ? "当前筛选结果里没有待审样本。" : "There are no pending items in the current result."}
                   onClick={selectVisiblePendingItems}
-                  icon={<SquareCheckBig size={14}/>}>{lang === "zh" ? "选择当前待审" : "Select pending"}</VButton>
+
+                    icon={<SquareCheckBig size={14}/>}
+                  >
+                    {lang === "zh" ? "选择当前待审" : "Select pending"}
+                  </VButton>
                 <VButton
                   type="button"
                   className={styles.compactAction}
@@ -537,7 +541,11 @@ export function SupervisedReviewRoute() {
                     : (lang === "zh" ? "请先选择待审样本。" : "Select pending samples first.")}
                   tooltip={lang === "zh" ? "将所选待审样本标记为丢弃。" : "Mark the selected pending samples as discarded."}
                   onClick={() => bulkDeleteMutation.mutate()}
-                  icon={bulkDeleteMutation.isPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}>{lang === "zh" ? "丢弃所选" : "Discard selected"}</VButton>
+
+                    icon={bulkDeleteMutation.isPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}
+                  >
+                    {lang === "zh" ? "丢弃所选" : "Discard selected"}
+                  </VButton>
               </div>
             </div>
 
@@ -731,7 +739,11 @@ export function SupervisedReviewRoute() {
                           ? (lang === "zh" ? "收录为带错误归因的反向训练样本。" : "Keep as a negative sample with error attribution.")
                           : (lang === "zh" ? "不进入正例或负例数据集。" : "Exclude from positive and negative datasets.")}
                       onClick={() => setDraftDecision(value)}
-                      icon={value === "positive" ? <CheckCircle2 size={15} /> : value === "negative" ? <TriangleAlert size={15} /> : <Trash2 size={15} />}>{decisionLabel(value)}</VButton>
+
+                        icon={value === "positive" ? <CheckCircle2 size={15} /> : value === "negative" ? <TriangleAlert size={15} /> : <Trash2 size={15} />}
+                      >
+                        {decisionLabel(value)}
+                      </VButton>
                   ))}
                 </div>
 
@@ -809,7 +821,11 @@ export function SupervisedReviewRoute() {
                       ? (lang === "zh" ? "正在保存当前裁决。" : "Saving the current decision.")
                       : (lang === "zh" ? "该样本已经完成裁决。" : "This sample has already been reviewed.")}
                     onClick={submitCurrentDecision}
-                    icon={decisionMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <LibraryBig size={15} />}>{lang === "zh" ? "保存裁决" : "Save decision"}</VButton>
+
+                      icon={decisionMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <LibraryBig size={15} />}
+                    >
+                      {lang === "zh" ? "保存裁决" : "Save decision"}
+                    </VButton>
                   <VTooltip
                     content={positiveDatasetVisible
                       ? (lang === "zh" ? "正例数据集已可用；返回后可直接基于它发起下一轮监督运行。" : "The positive dataset is ready and can be used for the next supervised run.")

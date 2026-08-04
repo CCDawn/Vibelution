@@ -208,28 +208,44 @@ export function MemoryProjectMemoryQueuePanel({
                       title={copy.projectMemoryQueueApply}
                       isDisabled={isResolving}
                       onClick={() => onResolve(proposal, "applied")}
-                      icon={<CheckCircle2 size={14}/>}><span>{copy.projectMemoryQueueApply}</span></VButton>
+
+                        icon={<CheckCircle2 size={14}/>}
+                      >
+                        <span>{copy.projectMemoryQueueApply}</span>
+                      </VButton>
                     <VButton
                       type="button"
                       className={styles.detailActionButton}
                       title={copy.projectMemoryQueueReject}
                       isDisabled={isResolving}
                       onClick={() => onResolve(proposal, "rejected")}
-                      icon={<XCircle size={14}/>}><span>{copy.projectMemoryQueueReject}</span></VButton>
+
+                        icon={<XCircle size={14}/>}
+                      >
+                        <span>{copy.projectMemoryQueueReject}</span>
+                      </VButton>
                     <VButton
                       type="button"
                       className={styles.detailActionButton}
                       title={copy.projectMemoryQueueConflict}
                       isDisabled={isResolving}
                       onClick={() => onResolve(proposal, "conflict")}
-                      icon={<TriangleAlert size={14}/>}><span>{copy.projectMemoryQueueConflict}</span></VButton>
+
+                        icon={<TriangleAlert size={14}/>}
+                      >
+                        <span>{copy.projectMemoryQueueConflict}</span>
+                      </VButton>
                     <VButton
                       type="button"
                       className={styles.detailActionButton}
                       title={copy.projectMemoryQueueSupersede}
                       isDisabled={isResolving}
                       onClick={() => onResolve(proposal, "superseded")}
-                      icon={<Square size={14} />}><span>{copy.projectMemoryQueueSupersede}</span></VButton>
+
+                        icon={<Square size={14} />}
+                      >
+                        <span>{copy.projectMemoryQueueSupersede}</span>
+                      </VButton>
                   </>
                 ) : (
                   <span className={styles.projectMemoryProposalResolved}>

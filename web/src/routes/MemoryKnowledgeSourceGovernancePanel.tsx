@@ -202,7 +202,11 @@ export function MemoryKnowledgeSourceGovernancePanel({
             ))}
           </VNativeSelect>
         </label>
-        <VButton type="button" className={styles.detailActionButton} onClick={onApplyActiveKnowledgeOwner} icon={<Database size={14}/>}><span>{copy.useActiveKnowledgeOwner}</span></VButton>
+        <VButton type="button" className={styles.detailActionButton} onClick={onApplyActiveKnowledgeOwner}
+          icon={<Database size={14}/>}
+        >
+          <span>{copy.useActiveKnowledgeOwner}</span>
+        </VButton>
       </div>
       <div className={styles.sourceGovernanceGrid}>
         <div className={styles.sourceGovernanceColumn}>
@@ -211,7 +215,11 @@ export function MemoryKnowledgeSourceGovernancePanel({
               <p className={styles.panelEyebrow}>{copy.collectOwnerSource}</p>
               <h3>{copy.ownerSourceInbox}</h3>
             </div>
-            <VButton type="button" className={styles.primaryActionButton} onClick={() => onShowOwnerSourceFormChange(!showOwnerSourceForm)} icon={<Pencil size={15} />}><span>{showOwnerSourceForm ? copy.cancelEdit : copy.submitSource}</span></VButton>
+            <VButton type="button" className={styles.primaryActionButton} onClick={() => onShowOwnerSourceFormChange(!showOwnerSourceForm)}
+              icon={<Pencil size={15} />}
+            >
+              <span>{showOwnerSourceForm ? copy.cancelEdit : copy.submitSource}</span>
+            </VButton>
           </div>
           {showOwnerSourceForm ? (
             <>
@@ -262,7 +270,11 @@ export function MemoryKnowledgeSourceGovernancePanel({
                 </label>
               </div>
               <div className={styles.formActionRow}>
-                <VButton type="button" className={styles.primaryActionButton} onClick={onSubmitOwnerSource} isDisabled={!canSubmitOwnerSource} icon={<Link2 size={15} />}><span>{copy.collectOwnerSource}</span></VButton>
+                <VButton type="button" className={styles.primaryActionButton} onClick={onSubmitOwnerSource} isDisabled={!canSubmitOwnerSource}
+                  icon={<Link2 size={15} />}
+                >
+                  <span>{copy.collectOwnerSource}</span>
+                </VButton>
               </div>
             </>
           ) : (
@@ -309,15 +321,31 @@ export function MemoryKnowledgeSourceGovernancePanel({
                     <span>{copy.dedupeStatus}: {source.dedupeStatus || "-"}</span>
                   </div>
                   <div className={styles.sourceRecordActions}>
-                    <VButton type="button" className={styles.detailActionButton} isDisabled={knowledgeBusy || !reviewable} onClick={() => onReviewOwnerSource(source, "accepted")} icon={<CheckCircle2 size={14}/>}><span>{copy.acceptSource}</span></VButton>
-                    <VButton type="button" className={styles.detailActionButton} isDisabled={knowledgeBusy || !reviewable} onClick={() => onReviewOwnerSource(source, "needs_more_context")} icon={<Eye size={14}/>}><span>{copy.needsMoreContext}</span></VButton>
+                    <VButton type="button" className={styles.detailActionButton} isDisabled={knowledgeBusy || !reviewable} onClick={() => onReviewOwnerSource(source, "accepted")}
+                      icon={<CheckCircle2 size={14}/>}
+                    >
+                      <span>{copy.acceptSource}</span>
+                    </VButton>
+                    <VButton type="button" className={styles.detailActionButton} isDisabled={knowledgeBusy || !reviewable} onClick={() => onReviewOwnerSource(source, "needs_more_context")}
+                      icon={<Eye size={14}/>}
+                    >
+                      <span>{copy.needsMoreContext}</span>
+                    </VButton>
                     <VButton
                       type="button"
                       className={styles.detailActionButton}
                       isDisabled={knowledgeBusy || !reviewable || !duplicateCentralSourceId.trim()}
                       onClick={() => onReviewOwnerSource(source, "duplicate")}
-                      icon={<CopyIcon size={14}/>}><span>{copy.markDuplicate}</span></VButton>
-                    <VButton type="button" className={styles.detailActionButton} isDisabled={knowledgeBusy || !reviewable} onClick={() => onReviewOwnerSource(source, "rejected")} icon={<XCircle size={14}/>}><span>{copy.rejectProposal}</span></VButton>
+
+                        icon={<CopyIcon size={14}/>}
+                      >
+                        <span>{copy.markDuplicate}</span>
+                      </VButton>
+                    <VButton type="button" className={styles.detailActionButton} isDisabled={knowledgeBusy || !reviewable} onClick={() => onReviewOwnerSource(source, "rejected")}
+                      icon={<XCircle size={14}/>}
+                    >
+                      <span>{copy.rejectProposal}</span>
+                    </VButton>
                   </div>
                 </article>
               );
@@ -347,7 +375,11 @@ export function MemoryKnowledgeSourceGovernancePanel({
               <span>{copy.reviewedAt}: {formatTimestamp(source.acceptedAt)}</span>
             </div>
             <div className={styles.sourceRecordActions}>
-              <VButton type="button" className={styles.detailActionButton} isDisabled={!canAttachCentralSource} onClick={() => onAttachCentralSource(source.centralSourceId)} icon={<Link2 size={14} />}><span>{copy.attachCentralSource}</span></VButton>
+              <VButton type="button" className={styles.detailActionButton} isDisabled={!canAttachCentralSource} onClick={() => onAttachCentralSource(source.centralSourceId)}
+                icon={<Link2 size={14} />}
+              >
+                <span>{copy.attachCentralSource}</span>
+              </VButton>
             </div>
           </article>
         ))}
