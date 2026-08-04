@@ -15,6 +15,8 @@ import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRende
 import teamSourceCollectionInjectRenderersSource from "./teams/teamSourceCollectionInjectRenderers.tsx?raw";
 import teamResearchWorkflowSurfaceRenderersSource from "./teams/teamResearchWorkflowSurfaceRenderers.tsx?raw";
 import teamResearchPrimarySurfaceRenderersSource from "./teams/teamResearchPrimarySurfaceRenderers.tsx?raw";
+import teamCanvasNodeEditingSource from "./teams/useTeamCanvasNodeEditing.ts?raw";
+import teamCanvasNodeModelSource from "./teams/teamCanvasNodeModel.ts?raw";
 import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
 import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
 import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
@@ -34,6 +36,8 @@ const routeSource = [
   teamSourceCollectionInjectRenderersSource,
   teamResearchWorkflowSurfaceRenderersSource,
   teamResearchPrimarySurfaceRenderersSource,
+  teamCanvasNodeEditingSource,
+  teamCanvasNodeModelSource,
   useSourceCollectionWorkspaceSource,
   useResearchExperimentWorkspaceSource,
   useTeamsShellCanvasWorkspaceSource,
@@ -902,7 +906,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("agentSourceRoute");
     expect(routeSource).toContain("正在读取团队节点");
     expect(routeSource).toContain("agentTeamMembership");
-    expect(routeSource).toContain("membership.teamId !== selectedTeam?.teamId");
+    expect(routeSource).toContain("membership.teamId !== selectedTeamId");
     expect(routeSource).toContain("disabled={ownedByOtherTeam}");
     expect(routeSource).toContain("已属于");
     expect(routeSource).toContain("接入主干");
@@ -2110,7 +2114,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamCommunicationPanelSource).toContain("styles.teamHistoryPanel");
     expect(routeStyles.kernelTraceLink).toBeTypeOf("string");
     expect(teamCommunicationPanelSource).toContain("interrupt_targets");
-    expect(routeSource).toContain("edges: durableCanvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
+    expect(routeSource).toContain("buildCanvasWithDeletedNode");
+    expect(routeSource).toContain("edge.source !== selectedNodeId && edge.target !== selectedNodeId");
     expect(routeSource).toContain("disabled={!hasWritableCanvas");
     expect(routeStyles.teamContextBar).toBeTypeOf("string");
     // Wave 8E: teamTitleBlock removed as unused route residue; context chrome remains.
@@ -3373,7 +3378,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("commitNodeDragPosition(dragState)");
     expect(routeSource).toContain("setPointerCapture(event.pointerId)");
     expect(routeSource).toContain("releasePointerCapture(event.pointerId)");
-    expect(routeSource).toContain("nodes: durableCanvas.nodes.map((node) => (node.id === dragState.nodeId");
+    expect(routeSource).toContain("buildCanvasWithDraggedNode");
+    expect(routeSource).toContain("export function buildCanvasWithDraggedNode");
     expect(routeSource).toContain("onPointerDown={researchCanvasReadOnly ? undefined : (event) => onNodePointerDown?.(event, node)}");
     expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : onNodePointerMove}");
     expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : onNodePointerUp}");

@@ -192,7 +192,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 3. **Done (structure):** SC inject render adapters → `teamSourceCollectionInjectRenderers.tsx` (`createSourceCollectionInjectRenderers`).
 4. **Done (structure):** research workflow / communication surface → `teamResearchWorkflowSurfaceRenderers.tsx`.
 5. **Done (structure):** research launcher/overview/standalone → `teamResearchPrimarySurfaceRenderers.tsx` (stageStandalone ordered after factory; peer ResearchBoard files not modified).
-6. Optional: collapse SC chrome+workspace double layer; large React Context only with explicit charter.
+6. **Done (structure):** canvas node edit/drag → `teamCanvasNodeModel.ts` + `useTeamCanvasNodeEditing.ts`.
+7. Optional: collapse SC chrome+workspace double layer; large React Context only with explicit charter.
 
 ## Rules
 
