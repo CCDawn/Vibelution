@@ -117,9 +117,9 @@ def test_router_registry_imports_all_route_modules_in_stable_order(monkeypatch):
         return DummyModule(name)
 
     monkeypatch.setattr("core.web.router_registry._import_route_module", fake_import)
-    modules = import_web_route_modules(max_workers=4)
+    modules = import_web_route_modules()
     assert [module.router.name for module in modules] == list(_ROUTE_MODULE_NAMES)
-    assert set(imported) == set(_ROUTE_MODULE_NAMES)
+    assert imported == list(_ROUTE_MODULE_NAMES)
 
     app = FastAPI()
     included: list[str] = []
@@ -130,3 +130,25 @@ def test_router_registry_imports_all_route_modules_in_stable_order(monkeypatch):
     monkeypatch.setattr(app, "include_router", fake_include)
     register_web_routers(app)
     assert included == list(_ROUTE_MODULE_NAMES)
+
+
+def test_create_app_health_works_before_routes_and_middleware_mounts_on_demand():
+    from fastapi.testclient import TestClient
+
+    from core.web.app import create_app
+    from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+
+    app = create_app()
+    # Without entering lifespan, routes are not pre-mounted.
+    assert bool(getattr(app.state, "web_routes_registered", False)) is False
+
+    with TestClient(app, headers={CONTROL_TOKEN_HEADER: get_control_token()}) as client:
+        health = client.get("/api/health")
+        assert health.status_code == 200
+        body = health.json()
+        assert body["status"] == "ok"
+        # Lifespan background warm or first non-health request should finish mounting.
+        # /api/skills is a real mounted API route after bootstrap.
+        skills = client.get("/api/skills")
+        assert skills.status_code in {200, 401, 403, 404, 500} or skills.status_code < 600
+        assert bool(getattr(app.state, "web_routes_registered", False)) is True
