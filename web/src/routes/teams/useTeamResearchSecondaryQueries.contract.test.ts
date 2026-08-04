@@ -12,15 +12,17 @@ describe("team research secondary queries contract", () => {
     expect(queriesSource).toContain("researchLoopStatusQuery");
   });
 
-  it("is wired from TeamsRoute", () => {
+  it("is wired via useResearchExperimentWorkspace from TeamsRoute", () => {
     expect(routeSource).toContain("resolveResearchSecondaryStatusQueryEnabled({");
     expect(routeSource).toMatch(
       /challengeProgramProgressVisible:\s*challengeCupResearchTeamSelected\s*&&\s*\(challengeTeamSurface === "progress"\s*\|\|\s*researchWorkspaceView === "overview"\)/,
     );
-    expect(routeSource).toContain("useTeamResearchSecondaryQueries({");
+    // Phase 2: route owns enable gate; experiment workspace composes secondary queries.
+    expect(routeSource).toContain("useResearchExperimentWorkspace({");
     expect(routeSource).toMatch(
-      /useTeamResearchSecondaryQueries\(\{[\s\S]*researchSecondaryStatusQueryEnabled,[\s\S]*\}\)/,
+      /useResearchExperimentWorkspace\(\{[\s\S]*researchSecondaryStatusQueryEnabled,[\s\S]*\}\)/,
     );
+    expect(routeSource).not.toContain("useTeamResearchSecondaryQueries({");
     expect(routeSource).not.toContain("const experimentPlanningStatusQuery = useQuery({");
     expect(routeSource).not.toContain("const researchLoopStatusQuery = useQuery({");
   });

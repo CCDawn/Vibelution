@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import routeSource from "../TeamsRoute.tsx?raw";
 import modelSource from "./sourceCollectionRunQueryModel.ts?raw";
 import queriesSource from "./useSourceCollectionRunQueries.ts?raw";
+import workspaceSource from "./useSourceCollectionWorkspace.ts?raw";
 
 describe("source-collection run queries contract", () => {
   it("owns selected-run detail queries", () => {
@@ -18,8 +19,10 @@ describe("source-collection run queries contract", () => {
     expect(queriesSource).not.toMatch(/\bnew EventSource\b/);
   });
 
-  it("is wired from TeamsRoute with promoted payload types", () => {
-    expect(routeSource).toContain("useSourceCollectionRunQueries({");
+  it("is wired via useSourceCollectionWorkspace with promoted payload types", () => {
+    // Phase 1: route consumes workspace hook; workspace composes run queries.
+    expect(routeSource).toContain("useSourceCollectionWorkspace({");
+    expect(workspaceSource).toContain("useSourceCollectionRunQueries({");
     expect(routeSource).toContain("sourceCollectionRunQueryModel");
     expect(modelSource).toContain("export type SourceCollectionSummaryPayload");
     expect(modelSource).toContain("export type DataProcessingRecordListPayload");
@@ -40,7 +43,7 @@ describe("source-collection run queries contract", () => {
   });
 
   it("uses a slower poll for the run list than for active run details", () => {
-    expect(routeSource).toContain("sourceCollectionRunListRefetchInterval");
+    expect(workspaceSource).toContain("sourceCollectionRunListRefetchInterval");
   });
 
   it("does not resolve the summary before a selected run is known", () => {

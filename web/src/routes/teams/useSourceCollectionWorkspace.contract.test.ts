@@ -20,6 +20,14 @@ describe("useSourceCollectionWorkspace Phase 1 contract", () => {
     expect(hookSource).toContain("selectDefaultSourceCollectionRun");
     expect(hookSource).toContain("useSourceCollectionRunQueries");
     expect(hookSource).toContain("sourceCollectionStageWritebackSyncActive");
+    expect(hookSource).toContain("sourceCollectionStageWritebackAwaitingTask");
     expect(hookSource).toContain("sourceCollectionFreshProjectDraft");
+    expect(hookSource).toContain("setSourceCollectionResultPageByStage({");
+  });
+
+  it("TeamsRoute does not re-declare SC pagination reset or writeback-awaiting derived", () => {
+    expect(routeSource).not.toContain(
+      "const sourceCollectionStageWritebackAwaitingTask = sourceCollectionStageWritebackSyncActive && sourceCollectionPendingStageTaskIdList.length > 0",
+    );
   });
 });

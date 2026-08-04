@@ -1,6 +1,8 @@
-# useSourceCollectionWorkspace — Phase 0 inventory
+# useSourceCollectionWorkspace — Phase 0 / 1+ inventory
 
 Baseline tests (2026-08-04 session): TeamsRoute.layout + teams contracts + source-collection pure tests — **106 passed**.
+
+Phase 1+ (same session): pagination reset + writeback-awaiting derived owned by hook; URL stage sync already via `initialStageId`.
 
 ## SC React state (must own)
 
