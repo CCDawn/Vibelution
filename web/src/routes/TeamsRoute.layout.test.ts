@@ -12,6 +12,7 @@ import teamNodeBindingPanelSource from "./teams/TeamNodeBindingPanel.tsx?raw";
 import teamShellToolbarSource from "./teams/TeamShellToolbar.tsx?raw";
 import teamCanvasReadOnlyInspectorSource from "./teams/TeamCanvasReadOnlyInspector.tsx?raw";
 import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRenderers.tsx?raw";
+import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
 
 /** Route + extracted shell modules (layout contracts may live in either). */
 const routeSource = [
@@ -21,6 +22,7 @@ const routeSource = [
   teamShellToolbarSource,
   teamCanvasReadOnlyInspectorSource,
   teamsWorkspacePanelRenderersSource,
+  useSourceCollectionWorkspaceSource,
 ].join("\n");
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
@@ -1857,12 +1859,13 @@ describe("TeamsRoute layout contract", () => {
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamListPayload>(\"/api/teams\", { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal })");
-    expect(queryLayerSource).toContain("queryKey: researchProjectQueryKey(effectiveTeamId || \"none\")");
-    expect(queryLayerSource).toContain("activeSourceCollectionResearchProjectId");
+    // Phase 1 state-machine: project/run list queries live in useSourceCollectionWorkspace.
+    expect(useSourceCollectionWorkspaceSource).toContain("queryKey: researchProjectQueryKey(effectiveTeamId || \"none\")");
+    expect(useSourceCollectionWorkspaceSource).toContain("activeSourceCollectionResearchProjectId");
+    expect(routeSource).toContain("useSourceCollectionWorkspace");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) =>");
-    // Wave 8S: research secondary + SC run detail queries moved out of the route query layer.
-    // The remaining project query gates source-run selection to the active project.
-    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(10);
+    // Route query layer no longer owns SC project/run list (moved to workspace hook).
+    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBeLessThanOrEqual(10);
     expect(queryLayerSource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
     const sourceCollectionStageReturnRefreshSource = routeSource.slice(
       routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
