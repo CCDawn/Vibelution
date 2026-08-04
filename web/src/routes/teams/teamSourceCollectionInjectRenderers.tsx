@@ -239,7 +239,7 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
   }
 
   function setSourceCollectionResultPage(stageId: SourceCollectionStageModuleId, page: number) {
-    setSourceCollectionResultPageByStage((current) => ({
+    setSourceCollectionResultPageByStage((current: Record<string, number>) => ({
       ...current,
       [stageId]: Math.max(1, page),
     }));
@@ -464,7 +464,7 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
         knowledgeExpansionWorkflowTeamSelected={knowledgeExpansionWorkflowTeamSelected}
         draft={sourceCollectionDraft}
         localScanDefaultRoots={SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS}
-        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+        onDraftChange={(patch) => setSourceCollectionDraft((current: Record<string, unknown>) => ({ ...current, ...patch }))}
       />
     );
   }
@@ -519,7 +519,7 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
         canStart={sourceCollectionCanStart}
         startPending={selectedTeamStartSourceCollectionPending}
         teamId={selectedTeam?.teamId}
-        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+        onDraftChange={(patch) => setSourceCollectionDraft((current: Record<string, unknown>) => ({ ...current, ...patch }))}
         onStart={({ teamId, draft }) => {
           startSourceCollectionRunMutation.mutate({ teamId, draft });
         }}
@@ -543,7 +543,7 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
         teamId={selectedTeam?.teamId}
         runId={selectedSourceCollectionRunEffectiveId}
         hasRecord={sourceCollectionOutputHasRecord}
-        onDraftChange={(patch) => setSourceCollectionOutputDraft((current) => ({ ...current, ...patch }))}
+        onDraftChange={(patch) => setSourceCollectionOutputDraft((current: Record<string, unknown>) => ({ ...current, ...patch }))}
         onSubmitRecord={({ teamId, runId, draft }) => {
           recordSourceCollectionOutputMutation.mutate({ teamId, runId, draft });
         }}

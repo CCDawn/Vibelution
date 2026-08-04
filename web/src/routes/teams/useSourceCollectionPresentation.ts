@@ -2145,6 +2145,7 @@ export function useSourceCollectionPresentation(input: UseSourceCollectionPresen
     sourceCollectionCandidateExtractionButtonText,
     sourceCollectionStageForPanel,
     selectSourceCollectionStage,
+    openSourceCollectionStage,
     scrollSourceCollectionPanelIntoView,
     openSourceCollectionScreeningPanel,
     runSourceCollectionScreeningAction,
