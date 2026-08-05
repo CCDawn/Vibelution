@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
 import { AgentSessionTabStrip, agentSessionStatusTone } from "./AgentSessionTabStrip";
+import styles from "./AgentSessionTabStrip.styles";
 import { markSessionActivitySeen, sessionActivityStamp } from "./sessionActivityIndicator";
 
 function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -224,6 +225,22 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).not.toContain(">completed</span>");
   });
 
+  it("always reserves a fixed status slot so tab geometry stays aligned with the close control", () => {
+    const markup = renderStrip({
+      sessions: [
+        session({ id: "session-idle", status: "idle" }),
+        session({ id: "session-running", status: "running" }),
+      ],
+    });
+    const slots = markup.match(/data-session-tab-status-slot/g) ?? [];
+    expect(slots.length).toBeGreaterThanOrEqual(2);
+    expect(styles.agentSessionTabStatusSlot).toContain("h-3.5");
+    expect(styles.agentSessionTabStatusSlot).toContain("w-3.5");
+    expect(styles.agentSessionTabStatusSlot).toContain("self-center");
+    expect(styles.agentSessionTabMainAction).toContain("!inline-flex");
+    expect(styles.agentSessionTabMainAction).toContain("items-center");
+  });
+
   it("uses green spinner for in-session running without approval", () => {
     const markup = renderStrip({
       sessions: [session({ id: "session-running", status: "running" })],
@@ -247,6 +264,8 @@ describe("AgentSessionTabStrip", () => {
     });
     expect(markup).not.toContain("agentSessionTabStatusCompleted");
     expect(markup).not.toContain("已完成");
+    // Empty status slot still reserved for geometry.
+    expect(markup).toContain("data-session-tab-status-slot");
   });
 
   it("renders the rename input for the edited session", () => {

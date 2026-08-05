@@ -250,17 +250,6 @@ export function AgentConversationDirectory({
         <span className={styles.agentCopy}>
           <span className={styles.agentTitleRow}>
             <span className={styles.agentTitle}>{display.name}</span>
-            {activityTone !== "none" ? (
-              <span
-                className={[styles.agentActivity, activityClassName].filter(Boolean).join(" ")}
-                aria-label={activityLabel}
-                title={activityLabel}
-              >
-                {activityTone === "running" || activityTone === "approval" ? (
-                  <LoaderCircle size={12} aria-hidden="true" className={styles.agentActivitySpinner} />
-                ) : null}
-              </span>
-            ) : null}
           </span>
           <span className={styles.agentMeta}>
             <span className={styles.agentMetaItem}>{display.functionLabel}</span>
@@ -272,6 +261,21 @@ export function AgentConversationDirectory({
             </span>
             {latestSession ? <time className={styles.agentMetaItem}>{formatTime(latestSession.updatedAt || latestSession.lastActive)}</time> : null}
           </span>
+        </span>
+        <span
+          className={styles.agentStatusSlot}
+          data-agent-status-slot
+          aria-label={activityTone !== "none" ? activityLabel : undefined}
+          title={activityTone !== "none" ? activityLabel : undefined}
+          aria-hidden={activityTone === "none" ? true : undefined}
+        >
+          {activityTone !== "none" ? (
+            <span className={[styles.agentActivity, activityClassName].filter(Boolean).join(" ")}>
+              {activityTone === "running" || activityTone === "approval" ? (
+                <LoaderCircle size={11} aria-hidden="true" className={styles.agentActivitySpinner} />
+              ) : null}
+            </span>
+          ) : null}
         </span>
       </VButton>
     );

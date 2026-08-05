@@ -11,9 +11,9 @@ const styles = {
     "vui-routes-agentconversationdirectory agentSection grid min-w-0 gap-1.5",
   agentDirectoryList:
     "vui-routes-agentconversationdirectory agentDirectoryList grid min-w-0 gap-1.5 pl-1",
-  // surface-role: hover-fill — no card border; matches team section rows in the same rail
+  // surface-role: hover-fill — fixed status slot (col 3) so light aligns to card mid-line.
   agentRow:
-    "vui-routes-agentconversationdirectory agentRow !grid !h-auto !min-h-[3.25rem] !w-full min-w-0 max-w-full grid-cols-[32px_minmax(0,1fr)] items-center justify-start gap-2.5 rounded-[var(--radius-control)] !border-0 [border:0] !bg-transparent px-2.5 py-2 text-left font-normal shadow-none transition-[background-color] hover:!border-transparent hover:!bg-vui-surface-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]",
+    "vui-routes-agentconversationdirectory agentRow !grid !h-auto !min-h-[3.25rem] !w-full min-w-0 max-w-full grid-cols-[32px_minmax(0,1fr)_0.875rem] items-center justify-start gap-x-2.5 gap-y-0 rounded-[var(--radius-control)] !border-0 [border:0] !bg-transparent px-2.5 py-2 text-left font-normal shadow-none transition-[background-color] hover:!border-transparent hover:!bg-vui-surface-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]",
   agentRowActive:
     `vui-routes-agentconversationdirectory agentRowActive !border-0 [border:0] ${vuiStateSelectedRowFillClass} !text-[var(--accent-cool)] shadow-none`,
   agentAvatar:
@@ -23,21 +23,24 @@ const styles = {
   agentCopy:
     "vui-routes-agentconversationdirectory agentCopy grid min-w-0 gap-0.5 overflow-hidden text-left",
   agentTitleRow:
-    "vui-routes-agentconversationdirectory agentTitleRow flex min-w-0 items-center gap-1.5",
+    "vui-routes-agentconversationdirectory agentTitleRow flex min-w-0 items-center",
   agentTitle:
-    "vui-routes-agentconversationdirectory agentTitle min-w-0 flex-1 truncate [font-size:var(--vui-font-sm)] font-semibold leading-tight [color:var(--fg-primary)]",
+    "vui-routes-agentconversationdirectory agentTitle min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold leading-tight [color:var(--fg-primary)]",
+  // Always-on status column; keeps list geometry stable with/without activity.
+  agentStatusSlot:
+    "vui-routes-agentconversationdirectory agentStatusSlot inline-grid h-3.5 w-3.5 shrink-0 place-items-center self-center",
   agentActivity:
-    "vui-routes-agentconversationdirectory agentActivity inline-grid shrink-0 place-items-center",
+    "vui-routes-agentconversationdirectory agentActivity inline-grid h-2.5 w-2.5 shrink-0 place-items-center",
   agentActivitySpinner:
     "vui-routes-agentconversationdirectory agentActivitySpinner animate-spin",
   agentActivityRunning:
-    "vui-routes-agentconversationdirectory agentActivityRunning h-4 w-4 text-[var(--state-success)]",
+    "vui-routes-agentconversationdirectory agentActivityRunning h-3 w-3 text-[var(--state-success)]",
   agentActivityApproval:
-    "vui-routes-agentconversationdirectory agentActivityApproval h-4 w-4 text-[var(--state-warning)]",
+    "vui-routes-agentconversationdirectory agentActivityApproval h-3 w-3 text-[var(--state-warning)]",
   agentActivityError:
-    "vui-routes-agentconversationdirectory agentActivityError h-2.5 w-2.5 rounded-full bg-[var(--state-error)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--state-error)_18%,transparent)]",
+    "vui-routes-agentconversationdirectory agentActivityError h-2.5 w-2.5 rounded-full bg-[var(--state-error)]",
   agentActivityCompleted:
-    "vui-routes-agentconversationdirectory agentActivityCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_18%,transparent)]",
+    "vui-routes-agentconversationdirectory agentActivityCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)]",
   agentMeta:
     "vui-routes-agentconversationdirectory agentMeta flex min-w-0 items-center gap-1.5 overflow-hidden [font-size:var(--vui-font-xs)] leading-tight [color:var(--fg-secondary)]",
   agentMetaItem:
