@@ -375,7 +375,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
         requestExperimentKnowledgeIngestionFromWorkspace,
         reviewExperimentHypothesisFromWorkspace,
         runExperimentSmokeFromWorkspace,
-        searchParams,
+        searchParams: searchParamsProp,
         selectedTeam,
         selectedTeamCompleteScientificHypothesisCandidateId,
         selectedTeamCompleteScientificHypothesisError,
@@ -420,7 +420,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
           experimentPlanningStatusQuery={experimentPlanningStatusQuery}
           experimentMethodCatalogQuery={experimentMethodCatalogQuery}
           preferredExperimentMethod={preferredExperimentMethod}
-          searchParams={searchParams}
+          searchParams={searchParamsProp ?? null}
           experimentBaselineArtifactDraft={experimentBaselineArtifactDraft}
           setExperimentBaselineArtifactDraft={setExperimentBaselineArtifactDraft}
           experimentSmokeResultDraft={experimentSmokeResultDraft}
