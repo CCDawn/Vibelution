@@ -1,10 +1,32 @@
 # Vibelution
 
-> 仓库入口说明：README 提供静态入门说明；当前工作状态以 `.docs/project-memory/INDEX.md`、`PROJECT_MEMORY.html` 和 guard claim 状态为准。
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-green.svg)](https://www.python.org/)
+[![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61dafb.svg)](web/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#快速开始)
 
-Vibelution 是一个本地优先的 AI Agent 工作台。它把编码对话、仓库阅读、Git 局势、自进化、监督评测、运行现场日志和模型配置收进同一套 Python runtime + FastAPI + React Web surface 里，让 agent 能在一个可观察、可回滚、可验证的工程环境中持续改进。
+**Local-first multi-agent workbench for coding, research teams, Git, evolution, and evidence.**
 
-这个项目不是一个单轮脚本，也不是线上托管代理。它的核心目标是：在本地仓库里稳定地执行协作、记录证据、评估候选改动，并让每一轮演化都能被人和后续 agent 重新理解。
+**本地优先的多 Agent 工作台：编码协作、科研团队流水线、Git、自进化与可复盘证据。**
+
+> Star ⭐ · Fork · Issues welcome. Config and secrets stay on your machine — not in this repo.
+
+Vibelution 把 **Chat 编码对话**、**Agent 管理**、**Git 局势**、**Teams / 科研团队**（知识搜集 → 实验设计 → 执行迭代）、**Self Evolution**、**Supervised Evolution**、**Runtime Scene 日志** 和 **模型配置** 收进同一套本地运行时：
+
+- **Python runtime + FastAPI** 负责会话、工具、生命周期与证据
+- **React Web workbench** 负责可操作、可观察的控制室界面
+- **桌面 / Launcher** 负责一键启动与托管窗口（尤其 Windows）
+
+它不是单轮 demo 脚本，也不是把仓库上传给远端托管的“黑盒助手”。目标是：在**你的电脑与仓库**里稳定协作，留下人和后续 Agent 都能读懂的记录与回滚边界。
+
+| 你可能关心 | 入口 |
+| --- | --- |
+| 快速跑起来 | [快速开始](#快速开始) · [启动方式](#启动方式) |
+| 能力一览 | [当前能力](#当前能力) |
+| 贡献 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| 许可证 | [MIT LICENSE](LICENSE) |
+| 产品语境 | [docs/product/README.md](docs/product/README.md) |
+| 给 coding Agent 的开发路由 | [docs/guides/README.md](docs/guides/README.md) · [AGENTS.md](AGENTS.md) |
 
 ## 前端工作台预览
 
@@ -20,14 +42,14 @@ Vibelution 是一个本地优先的 AI Agent 工作台。它把编码对话、�
 
 | 能力 | 说明 |
 | --- | --- |
-| Chat 工作台 | 面向日常编码协作的多会话界面，支持文件树、只读预览、消息流、停止/继续和任务状态摘要。 |
-| Git 局势 | 顶栏 Git chip 展示缩略状态，hover 预览变化；独立 Git 页面读取工作区、diff、最近提交，并支持选择文件手动提交。 |
-| AI 提交说明 | Git 页面可以根据当前选中的改动生成 commit message 草稿；生成模型默认值在 Git 页维护，提示词模板在配置页维护。 |
-| Self Evolution | 自进化页面展示目标、事务、fitness、工作区状态、审计尾迹和回滚边界，支持从网页启动有界自进化。 |
-| Supervised Evolution | 监督进化页面支持 dataset / bundle 运行、active run 监控、case 输入输出、提案库和建议基线治理。 |
-| Runtime Scenes | 日志页按单次运行打包前端、后端、浏览器、生命周期和原始日志，便于复盘失败、卡住或漂移。 |
-| Config Workbench | Web 配置面管理语言、默认入口、模型库、全局运行项和 Git 提交说明提示词；每个 Agent 的模型槽位在 Agent 管理维护。 |
-| Reset / Pet | 提供受保护的清理面和长期陪伴体状态面，避免把运行产物、记忆和演化证据混在一起。 |
+| Chat 工作台 | 日常编码协作：多会话、文件树、只读预览、消息流、停止/继续与任务状态。 |
+| Agent 管理 | 注册表、提示词、工具/技能边界、模型槽位与权限面。 |
+| Teams / 科研团队 | 组织画布 + 阶段流程（知识搜集 → 实验设计 → 执行迭代），面向挑战杯等团队科研闭环。 |
+| Git 局势 | 顶栏 chip + 独立 Git 页：diff、最近提交、选文件提交与 AI commit message 草稿。 |
+| Self Evolution | 有界自改进：目标、事务、fitness、审计与回滚边界。 |
+| Supervised Evolution | dataset / bundle 对比、active run、提案库与建议基线治理。 |
+| Runtime Scenes | 按次打包前后端/浏览器/生命周期日志，便于复盘失败与卡住。 |
+| Config / Reset / Pet | 模型与运行配置、受保护清理、长期陪伴体状态面。 |
 
 ## 运行模式
 
@@ -315,28 +337,35 @@ CI 通常覆盖：
 
 ## 隐私与安全说明
 
-- Web workbench 默认面向本地使用，写接口带本地 control token 与来源校验。
-- README 截图使用脱敏演示数据，不是当前机器的真实工作区状态。
-- 不要把外部 `config.toml` 中的真实密钥、provider 私有地址或本地路径提交进仓库。
-- Git 页面提交时只提交用户选择的文件；如果存在未选择的 staged 文件，后端会拒绝提交，避免误带 unrelated changes。
-- Reset 页面使用后端白名单和保护区，不接受任意路径清理。
-- Runtime scene 日志用于诊断，应避免把包含敏感信息的原始运行包公开发布。
+- Web workbench 默认面向**本地**使用，写接口带本地 control token 与来源校验。
+- README 截图使用脱敏演示数据，不是某台机器的真实工作区状态。
+- **不要**把外部 `config.toml` 中的真实密钥、provider 私有地址或本地绝对路径提交进仓库。
+- Git 提交时只提交用户选择的文件；存在未选择的 staged 文件时后端会拒绝，避免误带无关改动。
+- Reset 使用后端白名单和保护区，不接受任意路径清理。
+- Runtime scene 日志用于诊断，公开发布前请脱敏。
+
+## 许可证与社区
+
+- 源码许可证：[MIT License](LICENSE)
+- 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
+- 可选第三方科研组件登记：[THIRD_PARTY_COMPONENTS.md](THIRD_PARTY_COMPONENTS.md)（默认不启用）
+- 欢迎 Issue / Discussion / PR。安全类问题请优先私下联系维护者，勿直接公开可利用细节。
 
 ## 进一步阅读
 
 | 文档 | 作用 |
 | --- | --- |
-| [docs/standards/README.md](docs/standards/README.md) | Agent 开发规范权威入口 |
+| [docs/product/README.md](docs/product/README.md) | 现行产品定位 |
+| [docs/README.md](docs/README.md) | 文档地图 |
+| [docs/standards/README.md](docs/standards/README.md) | Agent 开发规范 |
 | [INDEX.md](INDEX.md) | 项目索引 |
-| [docs/README.md](docs/README.md) | 文档索引与归档边界 |
-| [.docs/project-memory/INDEX.md](.docs/project-memory/INDEX.md) | 当前项目记忆、lane 状态与 claim 入口 |
-| [PROJECT_MEMORY.html](PROJECT_MEMORY.html) | 人类可读项目记忆看板 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 如何贡献 |
 | [docs/agents/domain.md](docs/agents/domain.md) | 领域词汇与运行上下文说明 |
 | [core/core_prompt/SOUL.md](core/core_prompt/SOUL.md) | 核心使命与行为边界 |
 | [docs/standards/development-standard.md](docs/standards/development-standard.md) | 详细开发与交付标准 |
 
-本地协作入口 `AGENTS.md` 由当前工作区维护；它可能不会出现在干净 clone 或独立 worktree 中。项目记忆入口 `.docs/project-memory/INDEX.md` 和 `PROJECT_MEMORY.html` 是当前工作状态的权威读物。
+开发时若仓库根目录有 `AGENTS.md`，可优先按其中的本地协作约定执行。
 
-## License
+---
 
-MIT
+**MIT License** · 欢迎 Star、Fork 与 Issue · 密钥与本地配置请留在你自己的机器上。
