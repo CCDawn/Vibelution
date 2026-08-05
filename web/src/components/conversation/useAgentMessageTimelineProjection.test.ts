@@ -933,4 +933,112 @@ describe("projectAgentMessageTimelineMessages", () => {
       "读取 B",
     ]);
   });
+
+  it("keeps reconnect live overlay on the turnItems package track without active-turn dual paint", () => {
+    const liveOverlay = assistantMessage("session-1-message-live-turn-1", {
+      content: "重连后仍可见的流式正文",
+      streaming: true,
+      turnItems: [
+        {
+          version: 2,
+          id: "answer:0",
+          itemId: "answer",
+          type: "assistant_message",
+          kind: "assistant_message",
+          channel: "answer",
+          phase: "final_answer",
+          status: "in_progress",
+          provisional: true,
+          terminal: false,
+          revision: 0,
+          sequence: 1,
+          text: "重连后仍可见的流式正文",
+        },
+      ],
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-1" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [liveOverlay],
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0].id).toBe("session-1-message-live-turn-1");
+    expect(projection.messages[0].content).toBe("重连后仍可见的流式正文");
+    expect(projection.messages[0].turnItems?.[0]).toMatchObject({
+      phase: "final_answer",
+      provisional: true,
+      text: "重连后仍可见的流式正文",
+    });
+    expect(projection.messages[0].codexTranscript?.cells.some((cell) => (
+      cell.kind === "assistant_markdown" && cell.text === "重连后仍可见的流式正文"
+    ))).toBe(true);
+    expect(projection.streamingMessages.map((message) => message.id)).toEqual([
+      "session-1-message-live-turn-1",
+    ]);
+  });
+
+  it("merges same-turn live overlay package into active-turn so only one row remains", () => {
+    const liveOverlay = assistantMessage("session-1-message-live-turn-1", {
+      content: "overlay 过程正文",
+      streaming: true,
+      turnItems: [
+        {
+          version: 2,
+          id: "tool:0",
+          itemId: "tool-1",
+          type: "tool_call",
+          kind: "tool_call",
+          phase: "tool_call",
+          status: "completed",
+          provisional: false,
+          terminal: false,
+          revision: 0,
+          sequence: 1,
+          text: "read done",
+          toolName: "read_file_tool",
+        },
+      ],
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-1" },
+    });
+    const activeTurn = assistantMessage("session-1-message-active-turn-1", {
+      content: "active 流式正文",
+      streaming: true,
+      turnItems: [
+        {
+          version: 2,
+          id: "answer:0",
+          itemId: "answer",
+          type: "assistant_message",
+          kind: "assistant_message",
+          channel: "answer",
+          phase: "final_answer",
+          status: "in_progress",
+          provisional: true,
+          terminal: false,
+          revision: 0,
+          sequence: 2,
+          text: "active 流式正文",
+        },
+      ],
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [liveOverlay],
+      activeTurnMessage: activeTurn,
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0].id).toBe("session-1-message-active-turn-1");
+    expect(projection.messages[0].content).toBe("active 流式正文");
+    expect(projection.messages[0].turnItems?.map((item) => item.kind)).toEqual([
+      "tool_call",
+      "assistant_message",
+    ]);
+    expect(projection.messages[0].metadata).toMatchObject({
+      kind: "session_active_turn_layer",
+      turnId: "turn-1",
+    });
+  });
 });

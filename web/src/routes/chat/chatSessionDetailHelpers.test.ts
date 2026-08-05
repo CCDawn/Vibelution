@@ -4,11 +4,14 @@ import {
   buildSessionDetailShellFromSummary,
   fetchSessionDetailWindow,
   isForeignSessionDetailQueryKey,
+  isProvisionalSessionTranscript,
+  isSessionDetailHardLoading,
   isSessionNotFoundError,
   isStaleLedgerUpdate,
   resolveNeighborSessionIdsForPrefetch,
   resolveSessionDetailPlaceholder,
   sessionDetailSnapshotKey,
+  shouldShowSessionTranscriptPending,
 } from "./chatSessionDetailHelpers";
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import * as client from "../../api/client";
@@ -50,7 +53,46 @@ describe("chatSessionDetailHelpers", () => {
     expect(shell?.id).toBe("s2");
     expect(shell?.title).toBe("Hello");
     expect(shell?.messages).toEqual([]);
+    expect(shell?.provisionalTranscript).toBe(true);
+    expect(isProvisionalSessionTranscript(shell)).toBe(true);
     expect(shell?.messageWindow?.hasEarlier).toBe(false);
+  });
+
+  it("treats provisional shells as transcript-pending instead of empty-session hard loading", () => {
+    const provisional = buildSessionDetailShellFromSummary({
+      id: "s2",
+      title: "Hello",
+      status: "idle",
+      currentPhase: "ready",
+    } as SessionSummary);
+    expect(
+      isSessionDetailHardLoading({
+        activeSessionId: "s2",
+        detail: provisional,
+        isFetching: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowSessionTranscriptPending({
+        activeSessionId: "s2",
+        detail: provisional,
+        isFetching: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowSessionTranscriptPending({
+        activeSessionId: "s2",
+        detail: { id: "s2", messages: [], provisionalTranscript: false } as SessionDetail,
+        isFetching: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowSessionTranscriptPending({
+        activeSessionId: "s2",
+        detail: undefined,
+        isFetching: true,
+      }),
+    ).toBe(true);
   });
 
   it("prefers cached detail over summary shell and rejects foreign sessions", () => {

@@ -55,17 +55,29 @@ _REASONING_EFFORT_LABELS = {
     "medium": "中",
     "high": "高",
     "xhigh": "超高",
-    "max": "最大",
+"max": "最高",
     "ultra": "极高",
 }
 _REASONING_EFFORT_DESCRIPTIONS = {
-    "minimal": "最快响应",
+    "none": "不使用额外推理预算",
+    "minimal": "最快响应，适合简单任务",
     "low": "更快响应，适合直接问题",
     "medium": "平衡速度与推理深度",
     "high": "更深推理，适合复杂任务",
-    "xhigh": "最大推理深度",
+    "xhigh": "超高推理深度，适合高复杂度任务",
+    "ultra": "极高推理深度，用于最棘手的问题",
+    "max": "最高推理深度，耗时可能更长",
 }
-
+_REASONING_EFFORT_DISPLAY_ORDER = {
+    "none": 0,
+    "minimal": 1,
+    "low": 2,
+    "medium": 3,
+    "high": 4,
+    "xhigh": 5,
+    "ultra": 6,
+    "max": 7,
+}
 
 def reasoning_effort_options(values: list[str]) -> list[dict[str, str]]:
     """Return stable display metadata for a confirmed reasoning contract."""
@@ -76,8 +88,12 @@ def reasoning_effort_options(values: list[str]) -> list[dict[str, str]]:
             "label": _REASONING_EFFORT_LABELS.get(value, value),
             "description": _REASONING_EFFORT_DESCRIPTIONS.get(value, ""),
         }
-        for value in values
-    ]
+# Do not trust configuration insertion order as a semantic intensity order.
+        # Keep an input-position tie-breaker for any future recognized value.
+        for _position, value in sorted(
+            enumerate(values),
+            key=lambda item: (_REASONING_EFFORT_DISPLAY_ORDER.get(item[1], len(_REASONING_EFFORT_DISPLAY_ORDER)), item[0]),
+        )    ]
 
 
 def project_reasoning_contract(

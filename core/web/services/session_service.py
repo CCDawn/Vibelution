@@ -437,6 +437,7 @@ from core.web.services.session.turn_diagnostics import (
     _record_direct_session_submit_kernel_trace_event,
     _active_chat_turn_work_run_id_for_session,
     _release_stale_chat_turn_work_run,
+    reconcile_stale_chat_turn_work_runs,
     _complete_turn_error_visible_content,
     _provider_error_detail_safe_for_chat,
     _normalize_session_references,

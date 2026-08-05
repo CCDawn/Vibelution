@@ -239,7 +239,8 @@ export function useChatWorkspaceActions({
       reselectDirectSessionRef.current(normalizedSessionId);
     }
     if (!tempLocal) {
-      navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false });
+      // replace: true — Codex/ChatGPT thread switch does not push history per tab click.
+      navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true });
     }
   }, [
     activeSessionId,

@@ -1,5 +1,5 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
-import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import type { SessionDetail, SessionSummary } from "../../api/types";
@@ -120,6 +120,8 @@ export function useChatSessionSelection({
     },
   });
 
+  // Short debounce collapses rapid A→B→A tab thrash into one select POST.
+  const selectDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   reselectDirectSessionRef.current = (sessionId: string) => {
     const normalizedSessionId = String(sessionId || "").trim();
     if (!normalizedSessionId) {
@@ -128,8 +130,29 @@ export function useChatSessionSelection({
     latestDirectSessionSelectionRef.current = normalizedSessionId;
     directSessionSelectionGenerationRef.current += 1;
     const generation = directSessionSelectionGenerationRef.current;
-    selectDirectSessionMutation.mutate({ sessionId: normalizedSessionId, generation });
+    if (selectDebounceTimerRef.current != null) {
+      clearTimeout(selectDebounceTimerRef.current);
+    }
+    selectDebounceTimerRef.current = setTimeout(() => {
+      selectDebounceTimerRef.current = null;
+      // Only fire if this generation is still the latest user intent.
+      if (generation !== directSessionSelectionGenerationRef.current) {
+        return;
+      }
+      const latestSessionId = latestDirectSessionSelectionRef.current;
+      if (!latestSessionId) {
+        return;
+      }
+      selectDirectSessionMutation.mutate({ sessionId: latestSessionId, generation });
+    }, 80);
   };
+
+  useEffect(() => () => {
+    if (selectDebounceTimerRef.current != null) {
+      clearTimeout(selectDebounceTimerRef.current);
+      selectDebounceTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (requestedSessionId || requestedRoomId || activeSessionId) {

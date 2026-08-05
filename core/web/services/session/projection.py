@@ -1486,6 +1486,114 @@ def _stamp_turn_items_message_id(items: list[dict[str, Any]], message_id: str) -
     return stamped
 
 
+def _is_session_turn_final_answer_item(item: Mapping[str, Any] | None) -> bool:
+    if not isinstance(item, Mapping):
+        return False
+    kind = str(item.get("kind") or item.get("type") or "").strip().lower()
+    channel = str(item.get("channel") or "").strip().lower()
+    phase = str(item.get("phase") or "").strip().lower()
+    if phase in {"commentary", "interim"}:
+        return False
+    return phase == "final_answer" or (
+        kind in {"assistant_message", "agent_message"}
+        and channel in {"", "answer"}
+    )
+
+
+def _is_committed_session_turn_final_answer_item(item: Mapping[str, Any] | None) -> bool:
+    if not _is_session_turn_final_answer_item(item):
+        return False
+    assert isinstance(item, Mapping)
+    if item.get("provisional") is True:
+        return False
+    status = str(item.get("status") or "").strip().lower()
+    return item.get("terminal") is True or status in {"completed", "done", "failed"}
+
+
+def _merge_live_content_into_turn_items(
+    items: list[dict[str, Any]],
+    *,
+    session_id: str,
+    turn_id: str,
+    message_id: str,
+    content: Any = "",
+    done: bool = False,
+    source: str = "assistant_delta",
+) -> list[dict[str, Any]]:
+    """Keep journal/tool package authority while bridging live content into the same track.
+
+    When journal already has process items (tools/status) but no covering final_answer yet,
+    streaming content must still appear as a provisional final_answer item so live overlay
+    and assistant_delta share the package_cells path with settled detail.
+    """
+    s = _service()
+    merged = [dict(item) for item in list(items or []) if isinstance(item, dict)]
+    content_text = s._sanitize_message_content("assistant", content)
+    if not content_text:
+        return merged
+
+    final_index = next(
+        (index for index, item in enumerate(merged) if _is_session_turn_final_answer_item(item)),
+        -1,
+    )
+    if final_index >= 0:
+        final_item = merged[final_index]
+        if _is_committed_session_turn_final_answer_item(final_item):
+            # Committed journal final answer remains the sole authority.
+            return merged
+        item_text = str(final_item.get("text") or "").strip()
+        if (
+            len(content_text) > len(item_text)
+            and (
+                not item_text
+                or content_text.startswith(item_text)
+                or item_text in content_text
+            )
+        ):
+            next_item = dict(final_item)
+            next_item["text"] = content_text
+            next_item["status"] = "completed" if done else "in_progress"
+            next_item["provisional"] = not bool(done)
+            next_item["terminal"] = bool(done)
+            if not str(next_item.get("messageId") or "").strip():
+                next_item["messageId"] = str(message_id or "").strip()
+            if not str(next_item.get("source") or "").strip():
+                next_item["source"] = source
+            merged[final_index] = s._compact_codex_record(next_item)
+        return merged
+
+    item_id = s._session_turn_agent_message_item_id(session_id, turn_id or "turn")
+    sequence = max(
+        (int(item.get("sequence") or 0) for item in merged),
+        default=0,
+    ) + 1
+    merged.append(
+        s._compact_codex_record(
+            {
+                "version": 2,
+                "id": f"{item_id}:0",
+                "itemId": item_id,
+                "type": "assistant_message",
+                "kind": "assistant_message",
+                "channel": "answer",
+                "phase": "final_answer",
+                "status": "completed" if done else "in_progress",
+                "provisional": not bool(done),
+                "terminal": bool(done),
+                "revision": 0,
+                "sequence": sequence,
+                "sessionId": str(session_id or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "messageId": str(message_id or "").strip(),
+                "source": source,
+                "protocol": "session_detail",
+                "text": content_text,
+            }
+        )
+    )
+    return merged
+
+
 def _build_session_turn_items_projection(
     *,
     session_id: str,
@@ -1520,7 +1628,16 @@ def _build_session_turn_items_projection(
             turn_id=normalized_turn_id,
         )
         if canonical_items:
-            return s._stamp_turn_items_message_id(canonical_items, normalized_message_id)
+            stamped = s._stamp_turn_items_message_id(canonical_items, normalized_message_id)
+            return _merge_live_content_into_turn_items(
+                stamped,
+                session_id=session_id,
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                content=content,
+                done=done,
+                source=source,
+            )
     if (
         str(normalized_metadata.get("kind") or "").strip() == "turn_error"
         or normalized_metadata.get("providerFailure") is True
@@ -3384,9 +3501,16 @@ def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> s
         return "stopping"
     normalized = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
     if s._is_session_running(conversation_id):
-        if normalized == "queued":
-            return "queued"
-        return "running"
+        # C1: worker may still claim a hung turn after tool timeout — settle if hang criteria hit.
+        try:
+            s.reconcile_stale_chat_turn_work_runs()
+        except Exception:
+            pass
+        if s._is_session_running(conversation_id):
+            if normalized == "queued":
+                return "queued"
+            return "running"
+        # Hang settlement may have cleared in-memory running; fall through to ready path.
     # Process-local worker is gone. If a chat_turn work-run is still marked
     # active for this session, release it so shell/top-bar stop showing "running".
     stale_work_run = s._active_chat_turn_work_run_for_session(conversation_id)

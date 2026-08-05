@@ -1189,6 +1189,27 @@ def test_session_detail_live_overlay_identity_matches_assistant_delta_turn_id(tm
     assert live_message["feedbackEvents"][0]["name"] == "model_response"
     assert live_message["timelineItems"][0]["kind"] == "assistant_text"
     assert live_message["timelineItems"][0]["text"] == "正在输出。"
+    # C3: live overlay must carry turnItems package so reconnect paints on package_cells track.
+    turn_items = live_message.get("turnItems") or []
+    assert turn_items
+    final_items = [
+        item
+        for item in turn_items
+        if str(item.get("phase") or "") == "final_answer"
+        or (
+            str(item.get("kind") or item.get("type") or "") in {"assistant_message", "agent_message"}
+            and str(item.get("channel") or "") in {"", "answer"}
+        )
+    ]
+    assert final_items
+    assert final_items[0]["text"] == "正在输出。"
+    assert final_items[0].get("provisional") is True
+    assert final_items[0].get("terminal") is False
+    assert live_message["codexTranscript"]["source"] == "native"
+    assert any(
+        cell.get("kind") == "assistant_markdown" and cell.get("text") == "正在输出。"
+        for cell in live_message["codexTranscript"].get("cells") or []
+    )
 
 
 def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tmp_path, monkeypatch):

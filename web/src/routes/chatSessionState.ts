@@ -338,8 +338,12 @@ export function mergeSessionDetailMessageWindow(
   // Light poll responses omit expensive secondary lists; keep prior values so
   // inbox / governance UI does not flash empty while SSE owns the transcript.
   const merged = withPreservedSecondaryLists(previous, next);
+  // Real select/GET/SSE payloads never set provisionalTranscript; clear sticky shell flag.
+  const provisionalTranscript = next.provisionalTranscript === true ? true : undefined;
   if (!previous || previous.id !== merged.id || !previous.messageWindow || !merged.messageWindow) {
-    return merged;
+    return provisionalTranscript
+      ? { ...merged, provisionalTranscript: true }
+      : { ...merged, provisionalTranscript: undefined };
   }
   const messages = mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? []);
   const base = merged.messageWindow.hasLater ? previous : merged;
@@ -347,6 +351,7 @@ export function mergeSessionDetailMessageWindow(
     ...base,
     ...merged,
     messages,
+    provisionalTranscript,
     messageWindow: mergedMessageWindow(previous.messageWindow, merged.messageWindow, messages),
   };
 }

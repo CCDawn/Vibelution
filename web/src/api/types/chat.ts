@@ -822,6 +822,11 @@ export type SessionDetail = SessionSummary & {
   readFiles: string[];
   messages: ConversationMessage[];
   messageWindow?: SessionMessageWindow;
+  /**
+   * Client-only: summary shell painted while the message window is still loading.
+   * Never set by the API; cleared when a real detail/select payload arrives.
+   */
+  provisionalTranscript?: boolean;
   /** False when GET used includeSecondary=false (light poll). */
   secondaryHydrated?: boolean;
   runtimeNotices?: SessionRuntimeNotice[];

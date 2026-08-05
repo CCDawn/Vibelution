@@ -54,6 +54,11 @@ export type ConversationViewProps = {
   phase: string;
   messages: ConversationMessage[];
   activeTurnMessage?: ConversationMessage;
+  /**
+   * True while the session message window is still hydrating after a switch.
+   * Empty timeline then shows a loading surface instead of the empty-session copy.
+   */
+  transcriptPending?: boolean;
   className?: string;
   density?: "default" | "compact";
   composerVariant?: ConversationComposerVariant;

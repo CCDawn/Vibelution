@@ -151,6 +151,93 @@ def test_turn_items_projection_prefers_journal_and_stamps_message_id(monkeypatch
     assert items[0]["itemId"] == "item-final"
 
 
+def test_turn_items_projection_merges_live_content_when_journal_has_tools_only(monkeypatch) -> None:
+    """C3: tool-only journal package must still bridge streaming content onto same track."""
+    tool_item = {
+        "version": 2,
+        "id": "tool-1:0",
+        "itemId": "tool-1",
+        "type": "tool_call",
+        "kind": "tool_call",
+        "phase": "tool_call",
+        "status": "completed",
+        "terminal": False,
+        "provisional": False,
+        "text": "read_file done",
+        "toolName": "read_file_tool",
+        "turnId": "turn-live-1",
+        "sequence": 3,
+        "revision": 0,
+    }
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        lambda _session_id: [object()],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [dict(tool_item)] if turn_id == "turn-live-1" else [],
+    )
+    items = session_service._build_session_turn_items_projection(
+        session_id="session-1",
+        turn_id="turn-live-1",
+        message_id="message-live-1",
+        content="流式正文已经出现。",
+        done=False,
+        source="assistant_delta",
+    )
+    assert [item["kind"] for item in items] == ["tool_call", "assistant_message"]
+    final_item = items[1]
+    assert final_item["phase"] == "final_answer"
+    assert final_item["text"] == "流式正文已经出现。"
+    assert final_item["provisional"] is True
+    assert final_item["terminal"] is False
+    assert final_item["status"] == "in_progress"
+    assert final_item["messageId"] == "message-live-1"
+
+
+def test_turn_items_projection_extends_provisional_final_with_faster_content(monkeypatch) -> None:
+    provisional = {
+        "version": 2,
+        "id": "answer:0",
+        "itemId": "answer",
+        "type": "assistant_message",
+        "kind": "assistant_message",
+        "channel": "answer",
+        "phase": "final_answer",
+        "status": "in_progress",
+        "terminal": False,
+        "provisional": True,
+        "text": "你好",
+        "turnId": "turn-1",
+        "sequence": 1,
+        "revision": 0,
+    }
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        lambda _session_id: [object()],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [dict(provisional)] if turn_id == "turn-1" else [],
+    )
+    items = session_service._build_session_turn_items_projection(
+        session_id="session-1",
+        turn_id="turn-1",
+        message_id="message-stream",
+        content="你好，世界",
+        done=False,
+        source="assistant_delta",
+    )
+    assert len(items) == 1
+    assert items[0]["text"] == "你好，世界"
+    assert items[0]["provisional"] is True
+    assert items[0]["status"] == "in_progress"
+
+
 def test_window_slim_keeps_full_final_answer_text() -> None:
     long_answer = "最终结论：" + ("缓存命中率不受状态栏影响。" * 40)
     slim = session_service._slim_codex_transcript_for_window_payload(

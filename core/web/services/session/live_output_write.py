@@ -238,6 +238,7 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
     )
     if timeline_items:
         message["timelineItems"] = timeline_items
+    # Build process transcript first; turnItems package then owns the answer cells track.
     codex_transcript = s._build_codex_transcript_projection(
         message_id=message["id"],
         content=content,
@@ -245,7 +246,28 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
         tool_calls=tool_calls,
         streaming=True,
     )
-    if codex_transcript:
+    turn_items = s._build_session_turn_items_projection(
+        session_id=session_id,
+        turn_id=turn_id,
+        message_id=message["id"],
+        content=content,
+        thought=thought,
+        codex_transcript=codex_transcript,
+        done=False,
+        source="session_live_overlay",
+    )
+    if turn_items:
+        message["turnItems"] = turn_items
+        derived_transcript = s._build_codex_transcript_from_turn_items(
+            message_id=message["id"],
+            turn_items=turn_items,
+            streaming=True,
+        )
+        if derived_transcript:
+            message["codexTranscript"] = derived_transcript
+        elif codex_transcript:
+            message["codexTranscript"] = codex_transcript
+    elif codex_transcript:
         message["codexTranscript"] = codex_transcript
     return message
 

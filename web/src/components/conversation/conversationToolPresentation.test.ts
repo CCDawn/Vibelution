@@ -8,6 +8,8 @@ import {
   extractToolDisplayCommand,
   formatCodexStyleToolActivityLine,
   normalizeToolActivityStatus,
+  terminalSandboxPresentationDetail,
+  terminalSandboxPresentationSummary,
 } from "./conversationToolPresentation";
 
 describe("conversation tool presentation", () => {
@@ -175,6 +177,90 @@ describe("conversation tool presentation", () => {
       toolName: "exec_command",
       language: "zh",
     })).toBe("[超时] 命令执行超时");
+  });
+
+  it("summarizes write_stdin timeout JSON as 执行超时 without dumping stdout", () => {
+    const payload = JSON.stringify({
+      status: "timeout",
+      terminalSessionId: "sandbox-abc",
+      sessionOpen: false,
+      exitCode: 1,
+      outcomeStatus: "timeout",
+      stdout: "    \"high\": \"?\",\n    \"xhigh\": \"超高\",\n".repeat(40),
+      formattedOutput: "huge body ".repeat(80),
+      timedOut: true,
+    });
+    expect(terminalSandboxPresentationSummary(payload, "zh")).toBe("执行超时");
+    expect(
+      completedToolPresentationSummary({
+        toolSummary: payload,
+        toolName: "write_stdin",
+        status: "failed",
+        language: "zh",
+      }),
+    ).toBe("执行超时");
+    expect(conversationToolDetailPresentation({
+      value: payload,
+      toolName: "write_stdin",
+      language: "zh",
+    })).toContain("执行超时");
+    expect(conversationToolDetailPresentation({
+      value: payload,
+      toolName: "write_stdin",
+      language: "zh",
+    })).not.toContain("terminalSessionId");
+    expect(conversationToolDetailPresentation({
+      value: payload,
+      toolName: "write_stdin",
+      language: "zh",
+    }).length).toBeLessThan(200);
+  });
+
+  it("does not use embedded timeout JSON as the pill subject after 执行失败", () => {
+    const payload = JSON.stringify({
+      status: "timeout",
+      terminalSessionId: "sandbox-1",
+      sessionOpen: false,
+      outcomeStatus: "timeout",
+      stdout: "noise",
+    });
+    const pills = buildCodexToolActivityPills({
+      toolName: "write_stdin",
+      status: "failed",
+      language: "zh",
+      toolSummary: `执行失败 · ${payload}`,
+      timedOut: true,
+    });
+    expect(pills.statusKind).toBe("timeout");
+    expect(pills.statusLabel).toBe("超时");
+    expect(pills.subject).not.toContain("terminalSessionId");
+    expect(pills.subject).not.toContain("stdout");
+  });
+
+  it("collapses multi-search mashups into a short line", () => {
+    expect(
+      completedToolPresentationSummary({
+        toolSummary:
+          "[搜索] 正则: reasoning_effort_options [搜索] 目录: C:\\tests；[搜索] 未找到匹配项 正则: foo",
+        toolName: "grep_search_tool",
+        language: "zh",
+      }),
+    ).toBe("未找到匹配");
+  });
+
+  it("exposes bounded terminal detail helper for stdout-free timeout rows", () => {
+    const detail = terminalSandboxPresentationDetail(
+      JSON.stringify({
+        status: "timeout",
+        timedOut: true,
+        exitCode: 1,
+        stderr: "rg: command not found",
+      }),
+      "zh",
+    );
+    expect(detail).toContain("执行超时");
+    expect(detail).toContain("退出码 1");
+    expect(detail).toContain("rg: command not found");
   });
 
   it("turns a code-symbol payload into one semantic activity summary", () => {

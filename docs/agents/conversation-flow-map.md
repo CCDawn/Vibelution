@@ -75,12 +75,14 @@
 
 - `session_detail` 是校准 snapshot（full/windowed）。window 可瘦诊断字段，但 **final_answer 全文与 turnItems 语义不可丢**。
 - `assistant_delta` 携带 text delta、feedback、**完整 turnItems 快照**与可选 transcript；active-turn 在存在 turnItems 时只认该包。
+- `session_live_overlay`（detail 重连/校准桥）也必须挂 **同一 turnItems 包**；answer cells 由包派生，不得只剩 content/timeline 第二轨。
+- journal 已有 tool/process items 但尚无 final_answer 时，后端 projection 用 live content **桥接 provisional final_answer** 到同一包（不覆盖已 committed 终稿）。
 - `ConversationView` 主路径：`turnItems → codexTranscript.cells → package_cells 单轨渲染`。response 区块与 timeline 答案行仅 `legacy` 模式使用。
 - `timelineItems` 在 package 模式下剥离 `assistant_text`，只保留过程行（若 cells 未覆盖 process）。
-- `chatActiveTurnLayer` 是 in-flight bridge；`session_detail` settle 同一 `turnId` 且已 committed final 后必须清理。
+- `chatActiveTurnLayer` 是 in-flight bridge；`session_detail` settle 同一 `turnId` 且已 committed final 后必须清理。同 turn 的 live overlay 在 projection 中并入 active-turn / committed，不双行绘制。
 - **Legacy 冻结策略（故意保留）**：
   1. 无 `turnItems` 的旧会话仍走 **content / timeline**——这是兼容路径，不是遗漏删除。
-  2. 新/正常 settle 的 detail 与 window 必须带 `turnItems`（后端 fallback：content→`final_answer`）。
+  2. 新/正常 settle 的 detail、window 与 live overlay 必须带 `turnItems`（后端 fallback：content→`final_answer`）。
   3. 前端无包时 `renderMode=legacy`，仅覆盖过程-only、status placeholder、或尚未升级的缓存快照。
   4. **禁止**客户端随意合成 `turnItems` 包；合成只允许在后端 projection 边界。
   5. 确认无流量后再考虑删除纯 process 的 legacy 死分支（见优化队列）。
