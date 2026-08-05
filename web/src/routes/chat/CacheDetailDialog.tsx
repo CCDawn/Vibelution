@@ -352,34 +352,62 @@ export function CacheDetailDialog({
       aria-label={closeLabel}
     >
         <div id="cache-detail-dialog" className={styles.cacheDetailSummaryGrid}>
-          <div>
-            <span>{lang === "zh" ? "真实命中" : "True hit"}</span>
+          <div className={styles.cacheDetailSummaryPrimary}>
+            <span>{lang === "zh" ? "上轮真实命中" : "Last-turn true hit"}</span>
             <strong>{cacheCompositionPercent}%</strong>
-            <small>{numberFormatter.format(providerCachedInputTokens)} / {numberFormatter.format(providerCacheInputTokens)}</small>
+            <small>
+              {numberFormatter.format(providerCachedInputTokens)}
+              {" / "}
+              {numberFormatter.format(providerCacheInputTokens)}
+              {lang === "zh" ? " tokens · 厂商回报" : " tokens · provider"}
+            </small>
           </div>
           <div>
-            <span>{lang === "zh" ? "计算命中" : "Computed hit"}</span>
+            <span>{lang === "zh" ? "前缀上界" : "Prefix upper bound"}</span>
             <strong>{upperBoundCacheCompositionPercent}%</strong>
-            <small>{numberFormatter.format(upperBoundCachedInputTokens)} / {numberFormatter.format(upperBoundCacheInputTokens)}</small>
+            <small>
+              {numberFormatter.format(upperBoundCachedInputTokens)}
+              {" / "}
+              {numberFormatter.format(upperBoundCacheInputTokens)}
+              {lang === "zh" ? " · 稳定前缀可缓存上界" : " · stable-prefix ceiling"}
+            </small>
           </div>
           <div>
-            <span>{lang === "zh" ? "总平均命中" : "Average hit"}</span>
+            <span>{lang === "zh" ? "会话平均" : "Session average"}</span>
             <strong>{cacheCompositionAverageValue}</strong>
-            <small>{lang === "zh" ? "轮次" : "turns"} {numberFormatter.format(averageCacheObservedTurnCount)}</small>
+            <small>
+              {lang === "zh" ? "共" : ""}
+              {numberFormatter.format(averageCacheObservedTurnCount)}
+              {lang === "zh" ? " 轮 · 含早期工具轮低命中" : " turns · early tool loops pull this down"}
+            </small>
           </div>
         </div>
 
         {cacheCalibrationReason || cacheComputedOverestimatedInputTokens > 0 || cacheProviderExtraCachedInputTokens > 0 ? (
           <div className={styles.cacheDetailCalibrationNote} title={cacheCalibrationReason || cacheCalibrationSummaryText}>
-            <strong>{lang === "zh" ? "厂商校准" : "Provider calibration"}</strong>
-            <span>{cacheCalibrationSummaryText}</span>
-            <em>
-              {cacheComputedOverestimatedInputTokens > 0 ? `${lang === "zh" ? "上界未兑现" : "upper bound not observed"} ${numberFormatter.format(cacheComputedOverestimatedInputTokens)}` : ""}
-              {cacheComputedOverestimatedInputTokens > 0 && cacheProviderExtraCachedInputTokens > 0 ? " · " : ""}
-              {cacheProviderExtraCachedInputTokens > 0 ? `${lang === "zh" ? "厂商额外命中" : "provider extra hit"} ${numberFormatter.format(cacheProviderExtraCachedInputTokens)}` : ""}
-            </em>
+            <strong>{lang === "zh" ? "读数说明" : "How to read"}</strong>
+            <span>
+              {lang === "zh"
+                ? "左侧「上轮真实」看当前效率；右侧「会话平均」会被工具风暴前几轮拉低，不等于现在缓存坏了。"
+                : "Left is last-turn efficiency. Session average is diluted by early tool-loop turns — not a broken cache."}
+              {cacheComputedOverestimatedInputTokens > 0
+                ? (lang === "zh"
+                  ? ` 前缀上界尚有 ${numberFormatter.format(cacheComputedOverestimatedInputTokens)} tokens 未完全兑现。`
+                  : ` About ${numberFormatter.format(cacheComputedOverestimatedInputTokens)} prefix tokens are still unrealized.`)
+                : ""}
+            </span>
+            {cacheCalibrationSummaryText ? <em>{cacheCalibrationSummaryText}</em> : null}
           </div>
-        ) : null}
+        ) : (
+          <div className={styles.cacheDetailCalibrationNote}>
+            <strong>{lang === "zh" ? "读数说明" : "How to read"}</strong>
+            <span>
+              {lang === "zh"
+                ? "优先看「上轮真实命中」。会话平均包含早期低命中轮次，仅作历史参考。"
+                : "Prefer last-turn true hit. Session average includes early low-hit turns and is historical only."}
+            </span>
+          </div>
+        )}
 
         <div className={styles.cacheDetailBody}>
           <div className={styles.cacheDetailDonutPanel}>
@@ -437,13 +465,12 @@ export function CacheDetailDialog({
               </svg>
               <div className={`${styles.cacheDonutCenter} ${styles.cacheDetailDonutCenter}`} title={cacheCompositionTitle}>
                 <strong>{cacheCompositionPercent}%</strong>
-                <span>{cacheCompositionUpperBoundLabel} {upperBoundCacheCompositionPercent}%</span>
-                <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
+                <span>{lang === "zh" ? "上轮真实" : "last true"}</span>
               </div>
             </div>
             <div className={styles.cacheDetailDonutLegend}>
-              <span><b>{lang === "zh" ? "外环" : "outer"}</b>{lang === "zh" ? "提示词来源 / 上界分段" : "prompt sources / upper bound"}</span>
-              <span><b>{lang === "zh" ? "内环" : "inner"}</b>{lang === "zh" ? "厂商真实命中" : "provider hits"}</span>
+              <span><b>{lang === "zh" ? "外环" : "outer"}</b>{lang === "zh" ? "提示词分段上界" : "prompt segment ceiling"}</span>
+              <span><b>{lang === "zh" ? "内环" : "inner"}</b>{lang === "zh" ? "厂商真实命中" : "provider true hit"}</span>
             </div>
           </div>
 

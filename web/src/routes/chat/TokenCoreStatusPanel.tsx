@@ -69,11 +69,11 @@ export function TokenCoreStatusPanel({
   const panelId = useId();
   const titleId = `${panelId}-title`;
   const resolvedScopeLabel = scopeLabel
-    ?? (lang === "zh" ? "上轮遥测" : "Last-turn telemetry");
+    ?? (lang === "zh" ? "上轮" : "Last turn");
   const resolvedScopeTitle = scopeTitle
     ?? (lang === "zh"
-      ? "缓存命中与模型输入来自上一轮会话落库；压缩仅在当前 active 会话可读 runtime；速度仅在流式输出中估算。"
-      : "Cache hit and model input come from the last persisted turn; compression is available only for the active runtime session; speed is estimated only while streaming.");
+      ? "缓存与输入来自上一轮落库；压缩看当前会话；速度仅在流式时估算。"
+      : "Cache and input come from the last persisted turn; compression is active-session only; speed is estimated while streaming.");
 
   return (
     <section className={`${routeStyles.leftBlock} ${styles.tokenCompressionCard}`} aria-labelledby={titleId}>

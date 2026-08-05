@@ -167,9 +167,15 @@ export function buildChatCacheDetailViewModel(options: {
   const cacheDetailAvailable = Boolean(lastCacheComposition);
   const cacheDetailDialogTitle = lang === "zh" ? "缓存命中详情" : "Cache hit details";
   const cacheDetailOpenLabel = lang === "zh" ? "查看上一轮缓存命中详情" : "View previous cache hit details";
+  // Rail summary: lead with last-turn provider truth; park session average second
+  // so early low-hit tool loops don't read as "cache is broken".
   const cacheCompositionSummary = lastCacheComposition
     ? lastCacheComposition.source === "provider_usage"
-      ? `${cacheCompositionTrueLabel} ${cacheCompositionPercent}% · ${cacheCompositionUpperBoundLabel} ${upperBoundCacheCompositionPercent}% · ${cacheCompositionAverageLabel} ${cacheCompositionAverageValue}`
+      ? averageCacheObservedTurnCount > 1
+        ? (lang === "zh"
+          ? `上轮 ${cacheCompositionPercent}% · 会话均 ${cacheCompositionAverageValue}`
+          : `Last ${cacheCompositionPercent}% · avg ${cacheCompositionAverageValue}`)
+        : `${cacheCompositionPercent}%`
       : lastCacheComposition.source === "not_called"
         ? t("cacheHitNotCalled")
         : t("cacheHitMissing")
@@ -177,16 +183,19 @@ export function buildChatCacheDetailViewModel(options: {
   const cacheCompositionTitle = lastCacheComposition
     ? lastCacheComposition.source === "provider_usage"
       ? [
-        `${cacheCompositionTrueLabel} ${numberFormatter.format(providerCachedInputTokens)} / ${numberFormatter.format(providerCacheInputTokens)} · ${cacheCompositionPercent}%`,
-        `${cacheCompositionUpperBoundLabel} ${numberFormatter.format(upperBoundCachedInputTokens)} / ${numberFormatter.format(upperBoundCacheInputTokens)} · ${upperBoundCacheCompositionPercent}%`,
-        `${cacheCompositionAverageLabel} ${numberFormatter.format(averageCachedInputTokens)} / ${numberFormatter.format(averageCacheInputTokens)} · ${cacheCompositionAverageValue}`,
-        `${lang === "zh" ? "观测轮次" : "observed turns"} ${numberFormatter.format(averageCacheObservedTurnCount)}`,
-        cacheComputedOverestimatedInputTokens > 0 ? `${lang === "zh" ? "上界未兑现" : "upper bound not observed"} ${numberFormatter.format(cacheComputedOverestimatedInputTokens)}` : "",
-        cacheProviderExtraCachedInputTokens > 0 ? `${lang === "zh" ? "厂商额外命中" : "provider extra hit"} ${numberFormatter.format(cacheProviderExtraCachedInputTokens)}` : "",
-        cacheCalibrationStatus ? `${lang === "zh" ? "校准" : "calibration"} ${cacheCalibrationStatus}` : "",
-        `write ${numberFormatter.format(lastCacheComposition.cacheCreationInputTokens ?? 0)}`,
-        `uncached ${numberFormatter.format(providerUncachedInputTokens)}`,
-        cacheCalibrationReason,
+        lang === "zh"
+          ? `上轮真实命中 ${cacheCompositionPercent}%（${numberFormatter.format(providerCachedInputTokens)} / ${numberFormatter.format(providerCacheInputTokens)}）`
+          : `Last-turn true hit ${cacheCompositionPercent}% (${numberFormatter.format(providerCachedInputTokens)} / ${numberFormatter.format(providerCacheInputTokens)})`,
+        averageCacheObservedTurnCount > 1
+          ? (lang === "zh"
+            ? `会话平均 ${cacheCompositionAverageValue} · ${numberFormatter.format(averageCacheObservedTurnCount)} 轮（含工具风暴早期低命中）`
+            : `Session avg ${cacheCompositionAverageValue} · ${numberFormatter.format(averageCacheObservedTurnCount)} turns (early tool-loop turns pull this down)`)
+          : "",
+        cacheComputedOverestimatedInputTokens > 0
+          ? (lang === "zh"
+            ? `前缀上界未完全兑现 ${numberFormatter.format(cacheComputedOverestimatedInputTokens)} tokens`
+            : `Stable-prefix upper bound not fully realized: ${numberFormatter.format(cacheComputedOverestimatedInputTokens)} tokens`)
+          : "",
       ].filter(Boolean).join(" · ")
       : lastCacheComposition.source === "not_called"
         ? t("cacheHitNotCalled")

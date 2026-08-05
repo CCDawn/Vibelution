@@ -14,7 +14,7 @@ const styles: Record<string, string> = {
   cacheDetailBoundaryMiss: `vui-routes-chatcodingroute cacheDetailBoundaryMiss min-w-0 ${vuiGlassPanelClass} p-2 w-[var(--cache-boundary-miss-width)]`,
   cacheDetailBoundaryTrack: `vui-routes-chatcodingroute cacheDetailBoundaryTrack min-w-0 ${vuiGlassPanelClass} p-2 [&_span+span]:border-l [&_span+span]:border-[var(--vui-border-subtle)]`,
   cacheDetailBoundaryUnknown: `vui-routes-chatcodingroute cacheDetailBoundaryUnknown min-w-0 ${vuiGlassPanelClass} p-2 w-[var(--cache-boundary-unknown-width)]`,
-  cacheDetailCalibrationNote: `vui-routes-chatcodingroute cacheDetailCalibrationNote min-w-0 ${vuiGlassPanelClass} p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px]`,
+  cacheDetailCalibrationNote: `vui-routes-chatcodingroute cacheDetailCalibrationNote min-w-0 ${vuiGlassPanelClass} grid gap-1 p-2.5 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)] [&_strong]:text-[var(--fg-primary)] [&_em]:text-[var(--fg-tertiary)] [&_em]:not-italic`,
   cacheDetailCloseButton: `vui-routes-chatcodingroute cacheDetailCloseButton min-w-0 ${vuiGlassPanelClass} p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55`,
   // Dialog shell on VDialog content: viewport max-h (see components/layout/dialogHeightPolicy.ts).
   cacheDetailDialog: `vui-routes-chatcodingroute cacheDetailDialog min-w-0 w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]`,
@@ -36,7 +36,9 @@ const styles: Record<string, string> = {
   cacheDetailSegmentRow: `vui-routes-chatcodingroute cacheDetailSegmentRow min-w-0 ${vuiGlassPanelClass} p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)]`,
   cacheDetailSegmentSource: `vui-routes-chatcodingroute cacheDetailSegmentSource min-w-0 ${vuiGlassPanelClass} p-2`,
   cacheDetailSegmentText: `vui-routes-chatcodingroute cacheDetailSegmentText min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
-  cacheDetailSummaryGrid: `vui-routes-chatcodingroute cacheDetailSummaryGrid min-w-0 ${vuiGlassPanelClass} p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]`,
+  cacheDetailSummaryGrid: `vui-routes-chatcodingroute cacheDetailSummaryGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] p-0.5 [&_div]:min-w-0 [&_div]:rounded-[var(--radius-control)] [&_div]:border [&_div]:border-[var(--vui-border-subtle)] [&_div]:bg-[var(--vui-surface-row)] [&_div]:p-2.5 [&_div]:grid [&_div]:gap-0.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:[font-size:var(--vui-font-lg)] [&_strong]:font-semibold [&_strong]:text-[var(--fg-primary)] [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)]`,
+  cacheDetailSummaryPrimary:
+    "vui-routes-chatcodingroute cacheDetailSummaryPrimary !border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] !bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_strong]:text-[var(--accent-cool)]",
   cacheDetailSwatch: `vui-routes-chatcodingroute cacheDetailSwatch min-w-0 ${vuiGlassPanelClass} p-2`,
   cacheDonutCenter:
     "vui-routes-chatcodingroute cacheDonutCenter min-w-0",

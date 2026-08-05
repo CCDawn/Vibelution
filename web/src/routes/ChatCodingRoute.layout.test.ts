@@ -1334,7 +1334,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cacheDetailDialogSource).toContain("cacheComputedStatusLabel(segment.status, lang)");
     expect(cacheDetailDialogSource).toContain("segment.contentPreview");
     expect(routeSource).not.toContain("{lang === \"zh\" ? \"预测命中\" : \"Predicted hit\"}");
-    expect(cacheDetailDialogSource).toContain("{lang === \"zh\" ? \"计算命中\" : \"Computed hit\"}");
+    expect(cacheDetailDialogSource).toContain("{lang === \"zh\" ? \"上轮真实命中\" : \"Last-turn true hit\"}");
+    expect(cacheDetailDialogSource).toContain("{lang === \"zh\" ? \"会话平均\" : \"Session average\"}");
+    expect(cacheDetailDialogSource).toContain("{lang === \"zh\" ? \"读数说明\" : \"How to read\"}");
     expect(cacheDetailDialogSource).toContain("{lang === \"zh\" ? \"上界未兑现\" : \"upper bound gap\"}");
     expect(cacheDetailDialogSource).not.toContain("styles.cacheDonutLegendPreview");
     expect(cacheDetailDialogSource).not.toContain("key={`${segment.key}-${segment.status}-${index}-legend`}");
@@ -1364,7 +1366,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cacheDetailDialogSource).toContain("observedMissedPercent");
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailDonutPanel");
     expect(cacheDetailDialogSource).toContain("case \"cache_write\"");
-    expect(routeAndCacheDetailSource).toContain("cacheCreationInputTokens");
+    expect(routeAndCacheDetailSource).toContain("averageCacheObservedTurnCount");
+    expect(routeAndCacheDetailSource).toContain("上轮");
     expect(routeAndIndexRailSource).toContain("styles.currentSessionBlock");
     expect(routeAndIndexRailSource).toContain("styles.currentSessionLine");
     expect(routeAndIndexRailSource).toContain("styles.currentSessionMetaList");
