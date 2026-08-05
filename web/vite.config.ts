@@ -136,6 +136,12 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "*.test.ts"],
+    // File-level parallelism: contract/layout suites are independent modules.
+    // Forks isolate process-global state better than threads on Windows.
+    pool: "forks",
+    fileParallelism: true,
+    maxWorkers: "50%",
+    isolate: true,
   },
   build: {
     chunkSizeWarningLimit: 760,

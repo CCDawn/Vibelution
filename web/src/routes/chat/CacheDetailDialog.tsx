@@ -1,9 +1,25 @@
 import { type CSSProperties } from "react";
 
 import type { SessionCacheCompositionSegment } from "../../api/types";
-import { VDialog } from "../../components/vui";
+import { VDialog, VTooltip } from "../../components/vui";
 import routeStyles from "../ChatCodingRoute.styles";
 import styles from "./CacheDetailDialog.styles";
+
+function CacheHoverLines({ lines }: { lines: string[] }) {
+  const rows = lines.map((line) => line.trim()).filter(Boolean).slice(0, 5);
+  if (!rows.length) {
+    return null;
+  }
+  return (
+    <div className={styles.cacheDetailTooltip}>
+      {rows.map((line, index) => (
+        <div key={`${index}-${line.slice(0, 24)}`} className={styles.cacheDetailTooltipLine}>
+          {line}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export type CacheDonutSegment = SessionCacheCompositionSegment & {
   actualPercent: number;
@@ -339,6 +355,38 @@ export function CacheDetailDialog({
   upperBoundCacheCompositionPercent,
   upperBoundCacheInputTokens,
 }: CacheDetailDialogProps) {
+  const trueHitHover = [
+    `${numberFormatter.format(providerCachedInputTokens)} / ${numberFormatter.format(providerCacheInputTokens)} tokens`,
+    lang === "zh" ? "厂商回报 · 优先看这张卡" : "Provider-reported · primary metric",
+    cacheCalibrationSummaryText || cacheCalibrationReason || "",
+  ];
+  const upperBoundHover = [
+    `${numberFormatter.format(upperBoundCachedInputTokens)} / ${numberFormatter.format(upperBoundCacheInputTokens)} tokens`,
+    lang === "zh" ? "稳定前缀可缓存上界" : "Stable-prefix cache ceiling",
+    cacheComputedOverestimatedInputTokens > 0
+      ? (lang === "zh"
+        ? `未兑现 ${numberFormatter.format(cacheComputedOverestimatedInputTokens)} tokens`
+        : `Unrealized ${numberFormatter.format(cacheComputedOverestimatedInputTokens)} tokens`)
+      : "",
+    cacheProviderExtraCachedInputTokens > 0
+      ? (lang === "zh"
+        ? `厂商额外 ${numberFormatter.format(cacheProviderExtraCachedInputTokens)}`
+        : `Provider extra ${numberFormatter.format(cacheProviderExtraCachedInputTokens)}`)
+      : "",
+  ];
+  const averageHover = [
+    cacheCompositionAverageLabel || (lang === "zh" ? "会话平均命中" : "Session average hit"),
+    lang === "zh"
+      ? `共 ${numberFormatter.format(averageCacheObservedTurnCount)} 轮`
+      : `${numberFormatter.format(averageCacheObservedTurnCount)} turns`,
+    lang === "zh" ? "含早期工具轮，历史参考" : "Includes early tool turns · historical",
+  ];
+  const donutLegendHover = [
+    lang === "zh" ? "中心：上轮真实命中率" : "Center: last-turn true hit",
+    lang === "zh" ? "内环：厂商命中 / 未命中" : "Inner: provider hit / miss",
+    lang === "zh" ? "外环：提示词分段占比（非命中率）" : "Outer: prompt share (not hit rate)",
+  ];
+
   return (
     <VDialog
       open
@@ -352,126 +400,103 @@ export function CacheDetailDialog({
       aria-label={closeLabel}
     >
         <div id="cache-detail-dialog" className={styles.cacheDetailSummaryGrid}>
-          <div className={styles.cacheDetailSummaryPrimary}>
-            <span>{lang === "zh" ? "上轮真实命中" : "Last-turn true hit"}</span>
-            <strong>{cacheCompositionPercent}%</strong>
-            <small>
-              {numberFormatter.format(providerCachedInputTokens)}
-              {" / "}
-              {numberFormatter.format(providerCacheInputTokens)}
-              {lang === "zh" ? " tokens · 厂商回报" : " tokens · provider"}
-            </small>
-          </div>
-          <div>
-            <span>{lang === "zh" ? "前缀上界" : "Prefix upper bound"}</span>
-            <strong>{upperBoundCacheCompositionPercent}%</strong>
-            <small>
-              {numberFormatter.format(upperBoundCachedInputTokens)}
-              {" / "}
-              {numberFormatter.format(upperBoundCacheInputTokens)}
-              {lang === "zh" ? " · 稳定前缀可缓存上界" : " · stable-prefix ceiling"}
-            </small>
-          </div>
-          <div>
-            <span>{lang === "zh" ? "会话平均" : "Session average"}</span>
-            <strong>{cacheCompositionAverageValue}</strong>
-            <small>
-              {lang === "zh" ? "共" : ""}
-              {numberFormatter.format(averageCacheObservedTurnCount)}
-              {lang === "zh" ? " 轮 · 含早期工具轮低命中" : " turns · early tool loops pull this down"}
-            </small>
-          </div>
+          <VTooltip content={<CacheHoverLines lines={trueHitHover} />} width="compact" className={styles.cacheDetailTooltipSurface}>
+            <div className={styles.cacheDetailSummaryPrimary}>
+              <span>{lang === "zh" ? "上轮真实命中" : "Last-turn true hit"}</span>
+              <strong>{cacheCompositionPercent}%</strong>
+              <small>
+                {numberFormatter.format(providerCachedInputTokens)}
+                {" / "}
+                {numberFormatter.format(providerCacheInputTokens)}
+              </small>
+            </div>
+          </VTooltip>
+          <VTooltip content={<CacheHoverLines lines={upperBoundHover} />} width="compact" className={styles.cacheDetailTooltipSurface}>
+            <div>
+              <span>{lang === "zh" ? "前缀上界" : "Prefix upper bound"}</span>
+              <strong>{upperBoundCacheCompositionPercent}%</strong>
+              <small>
+                {numberFormatter.format(upperBoundCachedInputTokens)}
+                {" / "}
+                {numberFormatter.format(upperBoundCacheInputTokens)}
+              </small>
+            </div>
+          </VTooltip>
+          <VTooltip content={<CacheHoverLines lines={averageHover} />} width="compact" className={styles.cacheDetailTooltipSurface}>
+            <div>
+              <span>{lang === "zh" ? "会话平均" : "Session average"}</span>
+              <strong>{cacheCompositionAverageValue}</strong>
+              <small>
+                {numberFormatter.format(averageCacheObservedTurnCount)}
+                {lang === "zh" ? " 轮" : " turns"}
+              </small>
+            </div>
+          </VTooltip>
         </div>
-
-        {cacheCalibrationReason || cacheComputedOverestimatedInputTokens > 0 || cacheProviderExtraCachedInputTokens > 0 ? (
-          <div className={styles.cacheDetailCalibrationNote} title={cacheCalibrationReason || cacheCalibrationSummaryText}>
-            <strong>{lang === "zh" ? "读数说明" : "How to read"}</strong>
-            <span>
-              {lang === "zh"
-                ? "左侧「上轮真实」看当前效率；右侧「会话平均」会被工具风暴前几轮拉低，不等于现在缓存坏了。"
-                : "Left is last-turn efficiency. Session average is diluted by early tool-loop turns — not a broken cache."}
-              {cacheComputedOverestimatedInputTokens > 0
-                ? (lang === "zh"
-                  ? ` 前缀上界尚有 ${numberFormatter.format(cacheComputedOverestimatedInputTokens)} tokens 未完全兑现。`
-                  : ` About ${numberFormatter.format(cacheComputedOverestimatedInputTokens)} prefix tokens are still unrealized.`)
-                : ""}
-            </span>
-            {cacheCalibrationSummaryText ? <em>{cacheCalibrationSummaryText}</em> : null}
-          </div>
-        ) : (
-          <div className={styles.cacheDetailCalibrationNote}>
-            <strong>{lang === "zh" ? "读数说明" : "How to read"}</strong>
-            <span>
-              {lang === "zh"
-                ? "优先看「上轮真实命中」。会话平均包含早期低命中轮次，仅作历史参考。"
-                : "Prefer last-turn true hit. Session average includes early low-hit turns and is historical only."}
-            </span>
-          </div>
-        )}
 
         <div className={styles.cacheDetailBody}>
           <div className={styles.cacheDetailDonutPanel}>
-            <div className={styles.cacheDetailDonutShell}>
-              <svg
-                className={`${styles.cacheDonutSvg} ${styles.cacheDetailDonutSvg}`}
-                viewBox="0 0 100 100"
-                role="img"
-                aria-label={cacheCompositionTitle}
-              >
-                <circle
-                  className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`}
-                  cx="50"
-                  cy="50"
-                  r="42"
-                  pathLength={100}
-                  fill="none"
-                />
-                {cachePromptDonutSegments.map((segment, index) => (
+            <VTooltip content={<CacheHoverLines lines={donutLegendHover} />} width="compact" className={styles.cacheDetailTooltipSurface}>
+              <div className={styles.cacheDetailDonutShell}>
+                <svg
+                  className={`${styles.cacheDonutSvg} ${styles.cacheDetailDonutSvg}`}
+                  viewBox="0 0 100 100"
+                  role="img"
+                  aria-label={cacheCompositionTitle}
+                >
                   <circle
-                    key={`detail-computed-${segment.key}-${segment.status}-${index}`}
-                    className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cachePromptSegmentClass(segment)}`}
+                    className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`}
                     cx="50"
                     cy="50"
                     r="42"
                     pathLength={100}
                     fill="none"
-                    style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
-                  >
-                    <title>{cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, missingSegmentLabel)}</title>
-                  </circle>
-                ))}
-                <circle
-                  className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`}
-                  cx="50"
-                  cy="50"
-                  r="31"
-                  pathLength={100}
-                  fill="none"
-                />
-                {trueCacheDonutSegments.map((segment, index) => (
+                  />
+                  {cachePromptDonutSegments.map((segment, index) => (
+                    <circle
+                      key={`detail-computed-${segment.key}-${segment.status}-${index}`}
+                      className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cachePromptSegmentClass(segment)}`}
+                      cx="50"
+                      cy="50"
+                      r="42"
+                      pathLength={100}
+                      fill="none"
+                      // Outer ring is a composition pie (share of prompt tokens). Keep hairline
+                      // seams so it reads as one ring, not a dashed "broken" track.
+                      style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.18 : 0)}
+                    >
+                      <title>{cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, missingSegmentLabel)}</title>
+                    </circle>
+                  ))}
                   <circle
-                    key={`detail-true-${segment.key}-${segment.status}-${index}`}
-                    className={`${styles.cacheDonutSegment} ${styles.cacheDonutInnerSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
+                    className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`}
                     cx="50"
                     cy="50"
                     r="31"
                     pathLength={100}
                     fill="none"
-                    style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
-                  >
-                    <title>{cacheDonutSegmentTitle(segment, providerCacheInputTokens, numberFormatter, lang)}</title>
-                  </circle>
-                ))}
-              </svg>
-              <div className={`${styles.cacheDonutCenter} ${styles.cacheDetailDonutCenter}`} title={cacheCompositionTitle}>
-                <strong>{cacheCompositionPercent}%</strong>
-                <span>{lang === "zh" ? "上轮真实" : "last true"}</span>
+                  />
+                  {trueCacheDonutSegments.map((segment, index) => (
+                    <circle
+                      key={`detail-true-${segment.key}-${segment.status}-${index}`}
+                      className={`${styles.cacheDonutSegment} ${styles.cacheDonutInnerSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
+                      cx="50"
+                      cy="50"
+                      r="31"
+                      pathLength={100}
+                      fill="none"
+                      style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
+                    >
+                      <title>{cacheDonutSegmentTitle(segment, providerCacheInputTokens, numberFormatter, lang)}</title>
+                    </circle>
+                  ))}
+                </svg>
+                <div className={`${styles.cacheDonutCenter} ${styles.cacheDetailDonutCenter}`}>
+                  <strong>{cacheCompositionPercent}%</strong>
+                  <span>{lang === "zh" ? "上轮真实" : "last true"}</span>
+                </div>
               </div>
-            </div>
-            <div className={styles.cacheDetailDonutLegend}>
-              <span><b>{lang === "zh" ? "外环" : "outer"}</b>{lang === "zh" ? "提示词分段上界" : "prompt segment ceiling"}</span>
-              <span><b>{lang === "zh" ? "内环" : "inner"}</b>{lang === "zh" ? "厂商真实命中" : "provider true hit"}</span>
-            </div>
+            </VTooltip>
           </div>
 
           <div className={styles.cacheDetailSegmentList}>
@@ -583,7 +608,6 @@ export function CacheDetailDialog({
                             </div>
                           </div>
                         ) : null}
-                        {segment.contentPreview ? <small>{segment.contentPreview}</small> : null}
                       </div>
                       <em className={styles.cacheDetailSegmentStats}>
                         <span>

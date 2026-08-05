@@ -30,28 +30,33 @@ const styles = {
   actionIconButton:
     `vui-app-appshell actionIconButton ${vuiControlIconSmClass}`,
   activeWorkChip:
-    `vui-app-appshell activeWorkChip min-w-0 ${vuiControlPillClass} ${vuiStateSelectedRowClass} h-8 min-h-8 flex-nowrap gap-1.5 whitespace-nowrap`,
-  activeWorkDetailCopy: `vui-app-appshell activeWorkDetailCopy min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateSelectedRowClass}`,
+    `vui-app-appshell activeWorkChip min-w-0 ${vuiControlPillClass} ${vuiStateCoolSoftClass} h-8 min-h-8 max-w-[min(66vw,620px)] flex-nowrap gap-1.5 whitespace-nowrap px-2.5 text-[var(--fg-secondary)] [&_strong]:text-[var(--fg-primary)] [&_strong]:font-semibold`,
+  activeWorkDetailCopy:
+    "vui-app-appshell activeWorkDetailCopy min-w-0 grid gap-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_p]:m-0 [&_p]:min-w-0 [&_p]:[overflow-wrap:anywhere] [&_code]:block [&_code]:min-w-0 [&_code]:truncate [&_code]:rounded-[var(--radius-control)] [&_code]:bg-[color-mix(in_srgb,var(--vui-control-muted)_88%,transparent)] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--fg-tertiary)]",
   activeWorkDetailHeader:
-    "vui-app-appshell activeWorkDetailHeader min-w-0 flex flex-wrap items-center gap-1.5 border-b border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] px-0.5 pb-1 text-[var(--accent-cool)]",
-  activeWorkDetailItem: `vui-app-appshell activeWorkDetailItem min-w-0 ${vuiGlassPanelClass} p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] ${vuiStateSelectedRowClass} grid grid-cols-[max-content_minmax(0,1fr)] items-start`,
-  activeWorkDetailList: `vui-app-appshell activeWorkDetailList min-w-0 ${vuiGlassPanelClass} p-2 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiStateSelectedRowClass} max-h-[260px] overflow-y-auto`,
+    "vui-app-appshell activeWorkDetailHeader min-w-0 flex flex-wrap items-center justify-between gap-1.5 border-b border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] px-0.5 pb-1.5 text-[var(--accent-cool)] [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:font-semibold [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
+  activeWorkDetailItem:
+    "vui-app-appshell activeWorkDetailItem min-w-0 grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[var(--vui-surface-row)] px-2.5 py-2",
+  activeWorkDetailList:
+    "vui-app-appshell activeWorkDetailList m-0 grid min-h-0 max-h-[260px] list-none content-start gap-1.5 overflow-y-auto p-0",
   activeWorkDetailLink:
-    "vui-app-appshell activeWorkDetailLink block min-w-0 rounded-[var(--radius-control)] text-inherit no-underline outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--vui-surface-panel)]",
-  activeWorkDetailPanel: `vui-app-appshell activeWorkDetailPanel min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass} grid gap-2`,
-  activeWorkDetailTitle: `vui-app-appshell activeWorkDetailTitle min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] ${vuiStateSelectedRowClass} grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-2`,
+    "vui-app-appshell activeWorkDetailLink block min-w-0 rounded-[var(--radius-control)] text-inherit no-underline outline-none transition-colors hover:text-[var(--fg-primary)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--vui-surface-panel)]",
+  activeWorkDetailPanel:
+    "vui-app-appshell activeWorkDetailPanel min-w-0 grid gap-2 p-2.5",
+  activeWorkDetailTitle:
+    "vui-app-appshell activeWorkDetailTitle min-w-0 grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)] [&_span]:rounded-full [&_span]:border [&_span]:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] [&_span]:bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] [&_span]:px-1.5 [&_span]:py-0.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:font-medium [&_span]:text-[var(--accent-cool)]",
   activeWorkInlineDetails:
     "vui-app-appshell activeWorkInlineDetails min-w-0",
   activeWorkInlineItem:
     "vui-app-appshell activeWorkInlineItem min-w-0",
   activeWorkKicker:
-    `vui-app-appshell activeWorkKicker min-w-0 ${vuiStateSelectedRowClass}`,
+    "vui-app-appshell activeWorkKicker min-w-0 shrink-0 [font-size:var(--vui-font-xs)] font-medium text-[var(--fg-tertiary)]",
   activeWorkMore:
-    `vui-app-appshell activeWorkMore min-w-0 ${vuiStateSelectedRowClass}`,
+    "vui-app-appshell activeWorkMore min-w-0 shrink-0 [font-size:var(--vui-font-xs)] font-semibold text-[var(--accent-cool)]",
   activeWorkPopoverContent:
-    "vui-app-appshell activeWorkPopoverContent z-[95] w-[min(480px,calc(100vw-2rem))] max-w-[min(480px,calc(100vw-2rem))] border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
+    "vui-app-appshell activeWorkPopoverContent z-[95] w-[min(420px,calc(100vw-2rem))] max-w-[min(420px,calc(100vw-2rem))] border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--border-strong))] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   activeWorkStatus:
-    `vui-app-appshell activeWorkStatus min-w-0 ${vuiStateSelectedRowClass}`,
+    "vui-app-appshell activeWorkStatus min-w-0 shrink-0 rounded-full border border-[color-mix(in_srgb,var(--state-warning)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-medium text-[var(--state-warning)]",
   activeWorkSummary: `vui-app-appshell activeWorkSummary min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass}`,
   brand:
     "vui-app-appshell brand min-w-0",

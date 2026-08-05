@@ -55,19 +55,87 @@ describe("VUI shadcn route contract", () => {
     const development = readFileSync(resolve(projectRoot, "docs/standards/development-standard.md"), "utf-8");
     expect(agents).toContain("前端产品 UI 强制 VUI + shadcn/Radix");
     expect(agents).toContain("vuiShadcnRouteContract.test.ts");
-    expect(standardsIndex).toContain("vuiShadcnRouteContract.test.ts");
+    // standards index links the gate by short name or full path
+    expect(
+      standardsIndex.includes("vuiShadcnRouteContract")
+      || standardsIndex.includes("vuiShadcnRouteContract.test.ts"),
+    ).toBe(true);
     expect(development).toContain("Hard product constraint");
     expect(development).toContain("vuiShadcnRouteContract.test.ts");
   });
 
   it("keeps Teams shell on board/canvas page recipes + WORKBENCH_LAYOUT_IDS.teams", () => {
-    const teams = readFileSync(resolve(routesDir, "TeamsRoute.tsx"), "utf-8");
-    expect(teams).toContain("VBoardWorkbenchPage");
-    expect(teams).toContain("VCanvasWorkbenchPage");
-    expect(teams).toContain("WORKBENCH_LAYOUT_IDS.teams");
-    expect(teams).toContain('domainRecipe="teams-organization-workbench"');
-    expect(teams).toContain("TeamShellRail");
-    expect(teams).not.toMatch(/from\s+["']@heroui\/react["']/);
-    expect(teams).not.toMatch(/renderers\/shadcn/);
+    // TeamsRoute.tsx is a thin re-export; recipe ownership lives in teams/* workbench layers.
+    const teamsEntry = readFileSync(resolve(routesDir, "TeamsRoute.tsx"), "utf-8");
+    expect(teamsEntry).toMatch(/from\s+["']\.\/teams\/TeamsRouteWorkbench["']/);
+    expect(teamsEntry).not.toMatch(/from\s+["']@heroui\/react["']/);
+    expect(teamsEntry).not.toMatch(/renderers\/shadcn/);
+
+    const workbench = readFileSync(resolve(routesDir, "teams/useTeamsWorkbenchModel.tsx"), "utf-8");
+    const canvasComposer = readFileSync(resolve(routesDir, "teams/TeamsCanvasComposer.tsx"), "utf-8");
+    const shellFrame = readFileSync(resolve(routesDir, "teams/renderTeamsShellFrame.tsx"), "utf-8");
+    const chrome = readFileSync(resolve(routesDir, "teams/teamsWorkbenchChrome.ts"), "utf-8");
+
+    expect(workbench).toContain("VBoardWorkbenchPage");
+    expect(canvasComposer).toContain("VCanvasWorkbenchPage");
+    expect(chrome).toContain("WORKBENCH_LAYOUT_IDS.teams");
+    expect(canvasComposer).toContain('domainRecipe="teams-organization-workbench"');
+    expect(shellFrame).toContain("TeamShellRail");
+    expect(workbench).not.toMatch(/from\s+["']@heroui\/react["']/);
+    expect(workbench).not.toMatch(/renderers\/shadcn/);
+  });
+
+  it("documents V vs VNative button selection for agents", () => {
+    const projectRoot = resolve(webSrc, "../..");
+    const actions = readFileSync(
+      resolve(webSrc, "components/vui/designs/primitives/actions.md"),
+      "utf-8",
+    );
+    const guide = readFileSync(
+      resolve(projectRoot, "docs/guides/button-selection.md"),
+      "utf-8",
+    );
+    expect(actions).toContain("## VButton");
+    expect(actions).toContain("## VNativeButton");
+    expect(actions).toContain("画布节点");
+    expect(guide).toContain("VButton");
+    expect(guide).toContain("VNativeButton");
+    expect(guide).toContain("<button>");
+    expect(guide).toContain("禁止第三套");
+  });
+
+  it("forbids raw <button> tags in routes product sources", () => {
+    // Prefer VButton / VNativeButton. Implementors of VNativeButton live under components/vui.
+    const files = walkTsFiles(routesDir);
+    const offenders: string[] = [];
+    for (const file of files) {
+      const text = readFileSync(file, "utf-8");
+      if (/<button[\s>]/.test(text)) {
+        offenders.push(relative(webSrc, file));
+      }
+    }
+    expect(offenders, `Raw <button> in routes:\n${offenders.join("\n")}`).toEqual([]);
+  });
+
+  it("keeps Chat and Agents workbench recipe markers and layout ids", () => {
+    // ChatCodingRoute.tsx is a thin re-export (R01); recipe ownership lives in workbench.
+    const chatEntry = readFileSync(resolve(routesDir, "ChatCodingRoute.tsx"), "utf-8");
+    expect(chatEntry).toMatch(/from\s+["']\.\/chat\/ChatCodingRouteWorkbench["']/);
+    expect(chatEntry.split(/\r?\n/).length).toBeLessThan(40);
+
+    const chat = readFileSync(resolve(routesDir, "chat/ChatCodingRouteWorkbench.tsx"), "utf-8");
+    expect(chat).toContain('data-vui-recipe="chat-session-workbench"');
+    expect(chat).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(chat).not.toMatch(/from\s+["']@heroui\/react["']/);
+    expect(chat).not.toMatch(/renderers\/shadcn/);
+
+    const agents = readFileSync(resolve(routesDir, "AgentsRoute.tsx"), "utf-8");
+    expect(agents).toContain('data-vui-recipe="agents-management-workbench"');
+    expect(agents).toContain("AgentWorkspaceLayoutPanel");
+    expect(agents).not.toMatch(/from\s+["']@heroui\/react["']/);
+
+    const agentLayout = readFileSync(resolve(routesDir, "AgentWorkspaceLayoutPanel.tsx"), "utf-8");
+    expect(agentLayout).toContain("VListDetailPage");
+    expect(agentLayout).toContain("WORKBENCH_LAYOUT_IDS.agents");
   });
 });

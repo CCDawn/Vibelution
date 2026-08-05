@@ -20,6 +20,7 @@
  * Heavy non-chat routes load their utilities via design/route-css/*.tailwind.css.
  */
 @source "../routes/ChatCodingRoute.tsx";
+@source "../routes/chat/ChatCodingRouteWorkbench.tsx";
 @source "../routes/ChatCodingRoute.styles.ts";
 @source "../routes/chat/**/*.{ts,tsx}";
 @source "../routes/AgentSessionTabStrip.tsx";

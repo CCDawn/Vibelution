@@ -23,9 +23,9 @@ const styles: Record<string, string> = {
   tokenStatusMeta:
     "vui-routes-chatcodingroute tokenStatusMeta sr-only",
   tokenStatusMetric:
-    "vui-routes-chatcodingroute tokenStatusMetric !grid min-h-[64px] !w-full grid-cols-1 grid-rows-[28px_minmax(0,1fr)] place-items-center justify-stretch gap-1 overflow-visible rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_60%,transparent)] bg-[var(--vui-surface-raised)] px-1 py-1.5 text-center shadow-none",
+    "vui-routes-chatcodingroute tokenStatusMetric !grid min-h-[64px] !w-full grid-cols-1 grid-rows-1 place-items-stretch justify-stretch overflow-visible rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_60%,transparent)] bg-[var(--vui-surface-raised)] px-1 py-1.5 text-center shadow-none",
   tokenStatusMetricButton:
-    "vui-routes-chatcodingroute tokenStatusMetricButton !grid !h-full !min-h-0 !w-full !border-0 !bg-transparent !p-0 !text-inherit !shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-routes-chatcodingroute tokenStatusMetricButton !grid !h-full !min-h-0 !w-full grid-cols-1 grid-rows-[28px_minmax(0,1fr)] place-items-center justify-items-center gap-1 !justify-self-stretch !border-0 !bg-transparent !p-0 !text-inherit !shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   tokenStatusMetric_active:
     `vui-routes-chatcodingroute tokenStatusMetric_active min-w-0 ${vuiStateSelectedRowClass}`,
   tokenStatusMetric_answering:
@@ -153,11 +153,19 @@ const styles: Record<string, string> = {
   tokenStatusMetric_warning:
     `vui-routes-chatcodingroute tokenStatusMetric_warning min-w-0 ${vuiStateWarningSoftClass}`,
   tokenStatusRing:
-    "vui-routes-chatcodingroute tokenStatusRing relative size-[28px] shrink-0 rounded-full bg-[conic-gradient(var(--accent-cool)_calc(var(--token-status-value)*1%),var(--vui-border-subtle)_0)]",
+    "vui-routes-chatcodingroute tokenStatusRing relative mx-auto size-[28px] shrink-0 rounded-full bg-[conic-gradient(var(--accent-cool)_calc(var(--token-status-value)*1%),var(--vui-border-subtle)_0)]",
   tokenStatusRingCore:
-    "vui-routes-chatcodingroute tokenStatusRingCore absolute inset-[3px] grid max-w-full place-items-center overflow-hidden text-ellipsis rounded-full bg-[var(--vui-surface-panel)] px-0.5 text-center text-[10px] font-bold leading-none text-vui-fg-primary",
+    "vui-routes-chatcodingroute tokenStatusRingCore absolute inset-[3px] grid max-w-full place-items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-[var(--vui-surface-panel)] px-0.5 text-center text-[10px] font-bold leading-none tabular-nums tracking-tight text-vui-fg-primary",
   tokenStatusVisualGrid:
-    "vui-routes-chatcodingroute tokenStatusVisualGrid !grid w-full grid-cols-[repeat(4,minmax(0,1fr))] justify-stretch gap-1.5 rounded-[var(--radius-control)]",
+    "vui-routes-chatcodingroute tokenStatusVisualGrid !grid w-full grid-cols-[repeat(4,minmax(0,1fr))] items-stretch justify-stretch gap-1.5 rounded-[var(--radius-control)]",
+  tokenStatusTooltipSurface:
+    "vui-routes-chatcodingroute tokenStatusTooltipSurface !px-2.5 !py-2 text-left",
+  tokenStatusTooltip:
+    "vui-routes-chatcodingroute tokenStatusTooltip grid min-w-0 max-w-[14rem] gap-1 text-left",
+  tokenStatusTooltipHead:
+    "vui-routes-chatcodingroute tokenStatusTooltipHead text-[10px] font-semibold uppercase tracking-wide text-[var(--fg-tertiary)]",
+  tokenStatusTooltipLine:
+    "vui-routes-chatcodingroute tokenStatusTooltipLine min-w-0 break-words text-[11px] font-medium leading-snug text-vui-fg-primary tabular-nums",
 };
 
 export default styles;

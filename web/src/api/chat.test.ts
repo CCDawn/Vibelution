@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import apiSource from "./chat.ts?raw";
-import routeSource from "../routes/ChatCodingRoute.tsx?raw";
+import routeSource from "../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import mutationSource from "../routes/chat/useChatSessionDetailMutations.ts?raw";
 import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
 

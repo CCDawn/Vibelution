@@ -88,6 +88,7 @@ describe("VUI foundation primitives", () => {
     // Heavy non-chat routes load utilities via design/route-css/*.tailwind.css.
     expect(tailwindEntry).not.toContain('@source "../routes/**/*.{ts,tsx}";');
     expect(tailwindEntry).toContain('@source "../routes/ChatCodingRoute.tsx";');
+    expect(tailwindEntry).toContain('@source "../routes/chat/ChatCodingRouteWorkbench.tsx";');
     expect(tailwindEntry).toContain('@source "../routes/chat/**/*.{ts,tsx}";');
     expect(tailwindEntry).not.toContain(".test");
   });

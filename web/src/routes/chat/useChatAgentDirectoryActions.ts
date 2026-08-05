@@ -1,13 +1,25 @@
 /**
  * Chat agent-directory context-menu actions.
  */
-import { useCallback, type Dispatch, type MouseEvent as ReactMouseEvent, type SetStateAction } from "react";
+import {
+  useCallback,
+  useState,
+  type Dispatch,
+  type MouseEvent as ReactMouseEvent,
+  type SetStateAction,
+} from "react";
 import type { NavigateFunction } from "react-router-dom";
 
 import type { AgentInstance, SessionSummary } from "../../api/types";
 import type { AgentContextMenuState } from "../AgentContextMenu";
 import { agentCenterConfigRoute } from "../agentCenterRoutes";
 import type { SessionContextMenuState } from "./useChatSessionRenameMenu";
+
+export type AgentRenameDraft = {
+  agentId: string;
+  currentName: string;
+  draftName: string;
+};
 
 export type UseChatAgentDirectoryActionsOptions = {
   lang: "zh" | "en";
@@ -25,10 +37,14 @@ export type UseChatAgentDirectoryActionsOptions = {
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   setAgentCreateWizardOpen: (open: boolean) => void;
   renameAgentEmptyMessage: string;
-  promptRename?: (message: string, defaultValue: string) => string | null;
+  /** Optional archive confirm (defaults to window.confirm). */
   confirmArchive?: (message: string) => boolean;
 };
 
+/**
+ * Open agent rename in an in-app dialog. Electron/desktop shells block native browser
+ * prompts, so context-menu rename must not rely on that API.
+ */
 export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActionsOptions) {
   const {
     lang,
@@ -46,9 +62,10 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
     setSessionComposerErrors,
     setAgentCreateWizardOpen,
     renameAgentEmptyMessage,
-    promptRename = (message, defaultValue) => window.prompt(message, defaultValue),
     confirmArchive = (message) => window.confirm(message),
   } = options;
+
+  const [agentRenameDraft, setAgentRenameDraft] = useState<AgentRenameDraft | null>(null);
 
   const handleCreateAgent = useCallback(() => {
     setAgentCreateWizardOpen(true);
@@ -121,14 +138,29 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
       return;
     }
     const currentName = String(agent.displayName || agent.agentCode || agentId).trim();
-    const requestedName = promptRename(
-      lang === "zh" ? "输入新的 Agent 名称" : "Enter a new Agent name",
-      currentName,
-    );
-    if (requestedName === null) {
+    // Defer past Radix menu unmount/focus restore so the dialog can take focus.
+    queueMicrotask(() => {
+      setAgentRenameDraft({
+        agentId,
+        currentName,
+        draftName: currentName,
+      });
+    });
+  }, [renameAgentPending, setAgentContextMenu]);
+
+  const setAgentRenameDraftName = useCallback((draftName: string) => {
+    setAgentRenameDraft((current) => (current ? { ...current, draftName } : current));
+  }, []);
+
+  const cancelAgentRename = useCallback(() => {
+    setAgentRenameDraft(null);
+  }, []);
+
+  const submitAgentRename = useCallback(() => {
+    if (!agentRenameDraft || renameAgentPending) {
       return;
     }
-    const title = requestedName.trim();
+    const title = agentRenameDraft.draftName.trim();
     if (!title) {
       setSessionComposerErrors((current) => ({
         ...current,
@@ -136,17 +168,17 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
       }));
       return;
     }
-    if (title === currentName) {
+    if (title === agentRenameDraft.currentName) {
+      setAgentRenameDraft(null);
       return;
     }
-    renameAgent({ agentId, displayName: title });
+    renameAgent({ agentId: agentRenameDraft.agentId, displayName: title });
+    setAgentRenameDraft(null);
   }, [
-    lang,
-    promptRename,
+    agentRenameDraft,
     renameAgent,
     renameAgentEmptyMessage,
     renameAgentPending,
-    setAgentContextMenu,
     setSessionComposerErrors,
   ]);
 
@@ -179,5 +211,9 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
     handleOpenAgentConfig,
     handleRenameAgent,
     handleArchiveAgent,
+    agentRenameDraft,
+    setAgentRenameDraftName,
+    cancelAgentRename,
+    submitAgentRename,
   };
 }

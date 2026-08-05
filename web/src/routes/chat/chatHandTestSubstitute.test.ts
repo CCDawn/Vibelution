@@ -26,7 +26,7 @@ import {
 } from "./cliAgentRunModel";
 import { resolveSessionStreamShouldConnect } from "./chatSessionStreamConnect";
 
-const routeSource = readFileSync(resolve(import.meta.dirname, "../ChatCodingRoute.tsx"), "utf8");
+const routeSource = readFileSync(resolve(import.meta.dirname, "./ChatCodingRouteWorkbench.tsx"), "utf8");
 const sessionStreamSource = readFileSync(resolve(import.meta.dirname, "useSessionDetailStream.ts"), "utf8");
 const groupStreamSource = readFileSync(resolve(import.meta.dirname, "useGroupRoomStream.ts"), "utf8");
 const cacheDialogSource = readFileSync(resolve(import.meta.dirname, "useChatCacheDetailDialog.ts"), "utf8");

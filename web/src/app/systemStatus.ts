@@ -568,12 +568,8 @@ function buildActiveWorkCandidate(
   const summary = activeWorkSummary(kind, run, runtime, lang);
   const runId = textValue(run.runId);
   const href = activeWorkHref(kind, run);
-  const detailParts = [
-    label,
-    summary,
-    status ? status.replaceAll("_", " ") : "",
-    runId ? `id=${runId}` : "",
-  ].filter(Boolean);
+  // User-facing detail: kind + summary only. Raw status/"id=…" made native title tooltips unreadable.
+  const detailParts = [label, summary].filter(Boolean);
 
   return {
     kind,

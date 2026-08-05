@@ -557,6 +557,18 @@ export function restartRequestUnconfirmedBody(lang: string): string {
     : "重启流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
 }
 
+/** Shorten long session/run ids for the active-work popover (full value stays on title). */
+export function formatActiveWorkRunId(runId: string | null | undefined): string {
+  const value = String(runId ?? "").trim();
+  if (!value) {
+    return "";
+  }
+  if (value.length <= 28) {
+    return value;
+  }
+  return `${value.slice(0, 12)}…${value.slice(-10)}`;
+}
+
 export function restartActiveWorkBlockedMessage(lang: string, activeWorkDetails: string): string {
   const details = activeWorkDetails.trim();
   if (lang === "en") {
@@ -938,7 +950,19 @@ export function AppShell() {
     || String(workbench?.observedState ?? "").toLowerCase() === "open"
     || String(workbench?.lifecycleConsistency ?? "").toLowerCase() !== "consistent";
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
+  // Human-readable only (no raw session ids). Used for shutdown/restart copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
+  const activeWorkChipAriaLabel = activeWorkIndicator
+    ? [
+      t("activeWorkNow"),
+      activeWorkIndicator.label,
+      statusLabel(activeWorkIndicator.status),
+      activeWorkIndicator.count > 1
+        ? `${activeWorkIndicator.count} ${t("activeWorkCountSuffix")}`
+        : "",
+      activeWorkIndicator.items[0]?.summary,
+    ].filter(Boolean).join(" · ")
+    : "";
   const buildId = __VIBELUTION_BUILD_ID__;
   const clearRestartCompletionDismissTimer = useCallback(() => {
     if (restartCompletionDismissTimerRef.current === null) {
@@ -2210,16 +2234,15 @@ export function AppShell() {
                   type="button"
                   variant="secondary"
                   className={styles.activeWorkChip}
-                  title={activeWorkDetailsTitle}
                   aria-haspopup="dialog"
-                  aria-label={`${t("activeWorkNow")}: ${activeWorkIndicator.label} ${statusLabel(activeWorkIndicator.status)}${
-                    activeWorkIndicator.count > 1 ? `, ${activeWorkIndicator.count} ${t("activeWorkCountSuffix")}` : ""
-                  }. ${activeWorkDetailsTitle}`}
+                  aria-label={activeWorkChipAriaLabel}
                 >
                   <span className={`${styles.statusDot} ${styles[`status_${activeWorkIndicator.tone}`]}`} />
                   <span className={styles.activeWorkKicker}>{t("activeWorkNow")}</span>
                   <strong>{activeWorkIndicator.label}</strong>
-                  <span className={styles.activeWorkStatus}>{statusLabel(activeWorkIndicator.status)}</span>
+                  {activeWorkIndicator.tone !== "running" ? (
+                    <span className={styles.activeWorkStatus}>{statusLabel(activeWorkIndicator.status)}</span>
+                  ) : null}
                   <span className={styles.activeWorkInlineDetails} aria-hidden="true">
                     {activeWorkIndicator.items.slice(0, 2).map((item) => (
                       <span key={`${item.kind}-${item.runId || item.status}-inline`} className={styles.activeWorkInlineItem}>
@@ -2245,21 +2268,25 @@ export function AppShell() {
                 </div>
                 <ul className={styles.activeWorkDetailList}>
                   {activeWorkIndicator.items.map((item) => {
+                    const runIdDisplay = formatActiveWorkRunId(item.runId);
+                    const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
                     const detailCopy = (
                       <div className={styles.activeWorkDetailCopy}>
                         <div className={styles.activeWorkDetailTitle}>
                           <strong>{item.label}</strong>
                           <span>{statusLabel(item.status)}</span>
                         </div>
-                        <p>{item.summary}</p>
-                        {item.runId ? <code>{item.runId}</code> : null}
+                        {item.summary ? <p>{item.summary}</p> : null}
+                        {runIdDisplay ? (
+                          <code title={item.runId || undefined}>{runIdDisplay}</code>
+                        ) : null}
                       </div>
                     );
                     return (
                       <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
                         <span className={`${styles.statusDot} ${styles[`status_${item.tone}`]}`} />
                         {item.href ? (
-                          <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={item.detail}>
+                          <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={detailAria}>
                             {detailCopy}
                           </Link>
                         ) : detailCopy}

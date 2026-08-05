@@ -641,6 +641,23 @@ describe("systemStatus", () => {
     expect(deriveActiveWorkIndicator(runtimeWithActiveWork({}))).toBeNull();
   });
 
+  it("keeps active-work detail free of raw status and session id dumps", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        chat_turn: {
+          runId: "session-20260805-102605-207995-20260805132010054846",
+          runKind: "chat_turn",
+          status: "running",
+          userMessage: "为什么不会主动进行获取校验",
+        },
+      }),
+    );
+    expect(indicator?.detail).toBe("对话 · 为什么不会主动进行获取校验");
+    expect(indicator?.detail).not.toContain("id=");
+    expect(indicator?.detail).not.toMatch(/\brunning\b/i);
+    expect(indicator?.runId).toContain("session-20260805");
+  });
+
   it("prioritizes supervised evolution over self-evolution and chat work", () => {
     const indicator = deriveActiveWorkIndicator(
       runtimeWithActiveWork({

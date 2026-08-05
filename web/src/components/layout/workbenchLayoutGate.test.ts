@@ -67,7 +67,7 @@ describe("workbench layout gate (Wave 5)", () => {
 
   it("keeps Chat workbench on shared axis resize session + registry layout id", () => {
     const chatLayout = readFileSync(resolve(webSrc, "routes/chat/useChatWorkbenchLayout.ts"), "utf-8");
-    const chatRoute = readFileSync(resolve(webSrc, "routes/ChatCodingRoute.tsx"), "utf-8");
+    const chatRoute = readFileSync(resolve(webSrc, "routes/chat/ChatCodingRouteWorkbench.tsx"), "utf-8");
     const statusRail = readFileSync(resolve(webSrc, "routes/chat/ChatStatusRail.tsx"), "utf-8");
     const indexRail = readFileSync(resolve(webSrc, "routes/chat/ChatConversationIndexRail.tsx"), "utf-8");
     const sessionTabs = readFileSync(resolve(webSrc, "routes/AgentSessionTabStrip.styles.ts"), "utf-8");
@@ -164,12 +164,27 @@ describe("workbench layout gate (Wave 5)", () => {
   });
 
   it("keeps Teams source-collection list shells on shared height API (Wave 6E)", () => {
-    const heights = readFileSync(resolve(webSrc, "routes/teamSourceCollectionListHeights.ts"), "utf-8");
+    const heights = readFileSync(
+      resolve(webSrc, "routes/teams/source-collection/ui/teamSourceCollectionListHeights.ts"),
+      "utf-8",
+    );
     const shell = readFileSync(resolve(webSrc, "components/layout/PersistedHeightListShell.tsx"), "utf-8");
-    const candidates = readFileSync(resolve(webSrc, "routes/TeamSourceCollectionCandidatePanel.tsx"), "utf-8");
-    const screening = readFileSync(resolve(webSrc, "routes/TeamSourceCollectionScreeningPanel.tsx"), "utf-8");
-    const memory = readFileSync(resolve(webSrc, "routes/TeamSourceCollectionMemoryPanel.tsx"), "utf-8");
-    const graph = readFileSync(resolve(webSrc, "routes/TeamSourceCollectionGraphPanel.tsx"), "utf-8");
+    const candidates = readFileSync(
+      resolve(webSrc, "routes/teams/source-collection/ui/TeamSourceCollectionCandidatePanel.tsx"),
+      "utf-8",
+    );
+    const screening = readFileSync(
+      resolve(webSrc, "routes/teams/source-collection/ui/TeamSourceCollectionScreeningPanel.tsx"),
+      "utf-8",
+    );
+    const memory = readFileSync(
+      resolve(webSrc, "routes/teams/source-collection/ui/TeamSourceCollectionMemoryPanel.tsx"),
+      "utf-8",
+    );
+    const graph = readFileSync(
+      resolve(webSrc, "routes/teams/source-collection/ui/TeamSourceCollectionGraphPanel.tsx"),
+      "utf-8",
+    );
     expect(heights).toContain("WORKBENCH_LAYOUT_IDS.teams");
     expect(heights).toContain("source-collection-candidates");
     expect(heights).toContain("source-collection-screening");
@@ -271,16 +286,26 @@ describe("workbench layout gate (Wave 5)", () => {
   it("keeps Agents/Teams/Memory domain recipe markers (Wave 6B)", () => {
     const agents = readFileSync(resolve(webSrc, "routes/AgentsRoute.tsx"), "utf-8");
     const agentsWorkspace = readFileSync(resolve(webSrc, "routes/AgentWorkspaceLayoutPanel.tsx"), "utf-8");
-    const teams = readFileSync(resolve(webSrc, "routes/TeamsRoute.tsx"), "utf-8");
+    // TeamsRoute.tsx is thin re-export; recipe markers live in workbench/composers.
+    const teamsEntry = readFileSync(resolve(webSrc, "routes/TeamsRoute.tsx"), "utf-8");
+    const teamsWorkbench = readFileSync(resolve(webSrc, "routes/teams/useTeamsWorkbenchModel.tsx"), "utf-8");
+    const teamsCanvasComposer = readFileSync(resolve(webSrc, "routes/teams/TeamsCanvasComposer.tsx"), "utf-8");
     const teamsCanvas = readFileSync(resolve(webSrc, "routes/teams/TeamOrganizationCanvasSurface.tsx"), "utf-8");
     const memory = readFileSync(resolve(webSrc, "routes/MemoryRoute.tsx"), "utf-8");
     expect(agents).toContain('data-vui-recipe="agents-management-workbench"');
     expect(agentsWorkspace).toContain('data-vui-region="agents-directory"');
+    expect(teamsEntry).toMatch(/from\s+["']\.\/teams\/TeamsRouteWorkbench["']/);
     expect(
-      teams.includes('data-vui-recipe="teams-organization-workbench"')
-      || teams.includes('data-vui-domain-recipe="teams-organization-workbench"'),
+      teamsWorkbench.includes('data-vui-recipe="teams-organization-workbench"')
+      || teamsWorkbench.includes('data-vui-domain-recipe="teams-organization-workbench"')
+      || teamsCanvasComposer.includes('domainRecipe="teams-organization-workbench"')
+      || teamsCanvasComposer.includes("domainRecipe={\"teams-organization-workbench\"}"),
     ).toBe(true);
-    expect(teamsCanvas).toContain('data-vui-region="teams-canvas"');
+    expect(
+      teamsCanvas.includes('data-vui-region="teams-canvas"')
+      || teamsCanvasComposer.includes('data-vui-region="teams-canvas"')
+      || teamsWorkbench.includes('data-vui-region="teams-canvas"'),
+    ).toBe(true);
     expect(
       memory.includes('data-vui-domain-recipe="memory-knowledge-workbench"')
       || memory.includes('data-vui-recipe="memory-knowledge-workbench"'),
@@ -325,10 +350,10 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/LogsRoute.styles.ts", key: "packageFilesResizeHandle" },
       { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "diagnosticsBodyResizeHandle" },
       { file: "routes/MemoryProjectMemoryQueuePanel.styles.ts", key: "projectMemoryQueueResizeHandle" },
-      { file: "routes/TeamSourceCollectionCandidatePanel.styles.ts", key: "sourceCollectionListResizeHandle" },
-      { file: "routes/TeamSourceCollectionScreeningPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
-      { file: "routes/TeamSourceCollectionMemoryPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
-      { file: "routes/TeamSourceCollectionGraphPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
+      { file: "routes/teams/source-collection/ui/TeamSourceCollectionCandidatePanel.styles.ts", key: "sourceCollectionListResizeHandle" },
+      { file: "routes/teams/source-collection/ui/TeamSourceCollectionScreeningPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
+      { file: "routes/teams/source-collection/ui/TeamSourceCollectionMemoryPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
+      { file: "routes/teams/source-collection/ui/TeamSourceCollectionGraphPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
       { file: "routes/MemoryItemListPanel.styles.ts", key: "compactMemoryListResizeHandle" },
       { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "guardianTableResizeHandle" },
       { file: "routes/LauncherDeveloperModePanel.styles.ts", key: "cleanupConsoleResizeHandle" },

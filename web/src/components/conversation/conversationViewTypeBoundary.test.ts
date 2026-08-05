@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import chatCodingRouteSource from "../../routes/ChatCodingRoute.tsx?raw";
+import chatCodingRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import conversationStreamingMetricsSource from "./conversationStreamingMetrics.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationViewTypesSource from "./conversationViewTypes.ts?raw";

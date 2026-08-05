@@ -23,13 +23,21 @@ const styles: Record<string, string> = {
   cacheDetailBoundaryUnknown:
     "vui-routes-chatcodingroute cacheDetailBoundaryUnknown block h-full min-w-0 bg-[color-mix(in_srgb,var(--fg-tertiary)_55%,transparent)] w-[var(--cache-boundary-unknown-width)]",
   cacheDetailCalibrationNote: `vui-routes-chatcodingroute cacheDetailCalibrationNote min-w-0 ${vuiGlassPanelClass} !grid gap-1 p-2.5 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)] [&_strong]:text-[var(--fg-primary)] [&_em]:text-[var(--fg-tertiary)] [&_em]:not-italic`,
+  cacheDetailTooltipSurface:
+    "vui-routes-chatcodingroute cacheDetailTooltipSurface !px-2.5 !py-2 text-left",
+  cacheDetailTooltip:
+    "vui-routes-chatcodingroute cacheDetailTooltip grid min-w-0 max-w-[15rem] gap-1 text-left",
+  cacheDetailTooltipLine:
+    "vui-routes-chatcodingroute cacheDetailTooltipLine min-w-0 break-words text-[11px] font-medium leading-snug text-vui-fg-primary tabular-nums",
   cacheDetailCloseButton: `vui-routes-chatcodingroute cacheDetailCloseButton min-w-0 ${vuiGlassPanelClass} p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55`,
   // Dialog shell on VDialog content: viewport max-h (see components/layout/dialogHeightPolicy.ts).
   cacheDetailDialog: `vui-routes-chatcodingroute cacheDetailDialog min-w-0 w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]`,
   cacheDetailDonutCenter:
     "vui-routes-chatcodingroute cacheDetailDonutCenter pointer-events-none absolute inset-0 m-auto grid size-[min(96px,38%)] min-w-0 place-self-center place-items-center rounded-full border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,transparent)] p-2 text-center shadow-[var(--vui-shadow-hairline)] [&_strong]:[font-size:var(--vui-font-lg)] [&_strong]:font-semibold [&_strong]:text-[var(--fg-primary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
   cacheDetailDonutLegend:
-    "vui-routes-chatcodingroute cacheDetailDonutLegend min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-tertiary)] [&_b]:mr-1 [&_b]:font-semibold [&_b]:text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute cacheDetailDonutLegend min-w-0 grid w-full max-w-[240px] gap-1 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-tertiary)] [&_b]:mr-1 [&_b]:font-semibold [&_b]:text-[var(--fg-secondary)]",
+  cacheDetailDonutLegendHint:
+    "vui-routes-chatcodingroute cacheDetailDonutLegendHint min-w-0 text-[var(--fg-tertiary)] opacity-90",
   cacheDetailDonutPanel:
     "vui-routes-chatcodingroute cacheDetailDonutPanel min-w-0 grid justify-items-center gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3 md:sticky md:top-0",
   cacheDetailDonutShell:
@@ -64,15 +72,16 @@ const styles: Record<string, string> = {
   cacheDonutCenter:
     "vui-routes-chatcodingroute cacheDonutCenter min-w-0",
   cacheDonutInnerSegment:
-    "vui-routes-chatcodingroute cacheDonutInnerSegment min-w-0 [stroke-width:7px]",
+    "vui-routes-chatcodingroute cacheDonutInnerSegment min-w-0 [stroke-width:7px] [stroke-linecap:round]",
   cacheDonutInnerTrack:
     "vui-routes-chatcodingroute cacheDonutInnerTrack min-w-0 [stroke-width:7px]",
+  // Composition pie: butt caps avoid the "dashed broken ring" look of many round-capped slices.
   cacheDonutOuterSegment:
-    "vui-routes-chatcodingroute cacheDonutOuterSegment min-w-0 [stroke-width:8px]",
+    "vui-routes-chatcodingroute cacheDonutOuterSegment min-w-0 [stroke-width:8px] [stroke-linecap:butt]",
   cacheDonutOuterTrack:
     "vui-routes-chatcodingroute cacheDonutOuterTrack min-w-0 [stroke-width:8px]",
   cacheDonutSegment:
-    "vui-routes-chatcodingroute cacheDonutSegment min-w-0 fill-none stroke-[currentColor] [stroke-linecap:round] [stroke-linejoin:round] [vector-effect:non-scaling-stroke] opacity-90",
+    "vui-routes-chatcodingroute cacheDonutSegment min-w-0 fill-none stroke-[currentColor] [stroke-linejoin:round] [vector-effect:non-scaling-stroke] opacity-90",
   cacheDonutSegmentAgent:
     `vui-routes-chatcodingroute cacheDonutSegmentAgent min-w-0 ${vuiStateCoolInfoClass} stroke-[currentColor]`,
   cacheDonutSegmentAttachments:

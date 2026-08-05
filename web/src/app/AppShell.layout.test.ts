@@ -456,9 +456,13 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('data-vui="active-work-popover"');
     expect(shellSource).not.toContain("className={styles.activeWorkSummary}");
     expect(shellSource).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
+    // Native title dumps raw session ids; details live in the popover + aria-label.
+    expect(shellSource).not.toContain("title={activeWorkDetailsTitle}");
+    expect(shellSource).toContain("formatActiveWorkRunId");
+    expect(shellSource).toContain("activeWorkChipAriaLabel");
 
     expect(styles.activeWorkDetailPanel).toBeTypeOf("string");
-    expect(styles.activeWorkPopoverContent).toContain("w-[min(480px");
+    expect(styles.activeWorkPopoverContent).toContain("w-[min(420px");
     expect(styles.activeWorkChip).toContain("h-8");
     expect(styles.activeWorkChip).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
     expect(styles.activeWorkDetailPanel).not.toContain("absolute");

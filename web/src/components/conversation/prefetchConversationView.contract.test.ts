@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import lazySource from "./LazyConversationView.tsx?raw";
 import prefetchSource from "./prefetchConversationView.ts?raw";
-import routeSource from "../../routes/ChatCodingRoute.tsx?raw";
+import routeSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import workspaceSource from "../../routes/chat/ChatSessionWorkspacePanel.tsx?raw";
 
 describe("conversation view load contract (T1/T2)", () => {

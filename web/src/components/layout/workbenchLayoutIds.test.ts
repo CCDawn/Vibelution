@@ -31,9 +31,9 @@ describe("workbenchLayoutIds", () => {
       { file: "routes/PromptTemplatesRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.promptTemplates" },
       { file: "routes/KernelTaskCenterRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.kernelTaskCenter" },
       { file: "routes/LauncherRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.launcher" },
-      { file: "routes/TeamsRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.teams" },
-      { file: "routes/TeamSourceCollectionStandaloneStagePanel.tsx", token: "WORKBENCH_LAYOUT_IDS.teamsSourceCollection" },
-      { file: "routes/TeamSourceCollectionActiveStagePanel.tsx", token: "WORKBENCH_LAYOUT_IDS.teamsSourceCollectionStage" },
+      { file: "routes/teams/teamsWorkbenchChrome.ts", token: "WORKBENCH_LAYOUT_IDS.teams" },
+      { file: "routes/teams/source-collection/ui/TeamSourceCollectionStandaloneStagePanel.tsx", token: "WORKBENCH_LAYOUT_IDS.teamsSourceCollection" },
+      { file: "routes/teams/source-collection/ui/TeamSourceCollectionActiveStagePanel.tsx", token: "WORKBENCH_LAYOUT_IDS.teamsSourceCollectionStage" },
       { file: "routes/MemoryRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.memory" },
       { file: "routes/LogsRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.logs" },
       { file: "routes/ToolsRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.tools" },
@@ -41,7 +41,7 @@ describe("workbenchLayoutIds", () => {
       { file: "routes/SupervisedReviewRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.supervisedReview" },
       { file: "routes/EvolutionRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.evolution" },
       { file: "routes/SelfEvolutionTrack.tsx", token: "WORKBENCH_LAYOUT_IDS.evolutionSelf" },
-      { file: "routes/ChatCodingRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.chat" },
+      { file: "routes/chat/ChatCodingRouteWorkbench.tsx", token: "WORKBENCH_LAYOUT_IDS.chat" },
       { file: "routes/RuntimeScenesPane.tsx", token: "WORKBENCH_LAYOUT_IDS.logsRuntimeScenes" },
     ];
 
