@@ -31,14 +31,28 @@ function resolveDonutTone(key: string): string {
 }
 
 describe("CacheDetailDialog donut layout contract", () => {
-  it("labels the dialog from visible title and description text", () => {
-    expect(cacheDetailDialogSource).toContain("useId");
-    expect(cacheDetailDialogSource).toContain("aria-labelledby={titleId}");
-    expect(cacheDetailDialogSource).toContain("aria-describedby={descriptionId}");
-    expect(cacheDetailDialogSource).not.toContain("aria-label={cacheDetailDialogTitle}");
-    expect(cacheDetailDialogSource).toContain("<h3 id={titleId}>{cacheDetailDialogTitle}</h3>");
-    expect(cacheDetailDialogSource).toContain("<p id={descriptionId}>{previousCacheHitLabel}</p>");
-    expect(cacheDetailDialogSource).toContain("<X size={16} aria-hidden=\"true\" />");
+  it("uses VDialog with title and description props", () => {
+    expect(cacheDetailDialogSource).toContain("<VDialog");
+    expect(cacheDetailDialogSource).toContain("title={cacheDetailDialogTitle}");
+    expect(cacheDetailDialogSource).toContain("description={previousCacheHitLabel}");
+  });
+
+  it("keeps segment rows flat without glass nesting on atomic chrome", () => {
+    expect(cacheDetailStyles.cacheDetailBody).toContain("md:grid-cols-[");
+    expect(cacheDetailStyles.cacheDetailSegmentRow).toContain("grid-cols-[");
+    expect(cacheDetailStyles.cacheDetailSegmentRow).not.toContain("vuiGlassPanelClass");
+    expect(cacheDetailStyles.cacheDetailBoundaryTrack).toContain("flex");
+    expect(cacheDetailStyles.cacheDetailBoundaryTrack).toContain("h-2");
+    expect(cacheDetailStyles.cacheDetailBoundaryTrack).not.toMatch(/vuiGlass|p-2/);
+    expect(cacheDetailStyles.cacheDetailBoundaryHit).toContain("w-[var(--cache-boundary-hit-width)]");
+    expect(cacheDetailStyles.cacheDetailBoundaryHit).not.toMatch(/vuiGlass|p-2/);
+    expect(cacheDetailStyles.cacheDetailSegmentMeta).toContain("flex");
+    expect(cacheDetailStyles.cacheDetailSegmentMeta).toContain("gap-1");
+    expect(cacheDetailStyles.cacheDetailSegmentMeta).not.toMatch(/vuiGlass|p-2\b/);
+    expect(cacheDetailStyles.cacheDetailSwatch).toContain("size-2.5");
+    expect(cacheDetailStyles.cacheDetailSwatch).not.toMatch(/vuiGlass|p-2\b/);
+    expect(cacheDetailDialogSource).toContain("cacheDetailSegmentStats");
+    expect(cacheDetailDialogSource).toContain('lang === "zh" ? "真实" : "obs"');
   });
 
   it("renders donut circles as stroke-only SVG rings", () => {
