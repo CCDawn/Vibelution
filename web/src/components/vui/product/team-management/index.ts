@@ -7,6 +7,7 @@ export {
 export {
   TeamStageCommandBar,
   type TeamStageCommandBarProps,
+  type TeamStageCommandStep,
   type TeamStageStat,
 } from "./TeamStageCommandBar";
 export {

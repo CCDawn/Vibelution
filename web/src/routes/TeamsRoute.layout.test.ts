@@ -2013,10 +2013,13 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("<TeamStagePipeline");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("<TeamStageCard");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("TeamSourceCollectionStageActionIcon");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain("steps={commandSteps}");
     expect(routeSource).toContain("sourceCollectionConsoleStatusText");
     expect(sourceCollectionControllerSource).toContain("sourceCollectionConsoleStatusText");
     expect(sourceCollectionControllerSource).toContain("sourceCollectionBoardNextStepLabel");
     expect(sourceCollectionControllerSource).toContain("sourceCollectionCollectedCountLabel");
+    expect(sourceCollectionControllerSource).toContain('key: "progress"');
+    expect(sourceCollectionControllerSource).toContain("emphasis: \"accent\"");
     expect(sourceCollectionControllerSource).not.toContain("sourceCollectionSearchOpenAssignmentCountLabel");
     expect(sourceCollectionControllerSource).not.toContain("sourceCollectionDownstreamOpenAssignmentCountLabel");
     expect(sourceCollectionControllerSource).not.toContain("sourceCollectionQueryCountLabel");
@@ -3631,8 +3634,14 @@ describe("TeamsRoute layout contract", () => {
     // R2-o: phase close gate ownership moved into summary projection pure helper.
     expect(deriveSourceCollectionSummaryProjectionSource).toContain("sourceCollectionPhaseCloseGateForRun(");
     expect(useSourceCollectionPresentationSource).toContain("sourceCollectionPhaseCloseGate");
-    expect(sourceCollectionControllerSource).toContain("TeamSourceCollectionPhaseCloseGatePanel");
-    expect(sourceCollectionControllerSource).toContain("onOpenStage={chrome.selectSourceCollectionStage}");
+    // Progress unified into top command bar (not left-rail PhaseCloseGate stack).
+    expect(sourceCollectionControllerSource).toContain('progressPlacement="command-bar"');
+    expect(sourceCollectionControllerSource).toContain("sourceCollectionPhaseCloseGateNextStage");
+    expect(sourceCollectionControllerSource).toContain("phaseCloseGate={null}");
+    expect(sourceCollectionControllerSource).toContain("chrome.selectSourceCollectionStage");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain('progressPlacement = "command-bar"');
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain("commandSteps");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain('data-progress-placement={progressPlacement}');
     expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSearchBriefPanel")');
     expect(routeSource).toContain("function renderSourceCollectionSearchBrief(");
     expect(routeSource).toContain("createSourceCollectionController");

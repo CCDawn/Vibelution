@@ -11,7 +11,10 @@ import {
   preflightSourceCollectionStageAdvance,
   sourceCollectionStageAdvanceFailureTitle,
 } from "./stageAdvancePreflight";
-import type { SourceCollectionStageModuleId } from "./stageProjection";
+import {
+  sourceCollectionPhaseCloseGateNextStage,
+  type SourceCollectionStageModuleId,
+} from "./stageProjection";
 import type { ResearchStageRoundStartPayload } from "../workflowStartMutationModel";
 import type { ResearchWorkspaceView } from "../researchWorkspaceModel";
 import type { ResearchStageUnlock } from "../researchPrimaryActionModel";
@@ -20,7 +23,6 @@ import {
   splitDraftList,
 } from "./presentationModel";
 import { sourceCollectionRunTitleLabel } from "./runModel";
-import { TeamSourceCollectionPhaseCloseGatePanel } from "./ui/TeamSourceCollectionPhaseCloseGatePanel";
 
 export type SourceCollectionControllerContext = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -273,28 +275,58 @@ export function createSourceCollectionController(ctx: SourceCollectionController
               ? `${chrome.sourceCollectionSelectedRunQueryCount || compactSourceCollectionQuerySeeds(sourceCollectionDraft.topic, sourceCollectionDraft.querySeeds).length} 个搜索问题 · ${splitDraftList(sourceCollectionDraft.searchLanguages, 8).length || 1} 种语言 · ${splitDraftList(sourceCollectionDraft.sourceTypes, 12).length || 1} 类来源`
               : `${chrome.sourceCollectionSelectedRunQueryCount || compactSourceCollectionQuerySeeds(sourceCollectionDraft.topic, sourceCollectionDraft.querySeeds).length} queries · ${splitDraftList(sourceCollectionDraft.searchLanguages, 8).length || 1} languages · ${splitDraftList(sourceCollectionDraft.sourceTypes, 12).length || 1} source types`
           }
-          commandStats={[
-            { key: "status", label: lang === "zh" ? "当前" : "status", value: chrome.sourceCollectionConsoleStatusText },
-            { key: "next", label: lang === "zh" ? "下一步" : "next", value: chrome.sourceCollectionBoardNextStepLabel },
-            { key: "sources", label: lang === "zh" ? "资料" : "sources", value: chrome.sourceCollectionCollectedCountLabel },
-          ]}
+          commandStats={(() => {
+            const gate = chrome.sourceCollectionPhaseCloseGate;
+            const stageCount = typeof gate?.stageCount === "number" && gate.stageCount > 0
+              ? gate.stageCount
+              : (gate?.stages?.length || 4);
+            const closedLoopCount = typeof gate?.closedLoopCount === "number" ? gate.closedLoopCount : 0;
+            const nextStageId = sourceCollectionPhaseCloseGateNextStage(gate);
+            const selectedModule = (chrome.sourceCollectionStandaloneStageModules || []).find(
+              (module: { selected?: boolean }) => module.selected,
+            );
+            const goNext = () => {
+              if (selectedModule && !selectedModule.actionDisabled && typeof selectedModule.onAction === "function") {
+                selectedModule.onAction();
+                return;
+              }
+              if (nextStageId) {
+                chrome.selectSourceCollectionStage(nextStageId);
+              }
+            };
+            return [
+              {
+                key: "status",
+                label: lang === "zh" ? "当前" : "status",
+                value: chrome.sourceCollectionConsoleStatusText,
+              },
+              {
+                key: "progress",
+                label: lang === "zh" ? "进度" : "progress",
+                value: gate ? `${closedLoopCount}/${stageCount}` : `0/${stageCount}`,
+                title: lang === "zh" ? "阶段闭环进度" : "Stage close progress",
+              },
+              {
+                key: "next",
+                label: lang === "zh" ? "下一步" : "next",
+                value: chrome.sourceCollectionBoardNextStepLabel,
+                emphasis: "accent" as const,
+                title: lang === "zh" ? "点击进入下一步" : "Open next step",
+                onClick: goNext,
+              },
+              {
+                key: "sources",
+                label: lang === "zh" ? "资料" : "sources",
+                value: chrome.sourceCollectionCollectedCountLabel,
+              },
+            ];
+          })()}
           searchBrief={inject.renderSourceCollectionSearchBrief()}
           runSwitcher={inject.renderSourceCollectionRunSwitcher()}
           runHistoryLabel={lang === "zh" ? "切换历史批次" : "Switch historical run"}
-          phaseCloseGate={(
-            <TeamSourceCollectionPhaseCloseGatePanel
-              lang={lang}
-              selectedRunId={selectedSourceCollectionRunEffectiveId}
-              gate={chrome.sourceCollectionPhaseCloseGate}
-              loading={Boolean(
-                selectedSourceCollectionRunEffectiveId
-                && chrome.sourceCollectionSummaryQuery.isPending
-                && !chrome.sourceCollectionSummaryQuery.data,
-              )}
-              compact
-              onOpenStage={chrome.selectSourceCollectionStage}
-            />
-          )}
+          // Progress is unified into the top command bar (steps + stats); do not re-render left rail.
+          phaseCloseGate={null}
+          progressPlacement="command-bar"
           modules={chrome.sourceCollectionStandaloneStageModules}
           activePanel={inject.renderSourceCollectionActiveStagePanel()}
           compactActivePanel={chrome.sourceCollectionFindingStageCompact}
