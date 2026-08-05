@@ -80,6 +80,7 @@
 - `ConversationView` 主路径：`turnItems → codexTranscript.cells → package_cells 单轨渲染`。response 区块与 timeline 答案行仅 `legacy` 模式使用。
 - `timelineItems` 在 package 模式下剥离 `assistant_text`，只保留过程行（若 cells 未覆盖 process）。
 - `chatActiveTurnLayer` 是 in-flight bridge；`session_detail` settle 同一 `turnId` 且已 committed final 后必须清理。同 turn 的 live overlay 在 projection 中并入 active-turn / committed，不双行绘制。
+- **会话切换 keep-alive / scroll memory**：`chatSessionPaintCache` sticky last-good + keep-alive ring；`conversationSessionScrollMemory` 在 remount 后恢复 mid-history 视口（跟 tail 时仍 pin 底部）。删除会话时 paint 与 scroll 记忆一并 forget。
 - **Legacy 冻结策略（故意保留）**：
   1. 无 `turnItems` 的旧会话仍走 **content / timeline**——这是兼容路径，不是遗漏删除。
   2. 新/正常 settle 的 detail、window 与 live overlay 必须带 `turnItems`（后端 fallback：content→`final_answer`）。

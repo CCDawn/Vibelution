@@ -552,11 +552,12 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps browser unload guards from stopping the workbench backend", () => {
-    const beforeUnloadBody = shellSource.match(/function handleBeforeUnload\(event: BeforeUnloadEvent\) \{[\s\S]*?\n    \}/)?.[0] ?? "";
+    const beforeUnloadBody = shellSource.match(/useStableBeforeUnload\(\(event\) => \{[\s\S]*?\n  \}\);/)?.[0] ?? "";
 
     expect(beforeUnloadBody).toContain("applyBeforeUnloadProjectCloseGuard(event, guard.workbenchCloseGuardMessage)");
     expect(beforeUnloadBody).toContain("consumeNextWorkbenchWindowUnloadAllowance");
     expect(beforeUnloadBody).toContain("projectCloseGuardRef");
+    expect(shellSource).toContain("useStableBeforeUnload");
     expect(beforeUnloadBody).not.toContain("markControlledProjectLifecycleOperation(\"stop\")");
     expect(beforeUnloadBody).not.toContain("beginShutdown");
   });
@@ -571,9 +572,9 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("allowNextWorkbenchWindowUnload");
     expect(shellSource).toContain("window.location.reload()");
     expect(shellSource).not.toContain("window.setTimeout(() => window.location.reload(), 0)");
-    // Stable beforeunload: empty deps + ref, not re-armed on every polled state tick.
+    // Stable beforeunload: shared hook + ref decision, not re-armed on every polled state tick.
     expect(shellSource).toContain("projectCloseGuardRef");
-    expect(shellSource).toMatch(/addEventListener\("beforeunload"[\s\S]*?\},\s*\[\]\)/);
+    expect(shellSource).toContain("useStableBeforeUnload");
     expect(shellSource).toContain("lifecycleMenuCluster");
     expect(shellSource).toContain("lifecycleMenuPanel");
     expect(shellSource).toContain("lifecycleMenuOpen");

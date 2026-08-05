@@ -5,6 +5,7 @@
  */
 import { CheckCircle2, Eye, Link2, Play, RefreshCw, Settings2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
 
 import { getChallengeQuestionRunDetail } from "../api/challengeQuestionRuns";
@@ -14,11 +15,7 @@ import type {
   ResearchProjectAgentTaskKind,
 } from "../api/types";
 import { VNativeButton, VNativeInput, VStringSelect } from "../components/vui";
-import {
-  ChallengeCupOperationsWorkspace,
-  type ChallengeCupWorkspaceAgent,
-} from "./teams/challenge-cup/ChallengeCupOperationsWorkspace";
-import { ChallengeQuestionDetailPanel } from "./teams/challenge-cup/ChallengeQuestionDetailPanel";
+import type { ChallengeCupWorkspaceAgent } from "./teams/challenge-cup/ChallengeCupOperationsWorkspace";
 import {
   researchIterationLifecycleStatusLabel,
   researchKnowledgeLifecycleStatusLabel,
@@ -54,6 +51,18 @@ import {
 } from "./teams/researchStageLauncherProps";
 import researchStyles from "./TeamsRoute.research.styles";
 import shellStyles from "./TeamsRoute.styles";
+
+/** Keep challenge-cup ops out of the eager TeamsRoute graph (~50KB source). */
+const ChallengeCupOperationsWorkspace = lazy(() =>
+  import("./teams/challenge-cup/ChallengeCupOperationsWorkspace").then((module) => ({
+    default: module.ChallengeCupOperationsWorkspace,
+  })),
+);
+const ChallengeQuestionDetailPanel = lazy(() =>
+  import("./teams/challenge-cup/ChallengeQuestionDetailPanel").then((module) => ({
+    default: module.ChallengeQuestionDetailPanel,
+  })),
+);
 
 const styles = { ...shellStyles, ...researchStyles } as Record<string, string>;
 
@@ -175,19 +184,21 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
       const challengeTeamId = workflowTeamId;
       if (selectedChallengeQuestionId) {
         return (
-          <ChallengeQuestionDetailPanel
-            requestedQuestionId={selectedChallengeQuestionId}
-            detail={challengeQuestionDetailQuery.data}
-            isLoading={challengeQuestionDetailQuery.isPending}
-            errorMessage={
-              challengeQuestionDetailQuery.error instanceof Error
-                ? challengeQuestionDetailQuery.error.message
-                : challengeQuestionDetailQuery.isError
-                  ? "challenge_question_run_unavailable"
-                  : ""
-            }
-            onClose={() => navigate(teamWorkspaceRoute(challengeTeamId))}
-          />
+          <Suspense fallback={<div className={styles.panel} aria-busy="true">Loading…</div>}>
+            <ChallengeQuestionDetailPanel
+              requestedQuestionId={selectedChallengeQuestionId}
+              detail={challengeQuestionDetailQuery.data}
+              isLoading={challengeQuestionDetailQuery.isPending}
+              errorMessage={
+                challengeQuestionDetailQuery.error instanceof Error
+                  ? challengeQuestionDetailQuery.error.message
+                  : challengeQuestionDetailQuery.isError
+                    ? "challenge_question_run_unavailable"
+                    : ""
+              }
+              onClose={() => navigate(teamWorkspaceRoute(challengeTeamId))}
+            />
+          </Suspense>
         );
       }
       const challengeAgents: ChallengeCupWorkspaceAgent[] = selectedTeamMemoryMembers.map((member) => {
@@ -214,6 +225,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         };
       });
       return (
+        <Suspense fallback={<div className={styles.panel} aria-busy="true">Loading challenge workspace…</div>}>
         <ChallengeCupOperationsWorkspace
           projection={challengeProjection}
           agents={challengeAgents}
@@ -260,6 +272,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
           isRefreshing={experimentPlanningStatusQuery.isFetching}
           onRefresh={() => void experimentPlanningStatusQuery.refetch()}
         />
+        </Suspense>
       );
     }
     const stageCardsReadOnly = presentationMode === "overview";

@@ -31,10 +31,53 @@ const CONTROLLED_LIFECYCLE_WINDOW_MS = 120_000;
  * Also: the beforeunload *listener* must stay mounted (ref-backed decision), not
  * re-bound every poll — otherwise Edge shows "重新加载应用?" then tears the
  * listener down mid-dialog and the prompt flashes away before the user can click.
+ *
+ * sessionStorage mirrors the in-memory flag so a late module re-eval or a second
+ * listener still sees the one-shot pass within the expire window.
  */
 let allowNextWorkbenchUnload = false;
 let allowNextWorkbenchUnloadToken = 0;
 const ALLOW_NEXT_UNLOAD_EXPIRE_MS = 5_000;
+const ALLOW_NEXT_UNLOAD_STORAGE_KEY = "vibelution.allow_next_window_unload";
+
+function writeAllowNextUnloadStorage(armedAtMs: number) {
+  try {
+    if (typeof sessionStorage === "undefined") {
+      return;
+    }
+    sessionStorage.setItem(ALLOW_NEXT_UNLOAD_STORAGE_KEY, String(Math.max(0, Math.round(armedAtMs))));
+  } catch {
+    // Private mode / blocked storage — memory flag still works in the same document.
+  }
+}
+
+function clearAllowNextUnloadStorage() {
+  try {
+    if (typeof sessionStorage === "undefined") {
+      return;
+    }
+    sessionStorage.removeItem(ALLOW_NEXT_UNLOAD_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function readAllowNextUnloadStorageActive(nowMs = Date.now()) {
+  try {
+    if (typeof sessionStorage === "undefined") {
+      return false;
+    }
+    const raw = sessionStorage.getItem(ALLOW_NEXT_UNLOAD_STORAGE_KEY);
+    const armedAt = Number(raw);
+    return Number.isFinite(armedAt) && armedAt > 0 && nowMs >= armedAt && nowMs - armedAt <= ALLOW_NEXT_UNLOAD_EXPIRE_MS;
+  } catch {
+    return false;
+  }
+}
+
+function isUnloadAllowanceActive(nowMs = Date.now()) {
+  return allowNextWorkbenchUnload || readAllowNextUnloadStorageActive(nowMs);
+}
 const OPEN_PROJECT_STATES = new Set(["ready", "open", "partial", "starting", "running", "restarting", "opening"]);
 const OPEN_PHASE_TOKENS = ["start", "open", "restart", "queue", "processing"];
 const RUNTIME_COMPONENT_STATES = new Set([
@@ -133,7 +176,7 @@ export function shouldBlockProjectWindowClose(
 export function shouldBlockWorkbenchWindowClose(options: WorkbenchCloseGuardOptions) {
   if (
     options.frontendRefreshRequested
-      || allowNextWorkbenchUnload
+      || isUnloadAllowanceActive()
       || options.shutdownRequested
       || options.restartRequested
       || options.controlledLifecycleOperationInFlight
@@ -147,10 +190,13 @@ export function shouldBlockWorkbenchWindowClose(options: WorkbenchCloseGuardOpti
 export function allowNextWorkbenchWindowUnload() {
   allowNextWorkbenchUnload = true;
   const token = ++allowNextWorkbenchUnloadToken;
+  const armedAtMs = Date.now();
+  writeAllowNextUnloadStorage(armedAtMs);
   if (typeof globalThis.setTimeout === "function") {
     globalThis.setTimeout(() => {
       if (token === allowNextWorkbenchUnloadToken) {
         allowNextWorkbenchUnload = false;
+        clearAllowNextUnloadStorage();
       }
     }, ALLOW_NEXT_UNLOAD_EXPIRE_MS);
   }
@@ -158,7 +204,7 @@ export function allowNextWorkbenchWindowUnload() {
 
 /** True if a one-shot unload pass is armed (does not consume). */
 export function isNextWorkbenchWindowUnloadAllowed() {
-  return allowNextWorkbenchUnload;
+  return isUnloadAllowanceActive();
 }
 
 /**
@@ -166,11 +212,12 @@ export function isNextWorkbenchWindowUnloadAllowed() {
  * Returns true when this unload should proceed without the project-close prompt.
  */
 export function consumeNextWorkbenchWindowUnloadAllowance() {
-  if (!allowNextWorkbenchUnload) {
+  if (!isUnloadAllowanceActive()) {
     return false;
   }
   allowNextWorkbenchUnload = false;
   allowNextWorkbenchUnloadToken += 1;
+  clearAllowNextUnloadStorage();
   return true;
 }
 
@@ -178,6 +225,7 @@ export function consumeNextWorkbenchWindowUnloadAllowance() {
 export function clearNextWorkbenchWindowUnloadAllowance() {
   allowNextWorkbenchUnload = false;
   allowNextWorkbenchUnloadToken += 1;
+  clearAllowNextUnloadStorage();
 }
 
 export function isElectronDesktopShell(globalLike: DesktopShellLike = globalThis as DesktopShellLike) {

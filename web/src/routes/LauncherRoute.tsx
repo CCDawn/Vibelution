@@ -2,7 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, LoaderCircle, Play, Power, RefreshCw, Square } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import {
   getLauncherStatus,
@@ -45,6 +45,7 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockProjectWindowClose,
 } from "../app/projectCloseGuard";
+import { useStableBeforeUnload } from "../app/useStableBeforeUnload";
 import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
@@ -2057,32 +2058,39 @@ export function LauncherRoute() {
     setNotice({ tone: "neutral", text: "" });
   }, [shouldClearStaleLifecycleNotice]);
 
-  useEffect(() => {
-    if (!launcherCloseGuardArmed) {
+  // Decision via ref; listener stays mounted (status poll must not re-bind beforeunload).
+  const launcherCloseGuardRef = useRef({
+    armed: launcherCloseGuardArmed,
+    message: launcherCloseGuardMessage,
+    status,
+  });
+  launcherCloseGuardRef.current = {
+    armed: launcherCloseGuardArmed,
+    message: launcherCloseGuardMessage,
+    status,
+  };
+
+  useStableBeforeUnload((event) => {
+    const guard = launcherCloseGuardRef.current;
+    if (!guard.armed) {
       return;
     }
-
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      const telemetry = buildProjectWindowCloseBlockedTelemetry({
-        surface: "launcher",
-        status,
-      });
-      postBrowserTelemetry(
-        {
-          ...telemetry,
-          fields: {
-            ...collectBrowserPageSnapshot(),
-            ...(telemetry.fields ?? {}),
-          },
+    const telemetry = buildProjectWindowCloseBlockedTelemetry({
+      surface: "launcher",
+      status: guard.status,
+    });
+    postBrowserTelemetry(
+      {
+        ...telemetry,
+        fields: {
+          ...collectBrowserPageSnapshot(),
+          ...(telemetry.fields ?? {}),
         },
-        { preferBeacon: true },
-      );
-      applyBeforeUnloadProjectCloseGuard(event, launcherCloseGuardMessage);
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [launcherCloseGuardArmed, launcherCloseGuardMessage, status]);
+      },
+      { preferBeacon: true },
+    );
+    applyBeforeUnloadProjectCloseGuard(event, guard.message);
+  });
 
   return (
     <VDenseOpsPage

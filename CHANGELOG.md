@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.1.0 - 2026-08-06
+
+Public baseline after the post-1.0.16 workbench stretch. Version number and this note catch up to code that already shipped on `main`.
+
+### Product surfaces
+
+- Teams research home: flow strip + organization canvas as the default workspace (stage board for stage work).
+- Chat: harder turn/projection paint path, SessionTurnItem as the UI projection source, companion rail i18n, create-session optimistic shell fixes.
+- Shell: status chips alignment; browser close/refresh guard uses a stable `beforeunload` bind (workbench + launcher) plus a one-shot unload pass (memory + sessionStorage) so intentional refresh does not flash a dead dialog.
+- Source-collection / experiment stage chrome: command-bar step chips, search brief layout, stage advance gates.
+- VUI: shadcn-aligned primitives (dialog, popover, dropdown, tabs, selects) rolled across shell, chat, config, and teams.
+
+### Engineering
+
+- Large-route extracts: ChatCoding workbench, Teams spines / SC stage modules, Config and Evolution workbench slices, conversation session scroll memory module.
+- LLM: native wires, Anthropic prompt-cache alignment, agent-kernel related wiring on main.
+- Docs: living vs archive authority; open-source packaging (MIT, CONTRIBUTING, SECURITY, issue/PR templates); README rewritten in plain product language.
+
+### Notes
+
+- Still a local-first workbench: operator config stays outside the git tree.
+- GitHub Actions CI remains manual (`workflow_dispatch`) to limit minutes; local hooks / quality gate remain the default gate.
+
 ## 1.0.16 - 2026-06-12
 
 - Added a Challenge Cup source-collection search execution API that runs metadata-only query batches from existing assignments.

@@ -211,6 +211,11 @@ import {
   shouldStickTimelineToBottomOnContentResize,
 } from "./conversationTimelineFollowState";
 import {
+  peekSessionTimelineScroll,
+  rememberSessionTimelineScroll,
+  restoreSessionTimelineScroll,
+} from "./conversationSessionScrollMemory";
+import {
   extractComposerImageDropFiles,
   extractComposerSessionReferenceDrop,
   hasComposerImageDragPayload,
@@ -1209,6 +1214,29 @@ export function ConversationView({
     if (initializedSessionRef.current !== sessionId) {
       initializedSessionRef.current = sessionId;
       pinnedLatestUserMessageIdRef.current = latestUserMessageId;
+      // Codex resume: restore mid-history viewport when revisiting a thread.
+      const saved = peekSessionTimelineScroll(sessionId);
+      const restored = restoreSessionTimelineScroll(timeline, saved);
+      if (restored.restored) {
+        followLatestRef.current = false;
+        atBottomRef.current = false;
+        setIsAtBottom(false);
+        lastTimelineScrollTopRef.current = restored.scrollTop;
+        setTimelineVirtualMetrics({
+          scrollTop: restored.scrollTop,
+          viewportHeight: timeline.clientHeight || 720,
+        });
+        // Sticky→full hydrate and virtual row measure can grow height after first paint.
+        window.requestAnimationFrame(() => {
+          const nextTimeline = timelineRef.current;
+          if (!nextTimeline || followLatestRef.current) {
+            return;
+          }
+          const again = restoreSessionTimelineScroll(nextTimeline, saved);
+          lastTimelineScrollTopRef.current = again.scrollTop;
+        });
+        return;
+      }
       scrollTimelineToBottom(timeline, { followLatest: true });
       return;
     }
@@ -1258,6 +1286,11 @@ export function ConversationView({
       window.cancelAnimationFrame(streamingScrollFrameRef.current);
       streamingScrollFrameRef.current = null;
     }
+    // Capture leave-viewport scroll even when scroll listener already detached.
+    rememberSessionTimelineScroll(sessionId, {
+      scrollTop: lastTimelineScrollTopRef.current,
+      followingLatest: followLatestRef.current,
+    });
   }, [sessionId]);
 
   useEffect(() => {
@@ -1312,10 +1345,20 @@ export function ConversationView({
         scrollTop: timeline.scrollTop,
         viewportHeight: timeline.clientHeight || 720,
       });
+      rememberSessionTimelineScroll(sessionId, {
+        scrollTop: timeline.scrollTop,
+        followingLatest: nextState.shouldFollowLatest,
+      });
     };
     handleScroll();
     timeline.addEventListener("scroll", handleScroll);
-    return () => timeline.removeEventListener("scroll", handleScroll);
+    return () => {
+      timeline.removeEventListener("scroll", handleScroll);
+      rememberSessionTimelineScroll(sessionId, {
+        scrollTop: lastTimelineScrollTopRef.current,
+        followingLatest: followLatestRef.current,
+      });
+    };
   }, [
     displayMessages.length,
     earlierMessagesLoading,

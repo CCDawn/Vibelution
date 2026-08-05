@@ -1171,6 +1171,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("const frameId = window.requestAnimationFrame");
   });
 
+  it("restores per-session timeline scroll memory on thread revisit (C6)", () => {
+    expect(conversationViewSource).toContain("peekSessionTimelineScroll");
+    expect(conversationViewSource).toContain("restoreSessionTimelineScroll");
+    expect(conversationViewSource).toContain("rememberSessionTimelineScroll");
+    expect(conversationViewSource).toContain("initializedSessionRef.current !== sessionId");
+  });
+
   it("keeps virtual-row ResizeObservers and streaming paint free of per-render thrash", () => {
     expect(conversationViewSource).toContain("timelineVirtualRowRefCallbacksRef");
     expect(conversationViewSource).toContain("timelineRowNodesRef");
