@@ -8,7 +8,7 @@
 
 `ChatCodingRoute` 乐观提交 -> FastAPI sessions route -> `session_service` 提交/调度/worker（实现 claim 见 `core/web/services/session/*`） -> `agent.py` 单轮执行 -> `core.llm` invoke/stream -> UI capture -> turn journal/live output -> SSE -> 前端 active-turn layer -> `ConversationView`。
 
-结构拆分完成说明：`docs/plans/2026-07-21-backend-structure-p0-completion.md`。Team 工作流产品面 claim 见 `core/web/services/team_workflow/README.md`（routes 仍经 `team_workflow_orchestration_service` facade）。
+结构拆分历史说明（非现行规范）：`docs/archive/plans/2026-06-07/2026-07-21-backend-structure-p0-completion.md`。Team 工作流产品面 claim 见 `core/web/services/team_workflow/README.md`（routes 经 `team_workflows/` 包 + `team_workflow_orchestration_service` facade）。
 
 不覆盖：
 
@@ -88,7 +88,7 @@
 ## 当前观察点
 
 - 编辑 `session/projection.py`、`chatTurnProtocol.ts`、`assistantDisplayPlan.ts`、`ConversationView.tsx` 或 chat active-turn 前，先查 active claims 并串行化。
-- native transcript / delta 历史材料在 `docs/superpowers/plans/2026-07-07-codex-native-transcript-chain.md`；**现行权威以本文件 + SessionTurnItem 包为准**，历史计划不得覆盖。
+- native transcript / delta 历史材料在 `docs/archive/superpowers/plans/2026-07-07-codex-native-transcript-chain.md`；**现行权威以本文件 + SessionTurnItem 包为准**，历史计划不得覆盖。
 - 最新 `runtime_scenes` 可能只有 Launcher/browser 启动证据；缺 conversation runtime evidence 时标 telemetry gap，不当作链路已覆盖。
 
 ## 只读诊断命令

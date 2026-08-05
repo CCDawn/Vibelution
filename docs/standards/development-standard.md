@@ -816,20 +816,17 @@ Do not finish `STANDARD_TASK` or `HIGH_RISK` work with stale project memory or a
 
 ### 19.1 Spec And Plan Lifecycle
 
-`docs/superpowers/specs/` and `docs/superpowers/plans/` are active governance artifacts, not loose notes. New or materially updated specs and plans should begin with compact status metadata:
+Historical specs/plans live under `docs/archive/` (including former `docs/superpowers/` and `docs/plans/`). They are **not** current governance.
 
-- `Status`;
-- `Owner`;
-- `Claim`, branch, or worktree when applicable;
-- `Scope`;
-- `Supersedes` or `Replaces` when this document retires another artifact;
-- `Implementation link`;
-- `Validation`;
-- `Close condition`.
+When a task needs a new written plan or design:
 
-Use a small status vocabulary: `draft`, `user-approved`, `active-plan`, `in-progress`, `implemented`, `superseded`, `blocked`, or `historical`.
+1. Prefer a short note in the task claim / project-memory lane, or a single dated file that will be archived on close.
+2. Begin with compact status metadata: `Status`, `Owner`, `Claim`/branch/worktree, `Scope`, `Supersedes`, `Implementation link`, `Validation`, `Close condition`.
+3. Use status vocabulary: `draft`, `user-approved`, `active-plan`, `in-progress`, `implemented`, `superseded`, `blocked`, or `historical`.
+4. On close: set status to `implemented` / `superseded` / `historical` and **move the file into `docs/archive/`** (or delete only if the user explicitly wants no history).
+5. Durable rules extracted from a plan belong in `docs/standards/`, ADR, or the owning module README — not left only in the plan.
 
-When implementation starts or finishes, update the document status or the relevant project-memory lane. Do not leave superseded specs, abandoned plans, or already-implemented drafts with ambiguous current-state wording.
+Do not treat archive paths as live instruction sets. Do not reintroduce a long-lived `docs/plans/` or `docs/superpowers/` tree for day-to-day authority.
 
 ## 20. Challenge Cup Flow Site
 

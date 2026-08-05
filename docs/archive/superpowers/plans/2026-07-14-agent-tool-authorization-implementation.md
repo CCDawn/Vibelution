@@ -1,7 +1,7 @@
 # Unified Agent Tool Authorization Implementation Plan
 
-**Date:** 2026-07-14  
-**Design:** `docs/superpowers/specs/2026-07-14-agent-tool-authorization-design.md`  
+**Date:** 2026-07-14
+**Design:** `docs/superpowers/specs/2026-07-14-agent-tool-authorization-design.md`
 **Route:** SPLIT_REQUIRED
 
 ## 1. Goal
@@ -25,7 +25,7 @@ Use seven serialized milestones. Each milestone produces an independently review
 
 ## 4. Milestone 0: Contract fixtures and inventory
 
-**Owner:** authorization architecture  
+**Owner:** authorization architecture
 **Depends on:** approved design
 
 Tasks:
@@ -51,7 +51,7 @@ Exit gate:
 
 ## 5. Milestone 1: Canonical Registry descriptors
 
-**Owner:** tool registry  
+**Owner:** tool registry
 **Depends on:** Milestone 0
 
 Tasks:
@@ -81,7 +81,7 @@ Exit gate:
 
 ## 6. Milestone 2: Pure policy evaluator and v2 migration projection
 
-**Owner:** authorization core  
+**Owner:** authorization core
 **Depends on:** Milestone 1
 
 Tasks:
@@ -115,7 +115,7 @@ Exit gate:
 
 ## 7. Milestone 3: Shadow authorization and observability
 
-**Owner:** runtime authorization integration  
+**Owner:** runtime authorization integration
 **Depends on:** Milestone 2
 
 Tasks:
@@ -143,7 +143,7 @@ Exit gate:
 
 ## 8. Milestone 4: Model visibility enforcement
 
-**Owner:** Agent/LLM binding  
+**Owner:** Agent/LLM binding
 **Depends on:** Milestone 3 parity gate
 
 Tasks:
@@ -172,7 +172,7 @@ Exit gate:
 
 ## 9. Milestone 5: Execution enforcement and approval
 
-**Owner:** tool execution/security  
+**Owner:** tool execution/security
 **Depends on:** Milestone 4
 
 Tasks:
@@ -201,7 +201,7 @@ Exit gate:
 
 ## 10. Milestone 6: Versioned configuration API and UI
 
-**Owner:** Agent configuration  
+**Owner:** Agent configuration
 **Depends on:** Milestone 5 contracts
 
 Tasks:
@@ -234,7 +234,7 @@ Exit gate:
 
 ## 11. Milestone 7: Cutover and cleanup
 
-**Owner:** integration/release  
+**Owner:** integration/release
 **Depends on:** all previous gates
 
 Tasks:
@@ -306,4 +306,3 @@ The program is complete only when:
 - hidden tools are absent and direct calls are rejected;
 - all protocols and run kinds pass the same acceptance fixtures;
 - legacy authority paths are removed rather than left as silent fallbacks.
-

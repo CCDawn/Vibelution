@@ -1,8 +1,8 @@
 # Vibelution 项目索引
 
-**版本：** v7.5
-**日期：** 2026-07-21
-**用途：** AI Agent 执行任务的执行参数（结构说明已与仓库同步）
+**版本：** v7.9
+**日期：** 2026-08-05
+**用途：** AI Agent 执行任务的结构索引（细节冲突时以 `docs/README.md` 与 `AGENTS.md` 为准）
 
 ---
 
@@ -38,10 +38,16 @@ Vibelution/
 ├── tools/                      # Agent 可见工具（约 27 个 *_tools.py 模块）
 ├── tests/                      # Python 测试套件（以 pytest 收集为准）
 ├── web/                        # React + Vite 前端工程
-├── docs/                       # 文档索引、当前计划、操作记录、归档
-│   ├── README.md               # 文档入口与归档边界
-│   ├── plans/                  # 当前或近当前计划
-│   └── archive/                # 历史计划与归档说明
+├── docs/                       # 文档总图与归档（现行规范在 standards/）
+│   ├── README.md               # 文档地图（现行 vs 历史）
+│   ├── standards/              # 现行跨模块规范
+│   ├── agents/                 # 协作 / 授权 / 对话链路
+│   ├── guides/                 # Agent 开发路由（route/ownership/loop/playbook）
+│   ├── product/                # 产品语境 / UI 注册表（现行）
+│   ├── adr/                    # 架构决策
+│   ├── ops/config/             # Operator 配置索引
+│   ├── testing/                # 测试补充（权威命令见 tests/README）
+│   └── archive/                # 历史 plans / superpowers / 产品快照
 ├── workspace/                  # 本地运行态产物、evaluation 数据和日志（gitignored）
 ├── scripts/                    # launcher、web_workbench、doctor、prune_logs 等
 └── .docs/project-memory/       # 项目记忆与多页 HTML 状态面
@@ -157,7 +163,11 @@ Vibelution/
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
-| v7.4 | 2026-07-04 | 对齐 guard 命令到 `status/check/claim/release`；补充 `docs/superpowers/` 入口；将 README 状态说明委托给项目记忆；修正测试文档编号 |
+| v7.9 | 2026-08-05 | `docs/guides/` 改为纯 Agent 路由表（route/ownership/loop/playbook）；去掉用户向叙述 |
+| v7.8 | 2026-08-05 | 新增 `docs/guides/`；后于 v7.9 改为 Agent-only 形态 |
+| v7.7 | 2026-08-05 | 产品/设计全文归档；`docs/product/` 现行提炼；ADR 0003–0005（config 外置 / VUI only / 文档权威） |
+| v7.6 | 2026-08-05 | 文档整理：`superpowers`/一次性 testing 进 archive；现行树只保留 standards/agents/ops/adr/testing/prds/security；索引与 AGENTS 对齐 |
+| v7.4 | 2026-07-04 | 对齐 guard 命令到 `status/check/claim/release`；补充 `docs/superpowers/` 入口（后于 v7.6 归档）；将 README 状态说明委托给项目记忆；修正测试文档编号 |
 | v7.3 | 2026-06-19 | 增加 docs 入口；将 2026-05 历史计划归档到 docs/archive/plans/2026-05；刷新 README/INDEX 文档边界 |
 | v7.2 | 2026-06-05 | 补齐缺失子目录（chatroom/code_context_graph/llm/research/workspace）；修正 agent.py 行数；重排 P0/P1 待办，新增单文件红线约束与日志 retention 项 |
 | v7.1 | 2026-05-21 | 删除重复的根目录 reset.py，Reset 入口统一到 Web 工作台白名单清理动作面 |

@@ -1,5 +1,11 @@
 # Gym v1 Uses Promotion Proposals Before Baseline Rewrite
 
+## Status
+
+Accepted.
+
+## Summary
+
 Gym v1 evaluates **Candidate Improvements** through isolated **Harness Variants** and **Improvement Episodes**, but a promoted result is first persisted as an auditable promotion proposal instead of automatically rewriting baseline behavior. This keeps the task-driven self-evolution loop measurable and recoverable while the new **Trace**, **Critic**, **Evolver**, and **Selection Policy** boundaries are still being proven.
 
 Automatic baseline rewrite remains a future capability that should only be enabled after replay, rollback, holdout, and regression evidence are strong enough to make autonomous promotion safe.

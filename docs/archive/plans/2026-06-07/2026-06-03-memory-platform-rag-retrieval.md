@@ -810,4 +810,3 @@ The vector release is complete when:
    - Recommendation: no. First release returns context candidates through tool/API/UI only.
 4. Which embedding provider should be used if vector retrieval is later enabled?
    - Recommendation: defer provider choice until contract/API/tool are stable.
-

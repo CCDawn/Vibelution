@@ -56,7 +56,7 @@ Vibelution/
 │   ├── web/                    # FastAPI app、routes、services
 │   └── logging/                # transcript、tool tracker、runtime scene 日志
 ├── tools/                      # Agent 可见工具与内部工具封装
-├── docs/                       # 当前文档索引、规范、报告和归档
+├── docs/                       # 文档地图：standards / product / ops / adr / archive
 ├── web/                        # React + Vite 前端工程
 ├── workspace/                  # 本地运行态产物、evaluation 数据和日志
 ├── tests/                      # Python 测试套件
@@ -144,6 +144,17 @@ $env:MINIMAX_API_KEY="your-api-key"
 ```
 
 外部 `config.toml` 不属于项目仓库，不应提交真实密钥。README 中的示例只使用环境变量名，不包含密钥值。
+
+## Agent 开发
+
+面向 **coding Agent** 的任务路由（非最终用户产品文档；规则正文在 `docs/standards/`）：
+
+- [docs/guides/README.md](docs/guides/README.md) — 加载顺序
+- [docs/guides/route.md](docs/guides/route.md) — 任务类型 → READ / EDIT / TEST
+- [docs/guides/ownership.md](docs/guides/ownership.md) — 写入落点
+- [docs/guides/loop.md](docs/guides/loop.md) — 分级 / 命令 / 完成报告块
+
+全局红线：[AGENTS.md](AGENTS.md)。
 
 ## 本地任务闭环
 
