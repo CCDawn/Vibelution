@@ -358,7 +358,8 @@ type RightIndexPanel = "conversations" | "members";
 
 
 export function ChatCodingRoute() {
-  const { lang, t, statusLabel } = useAppI18n({ domains: ["chat", "agents"] });
+  // pet + evolution: companion rail shows mental/pet labels (otherwise raw keys leak).
+  const { lang, t, statusLabel } = useAppI18n({ domains: ["chat", "agents", "pet", "evolution"] });
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
