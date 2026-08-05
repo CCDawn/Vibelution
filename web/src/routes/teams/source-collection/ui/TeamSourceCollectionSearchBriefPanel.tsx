@@ -65,10 +65,7 @@ export function TeamSourceCollectionSearchBriefPanel({
       aria-label={isZh ? "搜索任务设置" : "Search brief"}
     >
       <div className={styles.header}>
-        <div>
-          <span className={styles.eyebrow}>{isZh ? "搜索任务" : "Search brief"}</span>
-          <h2 className={styles.title}>{isZh ? "先决定要研究什么" : "Decide what to research"}</h2>
-        </div>
+        <h2 className={styles.title}>{isZh ? "先决定要研究什么" : "Decide what to research"}</h2>
         <span className={styles.badge}>{isZh ? "本轮配置" : "Current setup"}</span>
       </div>
 
@@ -81,63 +78,74 @@ export function TeamSourceCollectionSearchBriefPanel({
           className={styles.topicTextarea}
           value={draft.topic}
           maxLength={120}
-          rows={3}
-          placeholder={isZh ? "用一句话说明本轮真正要解决的问题" : "State the question this run should resolve"}
+          rows={5}
+          placeholder={
+            isZh
+              ? "完整写出本轮研究焦点或假说（会驱动检索；尽量一句话说清问题）"
+              : "Write the full research focus or hypothesis for this run"
+          }
           onChange={(event) => onDraftChange({ topic: event.target.value })}
         />
         <small className={styles.fieldHint}>
-          <span>{isZh ? "主题和搜索问题会直接决定下一批结果" : "The topic and queries determine the next batch"}</span>
+          <span>
+            {isZh
+              ? "主题是主编辑区；下方检索式可选，勿把同一假说拆成多条碎句"
+              : "Topic is the primary field; queries below are optional retrieval lines"}
+          </span>
           <span>{draft.topic.length}/120</span>
         </small>
       </label>
 
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <div>
-            <strong>{isZh ? "搜索问题" : "Search queries"}</strong>
-            <span>
-              {isZh
-                ? `逐条修改或删除，最多 12 个 · 当前 ${querySeeds.length} 个`
-                : `Edit or remove each query · ${querySeeds.length}/12`}
-            </span>
-          </div>
+          <strong>{isZh ? "检索式（可选）" : "Queries (optional)"}</strong>
+          <span>
+            {isZh
+              ? `${querySeeds.length}/12 · 一行一条，宜短宜可搜`
+              : `${querySeeds.length}/12 · one short, searchable line each`}
+          </span>
         </div>
 
-        <div className={styles.queryList}>
-          {querySeeds.length ? querySeeds.map((query, index) => (
-            <label className={styles.queryRow} key={`${index}-${query}`}>
-              <span className={styles.queryIndex}>{index + 1}</span>
-              <VNativeInput
-                className={styles.queryInput}
-                aria-label={isZh ? `搜索问题 ${index + 1}` : `Search query ${index + 1}`}
-                value={query}
-                onChange={(event) => updateQuery(index, event.target.value)}
-              />
-              <VNativeButton
-                type="button"
-                className={styles.removeButton}
-                aria-label={isZh ? `删除搜索问题 ${index + 1}` : `Remove search query ${index + 1}`}
-                title={isZh ? "删除" : "Remove"}
-                onClick={() => removeQuery(index)}
-              >
-                <X size={13} aria-hidden />
-              </VNativeButton>
-            </label>
-          )) : (
+        <div className={styles.queryList} role="list" aria-label={isZh ? "检索式列表" : "Query list"}>
+          {querySeeds.length ? (
+            querySeeds.map((query, index) => (
+              <div className={styles.queryRow} key={`query-seed-${index}`} role="listitem">
+                <span className={styles.queryIndex} aria-hidden>
+                  {index + 1}
+                </span>
+                <VNativeInput
+                  className={styles.queryInput}
+                  aria-label={isZh ? `搜索问题 ${index + 1}` : `Search query ${index + 1}`}
+                  value={query}
+                  onChange={(event) => updateQuery(index, event.target.value)}
+                />
+                <VNativeButton
+                  type="button"
+                  className={styles.removeButton}
+                  aria-label={isZh ? `删除搜索问题 ${index + 1}` : `Remove search query ${index + 1}`}
+                  title={isZh ? "删除" : "Remove"}
+                  onClick={() => removeQuery(index)}
+                >
+                  <X size={14} aria-hidden />
+                </VNativeButton>
+              </div>
+            ))
+          ) : (
             <div className={styles.emptyQueries}>
               {isZh
-                ? "没有附加问题；系统会直接使用研究主题搜索，也可以补充更具体的问题。"
-                : "The topic can be searched directly, or you can add more specific queries."}
+                ? "未添加检索式时，将直接用研究主题搜索。需要更具体的关键词时可在此补充。"
+                : "Without queries, search uses the research topic. Add short keywords when needed."}
             </div>
           )}
         </div>
 
         <div className={styles.addQuery}>
           <VNativeInput
+            className={styles.addInput}
             value={newQuery}
             maxLength={240}
             disabled={querySeeds.length >= 12}
-            placeholder={isZh ? "补充一个搜索问题" : "Add a search query"}
+            placeholder={isZh ? "补充一条检索式，回车添加" : "Add a query, press Enter"}
             aria-label={isZh ? "补充搜索问题" : "Add search query"}
             onChange={(event) => setNewQuery(event.target.value)}
             onKeyDown={handleNewQueryKeyDown}
@@ -147,10 +155,10 @@ export function TeamSourceCollectionSearchBriefPanel({
             className={styles.addButton}
             disabled={!newQuery.trim() || querySeeds.length >= 12}
             aria-label={isZh ? "添加搜索问题" : "Add search query"}
-            title={isZh ? "添加搜索问题" : "Add search query"}
+            title={isZh ? "添加" : "Add"}
             onClick={addQuery}
           >
-            <Plus size={14} aria-hidden />
+            <Plus size={15} aria-hidden />
           </VNativeButton>
         </div>
       </div>

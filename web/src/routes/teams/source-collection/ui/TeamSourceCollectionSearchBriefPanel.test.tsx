@@ -54,10 +54,21 @@ describe("TeamSourceCollectionSearchBriefPanel", () => {
     expect(markup).toContain("科研 Agent 如何完成证据检索与实验规划");
     expect(markup).toContain("搜索问题 1");
     expect(markup).toContain("删除搜索问题 2");
+    expect(markup).toContain("检索式（可选）");
     expect(markup).toContain("搜索范围与来源偏好");
     expect(markup).toContain("右侧「推荐下一步」");
     expect(markup).not.toContain("按当前方案搜索下一批");
     expect(markup).not.toContain("开始搜索");
+  });
+
+  it("uses a compact single-surface query list (not heavy per-item cards)", () => {
+    expect(styles.queryList).toContain("divide-y");
+    expect(styles.queryRow).toContain("items-center");
+    expect(styles.queryRow).toContain("grid-cols-[1.5rem_minmax(0,1fr)_1.75rem]");
+    expect(styles.queryRow).not.toContain("rounded-[8px]");
+    expect(styles.queryRow).not.toContain("border border-");
+    expect(panelSource).toContain('role="list"');
+    expect(panelSource).toContain("query-seed-");
   });
 
   it("exposes an honest empty-query state and points first-start to the right rail", () => {
@@ -71,7 +82,7 @@ describe("TeamSourceCollectionSearchBriefPanel", () => {
       />,
     );
 
-    expect(markup).toContain("系统会直接使用研究主题搜索");
+    expect(markup).toContain("将直接用研究主题搜索");
     expect(markup).toContain("只在右侧「推荐下一步」开始搜集");
     expect(markup).not.toContain("开始搜索");
   });
