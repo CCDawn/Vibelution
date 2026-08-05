@@ -361,6 +361,27 @@ def test_sandbox_runs_explicit_powershell_command_without_cmd_quote_roundtrip(mo
     assert "cmd.exe" not in argv
 
 
+def test_sandbox_unwraps_cmd_c_wrapped_powershell_to_native_argv(monkeypatch):
+    """Nested cmd /c \"powershell -Command ...\" must not be re-fed to cmd /c."""
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_powershell_executable",
+        lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
+    route = shell_tools.classify_shell_command(
+        r'cmd /c "powershell -NoProfile -Command \"Get-ChildItem -Path $env:APPDATA\""'
+    )
+    argv = codex_cli_sandbox._sandbox_argv(r"C:\Codex\codex.exe", route)
+    assert argv[-4:] == [
+        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        "-NoProfile",
+        "-Command",
+        "Get-ChildItem -Path $env:APPDATA",
+    ]
+    assert not any(str(part).lower().endswith("cmd.exe") for part in argv)
+
+
 def test_full_access_argv_bypasses_codex_workspace_write_sandbox(monkeypatch):
     monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
