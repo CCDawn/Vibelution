@@ -106,10 +106,14 @@ export function TeamSourceCollectionStandaloneStagePanel({
       return modules.map((module, index) => ({
         id: module.id,
         indexLabel: String(index + 1).padStart(2, "0"),
-        title: module.title,
+        // Short rail label ("找资料") — not detailLabel ("查看资料…") which overflowed the bar.
+        title: module.label || module.title,
         tone: module.tone,
         selected: module.selected,
-        status: typeof module.status === "string" || typeof module.status === "number" ? module.status : undefined,
+        status:
+          typeof module.status === "string" || typeof module.status === "number"
+            ? module.status
+            : undefined,
         onClick: module.onDetail,
       }));
     }

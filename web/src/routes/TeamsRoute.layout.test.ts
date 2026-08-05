@@ -2548,7 +2548,10 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionScrollRegion).toContain("overflow-auto");
     expect(teamStageCommandBarSource).toContain('data-vui-product="team-stage-command-bar"');
-    expect(teamStageCommandBarSource).toContain("flex flex-wrap items-center justify-between");
+    // Progress: steps row stacked above stats (avoid horizontal chip collision).
+    expect(teamStageCommandBarSource).toContain("lg:grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamStageCommandBarSource).toContain("flex-col items-stretch");
+    expect(teamStageCommandBarSource).toContain('aria-label="stage-progress"');
     expect(teamStageCardSource).toContain('data-vui-product="team-stage-card"');
     expect(teamStageCardSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(teamStageCardSource).toContain("ACTION_ROW");
