@@ -944,7 +944,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("visibleTeamIds.has(RESEARCH_TEAM_ID)");
     expect(routeSource).toContain("const hasTeams = visibleTeams.length > 0");
     expect(routeSource).toContain("visibleTeamSummary.activeTeamCount");
-    expect(routeSource).toContain("visibleTeams.map((team) => (");
+    expect(routeSource).toMatch(/visibleTeams\.map\(\(team(?::[^\)]*)?\) => \(/);
     expect(routeSource).toContain("TeamShellRail");
     expect(routeSource).toContain("visibleTeams.find((team) => team.teamId === effectiveTeamId)");
     expect(routeSource).not.toContain("{teams.map((team) => (");
