@@ -1249,14 +1249,17 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
     already_closed_started = time.monotonic()
     already_closed = _launcher_workbench_already_closed()
     prequeue_timings_ms["alreadyClosedMs"] = _launcher_elapsed_ms(already_closed_started)
-    if already_closed:
+    # Only skip when the workbench is already closed *and* no residual work-run
+    # snapshots still block stop/restart. Otherwise still queue force_close so
+    # the daemon can mark zombie active work as force-stopped.
+    if already_closed and not active_work_runs:
         prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
         _record_launcher_prequeue_timing(
             "force-stop",
             phase="stop",
             timings_ms=prequeue_timings_ms,
             outcome="skipped",
-            extra_fields={"alreadyClosed": True, "activeWorkCount": len(active_work_runs)},
+            extra_fields={"alreadyClosed": True, "activeWorkCount": 0},
         )
         _record_launcher_event(
             "launcher.bundle.force_stop.skipped_already_closed",
@@ -1265,7 +1268,7 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
             outcome="skipped",
             fields={
                 "mode": "standalone_control_plane",
-                "activeWorkCount": len(active_work_runs),
+                "activeWorkCount": 0,
             },
         )
         return {
@@ -1275,9 +1278,27 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
             "operation": "force-stop",
             "commandId": "",
             "message": "项目工作台已经关闭，无需再次强制关闭。",
-            "activeWorkCount": len(active_work_runs),
-            "activeWorkRuns": active_work_runs[:8],
+            "activeWorkCount": 0,
+            "activeWorkRuns": [],
         }
+    residual_active_work_while_closed = bool(already_closed and active_work_runs)
+    if residual_active_work_while_closed:
+        _record_launcher_event(
+            "launcher.bundle.force_stop.residual_active_work_while_closed",
+            phase="stop",
+            message=(
+                "Workbench is already closed, but residual active work-run snapshots still "
+                "block lifecycle; queueing force_close to clear them."
+            ),
+            outcome="continue",
+            level="warning",
+            fields={
+                "mode": "standalone_control_plane",
+                "alreadyClosed": True,
+                "activeWorkCount": len(active_work_runs),
+                "activeWorkRuns": active_work_runs[:8],
+            },
+        )
     try:
         ensure_started = time.monotonic()
         ensure_daemon_running()
@@ -1303,7 +1324,12 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
             phase="stop",
             timings_ms=prequeue_timings_ms,
             outcome="failed",
-            extra_fields={"errorType": type(exc).__name__, "activeWorkCount": len(active_work_runs)},
+            extra_fields={
+                "errorType": type(exc).__name__,
+                "activeWorkCount": len(active_work_runs),
+                "alreadyClosed": already_closed,
+                "residualActiveWorkWhileClosed": residual_active_work_while_closed,
+            },
         )
         _record_launcher_event(
             "launcher.bundle.force_stop.failed",
@@ -1323,17 +1349,33 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         timings_ms=prequeue_timings_ms,
         command_id=command_id,
         outcome="accepted",
-        extra_fields={"activeWorkCount": len(active_work_runs)},
+        extra_fields={
+            "activeWorkCount": len(active_work_runs),
+            "alreadyClosed": already_closed,
+            "residualActiveWorkWhileClosed": residual_active_work_while_closed,
+        },
+    )
+    accepted_message = (
+        "工作台已关闭，正在强制收口残留任务记录，Launcher 控制面会保持可再次启动。"
+        if residual_active_work_while_closed
+        else "正在强制关闭项目工作台，Launcher 控制面会保持可再次启动。"
     )
     _record_launcher_event(
         "launcher.bundle.force_stop.accepted",
         phase="stop",
-        message="Launcher project bundle force-stop queued through runtime manager.",
+        message=(
+            "Launcher project bundle force-stop queued through runtime manager "
+            "(residual active work while closed)."
+            if residual_active_work_while_closed
+            else "Launcher project bundle force-stop queued through runtime manager."
+        ),
         outcome="accepted",
         fields={
             "mode": "standalone_control_plane",
             "commandId": command_id,
             "activeWorkCount": len(active_work_runs),
+            "alreadyClosed": already_closed,
+            "residualActiveWorkWhileClosed": residual_active_work_while_closed,
         },
     )
     return {
@@ -1342,7 +1384,7 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         "launcherMode": "standalone_control_plane",
         "operation": "force-stop",
         "commandId": command_id,
-        "message": "正在强制关闭项目工作台，Launcher 控制面会保持可再次启动。",
+        "message": accepted_message,
         "activeWorkCount": len(active_work_runs),
         "activeWorkRuns": active_work_runs[:8],
     }
