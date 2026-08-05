@@ -31,6 +31,56 @@ function nativeTranscriptCells(transcript: ConversationMessage["codexTranscript"
   return transcript.cells.filter(shouldDisplayTranscriptCell);
 }
 
+function compactProjectionKey(value: unknown) {
+  return String(value ?? "").replace(/\s+/g, "").trim();
+}
+
+function isCommentaryPhase(value: unknown) {
+  const phase = compactText(value).toLowerCase();
+  return phase === "commentary" || phase === "interim";
+}
+
+function isExplicitFinalAnswerCell(cell: { phase?: unknown; terminal?: unknown; provisional?: unknown }) {
+  if (cell.provisional === true) {
+    return false;
+  }
+  const phase = compactText(cell.phase).toLowerCase();
+  return phase === "final_answer" || cell.terminal === true;
+}
+
+function isCommittedNativeAssistantCell(cell: {
+  phase?: unknown;
+  status?: unknown;
+  provisional?: unknown;
+  terminal?: unknown;
+}) {
+  if (cell.provisional === true || isCommentaryPhase(cell.phase)) {
+    return false;
+  }
+  const status = compactText(cell.status).toLowerCase();
+  if (["pending", "running", "in_progress", "streaming"].includes(status)) {
+    return false;
+  }
+  return Boolean(
+    isExplicitFinalAnswerCell(cell)
+    || !status
+    || ["completed", "done"].includes(status),
+  );
+}
+
+/** Prefer explicit final_answer / terminal cells; otherwise all non-commentary markdown. */
+export function visibleNativeFinalAnswerText(
+  transcript: ConversationMessage["codexTranscript"] | undefined,
+) {
+  const cells = nativeTranscriptCells(transcript)
+    .filter((cell) => String(cell.kind ?? "").trim() === "assistant_markdown")
+    .filter((cell) => compactText(cell.text))
+    .filter((cell) => !isCommentaryPhase(cell.phase));
+  const explicit = cells.filter((cell) => isExplicitFinalAnswerCell(cell));
+  const chosen = explicit.length > 0 ? explicit : cells;
+  return chosen.map((cell) => compactText(cell.text)).filter(Boolean).join("\n\n");
+}
+
 export function visibleNativeAssistantMarkdownText(
   transcript: ConversationMessage["codexTranscript"] | undefined,
 ) {
@@ -39,6 +89,41 @@ export function visibleNativeAssistantMarkdownText(
     .map((cell) => compactText(cell.text))
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * True when native answer text already owns the committed final answer body.
+ * Short orphan capture fragments (e.g. "存。") must not win over long content.
+ */
+export function nativeAnswerOwnsProjectedContent(
+  nativeAnswer: string,
+  projectedAnswer: string,
+  options?: { hasExplicitFinalCell?: boolean },
+) {
+  const nativeKey = compactProjectionKey(nativeAnswer);
+  const contentKey = compactProjectionKey(projectedAnswer);
+  if (!nativeKey) {
+    return false;
+  }
+  if (options?.hasExplicitFinalCell) {
+    return true;
+  }
+  if (!contentKey) {
+    return true;
+  }
+  if (contentKey === nativeKey || nativeKey.includes(contentKey)) {
+    return true;
+  }
+  if (
+    contentKey.includes(nativeKey)
+    && nativeKey.length >= Math.max(24, Math.floor(contentKey.length * 0.8))
+  ) {
+    return true;
+  }
+  if (nativeKey.length < Math.max(8, Math.floor(contentKey.length * 0.5))) {
+    return false;
+  }
+  return true;
 }
 
 export function hasVisibleNativeCodexTranscript(
@@ -52,22 +137,21 @@ export function activeTurnProtocolTextLength(surface: ChatTurnProtocolSurface) {
   if (canonicalItems.length > 0) {
     return canonicalFinalAnswer(canonicalItems).length;
   }
-  return compactText(surface.answerContent).length
-    + compactText(surface.thoughtContent).length
-    + visibleNativeAssistantMarkdownText(surface.codexTranscript).length;
+  const projected = compactText(surface.answerContent);
+  const nativeFinal = visibleNativeFinalAnswerText(surface.codexTranscript);
+  // Prefer the longer of projected content vs native final to avoid orphan-only length.
+  const answerLen = Math.max(projected.length, nativeFinal.length);
+  return answerLen + compactText(surface.thoughtContent).length;
 }
 
 export function resolveAssistantTurnRenderProtocol(surface: ChatTurnProtocolSurface): ChatTurnRenderProtocol {
-  if (consolidateSessionTurnItemsV2(surface.turnItems).length > 0) {
-    return "canonical_turn_items_v2";
-  }
-  if (hasVisibleNativeCodexTranscript(surface.codexTranscript)) {
-    return "native_codex_transcript";
-  }
-  if (compactText(surface.answerContent) || compactText(surface.thoughtContent)) {
-    return "legacy_assistant_delta";
-  }
-  return "process_feedback";
+  return resolveAssistantTurnRenderSurface({
+    answerProjectionContent: surface.answerContent == null ? undefined : String(surface.answerContent),
+    thoughtContent: surface.thoughtContent == null ? undefined : String(surface.thoughtContent),
+    feedbackEvents: surface.feedbackEventCount ? Array.from({ length: surface.feedbackEventCount }) : [],
+    codexTranscript: surface.codexTranscript,
+    turnItems: surface.turnItems,
+  }).protocol;
 }
 
 export function hasVisibleActiveTurnProtocolContent(surface: ChatTurnProtocolSurface) {
@@ -97,30 +181,23 @@ export function hasCommittedAssistantProtocolAnswer(message: ConversationMessage
   if (canonicalItems.length > 0) {
     return hasCommittedCanonicalAnswer(canonicalItems);
   }
+  const projected = compactText(answerProjectionContent(message));
   const nativeAssistantCells = nativeTranscriptCells(message.codexTranscript)
     .filter((cell) => String(cell.kind ?? "").trim() === "assistant_markdown")
     .filter((cell) => compactText(cell.text));
-  if (nativeAssistantCells.length > 0) {
-    return nativeAssistantCells.some((cell) => {
-      const phase = compactText(cell.phase).toLowerCase();
-      const status = compactText(cell.status).toLowerCase();
-      if (
-        phase === "commentary"
-        || phase === "interim"
-        || cell.provisional === true
-        || ["pending", "running", "in_progress", "streaming"].includes(status)
-      ) {
-        return false;
-      }
-      return Boolean(
-        phase === "final_answer"
-        || cell.terminal === true
-        || !status
-        || ["completed", "done"].includes(status)
-      );
-    });
+  const explicitFinalCells = nativeAssistantCells.filter((cell) => isExplicitFinalAnswerCell(cell));
+  if (explicitFinalCells.length > 0) {
+    return true;
   }
-  return Boolean(compactText(answerProjectionContent(message)));
+  const committedNative = nativeAssistantCells.filter((cell) => isCommittedNativeAssistantCell(cell));
+  if (committedNative.length > 0) {
+    const nativeText = committedNative.map((cell) => compactText(cell.text)).filter(Boolean).join("\n\n");
+    // Orphan completed fragments must not count as "committed answer" when content is the real body.
+    if (nativeAnswerOwnsProjectedContent(nativeText, projected)) {
+      return true;
+    }
+  }
+  return Boolean(projected);
 }
 import type {
   ConversationMessage as CanonicalConversationMessage,
@@ -336,26 +413,43 @@ export const resolveAssistantTurnRenderSurface = (input: {
       turnItems,
     };
   }
-  const nativeCells = input.codexTranscript?.cells ?? [];
-  const nativeAnswer = nativeCells
-    .filter((cell) => cell.kind === "assistant_markdown")
-    .map((cell) => cell.text ?? ("markdown" in cell ? cell.markdown : ""))
-    .filter(Boolean)
-    .join("\n\n");
-  if (nativeAnswer) {
+  const projectedAnswer = compactText(input.answerProjectionContent);
+  const thoughtContent = compactText(input.thoughtContent);
+  const nativeCells = nativeTranscriptCells(input.codexTranscript);
+  const hasExplicitFinalCell = nativeCells.some((cell) => (
+    String(cell.kind ?? "").trim() === "assistant_markdown"
+    && compactText(cell.text)
+    && isExplicitFinalAnswerCell(cell)
+  ));
+  const nativeFinalAnswer = visibleNativeFinalAnswerText(input.codexTranscript);
+  // Prefer explicit final / covering native answer. Orphan fragments lose to projected content.
+  if (
+    nativeFinalAnswer
+    && nativeAnswerOwnsProjectedContent(nativeFinalAnswer, projectedAnswer, { hasExplicitFinalCell })
+  ) {
     return {
       protocol: "native_codex_transcript",
-      answerContent: nativeAnswer,
+      answerContent: nativeFinalAnswer,
       thoughtContent: "",
       feedbackEvents: input.feedbackEvents ?? [],
       codexTranscript: input.codexTranscript,
     };
   }
-  if ((input.answerProjectionContent ?? "").trim() || (input.thoughtContent ?? "").trim()) {
+  if (projectedAnswer || thoughtContent) {
     return {
       protocol: "legacy_assistant_delta",
-      answerContent: input.answerProjectionContent ?? "",
-      thoughtContent: input.thoughtContent ?? "",
+      answerContent: projectedAnswer || (input.answerProjectionContent ?? ""),
+      thoughtContent: thoughtContent || (input.thoughtContent ?? ""),
+      feedbackEvents: input.feedbackEvents ?? [],
+      // Keep native transcript for process rendering; answer body comes from content.
+      codexTranscript: input.codexTranscript,
+    };
+  }
+  if (hasVisibleNativeCodexTranscript(input.codexTranscript)) {
+    return {
+      protocol: "native_codex_transcript",
+      answerContent: nativeFinalAnswer,
+      thoughtContent: "",
       feedbackEvents: input.feedbackEvents ?? [],
       codexTranscript: input.codexTranscript,
     };
@@ -369,6 +463,13 @@ export const resolveAssistantTurnRenderSurface = (input: {
   };
 };
 
+/**
+ * Project an existing SessionTurnItem v2 package into content + codexTranscript.
+ *
+ * Legacy messages without turnItems are left unchanged: backend detail/window now
+ * attaches turnItems (including content fallback). Remaining package-less rows are
+ * process-only / status placeholders and intentionally use legacy rails.
+ */
 export const projectConversationMessageFromTurnItemsV2 = <T extends CanonicalConversationMessage>(message: T): T => {
   const turnItems = consolidateSessionTurnItemsV2(message.turnItems);
   if (turnItems.length === 0) return message;

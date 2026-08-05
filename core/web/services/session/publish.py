@@ -414,11 +414,15 @@ def _publish_session_assistant_delta(
     if turn_items:
         event["itemId"] = next(
             (
-                item["id"]
+                item.get("itemId") or item["id"]
                 for item in turn_items
-                if str(item.get("type") or "") == "agent_message" and item.get("id")
+                if str(item.get("type") or item.get("kind") or "") in {
+                    "agent_message",
+                    "assistant_message",
+                }
+                and (item.get("itemId") or item.get("id"))
             ),
-            turn_items[0]["id"],
+            turn_items[0].get("itemId") or turn_items[0]["id"],
         )
         event["turnItems"] = turn_items
     recovery_event = s._assistant_delta_recovery_stream_event(
@@ -495,10 +499,34 @@ def _merge_session_assistant_delta_events(
         merged["codexTranscript"] = codex_transcript
     else:
         merged.pop("codexTranscript", None)
-    turn_items = current.get("turnItems") or previous.get("turnItems")
+    # Prefer the newest turnItems snapshot (full rebuild from live state). Fall back
+    # to the previous package only when the current frame omitted items entirely.
+    current_turn_items = current.get("turnItems")
+    previous_turn_items = previous.get("turnItems")
+    if isinstance(current_turn_items, list) and current_turn_items:
+        turn_items = list(current_turn_items)
+    elif isinstance(previous_turn_items, list) and previous_turn_items:
+        turn_items = list(previous_turn_items)
+    else:
+        turn_items = []
     if turn_items:
-        merged["turnItems"] = list(turn_items)
-        merged["itemId"] = current.get("itemId") or previous.get("itemId") or (turn_items[0] or {}).get("id")
+        merged["turnItems"] = turn_items
+        merged["itemId"] = (
+            current.get("itemId")
+            or previous.get("itemId")
+            or next(
+                (
+                    str(item.get("itemId") or item.get("id") or "").strip()
+                    for item in turn_items
+                    if isinstance(item, dict)
+                    and str(item.get("kind") or item.get("type") or "") in {
+                        "assistant_message",
+                        "agent_message",
+                    }
+                ),
+                str((turn_items[0] or {}).get("itemId") or (turn_items[0] or {}).get("id") or "").strip(),
+            )
+        )
     else:
         merged.pop("turnItems", None)
         merged.pop("itemId", None)

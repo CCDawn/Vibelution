@@ -12,8 +12,10 @@ import {
   hasCommittedAssistantProtocolAnswer,
   hasTerminalCanonicalTurnOutcome,
   hasVisibleActiveTurnProtocolContent,
+  projectConversationMessageFromTurnItemsV2,
   resolveAssistantTurnRenderSurface,
 } from "./chatTurnProtocol";
+import type { SessionTurnItem } from "../api/types/chat";
 
 export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
 type ConversationFeedbackEvent = NonNullable<ConversationMessage["feedbackEvents"]>[number];
@@ -72,6 +74,62 @@ function assistantDeltaAnswerContent(payload: AssistantDeltaEvent, base: ActiveT
 
 function compactText(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function isFinalAnswerTurnItem(item: SessionTurnItem) {
+  const kind = compactText(item.kind || item.type).toLowerCase();
+  const phase = compactText(item.phase).toLowerCase();
+  const channel = compactText(item.channel).toLowerCase();
+  return (
+    phase === "final_answer"
+    || (
+      (kind === "assistant_message" || kind === "agent_message")
+      && (channel === "answer" || !channel)
+      && phase !== "commentary"
+      && phase !== "interim"
+    )
+  );
+}
+
+/**
+ * Phase B: keep provisional final item text aligned with streaming legacy content
+ * when a delta frame updates content faster than the turnItems snapshot.
+ */
+export function reconcileTurnItemsWithStreamingContent(
+  turnItems: SessionTurnItem[] | undefined,
+  streamingContent: string,
+): SessionTurnItem[] {
+  const items = consolidateSessionTurnItemsV2(turnItems);
+  const content = compactText(streamingContent);
+  if (items.length === 0 || !content) {
+    return items;
+  }
+  const finalIndex = items.findIndex((item) => isFinalAnswerTurnItem(item));
+  if (finalIndex < 0) {
+    return items;
+  }
+  const finalItem = items[finalIndex];
+  const itemText = compactText(finalItem.text);
+  const isProvisionalFinal = (
+    finalItem.provisional === true
+    || finalItem.terminal !== true
+    || ["pending", "running", "in_progress", "streaming"].includes(compactText(finalItem.status).toLowerCase())
+  );
+  if (
+    isProvisionalFinal
+    && content.length > itemText.length
+    && (itemText.length === 0 || content.startsWith(itemText) || content.includes(itemText))
+  ) {
+    const next = items.slice();
+    next[finalIndex] = {
+      ...finalItem,
+      text: content,
+      status: finalItem.status === "completed" ? finalItem.status : "in_progress",
+      provisional: finalItem.terminal === true ? finalItem.provisional : true,
+    };
+    return next;
+  }
+  return items;
 }
 
 export function createOptimisticActiveTurnLayer(
@@ -200,25 +258,36 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const feedbackEvents = payload.feedbackEvents
     ? visibleFeedbackEvents(mergeAgentFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents))
     : base?.feedbackEvents ?? [];
-  const turnItems = consolidateSessionTurnItemsV2(base?.turnItems, payload.turnItems);
-  const canonicalSurface = turnItems.length > 0
-    ? resolveAssistantTurnRenderSurface({
+  // Phase B: turnItems are the active-turn draft package. Prefer consolidating
+  // item identity over parallel content/transcript authority.
+  const consolidatedItems = consolidateSessionTurnItemsV2(base?.turnItems, payload.turnItems);
+  const turnItems = reconcileTurnItemsWithStreamingContent(consolidatedItems, legacyContent);
+  const hasTurnItemPackage = turnItems.length > 0;
+  let content = legacyContent;
+  let thought = legacyThought;
+  let codexTranscript = payload.codexTranscript ?? base?.codexTranscript;
+  if (hasTurnItemPackage) {
+    // Phase B: turnItems package owns answer + derived transcript.
+    const renderSurface = resolveAssistantTurnRenderSurface({
       answerProjectionContent: legacyContent,
       thoughtContent: legacyThought,
       feedbackEvents,
-      codexTranscript: payload.codexTranscript ?? base?.codexTranscript,
       turnItems,
-    })
-    : undefined;
-  const content = compactText(canonicalSurface?.answerContent) ? canonicalSurface!.answerContent : legacyContent;
-  const thought = compactText(canonicalSurface?.thoughtContent) ? canonicalSurface!.thoughtContent : legacyThought;
-  const codexTranscript = canonicalSurface?.codexTranscript ?? payload.codexTranscript ?? base?.codexTranscript;
+    });
+    content = compactText(renderSurface.answerContent)
+      ? renderSurface.answerContent
+      : legacyContent;
+    thought = compactText(renderSurface.thoughtContent)
+      ? renderSurface.thoughtContent
+      : legacyThought;
+    codexTranscript = renderSurface.codexTranscript ?? codexTranscript;
+  }
   const hasVisibleContent = hasVisibleActiveTurnProtocolContent({
     answerContent: content,
     thoughtContent: thought,
     feedbackEventCount: feedbackEvents.length,
     codexTranscript,
-    turnItems,
+    turnItems: hasTurnItemPackage ? turnItems : undefined,
   });
   if (!hasVisibleContent && payload.done) {
     return undefined;
@@ -236,7 +305,7 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
     feedbackEvents,
     timelineItems: payload.timelineItems ?? base?.timelineItems,
     codexTranscript,
-    turnItems: turnItems.length > 0 ? turnItems : undefined,
+    turnItems: hasTurnItemPackage ? turnItems : undefined,
     ledgerSeq: Math.max(normalizedLedgerSeq(base?.ledgerSeq), normalizedLedgerSeq(payload.ledgerSeq)),
   };
 }
@@ -247,7 +316,7 @@ export function activeTurnLayerToConversationMessage(
   if (!layer) {
     return undefined;
   }
-  return {
+  const message: ConversationMessage = {
     id: layer.id,
     role: "assistant",
     content: layer.answerContent,
@@ -267,6 +336,8 @@ export function activeTurnLayerToConversationMessage(
       ledgerSeq: layer.ledgerSeq,
     },
   };
+  // Project content + codexTranscript from turnItems when the package is present.
+  return projectConversationMessageFromTurnItemsV2(message);
 }
 
 export function activeTurnLayerTextLength(layer: ActiveTurnLayerState | undefined): number {
@@ -289,14 +360,36 @@ export function isActiveTurnSettledByDetail(
   if (!activeTurnId) {
     return false;
   }
-  return (detail.messages ?? []).some((message) => (
-    message.role === "assistant"
-    && String(message.metadata?.kind ?? "") !== "session_live_overlay"
-    && String(message.metadata?.kind ?? "") !== "session_active_turn_layer"
-    && messageTurnId(message) === activeTurnId
-    && (
-      hasCommittedAssistantProtocolAnswer(message)
-      || hasTerminalCanonicalTurnOutcome(message)
-    )
-  ));
+  return (detail.messages ?? []).some((message) => {
+    if (
+      message.role !== "assistant"
+      || String(message.metadata?.kind ?? "") === "session_live_overlay"
+      || String(message.metadata?.kind ?? "") === "session_active_turn_layer"
+      || messageTurnId(message) !== activeTurnId
+    ) {
+      return false;
+    }
+    // Prefer a committed turnItems package when detail carries v2 items.
+    if (hasTerminalCanonicalTurnOutcome(message) || hasCommittedAssistantProtocolAnswer(message)) {
+      return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * When detail settles the active turn, drop the live layer so detail messages
+ * (with turnItems package) become the only visible authority.
+ */
+export function settleActiveTurnLayerFromDetail(
+  layer: ActiveTurnLayerState | undefined,
+  detail: SessionDetail | undefined,
+): ActiveTurnLayerState | undefined {
+  if (!layer) {
+    return undefined;
+  }
+  if (isActiveTurnSettledByDetail(layer, detail)) {
+    return undefined;
+  }
+  return layer;
 }

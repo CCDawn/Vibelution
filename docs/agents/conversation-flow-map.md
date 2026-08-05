@@ -31,7 +31,7 @@
 | LLM 调用 | `agent.py::_invoke_llm` + `core/llm/invocation.py` | 统一经过 streaming/invoke helper，并携带 invocation metadata 与 prompt-cache partition。 |
 | 事实源 | `core/chat/turn_journal.py` | append-only turn 事件日志，用于 replay、模型上下文和可见消息投影。 |
 | 前端流式层 | `web/src/routes/sessionAssistantDeltaScheduler.ts` 和 `web/src/routes/chatActiveTurnLayer.ts` | 平滑消费 `assistant_delta`，在最终 `session_detail` 到来前维护 live assistant 响应。 |
-| 最终渲染 | `web/src/components/conversation/ConversationView.tsx` | 优先渲染 native `codexTranscript`，只在需要时回退旧 timeline/response 投影。 |
+| 最终渲染 | `web/src/components/conversation/ConversationView.tsx` | 主路径 `package_cells`（`turnItems → codexTranscript.cells`）；无包时 `legacy` 走 content/timeline。 |
 
 ## 单轮时序
 
@@ -54,27 +54,42 @@
 | session 索引/状态壳 | `workspace/chat/chat_state.json`，通过 `session_service` 写入 | session list/detail summary、active phase、last error、active task。 |
 | turn transcript/replay 事实 | `turn_journal.jsonl`，通过 `core/chat/turn_journal.py` | model-visible messages、`SessionDetail.messages`、native transcript/timeline 投影。 |
 | 运行中 assistant text/thought/tools | `SessionLiveOutputState` 和可选 live-output checkpoint | `assistant_delta` SSE、live overlay message、active-turn layer。 |
-| 最终 assistant 回复 | `turn_journal.jsonl` 里的 `assistant_message` event | 持久 `SessionDetail.messages`、`codexTranscript`、`timelineItems`、chat candidate capture。 |
+| 最终 assistant 回复 | `turn_journal.jsonl` 里的 `assistant_item_committed` / final answer | 持久 `SessionDetail.messages.turnItems`；`content` 为兼容镜像；`codexTranscript` 由 items 单向派生。 |
 | transport 顺序保护 | session ledger sequence 生成的 `ledgerSeq` | 前端 stale-event rejection 与 active-turn settlement。 |
 | runtime 调试证据 | `logs/runtime_scenes/**`、`log_info/**`、work-run records | 诊断包；不能替代 journal。 |
 | UI cache | React Query cache 与 `activeTurnLayersBySession` | 临时显示状态；必须通过 backend detail/journal 校准。 |
 
-经验规则：`assistant_delta` 是 transport，不是事实源。`codexTranscript`、`timelineItems`、前端 display plan 都是投影。`turn_journal.jsonl` 才是 durable turn record。
+经验规则：
+
+- `turn_journal.jsonl` 是 durable turn record。
+- **`SessionTurnItem[]`（`message.turnItems`）是 UI 主包 / 单一投影源。**
+- `assistant_delta` 是 transport，不是事实源；流式时按 item 身份更新 active-turn 草稿包。
+- `codexTranscript` 是 cells 渲染适配层，由 `turnItems` 单向派生，不得成为第二写入者。
+- `content` / `timelineItems` 是**故意保留的兼容面**，不是第二写入者：
+  - **新/正常 settle**：后端投影尽量产出 `turnItems`（含 content→`final_answer` 边界合成），前端走 `package_cells`。
+  - **无 `turnItems` 的旧会话 / 缓存快照**：前端 **故意** 走 `legacy`（`content` + `timelineItems`），不在客户端合成包，以免破坏历史折叠 UX。
+  - 有包时 `content`/`timeline` 不得与 package 抢 final 所有权（答案行由 cells 拥有）。
+- `assistantDisplayPlan.renderMode`：`package_cells`（主路径）/ `native_transcript`（有 native cells 但无 package 时的过渡）/ `legacy`（无包：content/timeline）。
 
 ## 投影边界
 
-- `session_detail` 是校准 snapshot。它可以是 full/windowed，也可以在运行中包含 live overlay。
-- `assistant_delta` 是低延迟流。它携带 text delta、thought delta、feedback events 和 native transcript snapshot。
-- `codexTranscript` 是 native display projection。存在且有效时，`ConversationView` 应优先使用它，并抑制重复的 legacy process/response blocks。
-- `timelineItems` 是兼容投影。它不应重复 native transcript 已经作为最终答案渲染的 assistant markdown。
-- `chatActiveTurnLayer` 是前端 in-flight bridge。最终 `session_detail` settle 同一 `turnId` 后应被清理。
+- `session_detail` 是校准 snapshot（full/windowed）。window 可瘦诊断字段，但 **final_answer 全文与 turnItems 语义不可丢**。
+- `assistant_delta` 携带 text delta、feedback、**完整 turnItems 快照**与可选 transcript；active-turn 在存在 turnItems 时只认该包。
+- `ConversationView` 主路径：`turnItems → codexTranscript.cells → package_cells 单轨渲染`。response 区块与 timeline 答案行仅 `legacy` 模式使用。
+- `timelineItems` 在 package 模式下剥离 `assistant_text`，只保留过程行（若 cells 未覆盖 process）。
+- `chatActiveTurnLayer` 是 in-flight bridge；`session_detail` settle 同一 `turnId` 且已 committed final 后必须清理。
+- **Legacy 冻结策略（故意保留）**：
+  1. 无 `turnItems` 的旧会话仍走 **content / timeline**——这是兼容路径，不是遗漏删除。
+  2. 新/正常 settle 的 detail 与 window 必须带 `turnItems`（后端 fallback：content→`final_answer`）。
+  3. 前端无包时 `renderMode=legacy`，仅覆盖过程-only、status placeholder、或尚未升级的缓存快照。
+  4. **禁止**客户端随意合成 `turnItems` 包；合成只允许在后端 projection 边界。
+  5. 确认无流量后再考虑删除纯 process 的 legacy 死分支（见优化队列）。
 
 ## 当前观察点
 
-- `core/web/services/session_service.py` 是热文件，并且职责混合：submit、scheduler、worker、projection、SSE、diagnostics、persistence 都在同一个文件里。优化前优先补 characterization tests 和窄 helper。
-- native transcript/delta 的近期历史在 `docs/superpowers/plans/2026-07-07-codex-native-transcript-chain.md` 和 `.docs/project-memory/lanes/chat-coding-surface.json`。
-- 编辑 `session_service.py`、`tests`、`web/src/api/types.ts`、`web/src/routes/ChatCodingRoute.tsx` 或 `web/src/components/conversation/**` 前，先查 active claims 并串行化。
-- 最新 `runtime_scenes` 可能只有 Launcher/browser 启动证据，没有真实 conversation events。缺少 conversation runtime evidence 时，应标记为 telemetry gap，而不是当作链路已覆盖。
+- 编辑 `session/projection.py`、`chatTurnProtocol.ts`、`assistantDisplayPlan.ts`、`ConversationView.tsx` 或 chat active-turn 前，先查 active claims 并串行化。
+- native transcript / delta 历史材料在 `docs/superpowers/plans/2026-07-07-codex-native-transcript-chain.md`；**现行权威以本文件 + SessionTurnItem 包为准**，历史计划不得覆盖。
+- 最新 `runtime_scenes` 可能只有 Launcher/browser 启动证据；缺 conversation runtime evidence 时标 telemetry gap，不当作链路已覆盖。
 
 ## 只读诊断命令
 
@@ -96,8 +111,6 @@
 
 ## 优化队列
 
-1. 先完成或审阅当前 duplicate-projection fix，再在同一批热文件里启动新代码改动。
-2. 已增加只读诊断脚本 `scripts/diagnose_session_turn.py`：输入 `sessionId` 和可选 `turnId`，输出 journal event order、terminal status、live checkpoint state、最近 runtime-scene/log 线索。
-3. 已增加离线 runtime-scene probe `scripts/probe_conversation_runtime_scene.py`，把 `session.detail_snapshot.published`、`session.assistant_delta.published`、LLM status、tool events、terminal persistence 串进同一 synthetic evidence package。
-4. 有诊断覆盖后，再拆 `session_service.py` 的稳定边界：submit/preflight、turn worker/context assembly、live output/SSE projection、final persistence。`turn_journal.py` API 保持共享边界。
-5. 前端优化继续围绕 display contract：`ledgerSeq` 拒绝旧事件、active-turn settlement、native transcript suppression rules、snapshot/delta reconciliation。
+1. ~~SessionTurnItem 包主路径（A/B/C）~~：后端 detail/window 产出 turnItems；流式 active-turn 认包；ConversationView `package_cells`；legacy 冻结为无包 fallback。
+2. 只读诊断：`scripts/diagnose_session_turn.py`、`scripts/probe_conversation_runtime_scene.py`（已有）。
+3. 后续可选：进一步收缩 `session_service` facade 边界；确认无流量后删除纯 process 的 legacy 死分支。

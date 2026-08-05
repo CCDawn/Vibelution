@@ -88,6 +88,44 @@ describe("chat turn protocol", () => {
     expect(hasCommittedAssistantProtocolAnswer(message)).toBe(true);
   });
 
+  it("does not let orphan native fragments suppress a longer committed content body", () => {
+    const fullAnswer = "继续审查后的结论更明确：仅打开状态栏不会降低缓存命中率，也不会触发新的模型调用。";
+    const surface = resolveAssistantTurnRenderProtocol({
+      answerContent: fullAnswer,
+      thoughtContent: "",
+      codexTranscript: nativeTranscript([
+        {
+          id: "orphan",
+          kind: "assistant_markdown",
+          messageId: "assistant-orphan",
+          status: "completed",
+          tone: "neutral",
+          text: "存。",
+        },
+      ]),
+    });
+    expect(surface).toBe("legacy_assistant_delta");
+
+    const message = {
+      id: "assistant-orphan",
+      role: "assistant" as const,
+      content: fullAnswer,
+      timestamp: "2026-08-05T10:00:00Z",
+      codexTranscript: nativeTranscript([
+        {
+          id: "orphan",
+          kind: "assistant_markdown",
+          messageId: "assistant-orphan",
+          status: "completed",
+          tone: "neutral",
+          text: "存。",
+        },
+      ]),
+    };
+    // Content is the committed body; orphan fragment must not fake a short committed answer alone.
+    expect(hasCommittedAssistantProtocolAnswer(message)).toBe(true);
+  });
+
   it("does not treat process-only native transcript cells as a committed answer", () => {
     const message = {
       id: "assistant-process",
@@ -427,6 +465,17 @@ describe("canonical SessionTurnItem v2 rendering", () => {
     } satisfies ConversationMessage;
 
     expect(canonicalTurnProtocol.hasCommittedAssistantProtocolAnswer(commentary)).toBe(false);
+  });
+
+  it("leaves package-less legacy messages unchanged for process/status fallback rails", () => {
+    const source = {
+      id: "message-legacy-only",
+      role: "assistant" as const,
+      content: "旧会话只有 content 的最终回答",
+      timestamp: "2026-08-05T12:00:00Z",
+    };
+    const projected = canonicalTurnProtocol.projectConversationMessageFromTurnItemsV2(source);
+    expect(projected).toEqual(source);
   });
 
   it("keeps terminal errors visible without promoting them to final answer content", () => {

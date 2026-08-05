@@ -9,6 +9,7 @@ their own packs. Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -988,7 +989,14 @@ def _normalize_messages(
                     ordered_timeline_events,
                     content,
                 )
-                include_assistant_text = False
+                # Keep process/commentary from the ledger, but still project the committed
+                # final answer when no remaining assistant_text covers it. Otherwise short
+                # orphan capture fragments or intermediate commentary alone suppress the
+                # real answer in the UI (timeline owns assistant_text; response is hidden).
+                include_assistant_text = not s._assistant_timeline_covers_final_content(
+                    timeline_feedback_events,
+                    content,
+                )
             elif ordered_timeline_events:
                 timeline_feedback_events = []
                 include_assistant_text = False
@@ -1013,16 +1021,16 @@ def _normalize_messages(
                     or raw_metadata.get("providerFailure") is True
                 )
             )
-            # Window payloads are used for chat switch / list restore. Building full
-            # native codexTranscript (cells + rolloutEvents) dominates payload size.
-            # Keep full projection for live streaming, full scope, and terminal errors.
-            should_build_codex_transcript = (
+            # Phase A: assistant messages always carry SessionTurnItem v2 as the UI
+            # source of truth. codexTranscript is a one-way renderer projection.
+            # Window payloads slim heavy diagnostics but never drop final-answer text.
+            should_build_full_codex_transcript = (
                 normalized_transcript_scope == "all"
                 or is_streaming_message
                 or is_terminal_error_message
             )
             codex_transcript = None
-            if should_build_codex_transcript:
+            if should_build_full_codex_transcript:
                 codex_transcript = s._build_codex_transcript_projection(
                     message_id=entry["id"],
                     role=role,
@@ -1032,7 +1040,7 @@ def _normalize_messages(
                     streaming=is_streaming_message,
                 )
             turn_items: list[dict[str, Any]] = []
-            if is_terminal_error_message:
+            if role == "assistant":
                 turn_items = s._build_session_turn_items_projection(
                     session_id=conversation_id,
                     turn_id=turn_id,
@@ -1040,24 +1048,64 @@ def _normalize_messages(
                     content=content,
                     thought=thought,
                     codex_transcript=codex_transcript,
-                    done=True,
+                    done=not is_streaming_message,
                     source="session_detail",
-                    metadata=raw_metadata,
+                    metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
                 )
+                if (
+                    turn_items
+                    and normalized_transcript_scope == "window"
+                    and not is_streaming_message
+                ):
+                    turn_items = s._slim_session_turn_items_for_window_payload(turn_items)
                 if turn_items:
                     entry["turnItems"] = turn_items
-                terminal_error_item = s._terminal_error_turn_item(turn_items)
-                if terminal_error_item:
-                    codex_transcript = s._build_terminal_error_codex_transcript_projection(
-                        message_id=entry["id"],
-                        error_item=terminal_error_item,
-                    )
+                if is_terminal_error_message:
+                    terminal_error_item = s._terminal_error_turn_item(turn_items)
+                    if terminal_error_item:
+                        codex_transcript = s._build_terminal_error_codex_transcript_projection(
+                            message_id=entry["id"],
+                            error_item=terminal_error_item,
+                        )
             if (
                 codex_transcript
                 and normalized_transcript_scope == "window"
                 and not is_streaming_message
             ):
                 codex_transcript = s._slim_codex_transcript_for_window_payload(codex_transcript)
+            # Prefer transcript derived from turnItems (single package → cells).
+            if (
+                role == "assistant"
+                and turn_items
+                and (
+                    not codex_transcript
+                    or (
+                        normalized_transcript_scope == "window"
+                        and not is_streaming_message
+                        and not is_terminal_error_message
+                    )
+                )
+            ):
+                derived = s._build_codex_transcript_from_turn_items(
+                    message_id=entry["id"],
+                    turn_items=turn_items,
+                    streaming=is_streaming_message,
+                    window_slimmed=normalized_transcript_scope == "window" and not is_streaming_message,
+                )
+                if derived:
+                    codex_transcript = derived
+            if (
+                role == "assistant"
+                and not codex_transcript
+                and content
+                and normalized_transcript_scope == "window"
+                and not is_streaming_message
+                and not is_terminal_error_message
+            ):
+                codex_transcript = s._build_window_final_answer_transcript(
+                    message_id=entry["id"],
+                    content=content,
+                )
             if codex_transcript:
                 entry["codexTranscript"] = codex_transcript
         if attachments:
@@ -1423,6 +1471,21 @@ def _session_detail_window_requested(
     )
 
 
+def _stamp_turn_items_message_id(items: list[dict[str, Any]], message_id: str) -> list[dict[str, Any]]:
+    normalized_message_id = str(message_id or "").strip()
+    if not normalized_message_id:
+        return list(items or [])
+    stamped: list[dict[str, Any]] = []
+    for item in list(items or []):
+        if not isinstance(item, dict):
+            continue
+        next_item = dict(item)
+        if not str(next_item.get("messageId") or "").strip():
+            next_item["messageId"] = normalized_message_id
+        stamped.append(next_item)
+    return stamped
+
+
 def _build_session_turn_items_projection(
     *,
     session_id: str,
@@ -1435,13 +1498,13 @@ def _build_session_turn_items_projection(
     source: str = "assistant_delta",
     metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    """Project SessionTurnItem v2 for a turn.
+
+    Prefer journal assistant_item_committed records (canonical). Fall back to a
+    deterministic final_answer item from content so window/detail always have a
+    single UI source of truth for the committed body.
+    """
     s = _service()
-    canonical_items = s.conversation_turn_items_from_events(
-        s._load_session_conversation_events_cached(str(session_id or "").strip()),
-        turn_id=str(turn_id or "").strip(),
-    )
-    if canonical_items:
-        return canonical_items
     normalized_metadata = dict(metadata or {})
     normalized_turn_id = str(
         turn_id
@@ -1449,6 +1512,15 @@ def _build_session_turn_items_projection(
         or normalized_metadata.get("turn_id")
         or ""
     ).strip()
+    normalized_message_id = str(message_id or "").strip()
+    # Require turn_id for journal projection so we never return other turns' items.
+    if normalized_turn_id:
+        canonical_items = s.conversation_turn_items_from_events(
+            s._load_session_conversation_events_cached(str(session_id or "").strip()),
+            turn_id=normalized_turn_id,
+        )
+        if canonical_items:
+            return s._stamp_turn_items_message_id(canonical_items, normalized_message_id)
     if (
         str(normalized_metadata.get("kind") or "").strip() == "turn_error"
         or normalized_metadata.get("providerFailure") is True
@@ -1462,7 +1534,6 @@ def _build_session_turn_items_projection(
                 metadata=normalized_metadata,
             )
         ]
-    normalized_message_id = str(message_id or "").strip()
     if not normalized_message_id:
         return []
     transcript_cells = list((codex_transcript or {}).get("cells") or [])
@@ -1470,31 +1541,71 @@ def _build_session_turn_items_projection(
     assistant_markdown_text = s._session_turn_assistant_markdown_text(transcript_cells)
     thought_text = s._sanitize_message_content("assistant", thought)
     items: list[dict[str, Any]] = []
-    agent_text = content_text or assistant_markdown_text
+    # Prefer explicit final_answer cells from transcript over raw content when present.
+    final_cell_text = ""
+    for cell in transcript_cells:
+        if not isinstance(cell, dict):
+            continue
+        if str(cell.get("kind") or "").strip() != "assistant_markdown":
+            continue
+        phase = str(cell.get("phase") or "").strip().lower()
+        if phase == "commentary" or phase == "interim":
+            continue
+        text = str(cell.get("text") or cell.get("markdown") or "").strip()
+        if phase == "final_answer" or cell.get("terminal") is True:
+            final_cell_text = text
+            break
+        if not final_cell_text and text:
+            final_cell_text = text
+    agent_text = content_text or final_cell_text or assistant_markdown_text
     if agent_text:
+        item_id = s._session_turn_agent_message_item_id(session_id, normalized_turn_id or "turn")
         items.append(
             s._compact_codex_record(
                 {
-                    "id": s._session_turn_agent_message_item_id(session_id, normalized_turn_id),
-                    "type": "agent_message",
+                    "version": 2,
+                    "id": f"{item_id}:0",
+                    "itemId": item_id,
+                    "type": "assistant_message",
+                    "kind": "assistant_message",
+                    "channel": "answer",
+                    "phase": "final_answer",
                     "status": "completed" if done else "in_progress",
+                    "provisional": not bool(done),
+                    "terminal": bool(done),
+                    "revision": 0,
+                    "sequence": 1,
+                    "sessionId": str(session_id or "").strip(),
                     "turnId": normalized_turn_id,
                     "messageId": normalized_message_id,
                     "source": source,
+                    "protocol": "session_detail",
                     "text": agent_text,
                 }
             )
         )
     if thought_text:
+        reasoning_id = f"{s._session_turn_item_base_id(session_id, normalized_turn_id or 'turn')}-reasoning"
         items.append(
             s._compact_codex_record(
                 {
-                    "id": f"{s._session_turn_item_base_id(session_id, normalized_turn_id)}-reasoning",
+                    "version": 2,
+                    "id": f"{reasoning_id}:0",
+                    "itemId": reasoning_id,
                     "type": "reasoning",
+                    "kind": "reasoning",
+                    "channel": "analysis",
+                    "phase": "reasoning",
                     "status": "completed" if done else "in_progress",
+                    "provisional": not bool(done),
+                    "terminal": False,
+                    "revision": 0,
+                    "sequence": 0,
+                    "sessionId": str(session_id or "").strip(),
                     "turnId": normalized_turn_id,
                     "messageId": normalized_message_id,
                     "source": source,
+                    "protocol": "session_detail",
                     "text": thought_text,
                 }
             )
@@ -1511,8 +1622,246 @@ def _build_session_turn_items_projection(
             source=source,
         )
         if item:
+            # Promote legacy cell-derived rows to v2 identity when missing.
+            if not item.get("version"):
+                item["version"] = 2
+            if not item.get("itemId"):
+                item["itemId"] = str(item.get("id") or f"{normalized_message_id}-cell-{index}")
+            if not item.get("kind"):
+                item["kind"] = str(item.get("type") or "tool_call")
             items.append(item)
     return items
+
+
+def _slim_session_turn_items_for_window_payload(
+    items: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Keep turn-item semantics for window payloads; only trim heavy tool text.
+
+    Final-answer and non-commentary assistant text must stay complete so the UI
+    has a single authoritative body without length heuristics.
+    """
+    s = _service()
+    slim_items: list[dict[str, Any]] = []
+    for item in list(items or []):
+        if not isinstance(item, dict):
+            continue
+        next_item = dict(item)
+        kind = str(next_item.get("kind") or next_item.get("type") or "").strip().lower()
+        phase = str(next_item.get("phase") or "").strip().lower()
+        keep_full_text = (
+            kind in {"assistant_message", "agent_message"}
+            and phase != "commentary"
+            and phase != "interim"
+        ) or phase == "final_answer" or next_item.get("terminal") is True
+        for field in ("text", "summary", "title"):
+            value = next_item.get(field)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            if keep_full_text and field == "text":
+                continue
+            if len(value) > 400:
+                next_item[field] = f"{value[:400]}…"
+        # Drop unbounded diagnostic blobs from window payloads.
+        diagnostic = next_item.get("diagnosticSummary")
+        if isinstance(diagnostic, dict) and len(json.dumps(diagnostic, ensure_ascii=False)) > 1200:
+            next_item["diagnosticSummary"] = {
+                key: diagnostic[key]
+                for key in (
+                    "reasonCode",
+                    "reasonSummary",
+                    "httpStatus",
+                    "providerErrorType",
+                    "provider",
+                    "model",
+                    "eventCode",
+                    "traceId",
+                )
+                if key in diagnostic
+            }
+        compact = s._compact_codex_record(next_item)
+        if compact:
+            slim_items.append(compact)
+    return slim_items
+
+
+def _build_codex_transcript_from_turn_items(
+    *,
+    message_id: str,
+    turn_items: list[dict[str, Any]] | None,
+    streaming: bool = False,
+    window_slimmed: bool = False,
+) -> dict[str, Any] | None:
+    """One-way codexTranscript projection from SessionTurnItem v2 (renderer adapter)."""
+    s = _service()
+    normalized_message_id = str(message_id or "").strip()
+    items = [item for item in list(turn_items or []) if isinstance(item, dict)]
+    if not normalized_message_id or not items:
+        return None
+    cells: list[dict[str, Any]] = []
+    for item in items:
+        text = str(item.get("text") or item.get("summary") or item.get("title") or "").strip()
+        kind = str(item.get("kind") or item.get("type") or "").strip().lower()
+        phase = str(item.get("phase") or "").strip().lower()
+        status = str(item.get("status") or ("running" if streaming else "completed")).strip() or "completed"
+        tone = "error" if status == "failed" else ("running" if status in {"running", "in_progress", "pending"} else "neutral")
+        render_id = str(
+            item.get("callId")
+            or item.get("itemId")
+            or item.get("id")
+            or f"{normalized_message_id}-{len(cells) + 1}"
+        ).strip()
+        cell_base = {
+            "id": render_id,
+            "messageId": str(item.get("messageId") or normalized_message_id).strip(),
+            "status": status,
+            "tone": tone,
+            "channel": item.get("channel"),
+            "phase": item.get("phase"),
+            "terminal": item.get("terminal"),
+            "provisional": item.get("provisional"),
+            "sourceItemId": str(item.get("itemId") or item.get("id") or "").strip() or None,
+            "diagnosticSummary": item.get("diagnosticSummary"),
+        }
+        if kind in {"assistant_message", "agent_message", "commentary"} or phase in {
+            "final_answer",
+            "commentary",
+            "interim",
+        }:
+            if not text:
+                continue
+            cells.append(
+                s._compact_codex_record(
+                    {
+                        **cell_base,
+                        "kind": "assistant_markdown",
+                        "text": text,
+                        "channel": item.get("channel")
+                        or ("commentary" if phase in {"commentary", "interim"} or kind == "commentary" else "answer"),
+                        "phase": item.get("phase")
+                        or ("commentary" if kind == "commentary" else "final_answer"),
+                    }
+                )
+            )
+            continue
+        if kind in {"reasoning", "analysis"} or phase == "reasoning":
+            if not text:
+                continue
+            cells.append(
+                s._compact_codex_record(
+                    {
+                        **cell_base,
+                        "kind": "reasoning_summary",
+                        "text": text,
+                        "summary": text,
+                    }
+                )
+            )
+            continue
+        if kind in {"tool_call", "tool", "command"} or phase == "tool_call":
+            cells.append(
+                s._compact_codex_record(
+                    {
+                        **cell_base,
+                        "kind": "tool_call",
+                        "title": str(item.get("toolName") or item.get("title") or "Tool").strip() or "Tool",
+                        "text": text or None,
+                        "summary": str(item.get("summary") or "").strip() or None,
+                    }
+                )
+            )
+            continue
+        if kind in {"error", "turn_error"} or phase == "turn_failed":
+            if not text:
+                continue
+            cells.append(
+                s._compact_codex_record(
+                    {
+                        **cell_base,
+                        "kind": "error_notice",
+                        "tone": "error",
+                        "text": text,
+                        "terminal": True,
+                    }
+                )
+            )
+            continue
+        if kind == "status" or phase == "status":
+            if not text:
+                continue
+            cells.append(
+                s._compact_codex_record(
+                    {
+                        **cell_base,
+                        "kind": "status",
+                        "text": text,
+                    }
+                )
+            )
+    cells = [cell for cell in cells if cell]
+    if not cells:
+        return None
+    return s._compact_codex_record(
+        {
+            "version": 1,
+            "source": "native",
+            "messageId": normalized_message_id,
+            "streaming": bool(streaming),
+            "windowSlimmed": bool(window_slimmed),
+            "cells": cells,
+            "toolCalls": [],
+            "terminalOperations": [],
+            "terminalSessions": [],
+            "modelObservations": [],
+            "rolloutEvents": [],
+        }
+    )
+
+
+def _build_window_final_answer_transcript(
+    *,
+    message_id: str,
+    content: Any,
+) -> dict[str, Any] | None:
+    """Minimal native transcript for completed window payloads.
+
+    Carries only the committed final answer cell so frontend ownership is explicit
+    without shipping tool rollout diagnostics.
+    """
+    s = _service()
+    normalized_message_id = str(message_id or "").strip()
+    content_text = s._sanitize_message_content("assistant", content)
+    if not normalized_message_id or not content_text:
+        return None
+    return s._compact_codex_record(
+        {
+            "version": 1,
+            "source": "native",
+            "messageId": normalized_message_id,
+            "streaming": False,
+            "windowSlimmed": True,
+            "cells": [
+                s._compact_codex_record(
+                    {
+                        "id": f"{normalized_message_id}-assistant-markdown",
+                        "kind": "assistant_markdown",
+                        "messageId": normalized_message_id,
+                        "status": "completed",
+                        "tone": "neutral",
+                        "channel": "answer",
+                        "phase": "final_answer",
+                        "terminal": True,
+                        "text": content_text,
+                    }
+                )
+            ],
+            "toolCalls": [],
+            "terminalOperations": [],
+            "terminalSessions": [],
+            "modelObservations": [],
+            "rolloutEvents": [],
+        }
+    )
 
 
 def _slim_codex_transcript_for_window_payload(
@@ -1523,6 +1872,9 @@ def _slim_codex_transcript_for_window_payload(
     Chat switch loads use transcript_scope=window. Full cells/rolloutEvents can
     dominate the response (often >80% of JSON). Keep a compact surface so the
     UI can still render error/tool summaries without shipping full diagnostics.
+
+    Never truncate non-commentary assistant_markdown: that text is the final
+    answer owner and must match message.content for display ownership.
     """
     s = _service()
     if not isinstance(transcript, dict):
@@ -1540,7 +1892,10 @@ def _slim_codex_transcript_for_window_payload(
             if not isinstance(text, str) or not text.strip():
                 text = cell.get("markdown") if isinstance(cell.get("markdown"), str) else ""
             text = str(text or "").strip()
-            if len(text) > 400:
+            cell_kind = str(cell.get("kind") or "").strip()
+            cell_phase = str(cell.get("phase") or "").strip().lower()
+            keep_full_answer_text = cell_kind == "assistant_markdown" and cell_phase != "commentary"
+            if len(text) > 400 and not keep_full_answer_text:
                 text = f"{text[:400]}…"
             slim_cell = s._compact_codex_record(
                 {
@@ -1551,6 +1906,7 @@ def _slim_codex_transcript_for_window_payload(
                     "status": cell.get("status"),
                     "tone": cell.get("tone"),
                     "phase": cell.get("phase"),
+                    "channel": cell.get("channel"),
                     "terminal": cell.get("terminal"),
                     "text": text or None,
                     "failureCount": cell.get("failureCount"),

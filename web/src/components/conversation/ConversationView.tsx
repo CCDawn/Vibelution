@@ -71,6 +71,10 @@ import {
 } from "./conversationSlashCommandSuggestions";
 import { buildAgentMessageRenderState, type AgentMessageRenderState } from "./agentMessageRenderState";
 import {
+  filterServerTimelineItemsForDisplayPlan,
+  resolveAssistantDisplayPlan,
+} from "./assistantDisplayPlan";
+import {
   compactStreamingStatusPlaceholder,
   isInternalStreamingStatusStage,
   isNoFinalAnswerStatusContent,
@@ -258,7 +262,6 @@ import {
   operationVisualTone,
   processSummaryIconKind,
   rolloutTraceEventLabel as resolveRolloutTraceEventLabel,
-  shouldRenderCodexTranscriptSurface as resolveShouldRenderCodexTranscriptSurface,
   shouldRenderCompactActiveTurnPlaceholder as resolveShouldRenderCompactActiveTurnPlaceholder,
 } from "./conversationOperationPresentation";
 import {
@@ -1967,10 +1970,6 @@ export function ConversationView({
         ) : null}
       </div>
     );
-  }
-
-  function shouldRenderCodexTranscriptSurface(surface?: CodexTranscriptSurface) {
-    return resolveShouldRenderCodexTranscriptSurface(surface);
   }
 
   function shouldRenderCompactActiveTurnPlaceholder(
@@ -3807,27 +3806,28 @@ export function ConversationView({
             );
             const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
             const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
+            // Phase C: display plan picks package_cells vs legacy; single track for final answer.
+            const displayPlanSeed = resolveAssistantDisplayPlan({
+              message,
+              surface: codexTranscriptSurface,
+              serverTimelineItems: message.timelineItems,
+            });
             const shouldRenderLegacyTurnError = Boolean(
-              turnErrorMessage && !codexTranscriptSurface?.suppressProjectedError,
+              turnErrorMessage && !displayPlanSeed.suppressProjectedError,
             );
-            const nativeCodexTranscriptPrimary = codexTranscriptSurface?.mode === "native";
-            const nativeAssistantTranscriptHasAnswer = Boolean(
-              nativeCodexTranscriptPrimary && codexTranscriptSurface?.hasAssistantMarkdown,
-            );
-            const timelineHasAssistantText = (message.timelineItems ?? []).some((item) => item.kind === "assistant_text");
             const timelineOptions = {
               lang,
-              includeAssistantText: timelineHasAssistantText && !nativeAssistantTranscriptHasAnswer,
+              includeAssistantText: displayPlanSeed.includeTimelineAssistantText,
             };
-            const timelineServerItems = nativeAssistantTranscriptHasAnswer
-              && !(message.timelineItems ?? []).some((item) => item.kind !== "assistant_text")
-              ? undefined
-              : message.timelineItems;
+            const timelineServerItems = filterServerTimelineItemsForDisplayPlan(
+              message.timelineItems,
+              displayPlanSeed,
+            );
             const agentMessageTimelineItems = buildAgentMessageTimelineItems(
               agentMessage,
               operationGroups.timeline,
               timelineOptions,
-              timelineServerItems,
+              timelineServerItems as typeof message.timelineItems | undefined,
             );
             const hasAgentMessageTimeline =
               message.role === "assistant"
@@ -3836,10 +3836,17 @@ export function ConversationView({
               && !agentInboxMessage
               && !groupTranscriptMessage
               && agentMessageTimelineItems.length > 0;
-            const timelineRendersAssistantText =
-              hasAgentMessageTimeline
-              && agentMessageTimelineItems.some((item) => item.kind === "assistant_text");
-            const shouldRenderNativeProcessTimeline = nativeAssistantTranscriptHasAnswer && hasAgentMessageTimeline;
+            const displayPlan = resolveAssistantDisplayPlan({
+              message,
+              surface: codexTranscriptSurface,
+              serverTimelineItems: message.timelineItems,
+              builtTimelineItems: agentMessageTimelineItems,
+              hasAgentMessageTimeline,
+            });
+            // Package/native ownership never lets timeline re-own the final body.
+            const timelineRendersAssistantText = displayPlan.renderMode === "legacy"
+              && displayPlan.timelineOwnsFinalAnswer;
+            const shouldRenderNativeProcessTimeline = displayPlan.shouldRenderNativeProcessAlongsideAnswer;
             const showUserContent = agentSections.hasUserContent;
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = Boolean(message.streaming)
@@ -3854,7 +3861,7 @@ export function ConversationView({
               ? getCachedResponseSegments(responseText)
               : [];
             const codexTranscriptNode = (
-              shouldRenderCodexTranscriptSurface(codexTranscriptSurface)
+              displayPlan.shouldRenderCodexSurface
               && !agentInboxMessage
               && !groupTranscriptMessage
             )
@@ -3926,7 +3933,14 @@ export function ConversationView({
               }
               return renderAgentProcessDetails(true);
             };
-            const responseSectionNode = !codexTranscriptSurface?.suppressProjectedResponse && showResponseBlock && !isStreamingStatusPlaceholder && !timelineRendersAssistantText ? (
+            // package_cells / native_transcript: final body lives in codex cells only.
+            const responseSectionNode = (
+              displayPlan.renderMode === "legacy"
+              && !displayPlan.suppressProjectedResponse
+              && showResponseBlock
+              && !isStreamingStatusPlaceholder
+              && !timelineRendersAssistantText
+            ) ? (
               <AgentResponseSectionView
                 answerKey={rowIdentity.answerKey}
                 answerContentSectionIds={agentRenderState.answerContentSectionIds}
@@ -3945,28 +3959,45 @@ export function ConversationView({
                   )}
               </AgentResponseSectionView>
             ) : null;
-            const processNode = codexTranscriptSurface?.suppressProjectedProcess ? null : shouldRenderNativeProcessTimeline ? (
-              renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
-            ) : answerOnlyProcessMode && !timelineRendersAssistantText ? (
-              renderAnswerOnlyProcessGroup(
-                message.id,
-                operationGroups.timeline,
-                processDefaultExpanded,
-                renderProcessDetails,
-                isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(responseText, compactPreview) : undefined,
-                agentRenderState.processSectionIds,
-              )
-            ) : hasAgentMessageTimeline ? (
-              renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
-            ) : hasFeedbackTimeline ? (
-              renderFeedbackTimelineGroup(
-                message.id,
-                operationGroups.timeline,
-                false,
-                agentRenderState.processSectionIds,
-              )
-            ) : renderAgentProcessDetails();
-            const turnStatusNode = !codexTranscriptSurface?.suppressProjectedTurnStatus && noFinalAnswerStatusText ? (
+            // Process rail: suppressed when cells already carry tools; otherwise timeline/legacy.
+            const processNode = displayPlan.suppressProjectedProcess
+              ? null
+              : shouldRenderNativeProcessTimeline
+                ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
+                : displayPlan.renderMode === "package_cells"
+                  // Package answer is in cells; only render non-answer process timeline if any.
+                  ? (
+                    hasAgentMessageTimeline
+                      ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
+                      : hasFeedbackTimeline
+                        ? renderFeedbackTimelineGroup(
+                          message.id,
+                          operationGroups.timeline,
+                          false,
+                          agentRenderState.processSectionIds,
+                        )
+                        : null
+                  )
+                  : answerOnlyProcessMode && !timelineRendersAssistantText
+                    ? renderAnswerOnlyProcessGroup(
+                      message.id,
+                      operationGroups.timeline,
+                      processDefaultExpanded,
+                      renderProcessDetails,
+                      isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(responseText, compactPreview) : undefined,
+                      agentRenderState.processSectionIds,
+                    )
+                    : hasAgentMessageTimeline
+                      ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
+                      : hasFeedbackTimeline
+                        ? renderFeedbackTimelineGroup(
+                          message.id,
+                          operationGroups.timeline,
+                          false,
+                          agentRenderState.processSectionIds,
+                        )
+                        : renderAgentProcessDetails();
+            const turnStatusNode = !displayPlan.suppressProjectedTurnStatus && noFinalAnswerStatusText ? (
               <div className={styles.turnStatusNote} role="status" aria-live="polite">
                 <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
                 <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
@@ -4039,7 +4070,9 @@ export function ConversationView({
                     hidden
                     data-codex-transcript-cell-count={codexTranscriptCells.length}
                     data-codex-transcript-surface-mode={codexTranscriptSurface?.mode ?? "empty"}
-                    data-codex-transcript-native-primary={nativeCodexTranscriptPrimary ? "true" : "false"}
+                    data-codex-transcript-native-primary={displayPlan.nativePrimary ? "true" : "false"}
+                    data-assistant-render-mode={displayPlan.renderMode}
+                    data-assistant-has-turn-item-package={displayPlan.hasTurnItemPackage ? "true" : "false"}
                     data-codex-transcript-projection-gap-reason={codexTranscriptSurface?.projectionGap?.reason ?? ""}
                     data-codex-transcript-projection-gap-projected-cell-count={codexTranscriptSurface?.projectionGap?.projectedCellCount ?? 0}
                   />

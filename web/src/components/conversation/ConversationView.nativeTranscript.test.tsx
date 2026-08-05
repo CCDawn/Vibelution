@@ -632,7 +632,10 @@ describe("ConversationView native Codex transcript surface", () => {
 
     expect(html).toContain('data-thought-expanded="false"');
     expect(html).toContain("codexTranscriptReasoningInlinePreview");
-    expect(html).toContain("确认了：当前cli_tool环境是bash");
+    // Markdown/inline preview may normalize word boundaries around Latin tokens.
+    expect(html).toContain("确认了：当前");
+    expect(html).toContain("cli_tool");
+    expect(html).toContain("bash");
     expect(html).not.toContain("codexTranscriptReasoningText");
     expect(html).not.toContain("statusSpinner");
   });
@@ -1373,6 +1376,9 @@ describe("ConversationView native Codex transcript surface", () => {
 
     expect(html).toContain("legacy process renders");
     expect(html).toContain("data-agent-process-kind");
+    // No turnItems package → frozen legacy rails (response + process), not package_cells.
+    expect(html).toContain('data-assistant-render-mode="legacy"');
+    expect(html).toContain('data-assistant-has-turn-item-package="false"');
     expect(html).not.toContain('data-codex-transcript-surface="true"');
     expect(html).toContain('data-codex-transcript-surface-mode="empty"');
     expect(html).toContain('data-codex-transcript-projection-gap-reason="native_missing"');
