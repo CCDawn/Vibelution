@@ -216,6 +216,12 @@ import {
   restoreSessionTimelineScroll,
 } from "./conversationSessionScrollMemory";
 import {
+  conversationPerformanceNowMs,
+  conversationTurnRowPropsAreEqual,
+  transcriptCellSequenceMatches,
+  type ConversationTurnRowProps,
+} from "./conversationTurnRowMemo";
+import {
   extractComposerImageDropFiles,
   extractComposerSessionReferenceDrop,
   hasComposerImageDragPayload,
@@ -296,98 +302,6 @@ const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
-
-function transcriptCellSequenceMatches(
-  previous: readonly CodexTranscriptCell[],
-  next: readonly CodexTranscriptCell[],
-) {
-  return previous.length === next.length && previous.every((cell, index) => cell === next[index]);
-}
-
-function conversationPerformanceNowMs() {
-  return typeof performance === "undefined" ? Date.now() : performance.now();
-}
-
-type ConversationTurnRowProps = {
-  message: ConversationMessage;
-  previousMessage?: ConversationMessage;
-  agentMessage?: AgentMessage;
-  agentRenderState?: AgentMessageRenderState;
-  previousAgentRenderState?: AgentMessageRenderState;
-  codexTranscriptCells?: CodexTranscriptCell[];
-  rowIdentity: AgentMessageTimelineRowIdentity;
-  defaultResponseExpanded: boolean;
-  latestUserMessageId: string;
-  editingMessageId?: string;
-  editUserMessageLabel?: string;
-  editUserMessageDisabled?: boolean;
-  composerPlaceholder: string;
-  answerOnlyProcessMode: boolean;
-  showMentalSnapshots: boolean;
-  lang: "zh" | "en";
-  assistantLabel: string;
-  assistantAvatarImageUrl?: string;
-  assistantAvatarFallback?: string;
-  userLabel: string;
-  userAvatarLabel: string;
-  userAvatarImageUrl?: string;
-  operationLabels: {
-    thought: string;
-    mental: string;
-    status: string;
-  };
-  resolveTurnAvatar?: (message: ConversationMessage) => TurnAvatarResolution | undefined;
-  onEditUserMessage?: (message: ConversationMessage) => void;
-  sectionExpansionForMessage: Record<string, boolean>;
-  computerUseStateForMessage: string;
-  imageArtifactUrlsBeforeMessage?: Set<string>;
-  renderTurn: () => ReactNode;
-};
-
-function agentMessageTimelineRowIdentityIsEqual(
-  previous: AgentMessageTimelineRowIdentity,
-  next: AgentMessageTimelineRowIdentity,
-) {
-  return previous.messageId === next.messageId
-    && previous.rowKey === next.rowKey
-    && previous.messageKey === next.messageKey
-    && previous.processKey === next.processKey
-    && previous.answerKey === next.answerKey;
-}
-
-function conversationTurnRowPropsAreEqual(
-  previous: ConversationTurnRowProps,
-  next: ConversationTurnRowProps,
-) {
-  return previous.message === next.message
-    && previous.previousMessage === next.previousMessage
-    && previous.agentMessage === next.agentMessage
-    && previous.agentRenderState === next.agentRenderState
-    && previous.previousAgentRenderState === next.previousAgentRenderState
-    && previous.codexTranscriptCells === next.codexTranscriptCells
-    && agentMessageTimelineRowIdentityIsEqual(previous.rowIdentity, next.rowIdentity)
-    && previous.defaultResponseExpanded === next.defaultResponseExpanded
-    && previous.latestUserMessageId === next.latestUserMessageId
-    && previous.editingMessageId === next.editingMessageId
-    && previous.editUserMessageLabel === next.editUserMessageLabel
-    && previous.editUserMessageDisabled === next.editUserMessageDisabled
-    && previous.composerPlaceholder === next.composerPlaceholder
-    && previous.answerOnlyProcessMode === next.answerOnlyProcessMode
-    && previous.showMentalSnapshots === next.showMentalSnapshots
-    && previous.lang === next.lang
-    && previous.assistantLabel === next.assistantLabel
-    && previous.assistantAvatarImageUrl === next.assistantAvatarImageUrl
-    && previous.assistantAvatarFallback === next.assistantAvatarFallback
-    && previous.userLabel === next.userLabel
-    && previous.userAvatarLabel === next.userAvatarLabel
-    && previous.userAvatarImageUrl === next.userAvatarImageUrl
-    && previous.operationLabels === next.operationLabels
-    && previous.resolveTurnAvatar === next.resolveTurnAvatar
-    && previous.onEditUserMessage === next.onEditUserMessage
-    && previous.sectionExpansionForMessage === next.sectionExpansionForMessage
-    && previous.computerUseStateForMessage === next.computerUseStateForMessage
-    && previous.imageArtifactUrlsBeforeMessage === next.imageArtifactUrlsBeforeMessage;
-}
 
 const ConversationTurnRow = React.memo(function ConversationTurnRow({
   renderTurn,

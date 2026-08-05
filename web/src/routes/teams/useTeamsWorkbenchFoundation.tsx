@@ -12,6 +12,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
   type ReactNode,
 } from "react";
 import {
@@ -21,13 +22,12 @@ import {
 import { createExperimentWorkspaceActions } from "./experimentWorkspaceActions";
 import { useTeamsSecondaryDataQueries } from "./useTeamsSecondaryDataQueries";
 import { useTeamsMutationBundle } from "./useTeamsMutationBundle";
-import { useTeamsScComposition } from "./useTeamsScComposition";
-import { useTeamsWorkbenchScLayer } from "./useTeamsWorkbenchScLayer";
 import { buildResearchStageAgentBindingsByStage } from "./researchStageAgentBindings";
 import { createTeamsResearchNavigation } from "./createTeamsResearchNavigation";
 import { createResearchStageLaunchHandlers } from "./createResearchStageLaunchHandlers";
 import { createSourceCollectionStageAgentHelpers } from "./createSourceCollectionStageAgentHelpers";
 import { buildExperimentWorkspacePendingFlags } from "./buildExperimentWorkspacePendingFlags";
+import { buildTeamsScLayerInput } from "./buildTeamsScLayerInput";
 import { useSourceCollectionWorkspace } from "./useSourceCollectionWorkspace";
 import { useResearchExperimentWorkspace } from "./useResearchExperimentWorkspace";
 import {
@@ -579,9 +579,11 @@ export function useTeamsWorkbenchFoundation({
     setSelectedNodeId,
   });
 
-  // Late-bound guards: SC composition both consumes launch handlers and produces these flags.
-  let selectedTeamStartResearchStagePending = false;
-  let researchStageCanLaunch = true;
+  // Late-bound guards: SC composition (lazy phase) updates this ref after mount.
+  const researchLaunchGuardRef = useRef({ startPending: false, canLaunch: true }) as MutableRefObject<{
+    startPending: boolean;
+    canLaunch: boolean;
+  }>;
   const {
     launchResearchStage,
     handleResearchPrimaryAction,
@@ -590,8 +592,8 @@ export function useTeamsWorkbenchFoundation({
     lang,
     selectedTeam,
     sourceCollectionDraft,
-    getSelectedTeamStartResearchStagePending: () => selectedTeamStartResearchStagePending,
-    getResearchStageCanLaunch: () => researchStageCanLaunch,
+    getSelectedTeamStartResearchStagePending: () => researchLaunchGuardRef.current.startPending,
+    getResearchStageCanLaunch: () => researchLaunchGuardRef.current.canLaunch,
     challengeCupResearchTeamSelected,
     researchStageProjectAgentTasks,
     startResearchStageRoundMutation,
@@ -922,109 +924,76 @@ export function useTeamsWorkbenchFoundation({
     () => resolveResearchStageUnlock(researchPrimaryActionInput),
     [researchPrimaryActionInput]
   );
-    // Runtime summary optional.
-  const scLayer = useTeamsWorkbenchScLayer({
-    sourceCollectionWorkspace,
-    mutationBundle,
-    lang,
-    selectedTeam,
-    effectiveTeamId,
-    researchWorkflowTeamSelected,
-    pageVisible,
-    researchStagePhases,
-    researchStageRoundStatus,
-    researchStageProjectAgentTasks,
-    teamWorkflowCandidates,
-    teamWorkflowCandidatesQuery,
-    teamWorkflowCandidateListEnabled,
-    teamWorkflowSourceQualityStatus,
-    teamWorkflowSourceQualityStatusQuery,
-    teamWorkflowCandidateGraphQuery,
-    teamWorkflowKnowledgeIngestionStatusQuery,
-    teamWorkflowPaperNoteChunkStatus,
-    teamWorkflow,
-    sourceCollectionWorkspaceSelected,
-    teamWorkflowSourceQualityEnabled,
-    teamWorkflowGraphEnabled,
-    teamWorkflowKnowledgeIngestionEnabled,
-    sourceCollectionNeedsCandidateList,
-    experimentPlanningStatusQuery,
-    researchLoopTemplatesQuery,
-    researchLoopStatusQuery,
-    aiSearchRunsQuery,
-    aiSearchRunTopic,
-    queryClient,
-    requestedSourceCollectionStage,
-    searchParams,
-    setSearchParams,
-    navigate,
-    scrollSourceCollectionPanelIntoViewRef,
-    sourceCollectionControlPanelRef,
-    sourceCollectionRelationMapperAgentId,
-    sourceCollectionExtractorAgentId,
-    sourceCollectionOwnerAgentId,
-    sourceCollectionIngestorAgentId,
-    sourceCollectionStandalone,
-    selectResearchWorkspaceView,
-    launchResearchStage,
-    styles,
-    setSourceCollectionStageAdvanceFailure,
-    teamWorkflowKnowledgeIngestionStatus,
-    teamWorkflowCandidateGraph,
-    repairSelectedWorkflowTeamAgentsIfNeeded,
-    knowledgeExpansionWorkflowTeamSelected,
-    sourceCollectionStageReturnRoute,
-    sourceCollectionStageChatReturnLabel,
-    sourceCollectionStageTaskClickKey,
-    sourceCollectionStageAgentChatState,
-    sourceCollectionStagePrimaryAgentBinding,
-    openSourceCollectionStageAgentChat,
-    agentSummaryQuery,
-    selectedTeamReturnRoute,
-    workflowQualityToneBound,
-    workflowIngestionToneBound,
-    sourceCollectionStageAgentBindings,
-    sourceCollectionStageAdvanceFailure,
+  // SC composition runs in lazy TeamsWorkbenchWithScPhase (secondary chunk).
+  const scLayerInput = buildTeamsScLayerInput({
+    sourceCollectionWorkspace: sourceCollectionWorkspace as Record<string, any>,
+    mutationBundle: mutationBundle as Record<string, any>,
+    shell: {
+      lang,
+      selectedTeam,
+      effectiveTeamId,
+      researchWorkflowTeamSelected,
+      pageVisible,
+      researchStagePhases,
+      researchStageRoundStatus,
+      researchStageProjectAgentTasks,
+      teamWorkflowCandidates,
+      teamWorkflowCandidatesQuery,
+      teamWorkflowCandidateListEnabled,
+      teamWorkflowSourceQualityStatus,
+      teamWorkflowSourceQualityStatusQuery,
+      teamWorkflowCandidateGraphQuery,
+      teamWorkflowKnowledgeIngestionStatusQuery,
+      teamWorkflowPaperNoteChunkStatus,
+      teamWorkflow,
+      sourceCollectionWorkspaceSelected,
+      teamWorkflowSourceQualityEnabled,
+      teamWorkflowGraphEnabled,
+      teamWorkflowKnowledgeIngestionEnabled,
+      sourceCollectionNeedsCandidateList,
+      experimentPlanningStatusQuery,
+      researchLoopTemplatesQuery,
+      researchLoopStatusQuery,
+      aiSearchRunsQuery,
+      aiSearchRunTopic,
+      queryClient,
+      requestedSourceCollectionStage,
+      searchParams,
+      setSearchParams,
+      navigate,
+      scrollSourceCollectionPanelIntoViewRef,
+      sourceCollectionControlPanelRef,
+      sourceCollectionRelationMapperAgentId,
+      sourceCollectionExtractorAgentId,
+      sourceCollectionOwnerAgentId,
+      sourceCollectionIngestorAgentId,
+      sourceCollectionStandalone,
+      selectResearchWorkspaceView,
+      launchResearchStage,
+      styles,
+      setSourceCollectionStageAdvanceFailure,
+      teamWorkflowKnowledgeIngestionStatus,
+      teamWorkflowCandidateGraph,
+      repairSelectedWorkflowTeamAgentsIfNeeded,
+      knowledgeExpansionWorkflowTeamSelected,
+      sourceCollectionStageReturnRoute,
+      sourceCollectionStageChatReturnLabel,
+      sourceCollectionStageTaskClickKey,
+      sourceCollectionStageAgentChatState,
+      sourceCollectionStagePrimaryAgentBinding,
+      openSourceCollectionStageAgentChat,
+      agentSummaryQuery,
+      selectedTeamReturnRoute,
+      workflowQualityToneBound,
+      workflowIngestionToneBound,
+      sourceCollectionStageAgentBindings,
+      sourceCollectionStageAdvanceFailure,
+    },
   });
-  const {
-    scComposition,
-    experimentPlanningStatus,
-    researchStageCanLaunchFromSc,
-    renderSourceCollectionStandalonePage,
-    selectSourceCollectionStage,
-    selectedTeamAssessSourceQualityPending,
-    selectedTeamPlanPaperNoteChunksPending,
-    selectedTeamRecordSourceCollectionOutputError,
-    selectedTeamRecordSourceCollectionOutputResult,
-    selectedTeamSourceQualityPending,
-    selectedTeamStartResearchStagePendingFromSc,
-    selectedTeamStartSourceCollectionError,
-    selectedTeamStartSourceCollectionResult,
-    sourceCollectionAssignmentRunSummaryText,
-    sourceCollectionBoardNextStepLabel,
-    sourceCollectionCollectedCountLabel,
-    sourceCollectionCollectedCountText,
-    sourceCollectionCollectedRunSummaryText,
-    sourceCollectionConsoleState,
-    sourceCollectionConsoleStatusText,
-    sourceCollectionDisplayState,
-    sourceCollectionDownstreamOpenAssignmentCountText,
-    sourceCollectionFindingStageCompact,
-    sourceCollectionPhaseCloseGate,
-    sourceCollectionPromptCacheMode,
-    sourceCollectionPromptCacheStatus,
-    sourceCollectionQueryCountText,
-    sourceCollectionRunStatus,
-    sourceCollectionSearchOpenAssignmentCountText,
-    sourceCollectionStandaloneStageModules,
-    sourceCollectionStepClassName,
-  } = scLayer;
-  // Late-bind launch guards (createResearchStageLaunchHandlers getters).
-  selectedTeamStartResearchStagePending = selectedTeamStartResearchStagePendingFromSc;
-  researchStageCanLaunch = researchStageCanLaunchFromSc;
-
 
   return {
+    scLayerInput,
+    researchLaunchGuardRef,
     queryClient,
     chatWorkspaceCache,
     navigate,
@@ -1353,12 +1322,9 @@ export function useTeamsWorkbenchFoundation({
     TEAMS_BOARD_INSPECTOR_PANE,
     TEAMS_LAYOUT_ID,
     TEAMS_RAIL_PANE,
-    // SC composition layer: standalone page renderer, display state, stage modules, etc.
-    // Must be on the bag — shell phase reads these flat (not only via scComposition).
-    ...scLayer,
+    // SC composition fields are merged in lazy TeamsWorkbenchWithScPhase.
     researchStageStartFeedbackText,
-    // Late-bound launch guards win over scLayer aliases.
-    selectedTeamStartResearchStagePending: selectedTeamStartResearchStagePendingFromSc,
-    researchStageCanLaunch: researchStageCanLaunchFromSc,
+    selectedTeamStartResearchStagePending: false,
+    researchStageCanLaunch: true,
   };
 }
