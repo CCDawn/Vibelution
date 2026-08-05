@@ -33,7 +33,6 @@ export type DeriveSourceCollectionOperationFlagsInput = {
   selectedTeamStartResearchStagePending: boolean;
   selectedTeamStartSourceCollectionPending: boolean;
   selectedTeamStartSourceCollectionStageTaskPending: boolean;
-  selectedTeamRecordSourceCollectionOutputPending: boolean;
   selectedTeamExtractSourceCollectionCandidatesPending: boolean;
   selectedTeamSourceQualityPending: boolean;
   selectedTeamBuildCandidateGraphPending: boolean;

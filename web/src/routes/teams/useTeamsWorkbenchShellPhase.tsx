@@ -17,6 +17,8 @@ import {
   workflowIngestionToneBound,
   workflowQualityToneBound,
 } from "./teamsWorkbenchChrome";
+import { formatTime } from "./source-collection/presentationModel";
+import { researchStageStartFeedbackText as researchStageStartFeedbackTextFn } from "./teamRouteShellModel";
 import { buildTeamsShellSurfaceModel } from "./teamsShellSurfaceModel";
 import { buildTeamWorkflowCandidatePreviewItems } from "./buildTeamWorkflowCandidatePreviewItems";
 import { buildSourceCollectionOverviewBag } from "./buildSourceCollectionOverviewBag";
@@ -406,7 +408,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       ? (lang === "zh" ? "正在读取团队索引。" : "Loading the team index.")
       : (lang === "zh" ? "仅显示 AI 搜索、知识库扩充和挑战杯科研团队。" : "Only AI search, knowledge expansion, and research teams are shown.");
   const visibleTeamOptions = visibleTeams.length
-    ? visibleTeams.map((team) => ({
+    ? visibleTeams.map((team: { teamId: string; name: string; purpose?: string }) => ({
       id: team.teamId,
       label: team.name,
       description: team.purpose || team.teamId,
@@ -512,6 +514,11 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     return shellGate;
   }
 
+  const researchStageStartFeedbackText =
+    typeof d.researchStageStartFeedbackText === "function"
+      ? d.researchStageStartFeedbackText
+      : researchStageStartFeedbackTextFn;
+
   const researchSurfaces = buildTeamsWorkbenchResearchSurfacesFromBag({
     ...d,
     scComposition,
@@ -610,7 +617,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       completionFlowSlot: renderKnowledgeCollectionCompletionFlowPanel(),
       onSelectNode: setSelectedNodeId,
       onLayoutModeChange: setResearchCanvasLayoutMode,
-      onToggleCommunicationEdges: () => setShowCommunicationEdges((current) => !current),
+      onToggleCommunicationEdges: () => setShowCommunicationEdges((current: boolean) => !current),
       onAddNode: addNode,
       onArchiveTeam: () => selectedTeam?.teamId && archiveTeamMutation.mutate(selectedTeam.teamId),
       onSyncRoom: () => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId),

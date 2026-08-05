@@ -32,11 +32,12 @@ const STAGE_SHELL_CTX_KEYS = ['activeSourceCollectionResearchProject', 'agentSum
 export function useTeamsScComposition(ctx: TeamsScCompositionContext) {
   const runtimeSummaryQuery = { data: undefined as RuntimeSummary | undefined };
 
+  // pickCtx yields a runtime bag; presentation input is the large SC contract (enforced by contracts, not static spread).
   const presentation = useSourceCollectionPresentation({
     ...pickCtx(ctx, PRESENTATION_CTX_KEYS),
     runtimeSummaryQuery,
     requestedSourceCollectionStage: ctx.requestedSourceCollectionStage ?? null,
-  });
+  } as any);
 
   // R2-k/R2-o: shell + presentation bag → stage modules / board chrome / controller.
   const stageSurfaces = composeSourceCollectionStageSurfaces({

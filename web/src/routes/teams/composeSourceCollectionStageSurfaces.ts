@@ -279,8 +279,9 @@ export function composeSourceCollectionStageSurfaces(input: ComposeSourceCollect
     sourceCollectionStageFormalRetryRequired,
   });
 
+  const stageLang: "zh" | "en" = lang === "en" ? "en" : "zh";
   const sourceCollectionStageModules = buildSourceCollectionStageModules({
-    lang,
+    lang: stageLang,
     selectedSourceCollectionRun,
     selectedSourceCollectionStageId,
     sourceCollectionProjectedCollectedCountLabel,
@@ -378,7 +379,7 @@ export function composeSourceCollectionStageSurfaces(input: ComposeSourceCollect
     ),
   };
   const { sourceCollectionBoardCurrentModule, sourceCollectionBoardNextStepLabel } = buildSourceCollectionBoardChrome({
-    lang,
+    lang: stageLang,
     sourceCollectionStageModules,
     sourceCollectionStageFocusLabel,
     graphHealth: sourceCollectionPipelineGraphHealth,
@@ -389,7 +390,7 @@ export function composeSourceCollectionStageSurfaces(input: ComposeSourceCollect
     sourceCollectionStageModules,
   });
   const sourceCollectionStandaloneStageModules = buildSourceCollectionStandaloneStageModules({
-    lang,
+    lang: stageLang,
     sourceCollectionStageModules,
     selectedSourceCollectionStageId,
     sourceCollectionStageActionReadinessFor,

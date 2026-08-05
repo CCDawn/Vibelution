@@ -372,7 +372,7 @@ export function useSourceCollectionPresentationMid(input: UseSourceCollectionPre
     downstreamOpenAssignmentCount: sourceCollectionDownstreamOpenAssignmentCount,
     queryCount: sourceCollectionQueryCount,
     assignmentsLength: sourceCollectionAssignments.length,
-    searchPlanQueryCount: sourceCollectionSearchPlanRef?.queryCount,
+    searchPlanQueryCount: (sourceCollectionSearchPlanRef as { queryCount?: number } | null | undefined)?.queryCount,
     startResultSearchPlanQueryCount: selectedTeamStartSourceCollectionResult?.searchPlan?.queryCount,
     displayedCandidateCount: sourceCollectionDisplayedCandidateCount,
     projectedCandidateCount: sourceCollectionProjectedCandidateCount,

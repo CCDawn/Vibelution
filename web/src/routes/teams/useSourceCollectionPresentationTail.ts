@@ -46,9 +46,6 @@ import { researchWorkspaceStageRoute } from "./researchWorkspaceModel";
 import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
 import type { UseSourceCollectionPresentationInput } from "./useSourceCollectionPresentationTypes";
 
-
-import type { UseSourceCollectionPresentationInput } from "./useSourceCollectionPresentationTypes";
-
 export function useSourceCollectionPresentationTail(
   input: UseSourceCollectionPresentationInput,
   mid: ReturnType<typeof import("./useSourceCollectionPresentationMid").useSourceCollectionPresentationMid>,
