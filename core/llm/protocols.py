@@ -217,6 +217,8 @@ PROTOCOL_POLICIES: Dict[ModelProtocol, ProtocolPolicy] = {
         content_shape_policy="responses_blocks",
         allow_stream_usage_options=True,
     ),
+    # policy.transport is the dialogue-family field (chat_completions vs responses).
+    # Native Anthropic wire is WireProtocol.ANTHROPIC_MESSAGES (see protocol_resolver + wire/compat_native).
     ModelProtocol.ANTHROPIC_CHAT: _policy(ModelProtocol.ANTHROPIC_CHAT, content_shape_policy="preserve"),
     ModelProtocol.ANTHROPIC_THINKING: _policy(
         ModelProtocol.ANTHROPIC_THINKING,

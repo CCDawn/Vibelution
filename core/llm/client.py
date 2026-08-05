@@ -1970,7 +1970,11 @@ class LLMClient:
                 provider_messages,
                 self.adapter,
             )
-        if self.protocol_route.wire_protocol == WireProtocol.CHAT_COMPLETIONS:
+        if self.protocol_route.wire_protocol in {
+            WireProtocol.CHAT_COMPLETIONS,
+            WireProtocol.ANTHROPIC_MESSAGES,
+            WireProtocol.GEMINI_GENERATE_CONTENT,
+        }:
             strict_blank_messages = _strict_blank_chat_completions_messages(
                 projection_messages,
                 metadata,
@@ -1990,9 +1994,12 @@ class LLMClient:
             profile_id=self.profile_id,
             config=self.config,
         )
+        # Chat-shaped wires (incl. LiteLLM-backed anthropic/gemini) share encode path.
         if self.protocol_route.wire_protocol in {
             WireProtocol.RESPONSES,
             WireProtocol.CHAT_COMPLETIONS,
+            WireProtocol.ANTHROPIC_MESSAGES,
+            WireProtocol.GEMINI_GENERATE_CONTENT,
         }:
             from .invocation import invocation_scope_from_metadata
 

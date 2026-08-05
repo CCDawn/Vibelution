@@ -263,7 +263,13 @@ class MiniMaxAdapter(ProviderAdapter):
 
 
 class AnthropicAdapter(ProviderAdapter):
-    """Native Anthropic routing can preserve structured content blocks."""
+    """Native Anthropic routing can preserve structured content blocks.
+
+    Prompt cache:
+    - automatic → payload strategy `anthropic_automatic_top_level` (request cache_control)
+    - explicit_cache_control → block-level ephemeral markers (see payload_builder)
+    Wire id is `anthropic_messages` (OpenAI-shaped body via LiteLLM; see wire/compat_native.py).
+    """
 
     preserves_structured_content = True
 

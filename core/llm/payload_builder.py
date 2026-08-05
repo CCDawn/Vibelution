@@ -33,6 +33,8 @@ class PayloadPolicyActions:
     minimal_tool_schema: bool = False
     prompt_cache_provider_strategy: str = "disabled"
     qwen_prompt_cache_markers_added: int = 0
+    anthropic_prompt_cache_markers_added: int = 0
+    anthropic_top_level_cache_control: bool = False
     provider_tool_chain_repaired: int = 0
 
     def to_log_dict(self) -> Dict[str, Any]:
@@ -45,6 +47,8 @@ class PayloadPolicyActions:
             "payloadPolicyMinimalToolSchema": self.minimal_tool_schema,
             "promptCacheProviderStrategy": self.prompt_cache_provider_strategy,
             "payloadPolicyQwenPromptCacheMarkersAdded": self.qwen_prompt_cache_markers_added,
+            "payloadPolicyAnthropicPromptCacheMarkersAdded": self.anthropic_prompt_cache_markers_added,
+            "payloadPolicyAnthropicTopLevelCacheControl": self.anthropic_top_level_cache_control,
             "payloadPolicyProviderToolChainRepaired": self.provider_tool_chain_repaired,
         }
 
@@ -167,7 +171,7 @@ def _prompt_cache_provider_strategy(build_input: PayloadBuildInput, prompt_cache
     if mode == "explicit_cache_control":
         if is_qwen:
             return "qwen_explicit_cache_control"
-        if provider_kind == "anthropic":
+        if provider_kind == "anthropic" or route_protocol.startswith("anthropic_"):
             return "anthropic_explicit_cache_control"
         return "explicit_cache_control"
     if mode == "automatic":
@@ -175,6 +179,9 @@ def _prompt_cache_provider_strategy(build_input: PayloadBuildInput, prompt_cache
         # OpenAI prompt_cache_key / retention fields (they are ignored or unsupported).
         if is_deepseek:
             return "deepseek_automatic"
+        # Anthropic: official automatic caching uses top-level cache_control (not OpenAI keys).
+        if provider_kind == "anthropic" or route_protocol.startswith("anthropic_"):
+            return "anthropic_automatic_top_level"
         if provider_kind in {"openai", "relay"} or provider_api in {"openai-responses", "responses"} or route_transport == "responses":
             return "openai_automatic_key"
         if is_qwen:
@@ -750,6 +757,82 @@ def _apply_qwen_explicit_prompt_cache_markers(
     return normalized
 
 
+def _message_accepts_anthropic_prompt_cache_marker(message: Dict[str, Any]) -> bool:
+    """Anthropic allows cache_control on system/user/assistant text blocks (and tools)."""
+    role = str(message.get("role") or "").strip().lower()
+    if role not in {"system", "user", "assistant"}:
+        return False
+    content = message.get("content")
+    if _content_has_image_block(content) or _content_cache_marker_count(content):
+        return False
+    return _append_cache_control_to_content(content) is not content
+
+
+def _apply_anthropic_explicit_prompt_cache_markers(
+    messages: List[Dict[str, Any]],
+    actions: PayloadPolicyActions,
+    *,
+    marker_limit: int = 4,
+) -> List[Dict[str, Any]]:
+    """Place ephemeral cache_control breakpoints per Anthropic prompt-caching docs.
+
+    Prefers the first system message (stable instructions), then the last
+    cacheable history text block before the current user turn.
+    """
+    if actions.prompt_cache_provider_strategy != "anthropic_explicit_cache_control":
+        return [dict(item) for item in messages]
+    normalized = [dict(item) for item in messages]
+    marker_count = sum(_message_cache_marker_count(item) for item in normalized)
+    if marker_count >= marker_limit:
+        return normalized
+
+    indices: list[int] = []
+    for index, message in enumerate(normalized):
+        if str(message.get("role") or "").strip().lower() == "system" and _message_accepts_anthropic_prompt_cache_marker(message):
+            indices.append(index)
+            break
+    # Also mark last stable history text (before final user) so multi-turn can grow.
+    current_user_index = -1
+    for index in range(len(normalized) - 1, -1, -1):
+        if str(normalized[index].get("role") or "").strip().lower() == "user":
+            current_user_index = index
+            break
+    history_end = current_user_index - 1 if current_user_index >= 0 else len(normalized) - 1
+    for index in range(history_end, -1, -1):
+        if index in indices:
+            continue
+        if _message_accepts_anthropic_prompt_cache_marker(normalized[index]):
+            indices.append(index)
+            break
+
+    for index in indices:
+        if actions.anthropic_prompt_cache_markers_added + marker_count >= marker_limit:
+            break
+        message = normalized[index]
+        content = message.get("content")
+        updated_content = _append_cache_control_to_content(content)
+        if updated_content is content:
+            continue
+        message["content"] = updated_content
+        normalized[index] = message
+        actions.anthropic_prompt_cache_markers_added += 1
+    return normalized
+
+
+def _apply_explicit_prompt_cache_markers(
+    messages: List[Dict[str, Any]],
+    actions: PayloadPolicyActions,
+    *,
+    marker_limit: int = 4,
+) -> List[Dict[str, Any]]:
+    strategy = str(actions.prompt_cache_provider_strategy or "").strip().lower()
+    if strategy == "qwen_explicit_cache_control":
+        return _apply_qwen_explicit_prompt_cache_markers(messages, actions, marker_limit=marker_limit)
+    if strategy == "anthropic_explicit_cache_control":
+        return _apply_anthropic_explicit_prompt_cache_markers(messages, actions, marker_limit=marker_limit)
+    return [dict(item) for item in messages]
+
+
 def build_llm_payload(
     build_input: PayloadBuildInput,
     *,
@@ -858,7 +941,7 @@ def build_llm_payload(
         preserve_cache_control=preserve_cache_control,
     )
     if preserve_cache_control and not has_image_content:
-        normalized_messages = _apply_qwen_explicit_prompt_cache_markers(
+        normalized_messages = _apply_explicit_prompt_cache_markers(
             normalized_messages,
             policy_actions,
         )
@@ -894,14 +977,25 @@ def build_llm_payload(
     _merge_extra_body(payload, thinking_extra_body)
 
     prompt_cache = getattr(profile, "prompt_cache", None)
-    if prompt_cache_mode == "automatic" and policy_actions.prompt_cache_provider_strategy != "deepseek_automatic":
+    cache_strategy = policy_actions.prompt_cache_provider_strategy
+    if prompt_cache_mode == "automatic" and cache_strategy == "anthropic_automatic_top_level":
+        # Anthropic official automatic caching: top-level cache_control on the request.
+        payload["cache_control"] = {"type": "ephemeral"}
+        policy_actions.anthropic_top_level_cache_control = True
+    elif prompt_cache_mode == "automatic" and cache_strategy not in {
+        "deepseek_automatic",
+        "anthropic_automatic_top_level",
+        "disabled",
+        "unsupported",
+        "",
+    }:
         prompt_cache_key = str(getattr(prompt_cache, "key", "") or "").strip()
         prompt_cache_retention = str(getattr(prompt_cache, "retention", "") or "").strip()
         if not prompt_cache_key:
             prompt_cache_key = _default_prompt_cache_key(build_input)
         if not prompt_cache_retention:
             prompt_cache_retention = _default_prompt_cache_retention(
-                policy_actions.prompt_cache_provider_strategy,
+                cache_strategy,
                 model=str(getattr(profile, "model", "") or ""),
             )
         if prompt_cache_key:
@@ -1015,7 +1109,7 @@ def compose_runtime_wire_payload(
         if prompt_cache_mode == "disabled":
             normalized_messages = _strip_cache_control_from_messages_copy(normalized_messages)
         elif prompt_cache_mode == "explicit_cache_control":
-            normalized_messages = _apply_qwen_explicit_prompt_cache_markers(
+            normalized_messages = _apply_explicit_prompt_cache_markers(
                 normalized_messages,
                 actions,
                 marker_limit=4,
@@ -1033,14 +1127,24 @@ def compose_runtime_wire_payload(
     _merge_extra_body(payload, thinking_extra_body)
 
     prompt_cache = getattr(profile, "prompt_cache", None)
-    if prompt_cache_mode == "automatic" and actions.prompt_cache_provider_strategy != "deepseek_automatic":
+    cache_strategy = actions.prompt_cache_provider_strategy
+    if prompt_cache_mode == "automatic" and cache_strategy == "anthropic_automatic_top_level":
+        payload["cache_control"] = {"type": "ephemeral"}
+        actions.anthropic_top_level_cache_control = True
+    elif prompt_cache_mode == "automatic" and cache_strategy not in {
+        "deepseek_automatic",
+        "anthropic_automatic_top_level",
+        "disabled",
+        "unsupported",
+        "",
+    }:
         prompt_cache_key = str(getattr(prompt_cache, "key", "") or "").strip()
         prompt_cache_retention = str(getattr(prompt_cache, "retention", "") or "").strip()
         if not prompt_cache_key:
             prompt_cache_key = _default_prompt_cache_key(build_input)
         if not prompt_cache_retention:
             prompt_cache_retention = _default_prompt_cache_retention(
-                actions.prompt_cache_provider_strategy,
+                cache_strategy,
                 model=str(getattr(profile, "model", "") or ""),
             )
         if prompt_cache_key:

@@ -1145,7 +1145,11 @@ class SelfEvolvingAgent:
         return model_name, provider, profile_id
 
     def _apply_turn_status_bar(self, messages: list, *, iteration: int = 0) -> list:
-        """Upsert live turn status (budget + optional mental) before the current user message."""
+        """Upsert live turn status (budget + optional mental) after the full message trail.
+
+        Must not sit before the current user: a rewritten mid-list status bar severs
+        DeepSeek automatic prefix cache so prior tool results never become hits.
+        """
 
         if not self.is_runtime_status_inject_enabled_for_turn():
             return strip_turn_status_bar_messages(messages)

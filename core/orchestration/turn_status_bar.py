@@ -1,8 +1,13 @@
 """Per-iteration turn status bar injected into model-visible messages.
 
-The status bar is volatile: it is rewritten every agent iteration so the model
-can observe live budget / progress without polluting the cacheable system
-prefix or durable chat history.
+The status bar is volatile and rewritten every agent iteration (tools used,
+budget_status, iteration index, ...).
+
+Placement is intentionally at the **end of the message list** (after user /
+assistant / tool trail), not before the current user. DeepSeek automatic
+prefix cache only hits the common byte-prefix; if a changing status block sits
+before user+tools, every iteration severs the prefix and prior tool results
+never become cache hits — even when the agent loop only appends tool pages.
 """
 
 from __future__ import annotations
@@ -218,14 +223,15 @@ def upsert_turn_status_bar_message(
     messages: Sequence[Any] | None,
     status_message: Any | None,
 ) -> list[Any]:
-    """Replace any previous status bar and insert the latest before current user."""
+    """Replace any previous status bar and append the latest after the full trail.
 
-    from core.orchestration.turn_outcome import TurnOutcomeController
+    Must stay after user/assistant/tool messages so pure-append agent steps can
+    extend the provider automatic prefix cache. Inserting a rewritten status bar
+    before the current user (legacy placement) freezes cache hits at the static
+    head (~system + agent static) and forces every tool page to rebill as miss.
+    """
 
     cleaned = strip_turn_status_bar_messages(messages)
     if status_message is None:
         return cleaned
-    return TurnOutcomeController.insert_volatile_context_before_current_user(
-        messages=cleaned,
-        context_messages=[status_message],
-    )
+    return list(cleaned) + [status_message]
