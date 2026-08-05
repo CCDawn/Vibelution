@@ -173,7 +173,7 @@ describe("TeamExperimentHypothesisGovernancePanel", () => {
     expect(markup).toContain("待人工审核");
     expect(markup).toContain("仅验证实验编排、复现与门禁链路");
     expect(markup).toContain("人工批准用于设计");
-    expect(markup).toContain("不自动批准");
+    expect(markup).toContain("需人工批准");
     expect(panelSource).toContain("candidate.approvedForExperiment");
   });
 
@@ -204,7 +204,7 @@ describe("TeamExperimentHypothesisGovernancePanel", () => {
       />,
     );
 
-    expect(markup).toContain("生成工程代理候选");
+    expect(markup).toContain("生成候选");
     expect(markup).toContain("Sleep homeostasis hypothesis");
   });
 

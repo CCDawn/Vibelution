@@ -12,7 +12,7 @@ const styles = {
   guardBadge:
     "inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--vui-border-subtle)] px-2 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   draftGrid:
-    "grid grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] gap-3 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3 max-[900px]:grid-cols-[minmax(0,1fr)]",
+    "grid grid-cols-1 gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3",
   draftIntro:
     "grid content-start gap-2",
   sectionLabel:
@@ -24,7 +24,7 @@ const styles = {
   actionRow:
     "flex justify-end",
   candidateGrid:
-    "grid grid-cols-2 gap-3 max-[900px]:grid-cols-[minmax(0,1fr)]",
+    "grid grid-cols-1 gap-2",
   candidateCard:
     "grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3",
   candidateHeader:
@@ -34,9 +34,9 @@ const styles = {
   statusBadge:
     "shrink-0 rounded-full border border-[var(--vui-border-subtle)] px-2 py-0.5 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   hypothesis:
-    "m-0 [font-size:var(--vui-font-sm)] leading-6 text-[var(--fg-primary)]",
+    "m-0 line-clamp-3 [font-size:var(--vui-font-sm)] leading-6 text-[var(--fg-primary)]",
   claimBoundary:
-    "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-panel))] px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-secondary)]",
+    "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-panel))] px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-secondary)] [&_summary]:cursor-pointer [&_summary]:font-semibold",
   metadata:
     "[font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   candidateActions:

@@ -146,17 +146,12 @@ export function TeamExperimentHypothesisGovernancePanel(
       <header className={styles.header}>
         <div className={styles.headingGroup}>
           <strong className={styles.title}>
-            {lang === "zh" ? "假设审查与设计选择" : "Hypothesis review and design selection"}
+            {lang === "zh" ? "假设审查" : "Hypothesis review"}
           </strong>
-          <span className={styles.subtitle}>
-            {lang === "zh"
-              ? "科学候选先用实验配置生成追加式修订；所有完整候选都必须人工批准后，才能生成新设计。"
-              : "Scientific candidates first receive an append-only design revision; every complete candidate needs human approval before a new design."}
-          </span>
         </div>
         <span className={styles.guardBadge}>
           <ShieldCheck size={13} />
-          {lang === "zh" ? "不自动批准" : "No auto approval"}
+          {lang === "zh" ? "需人工批准" : "Human approval"}
         </span>
       </header>
 
@@ -164,26 +159,21 @@ export function TeamExperimentHypothesisGovernancePanel(
         <div className={styles.draftGrid}>
           <div className={styles.draftIntro}>
             <span className={styles.sectionLabel}>
-              {lang === "zh" ? "从当前计划生成工程候选" : "Create an engineering candidate from this plan"}
+              {lang === "zh" ? "生成候选" : "Create candidate"}
             </span>
             <VNativeInput
-              aria-label={lang === "zh" ? "工程代理假设标题" : "Engineering proxy title"}
+              aria-label={lang === "zh" ? "候选标题" : "Candidate title"}
               value={draft.title}
               onChange={(event) => setDraft((current) => ({
                 ...current,
                 title: event.target.value,
               }))}
             />
-            <span className={styles.helper}>
-              {lang === "zh"
-                ? "只复制已保存的 dataset、metric、baseline 与 Smoke 合同，不运行实验。"
-                : "Copies only the saved dataset, metric, baseline, and smoke contract; no run is started."}
-            </span>
           </div>
           <div className={styles.draftFields}>
             <VNativeTextarea
-              aria-label={lang === "zh" ? "工程代理假设" : "Engineering proxy hypothesis"}
-              rows={3}
+              aria-label={lang === "zh" ? "假设" : "Hypothesis"}
+              rows={2}
               value={draft.hypothesis}
               onChange={(event) => setDraft((current) => ({
                 ...current,
@@ -208,7 +198,7 @@ export function TeamExperimentHypothesisGovernancePanel(
                 <FlaskConical size={14} />
                 {materializing
                   ? (lang === "zh" ? "生成中" : "Creating")
-                  : (lang === "zh" ? "生成工程代理候选" : "Create proxy candidate")}
+                  : (lang === "zh" ? "生成候选" : "Create candidate")}
               </VNativeButton>
             </div>
           </div>
@@ -247,14 +237,14 @@ export function TeamExperimentHypothesisGovernancePanel(
                   {hypothesisStatusLabel(candidate, lang)}
                 </span>
               </div>
-              <p className={styles.hypothesis}>
+              <p className={styles.hypothesis} title={candidate.hypothesis || candidate.summary || undefined}>
                 {candidate.hypothesis || candidate.summary || "-"}
               </p>
               {candidate.claimBoundary ? (
-                <div className={styles.claimBoundary}>
-                  <strong>{lang === "zh" ? "论断边界：" : "Claim boundary: "}</strong>
+                <details className={styles.claimBoundary}>
+                  <summary>{lang === "zh" ? "论断边界" : "Claim boundary"}</summary>
                   {candidate.claimBoundary}
-                </div>
+                </details>
               ) : null}
               {candidate.missingExperimentPlanFields.length > 0 ? (
                 <span className={styles.metadata}>

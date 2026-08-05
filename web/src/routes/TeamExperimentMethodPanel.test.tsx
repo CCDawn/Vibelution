@@ -10,6 +10,7 @@ import {
   createExperimentMethodFormDraft,
   createExperimentMethodDraftSyncKey,
   isExperimentMethodDraftComplete,
+  productizeAdapterUnavailableReason,
   selectExperimentMethod,
 } from "./TeamExperimentMethodPanel";
 import panelSource from "./TeamExperimentMethodPanel.tsx?raw";
@@ -161,6 +162,9 @@ describe("TeamExperimentMethodPanel", () => {
     expect(markup).toContain('role="group" aria-label="执行器选择"');
     expect(markup).not.toContain('<select aria-label="执行器选择"');
     expect(markup).toContain("预测编码是否改善基线？");
+    expect(markup).toContain('data-testid="experiment-adapter-status"');
+    expect(markup).toContain('data-adapter-ready="false"');
+    expect(markup).toContain("可先保存计划");
   });
 
   it("keeps an explicit adapter selection in the plan request", () => {
@@ -183,6 +187,17 @@ describe("TeamExperimentMethodPanel", () => {
 
     expect(request.requestedAdapterId).toBe("fashion_mnist_predictive_coding_multi_seed");
     expect(request.methodConfig.seeds).toEqual([17, 42, 101]);
+  });
+
+  it("productizes raw adapter unavailable reasons for operators", () => {
+    const copy = productizeAdapterUnavailableReason(
+      "No Adapter satisfies required capabilities: full_run, prepare.",
+      "zh",
+    );
+    expect(copy.title).toBe("执行器尚未就绪");
+    expect(copy.capabilities).toEqual(["full_run", "prepare"]);
+    expect(copy.body).toContain("full_run");
+    expect(copy.body).toContain("保存计划");
   });
 
   it("restores the active simulation method and renders its dynamic fields", () => {
@@ -343,7 +358,8 @@ describe("TeamExperimentMethodPanel", () => {
     );
 
     expect(styles.loading).toContain("min-h-[16rem]");
-    expect(styles.form).toContain("min-h-[18rem]");
+    expect(styles.form).toContain("grid-cols-1");
+    expect(styles.form).not.toContain("min-h-[18rem]");
     expect(loadingMarkup).toContain("读取实验方式");
     expect(panelSource).toContain("aria-pressed={draft.researchMode === mode.modeId}");
     expect(panelSource).toContain("aria-pressed={draft.experimentMethod === method.methodId}");
