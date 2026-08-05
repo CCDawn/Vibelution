@@ -1,6 +1,7 @@
 import { useRouteError } from "react-router-dom";
 
 import { VButton } from "../components/vui/primitives/VButton";
+import { allowNextWorkbenchWindowUnload } from "./projectCloseGuard";
 import { isDynamicImportFetchError } from "./routeChunkRecovery";
 import styles from "./RouteErrorBoundary.styles";
 
@@ -63,9 +64,13 @@ export function RouteErrorBoundary({ surface = "workbench" }: { surface?: RouteE
   const viewModel = buildRouteErrorBoundaryViewModel(error, surface);
 
   const reloadPage = () => {
+    // Parent AppShell may still arm beforeunload; pass it so Edge does not flash
+    // a non-actionable "重新加载应用?" dialog over this recovery page.
+    allowNextWorkbenchWindowUnload();
     globalThis.window?.location.reload();
   };
   const goHome = () => {
+    allowNextWorkbenchWindowUnload();
     const target = surface === "launcher" ? "/launcher" : "/chat";
     globalThis.window?.location.assign(target);
   };

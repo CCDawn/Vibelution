@@ -30,7 +30,10 @@ const styles = {
   actionIconButton:
     `vui-app-appshell actionIconButton ${vuiControlIconSmClass}`,
   activeWorkChip:
-    `vui-app-appshell activeWorkChip min-w-0 ${vuiControlPillClass} ${vuiStateCoolSoftClass} h-8 min-h-8 max-w-[min(66vw,620px)] flex-nowrap gap-1.5 whitespace-nowrap px-2.5 text-[var(--fg-secondary)] [&_strong]:text-[var(--fg-primary)] [&_strong]:font-semibold`,
+    `vui-app-appshell activeWorkChip min-w-0 ${vuiControlPillClass} ${vuiStateCoolSoftClass} ` +
+    "!inline-flex !h-8 !min-h-8 !max-h-8 max-w-[min(66vw,620px)] flex-nowrap !items-center !gap-1.5 !px-2.5 !py-0 " +
+    "whitespace-nowrap leading-none text-[var(--fg-secondary)] [&>*]:!self-center " +
+    "[&_strong]:text-[var(--fg-primary)] [&_strong]:font-semibold [&_strong]:leading-none",
   activeWorkDetailCopy:
     "vui-app-appshell activeWorkDetailCopy min-w-0 grid gap-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_p]:m-0 [&_p]:min-w-0 [&_p]:[overflow-wrap:anywhere] [&_code]:block [&_code]:min-w-0 [&_code]:truncate [&_code]:rounded-[var(--radius-control)] [&_code]:bg-[color-mix(in_srgb,var(--vui-control-muted)_88%,transparent)] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--fg-tertiary)]",
   activeWorkDetailHeader:
@@ -161,14 +164,15 @@ const styles = {
   statusBadge:
     `vui-app-appshell statusBadge min-w-0 ${vuiControlPillClass}`,
   statusBadgeLabel:
-    "vui-app-appshell statusBadgeLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] whitespace-nowrap",
+    "vui-app-appshell statusBadgeLabel inline-flex min-w-0 shrink-0 items-center [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-tertiary)] whitespace-nowrap",
   statusBadgeValue:
-    "vui-app-appshell statusBadgeValue min-w-0 whitespace-nowrap",
+    "vui-app-appshell statusBadgeValue inline-flex min-w-0 shrink-0 items-center [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-primary)] whitespace-nowrap",
   statusChipRow: `vui-app-appshell statusChipRow min-w-0 ${vuiOpaqueRowClass} p-2`,
   statusCluster:
     "vui-app-appshell statusCluster min-w-0 shrink-0",
+  // Fixed square + flex-none: no border/baseline so dots share the pill mid-line with text.
   statusDot:
-    "vui-app-appshell statusDot inline-block h-2 w-2 shrink-0 rounded-full border border-[color-mix(in_srgb,currentColor_38%,transparent)] bg-current p-0 align-middle",
+    "vui-app-appshell statusDot block h-2 w-2 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
   statusGuideCard: `vui-app-appshell statusGuideCard min-w-0 ${vuiGlassPanelClass} p-2`,
   statusGuideCardHeader:
     "vui-app-appshell statusGuideCardHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
@@ -184,8 +188,13 @@ const styles = {
     "vui-app-appshell statusGuidePopoverContent z-[95] w-[min(640px,calc(100vw-40px))] max-w-[min(640px,calc(100vw-40px))] border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   statusGuideStateLabel:
     "vui-app-appshell statusGuideStateLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  statusSummaryChip: `vui-app-appshell statusSummaryChip min-w-0 ${vuiControlPillClass} ${vuiStateSelectedRowClass} h-8 min-h-8 flex-nowrap gap-1.5 whitespace-nowrap`,
-  statusSummaryCount: `vui-app-appshell statusSummaryCount min-w-0`,
+  // Rigid pill geometry: fixed height, zero vertical padding, shared leading-none mid-line.
+  statusSummaryChip:
+    `vui-app-appshell statusSummaryChip min-w-0 ${vuiControlPillClass} ${vuiStateSelectedRowClass} ` +
+    "!inline-flex !h-8 !min-h-8 !max-h-8 flex-nowrap !items-center !justify-center !gap-1.5 !px-2.5 !py-0 " +
+    "whitespace-nowrap leading-none [&>*]:!self-center [&>*]:leading-none",
+  statusSummaryCount:
+    "vui-app-appshell statusSummaryCount inline-flex h-[18px] min-h-[18px] max-h-[18px] shrink-0 items-center justify-center tabular-nums leading-none text-[var(--fg-tertiary)]",
   status_active:
     `vui-app-appshell status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_blocked:
@@ -240,11 +249,11 @@ const styles = {
   topClock:
     "vui-app-appshell topClock min-w-0 flex shrink-0 items-center gap-1.5 whitespace-nowrap [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
   utilityButton:
-    `vui-app-appshell utilityButton min-w-0 ${vuiControlQuietClass}`,
+    `vui-app-appshell utilityButton min-w-0 w-full max-w-full ${vuiControlQuietChromeClass} hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)]`,
   utilityButtonActive:
     `vui-app-appshell utilityButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   utilityButtonGrid:
-    "vui-app-appshell utilityButtonGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+    "vui-app-appshell utilityButtonGrid min-w-0",
   utilityChevron:
     "vui-app-appshell utilityChevron min-w-0",
   utilityCluster:

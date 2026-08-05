@@ -207,13 +207,14 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
         </NavLink>
         <VButton
           type="button"
+          contentLayout="plain"
           className={styles.utilityButton}
-          icon={<FolderTree size={16} />}
           onPress={() => {
             requestUtilityFileTree();
             window.requestAnimationFrame(() => document.getElementById("utility-file-navigator")?.scrollIntoView({ block: "nearest" }));
           }}
         >
+          <FolderTree size={16} aria-hidden />
           <span>{t("files")}</span>
         </VButton>
       </div>

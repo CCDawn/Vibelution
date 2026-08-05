@@ -25,6 +25,16 @@ type DesktopShellLike = {
 
 const CONTROLLED_LIFECYCLE_COOKIE = "vibelution_lifecycle_operation";
 const CONTROLLED_LIFECYCLE_WINDOW_MS = 120_000;
+/**
+ * Synchronous unload pass for intentional frontend refresh / recovery reloads.
+ * React state (`frontendRefreshRequested`) is too late for the event handler.
+ * Also: the beforeunload *listener* must stay mounted (ref-backed decision), not
+ * re-bound every poll — otherwise Edge shows "重新加载应用?" then tears the
+ * listener down mid-dialog and the prompt flashes away before the user can click.
+ */
+let allowNextWorkbenchUnload = false;
+let allowNextWorkbenchUnloadToken = 0;
+const ALLOW_NEXT_UNLOAD_EXPIRE_MS = 5_000;
 const OPEN_PROJECT_STATES = new Set(["ready", "open", "partial", "starting", "running", "restarting", "opening"]);
 const OPEN_PHASE_TOKENS = ["start", "open", "restart", "queue", "processing"];
 const RUNTIME_COMPONENT_STATES = new Set([
@@ -123,6 +133,7 @@ export function shouldBlockProjectWindowClose(
 export function shouldBlockWorkbenchWindowClose(options: WorkbenchCloseGuardOptions) {
   if (
     options.frontendRefreshRequested
+      || allowNextWorkbenchUnload
       || options.shutdownRequested
       || options.restartRequested
       || options.controlledLifecycleOperationInFlight
@@ -130,6 +141,43 @@ export function shouldBlockWorkbenchWindowClose(options: WorkbenchCloseGuardOpti
     return false;
   }
   return normalizeState(options.runtimeControllerState) !== "closing";
+}
+
+/** Arm a one-shot pass so the next navigation/reload skips the project-close guard. */
+export function allowNextWorkbenchWindowUnload() {
+  allowNextWorkbenchUnload = true;
+  const token = ++allowNextWorkbenchUnloadToken;
+  if (typeof globalThis.setTimeout === "function") {
+    globalThis.setTimeout(() => {
+      if (token === allowNextWorkbenchUnloadToken) {
+        allowNextWorkbenchUnload = false;
+      }
+    }, ALLOW_NEXT_UNLOAD_EXPIRE_MS);
+  }
+}
+
+/** True if a one-shot unload pass is armed (does not consume). */
+export function isNextWorkbenchWindowUnloadAllowed() {
+  return allowNextWorkbenchUnload;
+}
+
+/**
+ * Consume the one-shot unload pass inside `beforeunload`.
+ * Returns true when this unload should proceed without the project-close prompt.
+ */
+export function consumeNextWorkbenchWindowUnloadAllowance() {
+  if (!allowNextWorkbenchUnload) {
+    return false;
+  }
+  allowNextWorkbenchUnload = false;
+  allowNextWorkbenchUnloadToken += 1;
+  return true;
+}
+
+/** Test / recovery helper: clear any pending one-shot unload pass. */
+export function clearNextWorkbenchWindowUnloadAllowance() {
+  allowNextWorkbenchUnload = false;
+  allowNextWorkbenchUnloadToken += 1;
 }
 
 export function isElectronDesktopShell(globalLike: DesktopShellLike = globalThis as DesktopShellLike) {
@@ -198,6 +246,28 @@ export function applyBeforeUnloadProjectCloseGuard(event: BeforeUnloadEvent, mes
   event.preventDefault();
   event.returnValue = message;
   return message;
+}
+
+/**
+ * Shared beforeunload decision for workbench surfaces.
+ * Intentional refresh/recovery must call {@link allowNextWorkbenchWindowUnload} first.
+ */
+export function handleWorkbenchBeforeUnload(
+  event: BeforeUnloadEvent,
+  options: {
+    message: string;
+    controlledLifecycleOperationInFlight?: boolean;
+    closeBlocked: boolean;
+  },
+): boolean {
+  if (consumeNextWorkbenchWindowUnloadAllowance()) {
+    return false;
+  }
+  if (options.controlledLifecycleOperationInFlight || !options.closeBlocked) {
+    return false;
+  }
+  applyBeforeUnloadProjectCloseGuard(event, options.message);
+  return true;
 }
 
 export function buildProjectWindowCloseBlockedTelemetry(options: {

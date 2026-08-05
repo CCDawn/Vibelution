@@ -159,6 +159,15 @@ describe("AppShell layout contract", () => {
     expect(styles.utilityTrigger).not.toContain("h-8");
     expect(styles.utilityTrigger).toContain("[&_[data-slot=vui-button-content]]:whitespace-nowrap");
     expect(styles.statusSummaryChip).toContain("whitespace-nowrap");
+    expect(styles.statusSummaryChip).toContain("!items-center");
+    expect(styles.statusSummaryChip).toContain("!py-0");
+    expect(styles.statusDot).toContain("self-center");
+    expect(styles.statusDot).not.toContain("align-middle");
+    expect(styles.statusBadgeLabel).toContain("leading-none");
+    expect(styles.statusBadgeValue).toContain("leading-none");
+    expect(styles.statusBadgeValue).toContain("[font-size:var(--vui-font-xs)]");
+    expect(shellStyles).toContain("align-self: center");
+    expect(shellStyles).toMatch(/\.statusDot\s*\{[^}]*align-self:\s*center/);
     expect(shellStyles).toContain("@media (max-width: 1279px)");
     expect(shellStyles).toContain("@media (max-width: 1180px)");
     expect(shellStyles).toContain(".topClock span:last-child");
@@ -172,7 +181,9 @@ describe("AppShell layout contract", () => {
     expect(styles.utilityPopoverContent).toContain("w-[min(520px,calc(100vw-40px))]");
     expect(styles.utilityPopoverContent).toContain("max-h-[min(78vh,760px)]");
     expect(styles.statusGuidePopoverContent).toContain("w-[min(640px,calc(100vw-40px))]");
-    expect(shellStyles).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
+    // Utility git signal/count grids: 2×2 for readable Chinese labels in the popover.
+    expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(shellStyles).toContain("grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr))");
     expect(shellStyles).toContain("grid-template-columns: 36px minmax(0, 1fr)");
     expect(shellStyles).toContain("@media (max-width: 640px)");
     expect(shellStyles).toContain("width: min(360px, calc(100vw - 20px))");
@@ -543,7 +554,9 @@ describe("AppShell layout contract", () => {
   it("keeps browser unload guards from stopping the workbench backend", () => {
     const beforeUnloadBody = shellSource.match(/function handleBeforeUnload\(event: BeforeUnloadEvent\) \{[\s\S]*?\n    \}/)?.[0] ?? "";
 
-    expect(beforeUnloadBody).toContain("applyBeforeUnloadProjectCloseGuard(event, workbenchCloseGuardMessage)");
+    expect(beforeUnloadBody).toContain("applyBeforeUnloadProjectCloseGuard(event, guard.workbenchCloseGuardMessage)");
+    expect(beforeUnloadBody).toContain("consumeNextWorkbenchWindowUnloadAllowance");
+    expect(beforeUnloadBody).toContain("projectCloseGuardRef");
     expect(beforeUnloadBody).not.toContain("markControlledProjectLifecycleOperation(\"stop\")");
     expect(beforeUnloadBody).not.toContain("beginShutdown");
   });
@@ -555,7 +568,12 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("RefreshCw");
     expect(shellSource).toContain("refreshFrontendLabel");
     expect(shellSource).toContain("browser.user_action.frontend_refresh_requested");
+    expect(shellSource).toContain("allowNextWorkbenchWindowUnload");
     expect(shellSource).toContain("window.location.reload()");
+    expect(shellSource).not.toContain("window.setTimeout(() => window.location.reload(), 0)");
+    // Stable beforeunload: empty deps + ref, not re-armed on every polled state tick.
+    expect(shellSource).toContain("projectCloseGuardRef");
+    expect(shellSource).toMatch(/addEventListener\("beforeunload"[\s\S]*?\},\s*\[\]\)/);
     expect(shellSource).toContain("lifecycleMenuCluster");
     expect(shellSource).toContain("lifecycleMenuPanel");
     expect(shellSource).toContain("lifecycleMenuOpen");

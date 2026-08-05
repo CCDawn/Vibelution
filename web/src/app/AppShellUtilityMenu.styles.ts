@@ -1,38 +1,45 @@
 import {
   vuiControlPillClass,
-  vuiControlQuietClass,
+  vuiControlQuietChromeClass,
 } from "../design/vuiChromeRecipes";
 
 import {
-  vuiGlassPanelClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
+/**
+ * Utility popover style hooks.
+ * Layout (grid/flex/display) for these hooks is owned by workbench-shell.css.
+ * Keep Tailwind here to chrome/state tokens only — do not re-declare display or
+ * grid-template that fights the shell CSS cascade.
+ */
 const styles = {
-  gitBranchName: "vui-app-appshell gitBranchName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  gitBranchName: "vui-app-appshell gitBranchName min-w-0",
   gitChip: `vui-app-appshell gitChip min-w-0 ${vuiControlPillClass}`,
-  gitCommitItem: `vui-app-appshell gitCommitItem min-w-0 ${vuiOpaqueRowClass} p-2`,
-  gitCommitList: "vui-app-appshell gitCommitList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  gitCount: "vui-app-appshell gitCount min-w-0",
-  gitCountGrid: "vui-app-appshell gitCountGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  gitFileItem: `vui-app-appshell gitFileItem min-w-0 ${vuiOpaqueRowClass} p-2`,
-  gitFileList: "vui-app-appshell gitFileList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  gitHeadline: "vui-app-appshell gitHeadline min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
-  gitMetaGrid: "vui-app-appshell gitMetaGrid min-w-0 flex flex-wrap items-center gap-1.5 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  gitMiniHeader: "vui-app-appshell gitMiniHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  gitMiniPanel: `vui-app-appshell gitMiniPanel min-w-0 ${vuiGlassPanelClass} p-2`,
-  gitQuietState: "vui-app-appshell gitQuietState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  gitCommitItem: `vui-app-appshell gitCommitItem min-w-0 ${vuiOpaqueRowClass}`,
+  gitCommitList: "vui-app-appshell gitCommitList min-w-0",
+  gitCount: "vui-app-appshell gitCount min-w-0 shrink-0 font-semibold",
+  gitCountGrid: "vui-app-appshell gitCountGrid min-w-0",
+  gitFileItem: `vui-app-appshell gitFileItem min-w-0 ${vuiOpaqueRowClass}`,
+  gitFileList: "vui-app-appshell gitFileList min-w-0",
+  gitHeadline: "vui-app-appshell gitHeadline min-w-0",
+  gitMetaGrid: "vui-app-appshell gitMetaGrid min-w-0",
+  gitMiniHeader: "vui-app-appshell gitMiniHeader min-w-0",
+  gitMiniPanel: "vui-app-appshell gitMiniPanel min-w-0",
+  gitQuietState: "vui-app-appshell gitQuietState min-w-0",
   gitSection: "vui-app-appshell gitSection min-w-0",
-  gitSectionHeader: "vui-app-appshell gitSectionHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  gitSignalGrid: "vui-app-appshell gitSignalGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  gitWorktreeItem: `vui-app-appshell gitWorktreeItem min-w-0 ${vuiOpaqueRowClass} p-2`,
-  gitWorktreeList: "vui-app-appshell gitWorktreeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  statusDot: "vui-app-appshell statusDot inline-block h-2 w-2 shrink-0 rounded-full border border-[color-mix(in_srgb,currentColor_38%,transparent)] bg-current p-0 align-middle",
+  gitSectionHeader: "vui-app-appshell gitSectionHeader min-w-0",
+  gitSignalGrid: "vui-app-appshell gitSignalGrid min-w-0",
+  gitWorktreeItem: `vui-app-appshell gitWorktreeItem min-w-0 ${vuiOpaqueRowClass}`,
+  gitWorktreeList: "vui-app-appshell gitWorktreeList min-w-0",
+  statusDot:
+    "vui-app-appshell statusDot block h-2 w-2 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
   status_active: `vui-app-appshell status_active min-w-0 ${vuiStateSelectedRowClass}`,
-  status_blocked: "vui-app-appshell status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  status_blocked:
+    "vui-app-appshell status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   status_caution: "vui-app-appshell status_caution text-[var(--state-warning)]",
   status_danger: `vui-app-appshell status_danger min-w-0 ${vuiStateDangerSoftClass}`,
   status_done: "vui-app-appshell status_done min-w-0",
@@ -44,28 +51,34 @@ const styles = {
   status_missing: "vui-app-appshell status_missing min-w-0",
   status_muted: "vui-app-appshell status_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   status_neutral: "vui-app-appshell status_neutral min-w-0",
-  status_ok: "vui-app-appshell status_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  status_ok:
+    "vui-app-appshell status_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   status_pending: "vui-app-appshell status_pending min-w-0",
-  status_ready: "vui-app-appshell status_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  status_ready:
+    "vui-app-appshell status_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   status_running: "vui-app-appshell status_running text-[var(--state-success)]",
   status_status: "vui-app-appshell status_status min-w-0",
-  status_success: "vui-app-appshell status_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  status_success:
+    "vui-app-appshell status_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   status_thought: "vui-app-appshell status_thought min-w-0",
   status_warn: "vui-app-appshell status_warn min-w-0",
-  status_warning: "vui-app-appshell status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  utilityButton: `vui-app-appshell utilityButton min-w-0 ${vuiControlQuietClass}`,
+  status_warning:
+    "vui-app-appshell status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  // Full-width grid cell chrome; layout (inline-flex, height) owned by shell CSS.
+  utilityButton: `vui-app-appshell utilityButton min-w-0 w-full max-w-full ${vuiControlQuietChromeClass} hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-content]]:justify-center [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:overflow-hidden`,
   utilityButtonActive: `vui-app-appshell utilityButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
-  utilityButtonGrid: "vui-app-appshell utilityButtonGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  utilityFileButton: `vui-app-appshell utilityFileButton min-w-0 ${vuiControlQuietClass} grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
+  utilityButtonGrid: "vui-app-appshell utilityButtonGrid min-w-0",
+  utilityFileButton: `vui-app-appshell utilityFileButton min-w-0 ${vuiControlQuietChromeClass} hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
   utilityFileButtonActive: `vui-app-appshell utilityFileButtonActive min-w-0 ${vuiStateSelectedRowClass} grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
   utilityFileChildren: "vui-app-appshell utilityFileChildren min-w-0",
   utilityFileDir: "vui-app-appshell utilityFileDir min-w-0",
-  utilityFileHeader: "vui-app-appshell utilityFileHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  utilityFilePanel: `vui-app-appshell utilityFilePanel min-w-0 ${vuiGlassPanelClass} p-2`,
+  utilityFileHeader: "vui-app-appshell utilityFileHeader min-w-0",
+  utilityFilePanel: "vui-app-appshell utilityFilePanel min-w-0",
   utilityFileSearch: "vui-app-appshell utilityFileSearch min-w-0",
   utilityFileState: "vui-app-appshell utilityFileState min-w-0",
-  utilityFileTree: "vui-app-appshell utilityFileTree min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  utilityPanel: `vui-app-appshell utilityPanel min-w-0 ${vuiGlassPanelClass} p-2`,
+  utilityFileTree: "vui-app-appshell utilityFileTree min-w-0",
+  // Panel chrome owned by workbench-shell.css (.utilityPanel).
+  utilityPanel: "vui-app-appshell utilityPanel min-w-0",
   utilityPanelHeader: "vui-app-appshell utilityPanelHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
 } as const;
 

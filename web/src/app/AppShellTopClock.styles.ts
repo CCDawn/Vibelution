@@ -1,6 +1,6 @@
 const styles = {
   statusDot:
-    "vui-app-appshell statusDot inline-block h-2 w-2 shrink-0 rounded-full border border-[color-mix(in_srgb,currentColor_38%,transparent)] bg-current p-0 align-middle",
+    "vui-app-appshell statusDot block h-2 w-2 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
   status_idle:
     "vui-app-appshell status_idle text-[color-mix(in_srgb,var(--fg-tertiary)_74%,transparent)]",
   topClock:
