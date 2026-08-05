@@ -929,7 +929,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.composerToolbar).toContain("items-center");
     expect(conversationViewSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
     expect(conversationViewSource).toContain("styles.composerEditSubmitButton");
+    // Labeled edit/rerun must not inherit square icon-only geometry.
+    expect(conversationViewSource).not.toContain("composerEditSubmitButton} ${styles.composerRoundButtonPrimary}");
     expect(conversationViewSource).toContain("styles.composerRoundButtonPrimary");
+    expect(conversationViewSource).toContain("icon={");
+    expect(conversationViewSource).toContain("<RefreshCw");
   });
 
   it("keeps the composer row compact with stable square actions", () => {
@@ -972,10 +976,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.sendButton).toContain("disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)]");
     expect(styles.sendButton).toContain("disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)]");
     expect(styles.sendButton).toContain("disabled:!text-[var(--fg-tertiary)]");
-    expect(styles.composerEditSubmitButton).toContain("w-fit");
+    expect(styles.composerEditSubmitButton).toContain("!w-fit");
+    expect(styles.composerEditSubmitButton).toContain("!rounded-full");
+    expect(styles.composerEditSubmitButton).toContain("!bg-[var(--fg-primary)]");
+    expect(styles.composerEditSubmitButton).toContain("!px-3");
+    expect(styles.composerEditSubmitButton).toContain("[&_[data-slot=vui-button-content]]:!inline-flex");
     expect(conversationViewSource).toContain("isIconOnly={!primaryActionIsEditSubmit}");
     expect(conversationViewSource).toContain("isIconOnly");
-    expect(styles.composerEditSubmitButton).toContain("px-2");
     expect(styles.composerEditSubmitButton).not.toContain("w-[var(--vui-control-height-sm)]");
 
     const sendButtonClassName = `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
@@ -3645,6 +3652,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("composerEditModeCancel");
     expect(html).toContain("composerEditSubmitButton");
     expect(html).toContain("保存并重跑");
+    expect(html).not.toContain("composerRoundButtonPrimary");
+    expect(html).toMatch(/data-slot="vui-button-label"[^>]*>保存并重跑</);
     expect(html).not.toContain("composerModeNoticeIcon");
   });
 

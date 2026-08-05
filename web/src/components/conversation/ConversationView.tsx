@@ -548,8 +548,10 @@ export function ConversationView({
     actionMode: resolvedActionMode,
     editModeActive: composerEditModeActive,
   });
+  // Edit/rerun is a labeled primary pill. Do not mix in round icon-only geometry
+  // (composerRoundButtonPrimary forces fixed square size + icon-only slots).
   const primaryActionClassName = primaryActionIsEditSubmit
-    ? `${styles.composerEditSubmitButton} ${styles.composerRoundButtonPrimary}`
+    ? styles.composerEditSubmitButton
     : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
   const {
     guidanceDraftReady,
@@ -3558,6 +3560,15 @@ export function ConversationView({
           isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
           type="button"
           onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
+          icon={
+            primaryActionIsEditSubmit
+              ? (
+                composerPending || composerSafeGuidancePending
+                  ? <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" />
+                  : <RefreshCw size={14} aria-hidden="true" />
+              )
+              : undefined
+          }
           title={
             runningGuidanceActionsEnabled
               ? composerSafeGuidancePending
@@ -3577,16 +3588,11 @@ export function ConversationView({
                 : resolvedActionLabel
           }
         >
-          {composerPending || composerSafeGuidancePending ? (
-            <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
-          ) : primaryActionIsEditSubmit ? (
-            <>
-              <RefreshCw size={15} aria-hidden="true" />
-              <span>{resolvedActionLabel}</span>
-            </>
-          ) : (
-            <ArrowUp size={16} aria-hidden="true" />
-          )}
+          {primaryActionIsEditSubmit
+            ? (composerPending || composerSafeGuidancePending ? resolvedPendingLabel : resolvedActionLabel)
+            : (composerPending || composerSafeGuidancePending
+              ? <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
+              : <ArrowUp size={16} aria-hidden="true" />)}
         </VButton>
       ) : null}
       {runningGuidanceActionsEnabled ? (
