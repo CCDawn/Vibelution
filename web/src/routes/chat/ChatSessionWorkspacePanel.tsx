@@ -144,12 +144,22 @@ export function ChatSessionWorkspacePanel({
           ) : null}
           <ChatRuntimeNoticeStack lang={lang} notices={notices} />
           <div className={styles.conversationBody}>
-            <ChatConversationComposerBridge
-              {...conversation}
-              toolApproval={null}
-              composer={conversation.composer}
-              fallback={conversationLoadingFallback}
-            />
+            {/*
+              key=sessionId remounts clean per thread (no cross-session scroll/expansion bleed).
+              Sticky last-good paint ensures the first frame already has messages (Codex resume feel).
+            */}
+            <div
+              key={conversation.sessionId}
+              className={styles.conversationKeepAlivePane}
+              data-session-conversation={conversation.sessionId}
+            >
+              <ChatConversationComposerBridge
+                {...conversation}
+                toolApproval={null}
+                composer={conversation.composer}
+                fallback={conversationLoadingFallback}
+              />
+            </div>
           </div>
         </div>
       </div>

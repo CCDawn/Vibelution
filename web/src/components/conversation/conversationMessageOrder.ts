@@ -18,7 +18,9 @@ function metadataNumber(message: ConversationMessage, key: string) {
 }
 
 function idMessageIndex(message: ConversationMessage) {
-  const match = /(?:^|-)message-(\d+)(?:$|-)/.exec(message.id);
+  // Prefer trailing -message-N (session journal ids), then any -message-N segment.
+  const trailing = /-message-(\d+)$/.exec(message.id);
+  const match = trailing ?? /(?:^|-)message-(\d+)(?:$|-)/.exec(message.id);
   if (!match) {
     return undefined;
   }
@@ -26,13 +28,29 @@ function idMessageIndex(message: ConversationMessage) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function messageSequenceOrder(message: ConversationMessage) {
+/**
+ * Journal sequence for a conversation message.
+ * Prefer explicit metadata, then id-encoded message index (Codex/session journal order).
+ */
+export function messageSequenceOrder(message: ConversationMessage) {
   return metadataNumber(message, "messageIndex")
     ?? metadataNumber(message, "seq")
     ?? idMessageIndex(message)
     ?? Number.POSITIVE_INFINITY;
 }
 
+function hasFiniteSequence(order: number) {
+  return Number.isFinite(order) && order !== Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Order messages for the conversation timeline.
+ *
+ * Primary key is journal sequence (messageIndex / seq / id), matching backend
+ * transcript chain and Codex-style turn order. Wall-clock timestamps are only a
+ * fallback when sequence is missing — timestamp-first reordering was scrambling
+ * turns after frontend unification when clocks or sticky merges disagreed.
+ */
 export function chronologicalConversationMessages(messages: ConversationMessage[]) {
   return messages
     .map((message, index) => ({
@@ -41,10 +59,20 @@ export function chronologicalConversationMessages(messages: ConversationMessage[
       sequenceOrder: messageSequenceOrder(message),
       timestampOrder: timestampOrder(message.timestamp),
     }))
-    .sort((left, right) =>
-      left.timestampOrder - right.timestampOrder
-      || left.sequenceOrder - right.sequenceOrder
-      || left.index - right.index
-    )
+    .sort((left, right) => {
+      const leftHasSeq = hasFiniteSequence(left.sequenceOrder);
+      const rightHasSeq = hasFiniteSequence(right.sequenceOrder);
+      if (leftHasSeq && rightHasSeq) {
+        return left.sequenceOrder - right.sequenceOrder
+          || left.timestampOrder - right.timestampOrder
+          || left.index - right.index;
+      }
+      if (leftHasSeq !== rightHasSeq) {
+        // Prefer journal-keyed messages over unsequenced noise in the same batch.
+        return leftHasSeq ? -1 : 1;
+      }
+      return left.timestampOrder - right.timestampOrder
+        || left.index - right.index;
+    })
     .map((item) => item.message);
 }

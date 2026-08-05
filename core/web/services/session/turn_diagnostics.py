@@ -14,6 +14,7 @@ import json
 import re
 import threading
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -616,6 +617,255 @@ def _release_stale_chat_turn_work_run(*, session_id: str, finished_at: str, summ
         return
 
 
+# C1: tool-timeout hang and absolute stale running work-run settlement.
+_CHAT_TURN_TOOL_TIMEOUT_HANG_SECONDS = 180.0
+_CHAT_TURN_ABSOLUTE_STALE_SECONDS = 30.0 * 60.0
+
+
+def _parse_work_run_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _chat_turn_last_tool_error_timed_out(payload: dict[str, Any]) -> bool:
+    last_tool_error = payload.get("lastToolError") if isinstance(payload.get("lastToolError"), dict) else {}
+    if not last_tool_error:
+        return False
+    if bool(last_tool_error.get("timedOut") or last_tool_error.get("timed_out")):
+        return True
+    failure_class = str(last_tool_error.get("failureClass") or last_tool_error.get("failure_class") or "").strip().lower()
+    if failure_class in {"timeout", "timed_out", "tool_timeout"}:
+        return True
+    summary = str(last_tool_error.get("summary") or last_tool_error.get("errorPreview") or "").lower()
+    return "timeout" in summary or "超时" in summary
+
+
+def _chat_turn_work_run_hang_reason(
+    payload: dict[str, Any],
+    *,
+    now: datetime,
+    worker_owns_turn: bool,
+) -> str:
+    """Return a non-empty reason code when a chat_turn work-run should be force-settled."""
+    status = str(payload.get("status") or payload.get("currentPhase") or "").strip().lower()
+    if status not in {"queued", "running", "stopping", "paused"}:
+        return ""
+    if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
+        return ""
+
+    updated = _parse_work_run_timestamp(payload.get("updatedAt") or payload.get("startedAt") or "")
+    started = _parse_work_run_timestamp(payload.get("startedAt") or payload.get("updatedAt") or "")
+    tool_error = payload.get("lastToolError") if isinstance(payload.get("lastToolError"), dict) else {}
+    tool_error_at = _parse_work_run_timestamp(tool_error.get("updatedAt") if tool_error else "")
+
+    # Worker gone: disk still says running → settle immediately.
+    if not worker_owns_turn:
+        return "worker_gone"
+
+    # Worker still claims the turn but tool timeout hang left no progress.
+    if _chat_turn_last_tool_error_timed_out(payload) and tool_error_at is not None:
+        if (now - tool_error_at).total_seconds() >= _CHAT_TURN_TOOL_TIMEOUT_HANG_SECONDS:
+            return "tool_timeout_hang"
+
+    # Absolute ceiling for any running chat_turn (defensive).
+    anchor = updated or started
+    if anchor is not None and (now - anchor).total_seconds() >= _CHAT_TURN_ABSOLUTE_STALE_SECONDS:
+        return "absolute_stale"
+
+    return ""
+
+
+def _settle_stale_chat_turn_work_run(
+    payload: dict[str, Any],
+    *,
+    reason: str,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Force a stuck chat_turn to a terminal work-run status and clear session running flags."""
+    s = _service()
+    run_id = str(payload.get("runId") or payload.get("roundId") or payload.get("id") or "").strip()
+    session_id = str(payload.get("sessionId") or "").strip()
+    if not run_id or not session_id:
+        return None
+    finished_at = (now or datetime.now(timezone.utc)).isoformat()
+    previous_status = str(payload.get("status") or payload.get("currentPhase") or "running").strip().lower()
+    if reason == "tool_timeout_hang":
+        status = "failed_runtime"
+        summary = s.text_for(
+            s.get_web_language(),
+            zh="工具超时后长时间无进展，本轮已自动收口为失败，可继续发送消息。",
+            en="This turn was auto-closed after a tool timeout with no further progress. You can continue the session.",
+        )
+    elif reason == "absolute_stale":
+        status = "failed_runtime"
+        summary = s.text_for(
+            s.get_web_language(),
+            zh="本轮运行时间过长且无收口，已自动标记失败以便继续对话。",
+            en="This turn ran too long without closing and was auto-marked failed so chat can continue.",
+        )
+    else:
+        status = "stopped"
+        summary = s.text_for(
+            s.get_web_language(),
+            zh="会话 worker 已结束，已清除残留运行态。",
+            en="Session worker finished; cleared residual running state.",
+        )
+    prior_summary = str(payload.get("summary") or "").strip()
+    if prior_summary and prior_summary not in summary:
+        summary = f"{prior_summary} [{summary}]"
+
+    s._persist_chat_turn_work_run(
+        session_id=session_id,
+        turn_id=run_id,
+        status=status,
+        summary=summary,
+        finished_at=finished_at,
+        updated_at=finished_at,
+        error_type="StaleChatTurnSettled",
+        error=reason,
+    )
+    try:
+        s._set_session_running(session_id, False, turn_id=run_id)
+        s._clear_session_turn_control(session_id, turn_id=run_id)
+    except Exception:
+        pass
+    try:
+        with s._CHAT_STATE_LOCK:
+            state = s.load_chat_state(s.PROJECT_ROOT)
+            conversations = state.get("conversations") if isinstance(state, dict) else None
+            if isinstance(conversations, list):
+                for conversation in conversations:
+                    if not isinstance(conversation, dict):
+                        continue
+                    if str(conversation.get("conversation_id") or "").strip() != session_id:
+                        continue
+                    conversation["last_turn_status"] = status
+                    conversation["updated_at"] = finished_at
+                    conversation["runtime_notices"] = s._append_session_runtime_notice(
+                        conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
+                        {
+                            "kind": "turn_recovered",
+                            "level": "warning",
+                            "message": summary,
+                            "timestamp": finished_at,
+                            "source": "conversation.turn_recovered",
+                            "turnId": run_id,
+                            "previousStatus": previous_status,
+                            "reason": reason,
+                        },
+                    )
+                    state["updated_at"] = finished_at
+                    s.save_chat_state(s.PROJECT_ROOT, state)
+                    break
+    except Exception:
+        pass
+    try:
+        s._publish_session_detail_snapshot(session_id)
+    except Exception:
+        pass
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "turn_recovery",
+            "conversation.turn_recovered",
+            level="warning",
+            outcome=status,
+            message=summary,
+            fields={
+                "sessionId": session_id,
+                "turnId": run_id,
+                "previousStatus": previous_status,
+                "reason": reason,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+    return {
+        "runId": run_id,
+        "sessionId": session_id,
+        "status": status,
+        "reason": reason,
+    }
+
+
+_RECONCILE_STALE_CHAT_TURN_LOCK = threading.Lock()
+_RECONCILE_STALE_CHAT_TURN_DEPTH = 0
+
+
+def reconcile_stale_chat_turn_work_runs(*, now: datetime | None = None) -> list[dict[str, Any]]:
+    """Settle chat_turn work-runs left running after worker death or tool-timeout hang (C1)."""
+    global _RECONCILE_STALE_CHAT_TURN_DEPTH
+    # Prevent re-entry from publish/detail projection triggered by settlement.
+    with _RECONCILE_STALE_CHAT_TURN_LOCK:
+        if _RECONCILE_STALE_CHAT_TURN_DEPTH > 0:
+            return []
+        _RECONCILE_STALE_CHAT_TURN_DEPTH += 1
+    try:
+        s = _service()
+        clock = now or datetime.now(timezone.utc)
+        settled: list[dict[str, Any]] = []
+        seen_run_ids: set[str] = set()
+
+        candidates: list[dict[str, Any]] = []
+        active = s._WORK_RUN_STORE.load_active_snapshot("chat_turn")
+        if isinstance(active, dict):
+            candidates.append(active)
+        try:
+            # Bound scan: active + recent index only (avoid loading hundreds of historical runs).
+            for snapshot in s._WORK_RUN_STORE.list_snapshots("chat_turn", limit=40):
+                if not isinstance(snapshot, dict):
+                    continue
+                status = str(snapshot.get("status") or snapshot.get("currentPhase") or "").strip().lower()
+                if status not in {"queued", "running", "stopping", "paused"}:
+                    continue
+                if str(snapshot.get("finishedAt") or snapshot.get("endedAt") or "").strip():
+                    continue
+                candidates.append(snapshot)
+        except Exception:
+            pass
+
+        with s._RUNNING_SESSIONS_LOCK:
+            running_session_ids = set(s._RUNNING_SESSION_IDS)
+            active_turn_ids = dict(s._SESSION_ACTIVE_TURN_IDS)
+
+        for payload in candidates:
+            run_id = str(payload.get("runId") or payload.get("roundId") or payload.get("id") or "").strip()
+            session_id = str(payload.get("sessionId") or "").strip()
+            if not run_id or run_id in seen_run_ids:
+                continue
+            seen_run_ids.add(run_id)
+            worker_owns = (
+                bool(session_id)
+                and session_id in running_session_ids
+                and str(active_turn_ids.get(session_id) or "").strip() == run_id
+            )
+            reason = _chat_turn_work_run_hang_reason(
+                payload,
+                now=clock,
+                worker_owns_turn=worker_owns,
+            )
+            if not reason:
+                continue
+            result = _settle_stale_chat_turn_work_run(payload, reason=reason, now=clock)
+            if result:
+                settled.append(result)
+        return settled
+    finally:
+        with _RECONCILE_STALE_CHAT_TURN_LOCK:
+            _RECONCILE_STALE_CHAT_TURN_DEPTH = max(0, _RECONCILE_STALE_CHAT_TURN_DEPTH - 1)
+
+
 def _complete_turn_error_visible_content(content: Any, metadata: dict[str, Any]) -> str:
     s = _service()
     visible = str(content or "").strip()
@@ -797,9 +1047,14 @@ def _active_chat_turn_work_run_for_session(session_id: str) -> dict[str, Any] | 
     return None
 
 
-def list_active_session_work_runs() -> list[dict[str, Any]]:
+def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, Any]]:
     """Return active web chat turns as lightweight WorkRun lease snapshots."""
     s = _service()
+    if reconcile:
+        try:
+            reconcile_stale_chat_turn_work_runs()
+        except Exception:
+            pass
 
     with s._RUNNING_SESSIONS_LOCK:
         session_ids = sorted(s._RUNNING_SESSION_IDS)
@@ -847,7 +1102,11 @@ def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
 
 def load_chat_turn_work_run_summary() -> dict[str, Any]:
     s = _service()
-    active_items = list_active_session_work_runs()
+    try:
+        reconcile_stale_chat_turn_work_runs()
+    except Exception:
+        pass
+    active_items = list_active_session_work_runs(reconcile=False)
     active = s._WORK_RUN_STORE.load_active_snapshot("chat_turn")
     if not active and active_items:
         active = active_items[0]
@@ -922,11 +1181,17 @@ def _persist_chat_turn_work_run(
         else "",
     }
     if isinstance(last_tool_error, dict) and last_tool_error:
+        timed_out = bool(last_tool_error.get("timedOut") or last_tool_error.get("timed_out"))
+        failure_class = str(last_tool_error.get("failureClass") or last_tool_error.get("failure_class") or "").strip()
+        if not timed_out and failure_class.lower() in {"timeout", "timed_out", "tool_timeout"}:
+            timed_out = True
         payload["lastToolError"] = {
             "toolName": s.trim_lines(str(last_tool_error.get("toolName") or ""), max_lines=1),
             "summary": s.trim_lines(str(last_tool_error.get("summary") or ""), max_lines=2),
             "errorPreview": s.trim_lines(str(last_tool_error.get("errorPreview") or ""), max_lines=2),
             "relatedEventCode": s.trim_lines(str(last_tool_error.get("relatedEventCode") or ""), max_lines=1),
+            "timedOut": timed_out,
+            "failureClass": s.trim_lines(failure_class or ("timeout" if timed_out else ""), max_lines=1),
             "updatedAt": str(last_tool_error.get("updatedAt") or now).strip(),
         }
     s._WORK_RUN_STORE.persist_snapshot("chat_turn", payload, active_run_id=active_run_id)

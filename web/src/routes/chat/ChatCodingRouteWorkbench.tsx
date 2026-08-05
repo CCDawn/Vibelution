@@ -142,6 +142,7 @@ import {
 } from "../sessionActivityIndicator";
 import type { AgentContextMenuState } from "../AgentContextMenu";
 import { ConversationIndexTree } from "../ConversationIndexTree";
+import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
   defaultConversationGroupCollapsed,
@@ -250,7 +251,6 @@ import {
   fetchSessionDetailWindow,
   isSessionNotFoundError,
   isSessionDetailHardLoading,
-  isForeignSessionDetailQueryKey,
   latestVisibleTurnErrorMessage,
   prefetchSessionDetailWindow,
   removeDeletedSessionFromConversations,
@@ -263,6 +263,11 @@ import {
   latestMentalSnapshot,
   latestChatRoomRound,
 } from "./chatSessionDetailHelpers";
+import {
+  forgetSessionDetailPaint,
+  resolveStickySessionDetailPaint,
+  shouldShowStickyTranscriptPending,
+} from "./chatSessionPaintCache";
 
 import {
   cliAgentRunIdFromTabId,
@@ -977,15 +982,8 @@ export function ChatCodingRoute() {
     clearPendingSelfEvolutionHandoff();
   }, [activeSessionId, sessionsQuery.data, setActiveSession]);
 
-  useEffect(() => {
-    const activeId = String(activeSessionId || "").trim();
-    if (!activeId) {
-      return;
-    }
-    void queryClient.cancelQueries({
-      predicate: (query) => isForeignSessionDetailQueryKey(query.queryKey, activeId),
-    });
-  }, [activeSessionId, queryClient]);
+  // Do not cancel foreign session detail queries on switch — that aborts in-flight
+  // loads for recently visited tabs and forces empty provisional shells on return.
   // Clear stale composer errors for the newly selected session after a switch.
   useEffect(() => {
     const activeId = String(activeSessionId || "").trim();
@@ -1060,6 +1058,7 @@ export function ChatCodingRoute() {
     }
     const nextActiveSessionId = sessionsQuery.data.find((session) => session.id !== activeSessionId)?.id || "";
     clearSessionTransientUiState(activeSessionId);
+    forgetSessionDetailPaint(activeSessionId);
     removeSessionWorkspace(activeSessionId, nextActiveSessionId || null);
     if (nextActiveSessionId) {
       setActiveSession(nextActiveSessionId);
@@ -1533,7 +1532,11 @@ export function ChatCodingRoute() {
       ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
       : undefined,
   });
-  const detail = rawSessionDetail;
+  // Codex/ChatGPT: paint sticky last-good transcript while provisional shell hydrates.
+  const detail = resolveStickySessionDetailPaint({
+    activeSessionId,
+    detail: rawSessionDetail,
+  });
   const sessionToolApprovalRuntimeActive = Boolean(
     activeSessionId
     && runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId,
@@ -1668,6 +1671,13 @@ export function ChatCodingRoute() {
   const sessionDetailLoadingForActiveSession = isSessionDetailHardLoading({
     activeSessionId,
     detail: rawSessionDetail,
+    isFetching: sessionDetailQuery.isFetching,
+    isTempSession: isTempSessionId(activeSessionId),
+  });
+  const sessionTranscriptPending = shouldShowStickyTranscriptPending({
+    activeSessionId,
+    paintDetail: detail,
+    liveDetail: rawSessionDetail,
     isFetching: sessionDetailQuery.isFetching,
     isTempSession: isTempSessionId(activeSessionId),
   });
@@ -3020,7 +3030,7 @@ export function ChatCodingRoute() {
         updateGroupRoomPending={updateGroupRoomMutation.isPending}
         deleteGroupRoomPending={deleteGroupRoomMutation.isPending}
         resetGroupRoomPending={resetGroupRoomMutation.isPending}
-        onOpenTeam={(teamId) => navigate(`/teams?team=${encodeURIComponent(teamId)}`)}
+        onOpenTeam={(teamId) => navigate(teamWorkspaceRoute(teamId))}
         onApplyGroupRoomManagement={handleApplyGroupRoomManagement}
         onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}
         onResetActiveGroupRoom={handleResetActiveGroupRoom}
@@ -3305,6 +3315,7 @@ export function ChatCodingRoute() {
                 phase: detail.currentPhase,
                 messages: detail.messages,
                 activeTurnMessage,
+                transcriptPending: sessionTranscriptPending,
                 hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier),
                 earlierMessagesLoading: loadEarlierSessionMessagesMutation.isPending,
                 onStreamingFramePaint: handleConversationStreamingFramePaint,

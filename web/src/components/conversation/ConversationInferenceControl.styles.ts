@@ -16,8 +16,8 @@ const styles = {
   option: "!grid !h-auto !min-h-9 !w-full !grid-cols-[minmax(0,1fr)_0.875rem] !items-start !gap-x-2 !gap-y-0 !rounded-[8px] !border-0 !bg-transparent !px-2 !py-1.5 !text-left !shadow-none hover:!bg-[var(--vui-control-muted)] data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)]",
   optionCopy: "grid min-w-0 content-start gap-0.5",
   optionLabel: "[font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
-  optionDescription: "line-clamp-2 whitespace-normal [font-size:var(--vui-font-xs)] leading-[1.35] text-[var(--fg-tertiary)]",
-  check: "mt-0.5 shrink-0 text-[var(--accent-cool)]",
+// Reserve two lines so every reasoning tier has the same option height.
+  optionDescription: "min-h-[2.7em] line-clamp-2 whitespace-normal [font-size:var(--vui-font-xs)] leading-[1.35] text-[var(--fg-tertiary)]",  check: "mt-0.5 shrink-0 text-[var(--accent-cool)]",
   checkSlot: "mt-0.5 block size-3.5 shrink-0",
 };
 

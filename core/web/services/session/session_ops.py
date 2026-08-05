@@ -890,6 +890,10 @@ def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
 def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, Any]:
     """Clear persisted running state when no in-memory worker owns it."""
     s = _service()
+    try:
+        s.reconcile_stale_chat_turn_work_runs()
+    except Exception:
+        pass
 
     conversations = payload.get("conversations")
     if not isinstance(conversations, list):

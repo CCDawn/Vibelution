@@ -124,6 +124,8 @@ export function buildSessionDetailShellFromSummary(
     changedFiles: [],
     readFiles: [],
     messages: [],
+    // Empty messages here mean "still loading", not "truly empty session".
+    provisionalTranscript: true,
     stopRequested: false,
     stopRequestedAt: "",
     stopReason: "",
@@ -138,6 +140,11 @@ export function buildSessionDetailShellFromSummary(
       transcriptScope: "window",
     },
   };
+}
+
+/** True when UI is painting a list-summary shell before the message window hydrates. */
+export function isProvisionalSessionTranscript(detail: SessionDetail | null | undefined): boolean {
+  return Boolean(detail?.provisionalTranscript);
 }
 
 /**
@@ -187,8 +194,11 @@ export function resolveActiveSessionDetailForUi(options: {
 }
 
 /**
- * Hard loading shell only when we have nothing to paint and a real fetch is in flight.
- * Temp/optimistic shells and summary shells must stay interactive (composer ready).
+ * Hard loading shell only when we have nothing usable to paint.
+ * - Temp shells stay interactive.
+ * - Summary shells (`provisionalTranscript`) are soft-pending: keep the conversation
+ *   frame (composer) but the transcript should show a loading state, not "no messages".
+ * - Missing detail while a real fetch is in flight is hard loading.
  */
 export function isSessionDetailHardLoading(options: {
   activeSessionId: string | null | undefined;
@@ -199,6 +209,29 @@ export function isSessionDetailHardLoading(options: {
   const activeSessionId = String(options.activeSessionId || "").trim();
   if (!activeSessionId || options.isTempSession) {
     return false;
+  }
+  if (options.detail?.id === activeSessionId) {
+    // Provisional shells keep the frame; transcript pending is handled separately.
+    return false;
+  }
+  return Boolean(options.isFetching);
+}
+
+/**
+ * Transcript should show a loading/skeleton state instead of the empty-session copy.
+ */
+export function shouldShowSessionTranscriptPending(options: {
+  activeSessionId: string | null | undefined;
+  detail: SessionDetail | undefined;
+  isFetching: boolean;
+  isTempSession?: boolean;
+}): boolean {
+  const activeSessionId = String(options.activeSessionId || "").trim();
+  if (!activeSessionId || options.isTempSession) {
+    return false;
+  }
+  if (options.detail?.id === activeSessionId && options.detail.provisionalTranscript) {
+    return true;
   }
   if (options.detail?.id === activeSessionId) {
     return false;

@@ -899,6 +899,10 @@ def _capture_session_ui_stream(
                 zh=f"工具失败：{name}。" + (f" {error_preview}" if error_preview else ""),
                 en=f"Tool failed: {name}." + (f" {error_preview}" if error_preview else ""),
             )
+            timed_out_flag = bool(fact_fields.get("timedOut"))
+            failure_class = str(fact_fields.get("failureClass") or "").strip().lower()
+            if failure_class in {"timeout", "timed_out", "tool_timeout"}:
+                timed_out_flag = True
             s._touch_chat_turn_work_run(
                 session_id=session_id,
                 turn_id=capture.turn_id,
@@ -910,6 +914,8 @@ def _capture_session_ui_stream(
                     "summary": work_run_summary,
                     "errorPreview": error_preview,
                     "relatedEventCode": "conversation.tool_error",
+                    "timedOut": timed_out_flag,
+                    "failureClass": failure_class or ("timeout" if timed_out_flag else ""),
                     "updatedAt": s._now_timestamp(),
                 },
             )

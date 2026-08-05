@@ -396,6 +396,7 @@ export function ConversationView({
   phase,
   messages,
   activeTurnMessage,
+  transcriptPending = false,
   className,
   density = "default",
   composerVariant = "compact",
@@ -3691,7 +3692,16 @@ export function ConversationView({
 
       <div ref={timelineRef} className={styles.timeline}>
         {displayMessages.length === 0 && !activeTurnMessage ? (
-          <VStateSurface fill className={styles.emptyState} tone="empty" title={t("sessionNoMessages")} />
+          transcriptPending ? (
+            <VStateSurface
+              fill
+              className={styles.emptyState}
+              tone="loading"
+              title={t("sessionTranscriptLoading")}
+            />
+          ) : (
+            <VStateSurface fill className={styles.emptyState} tone="empty" title={t("sessionNoMessages")} />
+          )
         ) : (
           <div ref={timelineContentRef} className={styles.timelineContent}>
             {timelineVirtualRange.topSpacerPx > 0 ? (

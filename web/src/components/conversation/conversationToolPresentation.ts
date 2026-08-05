@@ -188,25 +188,224 @@ function extractTruncatedStructuredSummary(value: string) {
   }
 }
 
+/** Terminal sandbox payload: status / stdout / timeout JSON dumped into process rows. */
+function isTerminalSandboxPayload(parsed: Record<string, unknown>) {
+  const keys = Object.keys(parsed);
+  const hasStatus = "status" in parsed || "outcomeStatus" in parsed;
+  const hasTerminalShape = keys.some((key) =>
+    [
+      "terminalSessionId",
+      "sessionOpen",
+      "formattedOutput",
+      "stdout",
+      "stderr",
+      "exitCode",
+      "timedOut",
+      "outcomeStatus",
+    ].includes(key)
+  );
+  return hasStatus && hasTerminalShape;
+}
+
+function extractJsonObject(value: string): Record<string, unknown> | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const tryParse = (text: string) => {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      return objectRecord(parsed);
+    } catch {
+      return null;
+    }
+  };
+  const direct = tryParse(trimmed);
+  if (direct) {
+    return direct;
+  }
+  // Human prefix before JSON: "执行失败 · {\"status\":...}" or search mashups.
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    return tryParse(trimmed.slice(start, end + 1));
+  }
+  return null;
+}
+
+function firstTextLine(value: unknown, maxLen = 96) {
+  const text = String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .find(Boolean);
+  if (!text) {
+    return "";
+  }
+  // Drop heavily escaped / mojibake fragments from broken console encodings.
+  if ((text.match(/\\n/g) || []).length >= 2 || /[?]{2,}|�/.test(text)) {
+    return "";
+  }
+  return text.length > maxLen ? `${text.slice(0, maxLen - 1).trimEnd()}…` : text;
+}
+
+/**
+ * Codex-style one-line summary for terminal/write_stdin sandbox payloads.
+ * Never returns raw JSON or multi-kilobyte stdout.
+ */
+export function terminalSandboxPresentationSummary(
+  value: string | undefined,
+  language: ConversationToolPresentationLanguage,
+): string {
+  const parsed = extractJsonObject(String(value ?? ""));
+  if (!parsed || !isTerminalSandboxPayload(parsed)) {
+    return "";
+  }
+  const status = String(parsed.status || parsed.outcomeStatus || "").trim().toLowerCase();
+  const outcome = String(parsed.outcomeStatus || "").trim().toLowerCase();
+  const timedOut = Boolean(parsed.timedOut)
+    || status === "timeout"
+    || outcome === "timeout"
+    || String(parsed.failureClass || "").toLowerCase().includes("timeout");
+  const exitCodeRaw = parsed.exitCode;
+  const exitCode = typeof exitCodeRaw === "number" && Number.isFinite(exitCodeRaw)
+    ? exitCodeRaw
+    : Number(String(exitCodeRaw ?? "").trim());
+  const hasExit = Number.isFinite(exitCode);
+
+  if (timedOut || status === "timeout" || outcome === "timeout") {
+    return language === "zh" ? "执行超时" : "Timed out";
+  }
+  if (status === "running" || outcome === "running") {
+    return language === "zh" ? "正在运行" : "Running";
+  }
+  if (status === "failed" || status === "error" || (hasExit && exitCode !== 0)) {
+    const errLine = firstTextLine(parsed.stderr || parsed.error || parsed.message);
+    if (errLine) {
+      return language === "zh" ? `执行失败 · ${errLine}` : `Failed · ${errLine}`;
+    }
+    if (hasExit && exitCode !== 0) {
+      return language === "zh" ? `执行失败 · 退出码 ${exitCode}` : `Failed · exit ${exitCode}`;
+    }
+    return language === "zh" ? "执行失败" : "Failed";
+  }
+  if (status === "completed" || status === "done" || status === "ok" || (hasExit && exitCode === 0)) {
+    const outLine = firstTextLine(parsed.formattedOutput || parsed.stdout || parsed.summary);
+    return outLine || "";
+  }
+  const fallback = firstTextLine(parsed.formattedOutput || parsed.stdout || parsed.stderr);
+  return fallback || (language === "zh" ? "终端结果" : "Terminal result");
+}
+
+/**
+ * Expanded detail for terminal payloads: short human lines only, no session ids / raw protocol.
+ */
+export function terminalSandboxPresentationDetail(
+  value: string | undefined,
+  language: ConversationToolPresentationLanguage,
+): string {
+  const parsed = extractJsonObject(String(value ?? ""));
+  if (!parsed || !isTerminalSandboxPayload(parsed)) {
+    return "";
+  }
+  const lines: string[] = [];
+  const summary = terminalSandboxPresentationSummary(value, language);
+  if (summary) {
+    lines.push(summary);
+  }
+  const exitCodeRaw = parsed.exitCode;
+  const exitCode = typeof exitCodeRaw === "number" && Number.isFinite(exitCodeRaw)
+    ? exitCodeRaw
+    : Number(String(exitCodeRaw ?? "").trim());
+  if (Number.isFinite(exitCode)) {
+    lines.push(language === "zh" ? `退出码 ${exitCode}` : `Exit code ${exitCode}`);
+  }
+  const stderr = String(parsed.stderr || "").trim();
+  if (stderr) {
+    const clipped = stderr
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .slice(0, 8)
+      .join("\n")
+      .slice(0, 600);
+    lines.push(clipped + (stderr.length > clipped.length ? "\n…" : ""));
+  } else {
+    const stdout = String(parsed.formattedOutput || parsed.stdout || "").trim();
+    if (stdout && !/timeout|执行超时/i.test(summary)) {
+      const clipped = stdout
+        .replace(/\r\n/g, "\n")
+        .replace(/\\n/g, "\n")
+        .split("\n")
+        .slice(0, 12)
+        .join("\n")
+        .slice(0, 800);
+      if (clipped && !/[?]{3,}|�/.test(clipped)) {
+        lines.push(clipped + (stdout.length > clipped.length ? "\n…" : ""));
+      }
+    }
+  }
+  return lines.filter(Boolean).join("\n");
+}
+
+/** Collapse multi-tool search mashups into a short activity line. */
+function searchMashupPresentationSummary(
+  value: string,
+  language: ConversationToolPresentationLanguage,
+) {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text.includes("[搜索]") && !text.includes("[Search]")) {
+    return "";
+  }
+  const noMatch = /未找到匹配|no matches|0 results/i.test(text);
+  const hitFiles = text.match(/'path'\s*:\s*'([^']+)'/g) || text.match(/"path"\s*:\s*"([^"]+)"/g);
+  const fileCount = hitFiles?.length ?? 0;
+  if (noMatch && fileCount === 0) {
+    return language === "zh" ? "未找到匹配" : "No matches";
+  }
+  if (fileCount > 0) {
+    return language === "zh" ? `搜索完成 · ${fileCount} 个命中` : `Search done · ${fileCount} hits`;
+  }
+  return language === "zh" ? "搜索完成" : "Search complete";
+}
+
 function compactToolPresentationCandidate(
   value: string | undefined,
   toolName: string | undefined,
   language: ConversationToolPresentationLanguage,
 ) {
-  const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
-  if (!normalized || normalized === String(toolName ?? "").trim()) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === String(toolName ?? "").trim()) {
     return "";
   }
+  // Prefer one-line sandbox summary before collapsing whitespace (keeps structure for JSON extract).
+  const terminalSummary = terminalSandboxPresentationSummary(raw, language);
+  if (terminalSummary) {
+    return terminalSummary;
+  }
+  const searchSummary = searchMashupPresentationSummary(raw, language);
+  if (searchSummary) {
+    return searchSummary;
+  }
+
+  const normalized = raw.replace(/\s+/g, " ").trim();
   if (String(toolName ?? "").trim().toLowerCase() === "conversation_log_inspect_tool") {
     const target = conversationLogInspectTarget(normalized);
     if (target) {
       return target;
     }
   }
-  if (normalized.startsWith("{") || normalized.startsWith("[")) {
+  // Embedded JSON after a human prefix (e.g. "执行失败 · {\"status\":...}").
+  const embeddedTerminal = terminalSandboxPresentationSummary(normalized, language);
+  if (embeddedTerminal) {
+    return embeddedTerminal;
+  }
+  if (normalized.startsWith("{") || normalized.startsWith("[") || normalized.includes('{"status"')) {
     try {
-      const parsed = JSON.parse(normalized) as Record<string, unknown>;
+      const parsed = extractJsonObject(normalized) ?? (JSON.parse(normalized) as Record<string, unknown>);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        if (isTerminalSandboxPayload(parsed)) {
+          return terminalSandboxPresentationSummary(JSON.stringify(parsed), language);
+        }
         if (String(toolName ?? "").trim().toLowerCase() === "code_symbol_tool") {
           const codeSummary = codeSymbolStructuredSummary(parsed, language);
           if (codeSummary) {
@@ -216,14 +415,27 @@ function compactToolPresentationCandidate(
         const semantic = [
           parsed.dirty_summary,
           parsed.message,
-          parsed.summary,
-          parsed.result,
-          parsed.status,
+          // Prefer short semantic fields; never promote huge stdout-like "summary" blobs.
+          typeof parsed.summary === "string" && parsed.summary.length <= 160 ? parsed.summary : "",
+          typeof parsed.result === "string" && parsed.result.length <= 160 ? parsed.result : "",
         ].find((item) => typeof item === "string" && item.trim());
-        if (typeof semantic === "string") {
+        if (typeof semantic === "string" && semantic.trim()) {
           return isLowValueToolResult(semantic)
             ? ""
             : compactToolPresentationText(semantic);
+        }
+        const statusOnly = compactScalar(parsed.status);
+        if (statusOnly && ["timeout", "failed", "error", "running", "ok", "done", "completed", "success"].includes(statusOnly.toLowerCase())) {
+          if (statusOnly.toLowerCase() === "timeout") {
+            return language === "zh" ? "执行超时" : "Timed out";
+          }
+          if (statusOnly.toLowerCase() === "running") {
+            return language === "zh" ? "正在运行" : "Running";
+          }
+          if (["ok", "done", "completed", "success"].includes(statusOnly.toLowerCase())) {
+            return "";
+          }
+          return language === "zh" ? "执行失败" : "Failed";
         }
       }
       return language === "zh"
@@ -236,7 +448,7 @@ function compactToolPresentationCandidate(
           : compactToolPresentationText(normalized);
       }
       const semantic = extractTruncatedStructuredSummary(normalized);
-      if (semantic) {
+      if (semantic && semantic.length <= 120 && !semantic.includes("\\n")) {
         return isLowValueToolResult(semantic)
           ? ""
           : compactToolPresentationText(semantic);
@@ -245,6 +457,10 @@ function compactToolPresentationCandidate(
         ? "已返回结构化结果"
         : "Structured result returned";
     }
+  }
+  // Never surface multi-line protocol dumps as the collapsed row summary.
+  if (normalized.length > 240 && (normalized.includes("terminalSessionId") || normalized.includes("formattedOutput"))) {
+    return language === "zh" ? "终端结果" : "Terminal result";
   }
   return isLowValueToolResult(normalized)
     ? ""
@@ -264,12 +480,41 @@ export function completedToolPresentationSummary({
   const normalizedStatus = String(status ?? "").trim().toLowerCase();
   const terminalTool = normalizedToolName === "exec_command"
     || normalizedToolName === "write_stdin"
-    || normalizedToolName === "cli_tool";
+    || normalizedToolName === "cli_tool"
+    || normalizedToolName === "run_terminal_command"
+    || normalizedToolName === "shell_tool";
   if (terminalTool && (normalizedStatus === "running" || normalizedStatus === "pending")) {
+    // Prefer payload-derived summary when available (timeout/running/exit).
+    for (const candidate of [toolSummary, cellSummary, resultPreview, cellText]) {
+      const fromPayload = terminalSandboxPresentationSummary(String(candidate || ""), language);
+      if (fromPayload) {
+        return fromPayload;
+      }
+    }
     return language === "zh" ? "正在运行" : "Running";
   }
   if (terminalTool && normalizedStatus === "completed") {
+    for (const candidate of [toolSummary, cellSummary, resultPreview, cellText]) {
+      const fromPayload = terminalSandboxPresentationSummary(String(candidate || ""), language);
+      if (fromPayload && fromPayload !== (language === "zh" ? "正在运行" : "Running")) {
+        return fromPayload === (language === "zh" ? "执行超时" : "Timed out")
+          || fromPayload.startsWith(language === "zh" ? "执行失败" : "Failed")
+          ? fromPayload
+          : "";
+      }
+    }
     return "";
+  }
+  if (terminalTool && (normalizedStatus === "failed" || normalizedStatus === "error" || normalizedStatus === "timeout")) {
+    for (const candidate of [toolSummary, cellSummary, resultPreview, cellText]) {
+      const fromPayload = terminalSandboxPresentationSummary(String(candidate || ""), language);
+      if (fromPayload) {
+        return fromPayload;
+      }
+    }
+    return normalizedStatus === "timeout" || /timeout|超时/i.test(`${toolSummary || ""} ${cellSummary || ""}`)
+      ? (language === "zh" ? "执行超时" : "Timed out")
+      : (language === "zh" ? "执行失败" : "Failed");
   }
   const candidates = [toolSummary, cellSummary, resultPreview, cellText];
   for (const candidate of candidates) {
@@ -317,6 +562,7 @@ function extractToolSubject(options: {
   resultPreview?: string;
   displayCommand?: string;
   filePath?: string;
+  language?: ConversationToolPresentationLanguage;
 }) {
   const filePath = String(options.filePath || "").trim();
   if (filePath) {
@@ -326,7 +572,25 @@ function extractToolSubject(options: {
   if (command) {
     return command.length > 72 ? `${command.slice(0, 71).trimEnd()}…` : command;
   }
+  const language = options.language || "zh";
   for (const candidate of [options.toolSummary, options.cellSummary, options.resultPreview]) {
+    const terminal = terminalSandboxPresentationSummary(String(candidate || ""), language);
+    if (terminal) {
+      // Subject stays empty for pure status lines; status pill already shows failure/timeout.
+      if (
+        terminal === "执行超时"
+        || terminal === "Timed out"
+        || terminal === "执行失败"
+        || terminal === "Failed"
+        || terminal === "正在运行"
+        || terminal === "Running"
+        || terminal === "终端结果"
+        || terminal === "Terminal result"
+      ) {
+        continue;
+      }
+      return terminal;
+    }
     const text = String(candidate || "").replace(/\s+/g, " ").trim();
     if (!text || isLowValueToolResult(text)) {
       continue;
@@ -335,6 +599,8 @@ function extractToolSubject(options: {
     // Keep human diagnostics that merely start with a bracket tag, e.g. "[超时] …".
     if (
       text.startsWith("{")
+      || text.includes("terminalSessionId")
+      || text.includes("formattedOutput")
       || (text.startsWith("[") && /^\[\s*[{"]/.test(text))
       || /^["']?status["']?\s*[:=]/i.test(text)
     ) {
@@ -433,9 +699,16 @@ export function buildCodexToolActivityPills(options: {
   const language = options.language;
   const toolName = String(options.toolName || "").trim().toLowerCase();
   const status = normalizeToolActivityStatus(options.status);
-  const timedOut = Boolean(options.timedOut)
-    || /超时|timed?\s*out/i.test(`${options.toolSummary || ""} ${options.cellSummary || ""}`);
   const actionLabel = conversationToolPresentationLabel(toolName, language);
+  // Prefer payload timeout signal over generic status text.
+  const payloadTimedOut = [options.toolSummary, options.cellSummary, options.resultPreview]
+    .some((value) => {
+      const line = terminalSandboxPresentationSummary(String(value || ""), language);
+      return line === "执行超时" || line === "Timed out";
+    });
+  const timedOut = Boolean(options.timedOut)
+    || payloadTimedOut
+    || /超时|timed?\s*out/i.test(`${options.toolSummary || ""} ${options.cellSummary || ""}`);
   let subject = extractToolSubject({
     toolName,
     toolSummary: options.toolSummary,
@@ -443,6 +716,7 @@ export function buildCodexToolActivityPills(options: {
     resultPreview: options.resultPreview,
     displayCommand: options.displayCommand,
     filePath: options.filePath,
+    language,
   });
   const subjectKey = subject.trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (
@@ -514,21 +788,21 @@ export function buildCodexToolActivityPills(options: {
     };
   }
 
-  // Failed wins over timeout heuristics so rows with timeout-ish error text still read as failures.
-  if (status === "failed") {
-    return {
-      actionLabel,
-      statusLabel: language === "zh" ? "执行失败" : "Failed",
-      statusKind: "failed",
-      subject,
-      durationLabel,
-    };
-  }
+  // Explicit / payload timeout outranks generic "failed" (write_stdin often status=failed + timedOut).
   if (timedOut) {
     return {
       actionLabel,
       statusLabel: language === "zh" ? "超时" : "Timed out",
       statusKind: "timeout",
+      subject,
+      durationLabel,
+    };
+  }
+  if (status === "failed") {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "执行失败" : "Failed",
+      statusKind: "failed",
       subject,
       durationLabel,
     };
@@ -680,17 +954,57 @@ export function conversationToolDetailPresentation({
   if (!normalized) {
     return "";
   }
-  if (String(toolName ?? "").trim().toLowerCase() !== "code_symbol_tool" || !normalized.startsWith("{")) {
-    return normalized;
+  const lowerTool = String(toolName ?? "").trim().toLowerCase();
+  // Terminal / write_stdin: never dump raw protocol JSON into the expanded panel.
+  const terminalDetail = terminalSandboxPresentationDetail(normalized, language);
+  if (terminalDetail) {
+    return terminalDetail;
   }
-  try {
-    const parsed = JSON.parse(normalized) as Record<string, unknown>;
-    return codeSymbolStructuredDetail(parsed, language)
-      || codeSymbolStructuredSummary(parsed, language)
-      || (language === "zh" ? "已返回结构化结果" : "Structured result returned");
-  } catch {
-    return normalized;
+  if (
+    lowerTool === "exec_command"
+    || lowerTool === "write_stdin"
+    || lowerTool === "cli_tool"
+    || lowerTool === "run_terminal_command"
+    || lowerTool === "shell_tool"
+  ) {
+    const summary = terminalSandboxPresentationSummary(normalized, language)
+      || completedToolPresentationSummary({
+        toolSummary: normalized,
+        toolName: lowerTool,
+        status: "failed",
+        language,
+      });
+    if (summary) {
+      return summary;
+    }
+    // Last resort: bounded plain text, never multi-KB protocol blobs.
+    if (normalized.length > 400 || normalized.includes("terminalSessionId")) {
+      return language === "zh" ? "终端输出已折叠（展开源数据见日志）" : "Terminal output collapsed (see logs for raw data)";
+    }
   }
+  if (lowerTool === "code_symbol_tool" && (normalized.startsWith("{") || normalized.includes("{"))) {
+    try {
+      const parsed = extractJsonObject(normalized) ?? (JSON.parse(normalized) as Record<string, unknown>);
+      if (parsed) {
+        return codeSymbolStructuredDetail(parsed, language)
+          || codeSymbolStructuredSummary(parsed, language)
+          || (language === "zh" ? "已返回结构化结果" : "Structured result returned");
+      }
+    } catch {
+      return language === "zh" ? "已返回结构化结果" : "Structured result returned";
+    }
+  }
+  if (normalized.startsWith("{") || normalized.includes("terminalSessionId") || normalized.includes("formattedOutput")) {
+    const asTerminal = terminalSandboxPresentationDetail(normalized, language)
+      || terminalSandboxPresentationSummary(normalized, language);
+    if (asTerminal) {
+      return asTerminal;
+    }
+    if (normalized.length > 280) {
+      return language === "zh" ? "已返回结构化结果" : "Structured result returned";
+    }
+  }
+  return normalized;
 }
 
 export function conversationToolPresentationLabel(
