@@ -801,14 +801,17 @@ export function AgentsRoute() {
       appliedRouteTargetRef.current = "";
       return;
     }
-    if (requestedAgentId && !workspaceQuery.data) {
-      return;
-    }
+    // Apply as soon as any workspace source has agents (summary is enough for selection + pane).
+    // Waiting only on full config-workspace delayed deep-links and made "open Agent settings" look broken.
     if (!workspace || appliedRouteTargetRef.current === routeTargetKey) {
       return;
     }
     const targetAgent = workspace.agents.find((agent) => agent.agentId === requestedAgentId);
     if (!targetAgent) {
+      // Full workspace may still be loading; keep waiting instead of false "missing Agent".
+      if (fullWorkspaceNeeded && !workspaceQuery.data && !workspaceQuery.isError) {
+        return;
+      }
       setNotice({
         tone: "error",
         text: lang === "zh" ? "目标 Agent 不存在或已被移除。" : "The requested Agent does not exist or was removed.",
@@ -823,7 +826,15 @@ export function AgentsRoute() {
     setSelectedBulkAgentIds(new Set());
     setBulkSelectionAnchorAgentId(targetAgent.agentId);
     appliedRouteTargetRef.current = routeTargetKey;
-  }, [lang, requestedAgentId, requestedPane, workspace, workspaceQuery.data]);
+  }, [
+    fullWorkspaceNeeded,
+    lang,
+    requestedAgentId,
+    requestedPane,
+    workspace,
+    workspaceQuery.data,
+    workspaceQuery.isError,
+  ]);
 
   useEffect(() => {
     setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
@@ -868,13 +879,15 @@ export function AgentsRoute() {
     draftSyncSourceRef.current = nextSource;
   }, [selectedAgent, workspace]);
 
+  // When the selected agent identity changes without a deep-link target, land on overview.
+  // While `?agent=` is present, the route-apply effect owns pane (config/activity/…) —
+  // never clobber it on the intermediate render before selectedAgent catches up.
   useEffect(() => {
-    if (requestedAgentId && selectedAgent?.agentId === requestedAgentId) {
-      setResetOptions(DEFAULT_AGENT_RESET_OPTIONS);
+    setResetOptions(DEFAULT_AGENT_RESET_OPTIONS);
+    if (requestedAgentId) {
       return;
     }
     setActivePane("overview");
-    setResetOptions(DEFAULT_AGENT_RESET_OPTIONS);
   }, [requestedAgentId, selectedAgent?.agentId]);
 
   useEffect(() => {
