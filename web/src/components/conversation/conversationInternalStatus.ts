@@ -13,6 +13,9 @@ const STREAMING_STATUS_CONTENT_MARKERS = [
   "本轮仍在继续",
   "上下文已组装完成",
   "正在进入 llm 调用",
+  "正在思考，已收到思考片段",
+  "模型已经开始返回 reasoning",
+  "正文可能稍后出现",
   "preparing the conversation context",
   "reading the current session",
   "preparing the conversation agent",
@@ -26,6 +29,8 @@ const STREAMING_STATUS_CONTENT_MARKERS = [
   "model request is retrying",
   "context is assembled",
   "llm call is starting",
+  "thinking, received reasoning",
+  "reasoning may appear later",
 ];
 
 const INTERNAL_STREAMING_STATUS_STAGES = new Set([
@@ -91,4 +96,67 @@ export function messageHasInternalStreamingStatusContent(message: ConversationMe
 
 export function answerProjectionContent(message: ConversationMessage) {
   return messageHasInternalStreamingStatusContent(message) ? "" : message.content;
+}
+
+function compactProjectionKey(value: unknown) {
+  return String(value ?? "").replace(/\s+/g, "").trim();
+}
+
+/**
+ * True when timeline assistant_text already owns the committed final answer.
+ * Intermediate commentary / orphan capture fragments must not suppress the response body.
+ *
+ * Interleaved turns may split the final body across multiple assistant_text rows
+ * (answer → tools → answer). Ownership uses the combined assistant_text keys.
+ */
+export function timelineAssistantTextCoversFinalAnswer(
+  items: ReadonlyArray<{ kind?: string; text?: string }>,
+  projectedAnswer: string,
+) {
+  const contentKey = compactProjectionKey(projectedAnswer);
+  if (!contentKey) {
+    return true;
+  }
+  const assistantKeys = items
+    .filter((item) => String(item.kind ?? "").trim() === "assistant_text")
+    .map((item) => compactProjectionKey(item.text))
+    .filter(Boolean);
+  if (assistantKeys.length === 0) {
+    return false;
+  }
+  const combinedKey = assistantKeys.join("");
+  if (
+    contentKey === combinedKey
+    || combinedKey.includes(contentKey)
+    || (
+      contentKey.includes(combinedKey)
+      && combinedKey.length >= Math.max(24, Math.floor(contentKey.length * 0.8))
+    )
+  ) {
+    return true;
+  }
+  // Content is exactly the concatenation of interleaved assistant_text segments
+  // (order-preserving removal leaves nothing).
+  let remainder = contentKey;
+  for (const textKey of assistantKeys) {
+    if (!textKey || !remainder.includes(textKey)) {
+      continue;
+    }
+    remainder = remainder.split(textKey).join("");
+  }
+  if (!remainder) {
+    return true;
+  }
+  for (const textKey of assistantKeys) {
+    if (contentKey === textKey || textKey.includes(contentKey)) {
+      return true;
+    }
+    if (
+      contentKey.includes(textKey)
+      && textKey.length >= Math.max(24, Math.floor(contentKey.length * 0.8))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

@@ -644,15 +644,21 @@ def test_assistant_delta_publish_exposes_codex_like_turn_items(monkeypatch):
     event = subscriber.get_nowait()
 
     assert event["itemId"] == "session-live-turn-turn-1-agent-message"
-    assert event["turnItems"][0] == {
-        "id": "session-live-turn-turn-1-agent-message",
-        "type": "agent_message",
-        "status": "in_progress",
-        "turnId": "turn-1",
-        "messageId": "session-live-message-live-turn-1",
-        "source": "assistant_delta",
-        "text": "正在处理",
-    }
+    final_item = event["turnItems"][0]
+    assert final_item["itemId"] == "session-live-turn-turn-1-agent-message"
+    assert final_item["id"] == "session-live-turn-turn-1-agent-message:0"
+    assert final_item["type"] == "assistant_message"
+    assert final_item["kind"] == "assistant_message"
+    assert final_item["channel"] == "answer"
+    assert final_item["phase"] == "final_answer"
+    assert final_item["version"] == 2
+    assert final_item["status"] == "in_progress"
+    assert final_item["provisional"] is True
+    assert final_item["terminal"] is False
+    assert final_item["turnId"] == "turn-1"
+    assert final_item["messageId"] == "session-live-message-live-turn-1"
+    assert final_item["source"] == "assistant_delta"
+    assert final_item["text"] == "正在处理"
     assert event["turnItems"][1]["type"] == "tool_call"
     assert event["turnItems"][1]["status"] == "running"
     assert event["turnItems"][1]["title"] == "cli_tool"
@@ -694,8 +700,10 @@ def test_turn_items_projection_prefers_explicit_canonical_v2(monkeypatch):
         content="legacy text",
     )
 
-    assert items == [canonical]
     assert len(items) == 1
+    assert items[0]["text"] == "最终答案"
+    assert items[0]["itemId"] == "answer-1"
+    assert items[0]["messageId"] == "legacy-message"
     assert all(item.get("text") != "legacy text" for item in items)
 
 

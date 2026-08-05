@@ -24,8 +24,15 @@ import {
   normalizeCodexTranscriptToolFailures,
   settleCodexTranscriptActiveStatuses,
 } from "./codexTranscriptCells";
+import {
+  nativeAnswerOwnsProjectedContent,
+  visibleNativeFinalAnswerText,
+} from "../../routes/chatTurnProtocol";
 import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
-import { isNoFinalAnswerStatusContent } from "./conversationInternalStatus";
+import {
+  answerProjectionContent,
+  isNoFinalAnswerStatusContent,
+} from "./conversationInternalStatus";
 import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
 
 export type CodexTranscriptSurfaceMode = "native" | "empty";
@@ -67,6 +74,27 @@ export function hasUsableNativeCodexTranscript(message: ConversationMessage) {
   );
 }
 
+/** True when native assistant_markdown already owns a displayable final answer. */
+export function nativeAssistantMarkdownCoversProjectedAnswer(
+  cells: CodexTranscriptCell[],
+  projectedAnswer: string,
+) {
+  const answerCells = cells.filter((cell) => (
+    cell.kind === "assistant_markdown"
+    && Boolean(cell.text?.trim())
+    && String(cell.phase ?? "").trim().toLowerCase() !== "commentary"
+  ));
+  const hasExplicitFinalCell = answerCells.some((cell) => {
+    const phase = String(cell.phase ?? "").trim().toLowerCase();
+    return phase === "final_answer" || cell.terminal === true;
+  });
+  const nativeAnswer = answerCells
+    .map((cell) => String(cell.text ?? "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+  return nativeAnswerOwnsProjectedContent(nativeAnswer, projectedAnswer, { hasExplicitFinalCell });
+}
+
 export function resolveCodexTranscriptSurface(
   message: ConversationMessage,
   projectedCells: CodexTranscriptCell[] = [],
@@ -75,21 +103,40 @@ export function resolveCodexTranscriptSurface(
     const transcript = message.codexTranscript as CodexTranscriptProjection;
     const cells = codexNativeTranscriptToCells(transcript);
     const hasAssistantMarkdown = cells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim()));
+    const projectedAnswer = String(answerProjectionContent(message) ?? "").trim();
+    const nativeFinalAnswer = visibleNativeFinalAnswerText(transcript);
+    const hasExplicitFinalCell = cells.some((cell) => (
+      cell.kind === "assistant_markdown"
+      && Boolean(cell.text?.trim())
+      && (
+        String(cell.phase ?? "").trim().toLowerCase() === "final_answer"
+        || cell.terminal === true
+      )
+    ));
+    const nativeCoversProjectedAnswer = nativeAnswerOwnsProjectedContent(
+      nativeFinalAnswer,
+      projectedAnswer,
+      { hasExplicitFinalCell },
+    );
     const hasNoFinalAnswerStatus = isNoFinalAnswerStatusContent(String(message.content ?? ""));
     const hasNativeProcessProjection = hasNativeProcessCells(cells) || hasNativeLifecycleProjection(transcript);
     const suppressProjectedError = cells.some((cell) => (
       cell.kind === "error_notice"
       || (cell.terminal === true && cell.status === "failed")
     ));
+    // Only hide the projected response when native cells already own the final answer.
+    // Short orphan fragments (e.g. "存。") must not suppress a long committed content body.
+    const suppressProjectedResponse = suppressProjectedError
+      || (hasAssistantMarkdown && nativeCoversProjectedAnswer);
     return {
       mode: "native",
       source: "message.codexTranscript",
       cells,
       hasAssistantMarkdown,
       suppressProjectedProcess: hasNativeProcessProjection,
-      suppressProjectedResponse: hasAssistantMarkdown || suppressProjectedError,
+      suppressProjectedResponse,
       suppressProjectedTurnStatus: suppressProjectedError
-        || (hasNoFinalAnswerStatus ? false : hasAssistantMarkdown || hasNativeProcessProjection),
+        || (hasNoFinalAnswerStatus ? false : suppressProjectedResponse || hasNativeProcessProjection),
       suppressProjectedError,
     };
   }

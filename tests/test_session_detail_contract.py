@@ -754,7 +754,7 @@ def test_session_detail_window_can_omit_native_transcript_for_light_payloads(tmp
 
 
 def test_session_detail_window_skips_heavy_codex_transcript_for_settled_turns(tmp_path, monkeypatch):
-    """Chat-switch window payloads must not ship full native transcript cells/rollouts."""
+    """Chat-switch window payloads ship a minimal final-answer transcript only."""
     _seed_chat_state(tmp_path, task_status="done")
     _append_window_test_turn(tmp_path, "session-live", 1)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -771,8 +771,31 @@ def test_session_detail_window_skips_heavy_codex_transcript_for_settled_turns(tm
     assert assistant["toolCalls"] == [
         {"name": "rg", "status": "done", "summary": "搜索 1", "callId": "tool-window-1"},
     ]
-    # Settled window turns omit full codexTranscript (toolCalls remain for compact UI).
-    assert "codexTranscript" not in assistant
+    # Settled window turns carry SessionTurnItem v2 + slim final-answer transcript.
+    turn_items = assistant.get("turnItems") or []
+    assert turn_items, "window settled assistant must expose turnItems as UI package"
+    final_items = [
+        item
+        for item in turn_items
+        if str(item.get("phase") or "") == "final_answer"
+        or str(item.get("kind") or item.get("type") or "") in {"assistant_message", "agent_message"}
+    ]
+    assert final_items
+    assert final_items[0]["text"] == assistant["content"]
+    assert final_items[0].get("version") == 2
+
+    transcript = assistant["codexTranscript"]
+    assert transcript["source"] == "native"
+    assert transcript.get("windowSlimmed") is True
+    assert transcript.get("rolloutEvents") in (None, [])
+    assert transcript.get("terminalOperations") in (None, [])
+    cells = transcript["cells"]
+    assert any(
+        cell.get("kind") == "assistant_markdown"
+        and (cell.get("phase") == "final_answer" or cell.get("terminal") is True)
+        and cell.get("text") == assistant["content"]
+        for cell in cells
+    )
     assert payload["messageWindow"]["transcriptScope"] == "window"
 
 

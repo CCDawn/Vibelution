@@ -7,6 +7,7 @@ import {
   isNoFinalAnswerStatusContent,
   messageHasInternalStreamingStatusContent,
   isStreamingStatusPlaceholderContent,
+  timelineAssistantTextCoversFinalAnswer,
 } from "./conversationInternalStatus";
 
 describe("conversation internal status helpers", () => {
@@ -89,5 +90,32 @@ describe("conversation internal status helpers", () => {
       "正在请求模型，等待首个响应片段",
       compactPreview,
     )).toBe("");
+  });
+
+  it("does not treat orphan or intermediate timeline fragments as the final answer", () => {
+    const finalAnswer = "继续审查后的结论更明确：仅打开状态栏不会降低缓存命中率，也不会触发新的模型调用。";
+    expect(timelineAssistantTextCoversFinalAnswer(
+      [{ kind: "assistant_text", text: "存。" }],
+      finalAnswer,
+    )).toBe(false);
+    expect(timelineAssistantTextCoversFinalAnswer(
+      [{ kind: "assistant_text", text: "我会先定位状态栏实现与缓存键路径。" }],
+      finalAnswer,
+    )).toBe(false);
+    expect(timelineAssistantTextCoversFinalAnswer(
+      [{ kind: "assistant_text", text: finalAnswer }],
+      finalAnswer,
+    )).toBe(true);
+  });
+
+  it("treats interleaved assistant_text segments as covering the final answer when combined", () => {
+    expect(timelineAssistantTextCoversFinalAnswer(
+      [
+        { kind: "assistant_text", text: "第一段回答" },
+        { kind: "operation", text: "tool" },
+        { kind: "assistant_text", text: "第二段回答" },
+      ],
+      "第一段回答\n\n第二段回答",
+    )).toBe(true);
   });
 });

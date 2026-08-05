@@ -4,6 +4,7 @@ import type { ConversationMessage } from "../../api/types";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import {
   hasUsableNativeCodexTranscript,
+  nativeAssistantMarkdownCoversProjectedAnswer,
   resolveCodexTranscriptSurface,
 } from "./codexNativeTranscriptSurface";
 
@@ -592,4 +593,31 @@ describe("native transcript semantic tool labels", () => {
       diagnosticSummary: { rawToolName: "cli_tool" },
     });
   });
+
+  it("does not suppress the projected final answer when native markdown is only an orphan fragment", () => {
+    const fullAnswer = "继续审查后的结论更明确：仅打开状态栏不会降低缓存命中率。".repeat(3);
+    const surface = resolveCodexTranscriptSurface(message({
+      content: fullAnswer,
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "message-1",
+        cells: [
+          {
+            id: "orphan-fragment",
+            kind: "assistant_markdown",
+            messageId: "message-1",
+            status: "completed",
+            tone: "neutral",
+            text: "存。",
+          },
+        ],
+      },
+    }), []);
+
+    expect(surface.hasAssistantMarkdown).toBe(true);
+    expect(nativeAssistantMarkdownCoversProjectedAnswer(surface.cells, fullAnswer)).toBe(false);
+    expect(surface.suppressProjectedResponse).toBe(false);
+  });
+
 });

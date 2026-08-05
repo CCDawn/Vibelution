@@ -1615,7 +1615,8 @@ describe("ConversationView edit resend affordance", () => {
     // Unified pill rows keep product labels; repeated same-tool calls still dedupe JSON noise.
     expect(html.match(/读取资料上下文/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
     expect(html).toContain("更新任务");
-    expect(html).toContain("运行中");
+    // Running tools use status kind + spinner chrome, not a visible "运行中" status word.
+    expect(html).toContain('data-codex-tool-status-kind="running"');
     expect(html).not.toContain("source_collection_context_tool");
     expect(html).not.toContain("candidateFieldsTruncated");
     expect(html).not.toContain("| # | 描述 | 状态 | 结果摘要 |");
@@ -1850,11 +1851,11 @@ describe("ConversationView edit resend affordance", () => {
     );
 
     expect(html).toContain("timelineOperationCell_success");
-    // Unified tool chrome: action|status pills on both codex rail and legacy timeline.
+    // Unified tool chrome: action pills + status kind on both codex rail and legacy timeline.
     expect(html).toContain('data-codex-tool-action-pill="true"');
     expect(html).toContain('data-codex-tool-unified-row="true"');
     expect(html).toContain("代码图谱");
-    expect(html).toContain("执行完成");
+    expect(html).toContain('data-codex-tool-status-kind="completed"');
     expect(html).not.toContain("&quot;status&quot;: &quot;ok&quot;");
     expect(html).toContain("timelineOperationCell_failed");
     expect(html).toMatch(/timelineOperationCell_failed[\s\S]*搜索[\s\S]*got an unexpected keyword argument/);
@@ -4199,7 +4200,10 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain('data-thought-expanded="false"');
     expect(html).toContain("timelineThoughtInlinePreview");
-    expect(html).toContain("确认了：当前cli_tool环境是bash");
+    // Markdown/inline preview may normalize Latin token boundaries (spaces around cli_tool).
+    expect(html).toContain("确认了：当前");
+    expect(html).toContain("cli_tool");
+    expect(html).toContain("bash");
     expect(html).not.toContain("timelineThoughtText");
     expect(html).not.toContain("所以第8/10轮");
     expect(html).toContain("timelineCellCompactTitleRow");
@@ -4831,7 +4835,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("运行中");
+    expect(html).toContain('data-codex-tool-status-kind="running"');
     expect(html).toContain("命令");
     expect(html).toContain("1m 15s");
     expect(html).not.toContain("工具调用");
@@ -5178,7 +5182,8 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("代码图谱");
-    expect(html).toContain("运行中");
+    expect(html).toContain('data-codex-tool-status-kind="running"');
+    expect(html).toContain("扫描符号关系");
     expect(html.match(/statusSpinner/g)?.length).toBe(1);
     expect(html).not.toContain("statusRunningDot");
     expect(styles.operationIcon).toContain("inline-grid");

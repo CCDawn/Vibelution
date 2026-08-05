@@ -805,4 +805,93 @@ describe("canonical SessionTurnItem v2 active turn", () => {
     expect(message?.turnItems).toHaveLength(1);
     expect(message?.codexTranscript?.cells.filter((cell) => cell.kind === "assistant_markdown")).toHaveLength(1);
   });
+
+  it("reconciles provisional final item text with faster streaming content deltas", () => {
+    const first = canonicalActiveTurn.mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({
+      contentDelta: "你好",
+      turnItems: [
+        {
+          version: 2,
+          id: "answer:0",
+          itemId: "answer",
+          type: "assistant_message",
+          kind: "assistant_message",
+          channel: "answer",
+          phase: "final_answer",
+          status: "in_progress",
+          provisional: true,
+          terminal: false,
+          revision: 0,
+          sequence: 1,
+          text: "你",
+        },
+      ],
+    } as never));
+    const second = canonicalActiveTurn.mergeAssistantDeltaIntoActiveTurnLayer(first, assistantDelta({
+      contentDelta: "，世界",
+      // Intentionally omit turnItems so streaming content can outpace the package snapshot.
+    }));
+
+    expect(second?.answerContent).toBe("你好，世界");
+    expect(second?.turnItems?.[0]?.text).toBe("你好，世界");
+    const message = canonicalActiveTurn.activeTurnLayerToConversationMessage(second);
+    expect(message?.content).toBe("你好，世界");
+    expect(message?.codexTranscript?.cells.some((cell) => (
+      cell.kind === "assistant_markdown" && cell.text === "你好，世界"
+    ))).toBe(true);
+  });
+
+  it("clears the active layer once detail carries a committed turnItems final answer", () => {
+    const active = canonicalActiveTurn.mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({
+      contentDelta: "临时",
+      turnId: "turn-settle-1",
+      turnItems: [
+        {
+          version: 2,
+          id: "answer:0",
+          itemId: "answer",
+          type: "assistant_message",
+          kind: "assistant_message",
+          channel: "answer",
+          phase: "final_answer",
+          status: "in_progress",
+          provisional: true,
+          terminal: false,
+          text: "临时",
+        },
+      ],
+    } as never));
+    const detail = {
+      id: "session-1",
+      messages: [
+        {
+          id: "message-committed",
+          role: "assistant",
+          content: "正式终稿",
+          timestamp: "2026-08-05T12:00:00Z",
+          metadata: { turnId: "turn-settle-1" },
+          turnItems: [
+            {
+              version: 2,
+              id: "answer:1",
+              itemId: "answer",
+              type: "assistant_message",
+              kind: "assistant_message",
+              channel: "answer",
+              phase: "final_answer",
+              status: "completed",
+              provisional: false,
+              terminal: true,
+              revision: 1,
+              sequence: 2,
+              text: "正式终稿",
+            },
+          ],
+        },
+      ],
+    } as SessionDetail;
+
+    expect(canonicalActiveTurn.isActiveTurnSettledByDetail(active, detail)).toBe(true);
+    expect(canonicalActiveTurn.settleActiveTurnLayerFromDetail(active, detail)).toBeUndefined();
+  });
 });

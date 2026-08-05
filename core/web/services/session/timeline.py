@@ -760,6 +760,15 @@ def _filter_redundant_assistant_timeline_events(
     events: list[dict[str, Any]],
     content: Any,
 ) -> list[dict[str, Any]]:
+    """Drop assistant_text that is already in final content or is a stale capture fragment.
+
+    Capture deltas (session_ui_capture) are progressive answer suffixes flushed at tool
+    boundaries. When the committed final answer exists:
+    - segments already present in content are redundant (avoid double projection)
+    - segments NOT present in content are orphans (e.g. a stray "存。") and must not
+      replace or suppress the final answer
+    Intentional intermediate commentary from assistant_item_committed is kept.
+    """
     s = _service()
     content_key = s._assistant_projection_text_key(content)
     if not content_key:
@@ -769,10 +778,39 @@ def _filter_redundant_assistant_timeline_events(
         if str(event.get("kind") or "").strip() == "assistant_text":
             text = s._sanitize_message_content("assistant", event.get("text") or event.get("content") or "")
             text_key = s._assistant_projection_text_key(text)
-            if text_key and text_key in content_key:
+            if not text_key:
+                continue
+            if text_key in content_key:
+                continue
+            source = str(event.get("source") or "").strip()
+            # Orphan UI-capture fragments that never landed in the final answer.
+            if source != "assistant_item_committed":
                 continue
         filtered.append(event)
     return filtered
+
+
+def _assistant_timeline_covers_final_content(
+    events: list[dict[str, Any]],
+    content: Any,
+) -> bool:
+    """True when timeline assistant_text already projects the committed final answer."""
+    s = _service()
+    content_key = s._assistant_projection_text_key(content)
+    if not content_key:
+        return True
+    for event in events:
+        if str(event.get("kind") or "").strip() != "assistant_text":
+            continue
+        text = s._sanitize_message_content("assistant", event.get("text") or event.get("content") or "")
+        text_key = s._assistant_projection_text_key(text)
+        if not text_key:
+            continue
+        if content_key == text_key or content_key in text_key:
+            return True
+        if text_key in content_key and len(text_key) >= max(24, int(len(content_key) * 0.8)):
+            return True
+    return False
 
 
 def _extract_chat_feedback_events(result: Any, *, final_status: str = "") -> list[dict[str, Any]]:
