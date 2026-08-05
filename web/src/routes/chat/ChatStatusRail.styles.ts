@@ -30,13 +30,21 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute activeSkillStatus min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))] text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)] items-start gap-1 rounded-[var(--radius-control)] px-1.5 py-1 shadow-none",
   agentMissingInline:
     `vui-routes-chatcodingroute agentMissingInline min-w-0 ${vuiStateCoolInfoClass}`,
-  compactDetails: `vui-routes-chatcodingroute compactDetails grid min-w-0 gap-1 ${vuiOpaqueRowClass} px-1.5 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&>summary]:grid [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:grid-cols-[14px_minmax(0,1fr)] [&>summary]:items-center [&>summary]:gap-1 [&>summary]:font-semibold [&>summary::-webkit-details-marker]:hidden [&>summary_svg]:transition-transform [&[open]>summary_svg]:rotate-90 [&_.compactDetailsOpenLabel]:hidden [&[open]_.compactDetailsOpenLabel]:inline [&[open]_.compactDetailsClosedLabel]:hidden`,
+  compactDetails:
+    `vui-routes-chatcodingroute compactDetails grid min-w-0 gap-1.5 ${vuiOpaqueRowClass} px-1.5 py-1.5 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] ` +
+    "[&>summary]:relative [&>summary]:z-[1] [&>summary]:grid [&>summary]:cursor-pointer [&>summary]:list-none " +
+    "[&>summary]:grid-cols-[14px_minmax(0,1fr)] [&>summary]:items-center [&>summary]:gap-1 [&>summary]:font-semibold " +
+    "[&>summary::-webkit-details-marker]:hidden [&>summary_svg]:shrink-0 [&>summary_svg]:transition-transform " +
+    "[&[open]>summary_svg]:rotate-90 " +
+    "[&_.compactDetailsOpenLabel]:hidden [&[open]_.compactDetailsOpenLabel]:inline " +
+    "[&[open]_.compactDetailsClosedLabel]:hidden",
   compactDetailsBody:
-    "vui-routes-chatcodingroute compactDetailsBody grid min-h-0 min-w-0 content-start gap-1 overflow-auto [scrollbar-gutter:stable]",
+    "vui-routes-chatcodingroute compactDetailsBody relative z-0 mt-0.5 grid min-h-0 min-w-0 content-start gap-1.5 " +
+    "overflow-auto border-t border-[color:color-mix(in_srgb,var(--border-soft)_80%,transparent)] pt-1.5 [scrollbar-gutter:stable]",
   compactDetailsClosedLabel:
     "vui-routes-chatcodingroute compactDetailsClosedLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   compactDetailsOpenLabel:
-    `vui-routes-chatcodingroute compactDetailsOpenLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] ${vuiStateCoolSoftClass}`,
+    "vui-routes-chatcodingroute compactDetailsOpenLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   compactDetailsResizeHandle:
     "vui-routes-chatcodingroute compactDetailsResizeHandle",
   companionBlock:
@@ -104,12 +112,16 @@ const styles: Record<string, string> = {
   groupTitleField:
     "vui-routes-chatcodingroute groupTitleField min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   inlineMetaList:
-    "vui-routes-chatcodingroute inlineMetaList min-w-0 grid min-h-0 content-start overflow-visible !grid grid-cols-[minmax(0,1fr)] gap-[4px]",
-  inlineMetaPill: `vui-routes-chatcodingroute inlineMetaPill min-w-0 min-h-[24px] max-w-full ${vuiOpaqueRowClass} px-1.5 py-1 text-[11px] font-semibold leading-tight text-[var(--fg-secondary)] !grid grid-cols-[minmax(58px,0.42fr)_minmax(0,1fr)] items-baseline gap-1 [&_span]:min-w-0 [&_span]:whitespace-normal [&_strong]:min-w-0 [&_strong]:whitespace-normal [overflow-wrap:anywhere]`,
+    "vui-routes-chatcodingroute inlineMetaList min-w-0 grid grid-cols-1 content-start gap-1",
+  inlineMetaPill:
+    `vui-routes-chatcodingroute inlineMetaPill min-h-7 min-w-0 max-w-full ${vuiOpaqueRowClass} ` +
+    "grid grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)] items-center gap-x-2 px-2 py-1 text-[11px] font-semibold " +
+    "leading-tight text-[var(--fg-secondary)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:truncate",
   inlineStat:
-    "vui-routes-chatcodingroute inlineStat min-w-0 !grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-baseline gap-0.5 [font-size:var(--vui-font-xs)] leading-tight [&_span]:min-w-0 [&_span]:whitespace-normal [&_span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:whitespace-normal [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute inlineStat min-w-0 grid grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)] items-center gap-x-2 " +
+    "text-xs leading-tight [&_span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:text-[var(--fg-primary)]",
   inlineStatGrid:
-    "vui-routes-chatcodingroute inlineStatGrid min-w-0 grid gap-2 !grid grid-cols-[1fr] gap-[3px]",
+    "vui-routes-chatcodingroute inlineStatGrid min-w-0 grid grid-cols-1 gap-1",
   mentalStateBadge_active:
     `vui-routes-chatcodingroute mentalStateBadge_active min-w-0 ${vuiStateSelectedRowClass}`,
   mentalStateBadge_answering:
@@ -237,11 +249,13 @@ const styles: Record<string, string> = {
   petMiniAvatar:
     "vui-routes-chatcodingroute petMiniAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAction:
-    "vui-routes-chatcodingroute petShowcaseAction min-w-0 !grid !h-auto min-h-[30px] !w-full grid-cols-[14px_minmax(0,1fr)] items-center gap-1 rounded-[var(--radius-control)] px-1.5 py-1 [font-size:var(--vui-font-sm)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_span]:min-w-0 [&_span]:whitespace-normal [&_span]:leading-tight [&_span]:[overflow-wrap:anywhere] [&_svg]:shrink-0",
+    "vui-routes-chatcodingroute petShowcaseAction !inline-flex !h-auto min-h-8 !w-full items-center justify-center gap-1 " +
+    "rounded-[var(--radius-control)] px-1.5 py-1 text-xs font-semibold leading-tight " +
+    "[&_svg]:shrink-0 [&_span]:min-w-0 [&_span]:truncate",
   petShowcaseActionHint:
     "vui-routes-chatcodingroute petShowcaseActionHint min-w-0 flex flex-wrap items-center gap-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   petShowcaseActions:
-    "vui-routes-chatcodingroute petShowcaseActions min-w-0 !grid grid-cols-3 gap-1",
+    "vui-routes-chatcodingroute petShowcaseActions min-w-0 grid grid-cols-3 gap-1",
   petShowcaseAvatar:
     "vui-routes-chatcodingroute petShowcaseAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseEarLeft:
