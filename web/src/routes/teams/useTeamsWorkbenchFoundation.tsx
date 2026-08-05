@@ -1029,6 +1029,8 @@ export function useTeamsWorkbenchFoundation({
     queryClient,
     chatWorkspaceCache,
     navigate,
+    searchParams,
+    setSearchParams,
     requestedResearchViewParam,
     requestedResearchWorkspaceView,
     requestedSourceCollectionStage,

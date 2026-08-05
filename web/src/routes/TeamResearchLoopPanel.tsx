@@ -141,6 +141,37 @@ export type TeamResearchLoopPanelProps = {
   recordResearchLoopDecisionFromWorkspace: (loop: ResearchLoopRecord) => void;
 };
 
+const FALLBACK_LOOP_CREATE_DRAFT: ResearchLoopCreateDraft = {
+  researchQuestion: "",
+  constraints: "",
+  datasetRefs: "",
+  environmentRefs: "",
+};
+const FALLBACK_LOOP_EVIDENCE_DRAFT: ResearchLoopEvidenceDraft = {
+  evidenceType: "",
+  status: "needs_review",
+  summary: "",
+  metricName: "",
+  metricValue: "",
+  baselineMetricValue: "",
+  delta: "",
+  artifactRef: "",
+  datasetRefs: "",
+  environmentRefs: "",
+  logRefs: "",
+  commandPreview: "",
+};
+const FALLBACK_LOOP_DECISION_DRAFT: ResearchLoopDecisionDraft = {
+  decision: "needs_more_evidence",
+  rationale: "",
+  nextTemplateId: "",
+  nextActions: "",
+  allowedVariableChanges: "",
+  frozenControls: "",
+};
+const FALLBACK_SOURCE_COLLECTION_DRAFT = { goal: "" };
+const NOOP_SET_DRAFT = <T,>(_updater: (draft: T) => T) => {};
+
 export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
   const {
     activePlan,
@@ -151,13 +182,13 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
     researchLoopTemplatesPayload,
     selectedResearchLoopTemplateId,
     setSelectedResearchLoopTemplateId,
-    researchLoopCreateDraft,
-    setResearchLoopCreateDraft,
-    researchLoopEvidenceDraft,
-    setResearchLoopEvidenceDraft,
-    researchLoopDecisionDraft,
-    setResearchLoopDecisionDraft,
-    sourceCollectionDraft,
+    researchLoopCreateDraft: researchLoopCreateDraftProp,
+    setResearchLoopCreateDraft: setResearchLoopCreateDraftProp,
+    researchLoopEvidenceDraft: researchLoopEvidenceDraftProp,
+    setResearchLoopEvidenceDraft: setResearchLoopEvidenceDraftProp,
+    researchLoopDecisionDraft: researchLoopDecisionDraftProp,
+    setResearchLoopDecisionDraft: setResearchLoopDecisionDraftProp,
+    sourceCollectionDraft: sourceCollectionDraftProp,
     researchLoopStatusQuery,
     selectedTeamCreateResearchLoopPending,
     selectedTeamCreateResearchLoopError,
@@ -173,6 +204,15 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
     recordResearchLoopEvidenceFromWorkspace,
     recordResearchLoopDecisionFromWorkspace,
   } = props;
+
+  // Research bag may omit drafts when wiring drops fields — never crash the workbench.
+  const researchLoopCreateDraft = researchLoopCreateDraftProp ?? FALLBACK_LOOP_CREATE_DRAFT;
+  const researchLoopEvidenceDraft = researchLoopEvidenceDraftProp ?? FALLBACK_LOOP_EVIDENCE_DRAFT;
+  const researchLoopDecisionDraft = researchLoopDecisionDraftProp ?? FALLBACK_LOOP_DECISION_DRAFT;
+  const sourceCollectionDraft = sourceCollectionDraftProp ?? FALLBACK_SOURCE_COLLECTION_DRAFT;
+  const setResearchLoopCreateDraft = setResearchLoopCreateDraftProp ?? NOOP_SET_DRAFT;
+  const setResearchLoopEvidenceDraft = setResearchLoopEvidenceDraftProp ?? NOOP_SET_DRAFT;
+  const setResearchLoopDecisionDraft = setResearchLoopDecisionDraftProp ?? NOOP_SET_DRAFT;
 
     const hydratedSmokeRunIdRef = useRef("");
     useEffect(() => {
