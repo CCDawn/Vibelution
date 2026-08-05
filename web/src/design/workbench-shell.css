@@ -702,8 +702,16 @@
 
 :where(.vui-app-appshell).utilityButtonGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  /* Five shortcuts fit one row in the 520px popover; wrap cleanly on narrower viewports. */
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
   gap: 8px;
+}
+
+:where(.vui-app-appshell).utilityButtonGrid > * {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 :where(.vui-app-appshell).utilityButton {
@@ -711,9 +719,12 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
   min-height: 38px;
   padding: 8px 10px;
+  box-sizing: border-box;
   text-decoration: none;
   white-space: nowrap;
 }
@@ -723,7 +734,6 @@
 :where(.vui-app-appshell).utilityFileButton small,
 :where(.vui-app-appshell).gitBranchName,
 :where(.vui-app-appshell).gitHeadline strong,
-:where(.vui-app-appshell).gitHeadline span,
 :where(.vui-app-appshell).gitMetaGrid strong,
 :where(.vui-app-appshell).gitFileItem span,
 :where(.vui-app-appshell).gitCommitItem span,
@@ -737,6 +747,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Summary line may wrap; forced nowrap made the hero row look clipped/broken. */
+:where(.vui-app-appshell).gitHeadline span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: normal;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 :where(.vui-app-appshell).utilityButton span {
@@ -891,10 +912,11 @@
 }
 
 :where(.vui-app-appshell).gitMiniHeader {
+  /* Stack chip + headline so Chinese labels do not crush in a 2-col row. */
   display: grid;
-  grid-template-columns: minmax(116px, auto) minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
 }
 
 :where(.vui-app-appshell).gitChip,
@@ -902,20 +924,23 @@
 :where(.vui-app-appshell).statusSummaryChip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
   min-width: 0;
   min-height: 32px;
   border-radius: 999px;
   white-space: nowrap;
+  line-height: 1;
 }
 
 :where(.vui-app-appshell).gitChip {
+  width: fit-content;
   max-width: 100%;
-  padding: 6px 9px;
+  padding: 6px 10px;
 }
 
 :where(.vui-app-appshell).gitBranchName {
-  max-width: 96px;
+  max-width: min(11rem, 42vw);
   color: var(--fg-primary);
   font-weight: 600;
 }
@@ -932,7 +957,8 @@
 :where(.vui-app-appshell).gitSignalGrid,
 :where(.vui-app-appshell).gitCountGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* 2×2 keeps Chinese labels readable inside the utility popover. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -941,31 +967,57 @@
 :where(.vui-app-appshell).lifecycleProofMeta span {
   display: grid;
   min-width: 0;
-  padding: 8px;
+  padding: 8px 10px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--shell-card);
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
+  white-space: normal;
+  line-height: 1.3;
 }
 
 :where(.vui-app-appshell).gitSignalGrid span {
-  gap: 3px;
-  min-height: 54px;
+  gap: 4px;
+  min-height: 52px;
+  align-content: start;
+}
+
+:where(.vui-app-appshell).gitSignalGrid strong,
+:where(.vui-app-appshell).gitCountGrid strong {
+  font-size: var(--vui-font-title);
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
 }
 
 :where(.vui-app-appshell).gitCountGrid span {
   gap: 2px;
+  align-content: start;
 }
 
 :where(.vui-app-appshell).gitMetaGrid {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 7px 12px;
+  align-items: center;
   padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--shell-card);
+}
+
+:where(.vui-app-appshell).gitMetaGrid > span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitMetaGrid > strong {
+  justify-self: start;
+  font-size: var(--vui-font-sm);
+  font-weight: 650;
+  color: var(--fg-primary);
 }
 
 :where(.vui-app-appshell).gitMetaGrid span,
@@ -1055,7 +1107,11 @@
 
 :where(.vui-app-appshell).statusSummaryChip {
   max-width: 210px;
-  padding: 6px 9px;
+  height: 32px;
+  max-height: 32px;
+  /* Vertical centering comes from fixed height + align-items; avoid asymmetric padding. */
+  padding: 0 10px;
+  line-height: 1;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
@@ -1077,11 +1133,23 @@
 
 :where(.vui-app-appshell).statusBadgeLabel {
   flex: 0 0 auto;
+  align-self: center;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
+  font-weight: 600;
+  line-height: 1;
 }
 
-:where(.vui-app-appshell).statusBadgeValue,
+/* Chip value stays same size as label so the status light shares one mid-line. */
+:where(.vui-app-appshell).statusBadgeValue {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+  font-weight: 650;
+  line-height: 1;
+}
+
 :where(.vui-app-appshell).statusGuideCardHeader strong,
 :where(.vui-app-appshell).lifecycleProofHeader strong,
 :where(.vui-app-appshell).lifecycleProofMeta strong {
@@ -1094,21 +1162,32 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
   min-width: 18px;
   height: 18px;
+  max-height: 18px;
   padding: 0 5px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   color: var(--fg-tertiary);
   background: var(--shell-card);
   font-size: var(--vui-font-xs);
+  font-weight: 650;
+  line-height: 1;
 }
 
 :where(.vui-app-appshell).statusDot {
-  width: 9px;
-  height: 9px;
+  display: block;
+  flex: 0 0 auto;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
   border-radius: 999px;
   background: currentColor;
+  line-height: 0;
 }
 
 :where(.vui-app-appshell).statusGuideCard {

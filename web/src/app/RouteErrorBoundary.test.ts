@@ -35,6 +35,8 @@ describe("RouteErrorBoundary view model", () => {
     expect(routeErrorBoundarySource).toContain('data-vui-app={surface}');
     expect(routeErrorBoundarySource).not.toContain("<button");
     expect(routeErrorBoundarySource).not.toContain("RouteErrorBoundary.module.css");
+    expect(routeErrorBoundarySource).toContain("allowNextWorkbenchWindowUnload");
+    expect(routeErrorBoundarySource).toContain("location.reload()");
     expect(routeErrorBoundarySource).not.toContain("styles.primaryAction");
     expect(routeErrorBoundarySource).not.toContain("#2563eb");
   });

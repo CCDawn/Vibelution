@@ -69,8 +69,10 @@ import {
   type ReturnNavigationEntry,
 } from "./navigationReturn";
 import {
+  allowNextWorkbenchWindowUnload,
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
+  consumeNextWorkbenchWindowUnloadAllowance,
   hasRecentControlledProjectLifecycleOperation,
   isElectronDesktopShell,
   projectWindowCloseGuardMessage,
@@ -1557,6 +1559,8 @@ export function AppShell() {
   ]);
 
   const refreshFrontend = useCallback(() => {
+    // Synchronous pass before reload — React state alone races beforeunload (dialog flash).
+    allowNextWorkbenchWindowUnload();
     setFrontendRefreshRequested(true);
     emitBrowserTelemetry(
       {
@@ -1569,45 +1573,68 @@ export function AppShell() {
       },
       { preferBeacon: true },
     );
-    window.setTimeout(() => window.location.reload(), 0);
+    window.location.reload();
   }, [emitBrowserTelemetry]);
 
-  useEffect(() => {
-    const closeBlocked = shouldBlockWorkbenchWindowClose({
-      controlledLifecycleOperationInFlight: hasRecentControlledProjectLifecycleOperation(),
-      frontendRefreshRequested,
-      restartRequested,
-      runtimeControllerState,
-      shutdownRequested,
-    });
-    if (!shouldArmBrowserProjectCloseGuard({ closeBlocked, electronDesktopShell: isElectronDesktopShell() })) {
-      return;
-    }
-
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      if (hasRecentControlledProjectLifecycleOperation()) {
-        return;
-      }
-      emitBrowserTelemetry(
-        buildProjectWindowCloseBlockedTelemetry({
-          surface: "workbench",
-          runtimeControllerState,
-        }),
-        { preferBeacon: true },
-      );
-      applyBeforeUnloadProjectCloseGuard(event, workbenchCloseGuardMessage);
-    }
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [
+  // Stable beforeunload: never re-bind when polled state changes, or Edge flashes
+  // "重新加载应用?" and dismisses it before the user can click (listener torn down mid-dialog).
+  const projectCloseGuardRef = useRef({
     emitBrowserTelemetry,
     frontendRefreshRequested,
     restartRequested,
     runtimeControllerState,
     shutdownRequested,
     workbenchCloseGuardMessage,
-  ]);
+  });
+  projectCloseGuardRef.current = {
+    emitBrowserTelemetry,
+    frontendRefreshRequested,
+    restartRequested,
+    runtimeControllerState,
+    shutdownRequested,
+    workbenchCloseGuardMessage,
+  };
+
+  useEffect(() => {
+    if (isElectronDesktopShell()) {
+      return;
+    }
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      // Intentional refresh / chunk recovery — skip prompt (sync one-shot flag).
+      if (consumeNextWorkbenchWindowUnloadAllowance()) {
+        return;
+      }
+      if (hasRecentControlledProjectLifecycleOperation()) {
+        return;
+      }
+      const guard = projectCloseGuardRef.current;
+      const closeBlocked = shouldBlockWorkbenchWindowClose({
+        controlledLifecycleOperationInFlight: hasRecentControlledProjectLifecycleOperation(),
+        frontendRefreshRequested: guard.frontendRefreshRequested,
+        restartRequested: guard.restartRequested,
+        runtimeControllerState: guard.runtimeControllerState,
+        shutdownRequested: guard.shutdownRequested,
+      });
+      if (!shouldArmBrowserProjectCloseGuard({
+        closeBlocked,
+        electronDesktopShell: false,
+      })) {
+        return;
+      }
+      guard.emitBrowserTelemetry(
+        buildProjectWindowCloseBlockedTelemetry({
+          surface: "workbench",
+          runtimeControllerState: guard.runtimeControllerState,
+        }),
+        { preferBeacon: true },
+      );
+      applyBeforeUnloadProjectCloseGuard(event, guard.workbenchCloseGuardMessage);
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   const toggleTheme = useCallback(() => {
     setTheme((current) => {
@@ -2233,11 +2260,12 @@ export function AppShell() {
                 <VButton
                   type="button"
                   variant="secondary"
+                  contentLayout="plain"
                   className={styles.activeWorkChip}
                   aria-haspopup="dialog"
                   aria-label={activeWorkChipAriaLabel}
                 >
-                  <span className={`${styles.statusDot} ${styles[`status_${activeWorkIndicator.tone}`]}`} />
+                  <span className={`${styles.statusDot} ${styles[`status_${activeWorkIndicator.tone}`]}`} aria-hidden="true" />
                   <span className={styles.activeWorkKicker}>{t("activeWorkNow")}</span>
                   <strong>{activeWorkIndicator.label}</strong>
                   {activeWorkIndicator.tone !== "running" ? (
@@ -2457,13 +2485,14 @@ export function AppShell() {
                 <VButton
                   type="button"
                   variant="secondary"
+                  contentLayout="plain"
                   className={styles.statusSummaryChip}
                   title={statusSummaryTitle}
                   aria-haspopup="dialog"
                   aria-expanded={statusGuideOpen}
                   aria-label={`${t("systemStatusGuide")}: ${primaryStatusCard.label} ${primaryStatusCard.value}`}
                 >
-                  <span className={`${styles.statusDot} ${styles[`status_${primaryStatusCard.tone}`]}`} />
+                  <span className={`${styles.statusDot} ${styles[`status_${primaryStatusCard.tone}`]}`} aria-hidden="true" />
                   <span className={styles.statusBadgeLabel}>{primaryStatusCard.label}</span>
                   <strong className={styles.statusBadgeValue}>{primaryStatusCard.value}</strong>
                   <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>

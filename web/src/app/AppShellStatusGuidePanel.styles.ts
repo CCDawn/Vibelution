@@ -13,7 +13,7 @@ const styles = {
   lifecycleProofList: "vui-app-appshell lifecycleProofList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   lifecycleProofMeta: "vui-app-appshell lifecycleProofMeta min-w-0 flex flex-wrap items-center gap-1.5",
   lifecycleProofName: "vui-app-appshell lifecycleProofName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
-  statusDot: "vui-app-appshell statusDot inline-block h-2 w-2 shrink-0 rounded-full border border-[color-mix(in_srgb,currentColor_38%,transparent)] bg-current p-0 align-middle",
+  statusDot: "vui-app-appshell statusDot block h-2 w-2 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
   statusGuideCard: `vui-app-appshell statusGuideCard min-w-0 ${vuiGlassPanelClass} p-2`,
   statusGuideCardHeader: "vui-app-appshell statusGuideCardHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
   statusGuideGrid: "vui-app-appshell statusGuideGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",

@@ -2,10 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { LauncherStatus } from "../api/types";
 import {
+  allowNextWorkbenchWindowUnload,
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
   clearControlledProjectLifecycleOperation,
+  clearNextWorkbenchWindowUnloadAllowance,
+  consumeNextWorkbenchWindowUnloadAllowance,
   hasRecentControlledProjectLifecycleOperation,
+  isNextWorkbenchWindowUnloadAllowed,
   markControlledProjectLifecycleOperation,
   projectWindowCloseGuardMessage,
   shouldArmBrowserProjectCloseGuard,
@@ -242,6 +246,32 @@ describe("project close guard", () => {
     expect(applyBeforeUnloadProjectCloseGuard(event, "Stop the project first.")).toBe("Stop the project first.");
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
     expect(event.returnValue).toBe("Stop the project first.");
+  });
+
+  it("uses a synchronous one-shot unload pass so intentional refresh skips the close guard", () => {
+    clearNextWorkbenchWindowUnloadAllowance();
+    expect(isNextWorkbenchWindowUnloadAllowed()).toBe(false);
+
+    allowNextWorkbenchWindowUnload();
+    expect(isNextWorkbenchWindowUnloadAllowed()).toBe(true);
+    expect(
+      shouldBlockWorkbenchWindowClose({
+        shutdownRequested: false,
+        restartRequested: false,
+        runtimeControllerState: "managed",
+      }),
+    ).toBe(false);
+
+    expect(consumeNextWorkbenchWindowUnloadAllowance()).toBe(true);
+    expect(consumeNextWorkbenchWindowUnloadAllowance()).toBe(false);
+    expect(isNextWorkbenchWindowUnloadAllowed()).toBe(false);
+    expect(
+      shouldBlockWorkbenchWindowClose({
+        shutdownRequested: false,
+        restartRequested: false,
+        runtimeControllerState: "managed",
+      }),
+    ).toBe(true);
   });
 
   it("does not arm browser beforeunload guards inside the Electron desktop shell", () => {

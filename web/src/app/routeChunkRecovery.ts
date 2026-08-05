@@ -1,3 +1,5 @@
+import { allowNextWorkbenchWindowUnload } from "./projectCloseGuard";
+
 export const ROUTE_CHUNK_RELOAD_KEY = "vibelution:route-chunk-reload";
 const ROUTE_CHUNK_RELOAD_RECORD_VERSION = 1;
 
@@ -156,6 +158,8 @@ export function recoverFromStaleRouteAsset(
     reloadRequested: true,
     duplicateRoute: false,
   });
+  // Avoid racing the workbench project-close beforeunload guard during recovery reloads.
+  allowNextWorkbenchWindowUnload();
   browserWindow.location.reload();
   return true;
 }
