@@ -113,12 +113,14 @@ export function TeamSourceCollectionSearchBriefPanel({
                 <span className={styles.queryIndex} aria-hidden>
                   {index + 1}
                 </span>
-                <VNativeInput
-                  className={styles.queryInput}
-                  aria-label={isZh ? `搜索问题 ${index + 1}` : `Search query ${index + 1}`}
-                  value={query}
-                  onChange={(event) => updateQuery(index, event.target.value)}
-                />
+                <div className={styles.queryInputWrap}>
+                  <VNativeInput
+                    className={styles.queryInput}
+                    aria-label={isZh ? `搜索问题 ${index + 1}` : `Search query ${index + 1}`}
+                    value={query}
+                    onChange={(event) => updateQuery(index, event.target.value)}
+                  />
+                </div>
                 <VNativeButton
                   type="button"
                   className={styles.removeButton}
@@ -140,16 +142,18 @@ export function TeamSourceCollectionSearchBriefPanel({
         </div>
 
         <div className={styles.addQuery}>
-          <VNativeInput
-            className={styles.addInput}
-            value={newQuery}
-            maxLength={240}
-            disabled={querySeeds.length >= 12}
-            placeholder={isZh ? "补充一条检索式，回车添加" : "Add a query, press Enter"}
-            aria-label={isZh ? "补充搜索问题" : "Add search query"}
-            onChange={(event) => setNewQuery(event.target.value)}
-            onKeyDown={handleNewQueryKeyDown}
-          />
+          <div className={styles.queryInputWrap}>
+            <VNativeInput
+              className={styles.addInput}
+              value={newQuery}
+              maxLength={240}
+              disabled={querySeeds.length >= 12}
+              placeholder={isZh ? "补充一条检索式，回车添加" : "Add a query, press Enter"}
+              aria-label={isZh ? "补充搜索问题" : "Add search query"}
+              onChange={(event) => setNewQuery(event.target.value)}
+              onKeyDown={handleNewQueryKeyDown}
+            />
+          </div>
           <VNativeButton
             type="button"
             className={styles.addButton}
