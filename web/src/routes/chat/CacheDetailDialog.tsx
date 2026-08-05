@@ -501,78 +501,100 @@ export function CacheDetailDialog({
                     `${lang === "zh" ? "未命中" : "miss"} ${numberFormatter.format(observedMissedTokens)}`,
                     observedUnknownTokens > 0 ? `${lang === "zh" ? "未观测" : "unobserved"} ${numberFormatter.format(observedUnknownTokens)}` : "",
                   ].filter(Boolean).join(" · ");
+                  const hasObservedBoundary =
+                    observedCachedTokens > 0 || observedMissedTokens > 0 || observedUnknownTokens > 0;
                   return (
                     <div
                       key={`detail-computed-row-${segment.key}-${segment.status}-${index}`}
                       className={styles.cacheDetailSegmentRow}
                       title={cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}
                     >
-                      <i className={`${styles.cacheDetailSwatch} ${cachePromptLegendSegmentClass(segment)}`} />
+                      <i className={`${styles.cacheDetailSwatch} ${cachePromptLegendSegmentClass(segment)}`} aria-hidden="true" />
                       <div className={styles.cacheDetailSegmentText}>
                         <strong>{segmentDisplayLabel}</strong>
                         <span className={styles.cacheDetailSegmentSource}>
-                          {promptSegmentCategoryLabel(segment, lang)}
-                          {promptSegmentAccuracyLabel(segment, lang) ? ` · ${promptSegmentAccuracyLabel(segment, lang)}` : ""}
-                          {segment.cachePolicy ? ` · ${segment.cachePolicy}` : ""}
+                          {[
+                            promptSegmentCategoryLabel(segment, lang),
+                            promptSegmentAccuracyLabel(segment, lang),
+                            segment.cachePolicy || "",
+                          ].filter(Boolean).join(" · ")}
                         </span>
                         <span className={styles.cacheDetailSegmentMeta}>
-                          <b>{cacheComputedStatusLabel(segment.status, lang)}</b>
+                          <b data-status={segment.status || "computed_unknown"}>
+                            {cacheComputedStatusLabel(segment.status, lang)}
+                          </b>
                           <b data-status={segment.observedStatus || "not_observed"}>
                             {cacheObservedStatusLabel(segment.observedStatus, lang)}
                           </b>
                           {(segment.computedOverestimatedInputTokens ?? 0) > 0 ? (
                             <b data-status="observed_miss">
-                              {lang === "zh" ? "上界未兑现" : "upper bound gap"} {numberFormatter.format(segment.computedOverestimatedInputTokens ?? 0)}
+                              {lang === "zh" ? "上界未兑现" : "upper bound gap"}{" "}
+                              {numberFormatter.format(segment.computedOverestimatedInputTokens ?? 0)}
                             </b>
                           ) : null}
                           {(segment.providerExtraCachedInputTokens ?? 0) > 0 ? (
                             <b data-status="observed_hit">
-                              {lang === "zh" ? "厂商额外" : "provider extra"} {numberFormatter.format(segment.providerExtraCachedInputTokens ?? 0)}
+                              {lang === "zh" ? "厂商额外" : "provider extra"}{" "}
+                              {numberFormatter.format(segment.providerExtraCachedInputTokens ?? 0)}
                             </b>
                           ) : null}
                         </span>
-                        <div className={styles.cacheDetailBoundary} title={observedBoundaryTitle}>
-                          <div className={styles.cacheDetailBoundaryLabels}>
-                            <span data-kind="hit">
-                              {lang === "zh" ? "命中" : "hit"} {numberFormatter.format(observedCachedTokens)}
-                            </span>
-                            <span data-kind="miss">
-                              {lang === "zh" ? "未命中" : "miss"} {numberFormatter.format(observedMissedTokens)}
-                            </span>
-                            {observedUnknownTokens > 0 ? (
-                              <span data-kind="unknown">
-                                {lang === "zh" ? "未观测" : "unobserved"} {numberFormatter.format(observedUnknownTokens)}
+                        {hasObservedBoundary ? (
+                          <div className={styles.cacheDetailBoundary} title={observedBoundaryTitle}>
+                            <div className={styles.cacheDetailBoundaryLabels}>
+                              <span data-kind="hit">
+                                {lang === "zh" ? "命中" : "hit"}{" "}
+                                {numberFormatter.format(observedCachedTokens)}
                               </span>
-                            ) : null}
+                              <span data-kind="miss">
+                                {lang === "zh" ? "未命中" : "miss"}{" "}
+                                {numberFormatter.format(observedMissedTokens)}
+                              </span>
+                              {observedUnknownTokens > 0 ? (
+                                <span data-kind="unknown">
+                                  {lang === "zh" ? "未观测" : "unobserved"}{" "}
+                                  {numberFormatter.format(observedUnknownTokens)}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div
+                              className={styles.cacheDetailBoundaryTrack}
+                              role="img"
+                              aria-label={observedBoundaryTitle}
+                            >
+                              {observedCachedPercent > 0 ? (
+                                <span
+                                  className={styles.cacheDetailBoundaryHit}
+                                  style={cacheBoundaryFillStyle("--cache-boundary-hit-width", observedCachedPercent)}
+                                />
+                              ) : null}
+                              {observedMissedPercent > 0 ? (
+                                <span
+                                  className={styles.cacheDetailBoundaryMiss}
+                                  style={cacheBoundaryFillStyle("--cache-boundary-miss-width", observedMissedPercent)}
+                                />
+                              ) : null}
+                              {observedUnknownTokens > 0 && observedUnknownPercent > 0 ? (
+                                <span
+                                  className={styles.cacheDetailBoundaryUnknown}
+                                  style={cacheBoundaryFillStyle("--cache-boundary-unknown-width", observedUnknownPercent)}
+                                />
+                              ) : null}
+                            </div>
                           </div>
-                          <div
-                            className={styles.cacheDetailBoundaryTrack}
-                            role="img"
-                            aria-label={observedBoundaryTitle}
-                          >
-                            <span
-                              className={styles.cacheDetailBoundaryHit}
-                              style={cacheBoundaryFillStyle("--cache-boundary-hit-width", observedCachedPercent)}
-                            />
-                            <span
-                              className={styles.cacheDetailBoundaryMiss}
-                              style={cacheBoundaryFillStyle("--cache-boundary-miss-width", observedMissedPercent)}
-                            />
-                            {observedUnknownTokens > 0 ? (
-                              <span
-                                className={styles.cacheDetailBoundaryUnknown}
-                                style={cacheBoundaryFillStyle("--cache-boundary-unknown-width", observedUnknownPercent)}
-                              />
-                            ) : null}
-                          </div>
-                        </div>
+                        ) : null}
                         {segment.contentPreview ? <small>{segment.contentPreview}</small> : null}
                       </div>
-                      <em>
-                        {numberFormatter.format(segment.tokens ?? 0)} · {Math.round(segment.actualPercent)}%
+                      <em className={styles.cacheDetailSegmentStats}>
+                        <span>
+                          {numberFormatter.format(segment.tokens ?? 0)}
+                          {" · "}
+                          {Math.round(segment.actualPercent)}%
+                        </span>
                         {(segment.observedCachedInputTokens ?? 0) > 0 || (segment.observedMissedInputTokens ?? 0) > 0 ? (
                           <small>
-                            {lang === "zh" ? "真" : "obs"} {numberFormatter.format(segment.observedCachedInputTokens ?? 0)}
+                            {lang === "zh" ? "真实" : "obs"}{" "}
+                            {numberFormatter.format(segment.observedCachedInputTokens ?? 0)}
                             {" / "}
                             {numberFormatter.format(segment.observedMissedInputTokens ?? 0)}
                           </small>
