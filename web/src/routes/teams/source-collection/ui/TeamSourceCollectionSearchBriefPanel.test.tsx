@@ -61,14 +61,16 @@ describe("TeamSourceCollectionSearchBriefPanel", () => {
     expect(markup).not.toContain("开始搜索");
   });
 
-  it("uses a compact single-surface query list (not heavy per-item cards)", () => {
-    expect(styles.queryList).toContain("divide-y");
+  it("uses flex rows so index/input/delete stay on one line in production CSS", () => {
+    // Arbitrary grid-cols were dropping in build → single-column stack (index above, × below).
+    expect(styles.queryRow).toContain("flex");
     expect(styles.queryRow).toContain("items-center");
-    expect(styles.queryRow).toContain("grid-cols-[1.5rem_minmax(0,1fr)_1.75rem]");
-    expect(styles.queryRow).not.toContain("rounded-[8px]");
-    expect(styles.queryRow).not.toContain("border border-");
+    expect(styles.queryRow).not.toContain("grid-cols-");
+    expect(styles.queryInputWrap).toContain("flex-1");
+    expect(styles.queryInput).toContain("!border-0");
+    expect(styles.removeButton).toContain("shrink-0");
+    expect(panelSource).toContain("queryInputWrap");
     expect(panelSource).toContain('role="list"');
-    expect(panelSource).toContain("query-seed-");
   });
 
   it("exposes an honest empty-query state and points first-start to the right rail", () => {
