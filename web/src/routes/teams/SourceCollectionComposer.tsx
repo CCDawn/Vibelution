@@ -52,6 +52,8 @@ export type SourceCollectionComposerProps = {
   modules: TeamSourceCollectionStandaloneStageModule[];
   activePanel: ReactNode;
   compactActivePanel?: boolean;
+  /** Default command-bar: stage progress only top-right (no left 01–04 stack). */
+  progressPlacement?: "command-bar" | "left-rail";
 };
 
 export function SourceCollectionComposer(props: SourceCollectionComposerProps) {
@@ -86,6 +88,7 @@ export function SourceCollectionComposer(props: SourceCollectionComposerProps) {
     modules,
     activePanel,
     compactActivePanel,
+    progressPlacement = "command-bar",
   } = props;
 
   const effectiveTeamId = teamId || RESEARCH_TEAM_ID;
@@ -128,6 +131,7 @@ export function SourceCollectionComposer(props: SourceCollectionComposerProps) {
           modules={modules}
           activePanel={activePanel}
           compactActivePanel={compactActivePanel}
+          progressPlacement={progressPlacement}
         />
       ) : (
         <main className={styles.sourceCollectionPageBody}>

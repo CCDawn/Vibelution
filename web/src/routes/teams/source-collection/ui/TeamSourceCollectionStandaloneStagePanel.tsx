@@ -1,5 +1,5 @@
 import { Archive, CheckCircle2, Play, RefreshCw, Search } from "lucide-react";
-import { type ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../../../../components/layout/workbenchLayoutIds";
 import { VSplitWorkspace } from "../../../../components/vui";
@@ -7,6 +7,7 @@ import {
   TeamStageCard,
   TeamStageCommandBar,
   TeamStagePipeline,
+  type TeamStageCommandStep,
   type TeamStageStat,
   type TeamStageTone,
 } from "../../../../components/vui/product/team-management";
@@ -40,12 +41,18 @@ type TeamSourceCollectionStandaloneStagePanelProps = {
   searchBrief?: ReactNode;
   runSwitcher: ReactNode;
   runHistoryLabel?: string;
+  /** Only rendered when progressPlacement is left-rail. */
   phaseCloseGate?: ReactNode;
   stagePipelineId: string;
   stagePipelineAriaLabel: string;
   modules: TeamSourceCollectionStandaloneStageModule[];
   activePanel: ReactNode;
   compactActivePanel?: boolean;
+  /**
+   * `command-bar` (default): 01–04 + next live in the top command bar only.
+   * `left-rail`: legacy left stack (gate + pipeline cards).
+   */
+  progressPlacement?: "command-bar" | "left-rail";
 };
 
 const SC_LEFT_PANE = {
@@ -73,8 +80,7 @@ export function TeamSourceCollectionStageActionIcon({ icon }: { icon: TeamSource
 
 /**
  * Knowledge-collection desktop workbench:
- * command bar + resizable left config rail + main stage workspace
- * (center list / right actions are split inside ActiveStagePanel).
+ * command bar (unified progress top-right by default) + left config + main workspace.
  */
 export function TeamSourceCollectionStandaloneStagePanel({
   commandAriaLabel,
@@ -91,11 +97,30 @@ export function TeamSourceCollectionStandaloneStagePanel({
   modules,
   activePanel,
   compactActivePanel = false,
+  progressPlacement = "command-bar",
 }: TeamSourceCollectionStandaloneStagePanelProps) {
+  const showLeftProgress = progressPlacement === "left-rail";
+
+  const commandSteps: TeamStageCommandStep[] | undefined = useMemo(() => {
+    if (!showLeftProgress && modules.length > 0) {
+      return modules.map((module, index) => ({
+        id: module.id,
+        indexLabel: String(index + 1).padStart(2, "0"),
+        title: module.title,
+        tone: module.tone,
+        selected: module.selected,
+        status: typeof module.status === "string" || typeof module.status === "number" ? module.status : undefined,
+        onClick: module.onDetail,
+      }));
+    }
+    return undefined;
+  }, [modules, showLeftProgress]);
+
   return (
     <main
       className={compactActivePanel ? styles.sourceCollectionPageBodyCompact : styles.sourceCollectionPageBody}
       data-testid="source-collection-standalone-workbench"
+      data-progress-placement={progressPlacement}
     >
       <TeamStageCommandBar
         ariaLabel={commandAriaLabel}
@@ -103,6 +128,7 @@ export function TeamSourceCollectionStandaloneStagePanel({
         title={commandTitle}
         subtitle={commandSubtitle}
         stats={commandStats}
+        steps={commandSteps}
       />
       <VSplitWorkspace
         className={styles.sourceCollectionPageSplit}
@@ -114,23 +140,25 @@ export function TeamSourceCollectionStandaloneStagePanel({
         sidebar={(
           <aside className={styles.sourceCollectionLeftRail} aria-label={stagePipelineAriaLabel}>
             {searchBrief}
-            {phaseCloseGate}
-            <TeamStagePipeline id={stagePipelineId} ariaLabel={stagePipelineAriaLabel}>
-              {modules.map((module, index) => (
-                <TeamStageCard
-                  key={module.id}
-                  index={index}
-                  tone={module.tone}
-                  selected={module.selected}
-                  title={module.title}
-                  onActivate={module.onDetail}
-                  status={module.status}
-                  label={module.label}
-                  metric={module.metric}
-                  nextLabel={module.nextLabel}
-                />
-              ))}
-            </TeamStagePipeline>
+            {showLeftProgress ? phaseCloseGate : null}
+            {showLeftProgress ? (
+              <TeamStagePipeline id={stagePipelineId} ariaLabel={stagePipelineAriaLabel}>
+                {modules.map((module, index) => (
+                  <TeamStageCard
+                    key={module.id}
+                    index={index}
+                    tone={module.tone}
+                    selected={module.selected}
+                    title={module.title}
+                    onActivate={module.onDetail}
+                    status={module.status}
+                    label={module.label}
+                    metric={module.metric}
+                    nextLabel={module.nextLabel}
+                  />
+                ))}
+              </TeamStagePipeline>
+            ) : null}
             {runSwitcher ? (
               <details className={styles.sourceCollectionRunHistory}>
                 <summary>{runHistoryLabel}</summary>
