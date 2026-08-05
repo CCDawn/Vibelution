@@ -58,7 +58,7 @@ export type TeamsWorkbenchCanvasPageProps = {
   canvasViewportStyle: CSSProperties;
   canvasFrameRef: MutableRefObject<HTMLElement | null>;
   nodeToneClass: (node: TeamCanvasNode) => string;
-  roleBadgeToneClass: (role: string) => string;
+  roleBadgeToneClass: (node: TeamCanvasNode, displayTone?: string) => string;
   completionFlowSlot: ReactNode;
   onSelectNode: (id: string) => void;
   onLayoutModeChange: (mode: any) => void;

@@ -59,7 +59,7 @@ export type DeriveSourceCollectionSelectionPresentationInput = {
   selectedTeamStartSourceCollectionResult: any;
   selectedTeamStartResearchStageResult: any;
   selectedTeamExecuteSourceCollectionSearchResult: any;
-  runtimeSummaryData: unknown;
+  runtimeSummaryData: any;
   selectedSourceCollectionRunEffectiveId: string;
   sourceCollectionSummary: any;
   teamWorkflowCandidates: TeamWorkflowCandidate[];

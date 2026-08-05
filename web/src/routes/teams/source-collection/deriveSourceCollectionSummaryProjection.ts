@@ -53,7 +53,7 @@ export function deriveSourceCollectionSummaryProjection(
   } = input;
 
   const teamWorkflowCandidateGraphRecord = latestWorkflowCandidate(
-    teamWorkflowCandidateGraphQueryData?.candidates ?? [],
+    (teamWorkflowCandidateGraphQueryData?.candidates ?? []) as any[],
   );
   const teamWorkflowCandidateGraph = workflowCandidateGraphFromCandidate(teamWorkflowCandidateGraphRecord);
 

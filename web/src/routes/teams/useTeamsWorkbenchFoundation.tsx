@@ -22,6 +22,7 @@ import { createExperimentWorkspaceActions } from "./experimentWorkspaceActions";
 import { useTeamsSecondaryDataQueries } from "./useTeamsSecondaryDataQueries";
 import { useTeamsMutationBundle } from "./useTeamsMutationBundle";
 import { useTeamsScComposition } from "./useTeamsScComposition";
+import { useTeamsWorkbenchScLayer } from "./useTeamsWorkbenchScLayer";
 import { buildResearchStageAgentBindingsByStage } from "./researchStageAgentBindings";
 import { createTeamsResearchNavigation } from "./createTeamsResearchNavigation";
 import { createResearchStageLaunchHandlers } from "./createResearchStageLaunchHandlers";
@@ -141,7 +142,7 @@ export function useTeamsWorkbenchFoundation({
   forcedTeamId = "",
   forcedResearchWorkspaceView,
   sourceCollectionStandalone: sourceCollectionStandaloneProp = false,
-}: TeamsRouteProps = {}): ReactNode {
+}: TeamsRouteProps = {}): Record<string, any> {
   const { lang } = useShellI18n();
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
@@ -844,11 +845,15 @@ export function useTeamsWorkbenchFoundation({
   const teamWorkflowCandidateGraphRecord = latestWorkflowCandidate(teamWorkflowCandidateGraphQuery.data?.candidates ?? []);
   const teamWorkflowCandidateGraph = workflowCandidateGraphFromCandidate(teamWorkflowCandidateGraphRecord);
   const teamWorkflowCandidateGraphLayout = teamWorkflowCandidateGraph ? workflowGraphLayout(teamWorkflowCandidateGraph) : null;
-  const latestKnowledgeStewardPackCandidate = latestWorkflowCandidate(teamWorkflowCandidates.filter((candidate) => {
-  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
-    return candidate.currentWorkflowNode === "steward_ingestion" || String(metadata.taskType || "") === "steward_pack_draft";
-    })
-    );
+  const latestKnowledgeStewardPackCandidate = latestWorkflowCandidate(
+    teamWorkflowCandidates.filter((candidate) => {
+      const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
+      return (
+        candidate.currentWorkflowNode === "steward_ingestion"
+        || String(metadata.taskType || "") === "steward_pack_draft"
+      );
+    }),
+  );
   const teamWorkflowCoordinationStatus = teamWorkflowCoordinationStatusQuery.data ?? null;
   const teamWorkflowKnowledgeIngestionStatus = teamWorkflowKnowledgeIngestionStatusQuery.data ?? null;
   const teamWorkflowOfficialModelEvidenceStatus = teamWorkflowOfficialModelEvidenceStatusQuery.data ?? null;
@@ -1040,7 +1045,8 @@ export function useTeamsWorkbenchFoundation({
     linkedRoomStatusForPolling,
     linkedChatRoomQueryEnabled,
     linkedChatRoomQuery,
-    detail,
+    detail: linkedRoomDetail,
+    selectedTeamMemoryMembers,
     sourceCollectionAgentIds,
     sourceCollectionOwnerAgentId,
     sourceCollectionFinderAgentId,
@@ -1061,15 +1067,6 @@ export function useTeamsWorkbenchFoundation({
     selectedTeamMemoryActorId,
     selectedTeamKnowledgeRoute,
     selectedTeamGraphRoute,
-    agentId,
-    agent,
-    display,
-    roleLabel,
-    memoryIndexAgentHydrationPending,
-    memoryIndexAgentLoadFailed,
-    statusTitle,
-    statusLabel,
-    statusTone,
     selectedTeamStartRoundPending,
     selectedTeamStartRoundResult,
     selectedTeamStartRoundError,
@@ -1094,7 +1091,6 @@ export function useTeamsWorkbenchFoundation({
     teamWorkflowCandidateGraph,
     teamWorkflowCandidateGraphLayout,
     latestKnowledgeStewardPackCandidate,
-    metadata,
     teamWorkflowCoordinationStatus,
     teamWorkflowKnowledgeIngestionStatus,
     teamWorkflowOfficialModelEvidenceStatus,
@@ -1361,5 +1357,6 @@ export function useTeamsWorkbenchFoundation({
     scComposition,
     researchStageCanLaunchFromSc,
     selectedTeamStartResearchStagePendingFromSc,
+    researchStageStartFeedbackText,
   };
 }
