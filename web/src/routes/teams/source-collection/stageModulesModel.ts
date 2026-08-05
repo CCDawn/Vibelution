@@ -27,6 +27,11 @@ export type SourceCollectionStageModule = {
   actionDisabled: boolean;
   actionTone: "primary" | "secondary";
   actionIcon: "play" | "search" | "check" | "archive" | "refresh";
+  /** Explicit cross-stage advance (never replaces stage-local primary). */
+  secondaryActionLabel?: string;
+  secondaryActionDisabled?: boolean;
+  secondaryActionIcon?: "play" | "search" | "check" | "archive" | "refresh";
+  onSecondaryAction?: () => void;
   projection?: SourceCollectionStageCardProjection | null;
   onAction: () => void;
   onDetail: () => void;
@@ -42,6 +47,8 @@ export type BuildSourceCollectionStageModulesInput = {
   selectedSourceCollectionStageId: SourceCollectionStageModuleId;
   sourceCollectionProjectedCollectedCountLabel: string;
   sourceCollectionProjectedCollectedCountText: string;
+  /** Numeric raw-record / collected count for pipeline handoff (not display text). */
+  sourceCollectionProjectedCollectedCount?: number;
   sourceCollectionProjectedAssessedCountText: string;
   sourceCollectionProjectedApprovedCountText: string;
   sourceCollectionProjectedCandidateCountLabel: string;
@@ -132,6 +139,7 @@ export function buildSourceCollectionStageModules(
     selectedSourceCollectionRun,
     sourceCollectionProjectedCollectedCountLabel,
     sourceCollectionProjectedCollectedCountText,
+    sourceCollectionProjectedCollectedCount: sourceCollectionProjectedCollectedCountInput,
     sourceCollectionProjectedAssessedCountText,
     sourceCollectionProjectedApprovedCountText,
     sourceCollectionProjectedCandidateCountLabel,
@@ -201,6 +209,12 @@ export function buildSourceCollectionStageModules(
     navigate,
   } = input;
 
+  const collectedCount = Math.max(
+    0,
+    Number(sourceCollectionProjectedCollectedCountInput || 0)
+      || Number(String(sourceCollectionProjectedCollectedCountText).match(/\d+/)?.[0] || 0),
+  );
+
 const sourceCollectionStageModules: SourceCollectionStageModule[] = [
   {
     id: "finding",
@@ -211,7 +225,7 @@ const sourceCollectionStageModules: SourceCollectionStageModule[] = [
       : sourceCollectionFindingDisplayLoading
       ? (lang === "zh" ? "正在读取资料结果" : "Loading source results")
       : sourceCollectionStageUserSummary(sourceCollectionCollectionProjection, lang) || (!selectedSourceCollectionRun
-      ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
+      ? (lang === "zh" ? "在右侧推荐下一步生成本轮任务" : "Use the right-rail next step to create this run")
       : sourceCollectionSearchOpenAssignmentCount > 0
         ? (lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 个搜索任务待执行` : `${sourceCollectionSearchOpenAssignmentCount} search tasks remain`)
         : sourceCollectionPrimaryDataLoading
@@ -219,17 +233,35 @@ const sourceCollectionStageModules: SourceCollectionStageModule[] = [
           : (lang === "zh" ? `已找到 ${sourceCollectionProjectedCollectedCountText} 条资料` : `${sourceCollectionProjectedCollectedCountText} sources found`)),
     inputLabel: lang === "zh" ? `${sourceCollectionQueryCountLabel} 搜索问题` : `${sourceCollectionQueryCountText} queries`,
     outputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCountLabel} 原始资料` : sourceCollectionProjectedCollectedCountLabel,
-    nextLabel: sourceCollectionSearchOpenAssignmentCount > 0
-      ? (lang === "zh" ? "继续寻找资料" : "Continue finding")
-      : (lang === "zh" ? "进入资料提炼" : "Move to extraction"),
-    state: sourceCollectionStageDisplayState("finding", sourceCollectionFindingDisplayState),
-    status: sourceCollectionStageDisplayStatus("finding", sourceCollectionFindingDisplayLoading ? sourceCollectionSourceSyncStatusText : sourceCollectionStepStatusText(sourceCollectionSearchStepState)),
+    nextLabel: collectedCount > 0
+      ? (lang === "zh" ? "进入资料提炼" : "Move to extraction")
+      : sourceCollectionSearchOpenAssignmentCount > 0
+        ? (lang === "zh" ? "继续寻找资料" : "Continue finding")
+        : (lang === "zh" ? "开始寻找资料" : "Start finding"),
+    // With returned materials, mark finding done for pipeline ownership even if more search remains.
+    state: (() => {
+      const base = sourceCollectionStageDisplayState("finding", sourceCollectionFindingDisplayState);
+      if (collectedCount > 0 && base !== "active" && base !== "failed") {
+        return "done";
+      }
+      return base;
+    })(),
+    status: sourceCollectionStageDisplayStatus(
+      "finding",
+      sourceCollectionFindingDisplayLoading
+        ? sourceCollectionSourceSyncStatusText
+        : collectedCount > 0
+          ? (lang === "zh" ? "已完成" : "Completed")
+          : sourceCollectionStepStatusText(sourceCollectionSearchStepState)
+            || sourceCollectionSourceSyncStatusText,
+    ),
     detailLabel: lang === "zh" ? "查看资料记录" : "View source records",
     actionLabel: sourceCollectionStageActionLabelFor("finding", sourceCollectionCollectionActionLabel),
     actionDisabled: sourceCollectionStageActionReadinessFor("finding").disabled,
     actionTone: "primary",
     actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
     projection: sourceCollectionCollectionProjection,
+    // Local search remains available as secondary when pipeline owns extraction.
     onAction: () => void startSourceCollectionStageSessionTask("finding"),
     onDetail: () => openSourceCollectionStage("finding"),
   },
@@ -359,25 +391,28 @@ const sourceCollectionStageModules: SourceCollectionStageModule[] = [
         : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
     outputLabel: lang === "zh" ? `${sourceCollectionProjectedFormalKnowledgeCount} 条正式知识 / ${sourceCollectionProjectedGraphNodeCount} 个关系节点` : `${sourceCollectionProjectedFormalKnowledgeCount} formal / ${sourceCollectionProjectedGraphNodeCount} graph nodes`,
     nextLabel: sourceCollectionIngestionReadyForExperiment
-      ? (lang === "zh" ? "进入实验规划" : "Move to experiment planning")
+      ? (lang === "zh" ? "可选：进入实验设计" : "Optional: experiment design")
       : sourceCollectionProjectedStewardPackCount > 0
         ? (lang === "zh" ? "等待入库完成" : "Wait for ingestion")
         : (lang === "zh" ? "Agent 入库资料" : "Agent ingest sources"),
     state: sourceCollectionStageDisplayState("ingestion", sourceCollectionIngestionDisplayState),
     status: sourceCollectionStageDisplayStatus("ingestion", sourceCollectionIngestionDisplayLoading ? sourceCollectionDataSyncText : sourceCollectionStepStatusText(sourceCollectionMemoryStepState)),
     detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",
-    actionLabel: sourceCollectionIngestionReadyForExperiment
-      ? (lang === "zh" ? "进入实验规划" : "Plan experiments")
-      : sourceCollectionStageActionLabelFor("ingestion", sourceCollectionMemoryActionLabel),
-    actionDisabled: sourceCollectionIngestionReadyForExperiment
-      ? false
-      : sourceCollectionStageActionReadinessFor("ingestion").disabled,
+    // Stage-local primary always advances ingestion work — never jumps to experiment.
+    actionLabel: sourceCollectionStageActionLabelFor("ingestion", sourceCollectionMemoryActionLabel),
+    actionDisabled: sourceCollectionStageActionReadinessFor("ingestion").disabled,
     actionTone: "primary",
     actionIcon: "check",
-    projection: sourceCollectionMemoryProjection,
-    onAction: sourceCollectionIngestionReadyForExperiment
+    secondaryActionLabel: sourceCollectionIngestionReadyForExperiment
+      ? (lang === "zh" ? "进入实验设计（离开知识搜集）" : "Enter experiment (leave collection)")
+      : undefined,
+    secondaryActionDisabled: sourceCollectionIngestionReadyForExperiment ? false : undefined,
+    secondaryActionIcon: sourceCollectionIngestionReadyForExperiment ? "play" : undefined,
+    onSecondaryAction: sourceCollectionIngestionReadyForExperiment
       ? () => navigate(sourceCollectionExperimentPlanningRoute)
-      : () => void startSourceCollectionStageSessionTask("ingestion"),
+      : undefined,
+    projection: sourceCollectionMemoryProjection,
+    onAction: () => void startSourceCollectionStageSessionTask("ingestion"),
     onDetail: () => openSourceCollectionStage("ingestion"),
   },
 ];
@@ -385,21 +420,140 @@ const sourceCollectionStageModules: SourceCollectionStageModule[] = [
   return sourceCollectionStageModules;
 }
 
+/** Graph health used so pipeline CTA never points at blocked ingestion. */
+export type SourceCollectionPipelineGraphHealth = {
+  nodeCount?: number;
+  edgeCount?: number;
+  missingLinkCount?: number;
+};
+
+const PIPELINE_GRAPH_MISSING_LINK_HARD_LIMIT = 5;
+
+export function sourceCollectionGraphBlocksIngestion(
+  graph?: SourceCollectionPipelineGraphHealth | null,
+): boolean {
+  if (!graph) {
+    return false;
+  }
+  const nodes = Math.max(0, Number(graph.nodeCount || 0));
+  const edges = Math.max(0, Number(graph.edgeCount || 0));
+  const missing = Math.max(0, Number(graph.missingLinkCount || 0));
+  if (nodes > 0 && edges <= 0) {
+    return true;
+  }
+  if (missing > PIPELINE_GRAPH_MISSING_LINK_HARD_LIMIT) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Pipeline owner for the fixed right-rail progress CTA.
+ * Prefer work-in-progress stages over the UI-selected stage card.
+ *
+ * Critical product rule: once finding has materials (nextLabel handoff to extraction),
+ * optional remaining search tasks must NOT keep the primary CTA on "搜索下一批".
+ * Also: never own ingestion while the graph still fails ingestion preflight.
+ */
+export function pickSourceCollectionPipelineModule(
+  modules: SourceCollectionStageModule[],
+  graphHealth?: SourceCollectionPipelineGraphHealth | null,
+): SourceCollectionStageModule | undefined {
+  if (!modules.length) {
+    return undefined;
+  }
+  const byId = (id: string) => modules.find((module) => module.id === id);
+  const finding = byId("finding");
+  const extraction = byId("extraction");
+  const relations = byId("relations");
+  const ingestion = byId("ingestion");
+  const graphBlocksIngestion = sourceCollectionGraphBlocksIngestion(graphHealth);
+
+  const findingReadyToHandoff = Boolean(
+    finding
+    && finding.state !== "active"
+    && finding.state !== "failed"
+    && (
+      finding.state === "done"
+      || /提炼|extraction|Extract/i.test(String(finding.nextLabel || ""))
+    ),
+  );
+
+  const failed = modules.find((module) => module.state === "failed");
+  // Ingestion "failed" because graph is blocked → CTA must be relations, not retry-ingest.
+  if (failed?.id === "ingestion" && graphBlocksIngestion && relations) {
+    return relations;
+  }
+  if (failed) {
+    return failed;
+  }
+
+  const activeNonFinding = modules.find((module) => module.state === "active" && module.id !== "finding");
+  if (activeNonFinding) {
+    if (activeNonFinding.id === "ingestion" && graphBlocksIngestion && relations) {
+      return relations;
+    }
+    return activeNonFinding;
+  }
+
+  // Finding still actively launching/running with no handoff signal → keep searching.
+  if (finding?.state === "active" && !findingReadyToHandoff) {
+    return finding;
+  }
+
+  // Materials ready: walk extraction → relations → ingestion for first unfinished stage.
+  if (findingReadyToHandoff) {
+    for (const stage of [extraction, relations, ingestion]) {
+      if (!stage) {
+        continue;
+      }
+      if (stage.id === "ingestion" && graphBlocksIngestion) {
+        return relations || stage;
+      }
+      // Relations stays the owner while the graph still fails ingestion preflight,
+      // even if the last relations task wrote "completed" with high missing links.
+      if (stage.id === "relations" && graphBlocksIngestion) {
+        return relations;
+      }
+      if (stage.state !== "done") {
+        return stage;
+      }
+    }
+    if (graphBlocksIngestion && relations) {
+      return relations;
+    }
+    return ingestion || extraction || finding;
+  }
+
+  const fallback = modules.find((module) => module.state === "active")
+    ?? modules.find((module) => module.state === "pending")
+    ?? modules.find((module) => module.state === "idle")
+    ?? modules.find((module) => module.state !== "done")
+    ?? modules[modules.length - 1];
+  if (fallback?.id === "ingestion" && graphBlocksIngestion && relations) {
+    return relations;
+  }
+  return fallback;
+}
+
 export function buildSourceCollectionBoardChrome(input: {
   lang: "zh" | "en";
   sourceCollectionStageModules: SourceCollectionStageModule[];
   sourceCollectionStageFocusLabel: string;
+  graphHealth?: SourceCollectionPipelineGraphHealth | null;
 }) {
-  const { lang, sourceCollectionStageModules, sourceCollectionStageFocusLabel } = input;
+  const { lang, sourceCollectionStageModules, sourceCollectionStageFocusLabel, graphHealth } = input;
   const sourceCollectionBoardCurrentModule =
-    sourceCollectionStageModules.find((module) => module.state === "active")
-    ?? sourceCollectionStageModules.find((module) => module.state === "failed")
-    ?? sourceCollectionStageModules.find((module) => module.state === "pending")
-    ?? sourceCollectionStageModules.find((module) => module.state === "idle")
-    ?? sourceCollectionStageModules[sourceCollectionStageModules.length - 1];
-  const sourceCollectionBoardNextStepLabel = sourceCollectionBoardCurrentModule?.state === "done"
-    ? (lang === "zh" ? "进入实验规划" : "Plan experiments")
-    : sourceCollectionBoardCurrentModule?.label ?? sourceCollectionStageFocusLabel;
+    pickSourceCollectionPipelineModule(sourceCollectionStageModules, graphHealth);
+  // Prefer the module's explicit nextLabel (e.g. 进入资料提炼) over bare stage name.
+  const sourceCollectionBoardNextStepLabel = !sourceCollectionBoardCurrentModule
+    ? sourceCollectionStageFocusLabel
+    : sourceCollectionBoardCurrentModule.state === "done"
+      && sourceCollectionBoardCurrentModule.id === "ingestion"
+      ? (lang === "zh" ? "进入实验规划" : "Plan experiments")
+      : (sourceCollectionBoardCurrentModule.nextLabel
+        || sourceCollectionBoardCurrentModule.label
+        || sourceCollectionStageFocusLabel);
   return { sourceCollectionBoardCurrentModule, sourceCollectionBoardNextStepLabel };
 }
 

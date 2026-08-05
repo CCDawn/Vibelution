@@ -165,6 +165,14 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
             layout={visibleGraphLayout}
             markerId="source-collection-workflow-graph-arrow"
             stateLabel={(value) => workflowStateLabel(value, lang)}
+            lang={lang}
+            focusCandidateId={selectedSourceCollectionCandidateId}
+            onFocusCandidate={(candidateId) => {
+              const candidate = teamWorkflowCandidatesById.get(candidateId);
+              if (candidate) {
+                selectSourceCollectionCandidate(candidate);
+              }
+            }}
           />
         ) : null}
         nodeListAriaLabel={lang === "zh" ? "入库关系节点列表，可滚动查看" : "Ingestion map nodes, scroll to review"}

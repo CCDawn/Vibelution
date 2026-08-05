@@ -292,22 +292,24 @@ export function deriveSourceCollectionDisplayState(input: SourceCollectionDispla
       "idle",
       "idle",
       zh ? "未开始" : "Not started",
-      zh ? "点击开始搜集，生成本轮搜索任务和存储目录。" : "Start collection to create the search work and storage folder.",
+      zh ? "在右侧「推荐下一步」开始搜集，生成本轮搜索任务和存储目录。" : "Use the right-rail next step to create this run's search work and storage folder.",
     );
   }
   if (input.searchOpenAssignmentCount > 0) {
+    // With materials already returned, finding is deliverable (searchStepState=done) so the
+    // fixed pipeline CTA can advance to extraction. Open search tasks remain optional continue.
     return state(
       "needs_continue",
       "pending",
-      "pending",
+      materialCount > 0 ? "done" : "pending",
       materialCount > 0 ? (zh ? "已返回一批" : "Batch returned") : (zh ? "需补充资料" : "More sources needed"),
       materialCount > 0
         ? (zh
-          ? `已返回 ${materialCount} 条资料，还有 ${input.searchOpenAssignmentCount} 个搜索任务可继续。`
-          : `${materialCount} sources have returned; ${input.searchOpenAssignmentCount} search assignments can continue.`)
+          ? `已返回 ${materialCount} 条资料；主按钮进入提炼，补搜请用更多操作。`
+          : `${materialCount} sources returned; primary advances extraction, more search is secondary.`)
         : (zh
-          ? `还有 ${input.searchOpenAssignmentCount} 个搜索任务未完成，点击搜索下一批推进。`
-          : `${input.searchOpenAssignmentCount} search assignments remain. Run the next search to proceed.`),
+          ? `还有 ${input.searchOpenAssignmentCount} 个搜索任务未完成，请在右侧「推荐下一步」推进。`
+          : `${input.searchOpenAssignmentCount} search assignments remain. Use the right-rail next step to proceed.`),
     );
   }
   if (input.downstreamOpenAssignmentCount > 0) {

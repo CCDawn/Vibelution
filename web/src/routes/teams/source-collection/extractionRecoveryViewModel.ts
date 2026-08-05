@@ -129,11 +129,15 @@ export function buildExtractionRecoveryViewModel(
       : rawMaterializedEvidenceGapCount;
   const evidenceGapCount = materializedEvidenceGapCount ?? sourceVerificationCount;
   const evidenceWorkCount = Math.max(evidenceGapCount, sourceVerificationCount);
-  const failureCount = Math.max(
+  // Real failures only — incomplete coverage / unprocessed rows are progress, not danger.
+  const hardFailureCount = Math.max(
     recoveryNumber(recoveryClosure?.failedCount),
     invalidCount,
-    recoveryCoverage?.complete === false ? coverageMissingCount : 0,
   );
+  const processedCount = recoveryNumber(recoveryCoverage?.processed);
+  const incompleteCoverageCount = recoveryCoverage?.complete === false
+    ? Math.max(coverageMissingCount, inputCount > processedCount ? inputCount - processedCount : 0)
+    : (inputCount > processedCount && processedCount >= 0 ? inputCount - processedCount : 0);
   const salvageSignals = [
     recoveryNumber(recoveryClosure?.successCount),
     recoveryNumber(candidateProjection?.counts?.output),
@@ -149,8 +153,7 @@ export function buildExtractionRecoveryViewModel(
     ? sourceCollectionLoadingText
     : String(salvageCount);
   const hasHardFailure = Boolean(
-    failureCount > 0
-    || recoveryCoverage?.complete === false
+    hardFailureCount > 0
     || recoveryClosure?.userStatus === "failed"
     || candidateProjection?.status === "failed"
     || candidateProjection?.status === "agent_blocked"
@@ -167,17 +170,31 @@ export function buildExtractionRecoveryViewModel(
     && materializedEvidenceGapCount === 0
     && sourceVerificationCount > 0,
   );
+  // 0/N processed with no hard errors = continue extraction, not "extraction failed".
+  const continueIncompleteOnly = Boolean(
+    !hasHardFailure
+    && !evidenceGapOnly
+    && !sourceVerificationOnly
+    && incompleteCoverageCount > 0,
+  );
   const excluded = Boolean(sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources);
-  const recoveryNeedsWork = Boolean(hasHardFailure || evidenceWorkCount > 0 || excluded);
+  const recoveryNeedsWork = Boolean(
+    hasHardFailure
+    || evidenceWorkCount > 0
+    || excluded
+    || continueIncompleteOnly,
+  );
   if (!recoveryNeedsWork) {
     return null;
   }
 
   const issueCount = hasHardFailure
-    ? failureCount
+    ? hardFailureCount
     : sourceVerificationOnly
       ? sourceVerificationCount
-      : evidenceGapCount;
+      : evidenceGapOnly
+        ? evidenceGapCount
+        : incompleteCoverageCount;
   const failedText = issueCount > 0
     ? inputCount > 0
       ? `${issueCount}/${inputCount}`
@@ -212,6 +229,10 @@ export function buildExtractionRecoveryViewModel(
         ? (lang === "zh"
           ? `还有证据锚点缺口。请先让 Agent 补页码/段落/DOI 锚点或可核验摘要。${nextStepGuide}`
           : `Evidence-anchor gaps remain. Have the Agent add page/paragraph/DOI anchors or a verifiable abstract. ${nextStepGuide}`)
+      : continueIncompleteOnly
+        ? (lang === "zh"
+          ? `候选资料已处理 ${processedCount}/${inputCount || incompleteCoverageCount}，还有 ${incompleteCoverageCount} 条需要补齐。点上方主按钮让 Agent 继续提炼即可，不是系统故障。`
+          : `${processedCount}/${inputCount || incompleteCoverageCount} processed; ${incompleteCoverageCount} still need extraction. Use the primary button to continue Agent extraction — this is progress, not a system fault.`)
       : (
         (sourceCollectionStageUserSummary(candidateProjection, lang)
           || (lang === "zh"
@@ -220,10 +241,12 @@ export function buildExtractionRecoveryViewModel(
         + ` ${nextStepGuide}`
       );
 
+  const progressable = Boolean(evidenceGapOnly || sourceVerificationOnly || continueIncompleteOnly);
+
   return {
     tone: excluded
       ? (sourceCollectionExtractionExcludedRecoveryState.tone || "danger")
-      : evidenceGapOnly || sourceVerificationOnly
+      : progressable
         ? "progressable"
         : "danger",
     titleLabel: excluded
@@ -232,6 +255,8 @@ export function buildExtractionRecoveryViewModel(
         ? (lang === "zh" ? "来源核验" : "Source verification")
         : evidenceGapOnly
           ? (lang === "zh" ? "证据补全" : "Evidence completion")
+          : continueIncompleteOnly
+            ? (lang === "zh" ? "继续提炼" : "Continue extraction")
           : (lang === "zh" ? "提炼失败恢复" : "Extraction recovery"),
     statusLabel: excluded
       ? String(sourceCollectionExtractionExcludedRecoveryState.statusLabel || sourceCollectionStageRecoveryStatusLabel("extraction", lang))
@@ -239,6 +264,8 @@ export function buildExtractionRecoveryViewModel(
         ? (lang === "zh" ? "提炼完成，待核验来源" : "Extraction complete; source verification required")
         : evidenceGapOnly
           ? (lang === "zh" ? "提炼完成，待补证据" : "Extraction complete; evidence needed")
+          : continueIncompleteOnly
+            ? (lang === "zh" ? "待补提炼" : "Extraction pending")
           : sourceCollectionStageRecoveryStatusLabel("extraction", lang),
     summary,
     failedLabel: excluded
@@ -247,6 +274,8 @@ export function buildExtractionRecoveryViewModel(
         ? (lang === "zh" ? "待核验来源" : "sources to verify")
         : evidenceGapOnly
           ? (lang === "zh" ? "待补证据" : "evidence gaps")
+          : continueIncompleteOnly
+            ? (lang === "zh" ? "待处理" : "pending")
           : (lang === "zh" ? "提炼失败" : "failed extraction"),
     failedText,
     salvageLabel: lang === "zh" ? "可保留" : "salvageable",
@@ -257,11 +286,15 @@ export function buildExtractionRecoveryViewModel(
         ? (lang === "zh" ? "提炼覆盖" : "extraction coverage")
         : evidenceGapOnly
           ? (lang === "zh" ? "提炼覆盖" : "extraction coverage")
+          : continueIncompleteOnly
+            ? (lang === "zh" ? "已处理" : "processed")
           : (lang === "zh" ? "待补提炼" : "to recover"),
     recoverText: sourceCollectionPrimaryDataLoading
       ? sourceCollectionLoadingText
       : excluded
         ? String(sourceCollectionExtractionExcludedRecoveryState.recoverText || recoveryCoverageText)
+        : continueIncompleteOnly
+          ? `${processedCount}/${inputCount || incompleteCoverageCount}`
         : recoveryCoverageText,
     pendingReviewText: sourceCollectionRunPendingScreeningCountText,
     primaryActionText,
@@ -289,6 +322,8 @@ export function buildExtractionRecoveryViewModel(
         ? (lang === "zh" ? "资料提炼来源核验工作台" : "Source extraction verification panel")
         : evidenceGapOnly
           ? (lang === "zh" ? "资料提炼证据补全工作台" : "Source extraction evidence completion panel")
+          : continueIncompleteOnly
+            ? (lang === "zh" ? "资料提炼继续工作台" : "Source extraction continue panel")
           : (lang === "zh" ? "资料提炼失败恢复工作台" : "Source extraction recovery panel"),
     preferPrimaryOverStageAction: true,
   };

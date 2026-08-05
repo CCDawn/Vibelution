@@ -3,7 +3,7 @@
  * Wave 8K: extracted from TeamsRoute.tsx for domain componentization.
  */
 import type { ReactNode } from "react";
-import { Play, RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 
 import type { Team } from "../api/types";
 import { VButton } from "../components/vui";
@@ -51,10 +51,6 @@ export type TeamSourceCollectionConversationWorkspacePanelProps = {
   sourceCollectionRecordClickableSourceCount: number;
   sourceCollectionRecordLocalFileCount: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionStageModules: Array<{ id: string; actionLabel?: string; actionDisabled?: boolean; onAction?: () => void }>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionStageActionReadinessFor: (stageId: SourceCollectionStageModuleId) => any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sourceCollectionDraft: { title: string };
   sourceCollectionCollectedCountLabel: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -62,8 +58,6 @@ export type TeamSourceCollectionConversationWorkspacePanelProps = {
   sourceCollectionBoardNextStepLabel: string;
   sourceCollectionSourceFilter: string;
   setSourceCollectionSourceFilter: (value: any) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionActionDisabledTitle: (readiness: any, label: string) => string | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sourceCollectionRecordFilterCounts: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,15 +89,12 @@ export function TeamSourceCollectionConversationWorkspacePanel(props: TeamSource
     sourceCollectionRawRecordCount,
     sourceCollectionRecordClickableSourceCount,
     sourceCollectionRecordLocalFileCount,
-    sourceCollectionStageModules,
-    sourceCollectionStageActionReadinessFor,
     sourceCollectionDraft,
     sourceCollectionCollectedCountLabel,
     selectedSourceCollectionStorageArtifacts,
     sourceCollectionBoardNextStepLabel,
     sourceCollectionSourceFilter,
     setSourceCollectionSourceFilter,
-    sourceCollectionActionDisabledTitle,
     sourceCollectionRecordFilterCounts,
     renderSourceCollectionFilterBar,
     sourceCollectionCollectedCountText,
@@ -144,9 +135,6 @@ export function TeamSourceCollectionConversationWorkspacePanel(props: TeamSource
     const sourceCollectionRecordLocalFileCountText = sourceCollectionRecordsDataLoading
       ? sourceCollectionLoadingText
       : String(sourceCollectionRecordLocalFileCount);
-    const findingStageModule = sourceCollectionStageModules.find((module: any) => module.id === "finding");
-    const findingStageReadiness = sourceCollectionStageActionReadinessFor("finding");
-    const findingStageActionLabel = findingStageModule?.actionLabel ?? (lang === "zh" ? "开始搜索" : "Start search");
     const rawRecordEmptyFacts: TeamSourceEmptyStateFact[] = [
       {
         key: "run",
@@ -185,8 +173,8 @@ export function TeamSourceCollectionConversationWorkspacePanel(props: TeamSource
       : sourceCollectionRecords.length
         ? (lang === "zh" ? "资料已经读取完成，但当前来源过滤没有命中；切回全部即可继续查看。" : "Records are loaded, but the selected source filter has no matches.")
         : (lang === "zh"
-            ? "点击开始搜索后，原始资料、候选资料和文件产物会按同一批次写入这里。"
-            : "Start a search to write raw records, candidates, and file artifacts into this run.");
+            ? "请在右侧「推荐下一步」推进搜集；原始资料、候选资料和文件产物会按同一批次写入这里。"
+            : "Use the right-rail recommended next step to collect. Raw records, candidates, and file artifacts land here in the same run.");
     const rawRecordEmptyActions = sourceCollectionRecordsDataLoading
       ? null
       : sourceCollectionRecords.length
@@ -202,19 +190,7 @@ export function TeamSourceCollectionConversationWorkspacePanel(props: TeamSource
               {lang === "zh" ? "查看全部来源" : "Show all sources"}
             </VButton>
           )
-        : (
-            <VButton
-              type="button"
-              density="compact"
-              variant="primary"
-              icon={<Play size={13} />}
-              isDisabled={findingStageModule?.actionDisabled ?? true}
-              onPress={findingStageModule?.onAction}
-              title={sourceCollectionActionDisabledTitle(findingStageReadiness, findingStageActionLabel)}
-            >
-              {findingStageActionLabel}
-            </VButton>
-          );
+        : null;
     return (
       <TeamSourceCollectionConversationPanel
         lang={lang}
