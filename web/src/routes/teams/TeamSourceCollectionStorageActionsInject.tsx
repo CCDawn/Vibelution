@@ -2,10 +2,8 @@
  * SC inject: storage open actions for the selected run artifacts directory.
  * Route only supplies artifacts snapshot + open mutation state.
  */
-import {
-  TeamSourceCollectionStorageActionsPanel,
-  type TeamSourceCollectionStorageAction,
-} from "../TeamSourceCollectionStorageActionsPanel";
+import type { TeamSourceCollectionStorageAction } from "../TeamSourceCollectionStorageActionsPanel";
+import { TeamSourceCollectionStorageActionsPanel } from "./teamLazyPanels";
 import {
   sourceCollectionStorageTargetLabel,
   type SourceCollectionStorageArtifacts,

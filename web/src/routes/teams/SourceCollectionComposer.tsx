@@ -10,10 +10,8 @@ import type { ResearchStageUnlock } from "./researchPrimaryActionModel";
 import type { ResearchWorkspaceView } from "./researchWorkspaceModel";
 import { teamWorkspaceRoute } from "./researchWorkspaceModel";
 import { ResearchStageWorkbenchShell } from "./ResearchStageWorkbenchShell";
-import {
-  TeamSourceCollectionStandaloneStagePanel,
-  type TeamSourceCollectionStandaloneStageModule,
-} from "./source-collection/ui/TeamSourceCollectionStandaloneStagePanel";
+import type { TeamSourceCollectionStandaloneStageModule } from "./source-collection/ui/TeamSourceCollectionStandaloneStagePanel";
+import { TeamSourceCollectionStandaloneStagePanel } from "./teamLazyPanels";
 import shellStyles from "../TeamsRoute.styles";
 import researchStyles from "../TeamsRoute.research.styles";
 

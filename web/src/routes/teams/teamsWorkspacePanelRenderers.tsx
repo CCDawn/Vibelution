@@ -3,11 +3,11 @@
  * Route owns state/mutations; this module only mounts already-extracted panels.
  */
 import { agentDisplayInfo } from "../agentDisplay";
-import { TeamMemoryIndexPanel } from "../TeamMemoryIndexPanel";
 import {
   TeamAiSearchWorkspacePanel,
   TeamExperimentPlanningLedgerPanel,
   TeamKnowledgeCollectionCompletionFlowPanel,
+  TeamMemoryIndexPanel,
   TeamResearchLoopPanel,
   TeamResearchStageAgentPanel,
   TeamResearchStageAgentSummary,

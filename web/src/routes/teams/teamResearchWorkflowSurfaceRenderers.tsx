@@ -2,9 +2,22 @@
  * Research workflow / communication surface renderers extracted from TeamsRoute.
  * Route owns state/mutations; this factory mounts already-extracted panels.
  */
-import { TeamCommunicationPanel } from "./TeamCommunicationPanel";
-import { TeamResearchWorkflowPanelHost } from "./TeamResearchWorkflowPanelHost";
-import { TeamResearchWorkflowStageModules } from "./TeamResearchWorkflowStageModules";
+import { lazy, Suspense, type ReactNode } from "react";
+
+/** Keep communication + workflow hosts out of the eager TeamsRoute graph. */
+const TeamCommunicationPanel = lazy(() =>
+  import("./TeamCommunicationPanel").then((module) => ({ default: module.TeamCommunicationPanel })),
+);
+const TeamResearchWorkflowPanelHost = lazy(() =>
+  import("./TeamResearchWorkflowPanelHost").then((module) => ({ default: module.TeamResearchWorkflowPanelHost })),
+);
+const TeamResearchWorkflowStageModules = lazy(() =>
+  import("./TeamResearchWorkflowStageModules").then((module) => ({ default: module.TeamResearchWorkflowStageModules })),
+);
+
+function withWorkflowSuspense(node: ReactNode) {
+  return <Suspense fallback={null}>{node}</Suspense>;
+}
 
 /** Loose context bag from TeamsRoute. */
 export type ResearchWorkflowSurfaceRenderContext = {
@@ -123,7 +136,7 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
   }
 
   function renderResearchWorkflowModules() {
-    return (
+    return withWorkflowSuspense(
       <TeamResearchWorkflowStageModules
         lang={lang}
         visibility={{
@@ -241,7 +254,7 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
           onOpenLibrary: openSourceCollectionCandidatePanel,
           onOpenReview: openSourceCollectionScreeningPanel,
         }}
-      />
+      />,
     );
   }
 
@@ -249,7 +262,7 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
     if (!showWorkflowPanel) {
       return null;
     }
-    return (
+    return withWorkflowSuspense(
       <TeamResearchWorkflowPanelHost
         lang={lang}
         researchWorkflowTeamSelected={researchWorkflowTeamSelected}
@@ -266,7 +279,7 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
         }
       >
         {renderResearchWorkflowModules()}
-      </TeamResearchWorkflowPanelHost>
+      </TeamResearchWorkflowPanelHost>,
     );
   }
 
@@ -274,7 +287,7 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
     if (!showTeamCommunicationPanel) {
       return null;
     }
-    return (
+    return withWorkflowSuspense(
       <TeamCommunicationPanel
         lang={lang}
         selectedTeam={selectedTeam}
@@ -309,7 +322,7 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
         }
         revokeError={revokeTeamMessageMutation.error instanceof Error ? revokeTeamMessageMutation.error : null}
         onRevokeTeamMessage={(payload) => revokeTeamMessageMutation.mutate(payload)}
-      />
+      />,
     );
   }
 

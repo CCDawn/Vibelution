@@ -15,7 +15,9 @@ const routeAndSurfaceSource = `${routeSource}\n${surfaceSource}`;
 describe("TeamResearchWorkflowStageModules extraction contract", () => {
   it("TeamsRoute composes stage modules once via the extracted component", () => {
     expect(routeSource).toMatch(/createTeamsResearchSurfaces|createTeamsWorkbenchResearchSurfaces|buildTeamsWorkbenchResearchSurfacesFromBag/);
-    expect(surfaceSource).toContain('from "./TeamResearchWorkflowStageModules"');
+    // Secondary-lazy: surface loads stage modules via dynamic import, not static.
+    expect(surfaceSource).toContain('import("./TeamResearchWorkflowStageModules")');
+    expect(surfaceSource).not.toContain('from "./TeamResearchWorkflowStageModules"');
     expect(routeAndSurfaceSource).toContain("function renderResearchWorkflowModules(");
     expect(surfaceSource.match(/<TeamResearchWorkflowStageModules[\s\S]*?\/>/g)?.length).toBe(1);
     // Stage panel JSX no longer lives on the route.
@@ -34,6 +36,8 @@ describe("TeamResearchWorkflowStageModules extraction contract", () => {
     expect(modulesSource).toContain("TeamsSourceCollectionPanel");
     expect(modulesSource).toContain("TeamWorkflowCoordinationStatusPanel");
     expect(modulesSource).toContain("TeamWorkflowCandidatePreviewPanel");
+    // Panels mount through teamLazyPanels so SC/experiment packs stay path-scoped.
+    expect(modulesSource).toContain('from "./teamLazyPanels"');
     expect(modulesSource).toContain("资料搜索执行");
     expect(modulesSource).toContain("候选仓库还没有资料、笔记或机制候选");
   });

@@ -18,7 +18,8 @@ describe("TeamCommunicationPanel extraction contract", () => {
   it("TeamsRoute mounts the shared communication panel via one render helper used by both shells", () => {
     expect(routeSource).toMatch(/createTeamsResearchSurfaces|createTeamsWorkbenchResearchSurfaces|buildTeamsWorkbenchResearchSurfacesFromBag/);
     expect(routeAndSurfaceSource).toContain("function renderTeamCommunicationPanel(");
-    expect(surfaceSource).toContain('from "./TeamCommunicationPanel"');
+    expect(surfaceSource).toContain('import("./TeamCommunicationPanel")');
+    expect(surfaceSource).not.toContain('from "./TeamCommunicationPanel"');
     // Called from renderTeamsInspectorSharedPanels (used by board + canvas), not inlined twice.
     expect(routeSource.match(/\{renderTeamCommunicationPanel\(\)\}/g)?.length ?? 0).toBe(0);
     // Board/canvas shells both consume inspector shared panels (object prop or JSX call).

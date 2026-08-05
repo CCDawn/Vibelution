@@ -2,11 +2,11 @@
  * SC inject claim: active-stage workspace body ownership.
  * Keeps TeamsRoute as mutation/query orchestration; panel implementation stays here.
  * Extraction recovery bag is assembled via buildSourceCollectionExtractionRecoveryBag.
+ *
+ * Runtime panel comes from teamLazyPanels so the SC pack stays out of the eager TeamsRoute graph.
  */
-import {
-  TeamSourceCollectionActiveStageWorkspacePanel,
-  type TeamSourceCollectionActiveStageWorkspacePanelProps,
-} from "../TeamSourceCollectionActiveStageWorkspacePanel";
+import type { TeamSourceCollectionActiveStageWorkspacePanelProps } from "../TeamSourceCollectionActiveStageWorkspacePanel";
+import { TeamSourceCollectionActiveStageWorkspacePanel } from "./teamLazyPanels";
 import {
   buildSourceCollectionExtractionRecoveryBag,
   type SourceCollectionExtractionRecoveryBag,

@@ -1,10 +1,9 @@
 /**
  * SC inject claim: selected-source detail workspace ownership.
+ * Runtime panel is lazy-packed (teamLazyPanels).
  */
-import {
-  TeamSourceCollectionSelectedSourceWorkspacePanel,
-  type TeamSourceCollectionSelectedSourceWorkspacePanelProps,
-} from "../TeamSourceCollectionSelectedSourceWorkspacePanel";
+import type { TeamSourceCollectionSelectedSourceWorkspacePanelProps } from "../TeamSourceCollectionSelectedSourceWorkspacePanel";
+import { TeamSourceCollectionSelectedSourceWorkspacePanel } from "./teamLazyPanels";
 
 export type TeamSourceCollectionSelectedSourceInjectProps = TeamSourceCollectionSelectedSourceWorkspacePanelProps;
 

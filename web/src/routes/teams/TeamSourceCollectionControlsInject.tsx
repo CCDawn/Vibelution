@@ -1,11 +1,9 @@
 /**
  * SC inject claim: controls / side-rail workspace body ownership.
- * Keeps TeamsRoute as mutation/query orchestration; panel implementation stays here.
+ * Runtime panel is lazy-packed (teamLazyPanels).
  */
-import {
-  TeamSourceCollectionControlsWorkspacePanel,
-  type TeamSourceCollectionControlsWorkspacePanelProps,
-} from "../TeamSourceCollectionControlsWorkspacePanel";
+import type { TeamSourceCollectionControlsWorkspacePanelProps } from "../TeamSourceCollectionControlsWorkspacePanel";
+import { TeamSourceCollectionControlsWorkspacePanel } from "./teamLazyPanels";
 
 export type TeamSourceCollectionControlsInjectProps = TeamSourceCollectionControlsWorkspacePanelProps;
 

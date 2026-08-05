@@ -1,7 +1,7 @@
 /**
  * SC inject: stage agent cards for the controls rail.
  */
-import { TeamSourceCollectionStageAgentsPanel } from "../TeamSourceCollectionStageAgentsPanel";
+import { TeamSourceCollectionStageAgentsPanel } from "./teamLazyPanels";
 import {
   buildSourceCollectionStageAgentCards,
   type SourceCollectionStageAgentBindingLike,

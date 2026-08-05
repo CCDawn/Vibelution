@@ -3,7 +3,7 @@
  */
 import type { MouseEvent as ReactMouseEvent } from "react";
 
-import { TeamSourceCollectionPagination } from "../TeamSourceCollectionResultControls";
+import { TeamSourceCollectionPagination } from "./teamLazyPanels";
 import { SOURCE_COLLECTION_RESULT_PAGE_SIZE } from "./source-collection/presentationModel";
 import { resolveSourceCollectionPaginationView } from "./source-collection/injectModel";
 import type { SourceCollectionStageModuleId } from "./source-collection/stageProjection";
