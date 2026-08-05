@@ -17,6 +17,7 @@ import {
   sourceCollectionLoadingChrome,
 } from "./source-collection/actionChrome";
 import {
+  EMPTY_SOURCE_COLLECTION_DISPLAY_STATE,
   type SourceCollectionStepState,
 } from "./source-collection/runModel";
 import {
@@ -452,9 +453,13 @@ export function useSourceCollectionPresentationTail(
     sourceCollectionCollectionActionReadiness,
   } = actionHandlers;
 
-  const sourceCollectionConsoleState: SourceCollectionStepState = sourceCollectionDisplayState.consoleState;
-  const sourceCollectionConsoleStatusText = sourceCollectionDisplayState.statusText;
-  const sourceCollectionDecisionText = sourceCollectionDisplayState.decisionText;
+  // Guard: incomplete SC bag / partial mid must never crash the workbench shell.
+  const resolvedSourceCollectionDisplayState =
+    sourceCollectionDisplayState ?? EMPTY_SOURCE_COLLECTION_DISPLAY_STATE;
+
+  const sourceCollectionConsoleState: SourceCollectionStepState = resolvedSourceCollectionDisplayState.consoleState;
+  const sourceCollectionConsoleStatusText = resolvedSourceCollectionDisplayState.statusText;
+  const sourceCollectionDecisionText = resolvedSourceCollectionDisplayState.decisionText;
   const sourceCollectionStepStatusText = (state: SourceCollectionStepState) =>
     sourceCollectionStepStatusTextPure(input.lang, state);
   // F3: pipeline step states in presentationStepStates.
@@ -473,7 +478,7 @@ export function useSourceCollectionPresentationTail(
     memoryStepState: sourceCollectionMemoryStepState,
     extractionStepState: sourceCollectionExtractionStepState,
   } = buildSourceCollectionPipelineStepStates({
-    searchFallback: sourceCollectionDisplayState.searchStepState,
+    searchFallback: resolvedSourceCollectionDisplayState.searchStepState,
     collectionProjection: sourceCollectionCollectionProjection,
     screeningProjection: sourceCollectionScreeningProjection,
     candidateProjection: sourceCollectionCandidateProjection,
@@ -612,7 +617,7 @@ export function useSourceCollectionPresentationTail(
     canExecuteSourceCollectionSearch,
     sourceCollectionAcceptedBackgroundFailed,
     sourceCollectionOperationFailed,
-    sourceCollectionDisplayState,
+    sourceCollectionDisplayState: resolvedSourceCollectionDisplayState,
     ...downstreamMetrics,
     sourceCollectionSearchActionReadiness,
     sourceCollectionCandidateExtractionActionReadiness,
