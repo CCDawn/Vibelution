@@ -1,16 +1,16 @@
 /**
- * Experiment planning ledger (method panel, baseline/smoke/full-run, knowledge ingestion).
- * Wave 8J: extracted from TeamsRoute.tsx for domain componentization.
+ * Experiment planning workbench (stepped product surface).
+ * Wave 8J base + product IA: setup → review → freeze → run (one step at a time).
  */
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AlertTriangle, ArrowRight, CheckCircle2, Play, Save, Send } from "lucide-react";
 
 import type { ExperimentMethodId, Team } from "../api/types";
 import {
+  VButton,
   VMetricChip,
   VNativeButton,
   VNativeInput,
-  VNativeTextarea,
   VStatusChip,
   VStringSelect,
   type VStatusTone,
@@ -30,6 +30,13 @@ import {
   experimentDeclaredSmokeAdapterId,
   selectBoundedSmokeAdapter,
 } from "./teams/experimentLoopModel";
+import {
+  EXPERIMENT_WORKBENCH_STEPS,
+  isExperimentWorkbenchStepUnlocked,
+  resolveExperimentWorkbenchStep,
+  shortProtocolLabel,
+  type ExperimentWorkbenchStepId,
+} from "./teams/experimentWorkbenchStepModel";
 import { TeamExperimentHypothesisGovernancePanel } from "./TeamExperimentHypothesisGovernancePanel";
 import { TeamExperimentMethodPanel, type ExperimentPlanMethodRequest } from "./TeamExperimentMethodPanel";
 import experimentStyles from "./TeamsRoute.experiment.styles";
@@ -435,113 +442,170 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       && !knowledgeIngestion
       && !selectedTeamRequestExperimentKnowledgeIngestionPending,
     );
-    const summary = statusPayload?.summary;
+    const hasApprovedHypothesis = hypotheses.some((candidate: any) => candidate.approvedForExperiment);
+    const designFrozen = explicitDesignGate
+      ? explicitDesignGate.status === "frozen"
+      : designExecutionAllowed && Boolean(activePlan);
+    const stepInput = useMemo(() => ({
+      hasActivePlan: Boolean(activePlan),
+      hasApprovedHypothesis,
+      designFrozen: Boolean(designFrozen),
+      readyForBoundedSmoke: Boolean(activePlan?.readiness.readyForBoundedSmokeRun),
+    }), [activePlan, hasApprovedHypothesis, designFrozen]);
+    const autoStep = resolveExperimentWorkbenchStep(stepInput);
+    const [stepOverride, setStepOverride] = useState<ExperimentWorkbenchStepId | null>(null);
+    useEffect(() => {
+      setStepOverride(null);
+    }, [autoStep]);
+    const currentStep = stepOverride && isExperimentWorkbenchStepUnlocked(stepOverride, stepInput)
+      ? stepOverride
+      : autoStep;
+
+    const methodPanel = (
+      <TeamExperimentMethodPanel
+        lang={lang}
+        catalog={experimentMethodCatalogQuery.data}
+        activeContract={activeExperimentContract}
+        preferredExperimentMethod={
+          experimentMethodCatalogQuery.data?.methods.some(
+            (method: any) => method.methodId === searchParams.get("experimentMethod"),
+          )
+            ? searchParams.get("experimentMethod") as ExperimentMethodId
+            : ((preferredExperimentMethod as ExperimentMethodId | "") || undefined)
+        }
+        activePlanStatus={activePlan?.status ?? ""}
+        fallbackResearchQuestion={
+          activePlan?.goal
+          || activePlan?.topic
+          || statusPayload?.latestExperimentRound?.goal
+          || statusPayload?.latestExperimentRound?.topic
+          || ""
+        }
+        loading={experimentMethodCatalogQuery.isFetching}
+        submitting={selectedTeamCreateExperimentPlanPending}
+        canCreatePlan={canDraftPlan}
+        onSubmit={createExperimentPlanFromWorkspace}
+        hypotheses={hypotheses}
+        completingCandidateId={selectedTeamCompleteScientificHypothesisCandidateId}
+        onCompleteHypothesis={(candidateId, methodRequest) => {
+          if (activePlan) {
+            completeScientificHypothesisFromWorkspace(
+              activePlan,
+              candidateId,
+              methodRequest,
+            );
+          }
+        }}
+        errorMessage={
+          selectedTeamCompleteScientificHypothesisError?.message
+          || (
+            experimentMethodCatalogQuery.error instanceof Error
+              ? experimentMethodCatalogQuery.error.message
+              : selectedTeamCreateExperimentPlanError?.message
+          )
+        }
+      />
+    );
+
+    const reviewPanel = (
+      <TeamExperimentHypothesisGovernancePanel
+        lang={lang}
+        activePlan={activePlan}
+        hypotheses={hypotheses}
+        materializing={selectedTeamMaterializeEngineeringProxyPending}
+        reviewingCandidateId={selectedTeamReviewExperimentHypothesisCandidateId}
+        revisingCandidateId={selectedTeamCreateExperimentHypothesisRevisionCandidateId}
+        materializeError={selectedTeamMaterializeEngineeringProxyError}
+        reviewError={selectedTeamReviewExperimentHypothesisError}
+        revisionError={selectedTeamCreateExperimentHypothesisRevisionError}
+        onMaterialize={materializeEngineeringProxyHypothesisFromWorkspace}
+        onReview={reviewExperimentHypothesisFromWorkspace}
+        onCreateRevision={createExperimentHypothesisRevisionFromWorkspace}
+      />
+    );
+
     return (
-      <section className={styles.experimentLedgerPanel} aria-label={lang === "zh" ? "实验计划账本" : "Experiment planning ledger"}>
-        <div className={styles.experimentLedgerHeader}>
-          <div>
-            <strong>{lang === "zh" ? "实验计划账本" : "Experiment ledger"}</strong>
-            <span>
-              {statusPayload?.readiness.reason
-                || (experimentPlanningStatusQuery.isFetching
-                  ? (lang === "zh" ? "读取实验账本中" : "Loading experiment ledger")
-                  : (lang === "zh" ? "等待实验阶段状态" : "Waiting for experiment status"))}
-            </span>
-          </div>
-          <span>{activePlan ? `${lang === "zh" ? "当前计划" : "Active plan"} · ${activePlan.planId}` : (lang === "zh" ? "尚未保存实验配置" : "Experiment setup not saved")}</span>
-        </div>
-        <div className={styles.experimentLedgerStats}>
-          <span>
-            {lang === "zh" ? "计划" : "Plans"}
-            <strong>{summary?.planCount ?? 0}</strong>
-          </span>
-          <span>
-            {lang === "zh" ? "候选假设" : "Hypotheses"}
-            <strong>{summary?.hypothesisCandidateCount ?? 0}</strong>
-          </span>
-          <span>
-            {lang === "zh" ? "可规划" : "Ready"}
-            <strong>{summary?.readyHypothesisCandidateCount ?? 0}</strong>
-          </span>
-          <span>
-            {lang === "zh" ? "缺口" : "Gaps"}
-            <strong>{summary?.gapCount ?? 0}</strong>
-          </span>
-        </div>
-        <TeamExperimentMethodPanel
-          lang={lang}
-          catalog={experimentMethodCatalogQuery.data}
-          activeContract={activeExperimentContract}
-          preferredExperimentMethod={
-            experimentMethodCatalogQuery.data?.methods.some(
-              (method: any) => method.methodId === searchParams.get("experimentMethod"),
+      <section
+        className={styles.experimentLedgerPanel}
+        aria-label={lang === "zh" ? "实验规划工作台" : "Experiment planning workbench"}
+        data-testid="experiment-planning-workbench"
+        data-workbench-step={currentStep}
+      >
+        <nav className={styles.experimentWorkbenchSteps} aria-label={lang === "zh" ? "实验规划步骤" : "Planning steps"}>
+          {EXPERIMENT_WORKBENCH_STEPS.map((step, index) => {
+            const unlocked = isExperimentWorkbenchStepUnlocked(step.id, stepInput);
+            const active = currentStep === step.id;
+            return (
+              <VButton
+                key={step.id}
+                type="button"
+                density="compact"
+                variant={active ? "primary" : "secondary"}
+                className={styles.experimentWorkbenchStep}
+                isDisabled={!unlocked}
+                data-testid={`experiment-workbench-step-${step.id}`}
+                data-active={active ? "true" : "false"}
+                data-unlocked={unlocked ? "true" : "false"}
+                onPress={() => {
+                  if (!unlocked) return;
+                  setStepOverride(step.id);
+                }}
+              >
+                {`${index + 1}. ${lang === "zh" ? step.zh : step.en}`}
+              </VButton>
+            );
+          })}
+        </nav>
+
+        <div className={styles.experimentWorkbenchStepBody}>
+          {currentStep === "setup" ? methodPanel : null}
+          {currentStep === "review" ? (
+            activePlan ? reviewPanel : (
+              <div className={styles.experimentLedgerEmpty}>
+                <AlertTriangle size={14} />
+                <span>{lang === "zh" ? "请先在「配置实验」保存计划。" : "Save a plan in Setup first."}</span>
+              </div>
             )
-              ? searchParams.get("experimentMethod") as ExperimentMethodId
-              : ((preferredExperimentMethod as ExperimentMethodId | "") || undefined)
-          }
-          activePlanStatus={activePlan?.status ?? ""}
-          fallbackResearchQuestion={
-            activePlan?.goal
-            || activePlan?.topic
-            || statusPayload?.latestExperimentRound?.goal
-            || statusPayload?.latestExperimentRound?.topic
-            || ""
-          }
-          loading={experimentMethodCatalogQuery.isFetching}
-          submitting={selectedTeamCreateExperimentPlanPending}
-          canCreatePlan={canDraftPlan}
-          onSubmit={createExperimentPlanFromWorkspace}
-          hypotheses={hypotheses}
-          completingCandidateId={selectedTeamCompleteScientificHypothesisCandidateId}
-          onCompleteHypothesis={(candidateId, methodRequest) => {
-            if (activePlan) {
-              completeScientificHypothesisFromWorkspace(
-                activePlan,
-                candidateId,
-                methodRequest,
-              );
-            }
-          }}
-          errorMessage={
-            selectedTeamCompleteScientificHypothesisError?.message
-            || (
-              experimentMethodCatalogQuery.error instanceof Error
-                ? experimentMethodCatalogQuery.error.message
-                : selectedTeamCreateExperimentPlanError?.message
-            )
-          }
-        />
-        <TeamExperimentHypothesisGovernancePanel
-          lang={lang}
-          activePlan={activePlan}
-          hypotheses={hypotheses}
-          materializing={selectedTeamMaterializeEngineeringProxyPending}
-          reviewingCandidateId={selectedTeamReviewExperimentHypothesisCandidateId}
-          revisingCandidateId={selectedTeamCreateExperimentHypothesisRevisionCandidateId}
-          materializeError={selectedTeamMaterializeEngineeringProxyError}
-          reviewError={selectedTeamReviewExperimentHypothesisError}
-          revisionError={selectedTeamCreateExperimentHypothesisRevisionError}
-          onMaterialize={materializeEngineeringProxyHypothesisFromWorkspace}
-          onReview={reviewExperimentHypothesisFromWorkspace}
-          onCreateRevision={createExperimentHypothesisRevisionFromWorkspace}
-        />
-        {activePlan ? (
-          <>
+          ) : null}
+          {currentStep === "protocol" && activePlan ? (
+            <>
             <div className={styles.experimentPlanGrid}>
               <article className={styles.experimentPlanSummary}>
                 <div>
-                  <span>{lang === "zh" ? "当前草稿" : "Active draft"}</span>
+                  <span>{lang === "zh" ? "当前计划" : "Active plan"}</span>
                   <strong>{activePlan.title}</strong>
                 </div>
-                <p>{activePlan.goal || activePlan.topic || (lang === "zh" ? "实验目标待补齐" : "Experiment goal pending")}</p>
+                <p className="line-clamp-2" title={activePlan.goal || activePlan.topic || undefined}>
+                  {activePlan.goal || activePlan.topic || (lang === "zh" ? "实验目标待补齐" : "Experiment goal pending")}
+                </p>
                 <div className={styles.experimentPlanFields}>
-                  {activeExperimentContract ? <span>{lang === "zh" ? "科研闭环" : "Research loop"} · {(lang === "zh" ? activeResearchModeDescriptor?.labelZh : activeResearchModeDescriptor?.labelEn) || activeExperimentContract.researchMode}</span> : null}
-                  {activeExperimentContract ? <span>{lang === "zh" ? "实验目的" : "Purpose"} · {(lang === "zh" ? activePurposeDescriptor?.labelZh : activePurposeDescriptor?.labelEn) || activeExperimentContract.purpose.primaryPurpose}</span> : null}
-                  {activeExperimentContract ? <span>{lang === "zh" ? "实验方法" : "Method"} · {(lang === "zh" ? activeMethodDescriptor?.labelZh : activeMethodDescriptor?.labelEn) || activeExperimentContract.experimentMethod}</span> : null}
-                  {activePlan.experimentPlan.dataset ? <span title={activePlan.experimentPlan.dataset}>{lang === "zh" ? "数据" : "Data"} · {activePlan.experimentPlan.dataset}</span> : null}
-                  {activePlan.experimentPlan.metric ? <span title={activePlan.experimentPlan.metric}>{lang === "zh" ? "指标" : "Metric"} · {activePlan.experimentPlan.metric}</span> : null}
-                  {activePlan.experimentPlan.baseline ? <span title={activePlan.experimentPlan.baseline}>Baseline · {activePlan.experimentPlan.baseline}</span> : null}
-                  {activePlan.experimentPlan.smokePlan ? <span title={activePlan.experimentPlan.smokePlan}>Smoke · {activePlan.experimentPlan.smokePlan}</span> : null}
+                  {activeExperimentContract ? (
+                    <span className={styles.experimentProtocolChip}>
+                      {(lang === "zh" ? activePurposeDescriptor?.labelZh : activePurposeDescriptor?.labelEn)
+                        || activeExperimentContract.purpose.primaryPurpose}
+                    </span>
+                  ) : null}
+                  {activeExperimentContract ? (
+                    <span className={styles.experimentProtocolChip}>
+                      {(lang === "zh" ? activeMethodDescriptor?.labelZh : activeMethodDescriptor?.labelEn)
+                        || activeExperimentContract.experimentMethod}
+                    </span>
+                  ) : null}
+                  {activePlan.experimentPlan.dataset ? (
+                    <span className={styles.experimentProtocolChip} title={activePlan.experimentPlan.dataset}>
+                      {lang === "zh" ? "数据" : "Data"} · {shortProtocolLabel(activePlan.experimentPlan.dataset)}
+                    </span>
+                  ) : null}
+                  {activePlan.experimentPlan.metric ? (
+                    <span className={styles.experimentProtocolChip} title={activePlan.experimentPlan.metric}>
+                      {lang === "zh" ? "指标" : "Metric"} · {shortProtocolLabel(activePlan.experimentPlan.metric, 28)}
+                    </span>
+                  ) : null}
+                  {activePlan.experimentPlan.baseline ? (
+                    <span className={styles.experimentProtocolChip} title={activePlan.experimentPlan.baseline}>
+                      Baseline · {shortProtocolLabel(activePlan.experimentPlan.baseline)}
+                    </span>
+                  ) : null}
                 </div>
               </article>
               <div className={styles.experimentChecklist}>
@@ -631,20 +695,31 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                 </VNativeButton>
               </div>
             )}
+            </>
+          ) : null}
+          {currentStep === "protocol" && !activePlan ? (
+            <div className={styles.experimentLedgerEmpty}>
+              <AlertTriangle size={14} />
+              <span>{lang === "zh" ? "请先保存并批准假设。" : "Save a plan and approve a hypothesis first."}</span>
+            </div>
+          ) : null}
+
+          {currentStep === "execute" && activePlan ? (
+            <>
             <div className={styles.experimentBaselineArtifact}>
-              <span>{lang === "zh" ? "受控 Smoke" : "Bounded smoke"}</span>
+              <span>{lang === "zh" ? "受控试跑" : "Bounded smoke"}</span>
               <strong title={activeSmokeRun?.artifactHash || activeSmokeAdapter?.adapterId || ""}>
                 {activeSmokeRun
-                  ? `${activeSmokeRun.adapter} · ${activeSmokeRun.status}`
+                  ? `${shortProtocolLabel(String(activeSmokeRun.adapter || ""), 28)} · ${activeSmokeRun.status}`
                   : !designExecutionAllowed
                     ? (lang === "zh" ? "设计尚未冻结" : "Design is not frozen")
-                    : activeSmokeAdapter?.adapterId
+                    : shortProtocolLabel(activeSmokeAdapter?.adapterId || "", 36)
                       || (lang === "zh" ? "没有可用的离线执行器" : "No offline Adapter available")}
               </strong>
-              <small>
+              <small title={activeSmokeRun ? `${activeSmokeRun.decisionHint} · seed ${activeSmokeRun.seed}` : smokeGateDetail}>
                 {activeSmokeRun
-                  ? `${activeSmokeRun.decisionHint} · seed ${activeSmokeRun.seed}`
-                  : smokeGateDetail}
+                  ? `seed ${activeSmokeRun.seed}`
+                  : (lang === "zh" ? "冻结后可试跑" : "Available after freeze")}
               </small>
               <VNativeButton
                 type="button"
@@ -1045,33 +1120,43 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                 ) : null}
               </>
             ) : null}
-          </>
-        ) : (
-          <div className={styles.experimentLedgerEmpty}>
-            <AlertTriangle size={14} />
-            <span>{lang === "zh" ? "还没有实验计划草稿，先启动实验阶段并生成计划。" : "No experiment plan draft yet. Start the stage and draft a plan."}</span>
-          </div>
-        )}
-        {renderResearchLoopPanel(activePlan, "experiment")}
-        <div className={styles.experimentEvidenceGrid}>
-          <section>
-            <strong>{lang === "zh" ? "阻塞项" : "Blockers"}</strong>
-            <div className={styles.experimentGapList}>
-              {(statusPayload?.gaps ?? []).map((gap: any) => (
-                <span key={gap.code} title={gap.message}>
-                  <AlertTriangle size={12} />
-                  {gap.message}
-                </span>
-              ))}
-              {statusPayload && statusPayload.gaps.length === 0 ? (
-                <span>
-                  <CheckCircle2 size={12} />
-                  {lang === "zh" ? "计划审查入口已就绪" : "Plan review is ready"}
-                </span>
-              ) : null}
+            <details className="min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] p-2">
+              <summary className="cursor-pointer [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)]">
+                {lang === "zh" ? "更多（循环与阻塞）" : "More (loop & blockers)"}
+              </summary>
+              <div className="mt-2 grid gap-2">
+                {renderResearchLoopPanel(activePlan, "experiment")}
+                <div className={styles.experimentEvidenceGrid}>
+                  <section>
+                    <strong>{lang === "zh" ? "阻塞项" : "Blockers"}</strong>
+                    <div className={styles.experimentGapList}>
+                      {(statusPayload?.gaps ?? []).map((gap: any) => (
+                        <span key={gap.code} title={gap.message}>
+                          <AlertTriangle size={12} />
+                          {gap.message}
+                        </span>
+                      ))}
+                      {statusPayload && statusPayload.gaps.length === 0 ? (
+                        <span>
+                          <CheckCircle2 size={12} />
+                          {lang === "zh" ? "无阻塞" : "No blockers"}
+                        </span>
+                      ) : null}
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </details>
+            </>
+          ) : null}
+          {currentStep === "execute" && !activePlan ? (
+            <div className={styles.experimentLedgerEmpty}>
+              <AlertTriangle size={14} />
+              <span>{lang === "zh" ? "完成前三步后再试跑。" : "Finish the earlier steps first."}</span>
             </div>
-          </section>
+          ) : null}
         </div>
+
         {selectedTeamCreateExperimentPlanError ? <div className={styles.workflowError}>{selectedTeamCreateExperimentPlanError.message}</div> : null}
         {selectedTeamFreezeExperimentDesignError ? <div className={styles.workflowError}>{selectedTeamFreezeExperimentDesignError.message}</div> : null}
         {selectedTeamRegisterExperimentBaselineArtifactError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentBaselineArtifactError.message}</div> : null}

@@ -32,9 +32,17 @@ const styles = {
     "experimentLedgerEmpty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   experimentLedgerHeader:
     "experimentLedgerHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  experimentLedgerPanel: `experimentLedgerPanel min-w-0 ${vuiFlatPanelClass} p-2`,
+  experimentLedgerPanel: `experimentLedgerPanel min-w-0 grid content-start gap-3 ${vuiFlatPanelClass} p-3`,
   experimentLedgerStats:
     "experimentLedgerStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  experimentWorkbenchSteps:
+    "experimentWorkbenchSteps min-w-0 flex flex-wrap items-center gap-1.5",
+  experimentWorkbenchStep:
+    "experimentWorkbenchStep !min-h-8 !px-2.5 ![font-size:var(--vui-font-xs)]",
+  experimentWorkbenchStepBody:
+    "experimentWorkbenchStepBody min-w-0 grid content-start gap-3",
+  experimentProtocolChip:
+    "experimentProtocolChip inline-flex max-w-full items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 py-0.5 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&>span]:min-w-0 [&>span]:truncate",
   experimentPlanFields:
     "experimentPlanFields min-w-0",
   experimentPlanGrid:

@@ -25,6 +25,52 @@ type MethodFieldDefinition = {
   allowEmpty?: boolean;
 };
 
+/** Productize raw adapter resolver errors into actionable Chinese/English copy. */
+export function productizeAdapterUnavailableReason(
+  reason: string | undefined,
+  lang: "zh" | "en",
+): { title: string; body: string; capabilities: string[] } {
+  const raw = String(reason || "").trim();
+  const capsMatch = raw.match(/capabilities?:\s*([^.]+)/i);
+  const capabilities = capsMatch
+    ? capsMatch[1].split(/[,\s]+/).map((item) => item.trim()).filter(Boolean)
+    : [];
+  if (/not required/i.test(raw)) {
+    return {
+      title: lang === "zh" ? "当前模式不需要执行器" : "No adapter required for this mode",
+      body: lang === "zh"
+        ? "可以只做规划与假设；切换到需要执行的闭环模式后再绑定执行器。"
+        : "Planning-only mode. Switch to an execution research mode before binding an adapter.",
+      capabilities,
+    };
+  }
+  if (capabilities.length) {
+    return {
+      title: lang === "zh" ? "执行器尚未就绪" : "Execution adapter not ready",
+      body: lang === "zh"
+        ? `当前没有满足能力 ${capabilities.join("、")} 的执行器。可先保存计划，或在上方选择/配置可用执行器后再跑真实验。`
+        : `No adapter provides ${capabilities.join(", ")}. Save the plan first, or pick a capable adapter above before a real run.`,
+      capabilities,
+    };
+  }
+  if (/no available adapter|not registered|unresolved/i.test(raw) || !raw) {
+    return {
+      title: lang === "zh" ? "执行器尚未就绪" : "Execution adapter not ready",
+      body: lang === "zh"
+        ? "尚未登记可用执行器。可以先完善并保存实验计划；需要真跑时再配置满足 full_run / prepare 的执行器。"
+        : "No available adapter is registered. You can still save the plan; configure an adapter before a real run.",
+      capabilities,
+    };
+  }
+  return {
+    title: lang === "zh" ? "执行器尚未就绪" : "Execution adapter not ready",
+    body: lang === "zh"
+      ? `${raw}。可以先保存计划，暂不开始真实执行。`
+      : `${raw}. You can save the plan without starting a real run.`,
+    capabilities,
+  };
+}
+
 const METHOD_FIELD_DEFINITIONS: Record<string, MethodFieldDefinition> = {
   dataset: { labelZh: "数据集", labelEn: "Dataset", kind: "textarea", placeholderZh: "数据版本、split、checksum 与来源", placeholderEn: "Version, split, checksum, and source", wide: true },
   model: { labelZh: "模型或候选", labelEn: "Model or candidate", kind: "textarea", placeholderZh: "模型结构、候选机制和容量约束", placeholderEn: "Architecture, candidate mechanism, and capacity", wide: true },
@@ -398,8 +444,7 @@ export function TeamExperimentMethodPanel({
     <section className={styles.panel} data-experiment-method-panel="true" data-selected-method={draft.experimentMethod} aria-label={isZh ? "实验方式配置" : "Experiment method setup"}>
       <div className={styles.header}>
         <div>
-          <strong>{isZh ? "实验方式" : "Experiment method"}</strong>
-          <span>{isZh ? "团队保持不变；切换方法只替换计划字段和执行能力。" : "The team stays fixed; switching methods only changes plan fields and execution capability."}</span>
+          <strong>{isZh ? "实验配置" : "Experiment setup"}</strong>
         </div>
         <span className={styles.sourceBadge}>{selectionSource}</span>
       </div>
@@ -486,45 +531,78 @@ export function TeamExperimentMethodPanel({
         </div>
       </div>
 
-      <div className={[styles.adapterStatus, (selectedAdapter || adapterSelection?.resolvedAdapterId) ? styles.adapterStatusReady : styles.adapterStatusBlocked].join(" ")} aria-live="polite">
-        {(selectedAdapter || adapterSelection?.resolvedAdapterId) ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
-        <div>
-          <strong>{selectedAdapter?.adapterId || adapterSelection?.resolvedAdapterId || (isZh ? "执行器尚未就绪" : "Execution Adapter unavailable")}</strong>
-          <span>{selectedAdapter ? `${selectedAdapter.adapterVersion} · ${selectedAdapter.requiresExplicitSelection ? (isZh ? "用户显式选择；仍需通过环境预检" : "user-selected; environment preflight still required") : (isZh ? "用户选择" : "user-selected")}` : adapterSelection?.resolvedAdapterId ? `${adapterSelection.resolvedAdapterVersion} · ${adapterSelection.selectionSource}` : adapterSelection?.unavailableReason || (isZh ? "可以保存计划，但不能开始真实执行。" : "The plan can be saved, but a real run cannot start.")}</span>
-        </div>
-      </div>
+      {(() => {
+        const adapterReady = Boolean(selectedAdapter || adapterSelection?.resolvedAdapterId);
+        const blockedCopy = adapterReady
+          ? null
+          : productizeAdapterUnavailableReason(adapterSelection?.unavailableReason, lang);
+        return (
+          <div
+            className={[styles.adapterStatus, adapterReady ? styles.adapterStatusReady : styles.adapterStatusBlocked].join(" ")}
+            aria-live="polite"
+            data-testid="experiment-adapter-status"
+            data-adapter-ready={adapterReady ? "true" : "false"}
+          >
+            {adapterReady ? <CheckCircle2 size={14} aria-hidden /> : <AlertTriangle size={14} aria-hidden />}
+            <div>
+              <strong>
+                {selectedAdapter?.adapterId
+                  || adapterSelection?.resolvedAdapterId
+                  || blockedCopy?.title
+                  || (isZh ? "执行器尚未就绪" : "Execution adapter not ready")}
+              </strong>
+              <span title={blockedCopy?.body || undefined}>
+                {selectedAdapter
+                  ? selectedAdapter.adapterVersion
+                  : adapterSelection?.resolvedAdapterId
+                    ? adapterSelection.resolvedAdapterVersion
+                    : (isZh ? "可先保存计划" : "Save plan first")}
+              </span>
+              {!adapterReady && blockedCopy?.capabilities.length ? (
+                <span className={styles.adapterCapabilityChips} data-testid="experiment-adapter-missing-caps">
+                  {blockedCopy.capabilities.map((cap) => (
+                    <em key={cap}>{cap}</em>
+                  ))}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className={styles.form}>
-        <label className={styles.fieldWide}>
+        <label className={styles.field}>
           <span>{isZh ? "待研究问题" : "Research question"}</span>
           <VNativeTextarea value={draft.researchQuestion} onChange={(event) => setDraft((current) => ({ ...current, researchQuestion: event.target.value }))} disabled={locked} rows={2} />
         </label>
-        <label className={styles.fieldWide}>
+        <label className={styles.field}>
           <span>{isZh ? "本轮目标" : "Objective"}</span>
           <VNativeTextarea value={draft.objective} onChange={(event) => setDraft((current) => ({ ...current, objective: event.target.value }))} disabled={locked} rows={2} />
         </label>
-        <label className={styles.field}>
-          <span>{isZh ? "主指标" : "Primary metric"}</span>
-          <VNativeInput value={draft.primaryMetric} onChange={(event) => setDraft((current) => ({ ...current, primaryMetric: event.target.value }))} disabled={locked} />
-        </label>
-        <label className={styles.field}>
-          <span>{isZh ? "指标方向" : "Metric direction"}</span>
-          <VStringSelect
-            ariaLabel={isZh ? "指标方向" : "Metric direction"}
-            value={draft.metricDirection}
-            isDisabled={locked}
-            onValueChange={(metricDirection) => setDraft((current) => ({
-              ...current,
-              metricDirection: metricDirection as ExperimentMethodFormDraft["metricDirection"],
-            }))}
-            options={[
-              { value: "maximize", label: isZh ? "越高越好" : "Maximize" },
-              { value: "minimize", label: isZh ? "越低越好" : "Minimize" },
-              { value: "target", label: isZh ? "接近目标" : "Target" },
-              { value: "descriptive", label: isZh ? "描述性指标" : "Descriptive" },
-            ]}
-          />
-        </label>
+        <div className={styles.formPair}>
+          <label className={styles.field}>
+            <span>{isZh ? "主指标" : "Primary metric"}</span>
+            <VNativeInput value={draft.primaryMetric} onChange={(event) => setDraft((current) => ({ ...current, primaryMetric: event.target.value }))} disabled={locked} />
+          </label>
+          <label className={styles.field}>
+            <span>{isZh ? "指标方向" : "Metric direction"}</span>
+            <VStringSelect
+              ariaLabel={isZh ? "指标方向" : "Metric direction"}
+              value={draft.metricDirection}
+              isDisabled={locked}
+              onValueChange={(metricDirection) => setDraft((current) => ({
+                ...current,
+                metricDirection: metricDirection as ExperimentMethodFormDraft["metricDirection"],
+              }))}
+              options={[
+                { value: "maximize", label: isZh ? "越高越好" : "Maximize" },
+                { value: "minimize", label: isZh ? "越低越好" : "Minimize" },
+                { value: "target", label: isZh ? "接近目标" : "Target" },
+                { value: "descriptive", label: isZh ? "描述性指标" : "Descriptive" },
+              ]}
+            />
+          </label>
+        </div>
         {selectedMethod?.requiredConfigFields.map((field) => (
           <MethodField key={field} field={field} value={draft.methodConfigs[draft.experimentMethod][field] ?? ""} lang={lang} disabled={locked} onChange={(value) => updateConfig(field, value)} />
         ))}
