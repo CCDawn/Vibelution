@@ -79,6 +79,7 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
+import { useStableBeforeUnload } from "./useStableBeforeUnload";
 import { VButton } from "../components/vui/primitives/VButton";
 import { VDropdownMenu } from "../components/vui/primitives/VDropdownMenu";
 import { VIconButton } from "../components/vui/primitives/VIconButton";
@@ -1576,8 +1577,8 @@ export function AppShell() {
     window.location.reload();
   }, [emitBrowserTelemetry]);
 
-  // Stable beforeunload: never re-bind when polled state changes, or Edge flashes
-  // "重新加载应用?" and dismisses it before the user can click (listener torn down mid-dialog).
+  // Stable beforeunload via useStableBeforeUnload (ref + no polled deps).
+  // Re-binding on status poll makes Edge flash "重新加载应用?" then dismiss it.
   const projectCloseGuardRef = useRef({
     emitBrowserTelemetry,
     frontendRefreshRequested,
@@ -1595,46 +1596,37 @@ export function AppShell() {
     workbenchCloseGuardMessage,
   };
 
-  useEffect(() => {
-    if (isElectronDesktopShell()) {
+  useStableBeforeUnload((event) => {
+    // Intentional refresh / chunk recovery — skip prompt (sync one-shot flag).
+    if (consumeNextWorkbenchWindowUnloadAllowance()) {
       return;
     }
-
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      // Intentional refresh / chunk recovery — skip prompt (sync one-shot flag).
-      if (consumeNextWorkbenchWindowUnloadAllowance()) {
-        return;
-      }
-      if (hasRecentControlledProjectLifecycleOperation()) {
-        return;
-      }
-      const guard = projectCloseGuardRef.current;
-      const closeBlocked = shouldBlockWorkbenchWindowClose({
-        controlledLifecycleOperationInFlight: hasRecentControlledProjectLifecycleOperation(),
-        frontendRefreshRequested: guard.frontendRefreshRequested,
-        restartRequested: guard.restartRequested,
-        runtimeControllerState: guard.runtimeControllerState,
-        shutdownRequested: guard.shutdownRequested,
-      });
-      if (!shouldArmBrowserProjectCloseGuard({
-        closeBlocked,
-        electronDesktopShell: false,
-      })) {
-        return;
-      }
-      guard.emitBrowserTelemetry(
-        buildProjectWindowCloseBlockedTelemetry({
-          surface: "workbench",
-          runtimeControllerState: guard.runtimeControllerState,
-        }),
-        { preferBeacon: true },
-      );
-      applyBeforeUnloadProjectCloseGuard(event, guard.workbenchCloseGuardMessage);
+    if (hasRecentControlledProjectLifecycleOperation()) {
+      return;
     }
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
+    const guard = projectCloseGuardRef.current;
+    const closeBlocked = shouldBlockWorkbenchWindowClose({
+      controlledLifecycleOperationInFlight: hasRecentControlledProjectLifecycleOperation(),
+      frontendRefreshRequested: guard.frontendRefreshRequested,
+      restartRequested: guard.restartRequested,
+      runtimeControllerState: guard.runtimeControllerState,
+      shutdownRequested: guard.shutdownRequested,
+    });
+    if (!shouldArmBrowserProjectCloseGuard({
+      closeBlocked,
+      electronDesktopShell: false,
+    })) {
+      return;
+    }
+    guard.emitBrowserTelemetry(
+      buildProjectWindowCloseBlockedTelemetry({
+        surface: "workbench",
+        runtimeControllerState: guard.runtimeControllerState,
+      }),
+      { preferBeacon: true },
+    );
+    applyBeforeUnloadProjectCloseGuard(event, guard.workbenchCloseGuardMessage);
+  });
 
   const toggleTheme = useCallback(() => {
     setTheme((current) => {

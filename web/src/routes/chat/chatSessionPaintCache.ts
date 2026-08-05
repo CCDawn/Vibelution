@@ -12,10 +12,13 @@
  */
 
 import type { ConversationMessage, SessionDetail } from "../../api/types";
+import { forgetSessionTimelineScroll } from "../../components/conversation/conversationSessionScrollMemory";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
 
 const MAX_LAST_GOOD_SESSIONS = 12;
 const lastGoodBySessionId = new Map<string, SessionDetail>();
+/** Active-first keep-alive ring for recent session ids (switch resume). */
+let keepAliveSessionIds: string[] = [];
 
 function messageCount(detail: SessionDetail | null | undefined) {
   return Array.isArray(detail?.messages) ? detail.messages.length : 0;
@@ -127,6 +130,9 @@ export function forgetSessionDetailPaint(sessionId: string | null | undefined) {
     return;
   }
   lastGoodBySessionId.delete(normalized);
+  keepAliveSessionIds = keepAliveSessionIds.filter((id) => id !== normalized);
+  // C5/C6: paint + scroll memory share session lifetime.
+  forgetSessionTimelineScroll(normalized);
 }
 
 /**
@@ -197,6 +203,7 @@ export function shouldShowStickyTranscriptPending(options: {
 /** Test helper — clear module cache between cases. */
 export function clearSessionDetailPaintCacheForTests() {
   lastGoodBySessionId.clear();
+  keepAliveSessionIds = [];
 }
 
 /** Codex-style keep-alive window: active first, then recent previous ids. */
@@ -211,4 +218,21 @@ export function nextSessionKeepAliveIds(options: {
     return options.previousIds.slice(0, limit);
   }
   return [activeSessionId, ...options.previousIds.filter((id) => id !== activeSessionId)].slice(0, limit);
+}
+
+/**
+ * Record the active session into the keep-alive ring so sticky paint for the
+ * previous thread remains warm while the user thrash-switches tabs.
+ */
+export function touchSessionKeepAlive(sessionId: string | null | undefined, limit = 3): string[] {
+  keepAliveSessionIds = nextSessionKeepAliveIds({
+    activeSessionId: sessionId,
+    previousIds: keepAliveSessionIds,
+    limit,
+  });
+  return keepAliveSessionIds.slice();
+}
+
+export function listSessionKeepAliveIds(): string[] {
+  return keepAliveSessionIds.slice();
 }

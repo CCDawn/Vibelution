@@ -676,6 +676,11 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("buildProjectWindowCloseBlockedTelemetry");
     expect(routeSource).toContain("markControlledProjectLifecycleOperation(operation)");
     expect(routeSource).toContain("clearControlledProjectLifecycleOperation()");
-    expect(routeSource).toContain('window.addEventListener("beforeunload", handleBeforeUnload)');
+    expect(routeSource).toContain("useStableBeforeUnload");
+    expect(routeSource).toContain("launcherCloseGuardRef");
+    // Must not re-bind beforeunload when status / armed flags poll-change.
+    expect(routeSource).not.toMatch(
+      /addEventListener\("beforeunload"[\s\S]*?\}, \[launcherCloseGuardArmed/,
+    );
   });
 });

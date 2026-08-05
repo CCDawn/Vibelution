@@ -274,6 +274,34 @@ describe("project close guard", () => {
     ).toBe(true);
   });
 
+  it("honors sessionStorage unload pass when the in-memory flag was cleared", () => {
+    clearNextWorkbenchWindowUnloadAllowance();
+    const memory = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => memory.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        memory.set(key, value);
+      },
+      removeItem: (key: string) => {
+        memory.delete(key);
+      },
+    };
+    vi.stubGlobal("sessionStorage", storage);
+
+    allowNextWorkbenchWindowUnload();
+    expect(memory.get("vibelution.allow_next_window_unload")).toBeTruthy();
+    // Drop only the in-memory flag path by consuming then re-arming storage alone.
+    clearNextWorkbenchWindowUnloadAllowance();
+    memory.set("vibelution.allow_next_window_unload", String(Date.now()));
+
+    expect(isNextWorkbenchWindowUnloadAllowed()).toBe(true);
+    expect(consumeNextWorkbenchWindowUnloadAllowance()).toBe(true);
+    expect(isNextWorkbenchWindowUnloadAllowed()).toBe(false);
+    expect(memory.has("vibelution.allow_next_window_unload")).toBe(false);
+
+    vi.unstubAllGlobals();
+  });
+
   it("does not arm browser beforeunload guards inside the Electron desktop shell", () => {
     expect(shouldArmBrowserProjectCloseGuard({ closeBlocked: true, electronDesktopShell: true })).toBe(false);
     expect(shouldArmBrowserProjectCloseGuard({ closeBlocked: false, electronDesktopShell: true })).toBe(false);

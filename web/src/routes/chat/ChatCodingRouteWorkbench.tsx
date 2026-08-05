@@ -267,6 +267,7 @@ import {
   forgetSessionDetailPaint,
   resolveStickySessionDetailPaint,
   shouldShowStickyTranscriptPending,
+  touchSessionKeepAlive,
 } from "./chatSessionPaintCache";
 
 import {
@@ -1401,6 +1402,14 @@ export function ChatCodingRoute() {
       hydrateSession(activeSessionId, [], "agent");
     }
   }, [activeSessionId, hydrateSession, sessionDetailQuery.data?.id]);
+
+  // C5: keep recent session ids warm (sticky paint + scroll memory lifetime ring).
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    touchSessionKeepAlive(activeSessionId);
+  }, [activeSessionId]);
 
   // T1: warm ConversationView after session intent is known (does not mount).
   useEffect(() => {

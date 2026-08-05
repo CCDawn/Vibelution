@@ -2,12 +2,19 @@ import { describe, expect, it, beforeEach } from "vitest";
 
 import type { SessionDetail } from "../../api/types";
 import {
+  clearSessionTimelineScrollMemoryForTests,
+  peekSessionTimelineScroll,
+  rememberSessionTimelineScroll,
+} from "../../components/conversation/conversationSessionScrollMemory";
+import {
   clearSessionDetailPaintCacheForTests,
   forgetSessionDetailPaint,
+  listSessionKeepAliveIds,
   nextSessionKeepAliveIds,
   rememberSessionDetailPaint,
   resolveStickySessionDetailPaint,
   shouldShowStickyTranscriptPending,
+  touchSessionKeepAlive,
 } from "./chatSessionPaintCache";
 
 function detail(id: string, messages: number, provisional = false): SessionDetail {
@@ -34,6 +41,7 @@ function detail(id: string, messages: number, provisional = false): SessionDetai
 describe("chatSessionPaintCache", () => {
   beforeEach(() => {
     clearSessionDetailPaintCacheForTests();
+    clearSessionTimelineScrollMemoryForTests();
   });
 
   it("remembers non-provisional detail and reuses it while a provisional shell is active", () => {
@@ -89,6 +97,7 @@ describe("chatSessionPaintCache", () => {
 
   it("forgets deleted sessions and keeps an active-first keep-alive window", () => {
     rememberSessionDetailPaint(detail("s1", 1));
+    rememberSessionTimelineScroll("s1", { scrollTop: 88, followingLatest: false });
     forgetSessionDetailPaint("s1");
     expect(
       resolveStickySessionDetailPaint({
@@ -96,6 +105,7 @@ describe("chatSessionPaintCache", () => {
         detail: detail("s1", 0, true),
       })?.provisionalTranscript,
     ).toBe(true);
+    expect(peekSessionTimelineScroll("s1")).toBeUndefined();
     expect(
       nextSessionKeepAliveIds({
         activeSessionId: "b",
@@ -103,5 +113,15 @@ describe("chatSessionPaintCache", () => {
         limit: 2,
       }),
     ).toEqual(["b", "a"]);
+  });
+
+  it("touches keep-alive ring with active-first order", () => {
+    expect(touchSessionKeepAlive("a", 3)).toEqual(["a"]);
+    expect(touchSessionKeepAlive("b", 3)).toEqual(["b", "a"]);
+    expect(touchSessionKeepAlive("c", 3)).toEqual(["c", "b", "a"]);
+    expect(touchSessionKeepAlive("d", 3)).toEqual(["d", "c", "b"]);
+    expect(listSessionKeepAliveIds()).toEqual(["d", "c", "b"]);
+    forgetSessionDetailPaint("c");
+    expect(listSessionKeepAliveIds()).toEqual(["d", "b"]);
   });
 });

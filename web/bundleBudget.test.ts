@@ -49,7 +49,17 @@ describe("bundle budget", () => {
       .toBe("known vendor framework chunks");
   });
 
-  it("fails when an ordinary feature chunk grows beyond its budget", () => {
+  it("classifies TeamsRoute under the known residual budget, not the generic route budget", () => {
+    writeAsset("TeamsRoute-CcYah-sm.js", 400 * 1024);
+
+    const result = checkBundleBudget(tempRoot);
+
+    expect(result.failures).toEqual([]);
+    expect(result.entries.find((entry) => entry.name.startsWith("TeamsRoute-"))?.budgetName)
+      .toBe("known Teams route residual");
+  });
+
+  it("fails when TeamsRoute grows beyond its residual budget", () => {
     writeAsset("TeamsRoute-CcYah-sm.js", 420 * 1024);
 
     const result = checkBundleBudget(tempRoot);
@@ -57,6 +67,18 @@ describe("bundle budget", () => {
     expect(result.failures).toHaveLength(1);
     expect(result.failures[0]).toMatchObject({
       name: "TeamsRoute-CcYah-sm.js",
+      budgetName: "known Teams route residual",
+    });
+  });
+
+  it("fails when an ordinary feature chunk grows beyond its budget", () => {
+    writeAsset("ChatCodingRoute-CcYah-sm.js", 420 * 1024);
+
+    const result = checkBundleBudget(tempRoot);
+
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({
+      name: "ChatCodingRoute-CcYah-sm.js",
       budgetName: "route or feature chunks",
     });
   });
