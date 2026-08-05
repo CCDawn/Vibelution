@@ -76,4 +76,10 @@ describe("teams workbench bag wiring contracts", () => {
     expect(shellSource).toContain("searchParams");
     expect(shellSource).toMatch(/buildTeamsWorkbenchResearchSurfacesFromBag\(\s*\{\s*\.\.\.d/);
   });
+
+  it("experiment ledger does not call searchParams.get without optional chaining", () => {
+    const ledger = readFileSync(new URL("../TeamExperimentPlanningLedgerPanel.tsx", import.meta.url), "utf8");
+    expect(ledger).not.toMatch(/searchParams\.get\(/);
+    expect(ledger).toMatch(/searchParams\?\.get\(/);
+  });
 });

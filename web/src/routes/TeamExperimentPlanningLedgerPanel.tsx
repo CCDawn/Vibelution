@@ -165,7 +165,7 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   experimentMethodCatalogQuery: { data?: any; isFetching: boolean; error?: unknown };
   preferredExperimentMethod: string;
-  searchParams: URLSearchParams;
+  searchParams?: URLSearchParams | null;
   experimentBaselineArtifactDraft: ExperimentBaselineArtifactDraft;
   setExperimentBaselineArtifactDraft: (updater: (draft: ExperimentBaselineArtifactDraft) => ExperimentBaselineArtifactDraft) => void;
   experimentSmokeResultDraft: ExperimentSmokeResultDraft;
@@ -508,16 +508,18 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       ? stepOverride
       : autoStep;
 
+    const requestedExperimentMethod = String(searchParams?.get("experimentMethod") || "").trim();
     const methodPanel = (
       <TeamExperimentMethodPanel
         lang={lang}
         catalog={experimentMethodCatalogQuery.data}
         activeContract={activeExperimentContract}
         preferredExperimentMethod={
-          experimentMethodCatalogQuery.data?.methods.some(
-            (method: any) => method.methodId === searchParams.get("experimentMethod"),
+          requestedExperimentMethod
+          && experimentMethodCatalogQuery.data?.methods?.some(
+            (method: any) => method.methodId === requestedExperimentMethod,
           )
-            ? searchParams.get("experimentMethod") as ExperimentMethodId
+            ? requestedExperimentMethod as ExperimentMethodId
             : ((preferredExperimentMethod as ExperimentMethodId | "") || undefined)
         }
         activePlanStatus={activePlan?.status ?? ""}
