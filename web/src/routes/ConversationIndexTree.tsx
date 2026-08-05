@@ -18,6 +18,7 @@ import {
   TeamConversationIndexItem,
 } from "./GroupSessionIndexItems";
 import styles from "./ConversationIndexTree.styles";
+import { teamWorkspaceRoute } from "./teams/researchWorkspaceModel";
 
 type ConversationIndexTreeProps = {
   activeGroupRoomId: string;
@@ -71,7 +72,7 @@ function roomIdFromConversation(conversation: ConversationSummary) {
 }
 
 function teamRouteFor(team: Team) {
-  return `/teams?team=${encodeURIComponent(team.teamId)}`;
+  return teamWorkspaceRoute(team.teamId);
 }
 
 export function ConversationIndexTree({

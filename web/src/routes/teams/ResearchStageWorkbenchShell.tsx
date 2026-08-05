@@ -75,10 +75,9 @@ export function ResearchStageWorkbenchShell({
   dataAttrs,
 }: ResearchStageWorkbenchShellProps) {
   const effectiveTeamId = teamId || RESEARCH_TEAM_ID;
-  const overviewHref =
-    backHref
-    || `/teams?team=${encodeURIComponent(effectiveTeamId)}&researchView=overview&teamMode=board`;
-  const resolvedBackLabel = backLabel ?? (lang === "zh" ? "返回科研总览" : "Back to overview");
+  // Same destination as initial team home (flow + canvas), never board kanban wall.
+  const overviewHref = backHref || teamWorkspaceRoute(effectiveTeamId);
+  const resolvedBackLabel = backLabel ?? (lang === "zh" ? "返回团队首页" : "Back to team home");
   const stageChatReturn =
     current === "knowledge_collection"
       ? researchSourceCollectionRoute(effectiveTeamId)

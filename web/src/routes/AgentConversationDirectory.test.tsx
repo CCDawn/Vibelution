@@ -92,9 +92,11 @@ describe("AgentConversationDirectory", () => {
     expect(styles.agentRow).toContain("!h-auto");
     expect(styles.agentRow).toContain("!w-full");
     expect(styles.agentRow).toContain("grid-cols-[32px_minmax(0,1fr)_0.875rem]");
-    expect(styles.agentStatusSlot).toContain("h-3.5");
+    expect(styles.agentRow).toContain("!items-stretch");
+    expect(styles.agentStatusSlot).toContain("h-full");
     expect(styles.agentStatusSlot).toContain("w-3.5");
-    expect(styles.agentStatusSlot).toContain("self-center");
+    expect(styles.agentStatusSlot).toContain("self-stretch");
+    expect(styles.agentStatusSlot).toContain("place-items-center");
     expect(directorySource).toContain("data-agent-status-slot");
     expect(styles.agentTitle).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.agentTitle).toContain("[color:var(--fg-primary)]");

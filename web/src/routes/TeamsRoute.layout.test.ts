@@ -268,7 +268,7 @@ describe("research project workspace", () => {
   it("keeps challenge platform surfaces compact and moves explanations into VUI tooltips", () => {
     // Board mode drops dual surface tabs; shell mode switch is the primary chrome.
     expect(routeSource).toContain("TeamShellToolbar");
-    expect(routeSource).toContain("TeamShellModeSwitch");
+    expect(routeSource).not.toContain("<TeamShellModeSwitch");
     expect(routeSource).toContain("selectTeamShellMode");
     expect(routeStyles.challengeSurfaceSwitch).toContain("inline-grid");
     expect(routeStyles.challengeSurfaceSwitch).toContain("w-fit");
@@ -494,23 +494,25 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps canvas action labels compact and exposes non-critical explanations through VUI tooltips", () => {
-    expect(routeSource).toContain("VTooltip,");
-    expect(routeSource).toContain('content={lang === "zh" ? "自动排版只改变当前显示，不保存坐标"');
-    expect(routeSource).toContain('content={lang === "zh" ? "显示画布文件中的原始坐标"');
-    expect(routeSource).toContain("<VTooltip content={communicationEdgeHint}>");
+    expect(routeSource).toContain("VTooltip");
+    // Research home: layout tools live on the flow strip (shell phase), not a second canvas chrome row.
+    expect(routeSource).toContain("自动排版只改变当前显示，不保存坐标");
+    expect(routeSource).toContain("原始坐标");
+    expect(routeSource).toContain("trailingActions");
+    expect(routeSource).toContain("hideCanvasToolbar");
     // Wave 8M: stage-agent config tooltip lives on active-stage workspace panel.
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain('content={lang === "zh" ? "当前阶段 Agent 配置"');
     expect(routeSource).toContain('content={lang === "zh" ? "到 AgentDirectory 源配置修改"');
-    expect(routeSource).not.toContain("title={communicationEdgeHint}");
     expect(routeSource).not.toContain('title={lang === "zh" ? "自动排版只改变当前显示，不保存坐标"');
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).not.toContain('title={lang === "zh" ? "当前阶段 Agent 配置"');
     expect(routeSource).not.toContain('title={lang === "zh" ? "到 AgentDirectory 源配置修改"');
-    expect(routeSource).not.toContain('{" · "}\n                  {communicationEdgeHint}');
   });
 
   it("preserves selected Team deep links from legacy routes", () => {
     expect(resolveLegacyTeamsRedirect("")).toBe("/teams");
-    expect(resolveLegacyTeamsRedirect("?team=research-core")).toBe("/teams?team=research-core");
+    expect(resolveLegacyTeamsRedirect("?team=research-core")).toBe(
+      "/teams?team=research-core&researchView=overview&teamMode=canvas",
+    );
   });
 
   it("uses Team APIs and Agent Center as the binding source", () => {
@@ -1130,11 +1132,14 @@ describe("TeamsRoute layout contract", () => {
     expect(teamAiSearchWorkspacePanelSource).toContain("styles.aiSearchScopePanel");
     expect(teamAiSearchWorkspacePanelSource).toContain("styles.aiSearchSourceGroups");
     expect(teamAiSearchWorkspacePanelSource).toContain("styles.aiSearchSourceItem");
-    // Overview: ResearchOverviewSurface owns CTA → board kanban → advanced (preview contract).
+    // Overview: ResearchOverviewSurface is a flow strip; main body is org canvas (not kanban wall).
     expect(routeSource).toContain("ResearchOverviewSurface");
     expect(routeSource).toContain("renderResearchOverviewSurface");
-    expect(routeSource).toContain("ResearchBoardKanban");
-    expect(routeSource).toContain("buildResearchBoardColumns");
+    expect(routeSource).toContain("researchFlowSlot");
+    expect(teamResearchPrimarySurfaceRenderersSource).not.toContain("ResearchBoardKanban");
+    // End-user overview no longer mounts evidence ledger / advanced secondary in primary renderers.
+    expect(teamResearchPrimarySurfaceRenderersSource).not.toContain("TeamWorkflowModelEvidenceStatusPanel");
+    expect(teamResearchPrimarySurfaceRenderersSource).not.toContain("advanced={");
     expect(routeSource).toContain('renderResearchStageLauncher("interactive")');
     expect(routeSource).toContain("styles.researchOverviewSurface");
     // Shell: VBoardWorkbenchPage / VCanvasWorkbenchPage + team rail + board/canvas modes.
@@ -1142,7 +1147,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("VCanvasWorkbenchPage");
     expect(routeSource).toContain("teamsRailResize");
     expect(routeSource).toContain("TeamShellRail");
-    expect(routeSource).toContain("TeamShellModeSwitch");
+    expect(routeSource).toContain("TeamShellToolbar");
+    expect(routeSource).not.toContain("<TeamShellModeSwitch");
     expect(routeSource).toContain("selectTeamShellMode");
     expect(routeSource).toContain('shellTestId="team-shell-workspace"');
     expect(routeSource).toContain("teamShellMode");
@@ -1151,7 +1157,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("usePersistedPaneResize");
     expect(routeSource).not.toContain("科研三阶段索引");
     expect(routeSource).not.toContain("团队专属阶段页");
-    expect(routeSource).toContain("ResearchBoardKanban");
+    expect(routeSource).toContain("researchFlowSlot");
     expect(routeSource).toContain("ResearchStageWorkspaceView");
     expect(routeSource).toContain("researchWorkspaceStageRoute");
     expect(researchWorkspaceModelSource).toContain('view: "knowledge_collection"');
@@ -1785,7 +1791,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('useState<"workspace" | "progress">("workspace")');
     expect(routeSource).toContain('challengeTeamSurface === "progress"');
     // Board/canvas shell owns mode chrome; challenge surface remains state for progress queries.
-    expect(routeSource).toContain("TeamShellModeSwitch");
+    expect(routeSource).toContain("TeamShellToolbar");
+    expect(routeSource).not.toContain("<TeamShellModeSwitch");
     expect(routeSource).toContain("challengeWorkspaceContextHidden");
     expect(routeSource).toContain("challengeWorkspaceBody");
     expect(teamResearchStageLauncherPanelSource).toContain("MVP 黄金样例");
@@ -1862,11 +1869,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("const displayCanvasNodes = researchCanvasAutoLayoutActive ? autoLayoutCanvasNodes : canvasNodes");
     expect(routeSource).toContain("自动排版只改变当前显示，不保存坐标");
     expect(routeSource).toContain("原始坐标");
-    expect(routeSource).toContain("canvasLayoutModeSwitch");
+    expect(routeSource).toContain("hideCanvasToolbar");
+    expect(routeSource).toContain("trailingActions");
     expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP");
     expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP");
     expect(canvasGeometrySource).toContain("researchCanvasRoleLayer");
-    expect(routeSource).toContain("返回三阶段");
+    // Stage switch lives on the flow strip (ResearchStageNav), not a "返回三阶段" link.
+    expect(routeSource).toContain("ResearchStageNav");
     expect(routeSource).toContain("onNodePointerDown: startNodeDrag");
     expect(routeSource).toContain("onNodePointerDown={p.onNodePointerDown}");
     expect(routeSource).toContain("onPointerDown={researchCanvasReadOnly ? undefined : (event) => onNodePointerDown?.(event, node)}");
@@ -1874,8 +1883,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : onNodePointerUp}");
     expect(routeSource).toContain("researchCanvasReadOnly ? nodeReadOnlyClassName : \"\"");
     expect(routeSource).toContain("styles.canvasReadOnlyPanel");
-    expect(routeSource).toContain("styles.canvasReadOnlyBadge");
-    expect(routeSource).toContain("styles.canvasLayoutModeSwitch");
     expect(routeSource).toContain("showNodeBindingPanel");
     expect(routeSource).toContain("showWorkflowPanel");
     expect(routeSource).toContain("showResearchSourceCollection");
@@ -2133,7 +2140,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("一键生成搜索计划、团队分工");
     expect(routeSource).not.toContain("搜索计划、步骤记录、资料记录和候选镜像都已落盘");
     // Wave 8I: stage standalone page is a product workbench (no team rail dump wall).
-    expect(routeSource).toContain("返回科研总览");
+    expect(routeSource).toContain("返回团队首页");
     expect(routeSource).toContain("实验规划工作台");
     expect(routeSource).toContain('data-product-workbench="true"');
     expect(routeSource).toContain("experimentPlanningStatusQueryKey");
@@ -2278,11 +2285,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamCommunicationPanelSource).toContain("团队广播");
     expect(teamCommunicationPanelSource).toContain("发送给团队");
     expect(teamCommunicationPanelSource).toContain("最近团队广播");
-    expect(routeSource).toContain("已衔接群聊");
     expect(teamCommunicationPanelSource).toContain("teamChatRoomRoute(startRoundResult.roomId");
     expect(teamCommunicationPanelSource).toContain("teamChatRoomRoute(latestTeamRound.roomId");
     expect(teamCommunicationPanelSource).toContain("teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
-    expect(routeSource).toContain("styles.linkedRoomLine");
+    // Canvas end-user chrome no longer dumps linked-room status lines; style tokens may remain.
     expect(routeSource).toContain("styles.toolbarLink");
     expect(routeSource).toContain("teamBusEvents");
     expect(teamCommunicationPanelSource).toContain("isProjectAgentBusEventRevoked");
@@ -2570,6 +2576,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.knowledgeCompletionFlowPanel).toContain("overflow-hidden");
     expect(routeStyles.knowledgeCompletionFlowHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.knowledgeCompletionFlowNodes).toContain("grid-cols-[repeat(auto-fit,minmax(280px,1fr))]");
+    expect(routeStyles.knowledgeCompletionFlowNodesRail).toContain("!grid-cols-2");
+    expect(routeStyles.knowledgeCompletionFlowPanelRail).toContain("knowledgeCompletionFlowPanelRail");
+    // Next-step + 4-card hero: stable md:grid-cols-2 (arbitrary fr grids get purged).
+    expect(routeStyles.researchPrimaryHeroSplit).toContain("md:!grid-cols-2");
+    expect(routeStyles.researchPrimaryHeroSplit).toContain("!grid");
+    expect(routeStyles.researchPrimaryHeroSide).toContain("md:border-l");
+    expect(routeStyles.researchPrimaryHeroHeader).toContain("border-b");
     expect(routeStyles.knowledgeCompletionFlowNode).toContain("grid");
     expect(routeStyles.knowledgeCompletionFlowNode).toContain("rounded-[var(--radius-control)]");
     expect(routeStyles.knowledgeCompletionFlowNodeBody).toContain("[&_p]:max-w-[min(100%,72ch)]");

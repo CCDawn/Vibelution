@@ -21,6 +21,7 @@ import {
   type SessionActivityTone,
 } from "./sessionActivityIndicator";
 import styles from "./AgentConversationDirectory.styles";
+import { teamWorkspaceRoute } from "./teams/researchWorkspaceModel";
 
 export type AgentConversationDirectoryProps = {
   activeAgentId: string;
@@ -116,7 +117,7 @@ function agentActivityClass(tone: SessionActivityTone) {
 }
 
 function teamRouteFor(team: Team) {
-  return `/teams?team=${encodeURIComponent(team.teamId)}`;
+  return teamWorkspaceRoute(team.teamId);
 }
 
 export function AgentConversationDirectory({

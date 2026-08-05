@@ -1,6 +1,7 @@
 /**
  * Teams shell presentation: left team rail + right content modes.
- * board = kanban/workbench content · canvas = organization graph
+ * board = stage workspaces (experiment / iteration / KC launcher)
+ * canvas = organization graph + research flow strip (end-user home)
  */
 
 export type TeamShellMode = "board" | "canvas";
@@ -23,8 +24,22 @@ export function teamShellModeLabel(mode: TeamShellMode, lang: "zh" | "en"): stri
   return lang === "zh" ? "画布模式" : "Canvas";
 }
 
+/**
+ * Map research workspace view → shell mode.
+ * Overview / canvas home use the org canvas; stage destinations use board.
+ */
 export function teamShellModeFromResearchView(view: string | null | undefined): TeamShellMode {
-  return view === "canvas" ? "canvas" : "board";
+  const value = String(view || "").trim();
+  if (
+    value === "experiment"
+    || value === "iteration"
+    || value === "knowledge_collection"
+    || value === "source_collection"
+  ) {
+    return "board";
+  }
+  // overview, canvas, empty → end-user canvas home
+  return "canvas";
 }
 
 export type TeamShellListItem = {

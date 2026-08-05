@@ -1412,7 +1412,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("referenceRoute(reference)");
     expect(agentRouteWorkspaceModelSource).toContain("reference.projectionEdit?.canonicalEditRoute || reference.sourceRef?.canonicalEditRoute");
     expect(routeSource).toContain("compactProjectionRoute(room");
-    expect(agentRouteWorkspaceModelSource).toContain('`/teams?team=${encodeURIComponent(reference.sourceId)}`');
+    expect(agentRouteWorkspaceModelSource).toContain("teamWorkspaceRoute(reference.sourceId)");
     expect(routeSource).toContain("onOpenRoute: (route: string) => navigate(route)");
     expect(routeSource).not.toContain("className={styles.referenceList}");
     expect(referencesPanelStyles.referenceList).toBeTruthy();

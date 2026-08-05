@@ -2,16 +2,14 @@
  * Research primary surface renderers (launcher / overview / stage standalone).
  * Extracted from TeamsRoute; does not own React state.
  */
-import { ResearchBoardKanban } from "./ResearchBoardKanban";
+import type { ReactNode } from "react";
 import { ResearchOverviewSurface } from "./ResearchOverviewSurface";
 import { ResearchStageNav } from "./ResearchStageNav";
 import { ResearchWorkflowErrorSurface } from "./ResearchWorkflowErrorSurface";
 import {
   TeamResearchStageLauncherPanel,
-  TeamWorkflowModelEvidenceStatusPanel,
 } from "./teamLazyPanels";
 import { createExperimentController } from "./createExperimentController";
-import { workflowIngestionStatusLabel } from "./source-collection/presentationModel";
 import { workflowStateLabel } from "./workflowPresentation";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
 
@@ -103,12 +101,7 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
     selectedResearchProjectSourceCollectionResetError,
     selectedResearchProjectSourceCollectionResetPending,
     runSourceCollectionProjectReset,
-    researchBoardColumns,
     selectResearchWorkspaceView,
-    activeWorkflowItemCount,
-    teamWorkflowOfficialModelEvidenceStatus,
-    teamWorkflowOfficialModelEvidenceStatusQuery,
-    teamWorkflowValidationSummary,
     createExperimentPlanMutation,
     materializeEngineeringProxyHypothesisMutation,
     completeScientificHypothesisFromDesignMutation,
@@ -214,10 +207,12 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
     );
   }
 
-  function renderResearchOverviewSurface() {
+  function renderResearchOverviewSurface(options?: {
+    trailingActions?: ReactNode;
+    sideSlot?: ReactNode;
+  }) {
     // Progressive fill: mount the stable overview IA immediately.
-    // Primary CTA + three-column board keep geometry; only inner slots skeleton
-    // until each query settles. Never return null just because workflow is pending.
+    // Primary CTA keeps fixed geometry; metrics skeleton in place until queries settle.
     const overviewWorkflowPending = teamWorkflowQuery.isPending;
     const overviewProgressPending = researchProjectProgressQuery.isPending
       && Boolean(activeSourceCollectionResearchProjectId);
@@ -307,68 +302,12 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
             />
           ) : undefined
         }
-        stages={(
-          <ResearchBoardKanban
-            lang={lang}
-            loading={overviewWorkflowPending}
-            columns={researchBoardColumns}
-            onOpenCard={(columnId) => {
-              if (columnId === "knowledge_collection") {
-                selectResearchWorkspaceView("knowledge_collection");
-                return;
-              }
-              if (columnId === "experiment") {
-                selectResearchWorkspaceView("experiment");
-                return;
-              }
-              selectResearchWorkspaceView("iteration");
-            }}
-          />
-        )}
-        advanced={teamWorkflow ? (
-          <>
-            <div className={styles.workflowStats}>
-              <div>
-                <span>{lang === "zh" ? "当前阶段" : "Stage"}</span>
-                <strong>{workflowStateLabel(teamWorkflow.stateMachine.currentStage, lang)}</strong>
-              </div>
-              <div>
-                <span>{lang === "zh" ? "候选" : "Candidates"}</span>
-                <strong>{teamWorkflow.candidateStore.candidateCount}</strong>
-              </div>
-              <div>
-                <span>{lang === "zh" ? "活跃项" : "Active"}</span>
-                <strong>{activeWorkflowItemCount}</strong>
-              </div>
-            </div>
-            <div className={styles.workflowMeta}>
-              <span>{teamWorkflow.workflowKind}</span>
-              <span className="truncate" title={teamWorkflow.ownerAgentId}>{teamWorkflow.ownerAgentId}</span>
-            </div>
-            <TeamWorkflowModelEvidenceStatusPanel
-              lang={lang}
-              status={teamWorkflowOfficialModelEvidenceStatus}
-              loading={teamWorkflowOfficialModelEvidenceStatusQuery.isPending}
-              errorMessages={teamWorkflowOfficialModelEvidenceStatusQuery.error instanceof Error ? [teamWorkflowOfficialModelEvidenceStatusQuery.error.message] : []}
-              statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
-            />
-            {teamWorkflowValidationSummary && !teamWorkflowValidationSummary.skipped ? (
-              <div className={styles.workflowValidation}>
-                <span>{lang === "zh" ? "校验" : "Validation"}</span>
-                <strong>
-                  {teamWorkflowValidationSummary.validCandidateCount}/{teamWorkflowValidationSummary.candidateCount}
-                </strong>
-                <span>{teamWorkflowValidationSummary.errorCount} errors</span>
-                <span>{teamWorkflowValidationSummary.warningCount} warnings</span>
-              </div>
-            ) : teamWorkflowValidationSummary?.skipped ? (
-              <div className={styles.empty}>{lang === "zh" ? "候选校验已延后。" : "Validation deferred."}</div>
-            ) : null}
-          </>
-        ) : undefined}
+        trailingActions={options?.trailingActions}
+        sideSlot={options?.sideSlot}
       />
     );
   }
+
 
 
 

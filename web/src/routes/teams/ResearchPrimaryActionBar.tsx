@@ -1,6 +1,8 @@
 import { ArrowRight, Compass } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { VButton, VSurface } from "../../components/vui";
+import researchStyles from "../TeamsRoute.research.styles";
 import {
   researchPrimaryActionDetail,
   researchPrimaryActionLabel,
@@ -38,6 +40,16 @@ export type ResearchPrimaryActionBarProps = {
   onPrimaryAction: (action: ResearchPrimaryAction) => void;
   /** Cross-stage secondary; defaults to onPrimaryAction when omitted. */
   onAdvanceAction?: (action: ResearchPrimaryAction) => void;
+  /**
+   * Right-side content inside the same next-step card (e.g. 4 stage flow cards).
+   * Fills the empty right half of the hero panel.
+   */
+  sideSlot?: ReactNode;
+  /**
+   * Top chrome inside the same card (stage nav + layout tools).
+   * Not rendered outside the next-step surface.
+   */
+  headerSlot?: ReactNode;
   /** @deprecated use metrics */
   facts?: Array<{ key: string; label: string; value: string }>;
 };
@@ -115,6 +127,8 @@ export function ResearchPrimaryActionBar({
   facts = [],
   onPrimaryAction,
   onAdvanceAction,
+  sideSlot = null,
+  headerSlot = null,
 }: ResearchPrimaryActionBarProps) {
   const chips: ResearchPrimaryMetric[] = metrics?.length
     ? metrics
@@ -134,6 +148,144 @@ export function ResearchPrimaryActionBar({
       ? `${researchPrimaryActionDetail(continueAction, lang)} ${handoff.bodyZh}`
       : `${researchPrimaryActionDetail(continueAction, lang)} ${handoff.bodyEn}`)
     : researchPrimaryActionDetail(continueAction, lang);
+  const hasSide = Boolean(sideSlot);
+  const hasHeader = Boolean(headerSlot);
+
+  const mainColumn = (
+    <div className="grid min-w-0 content-start gap-3">
+      <div className="flex min-w-0 items-center gap-2 text-[var(--vui-font-xs)] text-[var(--fg-tertiary)]">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--fg-primary)] px-2 py-0.5 font-semibold text-[var(--vui-surface-base)]">
+          <Compass size={12} className="shrink-0" aria-hidden="true" />
+          {lang === "zh" ? "下一步" : "Next"}
+        </span>
+        <span className="text-[var(--fg-tertiary)]" aria-hidden="true">·</span>
+        {loading && !projectName ? (
+          <span className={`${pulseClass} h-3 w-28`} aria-hidden="true" />
+        ) : (
+          <span className="min-w-0 truncate">{projectLine}</span>
+        )}
+      </div>
+
+      <div className="grid min-w-0 gap-1.5">
+        {loading ? (
+          <>
+            <span className={`${pulseClass} h-5 w-[min(100%,22rem)]`} aria-hidden="true" />
+            <span className={`${pulseClass} h-3.5 w-[min(100%,36rem)]`} aria-hidden="true" />
+            <span className={`${pulseClass} h-3.5 w-[min(100%,28rem)] opacity-80`} aria-hidden="true" />
+          </>
+        ) : (
+          <>
+            <h3 className="m-0 text-[1.125rem] font-[820] leading-snug tracking-tight text-[var(--fg-primary)]">
+              {title}
+            </h3>
+            <p className="m-0 max-w-[40rem] text-[var(--vui-font-sm)] leading-relaxed text-[var(--fg-secondary)]">
+              {body}
+            </p>
+          </>
+        )}
+      </div>
+
+      {!loading && handoff ? (
+        <div
+          className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 text-[12.5px] text-[var(--fg-primary)]"
+          role="status"
+          data-testid="research-stage-handoff-banner"
+        >
+          <strong className="font-[740] text-[var(--fg-primary)]">
+            {lang === "zh" ? "可选：进入下一阶段" : "Optional: next stage"}
+          </strong>
+          <span className="text-[var(--fg-tertiary)]" aria-hidden="true">·</span>
+          <span>
+            {lang === "zh" ? handoff.titleZh : handoff.titleEn}
+          </span>
+        </div>
+      ) : null}
+
+      {loading ? (
+        <dl className="m-0 flex min-w-0 flex-wrap gap-2" aria-hidden="true">
+          {["stage", "sources", "candidates"].map((key) => (
+            <div
+              key={key}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2.5 py-1"
+            >
+              <span className={`${pulseClass} h-2.5 w-8`} />
+              <span className={`${pulseClass} h-3 w-10`} />
+            </div>
+          ))}
+        </dl>
+      ) : chips.length ? (
+        <dl className="m-0 flex min-w-0 flex-wrap gap-2">
+          {chips.map((chip) => (
+            <div
+              key={chip.key}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2.5 py-1"
+            >
+              <dt className="m-0 text-[11px] font-semibold text-[var(--fg-tertiary)]">{chip.label}</dt>
+              <dd className="m-0 text-[12px] font-semibold text-[var(--fg-primary)]">
+                <MetricValue value={chip.value} loading={chip.loading} lang={lang} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+
+      <div className="flex min-w-0 flex-wrap items-center gap-2 pt-1">
+        {loading ? (
+          <>
+            <span
+              className={`${pulseClass} inline-block h-9 w-28 rounded-[var(--radius-control)]`}
+              role="status"
+              aria-label={lang === "zh" ? "主操作加载中" : "Primary action loading"}
+              data-testid="research-primary-cta-skeleton"
+            />
+            <span
+              className={`${pulseClass} inline-block h-9 w-36 rounded-[var(--radius-control)] opacity-70`}
+              aria-hidden="true"
+            />
+          </>
+        ) : (
+          <>
+            <VButton
+              type="button"
+              data-vui="research-primary-cta"
+              data-testid="research-primary-cta"
+              variant={continueAction.blocked ? "secondary" : "primary"}
+              isDisabled={primaryDisabled}
+              aria-label={primaryLabel}
+              trailingIcon={
+                !pending && !continueAction.blocked
+                  ? <ArrowRight size={14} aria-hidden="true" strokeWidth={2.25} />
+                  : undefined
+              }
+              onPress={() => {
+                if (primaryDisabled) return;
+                onPrimaryAction(continueAction);
+              }}
+            >
+              {primaryLabel}
+            </VButton>
+            {showAdvance && advanceAction ? (
+              <VButton
+                type="button"
+                data-vui="research-advance-cta"
+                data-testid="research-advance-cta"
+                variant="secondary"
+                isDisabled={pending}
+                aria-label={advanceLabel}
+                trailingIcon={<ArrowRight size={14} aria-hidden="true" strokeWidth={2.25} />}
+                onPress={() => {
+                  if (pending) return;
+                  (onAdvanceAction ?? onPrimaryAction)(advanceAction);
+                }}
+              >
+                {advanceLabel}
+              </VButton>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <section
@@ -143,6 +295,7 @@ export function ResearchPrimaryActionBar({
       data-loading={loading ? "true" : "false"}
       data-handoff={!loading && handoff ? "true" : "false"}
       data-has-advance={showAdvance ? "true" : "false"}
+      data-has-side={hasSide ? "true" : "false"}
       data-blocked={!loading && continueAction.blocked ? "true" : "false"}
       aria-busy={loading || undefined}
       aria-label={lang === "zh" ? "建议下一步" : "Suggested next step"}
@@ -162,138 +315,32 @@ export function ResearchPrimaryActionBar({
             : "",
         ].filter(Boolean).join(" ")}
       >
-        <div className="grid min-w-0 gap-3 p-4">
-          <div className="flex min-w-0 items-center gap-2 text-[var(--vui-font-xs)] text-[var(--fg-tertiary)]">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--fg-primary)] px-2 py-0.5 font-semibold text-[var(--vui-surface-base)]">
-              <Compass size={12} className="shrink-0" aria-hidden="true" />
-              {lang === "zh" ? "下一步" : "Next"}
-            </span>
-            <span className="text-[var(--fg-tertiary)]" aria-hidden="true">·</span>
-            {loading && !projectName ? (
-              <span className={`${pulseClass} h-3 w-28`} aria-hidden="true" />
-            ) : (
-              <span className="min-w-0 truncate">{projectLine}</span>
-            )}
+        {hasHeader ? (
+          <div
+            className={researchStyles.researchPrimaryHeroHeader}
+            data-testid="research-primary-header-slot"
+          >
+            {headerSlot}
           </div>
-
-          <div className="grid min-w-0 gap-1.5">
-            {loading ? (
-              <>
-                <span className={`${pulseClass} h-5 w-[min(100%,22rem)]`} aria-hidden="true" />
-                <span className={`${pulseClass} h-3.5 w-[min(100%,36rem)]`} aria-hidden="true" />
-                <span className={`${pulseClass} h-3.5 w-[min(100%,28rem)] opacity-80`} aria-hidden="true" />
-              </>
-            ) : (
-              <>
-                <h3 className="m-0 text-[1.125rem] font-[820] leading-snug tracking-tight text-[var(--fg-primary)]">
-                  {title}
-                </h3>
-                <p className="m-0 max-w-[40rem] text-[var(--vui-font-sm)] leading-relaxed text-[var(--fg-secondary)]">
-                  {body}
-                </p>
-              </>
-            )}
-          </div>
-
-          {!loading && handoff ? (
+        ) : null}
+        <div
+          className={
+            hasSide
+              ? researchStyles.researchPrimaryHeroSplit
+              : researchStyles.researchPrimaryHeroSplitSolo
+          }
+          data-testid="research-primary-hero-split"
+          data-has-side={hasSide ? "true" : "false"}
+        >
+          <div className={researchStyles.researchPrimaryHeroMain}>{mainColumn}</div>
+          {hasSide ? (
             <div
-              className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 text-[12.5px] text-[var(--fg-primary)]"
-              role="status"
-              data-testid="research-stage-handoff-banner"
+              className={researchStyles.researchPrimaryHeroSide}
+              data-testid="research-primary-side-slot"
             >
-              <strong className="font-[740] text-[var(--fg-primary)]">
-                {lang === "zh" ? "可选：进入下一阶段" : "Optional: next stage"}
-              </strong>
-              <span className="text-[var(--fg-tertiary)]" aria-hidden="true">·</span>
-              <span>
-                {lang === "zh" ? handoff.titleZh : handoff.titleEn}
-              </span>
+              {sideSlot}
             </div>
           ) : null}
-
-          {loading ? (
-            <dl className="m-0 flex min-w-0 flex-wrap gap-2" aria-hidden="true">
-              {["stage", "sources", "candidates"].map((key) => (
-                <div
-                  key={key}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2.5 py-1"
-                >
-                  <span className={`${pulseClass} h-2.5 w-8`} />
-                  <span className={`${pulseClass} h-3 w-10`} />
-                </div>
-              ))}
-            </dl>
-          ) : chips.length ? (
-            <dl className="m-0 flex min-w-0 flex-wrap gap-2">
-              {chips.map((chip) => (
-                <div
-                  key={chip.key}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2.5 py-1"
-                >
-                  <dt className="m-0 text-[11px] font-semibold text-[var(--fg-tertiary)]">{chip.label}</dt>
-                  <dd className="m-0 text-[12px] font-semibold text-[var(--fg-primary)]">
-                    <MetricValue value={chip.value} loading={chip.loading} lang={lang} />
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          ) : null}
-
-          <div className="flex min-w-0 flex-wrap items-center gap-2 pt-1">
-            {loading ? (
-              <>
-                <span
-                  className={`${pulseClass} inline-block h-9 w-28 rounded-[var(--radius-control)]`}
-                  role="status"
-                  aria-label={lang === "zh" ? "主操作加载中" : "Primary action loading"}
-                  data-testid="research-primary-cta-skeleton"
-                />
-                <span
-                  className={`${pulseClass} inline-block h-9 w-36 rounded-[var(--radius-control)] opacity-70`}
-                  aria-hidden="true"
-                />
-              </>
-            ) : (
-              <>
-                <VButton
-                  type="button"
-                  data-vui="research-primary-cta"
-                  data-testid="research-primary-cta"
-                  variant={continueAction.blocked ? "secondary" : "primary"}
-                  isDisabled={primaryDisabled}
-                  aria-label={primaryLabel}
-                  trailingIcon={
-                    !pending && !continueAction.blocked
-                      ? <ArrowRight size={14} aria-hidden="true" strokeWidth={2.25} />
-                      : undefined
-                  }
-                  onPress={() => {
-                    if (primaryDisabled) return;
-                    onPrimaryAction(continueAction);
-                  }}
-                >
-                  {primaryLabel}
-                </VButton>
-                {showAdvance && advanceAction ? (
-                  <VButton
-                    type="button"
-                    data-vui="research-advance-cta"
-                    data-testid="research-advance-cta"
-                    variant="secondary"
-                    isDisabled={pending}
-                    aria-label={advanceLabel}
-                    trailingIcon={<ArrowRight size={14} aria-hidden="true" strokeWidth={2.25} />}
-                    onPress={() => {
-                      if (pending) return;
-                      (onAdvanceAction ?? onPrimaryAction)(advanceAction);
-                    }}
-                  >
-                    {advanceLabel}
-                  </VButton>
-                ) : null}
-              </>
-            )}
-          </div>
         </div>
       </VSurface>
     </section>

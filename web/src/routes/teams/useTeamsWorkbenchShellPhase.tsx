@@ -4,6 +4,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ReactNode } from "react";
 import { useMemo } from "react";
+import { RefreshCw } from "lucide-react";
+import { VNativeButton, VTooltip } from "../../components/vui";
 import { buildTeamsWorkbenchResearchSurfacesFromBag } from "./buildTeamsWorkbenchResearchSurfacesFromBag";
 import { renderTeamsWorkbenchCanvasPage } from "./renderTeamsWorkbenchCanvasPage";
 import { renderTeamsWorkbenchBoardPage } from "./renderTeamsWorkbenchBoardPage";
@@ -571,6 +573,44 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   } = researchSurfaces;
 
   if (researchCanvasVisible) {
+    // End-user research home: flow strip (next step + layout tools) + organization canvas.
+    // No path / edge / room status chrome on the canvas itself.
+    const showResearchFlowHome =
+      researchWorkflowTeamSelected
+      && (researchWorkspaceView === "overview" || researchWorkspaceView === "canvas");
+    // Four stage cards live INSIDE the next-step card (right half), not a second row below.
+    const researchFlowSlot = showResearchFlowHome
+      ? renderResearchOverviewSurface({
+          trailingActions: (
+            <div
+              className="inline-flex items-center gap-1"
+              role="group"
+              aria-label={lang === "zh" ? "画布排版" : "Canvas layout"}
+            >
+              <VTooltip content={lang === "zh" ? "自动排版只改变当前显示，不保存坐标" : "Auto layout only changes the current view"}>
+                <VNativeButton
+                  type="button"
+                  className={researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
+                  onClick={() => setResearchCanvasLayoutMode("auto")}
+                >
+                  <RefreshCw size={14} />
+                  {lang === "zh" ? "自动排版" : "Auto layout"}
+                </VNativeButton>
+              </VTooltip>
+              <VTooltip content={lang === "zh" ? "显示画布文件中的原始坐标" : "Show original coordinates from the canvas file"}>
+                <VNativeButton
+                  type="button"
+                  className={!researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
+                  onClick={() => setResearchCanvasLayoutMode("source")}
+                >
+                  {lang === "zh" ? "原始坐标" : "Original"}
+                </VNativeButton>
+              </VTooltip>
+            </div>
+          ),
+          sideSlot: renderKnowledgeCollectionCompletionFlowPanel({ presentation: "rail" }),
+        })
+      : null;
     return renderTeamsWorkbenchCanvasPage({
       lang,
       styles,
@@ -580,6 +620,10 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       teamShellToolbar,
       researchWorkflowTeamSelected,
       researchCanvasReadOnly,
+      researchFlowSlot,
+      hideCanvasToolbar: Boolean(showResearchFlowHome && researchCanvasReadOnly),
+      // Flow+canvas density: inspector only when user is binding nodes (non-research editable).
+      hideInspector: Boolean(researchFlowSlot && researchCanvasReadOnly),
       validationValid: !(validation && !validation.valid),
       inspectorBody: renderTeamsInspectorSharedPanels(),
       selectedTeam,
@@ -617,7 +661,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       canvasFrameRef,
       nodeToneClass: nodeTone,
       roleBadgeToneClass: roleBadgeTone,
-      completionFlowSlot: renderKnowledgeCollectionCompletionFlowPanel(),
+      // Cards live in the hero split on research home — not under the org graph.
+      completionFlowSlot: showResearchFlowHome ? null : renderKnowledgeCollectionCompletionFlowPanel(),
       onSelectNode: setSelectedNodeId,
       onLayoutModeChange: setResearchCanvasLayoutMode,
       onToggleCommunicationEdges: () => setShowCommunicationEdges((current: boolean) => !current),

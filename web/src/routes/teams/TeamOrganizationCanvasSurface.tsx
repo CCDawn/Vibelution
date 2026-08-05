@@ -1,6 +1,5 @@
 import {
   Archive,
-  ArrowLeft,
   Bot,
   Link2,
   Plus,
@@ -26,8 +25,6 @@ import {
 } from "../../components/vui";
 import { edgeLine, isCommunicationEdge, teamCanvasNodeStyle } from "./canvasGeometry";
 import { teamNodeFunctionLabel } from "./teamRouteShellModel";
-import { TEAM_ORGANIZATION_CANVAS_KIND } from "../TeamsRoute.canvasData";
-import { teamConversationStatusLabel } from "./workflowPresentation";
 
 export type TeamOrganizationCanvasSurfaceProps = {
   lang: "zh" | "en";
@@ -43,6 +40,11 @@ export type TeamOrganizationCanvasSurfaceProps = {
   activeAgents: AgentConfigWorkspaceAgent[];
   agentDisplay: (agent: AgentConfigWorkspaceAgent, lang: "zh" | "en") => { name: string; functionLabel?: string; tone?: string };
   researchCanvasReadOnly: boolean;
+  /**
+   * When true, no canvas-local chrome (path / stats / actions).
+   * Research home merges layout actions into the flow strip above.
+   */
+  hideToolbar?: boolean;
   researchCanvasAutoLayoutActive: boolean;
   showCommunicationEdges: boolean;
   organizationEdgeCount: number;
@@ -105,9 +107,8 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
     activeAgents,
     agentDisplay,
     researchCanvasReadOnly,
-    researchCanvasAutoLayoutActive,
+    hideToolbar = false,
     showCommunicationEdges,
-    organizationEdgeCount,
     communicationEdgeCount,
     communicationEdgeHint,
     communicationEdgeButtonLabel,
@@ -118,8 +119,6 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
     teamSyncPending,
     teamArchivePending,
     teamArchiveDisabledReason,
-    conversationStatus,
-    conversationMissingAgentCount,
     showTeamLoadingSurface,
     teamWorkspaceLoadingTitle,
     teamWorkspaceLoadingMessage,
@@ -138,7 +137,6 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
     teamWorkspaceRoute,
     teamChatRoomRoute,
     onSelectNode,
-    onLayoutModeChange,
     onToggleCommunicationEdges,
     onAddNode,
     onArchiveTeam,
@@ -160,132 +158,68 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
       data-vui-region="teams-canvas"
       data-testid="team-organization-canvas-surface"
     >
-      <div className={styles.canvasToolbar}>
-        <div>
-          <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
-          <span>{canvas ? `${canvas.path} · ${TEAM_ORGANIZATION_CANVAS_KIND}` : "workspace/teams"}</span>
-          {canvas ? (
-            <small className={styles.edgeLayerLine}>
-              {lang === "zh" ? "组织线" : "Org lines"} {organizationEdgeCount}
-              {" · "}
-              {lang === "zh" ? "信息线" : "Info lines"} {communicationEdgeCount}
-            </small>
-          ) : null}
-          {selectedTeam?.linkedChatRoom ? (
-            <small className={styles.linkedRoomLine}>
-              {lang === "zh" ? "已衔接群聊" : "Linked room"}
-              {" · "}
-              {selectedTeam.linkedChatRoom.title}
-              {" · "}
-              {selectedTeam.linkedChatRoom.participantCount} agents
-              {" · "}
-              {teamConversationStatusLabel(conversationStatus || "linked", lang)}
-            </small>
-          ) : selectedTeam ? (
-            <small className={styles.linkedRoomLine}>
-              {researchCanvasReadOnly
-                ? (lang === "zh" ? "只读关系图：不会同步群聊或修改节点。" : "Read-only graph: room sync and node edits are disabled.")
-                : conversationStatus === "agent_missing"
-                  ? (lang === "zh"
-                    ? `成员缺失 ${conversationMissingAgentCount ?? 0} 个，请先修复 Agent 引用。`
-                    : `${conversationMissingAgentCount ?? 0} missing agents. Repair Agent references first.`)
-                  : activeTeamMemberCount > 0
-                    ? (lang === "zh" ? "尚未衔接群聊，可同步创建。" : "No linked room yet. Sync to create one.")
-                    : (lang === "zh" ? "绑定 active Agent 后可衔接群聊。" : "Bind active agents before linking a room.")}
-            </small>
-          ) : null}
-        </div>
-        <VActionGroup
-          className={styles.toolbarActions}
-          ariaLabel={lang === "zh" ? "团队画布操作" : "Team canvas actions"}
-        >
-          {researchCanvasReadOnly ? (
-            <span className={styles.canvasReadOnlyBadge}>{lang === "zh" ? "只读" : "Read only"}</span>
-          ) : saveLabel ? (
-            <span className={styles.saveState}>{saveLabel}</span>
-          ) : null}
-          {researchCanvasReadOnly ? (
-            <div className={styles.canvasLayoutModeSwitch} role="group" aria-label={lang === "zh" ? "画布排版模式" : "Canvas layout mode"}>
-              <VTooltip content={lang === "zh" ? "自动排版只改变当前显示，不保存坐标" : "Auto layout only changes the current view and does not save coordinates"}>
-                <VNativeButton
-                  type="button"
-                  className={researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
-                  onClick={() => onLayoutModeChange("auto")}
-                >
-                  <RefreshCw size={14} />
-                  {lang === "zh" ? "自动排版" : "Auto layout"}
-                </VNativeButton>
-              </VTooltip>
-              <VTooltip content={lang === "zh" ? "显示画布文件中的原始坐标" : "Show the original coordinates from the canvas file"}>
-                <VNativeButton
-                  type="button"
-                  className={!researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
-                  onClick={() => onLayoutModeChange("source")}
-                >
-                  {lang === "zh" ? "原始坐标" : "Original"}
-                </VNativeButton>
-              </VTooltip>
-            </div>
-          ) : null}
-          <VTooltip content={communicationEdgeHint}>
-            <VNativeButton
-              type="button"
-              className={showCommunicationEdges ? styles.layerButtonActive : ""}
-              onClick={onToggleCommunicationEdges}
-              disabled={!canvas || communicationEdgeCount === 0}
-            >
-              <Link2 size={14} />
-              {communicationEdgeButtonLabel}
-            </VNativeButton>
-          </VTooltip>
-          {researchCanvasReadOnly ? (
-            <Link className={styles.toolbarLink} to={teamWorkspaceRoute(selectedTeam?.teamId || researchTeamId)}>
-              <ArrowLeft size={14} />
-              {lang === "zh" ? "返回三阶段" : "Back to stages"}
-            </Link>
-          ) : (
-            <>
-              {linkedChatRoomId ? (
-                <Link
-                  className={styles.toolbarLink}
-                  to={teamChatRoomRoute(
-                    linkedChatRoomId,
-                    teamWorkspaceRoute(selectedTeam?.teamId || researchTeamId),
-                    lang === "zh" ? "返回团队页面" : "Back to team",
-                  )}
-                >
-                  {lang === "zh" ? "打开群聊" : "Open room"}
-                </Link>
-              ) : (
-                <VNativeButton
-                  type="button"
-                  onClick={onSyncRoom}
-                  disabled={!selectedTeam || activeTeamMemberCount === 0 || teamSyncPending}
-                >
-                  <Link2 size={14} />
-                  {teamSyncPending
-                    ? (lang === "zh" ? "同步中" : "Syncing")
-                    : (lang === "zh" ? "同步群聊" : "Sync room")}
-                </VNativeButton>
-              )}
-              <VNativeButton type="button" onClick={onAddNode} disabled={!hasWritableCanvas}>
-                <Plus size={14} />
-                {lang === "zh" ? "节点" : "Node"}
-              </VNativeButton>
+      {hideToolbar || researchCanvasReadOnly ? null : (
+        <div className={styles.canvasToolbar} data-testid="team-canvas-toolbar">
+          {/* Editable teams: actions only — no path / edge / room status walls. */}
+          <div className="min-w-0" />
+          <VActionGroup
+            className={styles.toolbarActions}
+            ariaLabel={lang === "zh" ? "团队画布操作" : "Team canvas actions"}
+          >
+            {saveLabel ? (
+              <span className={styles.saveState}>{saveLabel}</span>
+            ) : null}
+            <VTooltip content={communicationEdgeHint}>
               <VNativeButton
                 type="button"
-                className={styles.dangerButton}
-                onClick={onArchiveTeam}
-                disabled={!selectedTeam || teamArchivePending || Boolean(teamArchiveDisabledReason)}
-                title={teamArchiveDisabledReason || (lang === "zh" ? "归档当前团队" : "Archive this team")}
+                className={showCommunicationEdges ? styles.layerButtonActive : ""}
+                onClick={onToggleCommunicationEdges}
+                disabled={!canvas || communicationEdgeCount === 0}
               >
-                <Archive size={14} />
-                {lang === "zh" ? "归档" : "Archive"}
+                <Link2 size={14} />
+                {communicationEdgeButtonLabel}
               </VNativeButton>
-            </>
-          )}
-        </VActionGroup>
-      </div>
+            </VTooltip>
+            {linkedChatRoomId ? (
+              <Link
+                className={styles.toolbarLink}
+                to={teamChatRoomRoute(
+                  linkedChatRoomId,
+                  teamWorkspaceRoute(selectedTeam?.teamId || researchTeamId),
+                  lang === "zh" ? "返回团队页面" : "Back to team",
+                )}
+              >
+                {lang === "zh" ? "打开群聊" : "Open room"}
+              </Link>
+            ) : (
+              <VNativeButton
+                type="button"
+                onClick={onSyncRoom}
+                disabled={!selectedTeam || activeTeamMemberCount === 0 || teamSyncPending}
+              >
+                <Link2 size={14} />
+                {teamSyncPending
+                  ? (lang === "zh" ? "同步中" : "Syncing")
+                  : (lang === "zh" ? "同步群聊" : "Sync room")}
+              </VNativeButton>
+            )}
+            <VNativeButton type="button" onClick={onAddNode} disabled={!hasWritableCanvas}>
+              <Plus size={14} />
+              {lang === "zh" ? "节点" : "Node"}
+            </VNativeButton>
+            <VNativeButton
+              type="button"
+              className={styles.dangerButton}
+              onClick={onArchiveTeam}
+              disabled={!selectedTeam || teamArchivePending || Boolean(teamArchiveDisabledReason)}
+              title={teamArchiveDisabledReason || (lang === "zh" ? "归档当前团队" : "Archive this team")}
+            >
+              <Archive size={14} />
+              {lang === "zh" ? "归档" : "Archive"}
+            </VNativeButton>
+          </VActionGroup>
+        </div>
+      )}
       {showTeamLoadingSurface ? (
         <VStateSurface
           className={styles.teamLoadingInlineSurface}
