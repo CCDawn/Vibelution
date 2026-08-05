@@ -18,6 +18,7 @@ import {
   workflowQualityToneBound,
 } from "./teamsWorkbenchChrome";
 import { formatTime } from "./source-collection/presentationModel";
+import { EMPTY_SOURCE_COLLECTION_DISPLAY_STATE } from "./source-collection/runModel";
 import { researchStageStartFeedbackText as researchStageStartFeedbackTextFn } from "./teamRouteShellModel";
 import { buildTeamsShellSurfaceModel } from "./teamsShellSurfaceModel";
 import { buildTeamWorkflowCandidatePreviewItems } from "./buildTeamWorkflowCandidatePreviewItems";
@@ -234,6 +235,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     TEAMS_LAYOUT_ID
   } = d;
 
+  const resolvedSourceCollectionDisplayState =
+    sourceCollectionDisplayState ?? EMPTY_SOURCE_COLLECTION_DISPLAY_STATE;
 
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   /** Shell mode owns left/right IA: board = full team workbench, canvas = org graph. */
@@ -319,7 +322,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       sourceRunLabel: selectedSourceCollectionRun?.runId
         ? String(selectedSourceCollectionRun.runId).slice(0, 18)
         : "",
-      knowledgeStatusLabel: sourceCollectionDisplayState.statusText || "",
+      knowledgeStatusLabel: resolvedSourceCollectionDisplayState.statusText || "",
     }),
     [
       experimentPlanningStatus?.lifecycleProjection?.stage2?.activeDesignPlanId,
@@ -328,7 +331,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       lang,
       researchPrimaryActionInput,
       selectedSourceCollectionRun?.runId,
-      sourceCollectionDisplayState.statusText,
+      resolvedSourceCollectionDisplayState.statusText,
     ],
   );
   // Overview IA lives in ResearchOverviewSurface; workflow panel still hosts stage-specific modules.

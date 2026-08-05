@@ -52,6 +52,16 @@ export type SourceCollectionDisplayState = {
   decisionText: string;
 };
 
+/** Safe empty SC console state when presentation bag is incomplete. */
+export const EMPTY_SOURCE_COLLECTION_DISPLAY_STATE: SourceCollectionDisplayState = {
+  phase: "idle",
+  active: false,
+  consoleState: "idle",
+  searchStepState: "idle",
+  statusText: "",
+  decisionText: "",
+};
+
 function sourceCollectionRunMetric(run: SourceCollectionRunSummaryValue, keys: string[]) {
   if (!run) {
     return 0;

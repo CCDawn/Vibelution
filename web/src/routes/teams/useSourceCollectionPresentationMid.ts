@@ -512,19 +512,19 @@ export function useSourceCollectionPresentationMid(input: UseSourceCollectionPre
     canExecuteSourceCollectionSearch,
     sourceCollectionAcceptedBackgroundFailed,
     sourceCollectionOperationFailed,
-    sourceCollectionDisplayState,
+    sourceCollectionDisplayState: derivedSourceCollectionDisplayState,
   } = deriveSourceCollectionOperationFlags({
-    lang: input.lang,
+    lang: input.lang === "en" ? "en" : "zh",
     runStatus: sourceCollectionRunStatus,
     selectedRunStatus: input.selectedSourceCollectionRun?.status,
     selectedSourceCollectionSearchAccepted,
     selectedSourceCollectionActiveWorkRun,
     teamId: input.selectedTeam?.teamId,
     selectedSourceCollectionRunEffectiveId: input.selectedSourceCollectionRunEffectiveId,
-    outputAssignmentId: input.sourceCollectionOutputDraft.assignmentId,
+    outputAssignmentId: input.sourceCollectionOutputDraft?.assignmentId,
     selectedAssignmentId: selectedSourceCollectionAssignment?.assignmentId,
     sourceCollectionOutputHasRecord,
-    selectedTeamRecordSourceCollectionOutputPending,
+    selectedTeamRecordSourceCollectionOutputPending: Boolean(selectedTeamRecordSourceCollectionOutputPending),
     sourceCollectionAssignmentsDataLoading,
     sourceCollectionActionDataError,
     sourceCollectionSearchOpenAssignmentCount,
@@ -554,6 +554,7 @@ export function useSourceCollectionPresentationMid(input: UseSourceCollectionPre
     rawRecordCount: sourceCollectionRawRecordCount,
     candidateCount: sourceCollectionDisplayedCandidateCount,
   });
+  const sourceCollectionDisplayState = derivedSourceCollectionDisplayState;
   // R2-m: graph/memory/ingest pure metrics.
   const downstreamMetrics = deriveSourceCollectionDownstreamMetrics({
     teamWorkflowSourceQualityStatus: input.teamWorkflowSourceQualityStatus,
