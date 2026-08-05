@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import routeSource from "../ChatCodingRoute.tsx?raw";
+import routeSource from "./ChatCodingRouteWorkbench.tsx?raw";
 import apiSource from "../../api/agents.ts?raw";
 import mutationSource from "./useAgentPermissionPresetMutation.ts?raw";
 

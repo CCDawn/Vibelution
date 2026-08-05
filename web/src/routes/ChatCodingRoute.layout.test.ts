@@ -12,7 +12,7 @@ import routerSource from "../app/router.tsx?raw";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import chatApiSource from "../api/chat.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
-import routeSource from "./ChatCodingRoute.tsx?raw";
+import routeSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
 import conversationIndexRailSource from "./chat/ChatConversationIndexRail.tsx?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
@@ -522,7 +522,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("moves composer attachment and active-send display wiring into a route-local bridge", () => {
-    expect(routeSource).toContain('from "./chat/ChatConversationComposerBridge"');
+    expect(routeSource).toContain('from "./ChatConversationComposerBridge"');
     expect(routeSource).toContain("buildConversationComposerBridgeState({");
     expect(routeSource).toContain("const composerDisabled = conversationComposer.disabled");
     expect(routeSource).toContain("<ChatSessionWorkspacePanel");
@@ -1049,7 +1049,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
     expect(tokenCoreStatusPanelSource).toContain("tokenMetricShortLabel(metric, lang)");
     expect(tokenCoreStatusPanelSource).toContain("<div key={metric.key} className={metricClassName}");
-    expect(routeStyles.tokenStatusMetric).toContain("grid-rows-[28px_minmax(0,1fr)]");
+    expect(routeStyles.tokenStatusMetric).toContain("place-items-stretch");
     expect(routeStyles.tokenStatusMetric).toContain("min-h-[64px]");
     expect(routeStyles.tokenStatusMetric).not.toContain("min-h-[96px]");
     expect(routeStyles.tokenStatusMetric).toContain("bg-[var(--vui-surface-raised)]");
@@ -1060,6 +1060,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusMetric).toContain("overflow-visible");
     expect(routeStyles.tokenStatusVisualGrid).toContain("!grid");
     expect(routeStyles.tokenStatusVisualGrid).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
+    expect(routeStyles.tokenStatusVisualGrid).toContain("items-stretch");
     expect(routeStyles.tokenStatusVisualGrid).toContain("w-full");
     expect(routeStyles.tokenStatusCopy).toContain("min-w-0");
     expect(routeStyles.tokenStatusCopy).toContain("overflow-visible");
@@ -1072,10 +1073,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusRingCore).toContain("max-w-full");
     expect(routeStyles.tokenStatusRingCore).toContain("overflow-hidden");
     expect(routeStyles.tokenStatusRingCore).toContain("text-ellipsis");
+    expect(routeStyles.tokenStatusRingCore).toContain("whitespace-nowrap");
+    expect(routeStyles.tokenStatusRingCore).toContain("tabular-nums");
     expect(routeStyles.tokenStatusBar).toContain("h-1.5");
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(routeStyles.tokenStatusMetricButton).toContain("!grid");
+    expect(routeStyles.tokenStatusMetricButton).toContain("grid-rows-[28px_minmax(0,1fr)]");
     expect(routeStyles.tokenStatusMetricButton).toContain("!w-full");
+    expect(routeStyles.tokenStatusMetricButton).toContain("!justify-self-stretch");
     expect(routeStyles.tokenStatusMetricButton).toContain("!bg-transparent");
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-label]]:contents");
     expect(routeStyles.tokenStatusMetric_cache).not.toContain("inline-flex");
@@ -1226,7 +1231,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndTokenStatusSource).toContain("turnCacheHitRate");
     expect(routeAndTokenStatusSource).toContain("cacheHitNotCalled");
     expect(routeAndTokenStatusSource).toContain("cacheHitMissing");
-    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitle = [");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitleLines");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitle = tokenStatusCacheTitleLines.join");
+    expect(routeAndTokenStatusSource).toContain("titleLines: tokenStatusCacheTitleLines");
     expect(routeAndTokenStatusSource).toContain("llmUsageTitle");
   });
 
@@ -1234,10 +1241,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const lastContextComposition = detail?.lastContextComposition ?? null");
     expect(routeSource).toContain("const lastCacheComposition = detail?.lastCacheComposition ?? null");
     expect(routeSource).toContain("const lastLlmPayloadTrace = detail?.lastLlmPayloadTrace ?? null");
-    expect(routeSource).toContain('import("./chat/CacheDetailDialog")');
+    expect(routeSource).toContain('import("./CacheDetailDialog")');
     expect(chatStatusRailSource).toContain('import("./LlmPayloadTracePanel")');
     expect(chatStatusRailSource).toContain("import { TokenCoreStatusPanel");
-    expect(routeSource).toContain('from "./chat/chatTokenStatusModel"');
+    expect(routeSource).toContain('from "./chatTokenStatusModel"');
     expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
     expect(routeSource).not.toContain("<summary className={styles.sessionDiagnosticsSummary}>");
     expect(routeSource).not.toContain("const tokenCompressionContextBadge");
@@ -1274,10 +1281,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndTokenStatusSource).toContain("label: lang === \"zh\" ? \"模型输入\" : \"Model input\"");
     expect(routeSource).not.toContain("label: lang === \"zh\" ? \"本轮上下文\" : \"Current context\"");
     expect(routeAndTokenStatusSource).toContain("label: lang === \"zh\" ? \"压缩状态\" : \"Compression\"");
-    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitle = [");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitleLines");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitle = tokenStatusCacheTitleLines.join");
     expect(routeSource).not.toContain("const tokenStatusContextTitle = [");
-    expect(routeAndTokenStatusSource).toContain("const tokenStatusCompressionTitle = [");
-    expect(tokenCoreStatusPanelSource).toContain("content={metric.title}");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCompressionTitleLines");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCompressionTitle = tokenStatusCompressionTitleLines.join");
+    expect(tokenCoreStatusPanelSource).toContain("content={tooltipContent}");
+    expect(tokenCoreStatusPanelSource).toContain("titleLines");
     expect(tokenCoreStatusPanelSource).toContain("\"--token-status-value\": metric.percent");
     expect(routeSource).toContain("cacheDetailOpenLabel");
     expect(routeSource).toContain("onOpenCacheDetail={openCacheDetail}");
@@ -1315,7 +1325,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndCacheDetailSource).toContain("setCacheDetailOpen(true)");
     expect(tokenCoreStatusPanelSource).not.toContain("aria-controls={cacheDetailOpen ? \"cache-detail-dialog\" : undefined}");
     expect(routeSource).not.toContain("className={styles.contextCompositionItem} title={cacheCompositionTitle}");
-    expect(tokenCoreStatusPanelSource).toContain("content={metric.title}");
+    expect(tokenCoreStatusPanelSource).toContain("content={tooltipContent}");
     expect(routeAndCacheDetailSource).toContain("handleCacheDetailKeyDown");
     expect(routeAndCacheDetailSource).toContain("event.key === \"Escape\"");
     expect(routeAndCacheDetailSource).toContain("setCacheDetailOpen(false)");
@@ -1327,7 +1337,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndCacheDetailSource).toContain("promptSegmentDisplayLabel(segment, lang, t)");
     expect(cacheDetailDialogSource).toContain("promptSegmentCategoryLabel(segment, lang)");
     expect(cacheDetailDialogSource).toContain("promptSegmentAccuracyLabel(segment, lang)");
-    expect(cacheDetailDialogSource).toContain("cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)");
+    expect(cacheDetailDialogSource).toContain("cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.18 : 0)");
     expect(cacheDetailDialogSource).toContain("cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, missingSegmentLabel)");
     expect(cacheDetailDialogSource).toContain("cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)");
     expect(cacheDetailDialogSource).toContain("cacheObservedStatusLabel(segment.observedStatus, lang)");
@@ -1336,7 +1346,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("{lang === \"zh\" ? \"预测命中\" : \"Predicted hit\"}");
     expect(cacheDetailDialogSource).toContain("{lang === \"zh\" ? \"上轮真实命中\" : \"Last-turn true hit\"}");
     expect(cacheDetailDialogSource).toContain("{lang === \"zh\" ? \"会话平均\" : \"Session average\"}");
-    expect(cacheDetailDialogSource).toContain("{lang === \"zh\" ? \"读数说明\" : \"How to read\"}");
+    expect(cacheDetailDialogSource).not.toContain("{lang === \"zh\" ? \"读数说明\" : \"How to read\"}");
+    expect(cacheDetailDialogSource).toContain("CacheHoverLines");
+    expect(cacheDetailDialogSource).toContain("VTooltip");
     expect(cacheDetailDialogSource).toContain("{lang === \"zh\" ? \"上界未兑现\" : \"upper bound gap\"}");
     expect(cacheDetailDialogSource).not.toContain("styles.cacheDonutLegendPreview");
     expect(cacheDetailDialogSource).not.toContain("key={`${segment.key}-${segment.status}-${index}-legend`}");
@@ -1347,9 +1359,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cacheDetailDialogSource).not.toContain("styles.cacheDetailOverlay");
     expect(cacheDetailDialogSource).not.toContain("createPortal(");
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailSummaryGrid");
-    expect(cacheDetailDialogSource).toContain("styles.cacheDetailCalibrationNote");
+    expect(cacheDetailDialogSource).not.toContain("styles.cacheDetailCalibrationNote");
     expect(routeSource).toContain("cacheCalibrationSummaryText={cacheCalibrationSummaryText}");
-    expect(cacheDetailDialogSource).toContain("styles.cacheDetailDonutLegend");
+    expect(cacheDetailDialogSource).not.toContain("styles.cacheDetailDonutLegend");
+    expect(cacheDetailDialogSource).toContain("donutLegendHover");
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailSegmentSource");
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailSegmentList");
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailBoundary");
@@ -1593,7 +1606,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(html).toContain('aria-label="模型输入 128,000. 128,000 / 200,000 · 64%"');
     expect(routeSource).toContain("const compactNumberFormatter = useMemo(");
     expect(routeAndTokenStatusSource).toContain("displayValue: modelInputLimitMissing");
-    expect(routeAndTokenStatusSource).toContain("compactNumberFormatter.format(modelInputTokens)");
+    expect(routeAndTokenStatusSource).toContain("formatTokenStatusRingCompact(modelInputTokens, compactNumberFormatter)");
   });
 
   it("shows the active skill contract before the context status cards", () => {
@@ -1637,7 +1650,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("const tokenOutputLine = hasProviderLlmUsage");
     expect(routeAndTokenStatusSource).toContain("const llmUsageLine = hasProviderLlmUsage");
     expect(routeAndTokenStatusSource).toContain("const llmUsageTitle = hasProviderLlmUsage");
-    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitle = [");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCacheTitleLines");
     expect(routeAndTokenStatusSource).toContain("numberFormatter.format(sessionLlmUsage.outputTokens)");
     expect(routeAndTokenStatusSource).toContain("t(\"llmUsageNotCalled\")");
     expect(routeAndTokenStatusSource).toContain("t(\"llmUsageMissing\")");
@@ -1646,9 +1659,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("labels runtime compression as a separate estimate from session message history", () => {
     expect(routeSource).not.toContain("const contextSourceLine = lastContextComposition");
-    expect(routeAndTokenStatusSource).toContain("t(\"compressionScopeRuntime\")");
-    expect(routeAndTokenStatusSource).toContain("t(\"compressionLimitBasisEffective\")");
-    expect(routeAndTokenStatusSource).toContain("const compressionModelWindowLine = compression");
+    // High-value compression hover (chatTokenStatusModel); no long · soup dump.
     expect(routeAndTokenStatusSource).toContain("const compressionPolicySourceLine = compression");
     expect(routeAndTokenStatusSource).toContain("compression.policySource === \"agent_custom\"");
     expect(routeAndTokenStatusSource).toContain("Agent 自定义策略");
@@ -1656,19 +1667,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenCompressionCard");
     expect(routeAndTokenStatusSource).toContain("key: \"compression\"");
     expect(routeSource).not.toContain("key: \"strategy\"");
-    expect(routeAndTokenStatusSource).toContain("const tokenStatusCompressionTitle = [");
-    expect(routeAndTokenStatusSource).toContain("compressionTitleLine");
+    expect(routeAndTokenStatusSource).toContain("const tokenStatusCompressionTitleLines");
+    expect(routeAndTokenStatusSource).toContain("compressionMainLine");
     expect(routeAndTokenStatusSource).toContain("compressionThresholdValue");
     expect(routeAndTokenStatusSource).toContain("compressionThresholdMeta");
-    expect(routeAndTokenStatusSource).toContain("compression.contextWindowLimit");
-    expect(routeAndTokenStatusSource).toContain("compression.source || \"runtime_state\"");
   });
 
   it("keeps the current session status bar keyed to the selected session", () => {
-    expect(routeSource).toContain("const rawSessionDetail = sessionDetailQuery.data");
-    expect(routeSource).toContain("const selectedSessionDetail =");
-    expect(routeSource).toContain("rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined");
-    expect(routeSource).toContain("const detail = selectedSessionDetail");
+    expect(routeSource).toContain("const rawSessionDetail = resolveActiveSessionDetailForUi");
+    expect(routeSource).toContain("const detail = rawSessionDetail");
     expect(routeSource).toContain("const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined");
     expect(routeSource).toContain("const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail)");
     expect(routeSource).toContain("const activeTurnMessage = useMemo(");
@@ -2444,7 +2451,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndRenameMenuSource).toContain("const openSessionAgentConfig = useCallback");
     expect(routeAndRenameMenuSource).toContain("returnLabel: \"chat\"");
     expect(routeAndRenameMenuSource).toContain("returnTo: `/chat?session=${encodeURIComponent(session.id)}`");
-    expect(routeSource).toContain('import("./SessionContextMenu")');
+    expect(routeSource).toContain('import("../SessionContextMenu")');
     expect(routeSource).toContain("<SessionContextMenu");
     expect(routeSource).toContain("onAddToReview={handleAddSessionToReview}");
     expect(routeSource).toContain("onOpenAgentConfig={openSessionAgentConfig}");
@@ -2490,10 +2497,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentDirectoryActionsSource).toContain("const handleRenameAgent = useCallback");
     expect(agentDirectoryActionsSource).toContain("const handleArchiveAgent = useCallback");
     expect(agentDirectoryActionsSource).toContain("window.confirm(message)");
-    expect(agentDirectoryActionsSource).toContain("renameAgent({ agentId, displayName: title })");
+    expect(agentDirectoryActionsSource).toContain("renameAgent({ agentId: agentRenameDraft.agentId, displayName: title })");
+    expect(agentDirectoryActionsSource).not.toMatch(/window\.prompt\s*\(/);
+    expect(routeSource).toContain("AgentRenameDialog");
     expect(agentDirectoryActionsSource).toContain("archiveAgent({ agentId })");
     expect(routeSource).toContain("onContextMenu={openAgentContextMenu}");
-    expect(routeSource).toContain('import("./AgentContextMenu")');
+    expect(routeSource).toContain('import("../AgentContextMenu")');
     expect(routeSource).toContain("<AgentContextMenu");
     expect(routeSource).toContain("const archiveAgentMutation = useMutation");
     expect(routeSource).toContain('method: "DELETE"');
@@ -2684,10 +2693,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("moves file workspace tabs and preview display into chat file components while keeping route query ownership", () => {
-    expect(routeSource).toContain('import { ChatSessionWorkspacePanel } from "./chat/ChatSessionWorkspacePanel"');
-    expect(routeSource).not.toContain('import { ChatFilePreviewPanel } from "./chat/ChatFilePreviewPanel"');
+    expect(routeSource).toContain('import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel"');
+    expect(routeSource).not.toContain('import { ChatFilePreviewPanel } from "./ChatFilePreviewPanel"');
     expect(routeSource).toContain("const ChatFileWorkspaceTabs = lazy(() =>");
-    expect(routeSource).toContain('import("./chat/ChatFileWorkspaceTabs")');
+    expect(routeSource).toContain('import("./ChatFileWorkspaceTabs")');
     expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
     expect(routeSource).toContain("const fileContentQuery = useQuery({");
     expect(routeSource).toContain("queryKeys.fileContent(activeFilePath ?? \"\")");
@@ -2780,8 +2789,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cliAgentRunModelSource).not.toContain("closedRunIds.delete(cliRunId)");
     expect(cliAgentRunModelSource).toContain("toolCall.name !== CLI_AGENT_TOOL_NAME");
     expect(cliAgentRunModelSource).toContain("function isCliAgentRunActiveForClose");
-    expect(routeAndCliTerminalSource).toContain('from "./chat/cliAgentRunModel"');
-    expect(routeSource).toContain('from "./chat/useChatCliAgentTerminal"');
+    expect(routeAndCliTerminalSource).toContain('from "./cliAgentRunModel"');
+    expect(routeSource).toContain('from "./useChatCliAgentTerminal"');
     expect(routeAndCliTerminalSource).toContain("closeCliAgentRun");
     expect(routeAndCliTerminalSource).toContain("/api/cli-agents/terminal-sessions/");
     expect(routeAndCliTerminalSource).toContain("const [closedCliAgentRunTokensBySession");
@@ -2797,7 +2806,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndCliTerminalSource).toContain("const terminalSessionId = String(terminalSession?.terminalSessionId || run.terminalSessionId || run.result?.terminalSessionId || \"\").trim()");
     expect(routeAndCliTerminalSource).toContain("`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`");
     expect(routeSource).toContain("const CliAgentRunTerminalPanel = lazy(() =>");
-    expect(routeSource).toContain('import("./chat/CliAgentRunTerminalPanel")');
+    expect(routeSource).toContain('import("./CliAgentRunTerminalPanel")');
     expect(routeSource).toContain("<ChatCliAgentTerminalStack");
     expect(routeAndCliStackSource).toContain("runs.map((run) =>");
     expect(routeAndCliStackSource).toContain("!groupPanelActive && activeCliAgentRunId === run.id");
@@ -3342,7 +3351,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("routes ChatCoding route controls through VUI primitives", () => {
-    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain('from "../../components/vui"');
     expect(routeAndIndexRailSource).toContain("<VButton");
     expect(routeAndIndexRailSource).toContain("<VNativeInput");
     expect(routeAndIndexRailSource).toContain("<VStringSelect");

@@ -86,10 +86,16 @@ describe("CacheDetailDialog donut layout contract", () => {
 
     expect(cacheDetailStyles.cacheDonutSegment).toContain("fill-none");
     expect(cacheDetailStyles.cacheDonutSegment).toContain("stroke-[");
-    expect(cacheDetailStyles.cacheDonutSegment).toContain("[stroke-linecap:round]");
     expect(cacheDetailStyles.cacheDonutSegment).toContain("[vector-effect:non-scaling-stroke]");
     expect(cacheDetailStyles.cacheDonutOuterSegment).toContain("[stroke-width:");
+    expect(cacheDetailStyles.cacheDonutOuterSegment).toContain("[stroke-linecap:butt]");
     expect(cacheDetailStyles.cacheDonutInnerSegment).toContain("[stroke-width:");
+    expect(cacheDetailStyles.cacheDonutInnerSegment).toContain("[stroke-linecap:round]");
+    expect(cacheDetailStyles.cacheDetailTooltip).toContain("grid");
+    expect(cacheDetailStyles.cacheDetailTooltipLine).toContain("text-[11px]");
+    expect(cacheDetailDialogSource).toContain("VTooltip");
+    expect(cacheDetailDialogSource).not.toContain("读数说明");
+    expect(cacheDetailDialogSource).not.toContain("cacheDetailDonutLegend");
 
     for (const key of donutSegmentToneKeys) {
       expect(resolveDonutTone(key), key).toContain("stroke-[");

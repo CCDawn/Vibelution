@@ -9,9 +9,10 @@
     "check:bundle": "node scripts/checkBundleBudget.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "vitest run",
+    "test:parallel": "vitest run --maxWorkers=50%",
     "bun:dev": "vite",
     "bun:build": "tsc -b && vite build",
-    "bun:test": "vitest run"
+    "bun:test": "vitest run --maxWorkers=50%"
   },
   "devDependencies": {
     "@types/react": "^19.2.2",

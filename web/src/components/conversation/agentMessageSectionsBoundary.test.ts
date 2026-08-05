@@ -30,7 +30,7 @@ describe("agent message section module boundary", () => {
       "agentMessageOperations.ts",
       "timelineMessageProcessProjection.ts",
       "AgentContextSectionsView.tsx",
-      "../../routes/ChatCodingRoute.tsx",
+      "../../routes/chat/ChatCodingRouteWorkbench.tsx",
     ]) {
       expect(moduleSource(caller)).not.toContain("./messageSections");
       expect(moduleSource(caller)).not.toContain("/messageSections");

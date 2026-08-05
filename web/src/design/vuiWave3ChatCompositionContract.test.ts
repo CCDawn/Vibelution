@@ -20,7 +20,7 @@ const designRoot = resolve(import.meta.dirname);
 
 describe("Wave 3B Chat session workbench composition", () => {
   it("marks the Chat layout root as the session workbench recipe", () => {
-    const routeSource = readFileSync(resolve(routesRoot, "ChatCodingRoute.tsx"), "utf8");
+    const routeSource = readFileSync(resolve(routesRoot, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
     expect(routeSource).toContain('data-vui-recipe="chat-session-workbench"');
     expect(routeSource).toContain('data-vui-region="chat-conversation-center"');
     expect(routeSource).toContain("data-vui-layout-id");

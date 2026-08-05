@@ -10,7 +10,10 @@ export type TokenCoreStatusMetric = {
   value: string;
   displayValue?: string;
   meta: string;
+  /** Flat title for a11y / legacy; prefer titleLines for hover layout. */
   title: string;
+  /** High-value hover rows (max ~3); rendered as stacked lines, not · soup. */
+  titleLines?: string[];
   percent: number;
   tone: "cache" | "modelInput" | "compression" | "speed";
 };
@@ -89,6 +92,20 @@ export function TokenCoreStatusPanel({
           const metricClassName = `${styles.tokenStatusMetric} ${styles[`tokenStatusMetric_${metric.tone}`]}`;
           const visibleValue = metric.displayValue ?? metric.value;
           const visibleLabel = tokenMetricShortLabel(metric, lang);
+          const hoverLines = (metric.titleLines?.length ? metric.titleLines : metric.title.split("\n"))
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .slice(0, 4);
+          const tooltipContent = (
+            <div className={styles.tokenStatusTooltip} role="presentation">
+              <div className={styles.tokenStatusTooltipHead}>{visibleLabel}</div>
+              {hoverLines.map((line, index) => (
+                <div key={`${metric.key}-${index}`} className={styles.tokenStatusTooltipLine}>
+                  {line}
+                </div>
+              ))}
+            </div>
+          );
           const metricContent = (
             <>
               <span className={styles.tokenStatusRing} aria-hidden="true">
@@ -108,7 +125,9 @@ export function TokenCoreStatusPanel({
             return (
               <div key={metric.key} className={metricClassName} style={metricStyle} role="listitem">
                 <VTooltip
-                  content={metric.title}
+                  content={tooltipContent}
+                  width="compact"
+                  className={styles.tokenStatusTooltipSurface}
                   renderTrigger={(tooltipTriggerProps) => {
                     const {
                       children: _triggerChildren,
@@ -145,7 +164,9 @@ export function TokenCoreStatusPanel({
           return (
             <div key={metric.key} className={metricClassName} style={metricStyle} role="listitem">
               <VTooltip
-                content={metric.title}
+                content={tooltipContent}
+                width="compact"
+                className={styles.tokenStatusTooltipSurface}
                 renderTrigger={(tooltipTriggerProps) => {
                   const {
                     children: _triggerChildren,

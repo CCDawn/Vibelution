@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SkillLibraryItem } from "../../api/types";
-import chatRouteSource from "../../routes/ChatCodingRoute.tsx?raw";
+import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import chatConversationComposerBridgeSource from "../../routes/chat/ChatConversationComposerBridge.tsx?raw";
 import chatSessionWorkspacePanelSource from "../../routes/chat/ChatSessionWorkspacePanel.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";

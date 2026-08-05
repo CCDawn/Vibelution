@@ -11,7 +11,7 @@ const styles = {
   ...statusRailStyles,
   ...tokenCoreStyles,
 } as Record<string, string>;
-import chatCodingRouteSource from "./ChatCodingRoute.tsx?raw";
+import chatCodingRouteSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
 import chatSessionSurfaceModelSource from "./chat/chatSessionSurfaceModel.ts?raw";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 

@@ -1,6 +1,6 @@
 import type { RuntimeSummary, SessionDetail } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
-import { clampPercent, contextUsagePercent, formatRelativeTime } from "../chatShellFormat";
+import { clampPercent, contextUsagePercent } from "../chatShellFormat";
 import type { TokenSpeedTrackerState } from "../chatTokenSpeed";
 import { formatTokenSpeedValue, isBusyPhase } from "./chatCodingRouteViewModel";
 import type { TokenCoreStatusMetric } from "./TokenCoreStatusPanel";
@@ -31,6 +31,33 @@ export type ChatTokenStatusViewModel = {
   tokenStatusCacheTitle: string;
   tokenStatusCompressionTitle: string;
 };
+
+/**
+ * Keep ring-facing compact numbers single-line inside the 28px status ring.
+ * zh-CN compact often yields "2.3万", which wraps to two lines and misaligns the four cards.
+ */
+export function formatTokenStatusRingCompact(
+  value: number,
+  compactNumberFormatter: Intl.NumberFormat,
+): string {
+  const local = compactNumberFormatter
+    .format(value)
+    .replace(/\u00a0/g, "")
+    .replace(/\s/g, "");
+  const graphemes = Array.from(local);
+  const hasCjk = /[\u3400-\u9fff]/.test(local);
+  // CJK units are roughly full-width; more than 3 graphemes will not fit one line.
+  if ((hasCjk && graphemes.length > 3) || graphemes.length > 4) {
+    return new Intl.NumberFormat("en", {
+      notation: "compact",
+      maximumFractionDigits: 1,
+    })
+      .format(value)
+      .replace(/\u00a0/g, "")
+      .replace(/\s/g, "");
+  }
+  return local;
+}
 
 /**
  * Pure builder for TokenCoreStatusPanel metrics and related hover copy.
@@ -70,14 +97,14 @@ export function buildChatTokenStatusViewModel(options: {
     groupPanelActive,
     sessionStateValue,
     sessionStateLabel,
-    sessionStateLine,
+    sessionStateLine: _sessionStateLine,
     lang,
     t,
     numberFormatter,
     compactNumberFormatter,
-    locale,
-    formatTime,
-    nowMs = Date.now(),
+    locale: _locale,
+    formatTime: _formatTime,
+    nowMs: _nowMs,
   } = options;
   const compressionUnavailableForSession = !compression && !runtimeMatchesSelectedSession;
   const compressionUnavailableLine = compressionUnavailableForSession
@@ -143,15 +170,6 @@ export function buildChatTokenStatusViewModel(options: {
         ? (lang === "zh" ? "Agent 自定义策略" : "Agent custom policy")
         : (lang === "zh" ? "继承全局策略" : "Inherited global policy")
     : compressionUnavailableLine;
-  const compressionScopeLine = compression
-    ? `${t("compressionScopeRuntime")} · ${compressionPolicySourceLine}`
-    : compressionUnavailableLine;
-  const compressionModelWindowLine = compression
-    ? numberFormatter.format(compression.contextWindowLimit)
-    : "--";
-  const compressionTitleLine = compression
-    ? `${compressionMainLine} · ${compressionScopeLine} · ${t("compressionLimitBasisEffective")} · window ${numberFormatter.format(compression.contextWindowLimit)} · source ${compression.source || "runtime_state"}`
-    : compressionUnavailableTitle;
 
   const modelInputAvailable =
     lastCacheComposition?.calibratedInputTokens != null
@@ -219,19 +237,20 @@ export function buildChatTokenStatusViewModel(options: {
     : modelInputAvailable
       ? `${numberFormatter.format(modelInputTokens)} / ${numberFormatter.format(modelInputLimitTokens)} · ${modelInputPercent}%`
       : modelInputSourceLine;
-  const modelInputTitle = [
-    t("tokenStatusScopeLastTurn"),
-    modelInputLimitMissing ? modelInputLimitError : "",
-    lang === "zh"
-      ? `模型输入 ${numberFormatter.format(modelInputTokens)}`
-      : `Model input ${numberFormatter.format(modelInputTokens)}`,
-    !modelInputLimitMissing && modelInputLimitTokens > 0
-      ? `${lang === "zh" ? "窗口" : "window"} ${numberFormatter.format(modelInputLimitTokens)} · ${modelInputPercent}% · source ${modelInputLimitSource || "configured"}`
-      : "",
-    `${lang === "zh" ? "缓存输入" : "cached input"} ${numberFormatter.format(modelCachedInputTokens)}`,
-    modelInputSourceLine,
-    llmUsageTitle,
-  ].filter(Boolean).join("\n");
+  /** Hover: only actionable high-value rows (≤3). Detail dialogs hold the rest. */
+  const modelInputTitleLines = modelInputLimitMissing
+    ? [modelInputLimitError]
+    : modelInputAvailable
+      ? [
+          `${numberFormatter.format(modelInputTokens)} / ${numberFormatter.format(modelInputLimitTokens)} · ${modelInputPercent}%`,
+          modelCachedInputTokens > 0
+            ? (lang === "zh"
+              ? `缓存命中 ${numberFormatter.format(modelCachedInputTokens)}`
+              : `Cached ${numberFormatter.format(modelCachedInputTokens)}`)
+            : "",
+        ].filter(Boolean)
+      : [modelInputSourceLine];
+  const modelInputTitle = modelInputTitleLines.join("\n");
 
   const lastCompression = compression?.lastCompression ?? null;
   const lastCompressionSourceText = (() => {
@@ -240,26 +259,20 @@ export function buildChatTokenStatusViewModel(options: {
     }
     switch (lastCompression.triggerSource) {
       case "manual":
-        return lang === "zh" ? "Agent 主动请求" : "Agent requested";
+        return lang === "zh" ? "主动压缩" : "Manual";
       case "provider_limit":
-        return lang === "zh" ? "上下文上限触发" : "Context limit triggered";
+        return lang === "zh" ? "上限触发" : "Limit";
       case "auto":
-        return lang === "zh" ? "阈值自动触发" : "Threshold triggered";
+        return lang === "zh" ? "阈值触发" : "Threshold";
       default:
-        return String(lastCompression.triggerSource || "").trim() || (lang === "zh" ? "未知来源" : "Unknown source");
+        return String(lastCompression.triggerSource || "").trim() || (lang === "zh" ? "压缩" : "Compress");
     }
   })();
   const lastCompressionLine = lastCompression
     ? (lang === "zh"
-      ? `${lastCompressionSourceText}，${lastCompression.level || "--"} 档：${numberFormatter.format(lastCompression.beforeTokens)} -> ${numberFormatter.format(lastCompression.afterTokens)}，节省 ${numberFormatter.format(lastCompression.savedTokens)} token`
-      : `${lastCompressionSourceText}, ${lastCompression.level || "--"} level: ${numberFormatter.format(lastCompression.beforeTokens)} -> ${numberFormatter.format(lastCompression.afterTokens)}, saved ${numberFormatter.format(lastCompression.savedTokens)} tokens`)
-    : t("compressionNoRecord");
-  const compressionUpdatedLine = lastCompression?.timestamp
-    ? formatRelativeTime(lastCompression.timestamp, nowMs, locale) || formatTime(lastCompression.timestamp)
-    : compression?.updatedAt
-      ? formatRelativeTime(compression.updatedAt, nowMs, locale) || formatTime(compression.updatedAt)
-      : "";
-
+      ? `${lastCompressionSourceText} ${lastCompression.level || ""}：${numberFormatter.format(lastCompression.beforeTokens)}→${numberFormatter.format(lastCompression.afterTokens)}（−${numberFormatter.format(lastCompression.savedTokens)}）`
+      : `${lastCompressionSourceText} ${lastCompression.level || ""}: ${numberFormatter.format(lastCompression.beforeTokens)}→${numberFormatter.format(lastCompression.afterTokens)} (−${numberFormatter.format(lastCompression.savedTokens)})`)
+    : "";
   const tokenCompressionStrategyLevels = compression?.strategy?.levels ?? [];
   const tokenCompressionStrategyKeywords = (compression?.strategy?.errorProtectionKeywords ?? []).join(" / ") || "--";
   const tokenCompressionLevelLabel = compressionLevelLabel === "--"
@@ -278,23 +291,25 @@ export function buildChatTokenStatusViewModel(options: {
       ? `压缩阈值 ${compressionCurrentPercent}% · ${compressionLevelLabel}`
       : `threshold ${compressionCurrentPercent}% · ${compressionLevelLabel}`)
     : "";
-  const tokenStatusCacheTitle = [
-    t("tokenStatusScopeLastTurn"),
-    cache.cacheDetailOpenLabel,
-    cache.cacheCompositionTitle,
-    cacheHitLine,
-    llmUsageLine,
-    llmUsageTitle,
-  ].filter(Boolean).join("\n");
-  const tokenStatusCompressionTitle = [
-    compressionTitleLine,
-    compressionThresholdValue,
-    compressionThresholdMeta,
-    compressionModelWindowLine !== "--" ? `${lang === "zh" ? "模型窗口" : "model window"} ${compressionModelWindowLine}` : "",
-    tokenCompressionStrategyTitle !== "--" ? tokenCompressionStrategyTitle : "",
-    lastCompressionLine,
-    compressionUpdatedLine ? `${lang === "zh" ? "更新" : "updated"} ${compressionUpdatedLine}` : "",
-  ].filter(Boolean).join("\n");
+  // Cache hover: hit + ratio only (full breakdown lives in cache detail dialog).
+  const tokenStatusCacheTitleLines = cache.cacheDetailAvailable
+    ? [
+        `${cache.cacheCompositionPercent}% · ${numberFormatter.format(cache.providerCachedInputTokens)} / ${numberFormatter.format(cache.providerCacheInputTokens)}`,
+        lang === "zh" ? "点击查看明细" : "Click for detail",
+      ]
+    : [cacheHitLine || cache.cacheCompositionSummary || t("cacheHitMissing")].filter(Boolean);
+  const tokenStatusCacheTitle = tokenStatusCacheTitleLines.join("\n");
+  // Compression hover: usage + policy/level + last event only (no strategy dump / source noise).
+  const tokenStatusCompressionTitleLines = compression
+    ? [
+        compressionMainLine,
+        [compression?.enabled === false ? t("compressionDisabled") : tokenCompressionLevelLabel, compressionPolicySourceLine]
+          .filter(Boolean)
+          .join(" · "),
+        lastCompressionLine,
+      ].filter(Boolean)
+    : [compressionUnavailableTitle];
+  const tokenStatusCompressionTitle = tokenStatusCompressionTitleLines.join("\n");
 
   const conversationChainTokenSpeedActive = Boolean(activeSessionId)
     && !groupPanelActive
@@ -307,14 +322,15 @@ export function buildChatTokenStatusViewModel(options: {
     : conversationChainTokenSpeedActive
       ? sessionStateLabel
       : t("tokenSpeedEstimated");
-  const tokenSpeedTitle = [
-    t("tokenSpeedEstimated"),
-    sessionStateLabel,
-    sessionStateLine,
-    tokenSpeedTracker
-      ? `${lang === "zh" ? "已估算输出" : "estimated output"} ${numberFormatter.format(tokenSpeedTracker.tokenCount)} tokens`
-      : "",
-  ].filter(Boolean).join("\n");
+  const tokenSpeedTitleLines = [
+    tokenSpeedRateValue
+      ? (lang === "zh" ? `${tokenSpeedRateValue} tok/s` : `${tokenSpeedRateValue} tok/s`)
+      : conversationChainTokenSpeedActive
+        ? t("tokenSpeedSampling")
+        : (lang === "zh" ? "暂无速度" : "No speed yet"),
+    conversationChainTokenSpeedActive && !tokenSpeedRateValue ? sessionStateLabel : "",
+  ].filter(Boolean);
+  const tokenSpeedTitle = tokenSpeedTitleLines.join("\n");
   const tokenSpeedPercent = clampPercent(
     tokenSpeedTracker?.tokensPerSecond
       ? Math.min(100, Math.round(tokenSpeedTracker.tokensPerSecond))
@@ -332,6 +348,7 @@ export function buildChatTokenStatusViewModel(options: {
         ? `${numberFormatter.format(cache.providerCachedInputTokens)} / ${numberFormatter.format(cache.providerCacheInputTokens)}`
         : cache.cacheCompositionSummary,
       title: tokenStatusCacheTitle,
+      titleLines: tokenStatusCacheTitleLines,
       percent: clampPercent(cache.cacheDetailAvailable ? cache.cacheCompositionPercent : 0),
       tone: "cache",
     },
@@ -346,10 +363,11 @@ export function buildChatTokenStatusViewModel(options: {
       displayValue: modelInputLimitMissing
         ? "!"
         : modelInputAvailable
-          ? compactNumberFormatter.format(modelInputTokens)
+          ? formatTokenStatusRingCompact(modelInputTokens, compactNumberFormatter)
           : "--",
       meta: modelInputMetaLine,
       title: modelInputTitle,
+      titleLines: modelInputTitleLines,
       percent: clampPercent(modelInputLimitMissing ? 0 : modelInputPercent),
       tone: "modelInput",
     },
@@ -359,6 +377,7 @@ export function buildChatTokenStatusViewModel(options: {
       value: compression ? `${compressionCurrentPercent}%` : "--",
       meta: compression ? tokenCompressionLevelLabel : compressionUnavailableLine,
       title: tokenStatusCompressionTitle,
+      titleLines: tokenStatusCompressionTitleLines,
       percent: clampPercent(compression ? compressionCurrentPercent : 0),
       tone: "compression",
     },
@@ -368,6 +387,7 @@ export function buildChatTokenStatusViewModel(options: {
       value: tokenSpeedValue,
       meta: tokenSpeedMeta,
       title: tokenSpeedTitle,
+      titleLines: tokenSpeedTitleLines,
       percent: tokenSpeedPercent,
       tone: "speed",
     },

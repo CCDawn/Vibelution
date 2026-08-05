@@ -1,5 +1,8 @@
 # Actions（按钮族）
 
+> **Agent 速查：** 完整决策表见 [`docs/guides/button-selection.md`](../../../../../../docs/guides/button-selection.md)。
+> 默认 **`VButton`**；仅密集命中区用 **`VNativeButton`**；禁止第三种 button 门面与裸 `<button>` 通用化。
+
 ## VButton
 
 ### 职责

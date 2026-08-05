@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import chatRouteSource from "../routes/ChatCodingRoute.tsx?raw";
+import chatRouteSource from "../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import evolutionRouteSource from "../routes/EvolutionRoute.tsx?raw";
 import toolsRouteSource from "../routes/ToolsRoute.tsx?raw";
 import logsRouteSource from "../routes/LogsRoute.tsx?raw";

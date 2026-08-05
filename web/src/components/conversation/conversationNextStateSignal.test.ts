@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChatNextStateSignalSummary } from "../../api/types";
-import chatCodingRouteSource from "../../routes/ChatCodingRoute.tsx?raw";
+import chatCodingRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 

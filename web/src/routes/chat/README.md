@@ -1,6 +1,17 @@
 # Chat route modules (`web/src/routes/chat`)
 
-Agent-oriented map for Chat workbench development. Prefer editing a **module** over `ChatCodingRoute.tsx` when possible.
+Agent-oriented map for Chat workbench development. Prefer editing a **module** over the workbench shell when possible.
+
+## Entry (R01)
+
+| Path | Role |
+|------|------|
+| `web/src/routes/ChatCodingRoute.tsx` | **Thin re-export only** (router/layout import path) |
+| `web/src/routes/chat/ChatCodingRouteWorkbench.tsx` | Workbench implementation shell (still thick; do not grow without extract) |
+
+```text
+ChatCodingRoute.tsx → re-export ChatCodingRouteWorkbench
+```
 
 ## Ownership map (claim scopes)
 
@@ -34,7 +45,7 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 | Shell layout / resize / responsive panes | `useChatWorkbenchLayout.ts` | stream/submit |
 | Left index / new Agent / group / system entry UI | `ChatConversationIndexRail.tsx` | stream/submit |
 | Right status / run modes / token / pet / group settings | `ChatStatusRail.tsx` | left index, stream apply |
-| Orchestration / wiring only | `../ChatCodingRoute.tsx` | — |
+| Orchestration / wiring only | `ChatCodingRouteWorkbench.tsx` (prefer extract first) | thin entry `ChatCodingRoute.tsx` |
 
 ## Phase A (done)
 
@@ -62,7 +73,7 @@ Pure helpers extracted from `ChatCodingRoute.tsx`:
 
 ## Phase E (done for structure ROI)
 
-Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-split.md`
+Historical plan (archived): `docs/archive/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-split.md`
 
 - **E1–E4i done:** stream selection split, workspace hooks, surface models, center surfaces
 - **D2 (ROI queue):** `conversationFeedbackStatusPresentation.ts` — feedback status placeholder pure boundary for `ConversationView` (projection vs shell)

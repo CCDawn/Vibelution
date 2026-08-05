@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import routeSource from "./ChatCodingRoute.tsx?raw";
+import routeSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
 import tabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import lifecycleSource from "./chat/useChatWorkspaceLifecycle.ts?raw";
+import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 
 describe("ChatCodingRoute Agent-session hierarchy", () => {
   it("uses Agent navigation on the left and queries tabs by the selected Agent", () => {
     expect(routeSource).toContain("AgentConversationDirectory,");
     expect(routeSource).toContain("visibleDirectoryAgents,");
-    expect(routeSource).toContain('from "./AgentConversationDirectory"');
+    expect(routeSource).toContain('from "../AgentConversationDirectory"');
     expect(routeSource).toContain('queryKey: ["sessions", "agent", selectedChatAgentId]');
     expect(routeSource).toContain('`/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`');
     expect(routeSource).toContain("<AgentConversationDirectory");
-    expect(routeSource).toContain('import("./agent-create/AgentCreateWizardDialog")');
-    expect(routeSource).toContain("setAgentCreateWizardOpen(true)");
+    expect(routeSource).toContain('import("../agent-create/AgentCreateWizardDialog")');
+    // Open wizard lives in directory actions hook (not inline in workbench).
+    expect(agentDirectoryActionsSource).toContain("setAgentCreateWizardOpen(true)");
     expect(routeSource).toContain("<AgentCreateWizardDialog");
     expect(routeSource).toContain("{agentCreateWizardOpen ? (");
     expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
