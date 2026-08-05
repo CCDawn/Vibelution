@@ -1,14 +1,16 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), "utf8");
-const presentationSource = readFileSync(new URL("./useSourceCollectionPresentation.ts", import.meta.url), "utf8");
+const routeShellSource = readFileSync(new URL("./TeamsRouteWorkbench.tsx", import.meta.url), "utf8");
+const routeModelSource = readFileSync(new URL("./useTeamsWorkbenchModel.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchFoundation.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8");
+const routeSource = `${routeShellSource}\n${routeModelSource}`;
+const presentationSource = readFileSync(new URL("./useSourceCollectionPresentationCore.ts", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useSourceCollectionPresentationPipeline.ts", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useSourceCollectionPresentationMid.ts", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useSourceCollectionPresentationTail.ts", import.meta.url), "utf8");
 const surfaceSource = readFileSync(new URL("./teamMutationSurface.ts", import.meta.url), "utf8");
 
 describe("teamMutationSurface Phase 4 contract", () => {
   it("SC presentation consumes buildTeamsRouteMutationSurface instead of repeating team-scoped ternaries", () => {
     expect(presentationSource).toContain("buildTeamsRouteMutationSurface({");
-    expect(routeSource).toContain("useSourceCollectionPresentation({");
+    expect(routeSource).toContain("useTeamsScComposition");
     expect(routeSource).not.toContain(
       "startSourceCollectionRunMutation.isPending && startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId",
     );

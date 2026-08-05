@@ -58,4 +58,4 @@ Prefer slice modules over growing `team_service.py` when possible.
 ## Related
 
 - Routes: `core/web/routes/teams.py`
-- Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
+- Historical plans: `docs/archive/plans/2026-06-07/`

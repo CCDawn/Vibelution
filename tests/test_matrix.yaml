@@ -65,6 +65,42 @@ rules:
     notes:
       - "Gate-definition changes must validate the gate itself even when the matrix changes in the same branch."
 
+  - id: agent-runtime-core
+    description: "Agent single-turn entry, orchestration, turn status bar, and budget profiles."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "agent.py"
+      - "core/orchestration/**"
+      - "core/orchestration/turn_status_bar.py"
+      - "core/orchestration/tool_budget_profiles.py"
+      - "tests/test_turn_status_bar_and_budget_profiles.py"
+      - "tests/test_agent_protocol.py"
+      - "tests/test_agent_kernel_adapters.py"
+      - "tests/test_agent_kernel_source_authority.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_turn_status_bar_and_budget_profiles.py tests/test_agent_protocol.py tests/test_agent_kernel_adapters.py tests/test_agent_kernel_source_authority.py -q"
+    notes:
+      - "agent.py changes almost always need Launcher/runtime restart before live chat verification."
+      - "Prefer focused orchestration tests before full agent regression."
+
+  - id: service-structure-ownership
+    description: "Web service pack structure guards and Agent services index README."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/README.md"
+      - "core/web/services/**/README.md"
+      - "scripts/_gen_services_readme.py"
+      - "tests/test_service_structure_guards.py"
+      - "tests/test_service_pack_path_literals.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_service_structure_guards.py tests/test_service_pack_path_literals.py -q"
+    notes:
+      - "New *_service.py facades must appear in core/web/services/README.md (regen via scripts/_gen_services_readme.py)."
+
   - id: web-session-chat
     description: "Direct chat, session routes, room routes, and conversation UI."
     executionLayers:
@@ -140,10 +176,14 @@ rules:
     executionLayers:
       - "focused"
       - "local-serial"
+      - "local-parallel"
     paths:
       - "config/**"
       - "core/llm/**"
+      - "core/llm/payload_builder.py"
+      - "core/llm/PROTOCOL.md"
       - "core/web/services/config_service.py"
+      - "docs/ops/config/**"
       - "tests/test_web_config_routes.py"
       - "tests/test_config_panel.py"
       - "tests/test_config_sync.py"
@@ -151,10 +191,17 @@ rules:
       - "tests/test_llm_client.py"
       - "tests/test_prompt_cache_hit_optimization.py"
       - "tests/test_llm_invocation_context.py"
+      - "tests/test_llm_protocol_cache_alignment.py"
+      - "tests/test_llm_protocol_resolver.py"
+      - "tests/test_llm_wire_*.py"
+      - "tests/test_turn_status_bar_and_budget_profiles.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_config_routes.py tests/test_config_panel.py tests/test_config_sync.py tests/test_public_config_model_refs.py tests/test_llm_client.py tests/test_prompt_cache_hit_optimization.py tests/test_llm_invocation_context.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_llm_protocol_cache_alignment.py tests/test_llm_protocol_resolver.py tests/test_llm_wire_chat_completions.py tests/test_llm_wire_responses.py tests/test_prompt_cache_hit_optimization.py tests/test_llm_invocation_context.py tests/test_turn_status_bar_and_budget_profiles.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_config_routes.py tests/test_config_panel.py tests/test_config_sync.py tests/test_public_config_model_refs.py tests/test_llm_client.py -q"
     notes:
       - "Verify effective config behavior, not only source defaults."
+      - "Protocol/wire/cache tests are parallel-safe; config panel and web config routes stay serial."
+      - "Turn status bar placement affects DeepSeek automatic prefix cache; keep with LLM hot path."
 
   - id: agent-directory-config
     description: "Agent directory, mode binding, prompt templates, and model reference repair."
@@ -233,30 +280,43 @@ rules:
     description: "Teams, Team Knowledge, Challenge Cup flow, and source collection workflow."
     executionLayers:
       - "focused"
-      - "local-serial"
+      - "local-parallel"
+      - "remote-distributed"
       - "frontend"
     paths:
       - "core/web/services/team_service.py"
       - "core/web/services/team_knowledge_service.py"
       - "core/web/services/team_workflow_orchestration_service.py"
       - "core/web/services/team_workflow/**"
-      - "core/web/routes/team_workflows.py"
+      - "core/web/routes/team_workflows/**"
       - "tests/test_team_service.py"
       - "tests/test_team_knowledge_service.py"
       - "tests/test_team_workflow_orchestration_service.py"
+      - "tests/test_team_workflow_structure_cases.py"
+      - "tests/test_team_workflow_source_collection_cases.py"
+      - "tests/test_team_workflow_experiment_cases.py"
+      - "tests/test_team_workflow_research_knowledge_cases.py"
+      - "tests/test_team_workflow_remainder_cases.py"
+      - "tests/test_team_workflow_facade_contract.py"
+      - "tests/test_team_workflow_structure_packs.py"
       - "tests/test_team_workflow_routes.py"
+      - "tests/_support/team_workflow/**"
       - "web/src/routes/TeamsRoute.tsx"
       - "web/src/routes/TeamsRoute.styles.ts"
       - "web/src/routes/TeamsRoute.layout.test.ts"
       - "web/src/routes/teams/**"
       - "挑战杯/**"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_service.py tests/test_team_knowledge_service.py tests/test_team_workflow_orchestration_service.py tests/test_team_workflow_routes.py -q"
-      - "node web/node_modules/vitest/vitest.mjs run TeamsRoute.layout.test.ts"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_workflow_facade_contract.py tests/test_team_workflow_structure_packs.py tests/test_team_service.py tests/test_team_knowledge_service.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_workflow_routes.py tests/test_team_workflow_structure_cases.py tests/test_team_workflow_source_collection_cases.py tests/test_team_workflow_experiment_cases.py tests/test_team_workflow_research_knowledge_cases.py tests/test_team_workflow_remainder_cases.py -n 4 --dist loadfile -q"
+      - "node web/node_modules/vitest/vitest.mjs run src/routes/teams TeamsRoute.layout.test.ts"
       - "npm --prefix web run build"
       - "node 挑战杯/build_research_flow_site.mjs"
     notes:
       - "Challenge Cup flow changes must regenerate and verify the research flow HTML."
+      - "Behavioral cases are split into five domain packs for xdist loadfile; the aggregate test_team_workflow_orchestration_service.py is skipped when those packs are collected."
+      - "Single-domain debug: pytest tests/test_team_workflow_source_collection_cases.py -q (or cases_*.py under _support/)."
+      - "Team workflow Python tests are not serial-marked; use local-parallel / remote-distributed for speed."
 
   - id: frontend-workbench
     description: "Workbench routes, shared frontend API types, and route-level layout tests."
@@ -270,13 +330,17 @@ rules:
       - "web/src/api/**"
       - "web/src/app/**"
       - "web/src/i18n/**"
+      - "web/vite.config.ts"
+      - "web/package.json"
+      - "web/bundleBudget.test.ts"
     commands:
       - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts"
       - "node web/node_modules/vitest/vitest.mjs run"
       - "npm --prefix web run build"
     notes:
       - "VUI/shadcn route contract + component design catalog are mandatory for any web UI path (root AGENTS.md §2)."
-      - "Prefer narrowing the Vitest file list manually when the changed route has a dedicated layout test, but keep both VUI design gates."
+      - "Vitest uses fileParallelism + forks (see web/vite.config.ts); prefer npm --prefix web run test for the full suite."
+      - "Prefer narrowing the Vitest file list manually when the changed route has a dedicated layout/contract test, but keep both VUI design gates."
 
   - id: docs-only
     description: "Documentation-only changes."

@@ -1,34 +1,20 @@
 /**
- * Research stage standalone page (experiment / iteration workspaces).
- * Product shell: stage nav + workbench body only (no team rail, no dump walls).
+ * Research stage standalone page — thin adapter over ExperimentStageComposer.
  */
 import type { ReactNode } from "react";
-import { ArrowLeft, RefreshCw, Users } from "lucide-react";
-import { Link } from "react-router-dom";
 
 import type { Team } from "../api/types";
-import { VButton, VNativeButton } from "../components/vui";
 import {
   type ExperimentPlanRecord,
   type ExperimentPlanningStatusPayload,
 } from "./teams/experimentLoopModel";
-import { RESEARCH_TEAM_ID } from "./TeamsRoute.canvasData";
-import {
-  researchWorkspaceStageRoute,
-  teamWorkspaceRoute,
-  type ResearchStageWorkspaceView,
-} from "./teams/researchWorkspaceModel";
 import type {
   ResearchStagePhaseStatus,
   ResearchStageType,
 } from "./teams/source-collection/stageProjection";
 import type { ResearchStageUnlock } from "./teams/researchPrimaryActionModel";
-import { ResearchStageNav } from "./teams/ResearchStageNav";
-import { teamChatRoomRoute } from "./teams/researchStageAgentPresentation";
-import researchStyles from "./TeamsRoute.research.styles";
-import shellStyles from "./TeamsRoute.styles";
-
-const styles = { ...shellStyles, ...researchStyles } as Record<string, string>;
+import type { ResearchStageWorkspaceView, ResearchWorkspaceView } from "./teams/researchWorkspaceModel";
+import { ExperimentStageComposer } from "./teams/ExperimentStageComposer";
 
 type Lang = "zh" | "en";
 type StageView = Exclude<ResearchStageWorkspaceView, "knowledge_collection">;
@@ -57,12 +43,8 @@ export type TeamResearchStageStandalonePagePanelProps = {
   renderExperimentPlanningLedgerPanel: () => ReactNode;
   renderResearchLoopPanel: (activePlan: ExperimentPlanRecord | null, variant?: "experiment" | "iteration") => ReactNode;
   researchStageUnlock?: ResearchStageUnlock;
-  onSelectResearchStage?: (view: ResearchStageWorkspaceView) => void;
+  onSelectResearchStage?: (view: ResearchWorkspaceView) => void;
   onBackToOverview?: () => void;
-  /**
-   * When true, page is embedded in Teams board shell.
-   * Product path uses standalone full page (false) so left team rail is gone.
-   */
   embeddedInBoard?: boolean;
 };
 
@@ -87,102 +69,40 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
     embeddedInBoard = false,
   } = props;
 
-  const title = stageView === "experiment"
-    ? (lang === "zh" ? "实验规划工作台" : "Experiment planning workspace")
-    : (lang === "zh" ? "迭代优化工作台" : "Iteration workspace");
-  const statusLoading = !experimentPlanningStatus && experimentPlanningStatusQuery.isPending;
-  const statusText = statusLoading
-    ? (lang === "zh" ? "读取中" : "Loading")
-    : (experimentPlanningStatus?.activePlan
-      ? (lang === "zh" ? "有计划" : "Plan ready")
-      : (lang === "zh" ? "待配置" : "Not set up"));
+  const unlock = researchStageUnlock || {
+    knowledge_collection: true,
+    experiment: true,
+    iteration: true,
+  };
+
+  const body = stageView === "experiment"
+    ? renderExperimentPlanningLedgerPanel()
+    : renderResearchLoopPanel(experimentPlanningStatus?.activePlan ?? null, "iteration");
 
   return (
-    <section
-      className={[
-        styles.researchStagePage,
-        styles.route,
-        styles.sourceCollectionPage,
-        embeddedInBoard ? styles.researchStagePageEmbedded : "",
-      ].filter(Boolean).join(" ")}
-      data-fill={embeddedInBoard ? "true" : undefined}
-      data-research-stage-view={stageView}
-      data-testid="research-stage-standalone-page"
-      data-product-workbench="true"
-    >
-      <header className={`${styles.header} ${styles.sourceCollectionPageHeader}`}>
-        <div className={styles.sourceCollectionPageTitleBlock}>
-          <div className={styles.sourceCollectionPageTitleLine}>
-            <h1>{title}</h1>
-            <span className={styles.sourceCollectionRunBadge} data-research-stage-detail-status={statusText}>
-              {statusText}
-            </span>
-          </div>
-          {researchStageUnlock && onSelectResearchStage ? (
-            <ResearchStageNav
-              lang={lang}
-              current={stageView}
-              unlock={researchStageUnlock}
-              onSelect={onSelectResearchStage}
-              onOverview={onBackToOverview}
-            />
-          ) : null}
-        </div>
-        <div className={styles.sourceCollectionPageActions}>
-          {linkedChatRoomId ? (
-            <Link
-              to={teamChatRoomRoute(
-                linkedChatRoomId,
-                researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageView),
-                lang === "zh" ? "返回阶段页" : "Back to stage",
-              )}
-            >
-              <Users size={14} />
-              {lang === "zh" ? "团队讨论" : "Team discussion"}
-            </Link>
-          ) : (
-            <VButton
-              type="button"
-              density="compact"
-              variant="secondary"
-              icon={<Users size={14} />}
-              onPress={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
-              isDisabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
-            >
-              {selectedTeamSyncPending
-                ? (lang === "zh" ? "同步中" : "Syncing")
-                : (lang === "zh" ? "同步讨论" : "Sync chat")}
-            </VButton>
-          )}
-          <Link
-            to={
-              onBackToOverview
-                ? `/teams?team=${encodeURIComponent(selectedTeam?.teamId || RESEARCH_TEAM_ID)}&researchView=overview&teamMode=board`
-                : teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)
-            }
-          >
-            <ArrowLeft size={14} />
-            {lang === "zh" ? "返回科研总览" : "Back to overview"}
-          </Link>
-          <VNativeButton
-            type="button"
-            onClick={refreshStageWorkspace}
-            disabled={researchStageRoundStatusQuery.isFetching || experimentPlanningStatusQuery.isFetching}
-          >
-            <RefreshCw size={14} />
-            {lang === "zh" ? "刷新" : "Refresh"}
-          </VNativeButton>
-        </div>
-      </header>
-      <main
-        className={styles.researchStagePageBody}
-        data-testid="research-stage-workbench-body"
-      >
-        {stageView === "experiment" ? renderExperimentPlanningLedgerPanel() : null}
-        {stageView === "iteration"
-          ? renderResearchLoopPanel(experimentPlanningStatus?.activePlan ?? null, "iteration")
-          : null}
-      </main>
-    </section>
+    <ExperimentStageComposer
+      lang={lang}
+      stageView={stageView}
+      unlock={unlock}
+      onSelectStage={(view) => onSelectResearchStage?.(view)}
+      onOverview={() => onBackToOverview?.()}
+      teamId={selectedTeam?.teamId}
+      linkedChatRoomId={linkedChatRoomId || undefined}
+      onSyncChat={
+        selectedTeam?.teamId
+          ? () => syncTeamChatRoomMutation.mutate(selectedTeam.teamId)
+          : undefined
+      }
+      chatSyncPending={selectedTeamSyncPending}
+      chatSyncDisabled={!selectedTeam || activeTeamMemberCount === 0}
+      onRefresh={refreshStageWorkspace}
+      refreshDisabled={
+        researchStageRoundStatusQuery.isFetching || experimentPlanningStatusQuery.isFetching
+      }
+      experimentPlanningStatus={experimentPlanningStatus}
+      statusLoading={!experimentPlanningStatus && experimentPlanningStatusQuery.isPending}
+      body={body}
+      embeddedInBoard={embeddedInBoard}
+    />
   );
 }

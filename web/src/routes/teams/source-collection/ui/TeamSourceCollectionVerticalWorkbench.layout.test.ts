@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import persistedHeightListShellSource from "../components/layout/PersistedHeightListShell.tsx?raw";
-import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
+import persistedHeightListShellSource from "../../../../components/layout/PersistedHeightListShell.tsx?raw";
+import { WORKBENCH_LAYOUT_IDS } from "../../../../components/layout/workbenchLayoutIds";
 import activeStageSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
 import activeStageStyles from "./TeamSourceCollectionActiveStagePanel.styles";
 import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
@@ -9,7 +9,7 @@ import screeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
 import screeningPanelStyles from "./TeamSourceCollectionScreeningPanel.styles";
 import standaloneStageSource from "./TeamSourceCollectionStandaloneStagePanel.tsx?raw";
 import standaloneStageStyles from "./TeamSourceCollectionStandaloneStagePanel.styles";
-import { SOURCE_COLLECTION_RESULT_PAGE_SIZE } from "./teams/source-collection/presentationModel";
+import { SOURCE_COLLECTION_RESULT_PAGE_SIZE } from "../presentationModel";
 
 describe("source collection vertical three-column workbench", () => {
   it("uses persisted VSplitWorkspace rails instead of fixed clamp grid columns", () => {

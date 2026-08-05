@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import experimentApiSource from "../../api/teamExperiment.ts?raw";
-import routeSource from "../TeamsRoute.tsx?raw";
+import routeShellSource from "./TeamsRouteWorkbench.tsx?raw";
+import routeModelSourceThin from "./useTeamsWorkbenchModel.tsx?raw";
+import routeFoundationSource from "./useTeamsWorkbenchFoundation.tsx?raw";
+import routeShellPhaseSource from "./useTeamsWorkbenchShellPhase.tsx?raw";
+const routeModelSource = `${routeModelSourceThin}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
+import mutationBundleSource from "./useTeamsMutationBundle.ts?raw";
+const routeSource = `${routeShellSource}\n${routeModelSource}\n${routeFoundationSource}\n${routeShellPhaseSource}\n${mutationBundleSource}`;
 import {
   buildResearchLoopDecisionIdempotencyKey,
 } from "./useTeamExperimentLoopMutations";
@@ -47,7 +53,9 @@ describe("team experiment loop mutations contract", () => {
   });
 
   it("is wired from TeamsRoute while Route no longer defines those mutations inline", () => {
-    expect(routeSource).toContain("useTeamExperimentLoopMutations({");
+    // R2-g: model → mutation bundle → experiment loop mutations.
+    expect(routeModelSource).toContain("useTeamsMutationBundle({");
+    expect(mutationBundleSource).toContain("useTeamExperimentLoopMutations({");
     mutationOwners.forEach((owner) => {
       expect(routeSource).not.toContain(`const ${owner} = useMutation({`);
       expect(routeSource).toContain(owner);

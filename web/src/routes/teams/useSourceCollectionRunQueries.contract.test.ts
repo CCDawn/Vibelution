@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import routeSource from "../TeamsRoute.tsx?raw";
+import routeShellSource from "./TeamsRouteWorkbench.tsx?raw";
+import routeModelSourceThin from "./useTeamsWorkbenchModel.tsx?raw";
+import routeFoundationSource from "./useTeamsWorkbenchFoundation.tsx?raw";
+import routeShellPhaseSource from "./useTeamsWorkbenchShellPhase.tsx?raw";
+const routeModelSource = `${routeModelSourceThin}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
+const routeSource = `${routeShellSource}\n${routeModelSource}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
 import modelSource from "./sourceCollectionRunQueryModel.ts?raw";
 import queriesSource from "./useSourceCollectionRunQueries.ts?raw";
 import workspaceSource from "./useSourceCollectionWorkspace.ts?raw";
@@ -23,7 +28,8 @@ describe("source-collection run queries contract", () => {
     // Phase 1: route consumes workspace hook; workspace composes run queries.
     expect(routeSource).toContain("useSourceCollectionWorkspace({");
     expect(workspaceSource).toContain("useSourceCollectionRunQueries({");
-    expect(routeSource).toContain("sourceCollectionRunQueryModel");
+    // Payload types live in sourceCollectionRunQueryModel; workbench no longer re-imports the module path string.
+    expect(queriesSource).toMatch(/sourceCollectionRunQueryModel|SourceCollectionSummaryPayload/);
     expect(modelSource).toContain("export type SourceCollectionSummaryPayload");
     expect(modelSource).toContain("export type DataProcessingRecordListPayload");
     expect(routeSource).not.toContain("type SourceCollectionSummaryPayload =");

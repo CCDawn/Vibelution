@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import routeSource from "../TeamsRoute.tsx?raw";
+import routeShellSource from "./TeamsRouteWorkbench.tsx?raw";
+import routeModelSourceThin from "./useTeamsWorkbenchModel.tsx?raw";
+import routeFoundationSource from "./useTeamsWorkbenchFoundation.tsx?raw";
+import routeShellPhaseSource from "./useTeamsWorkbenchShellPhase.tsx?raw";
+const routeModelSource = `${routeModelSourceThin}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
+import mutationBundleSource from "./useTeamsMutationBundle.ts?raw";
+const routeSource = `${routeShellSource}\n${routeModelSource}\n${routeFoundationSource}\n${routeShellPhaseSource}\n${mutationBundleSource}`;
 import resourcesSource from "./useResearchWorkflowResources.ts?raw";
 import {
   officialModelEvidenceStatusQueryKey,
@@ -93,14 +99,17 @@ describe("research workflow shared read-query contract", () => {
     ].forEach((queryName) => {
       expect(routeSource).not.toContain(`const ${queryName} = useQuery({`);
     });
+    // R2-g: mutation families are owned by the bundle, not inlined in the model.
+    expect(routeModelSource).toContain("useTeamsMutationBundle({");
     [
       "useTeamShellMutations",
       "useTeamWorkflowStartMutations",
       "useTeamExperimentLoopMutations",
       "useTeamSourceCollectionMutations",
     ].forEach((mutationOwner) => {
-      expect(routeSource).toContain(`${mutationOwner}({`);
+      expect(mutationBundleSource).toContain(`${mutationOwner}({`);
+      expect(routeModelSource).not.toContain(`${mutationOwner}({`);
     });
-    expect(routeSource).not.toContain("useMutation");
+    expect(routeModelSource).not.toContain("useMutation");
   });
 });

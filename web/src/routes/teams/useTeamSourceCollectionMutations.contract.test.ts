@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import routeSource from "../TeamsRoute.tsx?raw";
+import routeShellSource from "./TeamsRouteWorkbench.tsx?raw";
+import routeModelSourceThin from "./useTeamsWorkbenchModel.tsx?raw";
+import routeFoundationSource from "./useTeamsWorkbenchFoundation.tsx?raw";
+import routeShellPhaseSource from "./useTeamsWorkbenchShellPhase.tsx?raw";
+const routeModelSource = `${routeModelSourceThin}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
+import mutationBundleSource from "./useTeamsMutationBundle.ts?raw";
+const routeSource = `${routeShellSource}\n${routeModelSource}\n${routeFoundationSource}\n${routeShellPhaseSource}\n${mutationBundleSource}`;
 import modelSource from "./sourceCollectionMutationModel.ts?raw";
 import mutationsSource from "./useTeamSourceCollectionMutations.ts?raw";
 
@@ -35,7 +41,9 @@ describe("team source-collection mutations contract", () => {
   });
 
   it("is wired from TeamsRoute while Route no longer defines those mutations inline", () => {
-    expect(routeSource).toContain("useTeamSourceCollectionMutations({");
+    // R2-g: model → mutation bundle → SC mutations.
+    expect(routeModelSource).toContain("useTeamsMutationBundle({");
+    expect(mutationBundleSource).toContain("useTeamSourceCollectionMutations({");
     expect(routeSource).toContain("scrollSourceCollectionPanelIntoViewRef");
     expect(routeSource).toContain("sourceCollectionMutationModel");
     mutationOwners.forEach((owner) => {

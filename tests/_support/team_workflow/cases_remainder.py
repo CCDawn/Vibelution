@@ -122,6 +122,12 @@ def test_content_extraction_writeback_downgrades_unanchored_evidence_ledger(tmp_
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(
+        run_id,
+        count=1,
+        title_prefix="Missing anchor raw source",
+        doi_prefix="10.0000/missing-anchor-raw",
+    )
     candidate = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
         {

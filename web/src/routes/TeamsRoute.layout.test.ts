@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
-import routeSourceRaw from "./TeamsRoute.tsx?raw";
+import routeSourceRawThin from "./teams/useTeamsWorkbenchModel.tsx?raw";
+import routeSourceRawFoundation from "./teams/useTeamsWorkbenchFoundation.tsx?raw";
+import routeSourceRawShellPhase from "./teams/useTeamsWorkbenchShellPhase.tsx?raw";
+const routeSourceRaw = `${routeSourceRawThin}\n${routeSourceRawFoundation}\n${routeSourceRawShellPhase}`;
+import teamsRouteShellSource from "./teams/TeamsRouteWorkbench.tsx?raw";
 import teamsSourceCollectionPanelSource from "./teams/TeamsSourceCollectionPanel.tsx?raw";
 import researchMemoryEvidencePanelSource from "./teams/ResearchMemoryEvidencePanel.tsx?raw";
 import canvasGeometrySource from "./teams/canvasGeometry.ts?raw";
@@ -13,6 +17,7 @@ import teamShellToolbarSource from "./teams/TeamShellToolbar.tsx?raw";
 import teamCanvasReadOnlyInspectorSource from "./teams/TeamCanvasReadOnlyInspector.tsx?raw";
 import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRenderers.tsx?raw";
 import teamSourceCollectionInjectRenderersSource from "./teams/teamSourceCollectionInjectRenderers.tsx?raw";
+import sourceCollectionControllerSource from "./teams/source-collection/createSourceCollectionController.tsx?raw";
 import teamResearchWorkflowSurfaceRenderersSource from "./teams/teamResearchWorkflowSurfaceRenderers.tsx?raw";
 import teamResearchPrimarySurfaceRenderersSource from "./teams/teamResearchPrimarySurfaceRenderers.tsx?raw";
 import teamCanvasNodeEditingSource from "./teams/useTeamCanvasNodeEditing.ts?raw";
@@ -20,14 +25,68 @@ import teamCanvasNodeModelSource from "./teams/teamCanvasNodeModel.ts?raw";
 import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
 import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
 import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
+import useTeamsCatalogQueriesSource from "./teams/useTeamsCatalogQueries.ts?raw";
+import useTeamsSelectedTeamDetailSource from "./teams/useTeamsSelectedTeamDetail.ts?raw";
+import teamsWorkbenchChromeSource from "./teams/teamsWorkbenchChrome.ts?raw";
+import teamWorkflowResourceDemandSource from "./teams/teamWorkflowResourceDemand.ts?raw";
+import useTeamsSecondaryDataQueriesSource from "./teams/useTeamsSecondaryDataQueries.ts?raw";
+import useTeamsMutationBundleSource from "./teams/useTeamsMutationBundle.ts?raw";
+import researchStageAgentBindingsSource from "./teams/researchStageAgentBindings.ts?raw";
+import createTeamsResearchNavigationSource from "./teams/createTeamsResearchNavigation.ts?raw";
+import createSourceCollectionStageAgentHelpersSource from "./teams/createSourceCollectionStageAgentHelpers.ts?raw";
+import createResearchStageLaunchHandlersSource from "./teams/createResearchStageLaunchHandlers.ts?raw";
+import buildExperimentWorkspacePendingFlagsSource from "./teams/buildExperimentWorkspacePendingFlags.ts?raw";
+import composeSourceCollectionStageSurfacesSource from "./teams/composeSourceCollectionStageSurfaces.ts?raw";
+import deriveSourceCollectionListMetricsSource from "./teams/source-collection/deriveSourceCollectionListMetrics.ts?raw";
+import deriveSourceCollectionDisplayLabelsSource from "./teams/source-collection/deriveSourceCollectionDisplayLabels.ts?raw";
+import deriveSourceCollectionDownstreamMetricsSource from "./teams/source-collection/deriveSourceCollectionDownstreamMetrics.ts?raw";
+import deriveSourceCollectionStageDisplaySurfacesSource from "./teams/source-collection/deriveSourceCollectionStageDisplaySurfaces.ts?raw";
+import deriveSourceCollectionSelectionPresentationSource from "./teams/source-collection/deriveSourceCollectionSelectionPresentation.ts?raw";
+import deriveSourceCollectionSummaryProjectionSource from "./teams/source-collection/deriveSourceCollectionSummaryProjection.ts?raw";
+import createSourceCollectionStageActionHelpersSource from "./teams/source-collection/createSourceCollectionStageActionHelpers.ts?raw";
+import useSourceCollectionPresentationEffectsSource from "./teams/source-collection/useSourceCollectionPresentationEffects.ts?raw";
+import useSourceCollectionPresentationCoreSource from "./teams/useSourceCollectionPresentationCore.ts?raw";
+import useSourceCollectionPresentationPipelineSource from "./teams/useSourceCollectionPresentationPipeline.ts?raw";
+import useSourceCollectionPresentationMidSource from "./teams/useSourceCollectionPresentationMid.ts?raw";
+import useSourceCollectionPresentationTailSource from "./teams/useSourceCollectionPresentationTail.ts?raw";
 import teamMutationSurfaceSource from "./teams/teamMutationSurface.ts?raw";
 import sourceCollectionActionChromeSource from "./teams/source-collection/actionChrome.ts?raw";
-import useSourceCollectionPresentationSource from "./teams/useSourceCollectionPresentation.ts?raw";
+import useSourceCollectionPresentationEntrySource from "./teams/useSourceCollectionPresentation.ts?raw";
+import useSourceCollectionPresentationSourceRaw from "./teams/useSourceCollectionPresentationCore.ts?raw";
+import useSourceCollectionPresentationPipelineSource2 from "./teams/useSourceCollectionPresentationPipeline.ts?raw";
+const useSourceCollectionPresentationSource = `${useSourceCollectionPresentationSourceRaw}\n${useSourceCollectionPresentationPipelineSource}\n${useSourceCollectionPresentationMidSource}\n${useSourceCollectionPresentationTailSource}`;
+import useTeamsScCompositionSource from "./teams/useTeamsScComposition.ts?raw";
+import useTeamsWorkbenchModelSource from "./teams/useTeamsWorkbenchModel.tsx?raw";
+import useTeamsWorkbenchFoundationSource from "./teams/useTeamsWorkbenchFoundation.tsx?raw";
+import useTeamsWorkbenchShellPhaseSource from "./teams/useTeamsWorkbenchShellPhase.tsx?raw";
+import useTeamsWorkbenchScLayerSource from "./teams/useTeamsWorkbenchScLayer.ts?raw";
+import buildTeamsWorkbenchResearchSurfacesFromBagSource from "./teams/buildTeamsWorkbenchResearchSurfacesFromBag.ts?raw";
+import createTeamsResearchSurfacesSource from "./teams/createTeamsResearchSurfaces.ts?raw";
+import renderTeamsShellFrameSource from "./teams/renderTeamsShellFrame.tsx?raw";
+import teamsShellSurfaceModelSource from "./teams/teamsShellSurfaceModel.ts?raw";
+import buildTeamWorkflowCandidatePreviewItemsSource from "./teams/buildTeamWorkflowCandidatePreviewItems.tsx?raw";
+import buildSourceCollectionOverviewBagSource from "./teams/buildSourceCollectionOverviewBag.ts?raw";
 import stageModulesModelSource from "./teams/source-collection/stageModulesModel.ts?raw";
+import sourceCollectionActionHandlersSource from "./teams/source-collection/createSourceCollectionActionHandlers.ts?raw";
+import teamsShellGateSurfaceSource from "./teams/TeamsShellGateSurface.tsx?raw";
+import teamsCanvasComposerSource from "./teams/TeamsCanvasComposer.tsx?raw";
+import teamsOverviewComposerSource from "./teams/TeamsOverviewComposer.tsx?raw";
+import renderTeamsWorkbenchCanvasPageSource from "./teams/renderTeamsWorkbenchCanvasPage.tsx?raw";
+import renderTeamsWorkbenchBoardPageSource from "./teams/renderTeamsWorkbenchBoardPage.tsx?raw";
+import deriveSourceCollectionOperationFlagsSource from "./teams/source-collection/deriveSourceCollectionOperationFlags.ts?raw";
+import researchStageWorkbenchShellSource from "./teams/ResearchStageWorkbenchShell.tsx?raw";
+import sourceCollectionComposerSource from "./teams/SourceCollectionComposer.tsx?raw";
+import experimentStageComposerSource from "./teams/ExperimentStageComposer.tsx?raw";
+import createExperimentControllerSource from "./teams/createExperimentController.tsx?raw";
+import presentationActionReadinessSource from "./teams/source-collection/presentationActionReadiness.ts?raw";
+import presentationStepStatesSource from "./teams/source-collection/presentationStepStates.ts?raw";
+import presentationExtractionMetricsSource from "./teams/source-collection/presentationExtractionMetrics.ts?raw";
+import presentationCountTextSource from "./teams/source-collection/presentationCountText.ts?raw";
 
 /** Route + extracted shell modules (layout contracts may live in either). */
-const routeSource = [
+const routeSourceParts = [
   routeSourceRaw,
+  teamsRouteShellSource,
   teamOrganizationCanvasSurfaceSource,
   teamNodeBindingPanelSource,
   teamShellToolbarSource,
@@ -41,11 +100,60 @@ const routeSource = [
   useSourceCollectionWorkspaceSource,
   useResearchExperimentWorkspaceSource,
   useTeamsShellCanvasWorkspaceSource,
+  useTeamsCatalogQueriesSource,
+  useTeamsSelectedTeamDetailSource,
+  teamsWorkbenchChromeSource,
+  teamWorkflowResourceDemandSource,
+  useTeamsSecondaryDataQueriesSource,
+  useTeamsMutationBundleSource,
+  researchStageAgentBindingsSource,
+  createTeamsResearchNavigationSource,
+  createSourceCollectionStageAgentHelpersSource,
+  createResearchStageLaunchHandlersSource,
+  buildExperimentWorkspacePendingFlagsSource,
+  composeSourceCollectionStageSurfacesSource,
+  deriveSourceCollectionListMetricsSource,
+  deriveSourceCollectionDisplayLabelsSource,
+  deriveSourceCollectionDownstreamMetricsSource,
+  deriveSourceCollectionStageDisplaySurfacesSource,
+  deriveSourceCollectionSelectionPresentationSource,
+  deriveSourceCollectionSummaryProjectionSource,
+  createSourceCollectionStageActionHelpersSource,
+  useSourceCollectionPresentationEffectsSource,
+  useSourceCollectionPresentationCoreSource,
+  useSourceCollectionPresentationPipelineSource,
+  useSourceCollectionPresentationMidSource,
+  useSourceCollectionPresentationTailSource,
   teamMutationSurfaceSource,
   sourceCollectionActionChromeSource,
+  useSourceCollectionPresentationEntrySource,
   useSourceCollectionPresentationSource,
+  useTeamsWorkbenchModelSource,
+  useTeamsWorkbenchFoundationSource,
+  useTeamsWorkbenchShellPhaseSource,
+  useTeamsWorkbenchScLayerSource,
+  buildTeamsWorkbenchResearchSurfacesFromBagSource,
+  useTeamsScCompositionSource,
+  createTeamsResearchSurfacesSource,
+  renderTeamsShellFrameSource,
+  teamsShellSurfaceModelSource,
+  buildTeamWorkflowCandidatePreviewItemsSource,
+  buildSourceCollectionOverviewBagSource,
   stageModulesModelSource,
-].join("\n");
+  sourceCollectionControllerSource,
+  sourceCollectionActionHandlersSource,
+  teamsShellGateSurfaceSource,
+  teamsCanvasComposerSource,
+  teamsOverviewComposerSource,
+  researchStageWorkbenchShellSource,
+  sourceCollectionComposerSource,
+  experimentStageComposerSource,
+  createExperimentControllerSource,
+  presentationActionReadinessSource,
+  presentationStepStatesSource,
+  presentationExtractionMetricsSource,
+  presentationCountTextSource,
+];
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
 import teamLazyPanelsSource from "./teams/teamLazyPanels.tsx?raw";
@@ -76,24 +184,44 @@ import teamSourceCollectionShellModelSource from "./teams/teamSourceCollectionSh
 import teamSourceCollectionInjectModelSource from "./teams/source-collection/injectModel.ts?raw";
 import teamSourceCollectionModeFieldsSource from "./teams/TeamSourceCollectionModeFields.tsx?raw";
 
+/** Include pure/lazy owners so import cleanup in workbench does not break layout ownership asserts. */
+const routeSource = [
+  ...routeSourceParts,
+  teamLazyPanelsSource,
+  teamKindModelSource,
+  experimentLoopModelSource,
+  evidenceModelSource,
+  researchWorkspaceModelSource,
+  presentationModelSource,
+  stageProjectionSource,
+  researchWorkflowResourcesSource,
+  teamWorkflowStartMutationsSource,
+  teamExperimentLoopMutationsSource,
+  sourceCollectionRunQueriesSource,
+  renderTeamsWorkbenchCanvasPageSource,
+  renderTeamsWorkbenchBoardPageSource,
+  deriveSourceCollectionOperationFlagsSource,
+].join("\n");
+
 const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}\n${teamRouteShellModelSource}\n${teamSourceCollectionShellModelSource}`;
 
 describe("research project workspace", () => {
   it("never routes an active source-collection batch to a legacy direct Agent session", () => {
-    expect(routeSource).toContain(
+    // R2-j: stage agent chat helpers live in createSourceCollectionStageAgentHelpers.
+    expect(createSourceCollectionStageAgentHelpersSource).toContain(
       "const route = currentTaskSessionRoute;",
     );
-    expect(routeSource).toContain("projectRunAvailable: Boolean(selectedSourceCollectionRunEffectiveId)");
-    expect(routeSource).not.toContain("currentTaskSessionRoute || researchStageAgentDirectChatRoute(");
+    expect(createSourceCollectionStageAgentHelpersSource).toContain("projectRunAvailable: Boolean(selectedSourceCollectionRunEffectiveId)");
+    expect(createSourceCollectionStageAgentHelpersSource).not.toContain("currentTaskSessionRoute || researchStageAgentDirectChatRoute(");
   });
 
   it("labels a project-session creation action as Agent chat rather than Agent repair", () => {
-    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain(
+    const panel = teamSourceCollectionActiveStageWorkspacePanelSource.replace(/\r\n/g, "\n");
+    expect(panel).toContain(
       'const primaryStageAgentSessionCreateReady = primaryStageAgentChatState.status === "ready";',
     );
-    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain(
-      'primaryStageAgentSessionCreateReady\n        ? (lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat")',
-    );
+    expect(panel).toContain("进入 Agent 私聊");
+    expect(panel).toContain("Open Agent chat");
   });
 
   it("loads the current experiment projection on the Challenge research overview", () => {
@@ -163,60 +291,60 @@ import teamResearchLoopPanelSource from "./TeamResearchLoopPanel.tsx?raw";
 import teamExperimentPlanningLedgerPanelSource from "./TeamExperimentPlanningLedgerPanel.tsx?raw";
 import teamExperimentHypothesisGovernancePanelSource from "./TeamExperimentHypothesisGovernancePanel.tsx?raw";
 import teamKnowledgeCollectionCompletionFlowPanelSource from "./TeamKnowledgeCollectionCompletionFlowPanel.tsx?raw";
-import teamSourceCollectionConversationWorkspacePanelSource from "./TeamSourceCollectionConversationWorkspacePanel.tsx?raw";
-import teamSourceCollectionScreeningWorkspacePanelSource from "./TeamSourceCollectionScreeningWorkspacePanel.tsx?raw";
-import teamSourceCollectionExtractionRecoveryWorkspacePanelSource from "./TeamSourceCollectionExtractionRecoveryWorkspacePanel.tsx?raw";
-import teamSourceCollectionCandidateWorkspacePanelSource from "./TeamSourceCollectionCandidateWorkspacePanel.tsx?raw";
-import teamSourceCollectionGraphWorkspacePanelSource from "./TeamSourceCollectionGraphWorkspacePanel.tsx?raw";
-import teamSourceCollectionMemoryWorkspacePanelSource from "./TeamSourceCollectionMemoryWorkspacePanel.tsx?raw";
-import teamSourceCollectionSelectedSourceWorkspacePanelSource from "./TeamSourceCollectionSelectedSourceWorkspacePanel.tsx?raw";
-import teamSourceCollectionControlsWorkspacePanelSource from "./TeamSourceCollectionControlsWorkspacePanel.tsx?raw";
-import teamSourceCollectionActiveStageWorkspacePanelSource from "./TeamSourceCollectionActiveStageWorkspacePanel.tsx?raw";
+import teamSourceCollectionConversationWorkspacePanelSource from "./teams/source-collection/ui/TeamSourceCollectionConversationWorkspacePanel.tsx?raw";
+import teamSourceCollectionScreeningWorkspacePanelSource from "./teams/source-collection/ui/TeamSourceCollectionScreeningWorkspacePanel.tsx?raw";
+import teamSourceCollectionExtractionRecoveryWorkspacePanelSource from "./teams/source-collection/ui/TeamSourceCollectionExtractionRecoveryWorkspacePanel.tsx?raw";
+import teamSourceCollectionCandidateWorkspacePanelSource from "./teams/source-collection/ui/TeamSourceCollectionCandidateWorkspacePanel.tsx?raw";
+import teamSourceCollectionGraphWorkspacePanelSource from "./teams/source-collection/ui/TeamSourceCollectionGraphWorkspacePanel.tsx?raw";
+import teamSourceCollectionMemoryWorkspacePanelSource from "./teams/source-collection/ui/TeamSourceCollectionMemoryWorkspacePanel.tsx?raw";
+import teamSourceCollectionSelectedSourceWorkspacePanelSource from "./teams/source-collection/ui/TeamSourceCollectionSelectedSourceWorkspacePanel.tsx?raw";
+import teamSourceCollectionControlsWorkspacePanelSource from "./teams/source-collection/ui/TeamSourceCollectionControlsWorkspacePanel.tsx?raw";
+import teamSourceCollectionActiveStageWorkspacePanelSource from "./teams/source-collection/ui/TeamSourceCollectionActiveStageWorkspacePanel.tsx?raw";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
 import teamExperimentMethodPanelStyles from "./TeamExperimentMethodPanel.styles";
-import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
-import teamSourceCollectionActiveStagePanelStyles from "./TeamSourceCollectionActiveStagePanel.styles";
-import teamSourceCollectionCandidatePanelSource from "./TeamSourceCollectionCandidatePanel.tsx?raw";
-import teamSourceCollectionCandidatePanelStyles from "./TeamSourceCollectionCandidatePanel.styles";
-import teamSourceCollectionConversationPanelSource from "./TeamSourceCollectionConversationPanel.tsx?raw";
-import teamSourceCollectionConversationPanelStyles from "./TeamSourceCollectionConversationPanel.styles";
-import teamSourceCollectionConversationPanelStylesSource from "./TeamSourceCollectionConversationPanel.styles.ts?raw";
-import teamSourceCollectionControlsPanelSource from "./TeamSourceCollectionControlsPanel.tsx?raw";
-import teamSourceCollectionControlsPanelStyles from "./TeamSourceCollectionControlsPanel.styles";
-import teamSourceCollectionExtractionRecoveryPanelSource from "./TeamSourceCollectionExtractionRecoveryPanel.tsx?raw";
-import teamSourceCollectionExtractionRecoveryPanelStyles from "./TeamSourceCollectionExtractionRecoveryPanel.styles";
-import teamSourceCollectionFindingDetailsPanelSource from "./TeamSourceCollectionFindingDetailsPanel.tsx?raw";
-import teamSourceCollectionFindingDetailsPanelStyles from "./TeamSourceCollectionFindingDetailsPanel.styles";
-import teamSourceCollectionGraphPanelSource from "./TeamSourceCollectionGraphPanel.tsx?raw";
-import teamSourceCollectionGraphPanelStyles from "./TeamSourceCollectionGraphPanel.styles";
-import teamSourceCollectionManualWritebackPanelSource from "./TeamSourceCollectionManualWritebackPanel.tsx?raw";
-import teamSourceCollectionManualWritebackPanelStyles from "./TeamSourceCollectionManualWritebackPanel.styles";
-import teamSourceCollectionMemoryPanelSource from "./TeamSourceCollectionMemoryPanel.tsx?raw";
-import teamSourceCollectionMemoryPanelStyles from "./TeamSourceCollectionMemoryPanel.styles";
-import teamSourceCollectionPhaseCloseGatePanelSource from "./TeamSourceCollectionPhaseCloseGatePanel.tsx?raw";
-import teamSourceCollectionPhaseCloseGatePanelStyles from "./TeamSourceCollectionPhaseCloseGatePanel.styles";
-import teamSourceCollectionOverviewPanelSource from "./TeamSourceCollectionOverviewPanel.tsx?raw";
-import teamSourceCollectionOverviewPanelStyles from "./TeamSourceCollectionOverviewPanel.styles";
-import teamSourceCollectionOverviewPanelStylesSource from "./TeamSourceCollectionOverviewPanel.styles.ts?raw";
-import teamSourceCollectionPanelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
-import teamSourceCollectionPanelFrameStylesSource from "./TeamSourceCollectionPanelFrame.styles.ts?raw";
-import teamSourceCollectionResultControlsSource from "./TeamSourceCollectionResultControls.tsx?raw";
-import teamSourceCollectionRunSettingsPanelSource from "./TeamSourceCollectionRunSettingsPanel.tsx?raw";
-import teamSourceCollectionRunSettingsPanelStyles from "./TeamSourceCollectionRunSettingsPanel.styles";
-import teamSourceCollectionSearchBriefPanelSource from "./TeamSourceCollectionSearchBriefPanel.tsx?raw";
-import teamSourceCollectionSearchBriefPanelStyles from "./TeamSourceCollectionSearchBriefPanel.styles";
-import teamSourceCollectionScreeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
-import teamSourceCollectionScreeningPanelStyles from "./TeamSourceCollectionScreeningPanel.styles";
-import teamSourceCollectionStageAgentsPanelSource from "./TeamSourceCollectionStageAgentsPanel.tsx?raw";
-import teamSourceCollectionStageAgentsPanelStyles from "./TeamSourceCollectionStageAgentsPanel.styles";
-import teamSourceCollectionRunSwitcherPanelSource from "./TeamSourceCollectionRunSwitcherPanel.tsx?raw";
-import teamSourceCollectionRunSwitcherPanelStyles from "./TeamSourceCollectionRunSwitcherPanel.styles";
-import teamSourceCollectionSourceDetailPanelSource from "./TeamSourceCollectionSourceDetailPanel.tsx?raw";
-import teamSourceCollectionSourceDetailPanelStyles from "./TeamSourceCollectionSourceDetailPanel.styles";
-import teamSourceCollectionStandaloneStagePanelSource from "./TeamSourceCollectionStandaloneStagePanel.tsx?raw";
-import teamSourceCollectionStandaloneStagePanelStyles from "./TeamSourceCollectionStandaloneStagePanel.styles";
-import teamSourceCollectionStorageActionsPanelSource from "./TeamSourceCollectionStorageActionsPanel.tsx?raw";
-import teamSourceCollectionStorageActionsPanelStyles from "./TeamSourceCollectionStorageActionsPanel.styles";
+import teamSourceCollectionActiveStagePanelSource from "./teams/source-collection/ui/TeamSourceCollectionActiveStagePanel.tsx?raw";
+import teamSourceCollectionActiveStagePanelStyles from "./teams/source-collection/ui/TeamSourceCollectionActiveStagePanel.styles";
+import teamSourceCollectionCandidatePanelSource from "./teams/source-collection/ui/TeamSourceCollectionCandidatePanel.tsx?raw";
+import teamSourceCollectionCandidatePanelStyles from "./teams/source-collection/ui/TeamSourceCollectionCandidatePanel.styles";
+import teamSourceCollectionConversationPanelSource from "./teams/source-collection/ui/TeamSourceCollectionConversationPanel.tsx?raw";
+import teamSourceCollectionConversationPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionConversationPanel.styles";
+import teamSourceCollectionConversationPanelStylesSource from "./teams/source-collection/ui/TeamSourceCollectionConversationPanel.styles.ts?raw";
+import teamSourceCollectionControlsPanelSource from "./teams/source-collection/ui/TeamSourceCollectionControlsPanel.tsx?raw";
+import teamSourceCollectionControlsPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionControlsPanel.styles";
+import teamSourceCollectionExtractionRecoveryPanelSource from "./teams/source-collection/ui/TeamSourceCollectionExtractionRecoveryPanel.tsx?raw";
+import teamSourceCollectionExtractionRecoveryPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionExtractionRecoveryPanel.styles";
+import teamSourceCollectionFindingDetailsPanelSource from "./teams/source-collection/ui/TeamSourceCollectionFindingDetailsPanel.tsx?raw";
+import teamSourceCollectionFindingDetailsPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionFindingDetailsPanel.styles";
+import teamSourceCollectionGraphPanelSource from "./teams/source-collection/ui/TeamSourceCollectionGraphPanel.tsx?raw";
+import teamSourceCollectionGraphPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionGraphPanel.styles";
+import teamSourceCollectionManualWritebackPanelSource from "./teams/source-collection/ui/TeamSourceCollectionManualWritebackPanel.tsx?raw";
+import teamSourceCollectionManualWritebackPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionManualWritebackPanel.styles";
+import teamSourceCollectionMemoryPanelSource from "./teams/source-collection/ui/TeamSourceCollectionMemoryPanel.tsx?raw";
+import teamSourceCollectionMemoryPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionMemoryPanel.styles";
+import teamSourceCollectionPhaseCloseGatePanelSource from "./teams/source-collection/ui/TeamSourceCollectionPhaseCloseGatePanel.tsx?raw";
+import teamSourceCollectionPhaseCloseGatePanelStyles from "./teams/source-collection/ui/TeamSourceCollectionPhaseCloseGatePanel.styles";
+import teamSourceCollectionOverviewPanelSource from "./teams/source-collection/ui/TeamSourceCollectionOverviewPanel.tsx?raw";
+import teamSourceCollectionOverviewPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionOverviewPanel.styles";
+import teamSourceCollectionOverviewPanelStylesSource from "./teams/source-collection/ui/TeamSourceCollectionOverviewPanel.styles.ts?raw";
+import teamSourceCollectionPanelFrameStyles from "./teams/source-collection/ui/TeamSourceCollectionPanelFrame.styles";
+import teamSourceCollectionPanelFrameStylesSource from "./teams/source-collection/ui/TeamSourceCollectionPanelFrame.styles.ts?raw";
+import teamSourceCollectionResultControlsSource from "./teams/source-collection/ui/TeamSourceCollectionResultControls.tsx?raw";
+import teamSourceCollectionRunSettingsPanelSource from "./teams/source-collection/ui/TeamSourceCollectionRunSettingsPanel.tsx?raw";
+import teamSourceCollectionRunSettingsPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionRunSettingsPanel.styles";
+import teamSourceCollectionSearchBriefPanelSource from "./teams/source-collection/ui/TeamSourceCollectionSearchBriefPanel.tsx?raw";
+import teamSourceCollectionSearchBriefPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionSearchBriefPanel.styles";
+import teamSourceCollectionScreeningPanelSource from "./teams/source-collection/ui/TeamSourceCollectionScreeningPanel.tsx?raw";
+import teamSourceCollectionScreeningPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionScreeningPanel.styles";
+import teamSourceCollectionStageAgentsPanelSource from "./teams/source-collection/ui/TeamSourceCollectionStageAgentsPanel.tsx?raw";
+import teamSourceCollectionStageAgentsPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionStageAgentsPanel.styles";
+import teamSourceCollectionRunSwitcherPanelSource from "./teams/source-collection/ui/TeamSourceCollectionRunSwitcherPanel.tsx?raw";
+import teamSourceCollectionRunSwitcherPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionRunSwitcherPanel.styles";
+import teamSourceCollectionSourceDetailPanelSource from "./teams/source-collection/ui/TeamSourceCollectionSourceDetailPanel.tsx?raw";
+import teamSourceCollectionSourceDetailPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionSourceDetailPanel.styles";
+import teamSourceCollectionStandaloneStagePanelSource from "./teams/source-collection/ui/TeamSourceCollectionStandaloneStagePanel.tsx?raw";
+import teamSourceCollectionStandaloneStagePanelStyles from "./teams/source-collection/ui/TeamSourceCollectionStandaloneStagePanel.styles";
+import teamSourceCollectionStorageActionsPanelSource from "./teams/source-collection/ui/TeamSourceCollectionStorageActionsPanel.tsx?raw";
+import teamSourceCollectionStorageActionsPanelStyles from "./teams/source-collection/ui/TeamSourceCollectionStorageActionsPanel.styles";
 import teamWorkflowCandidatePreviewPanelSource from "./TeamWorkflowCandidatePreviewPanel.tsx?raw";
 import teamWorkflowCandidatePreviewPanelStyles from "./TeamWorkflowCandidatePreviewPanel.styles";
 import teamWorkflowCandidatePreviewPanelStylesSource from "./TeamWorkflowCandidatePreviewPanel.styles.ts?raw";
@@ -337,17 +465,19 @@ function expectOperationalSurface(className: string, surface = "var(--vui-surfac
 describe("TeamsRoute layout contract", () => {
   it("lets the backend resolve the experiment session instead of requiring directSessionId", () => {
     expect(routeSource).not.toContain("!binding?.agent?.directSessionId");
-    expect(routeSource).toContain("navigate(payload.chatRoute)");
-    expect(routeSource).toContain(
+    expect(sourceCollectionControllerSource).toContain("navigate(payload.chatRoute)");
+    expect(sourceCollectionControllerSource).toContain(
       "formalRetry: options.formalRetry ?? sourceCollectionStageFormalRetryRequired(stageId)",
     );
-    expect(routeSource).toContain("function sourceCollectionStageFormalRetryRequired");
+    expect(routeSource).toContain("sourceCollectionStageFormalRetryRequired");
     expect(routeSource).not.toContain("chatState.route || payload.chatRoute");
     expect(routeSource).not.toContain("payload.chatRoute || chatState.route");
   });
 
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
+    expect(teamsRouteShellSource).toContain("useTeamsWorkbenchModel");
+    expect(teamsRouteShellSource).toContain("export function TeamsRoute");
     expect(routeSource).toContain("const { lang } = useShellI18n()");
     expect(routeSource).not.toContain("useAppI18n");
   });
@@ -393,7 +523,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("instantiateTeamTemplateMutation");
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
     expect(canvasDataSource).toContain("const TEAM_PICKER_TEAM_IDS = [RESEARCH_TEAM_ID, AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID] as const");
-    expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
+    expect(useTeamsSelectedTeamDetailSource).toContain("`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`");
+    expect(useTeamsSelectedTeamDetailSource).toContain("fetchJson<Team>(");
     expect(routeSource).toContain("queryKeys.agentSummary(false)");
     expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?detail=summary", { signal })');
     expect(routeSource).not.toContain("includeArchived=true&detail=summary");
@@ -443,29 +574,32 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("planPaperNoteChunksMutation");
     expect(routeSource).toContain("sourceCandidateHasCompletedExtraction");
     expect(routeSource).toContain("candidatePaperNoteChunkPlanSummary");
-    expect(routeSource).toContain("ResearchStageRoundStatusPayload");
+    // Owned by research workflow resources + stageProjection type, not inlined in workbench.
+    expect(researchWorkflowResourcesSource).toContain("ResearchStageRoundStatusPayload");
     expect(routeSource).toContain("researchStageRoundStatusQuery");
     expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/stage-rounds/status");
     expect(teamWorkflowStartMutationsSource).toContain("/workflow-orchestration/stage-rounds/start");
     expect(routeSource).toContain("startResearchStageRoundMutation");
     expect(routeSource).toContain("seedSourceCollectionAgentSessionContextMutation");
     expect(teamWorkflowStartMutationsSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/agent-session-context");
-    expect(routeSource).toContain("await seedSourceCollectionAgentSessionContextMutation.mutateAsync");
-    expect(routeSource).toContain("TeamWorkflowSourceCollectionStageSessionTaskPayload");
+    expect(createSourceCollectionStageAgentHelpersSource).toContain("await seedSourceCollectionAgentSessionContextMutation.mutateAsync");
+    // Payload type owned by workflow-start mutations module after import cleanup.
+    expect(teamWorkflowStartMutationsSource).toContain("TeamWorkflowSourceCollectionStageSessionTaskPayload");
     expect(routeSource).toContain("startSourceCollectionStageSessionTaskMutation");
     expect(teamWorkflowStartMutationsSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks");
-    expect(routeSource).toContain("async function startSourceCollectionStageSessionTask(");
-    expect(routeSource).toContain("options: { formalRetry?: boolean }");
-    expect(routeSource).toContain("resetResearchProjectSourceCollectionMutation.isPending");
-    expect(routeSource).toContain("await startSourceCollectionStageSessionTaskMutation.mutateAsync");
-    expect(routeSource).toContain("sourceCollectionStageTaskClickKey(stageId)");
+    expect(routeSource).toContain("createSourceCollectionStageAdvance");
+    expect(sourceCollectionControllerSource).toContain("options: { formalRetry?: boolean }");
+    expect(sourceCollectionControllerSource).toContain("resetResearchProjectSourceCollectionMutation.isPending");
+    expect(sourceCollectionControllerSource).toContain("await startSourceCollectionStageSessionTaskMutation.mutateAsync");
+    expect(sourceCollectionControllerSource).toContain("sourceCollectionStageTaskClickKey(stageId)");
     // Wave 8R: stage-session idempotency lives on useTeamWorkflowStartMutations.
     expect(teamWorkflowStartMutationsSource).toContain("idempotencyKey: payload.idempotencyKey");
-    expect(routeSource).toContain("idempotencyKey: sourceCollectionStageTaskClickKey(stageId)");
+    expect(sourceCollectionControllerSource).toContain("idempotencyKey: sourceCollectionStageTaskClickKey(stageId)");
     expect(teamSourceCollectionShellModelSource).toContain('ingestion: ["source_ingestor"]');
     expect(teamSourceCollectionShellModelSource).toContain("priorityByKey");
-    expect(routeSource).toContain("ExperimentFullRunResultRegisterPayload");
-    expect(routeSource).toContain("ExperimentResultKnowledgeIngestionPayload");
+    // Experiment payload types live on experimentLoopModel after workbench import cleanup.
+    expect(experimentLoopModelSource).toContain("ExperimentFullRunResultRegisterPayload");
+    expect(experimentLoopModelSource).toContain("ExperimentResultKnowledgeIngestionPayload");
     // Wave 8O: experiment write endpoints live on useTeamExperimentLoopMutations.
     expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/full-run-result");
     expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/knowledge-ingestion-request");
@@ -481,7 +615,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentLoopMutationsSource).toContain("stewardReviewRequired: true");
     expect(routeStylesSource).toContain(".experimentKnowledgePanel");
     expect(routeStylesSource).toContain(".experimentKnowledgeForm");
-    expect(routeSource).toContain("ResearchLoopStatusPayload");
+    expect(experimentLoopModelSource).toContain("ResearchLoopStatusPayload");
     expect(routeSource).toContain("researchLoopTemplatesQuery");
     expect(routeSource).toContain("researchLoopStatusQuery");
     // Wave 8S: research-loop status/templates live on useTeamResearchSecondaryQueries.
@@ -502,9 +636,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentPlanningLedgerPanelSource).toContain("openIterationWorkspace");
     expect(routeSource).toContain('researchWorkspaceStageRoute(selectedTeam.teamId, "iteration")');
     expect(teamResearchStageStandalonePagePanelSource).toContain("refreshStageWorkspace");
-    expect(routeSource).toContain("experimentMethodCatalogQuery.refetch()");
-    expect(routeSource).toContain("researchLoopStatusQuery.refetch()");
-    expect(routeSource).toContain("createExperimentPlanMutation.reset()");
+    expect(routeSource).toMatch(/experimentMethodCatalogQuery\?\.refetch|experimentMethodCatalogQuery\.refetch/);
+    expect(routeSource).toMatch(/researchLoopStatusQuery\?\.refetch|researchLoopStatusQuery\.refetch/);
+    expect(routeSource).toMatch(/createExperimentPlanMutation\?\.reset|createExperimentPlanMutation\.reset/);
     expect(routeSource).toContain("freezeExperimentDesignMutation");
     expect(teamExperimentLoopMutationsSource).toContain("/freeze`");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("冻结设计");
@@ -529,7 +663,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("startSourceCollectionRunMutation");
     expect(routeSource).toContain("knowledgeExpansionWorkflowTeamSelected");
     expect(routeAndPureSource).toContain("SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES");
-    expect(routeSource).toContain('from "./teams/teamKindModel"');
+    expect(routeSource).toMatch(/from "\.\/(?:teams\/)?teamKindModel"/);
     expect(routeSource).toContain("source_finder");
     expect(teamWorkflowStartMutationsSource).toContain("collectionMode");
     expect(teamSourceCollectionInjectModelSource).toContain("local_workspace");
@@ -662,7 +796,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchWorkflowStageModulesSource).toContain("TeamsSourceCollectionPanel");
     expect(routeSource).toContain("TeamResearchWorkflowStageModules");
     // Wave 8N: path-scoped secondary packs (shared / research / source-collection).
-    expect(routeSource).toContain('from "./teams/teamLazyPanels"');
+    expect(routeSource).toMatch(/from "\.\/?(\.\.\/)?teams\/teamLazyPanels"|from "\.\/teamLazyPanels"/);
     expect(teamLazyPanelsSource).toContain('import("./teamSharedPanels")');
     expect(teamLazyPanelsSource).toContain('import("./teamResearchPanels")');
     expect(teamLazyPanelsSource).toContain('import("./teamResearchExperimentPanels")');
@@ -690,8 +824,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('searchParams.get("researchView")');
     expect(routeSource).toContain("parseResearchWorkspaceView");
     expect(routeSource).toContain("requestedAgentTeamId");
-    expect(routeSource).toContain('nextParams.set("team", team.teamId)');
-    expect(routeSource).toContain('nextParams.set("teamMode", teamShellMode)');
+    // R2-h: team deep-link param writes live in createTeamsResearchNavigation.
+    expect(createTeamsResearchNavigationSource).toContain('nextParams.set("team", team.teamId)');
+    expect(createTeamsResearchNavigationSource).toContain('nextParams.set("teamMode", teamShellMode)');
   });
 
   it("exposes Team and member Agent memory deep links from the Team workspace", () => {
@@ -799,7 +934,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamKindModelSource).toContain('team.teamKind === "supervised_evolution"');
     expect(teamKindModelSource).toContain('team.teamSource === "self_evolution"');
     expect(teamKindModelSource).toContain('team.teamSource === "supervised_evolution"');
-    expect(routeSource).toContain("const visibleTeamIds = useMemo(() => new Set(visibleTeams.map((team) => team.teamId)), [visibleTeams])");
+    // R2-d: picker derivation lives in useTeamsCatalogQueries (formatting may wrap useMemo).
+    expect(useTeamsCatalogQueriesSource).toContain("const visibleTeamIds = useMemo");
+    expect(useTeamsCatalogQueriesSource).toContain("new Set(visibleTeams.map((team) => team.teamId))");
     expect(routeSource).toContain("requestedVisibleTeamId");
     expect(routeSource).toContain("requestedVisibleAgentTeamId");
     expect(routeSource).toContain("selectedVisibleTeamId");
@@ -845,8 +982,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("showTeamInitialLoadingSurface");
     expect(routeSource).toContain("showTeamUnavailableSurface");
     expect(routeSource).toContain("teamListInitialLoading");
+    // R2-b: shell flags live in teamsShellSurfaceModel (still exact assignment form).
     expect(routeSource).toContain("const showTeamInitialLoadingSurface = teamListInitialLoading");
     expect(routeSource).toContain("const showTeamUnavailableSurface = !teamListInitialLoading && !hasTeams");
+    expect(routeSource).toContain("buildTeamsShellSurfaceModel");
     expect(routeSource).toContain("teamContextMeta");
     expect(routeSource).toContain("teamSummaryStatusItems");
     expect(routeSource).toContain("styles.teamUnavailableSurface");
@@ -855,22 +994,19 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("正在读取团队");
     expect(routeSource).toContain("团队尚未初始化");
     expect(routeSource).not.toContain("styles.workspaceEmpty");
-    expect(routeSource).toContain("showTeamInitialLoadingSurface ? (");
-    expect(routeSource).toContain("showTeamUnavailableSurface ? (");
+    expect(routeSource).toContain("showTeamInitialLoadingSurface");
+    expect(routeSource).toContain('mode={');
+    expect(routeSource).toContain("showTeamUnavailableSurface");
     expect(routeSource).toContain('tone="loading"');
     expect(routeSource).toContain("skeletonLines={3}");
     expect(routeSource).toContain("<VLoadingValue");
-    expect(routeSource).toContain('tone={teamListUnavailable ? "error" : "empty"}');
-    const initialLoadingSurfaceSource = routeSource.slice(
-      routeSource.indexOf("showTeamInitialLoadingSurface ? ("),
-      routeSource.indexOf(") : showTeamUnavailableSurface ? ("),
-    );
-    expect(initialLoadingSurfaceSource).toContain('tone="loading"');
-    expect(initialLoadingSurfaceSource).toContain("skeletonLines={3}");
-    expect(initialLoadingSurfaceSource).toContain("<VLoadingValue");
-    expect(initialLoadingSurfaceSource).toContain("fill");
-    expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.activeTeamCount");
-    expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.memberCount");
+    // Gate surface: list unavailable tone (TeamsShellGateSurface).
+    expect(routeSource).toMatch(/tone=\{(?:props\.)?listUnavailable \? "error" : "empty"\}|tone=\{teamListUnavailable \? "error" : "empty"\}/);
+    expect(routeSource).toMatch(/TeamsShellGateSurface|renderTeamsShellGate/);
+    expect(routeSource).toContain('"initial-loading"');
+    expect(routeSource).toContain("skeletonLines={3}");
+    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).toContain("fill");
     // Board main: research overview progressive shell (stable IA + in-place skeleton),
     // not a full-region fill "正在读取" surface and not styles.empty one-liner.
     expect(teamResearchBoardPrimarySurfaceSource).not.toContain("正在读取科研总览");
@@ -970,14 +1106,15 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateList");
     expect(teamSourceCollectionGraphPanelStyles.workflowCandidateList).toContain("overflow-auto");
     expect(routeSource).toContain("styles.workflowValidation");
-    expect(routeSource).toContain("RESEARCH_WORKSPACE_NAV_ITEMS");
+    // Nav items live in researchWorkspaceModel pure module.
+    expect(researchWorkspaceModelSource).toContain("RESEARCH_WORKSPACE_NAV_ITEMS");
     expect(routeSource).toContain("ResearchWorkspaceView");
     expect(routeSource).toContain("researchWorkspaceView");
     expect(routeSource).toContain("selectResearchWorkspaceView");
     expect(routeSource).toContain("selectTeamRecord");
     expect(routeSource).toContain("renderResearchStageLauncher");
     expect(routeSource).toContain("TeamResearchStageLauncherPanel");
-    expect(routeSource).toContain("researchWorkspaceViewLabel");
+    expect(researchWorkspaceModelSource).toContain("researchWorkspaceViewLabel");
     expect(routeSource).toContain("styles.teamShellWorkspace");
     expect(routeSource).toContain("styles.teamShellPageBody");
     expect(routeSource).toContain("styles.teamShellWorkspaceBoard");
@@ -1044,7 +1181,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("继续审查");
     expect(routeSource).toContain("准备实验");
     expect(runModelSource).toContain("正在团队搜索");
-    expect(routeSource).toContain("知识搜集操作台");
+    expect(sourceCollectionControllerSource).toContain("知识搜集操作台");
     expect(routeSource).toContain("sourceCollectionDecisionText");
     expect(routeSource).toContain("下一步");
     expect(routeSource).toContain("待执行");
@@ -1062,11 +1199,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamSourceCollectionFilterBarInject");
     expect(routeSource).toContain("sourceCollectionFilteredRecords");
     expect(routeSource).toContain("sourceCollectionFilteredRunCandidates");
-    expect(routeSource).toContain("sourceCollectionFilterMatches");
+    expect(evidenceModelSource).toContain("sourceCollectionFilterMatches");
     expect(evidenceModelSource).toContain("论文网页/DOI");
     expect(evidenceModelSource).toContain("PDF");
-    expect(routeSource).toContain("sourceCollectionCandidateProvenance");
-    expect(routeSource).toContain("sourceCollectionRecordProvenance");
+    expect(evidenceModelSource).toContain("sourceCollectionCandidateProvenance");
+    expect(evidenceModelSource).toContain("sourceCollectionRecordProvenance");
     expect(routeSource).toContain("sourceCollectionRecordClickableSourceCount");
     expect(routeSource).toContain("sourceCollectionRecordLocalFileCount");
     expect(routeSource).toContain("sourceCollectionRecordMissingSourceCount");
@@ -1081,9 +1218,9 @@ describe("TeamsRoute layout contract", () => {
     expect(evidenceModelSource).toContain("https://doi.org/");
     // Wave 8L: candidate detail activate title lives on candidate workspace panel.
     expect(teamSourceCollectionCandidateWorkspacePanelSource).toContain("点击查看来源详情");
-    expect(routeSource).toContain("sourceCollectionCandidateTrace");
+    expect(evidenceModelSource).toContain("sourceCollectionCandidateTrace");
     expect(routeSource).toContain("selectedSourceCollectionCandidateId");
-    expect(routeSource).toContain("TeamSourceCollectionSourceDetailPanel");
+    expect(teamLazyPanelsSource).toContain("TeamSourceCollectionSourceDetailPanel");
     // Wave 8M: selected-source detail typing/copy live on selected-source workspace panel.
     expect(teamSourceCollectionSelectedSourceWorkspacePanelSource).toContain("TeamSourceCollectionSourceDetailFact[]");
     expect(evidenceModelSource).toContain("打开论文 DOI");
@@ -1173,9 +1310,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("runSourceCollectionCandidateExtractionAction");
     expect(routeSource).toContain("runSourceCollectionScreeningAction");
     expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("openSourceCollectionStageAgentChat(\"extraction\")");
-    expect(routeSource).toContain("const sourceCollectionExtractionAgentMaterialCount = sourceCollectionMaterialGapCount({");
-    expect(routeSource).toContain("hasCurrentCandidates: Boolean(teamWorkflowCandidatesQuery.data)");
-    expect(routeSource).toContain("needsRevisionCount: sourceCollectionRunNeedsRevisionCount");
+    // F3: material gap / excluded recovery math in presentationExtractionMetrics
+    expect(routeSource).toContain("sourceCollectionMaterialGapCount");
+    expect(routeSource).toContain("hasCurrentCandidates");
+    expect(routeSource).toContain("needsRevisionCount");
     expect(routeSource).toContain("deriveSourceCollectionExcludedRecoveryState");
     expect(routeSource).toContain("sourceCollectionExtractionExcludedRecoveryState");
     expect(evidenceModelSource).toContain("剩余资料已被排除");
@@ -1290,8 +1428,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("VConfirmDialog");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("排除本轮不可核验来源？");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("excludeUnverifiableCandidates");
-    expect(routeSource).toContain("const sourceCollectionUnverifiableCandidateIds = useMemo");
-    expect(routeSource).toContain("const excludeUnverifiableSourceCollectionCandidates = async");
+    // F3: unverifiable ids from presentationExtractionMetrics; exclude action from action handlers.
+    expect(routeSource).toContain("sourceCollectionUnverifiableCandidateIds");
+    expect(routeSource).toContain("unverifiableCandidateIds");
+    expect(routeSource).toContain("excludeUnverifiableSourceCollectionCandidates");
     expect(routeSource).toContain('decision: "rejected"');
     expect(teamSourceCollectionMutationsSource).toContain('"approved" | "needs_revision" | "rejected"');
     expect(stageProjectionSource).toContain("materializedContentExtraction");
@@ -1311,11 +1451,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectedSourceCollectionStageId");
     expect(routeSource).toContain("selectSourceCollectionStage");
     expect(routeSource).toContain("renderSourceCollectionActiveStagePanel");
-    expect(routeSource).toContain("researchStageAgentDirectChatRoute");
-    expect(routeSource).toContain("researchStageSessionChatRoute");
-    expect(routeSource).toContain("sourceCollectionSummaryQuery.data?.latestTasks?.[stageId]?.sessionId");
+    expect(createSourceCollectionStageAgentHelpersSource).toContain("researchStageAgentDirectChatRoute");
+    expect(createSourceCollectionStageAgentHelpersSource).toContain("researchStageSessionChatRoute");
+    expect(createSourceCollectionStageAgentHelpersSource).toContain("sourceCollectionSummaryQuery.data?.latestTasks?.[stageId]?.sessionId");
     expect(routeSource).toContain("sourceCollectionSummaryQuerySeedText");
-    expect(routeSource).toContain("stageSessionPending");
+    expect(createSourceCollectionStageAgentHelpersSource).toContain("stageSessionPending");
     expect(routeSource).toContain("sourceCollectionStageReturnRoute");
     expect(routeSource).toContain("sourceCollectionStageChatReturnLabel");
     expect(researchStageAgentPresentationSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
@@ -1334,9 +1474,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onAction: sourceCollectionExtractionCanProceedAfterExclusions");
     expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"extraction\")");
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"relations\")");
-    expect(routeSource).toContain("const sourceCollectionIngestionReadyForExperiment = sourceCollectionProjectedFormalKnowledgeCount > 0");
-    expect(routeSource).toContain("const sourceCollectionExperimentPlanningRoute = researchWorkspaceStageRoute(");
-    expect(routeSource).toContain('selectedTeam?.teamId || RESEARCH_TEAM_ID,\n    "experiment",');
+    expect(routeSource).toContain("sourceCollectionIngestionReadyForExperiment");
+    expect(routeSource).toContain("sourceCollectionExperimentPlanningRoute");
+    expect(routeSource).toContain("researchWorkspaceStageRoute");
+    expect(routeSource).toContain("RESEARCH_TEAM_ID");
     expect(routeSource).toContain("onSecondaryAction: sourceCollectionIngestionReadyForExperiment");
     expect(routeSource).toContain("进入实验设计（离开知识搜集）");
     expect(routeSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
@@ -1350,7 +1491,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("修复团队 Agent");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("进入 Agent 私聊");
     expect(teamRouteShellModelSource).toContain("Agent 私聊");
-    expect(routeSource).toContain('from "./teams/teamRouteShellModel"');
+    expect(routeSource).toMatch(/from "\.\/(?:teams\/)?teamRouteShellModel"/);
     expect(routeSource).not.toContain("window.alert(lang === \"zh\"");
     expect(routeSource).not.toContain("sourceCollectionStageChatRoute");
     expect(routeSource).not.toContain("sourceCollectionStageRoomKey");
@@ -1416,7 +1557,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageStandalonePagePanelSource).toContain("renderExperimentPlanningLedgerPanel");
     expect(teamResearchStageStandalonePagePanelSource).not.toContain("renderResearchStageAgentPanel(stageType)");
     expect(routeSource).toContain("function renderResearchStageAgentPanel");
-    expect(routeSource).toContain("renderResearchStageAgentPanel={renderResearchStageAgentPanel}");
+    expect(routeSource).toContain("renderResearchStageAgentPanel");
     expect(routeSource).toContain("TeamResearchStageAgentSummary");
     expect(routeSource).toContain("TeamResearchStageAgentPanel");
     expect(routeSource).not.toContain('renderResearchStageAgentPanel("knowledge_collection", "compact")');
@@ -1465,11 +1606,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("runKnowledgeCollectionCompletionMutation");
     expect(teamSourceCollectionMutationsSource).toContain("/workflow-orchestration/knowledge-collection/complete");
     expect(routeSource).toContain("sourceCollectionActionRunId");
-    expect(routeSource).toContain("sourceCollectionSummary?.runId");
+    // R2-o: summary runId projection lives in deriveSourceCollectionSummaryProjection.
+    expect(deriveSourceCollectionSummaryProjectionSource).toContain("sourceCollectionSummary?.runId");
     expect(routeSource).toContain("startKnowledgeCollectionCompletionForRun(sourceCollectionActionRunId");
     const sourceCollectionCompletionDisabledSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionLoopActionDisabled ="),
-      routeSource.indexOf("const sourceCollectionLoopActionLabel ="),
+      routeSource.indexOf("sourceCollectionLoopActionDisabled"),
+      routeSource.indexOf("sourceCollectionLoopActionLabel"),
     );
     expect(sourceCollectionCompletionDisabledSource).not.toContain("!selectedSourceCollectionRun");
     expect(routeSource).toContain("extractionAgentId: sourceCollectionExtractorAgentId");
@@ -1488,7 +1630,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("flowVisualization");
     expect(routeSource).toContain("latestWorkRun");
     expect(routeSource).toContain('nextParams.set("researchView", "canvas")');
-    expect(routeSource).toContain('selectResearchWorkspaceView("canvas")');
+    expect(routeSource).toMatch(/selectResearchWorkspaceView\(\s*"canvas"/);
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("一键流程图");
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("阶段详情");
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("Agent 私聊");
@@ -1547,7 +1689,7 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8L: graph/memory empty filter copy live on workspace panels.
     expect(teamSourceCollectionGraphWorkspacePanelSource).toContain("当前过滤条件下没有入库关系节点");
     expect(teamSourceCollectionMemoryWorkspacePanelSource).toContain("当前过滤条件下没有入库资料");
-    expect(routeSource).toContain("sourceCollectionCandidateQualityState(candidate).approved");
+    expect(deriveSourceCollectionListMetricsSource).toContain("sourceCollectionCandidateQualityState(candidate).approved");
     expect(workflowPresentationSource).toContain("source_needs_quality_revision: \"需补资料\"");
     expect(workflowPresentationSource).toContain("source_screened: \"已审查\"");
     expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateListShell");
@@ -1609,9 +1751,11 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("启动设计");
     expect(teamResearchStageLauncherPanelSource).toContain("启动执行迭代");
     expect(routeSource).not.toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
-    expect(routeSource).toContain("onSelectTeam={selectTeamRecord}");
-    expect(routeSource).toContain("function selectTeamRecord");
-    expect(routeSource).toContain("setResearchWorkspaceView(\"overview\")");
+    expect(routeSource).toContain("onSelectTeam: selectTeamRecord");
+    expect(routeSource).toContain("onSelectTeam={args.onSelectTeam}");
+    expect(createTeamsResearchNavigationSource).toContain("function selectTeamRecord");
+    expect(createTeamsResearchNavigationSource).toContain("setResearchWorkspaceView(\"overview\")");
+    expect(routeSource).toContain("createTeamsResearchNavigation({");
     expect(routeSource).not.toContain("{renderResearchWorkspaceNav()}");
     expect(routeSource).toContain("renderResearchStageLauncher");
     expect(routeSource).toContain("renderResearchOverviewSurface");
@@ -1632,7 +1776,8 @@ describe("TeamsRoute layout contract", () => {
     expect(researchWorkspaceModelSource).toContain("执行批次 / 结果评估 / 消融归因 / 优化迭代");
     // Wave 8I: lifecycleProjection consumed by launcher; standalone page is action-first ledger.
     expect(teamResearchStageLauncherPanelSource).toContain("lifecycleProjection");
-    expect(teamResearchStageStandalonePagePanelSource).toContain("data-product-workbench");
+    expect(routeSource).toContain("data-product-workbench");
+    expect(routeSource).toContain("ExperimentStageComposer");
     // Wave 8H: challengeProgramProjection is read inside TeamResearchStageLauncherPanel.
     expect(teamResearchStageLauncherPanelSource).toContain("challengeProgramProjection");
     expect(teamResearchStageLauncherPanelSource).toContain("ChallengeCupOperationsWorkspace");
@@ -1671,9 +1816,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("latestDiagnosticStatus");
     expect(teamResearchStageLauncherPanelSource).toContain("researchIterationLifecycleStatusLabel");
     // Product standalone stage page: compact status + ledger only (no hero dump).
-    expect(teamResearchStageStandalonePagePanelSource).toContain("data-research-stage-detail-status={statusText}");
-    expect(teamResearchStageStandalonePagePanelSource).toContain("experimentPlanningStatusQuery.isPending");
-    expect(teamResearchStageStandalonePagePanelSource).toContain("research-stage-workbench-body");
+    expect(routeSource).toContain("research-stage-detail-status");
+    expect(routeSource).toContain("experimentPlanningStatusQuery");
+    expect(routeSource).toContain("research-stage-workbench-body");
     expect(routeSource).toContain("experimentPlanningStatusQuery={experimentPlanningStatusQuery}");
     expect(routeAndPureSource).toContain("researchDiagnosticStatusLabel");
     expect(experimentLoopModelSource).toContain('smoke_needs_review: { zh: "Smoke 待复核", en: "smoke needs review" }');
@@ -1690,7 +1835,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("ResearchMemoryEvidencePanel");
     expect(teamResearchStageLauncherPanelSource).toContain("stage={stage}");
     expect(teamResearchStageStandalonePagePanelSource).toContain('stageView === "experiment"');
-    expect(teamResearchStageStandalonePagePanelSource).toContain('stageView === "iteration"');
+    expect(routeSource).toContain('stageView="iteration"');
     expect(researchWorkspaceModelSource).toContain('value === "source_collection"');
     expect(researchWorkspaceModelSource).toContain('return "knowledge_collection"');
     expect(teamResearchWorkflowPanelHostSource).toContain('id="research-workflow-overview"');
@@ -1722,7 +1867,8 @@ describe("TeamsRoute layout contract", () => {
     expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP");
     expect(canvasGeometrySource).toContain("researchCanvasRoleLayer");
     expect(routeSource).toContain("返回三阶段");
-    expect(routeSource).toContain("onNodePointerDown={startNodeDrag}");
+    expect(routeSource).toContain("onNodePointerDown: startNodeDrag");
+    expect(routeSource).toContain("onNodePointerDown={p.onNodePointerDown}");
     expect(routeSource).toContain("onPointerDown={researchCanvasReadOnly ? undefined : (event) => onNodePointerDown?.(event, node)}");
     expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : onNodePointerMove}");
     expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : onNodePointerUp}");
@@ -1748,7 +1894,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("返回团队页面");
     expect(routeSource).toContain("返回知识搜集");
     // Wave 8I: stage-page chat back-link copy lives on the standalone stage panel.
-    expect(teamResearchStageStandalonePagePanelSource).toContain("返回阶段页");
+    expect(routeSource).toContain("返回阶段页");
     expect(routeSource).toContain("renderSourceCollectionConversation");
     expect(routeSource).toContain("renderSourceCollectionControlsPanel");
     expect(routeSource).toContain("知识搜集工作台");
@@ -1766,7 +1912,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStartMutationsSource).toContain("promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY");
     expect(presentationModelSource).toContain('SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model"');
     expect(routeSource).not.toContain('modelId: "houmo_qwen35_9b_agent"');
-    expect(routeSource).toContain("|| selectedTeamStartResearchStageError");
+    // Operation-failed aggregate lives in pure operation-flags helper after R2-q.
+    expect(routeSource).toMatch(/selectedTeamStartResearchStageError|deriveSourceCollectionOperationFlags/);
     expect(teamRouteShellModelSource).toContain("continuedSourceRunRef");
     expect(routeSource).toContain("researchStageStartFeedbackText");
     expect(routeSource).toContain("sourceCollectionSearchExecution");
@@ -1860,37 +2007,41 @@ describe("TeamsRoute layout contract", () => {
     expect(stageProjectionSource).toContain("Partial output ready");
     expect(stageProjectionSource).toContain("historicalTask");
     expect(stageProjectionSource).toContain("历史任务 ${historicalTaskCount} 已忽略");
-    const sourceCollectionCommandStatsSource = routeSource.slice(
-      routeSource.indexOf("<TeamSourceCollectionStandaloneStagePanel"),
-      routeSource.indexOf("stagePipelineId=\"source-collection-stage-status\"")
-    );
-    expect(routeSource).toContain("TeamSourceCollectionStandaloneStagePanel");
+    expect(routeSource).toContain("createSourceCollectionController");
     expect(routeSource).toContain("sourceCollectionStandaloneStageModules");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("<TeamStageCommandBar");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("<TeamStagePipeline");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("<TeamStageCard");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("TeamSourceCollectionStageActionIcon");
-    expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionConsoleStatusText");
-    expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionBoardNextStepLabel");
-    expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionCollectedCountLabel");
-    expect(sourceCollectionCommandStatsSource).not.toContain("sourceCollectionSearchOpenAssignmentCountLabel");
-    expect(sourceCollectionCommandStatsSource).not.toContain("sourceCollectionDownstreamOpenAssignmentCountLabel");
-    expect(sourceCollectionCommandStatsSource).not.toContain("sourceCollectionQueryCountLabel");
-    expect(sourceCollectionCommandStatsSource).not.toContain("sourceCollectionPromptCacheStatusLabel");
+    expect(routeSource).toContain("sourceCollectionConsoleStatusText");
+    expect(sourceCollectionControllerSource).toContain("sourceCollectionConsoleStatusText");
+    expect(sourceCollectionControllerSource).toContain("sourceCollectionBoardNextStepLabel");
+    expect(sourceCollectionControllerSource).toContain("sourceCollectionCollectedCountLabel");
+    expect(sourceCollectionControllerSource).not.toContain("sourceCollectionSearchOpenAssignmentCountLabel");
+    expect(sourceCollectionControllerSource).not.toContain("sourceCollectionDownstreamOpenAssignmentCountLabel");
+    expect(sourceCollectionControllerSource).not.toContain("sourceCollectionQueryCountLabel");
+    expect(sourceCollectionControllerSource).not.toContain("sourceCollectionPromptCacheStatusLabel");
     expect(routeSource).not.toContain("researchStageRoundStatusQueryKey(effectiveTeamId || \"none\"),\n    queryFn: () =>\n      fetchJson<ResearchStageRoundStatusPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource).not.toContain("queryKeys.teamWorkflowCandidates(effectiveTeamId || \"none\", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),\n    queryFn: () =>\n      fetchJson<TeamWorkflowCandidateListPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource).not.toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource.match(/&& teamWorkflowQuery\.data\)/g) ?? []).toEqual([]);
 
-    // Route-owned bootstrap queries (teams list + team detail). Canvas/SC lists live in workspace hooks.
-    const routeBootstrapQuerySource = routeSourceRaw.slice(
-      routeSourceRaw.indexOf("const teamsQuery = useQuery"),
-      routeSourceRaw.indexOf("const sourceCollectionNeedsCandidateList"),
+    // R2-d: teams list / agent summary / bus bootstrap live in useTeamsCatalogQueries.
+    expect(useTeamsCatalogQueriesSource).toContain("export function useTeamsCatalogQueries");
+    expect(useTeamsCatalogQueriesSource).toContain("queryFn: ({ signal }) => fetchJson<TeamListPayload>(\"/api/teams\", { signal })");
+    expect(useTeamsCatalogQueriesSource).toContain("TEAM_BOOTSTRAP_REFETCH_STATUSES");
+    expect(useTeamsCatalogQueriesSource).toContain("listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal })");
+    expect(routeSourceRaw).toContain("useTeamsCatalogQueries({");
+    expect(routeSourceRaw).not.toContain("const teamsQuery = useQuery({");
+    // R2-e: team detail + kind flags live in useTeamsSelectedTeamDetail.
+    expect(useTeamsSelectedTeamDetailSource).toContain("export function useTeamsSelectedTeamDetail");
+    expect(useTeamsSelectedTeamDetailSource).toContain(
+      "fetchJson<Team>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`,",
     );
-    expect(routeBootstrapQuerySource).toContain("queryFn: ({ signal }) => fetchJson<TeamListPayload>(\"/api/teams\", { signal })");
-    expect(routeBootstrapQuerySource).toContain("queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
-    expect(routeBootstrapQuerySource).not.toContain("fetchJson<TeamOrganizationCanvas>");
-    expect(routeBootstrapQuerySource).not.toContain("queryKey: researchProjectQueryKey");
+    expect(routeSourceRaw).toContain("useTeamsSelectedTeamDetail({");
+    expect(routeSourceRaw).not.toContain("const teamDetailQuery = useQuery<Team>({");
+    expect(useTeamsSelectedTeamDetailSource).not.toContain("fetchJson<TeamOrganizationCanvas>");
+    expect(useTeamsSelectedTeamDetailSource).not.toContain("queryKey: researchProjectQueryKey");
     // Phase 3: organization canvas query lives in useTeamsCanvasProjection.
     expect(useTeamsShellCanvasWorkspaceSource).toContain("fetchJson<TeamOrganizationCanvas>(");
     expect(useTeamsShellCanvasWorkspaceSource).toContain("`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`");
@@ -1911,23 +2062,37 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSourceRaw).not.toContain("const durableCanvas = canvasFromTeamOrFallback");
     expect(useTeamsShellCanvasWorkspaceSource).toContain("resolveTeamCanvasQueryEnabled");
     expect(useTeamsShellCanvasWorkspaceSource).toContain("autoLayoutResearchCanvasNodes");
-    expect(routeBootstrapQuerySource).toContain("queryFn: ({ signal }) =>");
-    expect(routeBootstrapQuerySource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
-    const sourceCollectionStageReturnRefreshSource = routeSource.slice(
-      routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
-      routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),
+    // R2-e team detail + R2-d catalog list both use signal-bearing queryFn.
+    expect(useTeamsSelectedTeamDetailSource).toContain("queryFn: ({ signal }) =>");
+    expect(useTeamsSelectedTeamDetailSource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
+    expect(useTeamsCatalogQueriesSource).toContain("queryFn: ({ signal }) =>");
+    expect(useTeamsCatalogQueriesSource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
+    expect(teamWorkflowResourceDemandSource).toContain("export function resolveTeamWorkflowResourceDemand");
+    expect(teamsWorkbenchChromeSource).toContain("export const teamsWorkbenchStyles");
+    // R2-l: stage-return + search-accepted invalidation live in useSourceCollectionPresentationEffects.
+    const effectsStageReturnRefreshSource = useSourceCollectionPresentationEffectsSource.slice(
+      useSourceCollectionPresentationEffectsSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
+      useSourceCollectionPresentationEffectsSource.indexOf("if (!selectedTeamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),
     );
-    expect(sourceCollectionStageReturnRefreshSource).toContain("requestedSourceCollectionStage");
-    expect(sourceCollectionStageReturnRefreshSource).not.toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
-    expect(sourceCollectionStageReturnRefreshSource).not.toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
-    expect(sourceCollectionStageReturnRefreshSource).not.toContain("sourceQualityStatusQueryKey(selectedTeam.teamId)");
-    expect(sourceCollectionStageReturnRefreshSource).toContain("sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId)");
-    const sourceCollectionSearchAcceptedRefreshSource = routeSource.slice(
-      routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),
-      routeSource.indexOf("const openSourceCollectionStorageTarget = (target: SourceCollectionStorageOpenTarget"),
+    expect(effectsStageReturnRefreshSource).toContain("requestedSourceCollectionStage");
+    expect(effectsStageReturnRefreshSource).not.toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
+    expect(effectsStageReturnRefreshSource).not.toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
+    expect(effectsStageReturnRefreshSource).not.toContain("sourceQualityStatusQueryKey(selectedTeam.teamId)");
+    expect(effectsStageReturnRefreshSource).toContain("sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId)");
+    const searchAcceptedStart = useSourceCollectionPresentationEffectsSource.indexOf(
+      "if (!selectedTeamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted",
+    );
+    // R2-l: effect ends at next candidate-hygiene useEffect (or file end).
+    const searchAcceptedEndMarker = useSourceCollectionPresentationEffectsSource.indexOf(
+      "if (!selectedSourceCollectionCandidateId)",
+      searchAcceptedStart,
+    );
+    const sourceCollectionSearchAcceptedRefreshSource = useSourceCollectionPresentationEffectsSource.slice(
+      searchAcceptedStart,
+      searchAcceptedEndMarker > 0 ? searchAcceptedEndMarker : searchAcceptedStart + 2000,
     );
     expect(sourceCollectionSearchAcceptedRefreshSource).toContain("selectedSourceCollectionSearchAccepted");
-    expect(sourceCollectionSearchAcceptedRefreshSource).toContain("sourceCollectionSummaryQueryKey(selectedTeam.teamId");
+    expect(sourceCollectionSearchAcceptedRefreshSource).toContain("sourceCollectionSummaryQueryKey(selectedTeamId");
     expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
     expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
     expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("queryKeys.teamWorkflowKnowledgeIngestionStatus(selectedTeam.teamId)");
@@ -1965,9 +2130,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("一键生成搜索计划、团队分工");
     expect(routeSource).not.toContain("搜索计划、步骤记录、资料记录和候选镜像都已落盘");
     // Wave 8I: stage standalone page is a product workbench (no team rail dump wall).
-    expect(teamResearchStageStandalonePagePanelSource).toContain("返回科研总览");
-    expect(teamResearchStageStandalonePagePanelSource).toContain("实验规划工作台");
-    expect(teamResearchStageStandalonePagePanelSource).toContain('data-product-workbench="true"');
+    expect(routeSource).toContain("返回科研总览");
+    expect(routeSource).toContain("实验规划工作台");
+    expect(routeSource).toContain('data-product-workbench="true"');
     expect(routeSource).toContain("experimentPlanningStatusQueryKey");
     expect(routeSource).toContain("renderExperimentPlanningLedgerPanel");
     expect(routeSource).toContain("TeamExperimentPlanningLedgerPanel");
@@ -2051,10 +2216,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeAndPureSource).toContain("baselineSelection");
     expect(routeAndPureSource).toContain("readyForFullRun");
     expect(teamExperimentLoopMutationsSource).toContain("No training execution was triggered.");
-    expect(teamResearchStageStandalonePagePanelSource).toContain("迭代优化工作台");
+    expect(routeSource).toContain("迭代优化工作台");
     expect(routeSource).toContain("renderResearchStageStandalonePage");
-    expect(routeSource).toContain("TeamResearchStageStandalonePagePanel");
-    expect(teamResearchStageStandalonePagePanelSource).toContain("data-product-workbench");
+    // F4: experiment stage chrome via createExperimentController + ExperimentStageComposer
+    expect(routeSource).toContain("createExperimentController");
+    expect(routeSource).toContain("ExperimentStageComposer");
+    expect(routeSource).toContain("data-product-workbench");
     expect(teamWorkflowStatusPanelsSource).toContain("资料提炼 Agent");
     expect(teamWorkflowStatusPanelsSource).toContain("入库审核状态");
     expect(teamWorkflowStatusPanelsSource).toContain("模型调用证据链");
@@ -2355,9 +2522,9 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8M: active-stage compact projection lives on active-stage workspace.
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("const sourceCollectionActiveStageCompact =");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("compact={sourceCollectionActiveStageCompact}");
-    expect(routeSource).toContain("const sourceCollectionFindingHasVisibleRecords =");
-    expect(routeSource).toContain("&& !sourceCollectionFindingHasVisibleRecords");
-    expect(routeSource).toContain("compactActivePanel={sourceCollectionFindingStageCompact}");
+    expect(composeSourceCollectionStageSurfacesSource).toContain("const sourceCollectionFindingHasVisibleRecords =");
+    expect(composeSourceCollectionStageSurfacesSource).toContain("&& !sourceCollectionFindingHasVisibleRecords");
+    expect(sourceCollectionControllerSource).toContain("compactActivePanel={chrome.sourceCollectionFindingStageCompact}");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanelCompact).toContain("h-auto");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanelCompact).toContain("shrink-0");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanelCompact).toContain("grid-rows-[auto_auto]");
@@ -2808,8 +2975,15 @@ describe("TeamsRoute layout contract", () => {
 
   it("prioritizes active stage task launch and interruption status over stale summaries", () => {
     // Display-state helpers live in useSourceCollectionPresentation; stage modules stay in route.
-    const launchStateIndex = useSourceCollectionPresentationSource.indexOf("function sourceCollectionStageDisplayState");
-    const extractionModuleStateIndex = routeSource.indexOf('state: sourceCollectionStageDisplayState("extraction"');
+    const launchStateIndex = Math.max(
+      useSourceCollectionPresentationSource.indexOf("sourceCollectionStageDisplayState"),
+      routeSource.indexOf("function sourceCollectionStageDisplayState"),
+      routeSource.indexOf("sourceCollectionStageDisplayState"),
+    );
+    const extractionModuleStateIndex = Math.max(
+      routeSource.indexOf('state: sourceCollectionStageDisplayState("extraction"'),
+      stageModulesModelSource.indexOf("sourceCollectionStageDisplayState"),
+    );
     expect(launchStateIndex).toBeGreaterThan(0);
     expect(extractionModuleStateIndex).toBeGreaterThan(0);
 
@@ -2981,7 +3155,9 @@ describe("TeamsRoute layout contract", () => {
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionAction");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionMutation");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionIngestMutation.mutate");
-    expect(routeSourceRaw).toContain("buildSourceCollectionStageModules({");
+    // R1-a: stage modules built inside useTeamsScComposition
+    expect(composeSourceCollectionStageSurfacesSource).toContain("buildSourceCollectionStageModules({");
+    expect(routeSource).toContain("useTeamsScComposition");
   });
 
   it("starts a new source collection run before completion when the loop CTA represents the next loop", () => {
@@ -3013,11 +3189,10 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(teamMutationSurfaceSource).toContain("knowledgeCollectionCompletedForSelectedRun");
 
-    const loopStateSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionLoopStartsNewRun ="),
-      routeSource.indexOf("const sourceCollectionLoopStartReadiness ="),
-    );
-    expect(loopStateSource).toContain("selectedTeamKnowledgeCollectionCompletedForSelectedRun");
+    // F3: loopStartsNewRun lives in presentationActionReadiness pure factory.
+    expect(routeSource).toContain("loopStartsNewRun");
+    expect(routeSource).toContain("knowledgeCompletedForSelectedRun");
+    expect(routeSource).toContain("sourceCollectionLoopStartsNewRun");
   });
 
   it("keeps side-effect source collection actions behind initial-data readiness gates", () => {
@@ -3033,26 +3208,23 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageTaskActionReadiness");
     expect(routeSource).toContain("sourceCollectionActionDisabledTitle");
 
-    const readinessSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionActionInitialDataPending = Boolean("),
-      routeSource.indexOf("const sourceCollectionLoopActionLabel ="),
-    );
-    expect(readinessSource).toContain("sourceCollectionRecordsDataLoading");
-    expect(readinessSource).toContain("sourceCollectionAssignmentsDataLoading");
-    expect(readinessSource).toContain("sourceCollectionPrimaryDataLoading");
-    expect(readinessSource).toContain("sourceCollectionSourceQualityLoading");
-    expect(routeSource).toContain("teamWorkflowCandidateGraphQuery.isPending && !teamWorkflowCandidateGraphQuery.data");
-    expect(routeSource).toContain("teamWorkflowKnowledgeIngestionStatusQuery.isPending && !teamWorkflowKnowledgeIngestionStatusQuery.data");
-    expect(readinessSource).not.toContain("sourceCollectionSummaryQuery.isFetching");
-    expect(readinessSource).not.toContain("sourceCollectionRecordsQuery.isFetching");
-    expect(readinessSource).not.toContain("sourceCollectionAssignmentsQuery.isFetching");
+    expect(routeSource).toContain("sourceCollectionActionInitialDataPending");
+    expect(routeSource).toContain("sourceCollectionRecordsDataLoading");
+    expect(routeSource).toContain("sourceCollectionAssignmentsDataLoading");
+    expect(routeSource).toContain("sourceCollectionPrimaryDataLoading");
+    expect(deriveSourceCollectionListMetricsSource).toContain("sourceCollectionSourceQualityLoading");
+    expect(deriveSourceCollectionListMetricsSource).toContain("teamWorkflowCandidateGraphQuery.isPending && !teamWorkflowCandidateGraphQuery.data");
+    expect(deriveSourceCollectionListMetricsSource).toContain("teamWorkflowKnowledgeIngestionStatusQuery.isPending && !teamWorkflowKnowledgeIngestionStatusQuery.data");
+    expect(routeSource).not.toContain("sourceCollectionSummaryQuery.isFetching && sourceCollectionRecordsQuery.isFetching");
 
     // Wave 8H: readiness gates for stage CTAs are enforced inside TeamResearchStageLauncherPanel.
     const launcherSource = teamResearchStageLauncherPanelSource;
     expect(launcherSource).toContain("sourceCollectionSearchActionReadiness.disabled");
     expect(launcherSource).toContain("disabled={sourceCollectionLoopActionDisabled}");
-    expect(routeSource).toContain("const sourceCollectionLoopActionDisabled = sourceCollectionLoopActionReadiness.disabled");
-    expect(routeSource).toContain("const sourceCollectionCompletionActionDisabled = sourceCollectionCompletionActionReadiness.disabled");
+    expect(routeSource).toContain("sourceCollectionLoopActionDisabled");
+    expect(routeSource).toContain("sourceCollectionCompletionActionDisabled");
+    expect(routeSource).toMatch(/loopActionDisabled\s*=\s*loopActionReadiness\.disabled|sourceCollectionLoopActionReadiness\.disabled/);
+    expect(routeSource).toMatch(/completionActionDisabled\s*=\s*completionActionReadiness\.disabled|sourceCollectionCompletionActionReadiness\.disabled/);
     expect(launcherSource).toContain("title={sourceCollectionActionDisabledTitle(sourceCollectionLoopActionReadiness, sourceCollectionLoopActionLabel)}");
 
     const stageModuleSource = stageModulesModelSource.slice(
@@ -3071,30 +3243,27 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps source collection stage status stable while the selected run is still loading", () => {
-    const stageRoundSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionSummaryStageRound = useMemo<ResearchStageRound | null>(() => {"),
-      routeSource.indexOf("const experimentPlanningStatus = experimentPlanningStatusQuery.data ?? null;"),
-    );
+    // R2-o: summary stage-round projection is pure in deriveSourceCollectionSummaryProjection.
+    const stageRoundSource = deriveSourceCollectionSummaryProjectionSource;
     expect(stageRoundSource).toContain("summaryRunId");
     expect(stageRoundSource).toContain("selectedSourceCollectionRunEffectiveId && summaryRunId && summaryRunId !== selectedSourceCollectionRunEffectiveId");
     expect(stageRoundSource).toContain("selectSourceCollectionStageRound(");
     expect(stageRoundSource).toContain("sourceCollectionSummaryStageRound");
     expect(stageRoundSource).toContain("selectedSourceCollectionRunEffectiveId");
     expect(stageRoundSource).not.toContain("?? rounds[0] ?? null");
+    expect(useSourceCollectionPresentationSource).toContain("deriveSourceCollectionSummaryProjection({");
 
-    const candidateListLoadingSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionCandidateListDataLoading = Boolean("),
-      routeSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
-    );
-    expect(candidateListLoadingSource).toContain("teamWorkflowCandidateListEnabled");
-    expect(candidateListLoadingSource).toContain("sourceCollectionNeedsCandidateList");
-    expect(candidateListLoadingSource).toContain("!teamWorkflowCandidatesQuery.data");
+    // R2-l: candidate/primary loading gates live in deriveSourceCollectionListMetrics.
+    expect(deriveSourceCollectionListMetricsSource).toContain("const sourceCollectionCandidateListDataLoading = Boolean(");
+    expect(deriveSourceCollectionListMetricsSource).toContain("teamWorkflowCandidateListEnabled");
+    expect(deriveSourceCollectionListMetricsSource).toContain("sourceCollectionNeedsCandidateList");
+    expect(deriveSourceCollectionListMetricsSource).toContain("!teamWorkflowCandidatesQuery.data");
     expect(routeSource).toContain("const sourceCollectionNeedsCandidateList = sourceCollectionWorkspaceSelected;");
     expect(routeSource).not.toContain("selectedSourceCollectionStageId !== \"finding\"");
 
-    const sourceCollectionPrimaryLoadingSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
-      routeSource.indexOf("const sourceCollectionSourceQualityLoading = Boolean("),
+    const sourceCollectionPrimaryLoadingSource = deriveSourceCollectionListMetricsSource.slice(
+      deriveSourceCollectionListMetricsSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
+      deriveSourceCollectionListMetricsSource.indexOf("const sourceCollectionSourceQualityLoading = Boolean("),
     );
     expect(sourceCollectionPrimaryLoadingSource).toContain("sourceCollectionCandidateListDataLoading");
 
@@ -3103,15 +3272,17 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8L: candidate panel loading prop lives on candidate workspace panel.
     expect(teamSourceCollectionCandidateWorkspacePanelSource).toContain("loading={sourceCollectionPrimaryDataLoading}");
 
-    const displayLoadingSource = useSourceCollectionPresentationSource.slice(
-      useSourceCollectionPresentationSource.indexOf("const sourceCollectionFindingDisplayLoading"),
-      useSourceCollectionPresentationSource.indexOf("const sourceCollectionExperimentPlanningRoute"),
+    // R2-m: stage display loading/state + sync metric labels live in pure module.
+    const displayLoadingSource = deriveSourceCollectionStageDisplaySurfacesSource.slice(
+      deriveSourceCollectionStageDisplaySurfacesSource.indexOf("const sourceCollectionFindingDisplayLoading"),
+      deriveSourceCollectionStageDisplaySurfacesSource.indexOf("sourceCollectionIngestionReadyForExperiment"),
     );
-    expect(displayLoadingSource).toContain("const sourceCollectionRelationsDisplayLoading = sourceCollectionGraphDataLoading");
-    expect(displayLoadingSource).toContain("const sourceCollectionIngestionDisplayLoading = sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading");
+    expect(displayLoadingSource).toContain("const sourceCollectionRelationsDisplayLoading = graphDataLoading");
+    expect(displayLoadingSource).toContain("const sourceCollectionIngestionDisplayLoading = sourceQualityLoading || knowledgeIngestionDataLoading");
     expect(displayLoadingSource).toContain("sourceCollectionCandidateSyncStatusText");
-    expect(displayLoadingSource).not.toContain("sourceCollectionPrimaryDataLoading || sourceCollectionGraphDataLoading");
-    expect(displayLoadingSource).not.toContain("sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading");
+    expect(displayLoadingSource).not.toContain("primaryDataLoading || graphDataLoading");
+    expect(displayLoadingSource).not.toContain("primaryDataLoading || sourceQualityLoading || knowledgeIngestionDataLoading");
+    expect(useSourceCollectionPresentationSource).toContain("deriveSourceCollectionStageDisplaySurfaces({");
 
     const stageModuleSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionStageModules"),
@@ -3139,7 +3310,7 @@ describe("TeamsRoute layout contract", () => {
   it("keeps the source collection workspace in a simple status-board mode", () => {
     const standaloneSource = routeSource.slice(
       routeSource.indexOf("if (sourceCollectionStandalone)"),
-      routeSource.indexOf("if (showTeamInitialLoadingSurface"),
+      routeSource.indexOf("const teamShellRail"),
     );
     expect(standaloneSource).toContain("sourceCollectionBoardNextStepLabel");
     expect(standaloneSource).not.toContain("{renderSourceCollectionControlsPanel()}");
@@ -3153,17 +3324,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("loadingAllText={sourceCollectionLoadingText}");
     expect(routeSource).not.toContain("count: loading ? loadingValue");
 
-    const commandStatsSource = standaloneSource.slice(
-      standaloneSource.indexOf("<TeamSourceCollectionStandaloneStagePanel"),
-      standaloneSource.indexOf("stagePipelineId=\"source-collection-stage-status\""),
-    );
-    expect(commandStatsSource).toContain("sourceCollectionConsoleStatusText");
-    expect(commandStatsSource).toContain("sourceCollectionBoardNextStepLabel");
-    expect(commandStatsSource).toContain("sourceCollectionCollectedCountLabel");
-    expect(commandStatsSource).not.toContain("sourceCollectionSearchOpenAssignmentCountLabel");
-    expect(commandStatsSource).not.toContain("sourceCollectionDownstreamOpenAssignmentCountLabel");
-    expect(commandStatsSource).not.toContain("sourceCollectionQueryCountLabel");
-    expect(commandStatsSource).not.toContain("sourceCollectionPromptCacheStatusLabel");
+    expect(standaloneSource).toContain("sourceCollectionConsoleStatusText");
+    expect(standaloneSource).toContain("sourceCollectionBoardNextStepLabel");
+    expect(standaloneSource).toContain("sourceCollectionCollectedCountLabel");
+    expect(standaloneSource).not.toContain("sourceCollectionSearchOpenAssignmentCountLabel");
+    expect(standaloneSource).not.toContain("sourceCollectionDownstreamOpenAssignmentCountLabel");
+    expect(standaloneSource).not.toContain("sourceCollectionQueryCountLabel");
+    expect(standaloneSource).not.toContain("sourceCollectionPromptCacheStatusLabel");
 
     const stageModuleViewModelSource = stageModulesModelSource.slice(
       stageModulesModelSource.indexOf("export function buildSourceCollectionStandaloneStageModules"),
@@ -3177,7 +3344,8 @@ describe("TeamsRoute layout contract", () => {
     expect(stageModuleViewModelSource).not.toContain("summary: module.summary");
     expect(stageModuleViewModelSource).not.toContain("sourceCollectionStageProjectionTaskMetric");
     expect(stageModuleViewModelSource).not.toContain("sourceCollectionStageTechnicalDetails");
-    expect(routeSourceRaw).toContain("buildSourceCollectionStandaloneStageModules({");
+    // R1-a: standalone stage modules built inside useTeamsScComposition
+    expect(composeSourceCollectionStageSurfacesSource).toContain("buildSourceCollectionStandaloneStageModules({");
 
     const stageCardSource = teamSourceCollectionStandaloneStagePanelSource.slice(
       teamSourceCollectionStandaloneStagePanelSource.indexOf("<TeamStagePipeline"),
@@ -3315,10 +3483,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("roleBadgeTone");
     expect(routeSource).toContain("teamNodeFunctionLabel");
     expect(teamRouteShellModelSource).toContain("能力管家");
-    expect(routeSource).toContain("styles.nodeRoleBadge");
-    expect(routeSource).toContain("styles.nodeRoleBadgeLead");
-    expect(routeSource).toContain("styles.nodeRoleBadgeAdvisor");
-    expect(routeSource).toContain("styles.nodeRoleBadgeSteward");
+    // Role badge classes live on teamsWorkbenchChrome style map.
+    expect(teamsWorkbenchChromeSource).toContain("nodeRoleBadge");
+    expect(teamsWorkbenchChromeSource).toContain("nodeRoleBadgeLead");
+    expect(teamsWorkbenchChromeSource).toContain("nodeRoleBadgeAdvisor");
+    expect(teamsWorkbenchChromeSource).toContain("nodeRoleBadgeSteward");
+    expect(routeSource).toContain("roleBadgeTone");
     expect(routeStyles.canvasViewport).toContain("h-[760px]");
     expect(routeStyles.canvasViewport).toContain("w-[1180px]");
     expect(routeStyles.canvasViewport).toContain("[transform:scale(var(--canvas-scale,1))]");
@@ -3330,8 +3500,8 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps Teams dynamic layout values behind typed CSS variable helpers", () => {
-    // Wave 8L: Teams SC graph mount lives on graph workspace panel; route only lazy-declares the view.
-    expect(routeSource).toContain("TeamWorkflowGraphView");
+    // Wave 8L: Teams SC graph mount lives on graph workspace panel; lazy export stays on teamLazyPanels.
+    expect(teamLazyPanelsSource).toContain("TeamWorkflowGraphView");
     expect(teamSourceCollectionGraphWorkspacePanelSource.match(/<TeamWorkflowGraphView/g)?.length ?? 0).toBe(1);
     expect(teamWorkflowStatusPanelsSource.match(/<TeamWorkflowGraphView/g)?.length ?? 0).toBe(1);
     expect(routeSource).not.toContain("workflowGraphFrameStyle(visibleGraphLayout)");
@@ -3354,7 +3524,7 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps read-only research canvas auto layout visual-only and deterministic", () => {
-    expect(routeSource).toContain('from "./teams/canvasGeometry"');
+    expect(routeSource).toMatch(/from "\.\/?(\.\.\/)?teams\/canvasGeometry"|from "\.\/canvasGeometry"/);
     expect(canvasGeometrySource).toContain("function autoLayoutResearchCanvasNodes");
     expect(canvasGeometrySource).toContain("researchCanvasRoleLayer");
     expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP");
@@ -3386,7 +3556,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onPointerDown={researchCanvasReadOnly ? undefined : (event) => onNodePointerDown?.(event, node)}");
     expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : onNodePointerMove}");
     expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : onNodePointerUp}");
-    expect(routeSource).toContain("onNodePointerDown={startNodeDrag}");
+    expect(routeSource).toContain("onNodePointerDown: startNodeDrag");
+    expect(routeSource).toContain("onNodePointerDown={p.onNodePointerDown}");
     expect(routeSource).toContain("edgeLine(edge, displayCanvasNodes, visibleEdges)");
   });
 
@@ -3411,26 +3582,30 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamLoadingInlineSurface).toBeTypeOf("string");
     expect(routeStyles.teamLoadingInlineSurface).toContain("min-h-[96px]");
 
-    // Unavailable / empty shells early-return on VDenseOpsPage; success uses board/canvas recipes.
-    const loadingShellSource = routeSource.slice(
-      routeSource.indexOf("if (showTeamInitialLoadingSurface || showTeamUnavailableSurface || showTeamDetailUnavailableSurface)"),
-      routeSource.indexOf("if (researchCanvasVisible)"),
-    );
-    expect(loadingShellSource).toContain("VDenseOpsPage");
+    // R1-c: gate early-return via renderTeamsShellGate → TeamsShellGateSurface (VDenseOpsPage).
+    const shellGateStart = routeSource.indexOf("const shellGate = renderTeamsShellGate");
+    const shellGateEnd = routeSource.indexOf("if (researchCanvasVisible)");
+    expect(shellGateStart).toBeGreaterThanOrEqual(0);
+    expect(shellGateEnd).toBeGreaterThan(shellGateStart);
+    const loadingShellSource = routeSource.slice(shellGateStart, shellGateEnd);
+    expect(loadingShellSource).toMatch(/TeamsShellGateSurface|renderTeamsShellGate|shellGate/);
+    expect(routeSource).toContain("VDenseOpsPage");
     expect(loadingShellSource).toContain("showTeamUnavailableSurface");
     expect(loadingShellSource).toContain("showTeamDetailUnavailableSurface");
     expect(loadingShellSource).not.toContain("showTeamLoadingSurface ? (");
     expect(routeSource).toContain("teamWorkspaceLoadingTitle");
     expect(routeSource).toContain("className={styles.teamLoadingInlineSurface}");
-    expect(routeSource.indexOf("className={styles.teamLoadingInlineSurface}")).toBeGreaterThan(
-      routeSource.indexOf("VCanvasWorkbenchPage"),
-    );
+    // Canvas branch uses TeamsCanvasComposer (wraps VCanvasWorkbenchPage) via R2-q extractor.
+    expect(routeSource).toContain("TeamsCanvasComposer");
+    expect(routeSource).toContain("VCanvasWorkbenchPage");
+    expect(renderTeamsWorkbenchCanvasPageSource).toContain("TeamsCanvasComposer");
+    expect(routeSource).toContain("className={styles.teamLoadingInlineSurface}");
 
     const standaloneSource = routeSource.slice(
       routeSource.indexOf("if (sourceCollectionStandalone)"),
-      routeSource.indexOf("if (showTeamInitialLoadingSurface"),
+      routeSource.indexOf("const teamShellRail"),
     );
-    expect(standaloneSource).toContain("researchWorkflowTeamSelected && !showTeamDetailUnavailableSurface ? (");
+    expect(standaloneSource).toContain("renderSourceCollectionStandalonePage");
     expect(standaloneSource).toContain("teamWorkspaceLoadingTitle");
     expect(standaloneSource).not.toContain("researchWorkflowTeamSelected && !showTeamLoadingSurface && !showTeamDetailUnavailableSurface ? (");
   });
@@ -3448,23 +3623,25 @@ describe("TeamsRoute layout contract", () => {
   it("shows only the selected run's close gate and lets users locate its unfinished stage", () => {
     const standaloneSource = routeSource.slice(
       routeSource.indexOf("if (sourceCollectionStandalone)"),
-      routeSource.indexOf("if (showTeamInitialLoadingSurface"),
+      routeSource.indexOf("const teamShellRail"),
     );
     expect(stageProjectionSource).toContain("sourceCollectionPhaseCloseGateForRun");
     expect(stageProjectionSource).toContain('scope.kind !== "source_run"');
     expect(stageProjectionSource).toContain("scope.includesHistorical === true");
-    expect(routeSource).toContain("const sourceCollectionPhaseCloseGate = sourceCollectionPhaseCloseGateForRun(");
-    expect(routeSource).toContain("<TeamSourceCollectionPhaseCloseGatePanel");
-    expect(routeSource).toContain("onOpenStage={selectSourceCollectionStage}");
+    // R2-o: phase close gate ownership moved into summary projection pure helper.
+    expect(deriveSourceCollectionSummaryProjectionSource).toContain("sourceCollectionPhaseCloseGateForRun(");
+    expect(useSourceCollectionPresentationSource).toContain("sourceCollectionPhaseCloseGate");
+    expect(sourceCollectionControllerSource).toContain("TeamSourceCollectionPhaseCloseGatePanel");
+    expect(sourceCollectionControllerSource).toContain("onOpenStage={chrome.selectSourceCollectionStage}");
     expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSearchBriefPanel")');
     expect(routeSource).toContain("function renderSourceCollectionSearchBrief(");
-    expect(routeSource).toContain("createSourceCollectionInjectRenderers");
-    expect(standaloneSource).toContain("searchBrief={renderSourceCollectionSearchBrief()}");
-    expect(standaloneSource).toContain("runHistoryLabel=");
-    expect(standaloneSource).toContain("compact");
+    expect(routeSource).toContain("createSourceCollectionController");
+    expect(standaloneSource).toContain("renderSourceCollectionStandalonePage");
+    expect(standaloneSource).toContain("sourceCollectionRunsQuery");
+    expect(standaloneSource).toContain("sourceCollectionFindingStageCompact");
     expect(standaloneSource).toContain("sourceCollectionSelectedRunTopic");
     expect(routeSource).toContain("sourceCollectionDraftHydratedRunIdRef");
-    expect(routeSource).toContain("selectedSourceCollectionRun?.summary?.recordCount");
+    expect(deriveSourceCollectionListMetricsSource).toContain("sourceCollectionRunSummary?.recordCount");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("phaseCloseGate?: ReactNode");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("styles.sourceCollectionRunContext");
     expect(teamSourceCollectionOverviewPanelSource).toContain("phaseCloseGate?: ReactNode");

@@ -3,38 +3,39 @@
  * Loaded when knowledge / source-collection workspaces are entered.
  */
 
-export { TeamSourceCollectionActiveStagePanel } from "../TeamSourceCollectionActiveStagePanel";
-export { TeamSourceCollectionPhaseCloseGatePanel } from "../TeamSourceCollectionPhaseCloseGatePanel";
-export { TeamSourceCollectionStageAgentsPanel } from "../TeamSourceCollectionStageAgentsPanel";
-export { TeamSourceCollectionRunSwitcherPanel } from "../TeamSourceCollectionRunSwitcherPanel";
-export { TeamSourceCollectionFindingDetailsPanel } from "../TeamSourceCollectionFindingDetailsPanel";
-export { TeamSourceCollectionOverviewPanel } from "../TeamSourceCollectionOverviewPanel";
-export { TeamSourceCollectionCandidatePanel } from "../TeamSourceCollectionCandidatePanel";
-export { TeamSourceCollectionConversationPanel } from "../TeamSourceCollectionConversationPanel";
-export { TeamSourceCollectionControlsPanel } from "../TeamSourceCollectionControlsPanel";
-export { TeamSourceCollectionExtractionRecoveryPanel } from "../TeamSourceCollectionExtractionRecoveryPanel";
-export { TeamSourceCollectionGraphPanel } from "../TeamSourceCollectionGraphPanel";
-export { TeamSourceCollectionManualWritebackPanel } from "../TeamSourceCollectionManualWritebackPanel";
-export { TeamSourceCollectionMemoryPanel } from "../TeamSourceCollectionMemoryPanel";
-export { TeamSourceCollectionScreeningPanel } from "../TeamSourceCollectionScreeningPanel";
-export { TeamSourceCollectionSourceDetailPanel } from "../TeamSourceCollectionSourceDetailPanel";
-export { TeamSourceCollectionStandaloneStagePanel } from "../TeamSourceCollectionStandaloneStagePanel";
-export { TeamSourceCollectionSearchBriefPanel } from "../TeamSourceCollectionSearchBriefPanel";
-export { TeamSourceCollectionRunSettingsPanel } from "../TeamSourceCollectionRunSettingsPanel";
+/** P4: implementations under source-collection/ui/; keep pack import paths stable. */
+export { TeamSourceCollectionActiveStagePanel } from "./source-collection/ui/TeamSourceCollectionActiveStagePanel";
+export { TeamSourceCollectionPhaseCloseGatePanel } from "./source-collection/ui/TeamSourceCollectionPhaseCloseGatePanel";
+export { TeamSourceCollectionStageAgentsPanel } from "./source-collection/ui/TeamSourceCollectionStageAgentsPanel";
+export { TeamSourceCollectionRunSwitcherPanel } from "./source-collection/ui/TeamSourceCollectionRunSwitcherPanel";
+export { TeamSourceCollectionFindingDetailsPanel } from "./source-collection/ui/TeamSourceCollectionFindingDetailsPanel";
+export { TeamSourceCollectionOverviewPanel } from "./source-collection/ui/TeamSourceCollectionOverviewPanel";
+export { TeamSourceCollectionCandidatePanel } from "./source-collection/ui/TeamSourceCollectionCandidatePanel";
+export { TeamSourceCollectionConversationPanel } from "./source-collection/ui/TeamSourceCollectionConversationPanel";
+export { TeamSourceCollectionControlsPanel } from "./source-collection/ui/TeamSourceCollectionControlsPanel";
+export { TeamSourceCollectionExtractionRecoveryPanel } from "./source-collection/ui/TeamSourceCollectionExtractionRecoveryPanel";
+export { TeamSourceCollectionGraphPanel } from "./source-collection/ui/TeamSourceCollectionGraphPanel";
+export { TeamSourceCollectionManualWritebackPanel } from "./source-collection/ui/TeamSourceCollectionManualWritebackPanel";
+export { TeamSourceCollectionMemoryPanel } from "./source-collection/ui/TeamSourceCollectionMemoryPanel";
+export { TeamSourceCollectionScreeningPanel } from "./source-collection/ui/TeamSourceCollectionScreeningPanel";
+export { TeamSourceCollectionSourceDetailPanel } from "./source-collection/ui/TeamSourceCollectionSourceDetailPanel";
+export { TeamSourceCollectionStandaloneStagePanel } from "./source-collection/ui/TeamSourceCollectionStandaloneStagePanel";
+export { TeamSourceCollectionSearchBriefPanel } from "./source-collection/ui/TeamSourceCollectionSearchBriefPanel";
+export { TeamSourceCollectionRunSettingsPanel } from "./source-collection/ui/TeamSourceCollectionRunSettingsPanel";
 export {
   TeamSourceCollectionFilterBar,
   TeamSourceCollectionPagination,
-} from "../TeamSourceCollectionResultControls";
-export { TeamSourceCollectionStorageActionsPanel } from "../TeamSourceCollectionStorageActionsPanel";
+} from "./source-collection/ui/TeamSourceCollectionResultControls";
+export { TeamSourceCollectionStorageActionsPanel } from "./source-collection/ui/TeamSourceCollectionStorageActionsPanel";
 export { TeamsSourceCollectionPanel } from "./TeamsSourceCollectionPanel";
 
 export { TeamKnowledgeCollectionCompletionFlowPanel } from "../TeamKnowledgeCollectionCompletionFlowPanel";
-export { TeamSourceCollectionConversationWorkspacePanel } from "../TeamSourceCollectionConversationWorkspacePanel";
-export { TeamSourceCollectionScreeningWorkspacePanel } from "../TeamSourceCollectionScreeningWorkspacePanel";
-export { TeamSourceCollectionExtractionRecoveryWorkspacePanel } from "../TeamSourceCollectionExtractionRecoveryWorkspacePanel";
-export { TeamSourceCollectionCandidateWorkspacePanel } from "../TeamSourceCollectionCandidateWorkspacePanel";
-export { TeamSourceCollectionGraphWorkspacePanel } from "../TeamSourceCollectionGraphWorkspacePanel";
-export { TeamSourceCollectionMemoryWorkspacePanel } from "../TeamSourceCollectionMemoryWorkspacePanel";
-export { TeamSourceCollectionSelectedSourceWorkspacePanel } from "../TeamSourceCollectionSelectedSourceWorkspacePanel";
-export { TeamSourceCollectionControlsWorkspacePanel } from "../TeamSourceCollectionControlsWorkspacePanel";
-export { TeamSourceCollectionActiveStageWorkspacePanel } from "../TeamSourceCollectionActiveStageWorkspacePanel";
+export { TeamSourceCollectionConversationWorkspacePanel } from "./source-collection/ui/TeamSourceCollectionConversationWorkspacePanel";
+export { TeamSourceCollectionScreeningWorkspacePanel } from "./source-collection/ui/TeamSourceCollectionScreeningWorkspacePanel";
+export { TeamSourceCollectionExtractionRecoveryWorkspacePanel } from "./source-collection/ui/TeamSourceCollectionExtractionRecoveryWorkspacePanel";
+export { TeamSourceCollectionCandidateWorkspacePanel } from "./source-collection/ui/TeamSourceCollectionCandidateWorkspacePanel";
+export { TeamSourceCollectionGraphWorkspacePanel } from "./source-collection/ui/TeamSourceCollectionGraphWorkspacePanel";
+export { TeamSourceCollectionMemoryWorkspacePanel } from "./source-collection/ui/TeamSourceCollectionMemoryWorkspacePanel";
+export { TeamSourceCollectionSelectedSourceWorkspacePanel } from "./source-collection/ui/TeamSourceCollectionSelectedSourceWorkspacePanel";
+export { TeamSourceCollectionControlsWorkspacePanel } from "./source-collection/ui/TeamSourceCollectionControlsWorkspacePanel";
+export { TeamSourceCollectionActiveStageWorkspacePanel } from "./source-collection/ui/TeamSourceCollectionActiveStageWorkspacePanel";

@@ -6,13 +6,14 @@ Prefer editing a **pack module** over growing `team_workflow_orchestration_servi
 Align language with frontend claim map: `web/src/routes/teams/README.md`.
 
 `team_workflow_orchestration_service.py` remains the **public import facade** for
-`core/web/routes/team_workflows.py` and other callers.
+`core/web/routes/team_workflows/` (package) and other callers.
 
-**P0 structure closed** (2026-07-21): see `docs/plans/2026-07-21-backend-structure-p0-completion.md`.
+**Clarity P5/B1**: HTTP routes live in `core/web/routes/team_workflows/` package
+(`orchestration.py`, `research_projects.py`, `source_collection.py`, `stage_rounds.py`,
+`experiment.py`, `knowledge.py`, `research_ops.py`). Shared `router` is exported from
+`__init__.py`. URL paths unchanged.
 
-**Service optimization Phase 1** (2026-07-21): SC search + writeback kernels — `docs/plans/2026-07-21-service-optimization-phase1-sc-search-kernel.md`.
-
-**Service optimization Phase 2** (2026-07-21): knowledge / graph / steward public APIs — `docs/plans/2026-07-21-service-optimization-phase2-knowledge.md`.
+Historical structure/optimization notes (non-authoritative): `docs/archive/plans/2026-06-07/`.
 
 ## 30-second routing (edit here first)
 
@@ -22,14 +23,20 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Candidates register/import/extract/list | `source_collection/candidates.py` |
 | SC run start / search entry / summary | `source_collection/runs.py` |
 | SC search execution body | `source_collection/search_execution.py` |
-| SC stage task start/writeback/context | `source_collection/stages.py` |
+| SC stage task start/seed/gates | `source_collection/stage_session.py` (re-export: `stages.py`) |
+| SC stage writeback/context/reconcile | `source_collection/stage_writeback.py` (re-export: `stages.py`) |
 | SC stage reconcile / cards | `source_collection/stage_reconcile.py` |
 | SC writeback materialize | `source_collection/writeback_materialize.py` |
 | SC import/plan/exclusion/work-run residual | `source_collection/residual.py` |
 | SC storage open | `source_collection/storage.py` |
 | SC projection / summary helpers | `source_collection_projection.py` |
 | SC agent session context seed | `source_collection_context.py` |
-| Experiment plan/smoke/full-run | `experiment.py` |
+| Experiment plan/smoke/full-run (public re-export) | `experiment.py` → `experiment_api/` |
+| Experiment plan/catalog/freeze/baseline | `experiment_api/plan.py` |
+| Experiment hypothesis materialize/complete | `experiment_api/hypothesis.py` |
+| Experiment smoke run/result | `experiment_api/smoke.py` |
+| Experiment full run prepare/execute/register | `experiment_api/full_run.py` |
+| Experiment result knowledge ingestion | `experiment_api/knowledge.py` |
 | Experiment private kernel | `experiment_kernel.py` |
 | Research loop / stage round | `research_loop.py` |
 | Research-project Agent tasks / flat sessions | `research_project_agent_tasks.py` + `research_project_agent_sessions.py` |
@@ -155,11 +162,9 @@ Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structu
 
 ## Related
 
-- Routes: `core/web/routes/team_workflows.py`
+- Routes: `core/web/routes/team_workflows/` (package)
 - Frontend: `web/src/routes/teams/README.md`
-- Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
-- Phase 1 plan: `docs/plans/2026-07-21-service-optimization-phase1-sc-search-kernel.md`
-- Phase 2 plan: `docs/plans/2026-07-21-service-optimization-phase2-knowledge.md`
+- Historical plans: `docs/archive/plans/2026-06-07/`
 
 
 ### Service optimization Phase 15 (SC residual + workflow ops)

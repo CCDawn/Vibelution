@@ -1405,6 +1405,69 @@ def test_launcher_force_stop_skips_when_workbench_already_closed(monkeypatch):
     assert "launcher.bundle.force_stop.skipped_already_closed" in [event[0] for event in events]
 
 
+def test_launcher_force_stop_queues_when_already_closed_but_active_work_remains(tmp_path, monkeypatch):
+    """Closed workbench must still queue force_close when zombie work-runs block lifecycle."""
+
+    work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
+    store = WorkRunStore(root=work_runs_dir)
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat-turn-zombie",
+            "runKind": "chat_turn",
+            "sessionId": "session-zombie",
+            "status": "running",
+        },
+        active_run_id="",
+    )
+    events = []
+    commands = []
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
+    monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: True)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: None)
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda command_type, *, args=None, requested_by="unknown": commands.append((command_type, args, requested_by))
+        or {"commandId": "cmd-force-close-residual"},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.request_launcher_force_stop()
+
+    assert response["accepted"] is True
+    assert response["operation"] == "force-stop"
+    assert response["commandId"] == "cmd-force-close-residual"
+    assert response["activeWorkCount"] == 1
+    assert response["activeWorkRuns"] == [
+        {
+            "kind": "chat_turn",
+            "runId": "chat-turn-zombie",
+            "status": "running",
+            "sessionId": "session-zombie",
+        }
+    ]
+    assert "残留" in response["message"]
+    assert commands == [
+        (
+            "force_close_workbench",
+            {"reason": "launcher_force_stop_button", "source": "launcher_api", "stopManager": False},
+            "launcher_api",
+        )
+    ]
+    event_codes = [event[0] for event in events]
+    assert "launcher.bundle.force_stop.residual_active_work_while_closed" in event_codes
+    assert "launcher.bundle.force_stop.skipped_already_closed" not in event_codes
+    assert "launcher.bundle.force_stop.accepted" in event_codes
+    accepted_event = next(event for event in events if event[0] == "launcher.bundle.force_stop.accepted")
+    assert accepted_event[1]["fields"]["residualActiveWorkWhileClosed"] is True
+    assert accepted_event[1]["fields"]["alreadyClosed"] is True
+
+
 def test_launcher_active_work_guard_scans_parallel_chat_turn_snapshots(tmp_path, monkeypatch):
     work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
     store = WorkRunStore(root=work_runs_dir)

@@ -64,11 +64,45 @@ def test_turn_status_bar_message_and_upsert():
     ]
     updated = upsert_turn_status_bar_message(messages, message)
     assert len(updated) == 3
-    assert is_turn_status_bar_message(updated[1])
+    # Status bar must trail the user/tool path so DeepSeek prefix cache can grow.
+    assert is_turn_status_bar_message(updated[-1])
+    assert not is_turn_status_bar_message(updated[1])
     # Second upsert replaces rather than stacks.
     updated_again = upsert_turn_status_bar_message(updated, message)
     assert len(updated_again) == 3
+    assert is_turn_status_bar_message(updated_again[-1])
     assert len(strip_turn_status_bar_messages(updated_again)) == 2
+
+
+def test_turn_status_bar_trails_tool_messages_for_prefix_cache():
+    """Changing status bar must not sit between history and growing tool trail."""
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    bar1 = build_turn_status_bar_message(
+        collect_turn_status_snapshot(iteration=1, model="deepseek-chat", tool_policy={"maxCallsPerTurn": 8})
+    )
+    bar2 = build_turn_status_bar_message(
+        collect_turn_status_snapshot(iteration=2, model="deepseek-chat", tool_policy={"maxCallsPerTurn": 8})
+    )
+    base = [
+        SystemMessage(content="stable system"),
+        HumanMessage(content="do relations"),
+        AIMessage(content="", tool_calls=[{"id": "c1", "name": "source_collection_context_tool", "args": {}}]),
+        ToolMessage(content="page0", tool_call_id="c1"),
+    ]
+    step1 = upsert_turn_status_bar_message(base, bar1)
+    # Pure-append tool step then rewrite status: common prefix must include tools.
+    step2_msgs = list(strip_turn_status_bar_messages(step1)) + [
+        AIMessage(content="", tool_calls=[{"id": "c2", "name": "source_collection_context_tool", "args": {}}]),
+        ToolMessage(content="page1", tool_call_id="c2"),
+    ]
+    step2 = upsert_turn_status_bar_message(step2_msgs, bar2)
+    assert is_turn_status_bar_message(step2[-1])
+    # Everything except the final status bar is a pure prefix of step2 without bar.
+    body1 = strip_turn_status_bar_messages(step1)
+    body2 = strip_turn_status_bar_messages(step2)
+    assert body2[: len(body1)] == body1
+    assert len(body2) == len(body1) + 2
 
 
 def test_runtime_status_default_enabled_with_agent_metadata_off():

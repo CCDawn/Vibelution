@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import routeSource from "../TeamsRoute.tsx?raw";
+import routeShellSource from "./TeamsRouteWorkbench.tsx?raw";
+import routeModelSourceThin from "./useTeamsWorkbenchModel.tsx?raw";
+import routeFoundationSource from "./useTeamsWorkbenchFoundation.tsx?raw";
+import routeShellPhaseSource from "./useTeamsWorkbenchShellPhase.tsx?raw";
+const routeModelSource = `${routeModelSourceThin}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
+const routeSource = `${routeShellSource}\n${routeModelSource}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
 import queriesSource from "./useTeamResearchSecondaryQueries.ts?raw";
 
 describe("team research secondary queries contract", () => {

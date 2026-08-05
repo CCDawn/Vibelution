@@ -9,11 +9,7 @@ Canonical product flow: `docs/agents/conversation-flow-map.md`.
 (`from core.web.services.session_service import ...`). New hot-path logic should land in
 this package and be re-exported from the facade when it is part of the public API.
 
-**P0 structure closed** (2026-07-21): see `docs/plans/2026-07-21-backend-structure-p0-completion.md`.
-
-**Service optimization Phase 3** (2026-07-21): projection + SSE publish packs — `docs/plans/2026-07-21-service-optimization-phase3-session-projection.md`.
-
-**Service optimization Phase 4** (2026-07-21): stop control + agent session lifecycle — `docs/plans/2026-07-21-service-optimization-phase4-session-lifecycle.md`.
+Historical structure/optimization notes (non-authoritative): `docs/archive/plans/2026-06-07/`.
 
 ## 30-second routing (edit here first)
 
@@ -175,10 +171,9 @@ Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (s
 
 - Routes: `core/web/routes/sessions.py`
 - Domain: `core/chat/*` (ledger, context assembler)
-- Agent turn: `agent.py` (out of session P0 deep cut)
-- Phase 3 plan: `docs/plans/2026-07-21-service-optimization-phase3-session-projection.md`
-- Phase 4 plan: `docs/plans/2026-07-21-service-optimization-phase4-session-lifecycle.md`
-- Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
+- Agent turn: `agent.py`
+- Conversation map: `docs/agents/conversation-flow-map.md`
+- Historical plans: `docs/archive/plans/2026-06-07/`
 
 
 ### Service optimization Phase 16 (signals + runtime glue)

@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), "utf8");
+const routeShellSource = readFileSync(new URL("./TeamsRouteWorkbench.tsx", import.meta.url), "utf8");
+const routeModelSource = readFileSync(new URL("./useTeamsWorkbenchModel.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchFoundation.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8");
+const routeSource = `${routeShellSource}\n${routeModelSource}`;
 const hookSource = readFileSync(new URL("./useTeamsShellCanvasWorkspace.ts", import.meta.url), "utf8");
 
 describe("useTeamsShellCanvasWorkspace Phase 3 contract", () => {

@@ -314,6 +314,12 @@ def test_source_collection_writeback_recovers_fenced_structured_result_text(tmp_
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(
+        run_id,
+        count=1,
+        title_prefix="Fenced result raw source",
+        doi_prefix="10.0000/fenced-result-raw",
+    )
     candidate = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
         {

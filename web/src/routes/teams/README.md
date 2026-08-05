@@ -2,6 +2,51 @@
 
 Agent-oriented map for Teams workbench development. Prefer editing a **module** over growing `TeamsRoute.tsx` when possible.
 
+## Clarity P5–P0 roadmap (①–⑥)
+
+| Item | Location | Rule |
+| --- | --- | --- |
+| ① Stage shell + composers | `ResearchStageWorkbenchShell` + `SourceCollectionComposer` / `ExperimentStageComposer` | Stage pages: `data-team-rail="hidden"`; only overview mounts team rail |
+| F1 SC controller | `source-collection/createSourceCollectionController.tsx` | `TeamsRoute` must not define stage-advance or call `createSourceCollectionInjectRenderers` |
+| F3 SC presentation split | `presentationCountText` + `presentationExtractionMetrics` + `presentationActionReadiness` + `presentationStepStates` | Prefer pure modules over editing the 2k-line hook body for copy/metrics/readiness |
+| F4 Experiment controller | `createExperimentController.tsx` | Stage chrome/refresh via controller; primary surface uses it once per factory |
+| ④ SC panels | `source-collection/ui/*` + root re-exports | Pack imports stay stable via `teamSourceCollectionPanels.ts` |
+| ⑤ Overview/Canvas/Gate composers | `TeamsOverviewComposer` + `TeamsCanvasComposer` + `TeamsShellGateSurface` | Board/canvas/gate branches mount composers; do not re-inline `VCanvasWorkbenchPage` |
+| TeamsRoute shell | `routes/TeamsRoute.tsx` re-export | Implementation: `teams/TeamsRouteWorkbench.tsx` |
+| R1-a SC composition | `useTeamsScComposition.ts` | presentation + stage modules + controller |
+| R1-b research surfaces | `createTeamsResearchSurfaces.ts` | workspace + primary + workflow render factories |
+| R1-c shell frame | `renderTeamsShellFrame.tsx` | rail / toolbar / gate |
+| R2-a SC bag passthrough | `TeamsRouteWorkbench` + `...scComposition` | no flat 100+ SC destructure into research surfaces |
+| R2-b shell/overview bags | `teamsShellSurfaceModel` + `buildTeamWorkflowCandidatePreviewItems` + `buildSourceCollectionOverviewBag` | gate copy + candidate cards + SC overview stats |
+| R2-c workbench model | `useTeamsWorkbenchModel.tsx` + thin `TeamsRouteWorkbench.tsx` | Workbench entry &lt;1200; body in model |
+| R2-d catalog bootstrap | `useTeamsCatalogQueries.ts` | teams list / agent summary / bus + picker visibility; not team detail |
+| R2-e selected team detail | `useTeamsSelectedTeamDetail.ts` | effectiveTeamId + detail query + kind flags + SC workspace selected |
+| Workbench chrome | `teamsWorkbenchChrome.ts` | styles merge, rail/inspector panes, role/node/workflow tone helpers |
+| Workflow resource demand | `teamWorkflowResourceDemand.ts` | pure candidates/graph/quality/stage-round enable gates |
+| R2-g mutation bundle | `useTeamsMutationBundle.ts` | shell / workflow-start / experiment-loop / SC write mutations |
+| Stage agent bindings | `researchStageAgentBindings.ts` | pure canvas/member role → stage binding table |
+| R2-h research navigation | `createTeamsResearchNavigation.ts` | workspace view / team pick / shell mode URL sync |
+| R2-i stage launch handlers | `createResearchStageLaunchHandlers.ts` | launch/primary/advance; late-bound SC canLaunch/pending |
+| R2-j SC stage agent helpers | `createSourceCollectionStageAgentHelpers.ts` | stage agent chat routes + repair |
+| Experiment pending flags | `buildExperimentWorkspacePendingFlags.ts` | pure team-scoped pending bags for experiment actions |
+| R2-k SC stage surfaces | `composeSourceCollectionStageSurfaces.ts` | stage advance / modules / board chrome / controller after presentation |
+| R2-l presentation effects | `source-collection/useSourceCollectionPresentationEffects.ts` | stage/search invalidation + candidate hygiene |
+| R2-l list metrics pure | `source-collection/deriveSourceCollectionListMetrics.ts` | records/candidates/counts/loading flags |
+| R2-m display labels pure | `source-collection/deriveSourceCollectionDisplayLabels.ts` | count text/labels + pending screening |
+| R2-m downstream metrics | `source-collection/deriveSourceCollectionDownstreamMetrics.ts` | graph/memory/ingest pure counts |
+| R2-m stage display surfaces | `source-collection/deriveSourceCollectionStageDisplaySurfaces.ts` | stage loading/state + extraction metric labels |
+| R2-n selection presentation | `source-collection/deriveSourceCollectionSelectionPresentation.ts` | finding options / prompt-cache / search accepted / candidates |
+| R2-o scComposition passthrough | `useTeamsScComposition.ts` | spread presentation + stage surfaces; no flat re-list |
+| R2-o summary projection | `source-collection/deriveSourceCollectionSummaryProjection.ts` | summary/stage-cards/records pure |
+| R2-o stage action helpers | `source-collection/createSourceCollectionStageActionHelpers.ts` | stage task label/readiness |
+| R3 presentation entry | `useSourceCollectionPresentation.ts` → `useSourceCollectionPresentationCore.ts` | thin re-export; core still thick + `@ts-nocheck` |
+| F3 action handlers | `source-collection/createSourceCollectionActionHandlers.ts` | `runSourceCollection*` / open/select/scroll live here; presentation only wires |
+| F3 readiness/step metrics | `presentationActionReadiness` + `presentationStepStates` + `presentationExtractionMetrics` | copy/disable/step state edits go to pure modules |
+| B1 HTTP package | `core/web/routes/team_workflows/` | Domain modules; shared `router`; URLs unchanged |
+| B6 experiment_api | `team_workflow/experiment_api/{plan,hypothesis,smoke,full_run,knowledge}.py` | `experiment.py` re-exports only |
+
+Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollectionController.contract.test.ts`, `tests/test_team_workflow_facade_contract.py`.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |

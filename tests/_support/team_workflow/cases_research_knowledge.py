@@ -553,6 +553,7 @@ def test_content_extraction_writeback_accumulates_partial_candidate_batches(tmp_
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     candidates = [
         team_workflow_orchestration_service.register_candidate_source(
             team["teamId"],

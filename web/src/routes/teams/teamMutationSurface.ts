@@ -3,6 +3,35 @@
  * Phase 4: collapse repetitive pending/error/result flags so the route keeps less derived ctx.
  */
 
+import type {
+  TeamWorkflowSourceCollectionPromptCachePolicy,
+  TeamWorkflowSourceCollectionRunStartPayload,
+  WorkRunSnapshot,
+} from "../../api/types";
+
+/** Partial view of research stage start payload used by SC presentation. */
+export type ResearchStageRoundStartResultView = {
+  promptCachePolicy?: TeamWorkflowSourceCollectionPromptCachePolicy;
+  sourceCollectionRun?: {
+    promptCachePolicy?: TeamWorkflowSourceCollectionPromptCachePolicy;
+  };
+  searchPlan?: {
+    promptCachePolicy?: TeamWorkflowSourceCollectionPromptCachePolicy;
+    queryCount?: number;
+  };
+  stageRound?: {
+    promptCachePolicy?: TeamWorkflowSourceCollectionPromptCachePolicy;
+  };
+  sourceCollectionSearchExecution?: SourceCollectionSearchExecutionResultView;
+};
+
+/** Partial view of SC search execution mutation/result. */
+export type SourceCollectionSearchExecutionResultView = {
+  accepted?: boolean;
+  storageArtifacts?: Record<string, string>;
+  activeWorkRun?: WorkRunSnapshot;
+};
+
 export type TeamScopedMutationLike<
   TData = unknown,
   TVariables extends { teamId?: string } = { teamId?: string },
@@ -51,7 +80,7 @@ export function teamScopedMutationCandidateId<
 export type TeamMutationSurfaceMapInput = {
   teamId: string | undefined | null;
   resetResearchProjectSourceCollection: TeamScopedMutationLike;
-  startResearchStageRound: TeamScopedMutationLike;
+  startResearchStageRound: TeamScopedMutationLike<ResearchStageRoundStartResultView>;
   createExperimentPlan: TeamScopedMutationLike;
   materializeEngineeringProxyHypothesis: TeamScopedMutationLike;
   completeScientificHypothesisFromDesign: TeamScopedMutationLike<{ candidateId?: string } & Record<string, unknown>, { teamId?: string; candidateId?: string }>;
@@ -66,10 +95,10 @@ export type TeamMutationSurfaceMapInput = {
   createResearchLoop: TeamScopedMutationLike;
   recordResearchLoopEvidence: TeamScopedMutationLike;
   recordResearchLoopDecision: TeamScopedMutationLike;
-  startSourceCollectionRun: TeamScopedMutationLike;
+  startSourceCollectionRun: TeamScopedMutationLike<TeamWorkflowSourceCollectionRunStartPayload>;
   startSourceCollectionStageSessionTask: TeamScopedMutationLike<unknown, { teamId?: string; stageId?: string }>;
   recordSourceCollectionOutput: TeamScopedMutationLike;
-  executeSourceCollectionSearch: TeamScopedMutationLike;
+  executeSourceCollectionSearch: TeamScopedMutationLike<SourceCollectionSearchExecutionResultView>;
   extractSourceCollectionCandidates: TeamScopedMutationLike<{ runId?: string } & Record<string, unknown>>;
   openSourceCollectionStorage: TeamScopedMutationLike;
   startAiSearchRun: TeamScopedMutationLike;

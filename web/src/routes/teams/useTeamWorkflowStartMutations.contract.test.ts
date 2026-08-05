@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import routeSource from "../TeamsRoute.tsx?raw";
+import routeShellSource from "./TeamsRouteWorkbench.tsx?raw";
+import routeModelSourceThin from "./useTeamsWorkbenchModel.tsx?raw";
+import routeFoundationSource from "./useTeamsWorkbenchFoundation.tsx?raw";
+import routeShellPhaseSource from "./useTeamsWorkbenchShellPhase.tsx?raw";
+const routeModelSource = `${routeModelSourceThin}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
+import mutationBundleSource from "./useTeamsMutationBundle.ts?raw";
+const routeSource = `${routeShellSource}\n${routeModelSource}\n${routeFoundationSource}\n${routeShellPhaseSource}\n${mutationBundleSource}`;
 import modelSource from "./workflowStartMutationModel.ts?raw";
 import mutationsSource from "./useTeamWorkflowStartMutations.ts?raw";
 
@@ -29,8 +35,11 @@ describe("team workflow start mutations contract", () => {
   });
 
   it("is wired from TeamsRoute while Route no longer defines those mutations inline", () => {
-    expect(routeSource).toContain("useTeamWorkflowStartMutations({");
-    expect(routeSource).toContain("workflowStartMutationModel");
+    // R2-g: model → mutation bundle → workflow start mutations.
+    expect(routeModelSource).toContain("useTeamsMutationBundle({");
+    expect(mutationBundleSource).toContain("useTeamWorkflowStartMutations({");
+    // Start payload model is owned by workflowStartMutationModel (imported by start mutations).
+    expect(mutationsSource).toContain("workflowStartMutationModel");
     expect(routeSource).not.toMatch(/\bconst \w+Mutation = useMutation\(/);
     mutationOwners.forEach((owner) => {
       expect(routeSource).not.toContain(`const ${owner} = useMutation({`);

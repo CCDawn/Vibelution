@@ -8,6 +8,8 @@ re-export tests. These checks are intentionally cheap and high-signal:
 2. Public facades must stay re-export / glue thin (budget on top-level
    function bodies), so new business logic lands in packs.
 3. Anchored path filenames that were previously mangled stay correct.
+4. Agent ownership index (``core/web/services/README.md``) lists every
+   top-level ``*_service.py`` facade (R04).
 """
 
 from __future__ import annotations
@@ -240,8 +242,56 @@ def test_pack_readmes_exist_for_split_domains() -> None:
     required = [
         SERVICES / "session" / "README.md",
         SERVICES / "team_workflow" / "README.md",
+        SERVICES / "team" / "README.md",
+        SERVICES / "team_knowledge" / "README.md",
         SERVICES / "agent_directory" / "README.md",
         SERVICES / "runtime_scene" / "README.md",
     ]
     missing = [str(p.relative_to(REPO_ROOT)) for p in required if not p.is_file()]
     assert not missing, f"missing pack ownership READMEs: {missing}"
+
+
+def test_services_readme_indexes_every_facade() -> None:
+    """R04: every top-level ``*_service.py`` must appear in the agent index table.
+
+    Prevents new facades from shipping without Agent ownership discoverability.
+    Regenerate with: ``python scripts/_gen_services_readme.py``
+    """
+    import re
+
+    readme = SERVICES / "README.md"
+    assert readme.is_file(), "core/web/services/README.md missing (agent index)"
+
+    text = readme.read_text(encoding="utf-8")
+    # Only the Facade column (first cell), not Tests column (e.g. test_*_service.py).
+    indexed = set(
+        re.findall(
+            r"^\|\s*`([a-zA-Z0-9_]+_service\.py)`\s*\|",
+            text,
+            flags=re.MULTILINE,
+        )
+    )
+    on_disk = {p.name for p in SERVICES.glob("*_service.py")}
+
+    missing = sorted(on_disk - indexed)
+    stale = sorted(indexed - on_disk)
+
+    assert not missing, (
+        "services README missing facade rows (run scripts/_gen_services_readme.py): "
+        + ", ".join(missing)
+    )
+    assert not stale, (
+        "services README lists facades that no longer exist on disk: "
+        + ", ".join(stale)
+    )
+    assert len(on_disk) >= 1
+    # Pack domain section must still name the six split packs.
+    for pack in (
+        "session/",
+        "team_workflow/",
+        "team/",
+        "team_knowledge/",
+        "agent_directory/",
+        "runtime_scene/",
+    ):
+        assert f"`{pack}`" in text, f"services README missing pack entry {pack!r}"
