@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from .types import UsageStats
+from .usage_normalize import normalize_usage_dict, normalize_usage_payload
 
 
 def usage_to_dict(usage: Any) -> Dict[str, Any]:
@@ -190,42 +191,27 @@ def usage_tokens_from_dict(usage: Dict[str, Any] | Any) -> tuple[int, int, int]:
     usage_dict = usage_to_dict(usage)
     if not usage_dict:
         return 0, 0, 0
-    input_details = usage_dict.get("input_token_details") or usage_dict.get("input_tokens_details")
-    output_details = usage_dict.get("output_token_details")
-    usage_metadata = usage_dict.get("usage_metadata")
-    input_tokens = max(
-        read_usage_int(usage_dict, "prompt_tokens", "input_tokens", "input_token_count"),
-        read_usage_int(input_details, "input_tokens", "prompt_tokens", "input_token_count"),
-        read_usage_int(usage_metadata, "prompt_tokens", "input_tokens", "input_token_count"),
+    # Prefer pure-Python path for token triple (no subprocess); same algorithm as Rust pilot.
+    normalized = normalize_usage_dict(usage_dict, engine="python")
+    return (
+        int(normalized["input_tokens"]),
+        int(normalized["output_tokens"]),
+        int(normalized["total_tokens"]),
     )
-    output_tokens = max(
-        read_usage_int(usage_dict, "completion_tokens", "output_tokens", "output_token_count"),
-        read_usage_int(output_details, "completion_tokens", "output_tokens", "output_token_count"),
-        read_usage_int(usage_metadata, "completion_tokens", "output_tokens", "output_token_count"),
-    )
-    total_tokens = read_usage_int(usage_dict, "total_tokens") or read_usage_int(usage_metadata, "total_tokens")
-    if total_tokens > 0:
-        if input_tokens and not output_tokens:
-            output_tokens = max(0, total_tokens - input_tokens)
-        elif output_tokens and not input_tokens:
-            input_tokens = max(0, total_tokens - output_tokens)
-    else:
-        total_tokens = input_tokens + output_tokens
-    return input_tokens, output_tokens, total_tokens
 
 
 def usage_stats_from_payload(usage: Any, *, latency_ms: int = 0) -> UsageStats:
     usage_dict = usage_to_dict(usage)
-    input_tokens, output_tokens, total_tokens = usage_tokens_from_dict(usage_dict)
-    cached_tokens = cached_input_tokens_from_usage(usage_dict)
-    cache_creation_tokens = cache_creation_input_tokens_from_usage(usage_dict)
+    normalized = normalize_usage_payload(usage_dict)
     reasoning_output_tokens = reasoning_output_tokens_from_usage(usage_dict)
+    input_tokens = int(normalized["input_tokens"])
+    output_tokens = int(normalized["output_tokens"])
     return UsageStats(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        total_tokens=total_tokens,
-        cached_input_tokens=min(cached_tokens, input_tokens) if input_tokens else cached_tokens,
-        cache_creation_input_tokens=min(cache_creation_tokens, input_tokens) if input_tokens else cache_creation_tokens,
+        total_tokens=int(normalized["total_tokens"]),
+        cached_input_tokens=int(normalized["cached_input_tokens"]),
+        cache_creation_input_tokens=int(normalized["cache_creation_input_tokens"]),
         reasoning_output_tokens=min(reasoning_output_tokens, output_tokens)
         if output_tokens
         else reasoning_output_tokens,
@@ -237,21 +223,18 @@ def usage_stats_from_payload(usage: Any, *, latency_ms: int = 0) -> UsageStats:
 
 def usage_diagnostic_summary_from_payload(usage: Any) -> Dict[str, Any]:
     """Normalize provider usage into the bounded canonical event contract."""
-    stats = usage_stats_from_payload(usage)
-    input_tokens = max(0, int(stats.input_tokens or 0))
-    cached_input_tokens = max(0, int(stats.cached_input_tokens or 0))
-    cache_creation_input_tokens = max(0, int(stats.cache_creation_input_tokens or 0))
-    if input_tokens:
-        cached_input_tokens = min(cached_input_tokens, input_tokens)
-        cache_creation_input_tokens = min(cache_creation_input_tokens, input_tokens)
+    usage_dict = usage_to_dict(usage)
+    normalized = normalize_usage_payload(usage_dict)
+    stats = usage_stats_from_payload(usage_dict)
     return {
-        "inputTokens": input_tokens,
-        "outputTokens": max(0, int(stats.output_tokens or 0)),
+        "inputTokens": int(normalized["inputTokens"]),
+        "outputTokens": int(normalized["outputTokens"]),
         "reasoningOutputTokens": max(0, int(stats.reasoning_output_tokens or 0)),
-        "totalTokens": max(0, int(stats.total_tokens or 0)),
-        "cachedInputTokens": cached_input_tokens,
-        "cacheReadInputTokens": cached_input_tokens,
-        "cacheCreationInputTokens": cache_creation_input_tokens,
-        "uncachedInputTokens": max(0, input_tokens - cached_input_tokens),
-        "cacheHitRate": round(cached_input_tokens / input_tokens, 4) if input_tokens else 0.0,
+        "totalTokens": int(normalized["totalTokens"]),
+        "cachedInputTokens": int(normalized["cachedInputTokens"]),
+        "cacheReadInputTokens": int(normalized["cacheReadInputTokens"]),
+        "cacheCreationInputTokens": int(normalized["cacheCreationInputTokens"]),
+        "uncachedInputTokens": int(normalized["uncachedInputTokens"]),
+        "cacheHitRate": float(normalized["cacheHitRate"]),
+        "engine": str(normalized.get("engine") or "python"),
     }
