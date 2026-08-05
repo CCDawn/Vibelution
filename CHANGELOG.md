@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.2 - 2026-08-06
+
+Five-wave structure pass:
+
+1. **Teams SC phase island** — `TeamsWorkbenchWithScPhase` lazy-loads SC composition (Mid/Tail + compose + shell surfaces). Eager `TeamsRoute` ~110 KiB; SC phase ~261 KiB secondary chunk.
+2. **Foundation bag hygiene** — `buildTeamsScLayerInput` + launch-guard ref for late SC flags.
+3. **Chat** — `conversationTurnRowMemo` extracted from `ConversationView`.
+4. **CliAgent** — pure terminal presentation helpers extracted (panel already route-lazy).
+5. **Backend** — `session/projection_codex_transcript.py` extracted from `session/projection.py` (~480 lines).
+
 ## 1.1.1 - 2026-08-06
 
 - Teams: SC inject wrappers and workflow stage modules mount panels via `teamLazyPanels` / dynamic import so workspace packs leave the eager `TeamsRoute` graph.

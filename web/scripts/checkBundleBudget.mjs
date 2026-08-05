@@ -29,12 +29,16 @@ export const BUNDLE_BUDGETS = [
     maxBytes: 360 * 1024,
   },
   {
-    // Teams foundation bag residual (SC presentation + shell still eager).
-    // SC workspace panels / workflow hosts are secondary-lazy via teamLazyPanels.
-    // Keep slightly above generic route budget until Mid/Tail presentation leaves the bag.
+    // Eager TeamsRoute shell only; SC+shell phase lives in TeamsWorkbenchWithScPhase chunk.
     name: "known Teams route residual",
     pattern: /^TeamsRoute-[\w-]+\.js$/,
-    maxBytes: 400 * 1024,
+    maxBytes: 160 * 1024,
+  },
+  {
+    // Lazy SC composition + shell phase bag (Mid/Tail + compose + surfaces).
+    name: "known Teams SC phase residual",
+    pattern: /^TeamsWorkbenchWithScPhase-[\w-]+\.js$/,
+    maxBytes: 320 * 1024,
   },
   {
     name: "route or feature chunks",

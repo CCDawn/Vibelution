@@ -50,7 +50,7 @@ describe("bundle budget", () => {
   });
 
   it("classifies TeamsRoute under the known residual budget, not the generic route budget", () => {
-    writeAsset("TeamsRoute-CcYah-sm.js", 395 * 1024);
+    writeAsset("TeamsRoute-CcYah-sm.js", 120 * 1024);
 
     const result = checkBundleBudget(tempRoot);
 
@@ -60,7 +60,7 @@ describe("bundle budget", () => {
   });
 
   it("fails when TeamsRoute grows beyond its residual budget", () => {
-    writeAsset("TeamsRoute-CcYah-sm.js", 405 * 1024);
+    writeAsset("TeamsRoute-CcYah-sm.js", 170 * 1024);
 
     const result = checkBundleBudget(tempRoot);
 
@@ -69,6 +69,16 @@ describe("bundle budget", () => {
       name: "TeamsRoute-CcYah-sm.js",
       budgetName: "known Teams route residual",
     });
+  });
+
+  it("classifies TeamsWorkbenchWithScPhase under its residual budget", () => {
+    writeAsset("TeamsWorkbenchWithScPhase-Ab12CdEf.js", 280 * 1024);
+
+    const result = checkBundleBudget(tempRoot);
+
+    expect(result.failures).toEqual([]);
+    expect(result.entries.find((entry) => entry.name.startsWith("TeamsWorkbenchWithScPhase-"))?.budgetName)
+      .toBe("known Teams SC phase residual");
   });
 
   it("fails when an ordinary feature chunk grows beyond its budget", () => {
