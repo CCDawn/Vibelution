@@ -18,7 +18,13 @@ export type ResearchPrimaryMetric = {
 
 export type ResearchPrimaryActionBarProps = {
   lang: "zh" | "en";
+  /** Continue current stage (solid primary). */
   action: ResearchPrimaryAction;
+  /**
+   * Explicit cross-stage advance. When set, shown as secondary CTA.
+   * Never overrides the primary continue button.
+   */
+  advanceAction?: ResearchPrimaryAction | null;
   handoff: ResearchStageHandoff | null;
   /** Mutation in flight (button shows Working…). */
   pending?: boolean;
@@ -30,6 +36,8 @@ export type ResearchPrimaryActionBarProps = {
   projectName?: string;
   metrics?: ResearchPrimaryMetric[];
   onPrimaryAction: (action: ResearchPrimaryAction) => void;
+  /** Cross-stage secondary; defaults to onPrimaryAction when omitted. */
+  onAdvanceAction?: (action: ResearchPrimaryAction) => void;
   /** @deprecated use metrics */
   facts?: Array<{ key: string; label: string; value: string }>;
 };
@@ -58,38 +66,47 @@ function MetricValue({
   return <>{value}</>;
 }
 
-function ctaLabel(action: ResearchPrimaryAction, lang: "zh" | "en", pending: boolean): string {
+function continueCtaLabel(action: ResearchPrimaryAction, lang: "zh" | "en", pending: boolean): string {
   if (pending) {
     return lang === "zh" ? "处理中…" : "Working…";
   }
   switch (action.kind) {
     case "start_knowledge_collection":
-      return lang === "zh" ? "开始搜集" : "Start collection";
+      return lang === "zh" ? "开始知识搜集" : "Start collection";
     case "continue_knowledge_collection":
-      return lang === "zh" ? "进入知识搜集" : "Open collection";
-    case "start_experiment":
-      return lang === "zh" ? "进入实验设计" : "Open experiment";
+      return lang === "zh" ? "继续知识搜集" : "Continue collection";
     case "continue_experiment":
       return lang === "zh" ? "继续实验设计" : "Continue experiment";
-    case "start_iteration":
     case "continue_iteration":
+      return lang === "zh" ? "继续执行迭代" : "Continue iteration";
+    case "start_experiment":
+      return lang === "zh" ? "进入实验设计" : "Open experiment";
+    case "start_iteration":
       return lang === "zh" ? "进入执行迭代" : "Open iteration";
     default:
       return researchPrimaryActionLabel(action, lang);
   }
 }
 
+function advanceCtaLabel(action: ResearchPrimaryAction, lang: "zh" | "en", pending: boolean): string {
+  if (pending) {
+    return lang === "zh" ? "处理中…" : "Working…";
+  }
+  // Prefer leave-aware labels from the model.
+  return researchPrimaryActionLabel(action, lang);
+}
+
 /**
- * Linear / GitHub style next-step card:
- * - Single solid CTA (no sibling "ghost text" that looks like a broken control)
- * - Metrics as quiet chips (value slots fill independently when ready)
- * - Helper copy stays in the body, never beside the CTA
- * - Optional stage-handoff banner when upstream is ready to advance
- * - `loading` keeps the same shell geometry; only inner text slots are skeleton
+ * Easy-ops next-step card:
+ * - Solid primary = continue current stage only
+ * - Secondary = explicit advance (leave current stage)
+ * - Handoff banner explains advance; never hijacks primary
+ * - Metrics as quiet chips; loading keeps fixed geometry
  */
 export function ResearchPrimaryActionBar({
   lang,
   action,
+  advanceAction = null,
   handoff,
   pending = false,
   loading = false,
@@ -97,22 +114,26 @@ export function ResearchPrimaryActionBar({
   metrics,
   facts = [],
   onPrimaryAction,
+  onAdvanceAction,
 }: ResearchPrimaryActionBarProps) {
   const chips: ResearchPrimaryMetric[] = metrics?.length
     ? metrics
     : facts.map((item) => ({ ...item, loading: false }));
-  const effectiveAction = handoff?.action ?? action;
+  // Primary is always the continue action — handoff must not replace it.
+  const continueAction = action;
   const projectLine = projectName
     ? projectName
     : (lang === "zh" ? "当前科研项目" : "Active project");
-  const buttonLabel = ctaLabel(effectiveAction, lang, pending);
-  const disabled = loading || effectiveAction.blocked || pending;
-  const title = handoff
-    ? (lang === "zh" ? handoff.titleZh : handoff.titleEn)
-    : researchPrimaryActionLabel(effectiveAction, lang);
+  const primaryLabel = continueCtaLabel(continueAction, lang, pending);
+  const primaryDisabled = loading || continueAction.blocked || pending;
+  const showAdvance = Boolean(!loading && advanceAction && !advanceAction.blocked && !continueAction.blocked);
+  const advanceLabel = advanceAction ? advanceCtaLabel(advanceAction, lang, pending) : "";
+  const title = researchPrimaryActionLabel(continueAction, lang);
   const body = handoff
-    ? (lang === "zh" ? handoff.bodyZh : handoff.bodyEn)
-    : researchPrimaryActionDetail(effectiveAction, lang);
+    ? (lang === "zh"
+      ? `${researchPrimaryActionDetail(continueAction, lang)} ${handoff.bodyZh}`
+      : `${researchPrimaryActionDetail(continueAction, lang)} ${handoff.bodyEn}`)
+    : researchPrimaryActionDetail(continueAction, lang);
 
   return (
     <section
@@ -121,7 +142,8 @@ export function ResearchPrimaryActionBar({
       data-vui="research-primary-action"
       data-loading={loading ? "true" : "false"}
       data-handoff={!loading && handoff ? "true" : "false"}
-      data-blocked={!loading && effectiveAction.blocked ? "true" : "false"}
+      data-has-advance={showAdvance ? "true" : "false"}
+      data-blocked={!loading && continueAction.blocked ? "true" : "false"}
       aria-busy={loading || undefined}
       aria-label={lang === "zh" ? "建议下一步" : "Suggested next step"}
     >
@@ -135,7 +157,7 @@ export function ResearchPrimaryActionBar({
           "border border-[var(--vui-border-strong,var(--vui-border-subtle))]",
           "bg-[var(--vui-surface-panel)]",
           "shadow-[inset_3px_0_0_0_var(--fg-primary)]",
-          !loading && effectiveAction.blocked
+          !loading && continueAction.blocked
             ? "border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] shadow-[inset_3px_0_0_0_var(--fg-tertiary)]"
             : "",
         ].filter(Boolean).join(" ")}
@@ -180,7 +202,7 @@ export function ResearchPrimaryActionBar({
               data-testid="research-stage-handoff-banner"
             >
               <strong className="font-[740] text-[var(--fg-primary)]">
-                {lang === "zh" ? "阶段交接" : "Stage handoff"}
+                {lang === "zh" ? "可选：进入下一阶段" : "Optional: next stage"}
               </strong>
               <span className="text-[var(--fg-tertiary)]" aria-hidden="true">·</span>
               <span>
@@ -217,38 +239,59 @@ export function ResearchPrimaryActionBar({
             </dl>
           ) : null}
 
-          <div className="pt-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 pt-1">
             {loading ? (
-              <span
-                className={`${pulseClass} inline-block h-9 w-28 rounded-[var(--radius-control)]`}
-                role="status"
-                aria-label={lang === "zh" ? "主操作加载中" : "Primary action loading"}
-                data-testid="research-primary-cta-skeleton"
-              />
+              <>
+                <span
+                  className={`${pulseClass} inline-block h-9 w-28 rounded-[var(--radius-control)]`}
+                  role="status"
+                  aria-label={lang === "zh" ? "主操作加载中" : "Primary action loading"}
+                  data-testid="research-primary-cta-skeleton"
+                />
+                <span
+                  className={`${pulseClass} inline-block h-9 w-36 rounded-[var(--radius-control)] opacity-70`}
+                  aria-hidden="true"
+                />
+              </>
             ) : (
-              <VButton
-                type="button"
-                data-vui="research-primary-cta"
-                data-testid="research-primary-cta"
-                variant={effectiveAction.blocked ? "secondary" : "primary"}
-                isDisabled={disabled}
-                aria-label={buttonLabel}
-                // Prefer trailingIcon + plain label text: default contentLayout="label"
-                // wraps all children in a truncated label slot, which breaks multi-child
-                // (text + ArrowRight) and can look like a split/cut-off control.
-                // Avoid title= here — it forces VTooltip wrap when aria-label already exists.
-                trailingIcon={
-                  !pending && !effectiveAction.blocked
-                    ? <ArrowRight size={14} aria-hidden="true" strokeWidth={2.25} />
-                    : undefined
-                }
-                onPress={() => {
-                  if (disabled) return;
-                  onPrimaryAction(effectiveAction);
-                }}
-              >
-                {buttonLabel}
-              </VButton>
+              <>
+                <VButton
+                  type="button"
+                  data-vui="research-primary-cta"
+                  data-testid="research-primary-cta"
+                  variant={continueAction.blocked ? "secondary" : "primary"}
+                  isDisabled={primaryDisabled}
+                  aria-label={primaryLabel}
+                  trailingIcon={
+                    !pending && !continueAction.blocked
+                      ? <ArrowRight size={14} aria-hidden="true" strokeWidth={2.25} />
+                      : undefined
+                  }
+                  onPress={() => {
+                    if (primaryDisabled) return;
+                    onPrimaryAction(continueAction);
+                  }}
+                >
+                  {primaryLabel}
+                </VButton>
+                {showAdvance && advanceAction ? (
+                  <VButton
+                    type="button"
+                    data-vui="research-advance-cta"
+                    data-testid="research-advance-cta"
+                    variant="secondary"
+                    isDisabled={pending}
+                    aria-label={advanceLabel}
+                    trailingIcon={<ArrowRight size={14} aria-hidden="true" strokeWidth={2.25} />}
+                    onPress={() => {
+                      if (pending) return;
+                      (onAdvanceAction ?? onPrimaryAction)(advanceAction);
+                    }}
+                  >
+                    {advanceLabel}
+                  </VButton>
+                ) : null}
+              </>
             )}
           </div>
         </div>

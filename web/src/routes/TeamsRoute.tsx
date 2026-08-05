@@ -201,10 +201,17 @@ import {
   type ResearchWorkspaceView,
 } from "./teams/researchWorkspaceModel";
 import {
+  resolveResearchAdvanceAction,
   resolveResearchPrimaryAction,
   resolveResearchStageHandoff,
+  resolveResearchStageUnlock,
+  researchAdvanceSuccessMessage,
   type ResearchPrimaryAction,
 } from "./teams/researchPrimaryActionModel";
+import {
+  preflightSourceCollectionStageAdvance,
+  sourceCollectionStageAdvanceFailureTitle,
+} from "./teams/source-collection/stageAdvancePreflight";
 import { buildResearchBoardColumns } from "./teams/researchBoardModel";
 import { TeamCanvasReadOnlyInspector } from "./teams/TeamCanvasReadOnlyInspector";
 import { TeamNodeBindingPanel } from "./teams/TeamNodeBindingPanel";
@@ -212,6 +219,7 @@ import { TeamOrganizationCanvasSurface } from "./teams/TeamOrganizationCanvasSur
 import { TeamShellRail } from "./teams/TeamShellRail";
 import { TeamShellToolbar } from "./teams/TeamShellToolbar";
 import { TeamResearchBoardPrimarySurface } from "./teams/TeamResearchBoardPrimarySurface";
+import { ResearchStageNav } from "./teams/ResearchStageNav";
 import {
   parseTeamShellMode,
   type TeamShellMode,
@@ -564,6 +572,9 @@ export function TeamsRoute({
   const pageVisible = usePageVisibility();
   const requestedTeamShellMode = parseTeamShellMode(searchParams.get("teamMode"));
   const [aiSearchRunTopic, setAiSearchRunTopic] = useState("AI 最新动态");
+  const [researchAdvanceNotice, setResearchAdvanceNotice] = useState("");
+  /** Product outcome for stage advance button: must never stay silent on failure. */
+  const [sourceCollectionStageAdvanceFailure, setSourceCollectionStageAdvanceFailure] = useState("");
   // Shell/canvas state: useTeamsShellCanvasWorkspace (Phase 3).
   // Experiment/research-loop drafts: useResearchExperimentWorkspace (Phase 2).
   const sourceCollectionControlPanelRef = useRef<HTMLElement | null>(null);
@@ -1179,6 +1190,19 @@ export function TeamsRoute({
     }
   }
 
+  async function handleResearchAdvanceAction(action: ResearchPrimaryAction) {
+    if (action.blocked || !selectedTeam?.teamId) {
+      return;
+    }
+    await handleResearchPrimaryAction(action);
+    setResearchAdvanceNotice(researchAdvanceSuccessMessage(action, lang));
+    window.setTimeout(() => {
+      setResearchAdvanceNotice((current) => (
+        current === researchAdvanceSuccessMessage(action, lang) ? "" : current
+      ));
+    }, 5000);
+  }
+
   function selectTeamRecord(team: Team) {
     setSelectedTeamId(team.teamId);
     setSelectedNodeId("");
@@ -1454,10 +1478,60 @@ export function TeamsRoute({
       || startSourceCollectionStageSessionTaskMutation.isPending
       || resetResearchProjectSourceCollectionMutation.isPending
     ) {
+      setSourceCollectionStageAdvanceFailure(
+        lang === "zh"
+          ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：系统忙或未选择团队，推进未启动。`
+          : `${sourceCollectionStageAdvanceFailureTitle("en")}: system busy or no team selected.`,
+      );
       return;
     }
+
+    const knowledgeActionItemCodes = (teamWorkflowKnowledgeIngestionStatus?.actionItems || [])
+      .map((item) => String(item?.code || "").trim())
+      .filter(Boolean);
+
+    const preflight = preflightSourceCollectionStageAdvance({
+      stageId,
+      hasRun: Boolean(selectedSourceCollectionRunEffectiveId),
+      rawRecordCount: Number(sourceCollectionProjectedCollectedCount || sourceCollectionCollectedCount || 0),
+      approvedCandidateCount: Number(sourceCollectionProjectedApprovedCount || sourceCollectionRunApprovedCount || 0),
+      displayedCandidateCount: Number(sourceCollectionDisplayedCandidateCount || 0),
+      graphNodeCount: Number(
+        teamWorkflowCandidateGraph?.summary?.nodeCount
+        ?? candidateGraphNodeCount
+        ?? sourceCollectionProjectedGraphNodeCount
+        ?? 0,
+      ),
+      graphEdgeCount: Number(
+        teamWorkflowCandidateGraph?.summary?.edgeCount
+        ?? candidateGraphEdgeCount
+        ?? sourceCollectionProjectedGraphEdgeCount
+        ?? 0,
+      ),
+      graphMissingLinkCount: Number(
+        teamWorkflowCandidateGraph?.summary?.missingLinkCount
+        ?? teamWorkflowCandidateGraph?.missingLinks?.length
+        ?? teamWorkflowKnowledgeIngestionStatus?.summary?.missingLinkCount
+        ?? 0,
+      ),
+      knowledgeActionItemCodes,
+      findingState: sourceCollectionFindingDisplayState,
+      extractionState: sourceCollectionExtractionDisplayState,
+      relationsState: sourceCollectionRelationsDisplayState,
+    });
+    if (!preflight.ok) {
+      setSourceCollectionStageAdvanceFailure(lang === "zh" ? preflight.reasonZh : preflight.reasonEn);
+      openSourceCollectionStage(preflight.redirectStageId);
+      return;
+    }
+
     const actionReadiness = sourceCollectionStageActionReadinessFor(stageId);
     if (actionReadiness.disabled) {
+      setSourceCollectionStageAdvanceFailure(
+        lang === "zh"
+          ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：${actionReadiness.reason || "当前阶段操作不可用"}`
+          : `${sourceCollectionStageAdvanceFailureTitle("en")}: ${actionReadiness.reason || "stage action unavailable"}`,
+      );
       return;
     }
     openSourceCollectionStage(stageId);
@@ -1466,6 +1540,11 @@ export function TeamsRoute({
     const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
     const agentRole = String(binding?.key || "").trim();
     if (!agentId) {
+      setSourceCollectionStageAdvanceFailure(
+        lang === "zh"
+          ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：缺少阶段 Agent，请先修复团队绑定。`
+          : `${sourceCollectionStageAdvanceFailureTitle("en")}: stage Agent missing; repair team bindings.`,
+      );
       if (chatState.status === "repair") {
         repairSelectedWorkflowTeamAgentsIfNeeded();
       }
@@ -1475,6 +1554,11 @@ export function TeamsRoute({
     if (!runId && stageId === "finding") {
       if (knowledgeExpansionWorkflowTeamSelected) {
         if (!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+          setSourceCollectionStageAdvanceFailure(
+            lang === "zh"
+              ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：无法创建资料批次。`
+              : `${sourceCollectionStageAdvanceFailureTitle("en")}: cannot create a source-collection run.`,
+          );
           return;
         }
         try {
@@ -1483,11 +1567,21 @@ export function TeamsRoute({
             draft: sourceCollectionDraft,
           });
           runId = runPayload.run.runId;
-        } catch {
+        } catch (error) {
+          setSourceCollectionStageAdvanceFailure(
+            lang === "zh"
+              ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：${error instanceof Error ? error.message : "创建批次失败"}`
+              : `${sourceCollectionStageAdvanceFailureTitle("en")}: ${error instanceof Error ? error.message : "failed to create run"}`,
+          );
           return;
         }
       } else {
         if (!researchStageCanLaunch || selectedTeamStartResearchStagePending) {
+          setSourceCollectionStageAdvanceFailure(
+            lang === "zh"
+              ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：科研阶段无法启动。`
+              : `${sourceCollectionStageAdvanceFailureTitle("en")}: research stage cannot launch.`,
+          );
           return;
         }
         let stagePayload: ResearchStageRoundStartPayload;
@@ -1497,16 +1591,27 @@ export function TeamsRoute({
             stageType: "knowledge_collection",
             draft: sourceCollectionDraft,
           });
-        } catch {
+        } catch (error) {
+          setSourceCollectionStageAdvanceFailure(
+            lang === "zh"
+              ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：${error instanceof Error ? error.message : "启动失败"}`
+              : `${sourceCollectionStageAdvanceFailureTitle("en")}: ${error instanceof Error ? error.message : "start failed"}`,
+          );
           return;
         }
         runId = stagePayload.run?.runId || stagePayload.stageRound.sourceRunIds?.[0] || "";
       }
     }
     if (!runId) {
+      setSourceCollectionStageAdvanceFailure(
+        lang === "zh"
+          ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：没有可用资料批次。`
+          : `${sourceCollectionStageAdvanceFailureTitle("en")}: no source-collection run available.`,
+      );
       return;
     }
     try {
+      setSourceCollectionStageAdvanceFailure("");
       const payload = await startSourceCollectionStageSessionTaskMutation.mutateAsync({
         teamId: selectedTeam.teamId,
         runId,
@@ -1521,9 +1626,19 @@ export function TeamsRoute({
       });
       if (payload.chatRoute) {
         navigate(payload.chatRoute);
+        return;
       }
-    } catch {
-      return;
+      setSourceCollectionStageAdvanceFailure(
+        lang === "zh"
+          ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：已创建任务但没有会话路由，阶段未真正推进。`
+          : `${sourceCollectionStageAdvanceFailureTitle("en")}: task created without chat route; stage did not advance.`,
+      );
+    } catch (error) {
+      setSourceCollectionStageAdvanceFailure(
+        lang === "zh"
+          ? `${sourceCollectionStageAdvanceFailureTitle("zh")}：${error instanceof Error ? error.message : "启动阶段任务失败"}`
+          : `${sourceCollectionStageAdvanceFailureTitle("en")}: ${error instanceof Error ? error.message : "failed to start stage task"}`,
+      );
     }
   }
 
@@ -1729,10 +1844,19 @@ export function TeamsRoute({
       researchProjectProgress
       && researchProjectProgress.frozenExperimentPlanCount > 0,
     ),
+    // Overview infers active stage from progress; in-stage URLs pin continue target.
+    currentView: (
+      researchWorkspaceView === "knowledge_collection"
+      || researchWorkspaceView === "experiment"
+      || researchWorkspaceView === "iteration"
+    )
+      ? researchWorkspaceView
+      : null,
   }), [
     activeSourceCollectionResearchProjectId,
     researchProjectProgress,
     researchStagePhases,
+    researchWorkspaceView,
     sourceCollectionRuns.length,
     teamWorkflow?.candidateStore?.candidateCount,
   ]);
@@ -1740,8 +1864,16 @@ export function TeamsRoute({
     () => resolveResearchPrimaryAction(researchPrimaryActionInput),
     [researchPrimaryActionInput],
   );
+  const researchAdvanceAction = useMemo(
+    () => resolveResearchAdvanceAction(researchPrimaryActionInput),
+    [researchPrimaryActionInput],
+  );
   const researchStageHandoff = useMemo(
     () => resolveResearchStageHandoff(researchPrimaryActionInput),
+    [researchPrimaryActionInput],
+  );
+  const researchStageUnlock = useMemo(
+    () => resolveResearchStageUnlock(researchPrimaryActionInput),
     [researchPrimaryActionInput],
   );
   // Runtime summary is optional for SC active-work overlay; keep a stable empty query shape.
@@ -2213,6 +2345,7 @@ export function TeamsRoute({
     selectedSourceCollectionStageId,
     sourceCollectionProjectedCollectedCountLabel,
     sourceCollectionProjectedCollectedCountText,
+    sourceCollectionProjectedCollectedCount,
     sourceCollectionProjectedAssessedCountText,
     sourceCollectionProjectedApprovedCountText,
     sourceCollectionProjectedCandidateCountLabel,
@@ -2284,10 +2417,31 @@ export function TeamsRoute({
     openSourceCollectionStageAgentChat,
     navigate,
   });
+  const sourceCollectionPipelineGraphHealth = {
+    nodeCount: Number(
+      teamWorkflowCandidateGraph?.summary?.nodeCount
+      ?? candidateGraphNodeCount
+      ?? sourceCollectionProjectedGraphNodeCount
+      ?? 0,
+    ),
+    edgeCount: Number(
+      teamWorkflowCandidateGraph?.summary?.edgeCount
+      ?? candidateGraphEdgeCount
+      ?? sourceCollectionProjectedGraphEdgeCount
+      ?? 0,
+    ),
+    missingLinkCount: Number(
+      teamWorkflowCandidateGraph?.summary?.missingLinkCount
+      ?? teamWorkflowCandidateGraph?.missingLinks?.length
+      ?? teamWorkflowKnowledgeIngestionStatus?.summary?.missingLinkCount
+      ?? 0,
+    ),
+  };
   const { sourceCollectionBoardCurrentModule, sourceCollectionBoardNextStepLabel } = buildSourceCollectionBoardChrome({
     lang,
     sourceCollectionStageModules,
     sourceCollectionStageFocusLabel,
+    graphHealth: sourceCollectionPipelineGraphHealth,
   });
   const sourceCollectionCompletionFlow = selectedTeamKnowledgeCollectionWorkRun?.flowVisualization ?? null;
   const sourceCollectionCompletionFlowNodes = buildSourceCollectionCompletionFlowNodes({
@@ -2463,6 +2617,8 @@ export function TeamsRoute({
     selectedTeamRecordSourceCollectionOutputError,
     selectedTeamExecuteSourceCollectionSearchError,
     selectedTeamStartSourceCollectionStageTaskError,
+    sourceCollectionStageAdvanceFailure,
+    sourceCollectionPipelineGraphHealth,
     selectedTeamExecuteSourceCollectionSearchResult,
     selectedTeamRecordSourceCollectionOutputResult,
     candidateGraphNodeCount,
@@ -2828,6 +2984,13 @@ export function TeamsRoute({
                 {sourceCollectionConsoleStatusText}
               </span>
             </div>
+            <ResearchStageNav
+              lang={lang}
+              current="knowledge_collection"
+              unlock={researchStageUnlock}
+              onSelect={(view) => selectResearchWorkspaceView(view)}
+              onOverview={() => selectResearchWorkspaceView("overview")}
+            />
           </div>
           <div className={styles.sourceCollectionPageActions}>
             {linkedChatRoomId ? (
@@ -3273,9 +3436,13 @@ export function TeamsRoute({
     teamWorkflow,
     sourceCollectionRuns,
     researchPrimaryAction,
+    researchAdvanceAction,
     researchStageHandoff,
+    researchStageUnlock,
+    researchAdvanceNotice,
     activeSourceCollectionResearchProject,
     handleResearchPrimaryAction,
+    handleResearchAdvanceAction,
     selectedResearchProjectSourceCollectionResetError,
     selectedResearchProjectSourceCollectionResetPending,
     runSourceCollectionProjectReset,
@@ -3311,10 +3478,8 @@ export function TeamsRoute({
     renderResearchLoopPanel,
   });
 
-  // experiment / iteration standalone pages render *inside* the board shell
-  // (TeamResearchBoardPrimarySurface stageSlot). Do not early-return the whole
-  // route — that stripped the team rail and left the three-card launcher as the
-  // only non-overview board body after CTA navigation that only updated state.
+  // Experiment / iteration: full-page product workbench (same shell pattern as
+  // knowledge collection). Board shell team rail is intentionally not shown.
 
   const {
     researchWorkflowStatusText,
@@ -3525,6 +3690,16 @@ export function TeamsRoute({
     researchWorkflowTeamSelected
     && !researchCanvasVisible
     && researchWorkspaceView !== "overview";
+
+  if (
+    researchWorkflowTeamSelected
+    && (researchWorkspaceView === "experiment" || researchWorkspaceView === "iteration")
+  ) {
+    return renderResearchStageStandalonePage(
+      researchWorkspaceView === "iteration" ? "iteration" : "experiment",
+      { embeddedInBoard: false },
+    );
+  }
 
   return (
     <VBoardWorkbenchPage

@@ -32,6 +32,8 @@ describe("workbenchLayoutIds", () => {
       { file: "routes/KernelTaskCenterRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.kernelTaskCenter" },
       { file: "routes/LauncherRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.launcher" },
       { file: "routes/TeamsRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.teams" },
+      { file: "routes/TeamSourceCollectionStandaloneStagePanel.tsx", token: "WORKBENCH_LAYOUT_IDS.teamsSourceCollection" },
+      { file: "routes/TeamSourceCollectionActiveStagePanel.tsx", token: "WORKBENCH_LAYOUT_IDS.teamsSourceCollectionStage" },
       { file: "routes/MemoryRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.memory" },
       { file: "routes/LogsRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.logs" },
       { file: "routes/ToolsRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.tools" },

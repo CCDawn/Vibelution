@@ -4,6 +4,7 @@
  */
 import { ResearchBoardKanban } from "./ResearchBoardKanban";
 import { ResearchOverviewSurface } from "./ResearchOverviewSurface";
+import { ResearchStageNav } from "./ResearchStageNav";
 import { ResearchWorkflowErrorSurface } from "./ResearchWorkflowErrorSurface";
 import {
   TeamResearchStageLauncherPanel,
@@ -92,9 +93,13 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
     teamWorkflow,
     sourceCollectionRuns,
     researchPrimaryAction,
+    researchAdvanceAction,
     researchStageHandoff,
+    researchStageUnlock,
+    researchAdvanceNotice,
     activeSourceCollectionResearchProject,
     handleResearchPrimaryAction,
+    handleResearchAdvanceAction,
     selectedResearchProjectSourceCollectionResetError,
     selectedResearchProjectSourceCollectionResetPending,
     runSourceCollectionProjectReset,
@@ -240,8 +245,21 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
       <ResearchOverviewSurface
         lang={lang}
         className={styles.researchOverviewSurface}
+        stageNav={(
+          <ResearchStageNav
+            lang={lang}
+            current="overview"
+            unlock={researchStageUnlock || {
+              knowledge_collection: false,
+              experiment: false,
+              iteration: false,
+            }}
+            onSelect={(view) => selectResearchWorkspaceView(view)}
+          />
+        )}
         primary={{
           action: researchPrimaryAction,
+          advanceAction: overviewWorkflowPending ? null : researchAdvanceAction,
           handoff: overviewWorkflowPending ? null : researchStageHandoff,
           pending: selectedTeamStartResearchStagePending,
           loading: overviewWorkflowPending,
@@ -269,7 +287,11 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
           onPrimaryAction: (action) => {
             void handleResearchPrimaryAction(action);
           },
+          onAdvanceAction: (action) => {
+            void handleResearchAdvanceAction(action);
+          },
         }}
+        notice={researchAdvanceNotice || undefined}
         errorSlot={
           selectedResearchProjectSourceCollectionResetError ? (
             <ResearchWorkflowErrorSurface
@@ -403,7 +425,14 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
         researchStageStartFeedbackText={researchStageStartFeedbackText}
         renderExperimentPlanningLedgerPanel={renderExperimentPlanningLedgerPanel}
         renderResearchLoopPanel={renderResearchLoopPanel}
-        embeddedInBoard={options?.embeddedInBoard ?? true}
+        researchStageUnlock={researchStageUnlock || {
+          knowledge_collection: true,
+          experiment: true,
+          iteration: true,
+        }}
+        onSelectResearchStage={(view) => selectResearchWorkspaceView(view)}
+        onBackToOverview={() => selectResearchWorkspaceView("overview")}
+        embeddedInBoard={options?.embeddedInBoard ?? false}
       />
     );
   }
