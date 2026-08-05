@@ -625,9 +625,11 @@ describe("AgentsRoute layout contract", () => {
     expect(agentRouteBulkModelSource).toContain("return safeReturnToPath(value)");
     expect(routeSource).toContain("const routeTargetKey = requestedAgentId ? `${requestedAgentId}:${requestedPane}` : \"\"");
     expect(routeSource).toContain("workspace.agents.find((agent) => agent.agentId === requestedAgentId)");
-    expect(routeSource).toContain("if (requestedAgentId && !workspaceQuery.data)");
+    expect(routeSource).not.toContain("if (requestedAgentId && !workspaceQuery.data)");
+    expect(routeSource).toContain("fullWorkspaceNeeded && !workspaceQuery.data && !workspaceQuery.isError");
     expect(routeSource).toContain("setSelectedAgentId(targetAgent.agentId)");
     expect(routeSource).toContain("setActivePane(requestedPane)");
+    expect(routeSource).toContain("While `?agent=` is present, the route-apply effect owns pane");
     expect(routeSource).toContain('setActiveFilter(targetAgent.status === "archived" ? "archived" : "active")');
     expect(agentRouteBulkModelSource).toContain('normalized === "supervised_evolution"');
     expect(agentRouteBulkModelSource).toContain("返回监督进化");
@@ -650,7 +652,9 @@ describe("AgentsRoute layout contract", () => {
     expect(returnBannerPanelSource).not.toContain("AgentsRoute.styles");
     expect(returnBannerPanelSource).toContain("className={styles.returnBanner}");
     expect(returnBannerPanelSource).toContain("className={styles.returnBannerButton}");
-    expect(routeSource).toContain("if (requestedAgentId && selectedAgent?.agentId === requestedAgentId)");
+    expect(routeSource).toContain("While `?agent=` is present, the route-apply effect owns pane");
+    expect(routeSource).toContain("if (requestedAgentId) {\n      return;\n    }\n    setActivePane(\"overview\")");
+    expect(routeSource).not.toContain("if (requestedAgentId && !workspaceQuery.data)");
     expect(routeSource).not.toContain("className={styles.returnButton}");
     expect(returnBannerStyles.returnBanner).toBeTruthy();
     expect(returnBannerStyles.returnBannerCopy).toBeTruthy();

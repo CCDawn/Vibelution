@@ -11,6 +11,9 @@ describe("useChatAgentDirectoryActions contract", () => {
     expect(actionsSource).toContain("handleRenameAgent");
     expect(actionsSource).toContain("handleArchiveAgent");
     expect(actionsSource).toContain("agentCenterConfigRoute");
+    expect(actionsSource).toContain("handleOpenAgentConfig");
+    expect(actionsSource).toContain("pane: \"config\"");
+    expect(actionsSource).toContain("returnLabel: \"chat\"");
   });
 
   it("is wired from ChatCodingRoute", () => {
