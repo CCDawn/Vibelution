@@ -3,40 +3,95 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-green.svg)](https://www.python.org/)
 [![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61dafb.svg)](web/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#快速开始)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#60-秒最短路径)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**Local-first multi-agent workbench for coding, research teams, Git, evolution, and evidence.**
+**Local-first multi-agent workbench** — coding chat, research-team pipelines, Git, bounded evolution, and replayable evidence. Your repo and secrets stay on **your machine**.
 
-**本地优先的多 Agent 工作台：编码协作、科研团队流水线、Git、自进化与可复盘证据。**
+**本地优先的多 Agent 工作台** — 编码协作、科研团队流水线、Git、有界自进化与可复盘证据。仓库与密钥留在**你自己的电脑**。
 
-> Star ⭐ · Fork · Issues welcome. Config and secrets stay on your machine — not in this repo.
+> ⭐ Star · Fork · [Issues](https://github.com/CCDawn/Vibelution/issues) · [Discussions](https://github.com/CCDawn/Vibelution/discussions) · [Contributing](CONTRIBUTING.md) · [MIT](LICENSE)
 
-Vibelution 把 **Chat 编码对话**、**Agent 管理**、**Git 局势**、**Teams / 科研团队**（知识搜集 → 实验设计 → 执行迭代）、**Self Evolution**、**Supervised Evolution**、**Runtime Scene 日志** 和 **模型配置** 收进同一套本地运行时：
+## 它解决什么
 
-- **Python runtime + FastAPI** 负责会话、工具、生命周期与证据
-- **React Web workbench** 负责可操作、可观察的控制室界面
-- **桌面 / Launcher** 负责一键启动与托管窗口（尤其 Windows）
+多数 AI 助手要么是 **云端黑盒**（代码与上下文离机），要么是 **单轮脚本**（跑完难复盘）。Vibelution 把协作放进**本地控制室**：
 
-它不是单轮 demo 脚本，也不是把仓库上传给远端托管的“黑盒助手”。目标是：在**你的电脑与仓库**里稳定协作，留下人和后续 Agent 都能读懂的记录与回滚边界。
-
-| 你可能关心 | 入口 |
+| 你要的 | Vibelution 怎么给 |
 | --- | --- |
-| 快速跑起来 | [快速开始](#快速开始) · [启动方式](#启动方式) |
+| 在本机仓库里改代码 | Chat 工作台 + 文件树 / 预览 / 任务状态 |
+| 团队科研有阶段、有痕迹 | Teams：组织画布 + 知识搜集 → 实验设计 → 执行迭代 |
+| 知道改了什么、能否回滚 | Git 局势 + Self / Supervised Evolution + Runtime Scene 日志 |
+| 密钥与配置不进 Git | 用户级外部 `config.toml`，仓库内只放示例与文档 |
+
+技术栈一览：**Python + FastAPI**（会话 / 工具 / 证据）· **React + Vite**（工作台 UI）· **Launcher / 桌面入口**（一键启动，尤其 Windows）。
+
+## 和其他工具差在哪
+
+| | 典型云端 IDE 助手 | 单 Agent CLI / demo | **Vibelution** |
+| --- | --- | --- | --- |
+| 数据默认位置 | 云端会话 | 本机，但界面与证据弱 | **本机优先**，Web 控制室 |
+| 工作面 | 聊天 + 补全 | 终端一轮任务 | Chat · Agents · Git · Teams · Evolution · Logs |
+| 可复盘性 | 依赖厂商历史 | 日志零散 | **Runtime Scene** 按次打包前后端证据 |
+| 团队科研流程 | 通常没有 | 需自搭 | **阶段流水线 + 组织画布**（如挑战杯场景） |
+| 自改进 | 少见或不可控 | 脚本级 | **有界** Self / Supervised Evolution |
+
+不是「再做一个 ChatGPT 壳」，而是 **本地工程与科研的可观察运营台**。
+
+## 适合谁 / 不适合谁
+
+**适合**
+
+- 希望 **代码与密钥不出本机** 的个人开发者与小团队
+- 需要 **编码 + Git + 多 Agent 边界** 同一界面的维护者
+- 做 **挑战杯 / 课题式** 团队科研、要阶段与证据而不是只聊天的人
+- 关心 **失败复盘、候选对比、回滚边界** 的重度用户
+
+**暂时不适合**
+
+- 只想要浏览器里开箱即用、零安装的 SaaS 聊天
+- 需要官方 7×24 托管运维 / 多租户企业控制台（当前定位是本地 workbench）
+- 完全没有 Python / Node 环境、也不打算装依赖的用户
+
+## 60 秒最短路径
+
+**需要：** Python **3.11+**（推荐 3.12）、Node.js **18+**（npm）、Git。Windows 用桌面窗口时建议已装 **Microsoft Edge**。
+
+```bash
+git clone https://github.com/CCDawn/Vibelution.git
+cd Vibelution
+```
+
+```powershell
+# Windows（推荐）：准备环境并启动工作台
+powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action start
+```
+
+```bash
+# macOS / Linux：先起服务（不自动开浏览器）
+python scripts/vibelution_launcher.py --action start --no-browser
+# 浏览器打开 http://127.0.0.1:8000 （以 launcher / 日志提示为准）
+```
+
+首次启动会尝试创建 `.venv`、安装依赖并构建前端；系统级 Python/Node 缺失时会停在明确报错。
+
+配置 LLM：用户级外部配置（默认 `%USERPROFILE%\Documents\Vibelution\config\config.toml`，可用环境变量覆盖）。详见下方 [配置 LLM](#4-配置-llm) —— **永远不要把真实 API Key 提交进仓库**。
+
+| 下一步 | 链接 |
+| --- | --- |
+| 完整安装与手动步骤 | [快速开始](#快速开始) |
+| 启动参数与 dev 前端 | [启动方式](#启动方式) |
 | 能力一览 | [当前能力](#当前能力) |
 | 贡献 | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| 许可证 | [MIT LICENSE](LICENSE) |
 | 产品语境 | [docs/product/README.md](docs/product/README.md) |
-| 给 coding Agent 的开发路由 | [docs/guides/README.md](docs/guides/README.md) · [AGENTS.md](AGENTS.md) |
+| 安全说明 | [隐私与安全说明](#隐私与安全说明) · [SECURITY.md](SECURITY.md) |
 
 ## 前端工作台预览
 
-以下截图使用脱敏演示数据生成，只展示公开安全的界面状态；不包含真实本地路径、账号、密钥、聊天内容或运行日志。
+截图为脱敏演示数据：不含真实本地路径、账号、密钥、聊天正文或运行日志。
 
-![Vibelution 对话工作台](docs/assets/readme/web-workbench-chat.png)
-
-![Vibelution Git 局势页](docs/assets/readme/web-workbench-git.png)
-
-![Vibelution 监督进化控制台](docs/assets/readme/web-workbench-supervised.png)
+| Chat | Git | Supervised Evolution |
+| --- | --- | --- |
+| ![对话工作台](docs/assets/readme/web-workbench-chat.png) | ![Git 局势](docs/assets/readme/web-workbench-git.png) | ![监督进化](docs/assets/readme/web-workbench-supervised.png) |
 
 ## 当前能力
 
@@ -88,6 +143,15 @@ Vibelution/
 
 ## 快速开始
 
+若你只想先跑起来，请优先看上方 [60 秒最短路径](#60-秒最短路径)。下面是可复查的完整步骤。
+
+### 0. 克隆仓库
+
+```bash
+git clone https://github.com/CCDawn/Vibelution.git
+cd Vibelution
+```
+
 ### 1. 首次打开自动准备环境
 
 从桌面入口或平台 launcher 首次打开时，launcher 会自动准备项目内运行环境：
@@ -109,6 +173,9 @@ Vibelution/
 建议使用 Python `3.11` 或 `3.12`，并在项目虚拟环境中运行。
 
 ```bash
+python -m venv .venv
+# Windows: .\.venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -167,9 +234,16 @@ $env:MINIMAX_API_KEY="your-api-key"
 
 外部 `config.toml` 不属于项目仓库，不应提交真实密钥。README 中的示例只使用环境变量名，不包含密钥值。
 
-## Agent 开发
+## 反馈与社区
 
-面向 **coding Agent** 的任务路由（非最终用户产品文档；规则正文在 `docs/standards/`）：
+- Bug / 功能请求：用 [Issue 模板](https://github.com/CCDawn/Vibelution/issues/new/choose) 提交（请附 OS、Python/Node 版本与复现步骤）
+- 使用讨论、路线图想法：[Discussions](https://github.com/CCDawn/Vibelution/discussions)
+- 贡献代码：[CONTRIBUTING.md](CONTRIBUTING.md)
+- 版本记录：[CHANGELOG.md](CHANGELOG.md) · 版本号见 [VERSION](VERSION)
+
+## Agent 开发（贡献者）
+
+面向 **coding Agent / 维护者** 的任务路由（非最终用户产品文档；规则正文在 `docs/standards/`）：
 
 - [docs/guides/README.md](docs/guides/README.md) — 加载顺序
 - [docs/guides/route.md](docs/guides/route.md) — 任务类型 → READ / EDIT / TEST
@@ -343,13 +417,15 @@ CI 通常覆盖：
 - Git 提交时只提交用户选择的文件；存在未选择的 staged 文件时后端会拒绝，避免误带无关改动。
 - Reset 使用后端白名单和保护区，不接受任意路径清理。
 - Runtime scene 日志用于诊断，公开发布前请脱敏。
+- 漏洞报告流程见 [SECURITY.md](SECURITY.md)（勿在公开 Issue 贴可利用细节）。
 
 ## 许可证与社区
 
 - 源码许可证：[MIT License](LICENSE)
 - 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
+- 安全策略：[SECURITY.md](SECURITY.md)
 - 可选第三方科研组件登记：[THIRD_PARTY_COMPONENTS.md](THIRD_PARTY_COMPONENTS.md)（默认不启用）
-- 欢迎 Issue / Discussion / PR。安全类问题请优先私下联系维护者，勿直接公开可利用细节。
+- 欢迎 [Issue](https://github.com/CCDawn/Vibelution/issues/new/choose) / [Discussion](https://github.com/CCDawn/Vibelution/discussions) / PR。
 
 ## 进一步阅读
 

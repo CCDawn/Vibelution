@@ -1,0 +1,74 @@
+name: Bug report
+description: 报告可复现的缺陷（请脱敏，勿贴密钥与真实聊天内容）
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请勿粘贴 API Key、完整本地绝对路径、未脱敏日志或聊天正文。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 现象摘要
+      description: 一句话说明出了什么问题、你期望什么。
+      placeholder: 例如：Launcher 启动后 8000 端口无响应，日志停在 …
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 从 clone / 启动到出错的最短步骤。
+      placeholder: |
+        1. git clone …
+        2. 运行 …
+        3. 打开 …
+        4. 观察到 …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      placeholder: Windows 11 / macOS 14 / Ubuntu 22.04
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Python / Node 版本
+      placeholder: Python 3.12.x · Node 20.x
+    validations:
+      required: true
+  - type: dropdown
+    id: entry
+    attributes:
+      label: 启动入口
+      options:
+        - Launcher (vibelution_launcher)
+        - web_workbench.py
+        - Desktop entry
+        - agent.py CLI
+        - 其他 / 不确定
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志（已脱敏）
+      description: 可摘录 launcher-control 或 runtime scene 中的非敏感片段。
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已搜索过类似 Issue，且未包含密钥/隐私数据
+          required: true

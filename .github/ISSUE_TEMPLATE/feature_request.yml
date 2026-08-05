@@ -1,0 +1,49 @@
+name: Feature request
+description: 建议新能力或体验改进（说明场景与价值）
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        功能讨论也可先发 [Discussions](https://github.com/CCDawn/Vibelution/discussions)。具体可落地的需求用本模板。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题 / 场景
+      description: 谁在什么情况下卡住？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的解决方案
+      description: 不必写实现细节；写清用户可见结果即可。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案或现状 workaround
+      description: 可选。
+  - type: dropdown
+    id: surface
+    attributes:
+      label: 主要产品面
+      options:
+        - Chat / 编码
+        - Teams / 科研
+        - Git
+        - Self / Supervised Evolution
+        - Runtime Scenes / Logs
+        - Config / Launcher / Desktop
+        - Docs / 其他
+    validations:
+      required: true
+  - type: checkboxes
+    id: local_first
+    attributes:
+      label: 本地优先边界
+      options:
+        - label: 我理解默认数据与密钥应留在本机，不要求变成云端 SaaS
+          required: true
