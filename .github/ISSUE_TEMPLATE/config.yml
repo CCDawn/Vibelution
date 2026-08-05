@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Discussions（使用讨论 / 想法）
+    url: https://github.com/CCDawn/Vibelution/discussions
+    about: 非缺陷类问题、体验反馈与路线想法，优先发 Discussions。
+  - name: Contributing guide
+    url: https://github.com/CCDawn/Vibelution/blob/main/CONTRIBUTING.md
+    about: 如何本地搭建与提交 PR。
