@@ -53,6 +53,25 @@ describe("chatSessionSurfaceModel", () => {
     expect(model.mentalCompactLine).toContain("mentalSourceState");
   });
 
+  it("never surfaces raw mental i18n keys as the badge label", () => {
+    const model = buildChatMentalStateViewModel({
+      mental: {
+        mood: "mentalCognitiveState_unknown",
+        cognitiveState: "unknown",
+        confidence: 0,
+        sampleSize: 0,
+        interventionCount: 0,
+        updatedAt: "",
+        source: "unavailable",
+      },
+      lang: "zh",
+      t: ((key: string) => (key === "mentalCognitiveState_unknown" ? "未判定" : key)) as never,
+      locale: "zh-CN",
+    });
+    expect(model.mentalStateLabel).toBe("未判定");
+    expect(model.mentalStateLabel).not.toContain("mentalCognitiveState_");
+  });
+
   it("builds pet vitals and companion line", () => {
     const model = buildChatPetCompanionViewModel({
       pet: {

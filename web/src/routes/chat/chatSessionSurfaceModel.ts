@@ -154,7 +154,13 @@ export function buildChatMentalStateViewModel(options: {
         return t("mentalSourceUnavailable");
     }
   })();
-  const mentalStateLabel = mentalState?.mood?.trim() || mentalCognitiveStateLabel;
+  // Never surface raw i18n keys like "mentalCognitiveState_unknown" in the rail badge.
+  // Backend mood may be empty, English prose, or a dictionary key leaked through another domain.
+  const moodRaw = String(mentalState?.mood || "").trim();
+  const moodLooksLikeKey = /^[a-z][a-zA-Z0-9_]*$/.test(moodRaw) && moodRaw.includes("_");
+  const mentalStateLabel = !moodRaw || moodLooksLikeKey
+    ? mentalCognitiveStateLabel
+    : moodRaw;
   const mentalSummary = mentalState?.feeling?.trim() || mentalState?.summary || t("mentalStatePending");
   const mentalWhisper = mentalState?.whisper?.trim() || t("mentalStatePending");
   const mentalConfidence =
