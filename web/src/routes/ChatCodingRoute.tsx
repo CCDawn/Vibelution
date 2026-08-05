@@ -243,11 +243,13 @@ import {
   SESSION_DETAIL_HISTORY_PAGE_SIZE,
   fetchSessionDetailWindow,
   isSessionNotFoundError,
+  isSessionDetailHardLoading,
   isForeignSessionDetailQueryKey,
   latestVisibleTurnErrorMessage,
   prefetchSessionDetailWindow,
   removeDeletedSessionFromConversations,
   mergeSessionDetailIntoConversations,
+  resolveActiveSessionDetailForUi,
   resolveNeighborSessionIdsForPrefetch,
   resolveSessionDetailPlaceholder,
   sessionDetailSnapshotKey,
@@ -1509,10 +1511,17 @@ export function ChatCodingRoute() {
 
   const runtime = runtimeQuery.data;
   const pet = petQuery.data;
-  const rawSessionDetail = sessionDetailQuery.data;
-  const selectedSessionDetail =
-    rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined;
-  const detail = selectedSessionDetail;
+  // Prefer live query data, but always re-read RQ cache for optimistic temp shells
+  // (disabled queries often omit data even after setQueryData).
+  const rawSessionDetail = resolveActiveSessionDetailForUi({
+    activeSessionId,
+    queryData: sessionDetailQuery.data,
+    cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
+    summary: activeSessionId
+      ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
+      : undefined,
+  });
+  const detail = rawSessionDetail;
   const sessionToolApprovalRuntimeActive = Boolean(
     activeSessionId
     && runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId,
@@ -1644,11 +1653,12 @@ export function ChatCodingRoute() {
     setActiveTab,
     refetchSessionDetail: () => sessionDetailQuery.refetch(),
   });
-  const sessionDetailLoadingForActiveSession = Boolean(
-    activeSessionId
-    && (!rawSessionDetail || rawSessionDetail.id !== activeSessionId)
-    && sessionDetailQuery.isFetching,
-  );
+  const sessionDetailLoadingForActiveSession = isSessionDetailHardLoading({
+    activeSessionId,
+    detail: rawSessionDetail,
+    isFetching: sessionDetailQuery.isFetching,
+    isTempSession: isTempSessionId(activeSessionId),
+  });
   const runtimeActiveChatTurnSessionIds = new Set(
     [
       ...(runtime?.workRuns?.activeItems?.chat_turn ?? []),

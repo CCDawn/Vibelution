@@ -160,6 +160,52 @@ export function resolveSessionDetailPlaceholder(options: {
   return buildSessionDetailShellFromSummary(summary);
 }
 
+/**
+ * Resolve what the chat center should paint for the active session.
+ * Combines live query data, RQ cache (including optimistic temp shells), and list summary.
+ * Disabled queries (temp ids) often omit `queryData` even after setQueryData — always
+ * re-read the cache so create/switch never falls back to a full loading shell.
+ */
+export function resolveActiveSessionDetailForUi(options: {
+  activeSessionId: string | null | undefined;
+  queryData: SessionDetail | undefined;
+  cachedDetail: SessionDetail | undefined;
+  summary: SessionSummary | null | undefined;
+}): SessionDetail | undefined {
+  const activeSessionId = String(options.activeSessionId || "").trim();
+  if (!activeSessionId) {
+    return undefined;
+  }
+  if (options.queryData?.id === activeSessionId) {
+    return options.queryData;
+  }
+  return resolveSessionDetailPlaceholder({
+    activeSessionId,
+    cachedDetail: options.cachedDetail,
+    summary: options.summary,
+  });
+}
+
+/**
+ * Hard loading shell only when we have nothing to paint and a real fetch is in flight.
+ * Temp/optimistic shells and summary shells must stay interactive (composer ready).
+ */
+export function isSessionDetailHardLoading(options: {
+  activeSessionId: string | null | undefined;
+  detail: SessionDetail | undefined;
+  isFetching: boolean;
+  isTempSession?: boolean;
+}): boolean {
+  const activeSessionId = String(options.activeSessionId || "").trim();
+  if (!activeSessionId || options.isTempSession) {
+    return false;
+  }
+  if (options.detail?.id === activeSessionId) {
+    return false;
+  }
+  return Boolean(options.isFetching);
+}
+
 export function isForeignSessionDetailQueryKey(
   queryKey: readonly unknown[],
   activeSessionId: string,

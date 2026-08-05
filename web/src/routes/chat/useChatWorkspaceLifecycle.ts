@@ -30,11 +30,13 @@ import {
 } from "../chatSessionIndexQuery";
 import {
   mergeSessionDetailIntoSummaries,
+  mergeSessionDetailMessageWindow,
   renameSessionDetail,
   renameSessionInSummaries,
 } from "../chatSessionState";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import {
+  fetchSessionDetailWindow,
   removeDeletedSessionFromConversations,
   renameSessionInConversations,
 } from "./chatSessionDetailHelpers";
@@ -239,19 +241,24 @@ export function useChatWorkspaceLifecycle({
         body: JSON.stringify({ agentId }),
       }),
     onMutate: async ({ agentId }) => {
-      // T0: mint a local temp tab immediately (ChatGPT-style). Real id arrives on success.
+      // T0: mint a local temp tab + empty transcript immediately (ChatGPT-style).
+      // Real id arrives on success; UI must stay interactive while POST is in flight.
       const tempSessionId = createTempSessionId();
       const previousActiveSessionId = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
       const normalizedAgentId = String(agentId || "").trim();
       // Match backend create default ("新会话"), not the create-button label ("新建会话").
       const title = defaultNewSessionTitle(lang);
       const nowIso = new Date().toISOString();
+      const agents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
+      const agentRow = agents.find((item) => String(item.agentId || "").trim() === normalizedAgentId);
+      const agentDisplayName = String(agentRow?.displayName || agentRow?.agentCode || "").trim();
       // Remount during temp→real would blur the title input and auto-finish rename; suppress that.
       suppressRenameBlurUntilRef.current = Date.now() + 2500;
       const optimisticDetail: SessionDetail = {
         id: tempSessionId,
         title,
         agentId: normalizedAgentId,
+        agentDisplayName: agentDisplayName || undefined,
         status: "idle",
         currentPhase: "ready",
         taskSummary: "",
@@ -266,6 +273,16 @@ export function useChatWorkspaceLifecycle({
         stopRequested: false,
         stopRequestedAt: "",
         stopReason: "",
+        messageWindow: {
+          mode: "window",
+          totalMessages: 0,
+          returnedMessages: 0,
+          oldestMessageIndex: 0,
+          newestMessageIndex: 0,
+          hasEarlier: false,
+          hasLater: false,
+          transcriptScope: "window",
+        },
       };
       setSessionComposerErrors((current) => ({
         ...current,
@@ -274,10 +291,11 @@ export function useChatWorkspaceLifecycle({
       }));
       setActiveGroupRoomId("");
       setRightIndexPanel("conversations");
+      // Cache first, then switch active — center panel reads cache when query is disabled for temp ids.
+      queryClient.setQueryData(queryKeys.session(tempSessionId), optimisticDetail);
       updateSessionSummaryCaches(queryClient, (sessions) =>
         mergeSessionDetailIntoSummaries(sessions, optimisticDetail),
       );
-      queryClient.setQueryData(queryKeys.session(tempSessionId), optimisticDetail);
       setActiveSession(tempSessionId);
       setSelectedAgentId(normalizedAgentId);
       setSessionFilter("");
@@ -304,20 +322,14 @@ export function useChatWorkspaceLifecycle({
         agentId,
         messages: Array.isArray(nextDetail.messages) ? nextDetail.messages : [],
       };
-      // Drop the temp shell before seeding the server id (rebased identity).
-      if (tempSessionId) {
-        updateSessionSummaryCaches(queryClient, (sessions) =>
-          (sessions ?? []).filter((session) => session.id !== tempSessionId),
-        );
-        queryClient.removeQueries({ queryKey: queryKeys.session(tempSessionId), exact: true });
-        removeSessionWorkspace(tempSessionId, nextId);
-      }
+      // Seed real id cache BEFORE switching active id so the UI never paints a hard loading shell.
+      queryClient.setQueryData(queryKeys.session(nextId), seededDetail);
       updateSessionSummaryCaches(queryClient, (sessions) =>
         mergeSessionDetailIntoSummaries(sessions, seededDetail),
       );
       const currentActive = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
-      // Keep user focus if they already switched away from the temp tab.
-      if (!currentActive || currentActive === tempSessionId || isTempSessionId(currentActive)) {
+      const keepFocusOnCreated = !currentActive || currentActive === tempSessionId || isTempSessionId(currentActive);
+      if (keepFocusOnCreated) {
         // Extend blur suppress through remount so rename field stays open for typing.
         suppressRenameBlurUntilRef.current = Date.now() + 2500;
         setActiveSession(nextId);
@@ -325,8 +337,14 @@ export function useChatWorkspaceLifecycle({
         setEditingSessionId(nextId);
         setEditingSessionTitle(title);
         syncSessionDetail(seededDetail);
-      } else {
-        queryClient.setQueryData(queryKeys.session(nextId), seededDetail);
+      }
+      // Drop temp shell after real id is active/cached.
+      if (tempSessionId) {
+        updateSessionSummaryCaches(queryClient, (sessions) =>
+          (sessions ?? []).filter((session) => session.id !== tempSessionId),
+        );
+        queryClient.removeQueries({ queryKey: queryKeys.session(tempSessionId), exact: true });
+        removeSessionWorkspace(tempSessionId, keepFocusOnCreated ? nextId : currentActive || nextId);
       }
       setSelectedAgentId(agentId);
       setSessionComposerErrors((current) => {
@@ -341,6 +359,24 @@ export function useChatWorkspaceLifecycle({
           queryKey: ["sessions", "agent", agentId],
         });
       }
+      // Progressive hydrate: partial window first (no secondary lists), then full workspace cache refresh.
+      void fetchSessionDetailWindow(nextId, {
+        messageLimit: 40,
+        includeSecondary: false,
+        transcriptScope: "window",
+      }).then((partial) => {
+        if (!partial || String(partial.id || "").trim() !== nextId) {
+          return;
+        }
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(nextId), (previous) =>
+          mergeSessionDetailMessageWindow(previous, partial) ?? partial,
+        );
+        updateSessionSummaryCaches(queryClient, (sessions) =>
+          mergeSessionDetailIntoSummaries(sessions, partial),
+        );
+      }).catch(() => {
+        // Keep lightweight create shell; user can still chat.
+      });
       void chatWorkspaceCache.afterSessionChanged({
         sessionId: nextId,
         agentId,

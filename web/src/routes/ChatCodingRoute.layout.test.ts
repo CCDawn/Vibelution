@@ -1839,6 +1839,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLifecycleSource).toContain('fetchJson<SessionDetail>("/api/sessions"');
     expect(routeAndLifecycleSource).toContain('Prefer: "respond-async"');
     expect(routeAndLifecycleSource).toContain("mergeSessionDetailIntoSummaries");
+    expect(routeAndLifecycleSource).toContain("createTempSessionId()");
+    expect(routeAndLifecycleSource).toContain("Seed real id cache BEFORE switching active id");
+    expect(routeAndLifecycleSource).toContain("fetchSessionDetailWindow(nextId");
+    expect(routeAndLifecycleSource).toContain("includeSecondary: false");
+    expect(routeSource).toContain("resolveActiveSessionDetailForUi");
+    expect(routeSource).toContain("isSessionDetailHardLoading");
     expect(routeAndActionsSource).toContain("createSessionMutation.mutate({ agentId: selectedChatAgentId })");
     expect(routeSource).not.toContain("updateSessionAgentMutation");
     expect(routeSource).not.toContain("sessionAgentOptions");
