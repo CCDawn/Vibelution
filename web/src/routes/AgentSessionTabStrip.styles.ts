@@ -39,7 +39,8 @@ const styles = {
   agentSessionTabKicker:
     "vui-routes-chatcodingroute agentSessionTabKicker min-w-0 text-[10px] font-semibold leading-none text-[var(--fg-tertiary)]",
   // Content hit target only — selection chrome is on the outer agentSessionTab card.
-  agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction !h-9 !min-h-9 min-w-0 max-w-full flex-1 !rounded-none !border-0 !bg-transparent !px-2 !text-inherit !shadow-none hover:!border-transparent hover:!bg-transparent hover:!text-inherit [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:!gap-1.5 [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:!gap-1.5 [&_[data-slot=vui-button-label]]:truncate`,
+  // Fixed row: [icon] [title flex] [status slot] — status always occupies the same 14px cell.
+  agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction !inline-flex !h-9 !min-h-9 min-w-0 max-w-full flex-1 items-center !gap-1.5 !rounded-none !border-0 !bg-transparent !px-2 !py-0 !text-inherit !shadow-none hover:!border-transparent hover:!bg-transparent hover:!text-inherit`,
   agentSessionTabMainActionActive: `vui-routes-chatcodingroute agentSessionTabMainActionActive !text-[var(--fg-primary)] !shadow-none`,
   agentSessionTabMainActionContextTarget:
     "vui-routes-chatcodingroute agentSessionTabMainActionContextTarget",
@@ -48,24 +49,27 @@ const styles = {
   agentSessionTabRoot:
     "vui-routes-chatcodingroute agentSessionTabRoot min-w-0",
   agentSessionTabTitleBlock:
-    "vui-routes-chatcodingroute agentSessionTabTitleBlock min-w-0 inline-flex max-w-[12.5rem] items-center gap-1",
+    "vui-routes-chatcodingroute agentSessionTabTitleBlock min-w-0 max-w-[11rem] flex-1 overflow-hidden",
+  // Fixed status slot between title and close: keeps tab geometry stable with/without activity.
+  agentSessionTabStatusSlot:
+    "vui-routes-chatcodingroute agentSessionTabStatusSlot inline-grid h-3.5 w-3.5 shrink-0 place-items-center self-center",
   agentSessionTabStatus:
-    "vui-routes-chatcodingroute agentSessionTabStatus inline-flex shrink-0 items-center gap-1",
+    "vui-routes-chatcodingroute agentSessionTabStatus inline-grid h-3.5 w-3.5 shrink-0 place-items-center",
   agentSessionTabStatusIndicator:
-    "vui-routes-chatcodingroute agentSessionTabStatusIndicator inline-grid shrink-0 place-items-center",
+    "vui-routes-chatcodingroute agentSessionTabStatusIndicator inline-grid h-2.5 w-2.5 shrink-0 place-items-center",
   agentSessionTabStatusSpinner:
     "vui-routes-chatcodingroute agentSessionTabStatusSpinner animate-spin",
   agentSessionTabStatusRunning:
-    "vui-routes-chatcodingroute agentSessionTabStatusRunning h-3.5 w-3.5 text-[var(--state-success)]",
+    "vui-routes-chatcodingroute agentSessionTabStatusRunning h-3 w-3 text-[var(--state-success)]",
   agentSessionTabStatusApproval:
-    "vui-routes-chatcodingroute agentSessionTabStatusApproval h-3.5 w-3.5 text-[var(--state-warning)]",
+    "vui-routes-chatcodingroute agentSessionTabStatusApproval h-3 w-3 text-[var(--state-warning)]",
   agentSessionTabStatusError:
-    "vui-routes-chatcodingroute agentSessionTabStatusError h-2.5 w-2.5 rounded-full bg-[var(--state-error)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--state-error)_28%,transparent)]",
+    "vui-routes-chatcodingroute agentSessionTabStatusError h-2.5 w-2.5 rounded-full bg-[var(--state-error)]",
   agentSessionTabStatusCompleted:
-    "vui-routes-chatcodingroute agentSessionTabStatusCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-cool)_28%,transparent)]",
+    "vui-routes-chatcodingroute agentSessionTabStatusCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)]",
   // Legacy class names kept so layout source tests that still mention dots do not hard-fail mid-migration.
   agentSessionTabStatusDot:
-    "vui-routes-chatcodingroute agentSessionTabStatusDot h-2.5 w-2.5 shrink-0 rounded-full border border-white/70 shadow-[0_0_0_1px_color-mix(in_srgb,currentColor_28%,transparent)]",
+    "vui-routes-chatcodingroute agentSessionTabStatusDot h-2.5 w-2.5 shrink-0 rounded-full",
   agentSessionTabStatusDotIdle:
     "vui-routes-chatcodingroute agentSessionTabStatusDotIdle bg-[color-mix(in_srgb,var(--fg-tertiary)_55%,transparent)] text-[var(--fg-tertiary)]",
   agentSessionTabStatusDotError:
@@ -75,7 +79,7 @@ const styles = {
   agentSessionTabStatusDotApproval:
     "vui-routes-chatcodingroute agentSessionTabStatusDotApproval bg-[var(--state-warning)] text-[var(--state-warning)]",
   agentSessionTabTitle:
-    "vui-routes-chatcodingroute agentSessionTabTitle min-w-0 max-w-[9rem] truncate text-left [font-size:var(--vui-font-sm)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute agentSessionTabTitle block min-w-0 max-w-full truncate text-left [font-size:var(--vui-font-sm)] font-semibold leading-none text-[var(--fg-secondary)]",
   agentSessionTabTitleActive:
     "vui-routes-chatcodingroute agentSessionTabTitleActive !text-[var(--fg-primary)]",
   // Inline tab rename field: strip dense form chrome so it reads as a tab title, not a dialog.

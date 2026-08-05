@@ -88,6 +88,23 @@ function agentSessionStatusIndicatorClassName(tone: AgentSessionStatusTone) {
   ].filter(Boolean).join(" ");
 }
 
+/** Fixed-width status cell: always rendered so tab width/close alignment stay stable. */
+function renderAgentSessionStatusSlot(tone: AgentSessionStatusTone) {
+  return (
+    <span className={styles.agentSessionTabStatusSlot} aria-hidden="true" data-session-tab-status-slot>
+      {tone === "none" ? null : (
+        <span className={styles.agentSessionTabStatus}>
+          <span className={agentSessionStatusIndicatorClassName(tone)}>
+            {tone === "running" || tone === "approval" ? (
+              <LoaderCircle size={11} aria-hidden="true" className={styles.agentSessionTabStatusSpinner} />
+            ) : null}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function agentSessionStatusShortLabel(tone: AgentSessionStatusTone, lang: "zh" | "en") {
   return sessionActivityLabel(tone, lang);
 }
@@ -254,7 +271,6 @@ export function AgentSessionTabStrip({
           session,
           isActive: tabActive,
         });
-        const statusIndicatorClassName = agentSessionStatusIndicatorClassName(statusTone);
         const statusShortLabel = agentSessionStatusShortLabel(statusTone, lang);
         const sessionTitle =
           session.title
@@ -415,18 +431,7 @@ export function AgentSessionTabStrip({
                   ].filter(Boolean).join(" ")}
                 >{sessionTitle}</span>
               </span>
-              {statusTone !== "none" ? (
-                <span className={styles.agentSessionTabStatus}>
-                  <span
-                    className={statusIndicatorClassName}
-                    aria-hidden="true"
-                  >
-                    {statusTone === "running" || statusTone === "approval" ? (
-                      <LoaderCircle size={11} aria-hidden="true" className={styles.agentSessionTabStatusSpinner} />
-                    ) : null}
-                  </span>
-                </span>
-              ) : null}
+              {renderAgentSessionStatusSlot(statusTone)}
             </VButton>
             <VIconButton
               type="button"
@@ -447,7 +452,6 @@ export function AgentSessionTabStrip({
       {cliAgentRuns.map((run) => {
         const tabActive = activeCliAgentRunId === run.id;
         const statusTone = agentSessionStatusTone(run.status);
-        const statusIndicatorClassName = agentSessionStatusIndicatorClassName(statusTone);
         const statusShortLabel = agentSessionStatusShortLabel(statusTone, lang);
         const title = [run.title, statusShortLabel, run.summary].filter(Boolean).join(" · ");
         const tabMainActionClassName = [
@@ -505,18 +509,7 @@ export function AgentSessionTabStrip({
                   ].filter(Boolean).join(" ")}
                 >{run.title}</span>
               </span>
-              {statusTone !== "none" ? (
-                <span className={styles.agentSessionTabStatus}>
-                  <span
-                    className={statusIndicatorClassName}
-                    aria-hidden="true"
-                  >
-                    {statusTone === "running" || statusTone === "approval" ? (
-                      <LoaderCircle size={11} aria-hidden="true" className={styles.agentSessionTabStatusSpinner} />
-                    ) : null}
-                  </span>
-                </span>
-              ) : null}
+              {renderAgentSessionStatusSlot(statusTone)}
             </VButton>
             <VIconButton
               type="button"
