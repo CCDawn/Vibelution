@@ -651,9 +651,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
     expect(styles.operationItem).toContain("!rounded-none");
-    expect(styles.operationItem).toContain("!border-x-0");
-    expect(styles.operationItem).toContain("!border-t-0");
-    expect(styles.operationItem).toContain("border-b");
+    expect(styles.operationItem).toContain("!border-0");
+    expect(styles.operationItem).not.toContain("border-b ");
     expect(styles.operationItem).toContain("!bg-transparent");
     expect(styles.operationItem).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationItem).toContain("!p-0");

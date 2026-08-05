@@ -671,7 +671,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview operationIcon_warn min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_warning:
     "vui-components-conversationview operationIcon_warning min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] !text-[var(--state-warning)]",
-  operationItem: `vui-components-conversationview operationItem min-w-0 ${vuiOpaqueRowClass} p-2 w-[min(100%,72ch)] grid grid-cols-[22px_minmax(0,1fr)_auto_auto_16px] items-start gap-1.5 !rounded-none !border-x-0 !border-t-0 border-b border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] !bg-transparent !p-0 !pb-1 !text-[var(--fg-secondary)] !shadow-none`,
+  operationItem: `vui-components-conversationview operationItem min-w-0 ${vuiOpaqueRowClass} p-2 w-[min(100%,72ch)] grid grid-cols-[22px_minmax(0,1fr)_auto_auto_16px] items-start gap-1.5 !rounded-none !border-0 !bg-transparent !p-0 !pb-1 !text-[var(--fg-secondary)] !shadow-none`,
   operationItemActive: `vui-components-conversationview operationItemActive min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
   operationItemTool: `vui-components-conversationview operationItemTool min-w-0 ${vuiOpaqueRowClass} p-2 text-[var(--fg-secondary)] max-w-full`,
   operationItemWrap:
@@ -838,7 +838,7 @@ const styles: Record<string, string> = {
   reActToolItem:
     "vui-components-conversationview reActToolItem min-w-0 border-0 bg-transparent p-0 text-[var(--fg-secondary)] shadow-none",
   reActToolLine:
-    "vui-components-conversationview reActToolLine min-w-0 grid grid-cols-[minmax(9rem,auto)_minmax(0,1fr)_auto_auto] items-start gap-1.5 border-0 border-b border-[color-mix(in_srgb,var(--accent-warm)_18%,var(--vui-border-subtle))] bg-transparent py-1.5 text-[var(--fg-secondary)] shadow-none",
+    "vui-components-conversationview reActToolLine min-w-0 grid grid-cols-[minmax(9rem,auto)_minmax(0,1fr)_auto_auto] items-start gap-1.5 border-0 bg-transparent py-1.5 text-[var(--fg-secondary)] shadow-none",
   reActToolList:
     "vui-components-conversationview reActToolList min-w-0 grid min-h-0 content-start gap-0 overflow-visible border-0 bg-transparent text-[var(--fg-secondary)]",
   reActToolName:
@@ -1115,9 +1115,9 @@ const styles: Record<string, string> = {
   timelineCommandError:
     "vui-components-conversationview timelineCommandError col-start-2 mt-0.5 min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--state-error)] whitespace-pre-wrap [overflow-wrap:anywhere]",
   timelineCommandList:
-    "vui-components-conversationview timelineCommandList min-w-0 grid min-h-0 content-start gap-0 border-y border-[color-mix(in_srgb,var(--fg-tertiary)_22%,var(--vui-border-subtle))] py-1.5 my-1 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin]",
+    "vui-components-conversationview timelineCommandList min-w-0 grid min-h-0 content-start gap-0 border-0 py-1 my-0.5 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin]",
   timelineCommandRow:
-    "vui-components-conversationview timelineCommandRow min-w-0 grid grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-b border-[color-mix(in_srgb,var(--vui-border-subtle)_55%,transparent)] bg-transparent py-[0.35rem] [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)] last:border-b-0",
+    "vui-components-conversationview timelineCommandRow min-w-0 grid grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-0 bg-transparent py-[0.35rem] [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)]",
   timelineHistoryButton:
     "vui-components-conversationview timelineHistoryButton min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   timelineHistoryGate:

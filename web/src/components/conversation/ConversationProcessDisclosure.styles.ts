@@ -9,7 +9,7 @@ const styles = {
   summary: cx(
     "summary",
     // list-none: prevent native details "›" leaking under the process label.
-    "flex min-h-8 w-full list-none cursor-pointer items-center justify-start gap-1 border-b border-[var(--vui-border-subtle)] pb-2 pt-1 text-left [font-size:var(--vui-font-sm)] leading-5 text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:ring-inset",
+    "flex min-h-8 w-full list-none cursor-pointer items-center justify-start gap-1 border-0 pb-1.5 pt-1 text-left [font-size:var(--vui-font-sm)] leading-5 text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:ring-inset",
   ),
   chevron: cx(
     "chevron",

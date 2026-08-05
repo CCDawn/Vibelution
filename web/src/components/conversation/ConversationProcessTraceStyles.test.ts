@@ -49,10 +49,12 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCommandRow).toContain("py-[0.35rem]");
     expect(styles.timelineCommandRow).toContain("[font-size:var(--vui-font-xs)]");
     expect(styles.timelineCommandRow).toContain("text-[var(--fg-tertiary)]");
-    expect(styles.timelineCommandRow).toContain("border-b");
+    expect(styles.timelineCommandRow).toContain("border-0");
+    expect(styles.timelineCommandRow).not.toContain("border-b ");
     expect(styles.timelineCommandRow).not.toContain("overflow-auto");
     expect(styles.timelineCommandRow).not.toContain("bg-[var(--vui-surface-row)]");
-    expect(styles.timelineCommandList).toContain("border-y");
+    expect(styles.timelineCommandList).toContain("border-0");
+    expect(styles.timelineCommandList).not.toContain("border-y");
     expect(styles.timelineCommandList).toContain("max-h-[min(18rem,42vh)]");
     expect(styles.timelineCommandError).toContain("col-start-2");
     expect(styles.timelineCommandError).not.toContain("col-span-2");

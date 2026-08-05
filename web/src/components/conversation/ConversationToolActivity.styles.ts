@@ -5,10 +5,10 @@ function cx(key: string, ...classNames: string[]) {
 }
 
 const styles = {
-  // Codex-aligned continuous tool rail: top/bottom frame + capped scroll height.
+  // Continuous tool rail: no horizontal frame lines; spacing + scroll only.
   activity: cx(
     "activity",
-    "grid w-full max-w-full min-w-0 gap-0 border-y border-[color-mix(in_srgb,var(--fg-tertiary)_22%,var(--vui-border-subtle))] py-1.5 my-1 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:color-mix(in_srgb,var(--fg-tertiary)_35%,transparent)_transparent]",
+    "grid w-full max-w-full min-w-0 gap-0 border-0 py-1 my-0.5 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:color-mix(in_srgb,var(--fg-tertiary)_35%,transparent)_transparent]",
   ),
   activityRow: cx("activityRow", "w-full max-w-full min-w-0"),
   group: cx("group", "w-full max-w-full min-w-0 my-1"),
