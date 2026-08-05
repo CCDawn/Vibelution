@@ -1,7 +1,7 @@
 # Unified Agent Tool Authorization Design
 
-**Date:** 2026-07-14  
-**Status:** Proposed  
+**Date:** 2026-07-14
+**Status:** Proposed
 **Scope:** Agent tool registration, assignment, model visibility, execution authorization, configuration, audit, and migration
 
 ## 1. Decision
@@ -398,4 +398,3 @@ The design is complete when runtime evidence proves:
 - Vibelution's existing Agent Kernel plan already requires all tool use to pass Tool Registry and ToolPolicy.
 - OpenAI Codex separates turn permission profiles, approval policy, sandbox policy, and execution checks; Vibelution follows the same separation of concerns while retaining Agent-specific durable assignments.
 - Claude-style `allowedTools` demonstrates that model visibility must be derived from explicit permission context, with execution-time permission checks remaining authoritative.
-

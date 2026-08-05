@@ -1,7 +1,8 @@
 # Electron Launcher Protocol Contract
 
-日期：2026-06-26
-参考：`C:\Users\17533\Desktop\Agent论文\projects\60_openai_codex`
+> **状态：参考合同**（2026-06-26 起）
+> 实现与验收以 `tests/` + Launcher/runtime-manager 代码为准；本文件不覆盖开发标准 §8.0 无控制台红线。
+> 一次性迁移 ledger 已迁至 `docs/archive/testing/`。
 
 ## Reference Findings
 

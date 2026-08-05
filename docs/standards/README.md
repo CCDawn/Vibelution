@@ -16,23 +16,31 @@
 
 | 任务或问题 | 权威文档 |
 | --- | --- |
+| **Agent 任务路由（非规则正文）** | [../guides/README.md](../guides/README.md) · [route](../guides/route.md) · [loop](../guides/loop.md) |
 | 开发分级、BRT、来源权威、结构边界、验证、Git、Launcher、发布、完成条件 | [development-standard.md](development-standard.md) |
 | Windows 产品运行时禁止 cmd/控制台弹窗（永久红线） | [development-standard.md §8.0](development-standard.md) + 根 `AGENTS.md` §2 |
 | 多 Agent、worktree、claim、merge 协作 | [../agents/worktree-collaboration.md](../agents/worktree-collaboration.md) |
 | 领域词汇 | [../agents/domain.md](../agents/domain.md) |
 | 工具授权入口 | [../agents/tool-authorization-entrypoints.md](../agents/tool-authorization-entrypoints.md) |
-| 前端 UI / VUI / shadcn（**强制**，根 `AGENTS.md` §2 红线） | [development-standard.md §9.1](development-standard.md) + [../../web/src/components/vui/README.md](../../web/src/components/vui/README.md) + [组件设计索引](../../web/src/components/vui/designs/INDEX.md) + 门禁 `vuiShadcnRouteContract` / `vuiComponentDesignContract` |
+| 前端 UI / VUI / shadcn（**强制**，根 `AGENTS.md` §2 红线） | [development-standard.md §9.1](development-standard.md) + [../../web/src/components/vui/README.md](../../web/src/components/vui/README.md) + [组件设计索引](../../web/src/components/vui/designs/INDEX.md) + 按钮选型 [../guides/button-selection.md](../guides/button-selection.md) + 门禁 `vuiShadcnRouteContract.test.ts` / `vuiComponentDesignContract` |
 | 测试入口 | [../../tests/README.md](../../tests/README.md) |
 | 运行日志实现地图 | [../../core/logging/README.md](../../core/logging/README.md) |
-| 架构决策 | [../adr/](../adr/) |
+| Operator 配置（config.toml / LLM / 缓存 / 厂商菜谱） | [../ops/config/INDEX.md](../ops/config/INDEX.md) |
+| 架构决策（索引） | [../adr/README.md](../adr/README.md) |
 | Agent 协作发送（session 落脚 + 保留 inbox） | [../adr/0002-agent-collaboration-session-addressing.md](../adr/0002-agent-collaboration-session-addressing.md) |
+| Operator config 在 Documents 外置 | [../adr/0003-operator-config-lives-outside-repo.md](../adr/0003-operator-config-lives-outside-repo.md) |
+| 产品 UI = VUI + shadcn only | [../adr/0004-product-ui-uses-vui-shadcn-only.md](../adr/0004-product-ui-uses-vui-shadcn-only.md) |
+| 文档权威层与 archive | [../adr/0005-docs-authority-and-archive-policy.md](../adr/0005-docs-authority-and-archive-policy.md) |
+| 产品语境 / UI 注册表 | [../product/README.md](../product/README.md) · [../product/design-register.md](../product/design-register.md) |
+| Web services 全量 ownership | [../../core/web/services/README.md](../../core/web/services/README.md) |
 
 ## 边界
 
 - 全局规则正文只写一次；其他文档使用链接。
 - 模块 README 只负责局部 ownership、目录和实现地图，不声明竞争性的全局规则。
 - `.docs/project-memory/` 是运行状态与协作数据，不是规范目录。
-- `docs/plans/`、`docs/superpowers/` 和 `docs/archive/` 不是现行规则来源，除非本索引或 `AGENTS.md` 明确提升。
+- `docs/archive/`（含原 `docs/plans/`、`docs/superpowers/`）不是现行规则来源，除非本索引或 `AGENTS.md` 明确提升。
+- 文档总图：[../README.md](../README.md)；配置入口：[../ops/config/INDEX.md](../ops/config/INDEX.md)。
 - 新增或修改全局规则时，必须同步检查 `AGENTS.md` 路由、相关守卫测试和项目记忆决策。
 
 当前 `development-standard.md` 保留完整章节编号以降低迁移风险；后续只有在不复制规则正文且链接守卫可验证时，才按专题继续拆分。

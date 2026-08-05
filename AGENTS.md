@@ -29,7 +29,7 @@
 
 开始非简单任务前：
 
-1. 读取 [规范索引](docs/standards/README.md)，再只读取与任务相关的专项文档。
+1. 非平凡任务按 [Agent 开发路由](docs/guides/README.md)：`route.md` 定 READ/EDIT/TEST → `ownership.md` 定落点 → `loop.md` 验证与完成块；细则只下钻 [规范索引](docs/standards/README.md) 相关条。
 2. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务读取 `.docs/project-memory/INDEX.md` 与 `profile.json`；仅在会改变答案时继续读取具体 lane/registry。
 3. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。
 4. Bug、回归、卡住、运行不一致或异常命令先检查最新 `logs/runtime_scenes/`。
@@ -39,18 +39,20 @@
 
 | 任务 | 文档 |
 | --- | --- |
+| **Agent 开发路由（任务→路径/命令）** | [guides/README](docs/guides/README.md) · [route](docs/guides/route.md) · [ownership](docs/guides/ownership.md) · [loop](docs/guides/loop.md) · [playbook](docs/guides/playbook.md) |
 | 开发分级、架构、前后端、测试、Git、Launcher、发布、完成条件 | [开发标准](docs/standards/development-standard.md) |
 | Windows 无控制台弹窗（cmd/powershell/WT/OpenConsole）红线 | [开发标准 §8.0](docs/standards/development-standard.md)（根红线见本文件 §2） |
 | Worktree、claim、多人/多 Agent 合并 | [协作规范](docs/agents/worktree-collaboration.md) |
 | 工具权限与入口 | [工具授权](docs/agents/tool-authorization-entrypoints.md) |
 | 领域词汇 | [领域文档](docs/agents/domain.md) |
-| ADR | [架构决策](docs/adr/) |
+| ADR | [架构决策索引](docs/adr/README.md) |
+| 产品语境 / UI 注册表 | [产品](docs/product/README.md) · [设计注册表](docs/product/design-register.md) |
 | 测试命令和矩阵 | [测试指南](tests/README.md) |
 | 前端 UI / 控件 / 页面壳 / 布局（**必读**） | [VUI 实现地图](web/src/components/vui/README.md) + [开发标准 §9.1](docs/standards/development-standard.md) + 门禁 `web/src/components/vui/vuiShadcnRouteContract.test.ts` |
-| 后端服务 ownership | 对应 `core/web/services/<domain>/README.md` |
+| 后端服务 ownership | [services 全量索引](core/web/services/README.md) · pack 域再读 `core/web/services/<domain>/README.md` |
 | 运行日志实现 | [日志说明](core/logging/README.md) |
 
-历史计划、报告、`docs/archive/`、`docs/superpowers/` 和 `.docs/project-memory/` 不得与现行规范竞争权威。
+历史计划、报告、`docs/archive/`（含原 `docs/plans/` 与 `docs/superpowers/`）和 `.docs/project-memory/` 不得与现行规范竞争权威。
 
 ## 4. Execution Baseline
 
@@ -76,3 +78,6 @@
 - 若包含 fallback、degraded、partial 或 compatibility 路径，明确原因、范围、可信部分和剩余修复信号。
 
 规则冲突、链接失效或本地事实与文档不一致时，不静默选择旧路径；先保留现场、定位唯一权威，再在同一治理轮修正文档与守卫。
+## Operator 配置
+
+- 索引（LLM/协议/缓存/厂商菜谱）：[docs/ops/config/INDEX.md](docs/ops/config/INDEX.md)
