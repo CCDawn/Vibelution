@@ -576,13 +576,17 @@ def start_codex_sandbox_terminal_session(
     )
     sandbox_temp: Path | None = None
     try:
-        encoding = locale.getpreferredencoding(False) or "utf-8"
+        # Prefer UTF-8 so agent-facing tool text is stable; Windows host tools may
+        # still emit GBK — errors=replace keeps the session alive.
+        encoding = "utf-8"
         environment, sandbox_temp = _sandbox_process_environment(
             workdir,
             command_hash,
             environment_policy=_environment_policy,
         )
         environment.pop(command_env_name, None)
+        environment.setdefault("PYTHONIOENCODING", "utf-8")
+        environment.setdefault("PYTHONUTF8", "1")
         if is_native_windows_command:
             environment[command_env_name] = route.command
         process = subprocess.Popen(
@@ -661,13 +665,30 @@ def write_codex_sandbox_terminal_stdin(
         )
     input_error = session.send_input(normalized_chars)
     if input_error:
-        message = {
-            "terminal_not_running": "终端会话已结束，不能继续写入。",
-            "stdin_unavailable": "终端会话不支持标准输入。",
-            "stdin_write_failed": "写入终端标准输入失败。",
-        }.get(input_error, "终端输入不可用。")
+        # Distinguish process exit from true stdin pipe absence — agents often
+        # write_stdin after a non-interactive command already completed.
+        error_by_kind = {
+            "terminal_not_running": (
+                "TERMINAL_SESSION_CLOSED",
+                "终端进程已结束，无法写入 stdin。"
+                "非交互命令（powershell/cmd 单次执行）结束后会话即关闭；"
+                "请用 cli_tool 一次性执行完整命令，不要依赖 write_stdin 续跑。",
+            ),
+            "stdin_unavailable": (
+                "TERMINAL_STDIN_UNAVAILABLE",
+                "终端会话不支持标准输入（stdin 管道不可用）。",
+            ),
+            "stdin_write_failed": (
+                "TERMINAL_STDIN_WRITE_FAILED",
+                "写入终端标准输入失败（管道已关闭或进程退出）。",
+            ),
+        }
+        code, message = error_by_kind.get(
+            input_error,
+            ("TERMINAL_STDIN_UNAVAILABLE", "终端输入不可用。"),
+        )
         payload = session.snapshot(max_output_chars=max_output_chars)
-        payload.update(_terminal_error_payload("TERMINAL_STDIN_UNAVAILABLE", message, session_id=session_id))
+        payload.update(_terminal_error_payload(code, message, session_id=session_id))
         return payload
     return session.wait_for_update(
         yield_time_ms=yield_time_ms,
@@ -752,13 +773,15 @@ def execute_codex_sandbox_command(
     process: subprocess.Popen[str] | None = None
     sandbox_temp: Path | None = None
     try:
-        encoding = locale.getpreferredencoding(False) or "utf-8"
+        encoding = "utf-8"
         environment, sandbox_temp = _sandbox_process_environment(
             workdir,
             command_hash,
             environment_policy=_environment_policy,
         )
         environment.pop(command_env_name, None)
+        environment.setdefault("PYTHONIOENCODING", "utf-8")
+        environment.setdefault("PYTHONUTF8", "1")
         if is_native_windows_command:
             environment[command_env_name] = route.command
         process = subprocess.Popen(

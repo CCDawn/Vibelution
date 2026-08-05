@@ -215,7 +215,7 @@ class TestShellCommandClassifier:
         assert not shell_tools.is_shell_execution_failure("ok lines\n1 file matched")
 
     def test_shell_failure_class_blocks_followup_powershell_variants(self):
-        """Flash thrash pattern: different PS-flavored commands after cmd dialect mismatch."""
+        """Flash thrash pattern: bare PS under cmd dialect mismatch still shares a class."""
         shell_tools.reset_shell_failure_cooldown()
         first = "Get-Content log.jsonl | Select-Object -First 20"
         second = "Get-ChildItem logs | Select-Object -First 5"
@@ -226,6 +226,27 @@ class TestShellCommandClassifier:
         assert hit is True
         assert count >= 1
         assert "工具纪律" in shell_tools.shell_failure_cooldown_message(second, count)
+        shell_tools.reset_shell_failure_cooldown()
+
+    def test_shell_failure_ps_exec_does_not_block_corrected_powershell(self):
+        """Quoting/path EXEC FAILURE must not poison later Get-Item/Get-Content under powershell.exe."""
+        shell_tools.reset_shell_failure_cooldown()
+        first = r'powershell -NoProfile -Command "Get-ChildItem -Path \ $env:APPDATA\" -Directory"'
+        second = r'powershell -NoProfile -Command "Get-Item $env:APPDATA"'
+        third = r'powershell -NoProfile -Command "Get-Content -Path foo.yaml -Tail 5"'
+        failure = (
+            "[EXEC FAILURE | Exit Code: 1]\n"
+            "[STDERR]\nGet-ChildItem : 路径中有非法字符。\n"
+        )
+        cls = shell_tools.classify_shell_failure_class(first, failure)
+        assert cls.startswith("exact:"), cls
+        assert shell_tools.record_shell_failure(first, failure) >= 1
+        assert shell_tools.shell_failure_cooldown_hit(second) == (False, 0)
+        assert shell_tools.shell_failure_cooldown_hit(third) == (False, 0)
+        # Identical broken command still blocked.
+        hit, count = shell_tools.shell_failure_cooldown_hit(first)
+        assert hit is True
+        assert count >= 1
         shell_tools.reset_shell_failure_cooldown()
 
     def test_windows_command_is_blocked_on_unix(self, monkeypatch):

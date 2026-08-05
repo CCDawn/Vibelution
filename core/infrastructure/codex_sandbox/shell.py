@@ -151,6 +151,46 @@ def _direct_executable_argv(command: str) -> list[str]:
     return tokens
 
 
+def _strip_matching_outer_quotes(token: str) -> str:
+    text = str(token or "")
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        return text[1:-1]
+    return text
+
+
+def _unwrap_cmd_c_payload(command: str) -> str:
+    """Strip a single outer ``cmd /c ...`` wrapper so nested PowerShell is not re-wrapped.
+
+    Models often emit ``cmd /c "powershell -NoProfile -Command \\"...\\""``. Feeding
+    that whole string back into another ``cmd /c`` shreds inner quotes (seen as
+    ``\\ $env:APPDATA\\"`` in failures). Prefer the inner payload when present.
+
+    Uses string scanning rather than Windows ``shlex`` — nested escaped quotes are
+    not CRT-split reliably under ``posix=False``.
+    """
+    import re
+
+    text = str(command or "").strip()
+    if not text:
+        return ""
+    match = re.match(
+        r'(?is)^\s*(?:"|\')?cmd(?:\.exe)?(?:"|\')?'
+        r'(?:\s+(?:/[dDsS]|/[vV]:\w+))*'
+        r'\s+/[cC]\s+'
+        r'(?:call\s+)?'
+        r'(.+?)\s*$',
+        text,
+    )
+    if not match:
+        return ""
+    rest = match.group(1).strip()
+    if len(rest) >= 2 and rest[0] == rest[-1] and rest[0] in {'"', "'"}:
+        rest = rest[1:-1]
+    # Unescape one layer of cmd-style quote escaping.
+    rest = rest.replace('\\"', '"').replace("\\'", "'")
+    return rest.strip()
+
+
 def _explicit_powershell_argv(
     command: str,
     *,
@@ -165,40 +205,42 @@ def _explicit_powershell_argv(
     security checks.
     """
 
-    try:
-        tokens = shlex.split(command, posix=False)
-    except ValueError:
-        return []
-    normalized = [
-        token[1:-1]
-        if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}
-        else token
-        for token in tokens
-    ]
-    if not normalized:
-        return []
-    executable = Path(normalized[0]).name.lower()
-    if executable not in {"powershell", "powershell.exe"}:
-        return []
-    command_index = next(
-        (
-            index
-            for index, value in enumerate(normalized[1:], start=1)
-            if value.lower() in {"-command", "-c"}
-        ),
-        -1,
-    )
-    if command_index < 0 or command_index >= len(normalized) - 1:
-        return []
-    command_payload = " ".join(normalized[command_index + 1 :]).strip()
-    if not command_payload:
-        return []
-    return [
-        powershell_executable_fn(),
-        *normalized[1:command_index],
-        normalized[command_index],
-        command_payload,
-    ]
+    candidates = [command]
+    unwrapped = _unwrap_cmd_c_payload(command)
+    if unwrapped and unwrapped != command:
+        candidates.insert(0, unwrapped)
+
+    for candidate in candidates:
+        try:
+            tokens = shlex.split(candidate, posix=False)
+        except ValueError:
+            continue
+        normalized = [_strip_matching_outer_quotes(token) for token in tokens]
+        if not normalized:
+            continue
+        executable = Path(normalized[0]).name.lower()
+        if executable not in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+            continue
+        command_index = next(
+            (
+                index
+                for index, value in enumerate(normalized[1:], start=1)
+                if value.lower() in {"-command", "-c"}
+            ),
+            -1,
+        )
+        if command_index < 0 or command_index >= len(normalized) - 1:
+            continue
+        command_payload = " ".join(normalized[command_index + 1 :]).strip()
+        if not command_payload:
+            continue
+        return [
+            powershell_executable_fn(),
+            *normalized[1:command_index],
+            normalized[command_index],
+            command_payload,
+        ]
+    return []
 
 
 def _split_unquoted_and_chain(command: str) -> list[str]:

@@ -530,9 +530,10 @@ def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
             [
                 "=== Shell 方言（Windows 宿主，与运行时路由一致）===",
                 "1. 默认普通命令 → `cmd /c`（不是 bash，也不是默认 PowerShell）。",
-                "2. PowerShell cmdlet/语法（`Get-*`、`Select-Object`、`$var`、`$env:`、`[Type]::`、`;` 多语句）→ powershell。",
-                "3. Unix 管道片段（`| head`、`grep -n`、`xargs`、`/dev/null`）→ 拦截；需要 bash 时显式 `bash -c \"...\"`。",
-                "4. 本轮选定一种写法后不要再探路；同类失败 1 次后改 `code_symbol_tool`/`grep_search_tool`。",
+                "2. PowerShell cmdlet/语法（`Get-*`、`Select-Object`、`$var`、`$env:`、`[Type]::`、`;` 多语句）→ 直接 `powershell -NoProfile -Command \"...\"`，**禁止** `cmd /c \"powershell ...\"` 双层包装（内层引号会被 cmd 拆碎）。",
+                "3. 不要用 `findstr` 搜 UTF-8 无 BOM 配置文件（系统代码页 GBK 会漏匹配）；文件内容搜索用 `grep_search_tool` / `rg -n`。",
+                "4. Unix 管道片段（`| head`、`grep -n`、`xargs`、`/dev/null`）→ 拦截；需要 bash 时显式 `bash -c \"...\"`。",
+                "5. 本轮选定一种写法后不要再探路；**cmd 方言下跑裸 PowerShell** 失败 1 次后改 `code_symbol_tool`/`grep_search_tool`。PowerShell 路径/引号 EXEC 失败只拦截同一条命令，改写后的 Get-Item/Get-Content 可继续。",
                 "推荐：`rg -n \"pattern\" path`（无管道）；读小段用完整 PowerShell Get-Content。",
             ]
         )
@@ -584,7 +585,13 @@ def is_shell_execution_failure(result_text: str) -> bool:
 
 
 def classify_shell_failure_class(command: str, result_text: str = "") -> str:
-    """Classify shell failure into an exact-or-class cooldown key."""
+    """Classify shell failure into an exact-or-class cooldown key.
+
+    Keep dialect classes narrow: only true cmd↔PowerShell thrash (e.g. Select-Object
+    not recognized under cmd) shares a class. Runtime PowerShell EXEC FAILURE
+    (broken quotes, missing path) stays exact so a corrected Get-Item/Get-Content
+    is not blocked by an earlier Get-ChildItem quoting mistake.
+    """
 
     text = str(result_text or "")
     lowered = text.lower()
@@ -597,22 +604,23 @@ def classify_shell_failure_class(command: str, result_text: str = "") -> str:
         or "$env:" in cmd
         or re.search(r"(^|[\s;])\$[A-Za-z_]", cmd)
     )
-
-    if "shell_route_blocked" in lowered or text.startswith("[跨平台警告]"):
-        return "class:route_blocked"
-    if (
+    dialect_mismatch = (
         "不是内部或外部命令" in text
         or "is not recognized as an internal or external command" in lowered
         or "is not recognized as a name of a cmdlet" in lowered
-    ):
+        or "is not recognized as the name of a cmdlet" in lowered
+    )
+
+    if "shell_route_blocked" in lowered or text.startswith("[跨平台警告]"):
+        return "class:route_blocked"
+    if dialect_mismatch:
         if looks_ps:
             return "class:windows_ps_syntax_mismatch"
         if re.search(r"python(?:\.exe)?|\\\\\.venv\\\\|/\.venv/", cmd, re.I):
             return "class:windows_python_path_mismatch"
         return "class:windows_command_not_found"
     if text.startswith("[EXEC FAILURE") or text.startswith("[WARNING | Exit Code"):
-        if looks_ps:
-            return "class:windows_ps_syntax_mismatch"
+        # Non-dialect runtime failures: exact key only (do not poison all PowerShell).
         return f"exact:{exact}" if exact else "class:exec_nonzero"
     if exact:
         return f"exact:{exact}"
@@ -630,14 +638,21 @@ def _shell_cooldown_keys_for_command(command: str, *, result_text: str = "") -> 
         cls = classify_shell_failure_class(command, result_text)
         if cls and cls not in keys:
             keys.append(cls)
-    else:
-        # Pre-flight: if command already looks PowerShell-heavy, honor prior PS-class failures.
-        if _is_powershell_command(command) or re.search(
-            r"\b(Select-Object|Get-ChildItem|Get-Content|Where-Object)\b",
-            str(command or ""),
+        return keys
+    # Pre-flight: only block pure dialect thrash (bare PS piped under cmd).
+    # Do NOT attach windows_ps_syntax_mismatch to every powershell -Command line —
+    # that blocked corrected Get-Item/Get-Content after one quoting EXEC FAILURE.
+    cmd = str(command or "")
+    bare_ps_pipeline = bool(
+        re.search(
+            r"\b(Select-Object|Where-Object|ForEach-Object)\b",
+            cmd,
             re.I,
-        ):
-            keys.append("class:windows_ps_syntax_mismatch")
+        )
+        and not re.search(r"(?i)^\s*(powershell|pwsh)(?:\.exe)?\b", cmd)
+    )
+    if bare_ps_pipeline:
+        keys.append("class:windows_ps_syntax_mismatch")
     return keys
 
 
