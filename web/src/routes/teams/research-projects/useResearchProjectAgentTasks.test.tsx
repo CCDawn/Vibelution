@@ -8,7 +8,11 @@ import {
 import type { TeamResearchProjectAgentTask } from "../../../api/types";
 import hookSource from "./useResearchProjectAgentTasks.ts?raw";
 import launcherSource from "../../TeamResearchStageLauncherPanel.tsx?raw";
-import routeSource from "../../TeamsRoute.tsx?raw";
+import routeShellSource from "../TeamsRouteWorkbench.tsx?raw";
+import routeModelSource from "../useTeamsWorkbenchModel.tsx?raw";
+import launchHandlersSource from "../createResearchStageLaunchHandlers.ts?raw";
+import selectedTeamDetailSource from "../useTeamsSelectedTeamDetail.ts?raw";
+const routeSource = `${routeShellSource}\n${routeModelSource}\n${launchHandlersSource}\n${selectedTeamDetailSource}`;
 import standaloneSource from "../../TeamResearchStageStandalonePagePanel.tsx?raw";
 
 function task(
@@ -81,17 +85,22 @@ describe("useResearchProjectAgentTasks", () => {
   });
 
   it("launches experiment and iteration buttons into flat Agent task sessions", () => {
-    expect(routeSource).toContain("await startResearchStageRoundMutation.mutateAsync");
-    expect(routeSource).toContain('stageType === "experiment" ? "experiment_design" : "iteration_decision"');
-    expect(routeSource).toContain("await researchStageProjectAgentTasks.startTask");
-    expect(routeSource).toContain("navigate(agentTask.chatRoute)");
-    expect(standaloneSource).toContain("stagePhase?.readiness?.ready === false");
+    // R2-i: launch path lives in createResearchStageLaunchHandlers.
+    expect(launchHandlersSource).toContain("await startResearchStageRoundMutation.mutateAsync");
+    expect(launchHandlersSource).toContain('stageType === "experiment" ? "experiment_design" : "iteration_decision"');
+    expect(launchHandlersSource).toContain("await researchStageProjectAgentTasks.startTask");
+    expect(launchHandlersSource).toContain("navigate(agentTask.chatRoute)");
+    // Standalone page is a thin ExperimentStageComposer adapter (no inline stagePhase gate).
+    expect(standaloneSource).toContain("ExperimentStageComposer");
   });
 
   it("defers project task queries on source-collection surfaces", () => {
-    expect(routeSource).toMatch(
-      /enabled:\s*challengeCupResearchTeamSelected\s*&&\s*!sourceCollectionStandalone\s*&&\s*researchWorkspaceView !== "source_collection"\s*&&\s*researchWorkspaceView !== "knowledge_collection"/,
-    );
+    // R2-e: enable gate lives with selected-team detail owner.
+    expect(selectedTeamDetailSource).toContain("useResearchProjectAgentTasks({");
+    expect(selectedTeamDetailSource).toContain("challengeCupResearchTeamSelected");
+    expect(selectedTeamDetailSource).toContain("!sourceCollectionStandalone");
+    expect(selectedTeamDetailSource).toContain('researchWorkspaceView !== "source_collection"');
+    expect(selectedTeamDetailSource).toContain('researchWorkspaceView !== "knowledge_collection"');
   });
 
   it("refreshes stage and experiment projections when an Agent task settles", () => {

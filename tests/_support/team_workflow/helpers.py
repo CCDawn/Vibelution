@@ -22,8 +22,9 @@ from core.web.services import (
 )
 from tools import team_knowledge_tools
 
-pytestmark = pytest.mark.serial
-
+# Domain case modules intentionally omit module-level ``serial``.
+# Cases isolate via tmp_path + PROJECT_ROOT monkeypatch and are safe for
+# pytest-xdist ``--dist loadfile`` across the five domain pack files.
 
 
 class _FakeLocalResearchMessage:
@@ -94,6 +95,35 @@ def _capture_workflow_events(monkeypatch):
         fake_record_runtime_scene_event,
     )
     return events
+
+def _seed_source_collection_raw_records(
+    run_id: str,
+    *,
+    count: int = 1,
+    title_prefix: str = "Raw source",
+    doi_prefix: str = "10.0000/raw-source",
+) -> list[dict]:
+    """Seed DataProcessing raw records so extraction stage advance preflight can open.
+
+    Product gate ``assert_source_collection_stage_advance_ready`` requires
+    ``record_count > 0`` before ``stageId=extraction`` session tasks start.
+    """
+    records: list[dict] = []
+    for index in range(max(1, int(count))):
+        records.append(
+            data_processing_service.add_record(
+                run_id,
+                {
+                    "sourceType": "paper",
+                    "sourceRef": f"https://doi.org/{doi_prefix}-{index}",
+                    "title": f"{title_prefix} {index}",
+                    "summary": "Seeded raw record for source-collection extraction stage tests.",
+                    "metadata": {"doi": f"{doi_prefix}-{index}"},
+                },
+            )
+        )
+    return records
+
 
 def _append_stage_task_tool_trace(project_root: Path, task: dict, *, complete: bool = True, turn_id: str = "") -> None:
     session_id = task["sessionId"]

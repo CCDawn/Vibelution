@@ -35,18 +35,47 @@ tests/
 | `test_service_pack_path_literals.py` | service pack 路径字面量回归（防 extract 吃掉 `.jsonl`/`.json`） | structure |
 | 其它 `test_*.py` | 按被测模块命名，优先靠 `tests/test_matrix.yaml` 和文件名定位 | module-specific |
 
-`test_team_workflow_orchestration_service.py` 仍是聚合入口（selectors/文档可继续指向它）。用例实现在 `tests/_support/team_workflow/`：
+Team workflow 行为用例实现在 `tests/_support/team_workflow/`，由 **五个 domain pack** 收集（便于 `pytest-xdist --dist loadfile` 按文件并行）：
 
-| 模块 | 域 |
+| Domain pack（`tests/`） | 实现 |
 |------|-----|
-| `cases_structure.py` | 结构 / re-export / 角色注册 |
-| `cases_source_collection.py` | source collection / stage |
-| `cases_experiment.py` | experiment / smoke / full-run |
-| `cases_research_knowledge.py` | research graph / candidates / steward |
-| `cases_remainder.py` | 其余 |
-| `helpers.py` | 共享 fakes |
+| `test_team_workflow_structure_cases.py` | `cases_structure.py` |
+| `test_team_workflow_source_collection_cases.py` | `cases_source_collection.py` |
+| `test_team_workflow_experiment_cases.py` | `cases_experiment.py` |
+| `test_team_workflow_research_knowledge_cases.py` | `cases_research_knowledge.py` |
+| `test_team_workflow_remainder_cases.py` | `cases_remainder.py` |
+| `helpers.py` | 共享 fakes（无模块级 `serial`） |
 
-单域快速跑：`py -3 -m pytest tests/_support/team_workflow/cases_source_collection.py -q`
+`test_team_workflow_orchestration_service.py` 仍是 **兼容聚合入口**（单独指定路径时 re-export 全部域）。全量 `pytest tests/` 或与 domain pack 同跑时，`conftest.pytest_ignore_collect` 会跳过聚合，避免双重收集。
+
+配套结构门（优先 fail-fast，不跑全量 SC 用例）：
+
+| 文件 | 作用 |
+|------|------|
+| `test_team_workflow_facade_contract.py` | routes 包拆分 + facade / experiment_api re-export |
+| `test_team_workflow_structure_packs.py` | pack 再导出契约 |
+
+单域快速跑：
+
+```bash
+py -3 -m pytest tests/test_team_workflow_source_collection_cases.py -q
+# 或直接打 support（文件名非 test_*.py，需显式路径）：
+py -3 -m pytest tests/_support/team_workflow/cases_source_collection.py -q
+```
+
+五域并行（PowerShell 请显式列出文件，勿依赖未展开的 `*_cases.py` glob）：
+
+```bash
+py -3 -m pytest ^
+  tests/test_team_workflow_structure_cases.py ^
+  tests/test_team_workflow_source_collection_cases.py ^
+  tests/test_team_workflow_experiment_cases.py ^
+  tests/test_team_workflow_research_knowledge_cases.py ^
+  tests/test_team_workflow_remainder_cases.py ^
+  -n 4 --dist loadfile -q
+```
+
+HTTP routes 现位于 `core/web/routes/team_workflows/` 包（不再是单文件 `team_workflows.py`）。
 
 ---
 
@@ -155,6 +184,8 @@ python tests/test_runner.py --hybrid --workers 4
 - 需要完整验证时优先使用 `--hybrid`：先并行运行 `not serial`，再串行运行 `serial`，避免把并行子集误判为全量通过。
 - 不把 `-n auto` 作为默认；本地开发建议先用 `--workers 2` 或 `--workers 4`，再根据耗时和稳定性调整。
 - 广义全量回归仍应保留串行兜底；并行适合日常快速反馈和已标注边界的稳定子集。
+- **Teams / team_workflow / structure packs** 未标 `serial`，应走 `local-parallel` 或 `test_runner.py --parallel`；不要误当成必须串行的 Launcher 层。
+- **前端 Vitest** 默认 `pool=forks` + `fileParallelism` + `maxWorkers=50%`（见 `web/vite.config.ts`）。全量：`npm --prefix web run test`；也可 `npm --prefix web run test:parallel`。
 
 ### 3.5 使用影响面测试选择器
 

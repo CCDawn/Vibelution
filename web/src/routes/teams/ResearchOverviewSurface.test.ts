@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 
 const surfaceSource = readFileSync(new URL("./ResearchOverviewSurface.tsx", import.meta.url), "utf8");
 const primarySource = readFileSync(new URL("./ResearchPrimaryActionBar.tsx", import.meta.url), "utf8");
-const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), "utf8");
+const routeSource = [
+  readFileSync(new URL("./TeamsRouteWorkbench.tsx", import.meta.url), "utf8"),
+  readFileSync(new URL("./useTeamsWorkbenchModel.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchFoundation.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8"),
+].join("\n");
 const primaryRenderersSource = readFileSync(
   new URL("./teamResearchPrimarySurfaceRenderers.tsx", import.meta.url),
   "utf8",

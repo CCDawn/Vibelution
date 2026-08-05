@@ -197,6 +197,32 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
         workflowIngestionToneBound
       } = ctx;
 
+      // Defensive no-ops: missing binders must not crash canvas completion-flow slot.
+      const stagePrimaryBinding =
+        typeof sourceCollectionStagePrimaryAgentBinding === "function"
+          ? sourceCollectionStagePrimaryAgentBinding
+          : () => null;
+      const stageReturnRoute =
+        typeof sourceCollectionStageReturnRoute === "function"
+          ? sourceCollectionStageReturnRoute
+          : () => "";
+      const openStageAgentChat =
+        typeof openSourceCollectionStageAgentChat === "function"
+          ? openSourceCollectionStageAgentChat
+          : () => {};
+      const stepClassName =
+        typeof sourceCollectionStepClassName === "function"
+          ? sourceCollectionStepClassName
+          : () => "";
+      const actionDisabledTitle =
+        typeof sourceCollectionActionDisabledTitle === "function"
+          ? sourceCollectionActionDisabledTitle
+          : () => undefined;
+      const ingestionTone =
+        typeof workflowIngestionToneBound === "function"
+          ? workflowIngestionToneBound
+          : () => "";
+
       return (
         <TeamKnowledgeCollectionCompletionFlowPanel
           lang={lang}
@@ -204,18 +230,22 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
           researchCanvasReadOnly={researchCanvasReadOnly}
           selectedTeamKnowledgeCollectionWorkRun={selectedTeamKnowledgeCollectionWorkRun}
           sourceCollectionCompletionFlow={sourceCollectionCompletionFlow}
-          sourceCollectionCompletionFlowNodes={sourceCollectionCompletionFlowNodes}
-          sourceCollectionStageModules={sourceCollectionStageModules}
-          workflowIngestionTone={workflowIngestionToneBound}
+          sourceCollectionCompletionFlowNodes={Array.isArray(sourceCollectionCompletionFlowNodes) ? sourceCollectionCompletionFlowNodes : []}
+          sourceCollectionStageModules={Array.isArray(sourceCollectionStageModules) ? sourceCollectionStageModules : []}
+          workflowIngestionTone={ingestionTone}
           parseSourceCollectionStageModuleId={parseSourceCollectionStageModuleId}
-          sourceCollectionStagePrimaryAgentBinding={sourceCollectionStagePrimaryAgentBinding}
-          sourceCollectionStageReturnRoute={sourceCollectionStageReturnRoute}
-          openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
-          sourceCollectionStepClassName={sourceCollectionStepClassName}
-          runKnowledgeCollectionCompletionAction={runKnowledgeCollectionCompletionAction}
-          sourceCollectionCompletionActionDisabled={sourceCollectionCompletionActionDisabled}
-          selectedTeamKnowledgeCollectionIngestPending={selectedTeamKnowledgeCollectionIngestPending}
-          sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
+          sourceCollectionStagePrimaryAgentBinding={stagePrimaryBinding}
+          sourceCollectionStageReturnRoute={stageReturnRoute}
+          openSourceCollectionStageAgentChat={openStageAgentChat}
+          sourceCollectionStepClassName={stepClassName}
+          runKnowledgeCollectionCompletionAction={
+            typeof runKnowledgeCollectionCompletionAction === "function"
+              ? runKnowledgeCollectionCompletionAction
+              : () => {}
+          }
+          sourceCollectionCompletionActionDisabled={Boolean(sourceCollectionCompletionActionDisabled)}
+          selectedTeamKnowledgeCollectionIngestPending={Boolean(selectedTeamKnowledgeCollectionIngestPending)}
+          sourceCollectionActionDisabledTitle={actionDisabledTitle}
           sourceCollectionCompletionActionReadiness={sourceCollectionCompletionActionReadiness}
         />
       );

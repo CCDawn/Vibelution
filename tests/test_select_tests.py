@@ -26,19 +26,22 @@ def test_matrix_references_existing_test_files_and_directories():
     matrix = select_tests.load_matrix()
     missing_paths: list[str] = []
     missing_command_tests: list[str] = []
-    planned_future_globs = {
-        "core/web/services/session/**",
-        "core/web/services/team_workflow/**",
-    }
-
     for rule in matrix["rules"]:
         for pattern in rule.get("paths", []):
             normalized = select_tests.normalize_path(str(pattern))
             if "*" in normalized:
                 matches = list(PROJECT_ROOT.glob(normalized))
-                if not matches and not normalized.startswith(".docs/") and normalized not in planned_future_globs:
+                if not matches and not normalized.startswith(".docs/"):
                     missing_paths.append(f"{rule['id']}:{normalized}")
             elif normalized.startswith("tests/") and not (PROJECT_ROOT / normalized).exists():
+                missing_paths.append(f"{rule['id']}:{normalized}")
+            elif (
+                normalized.startswith("core/")
+                or normalized.startswith("web/")
+                or normalized.startswith("scripts/")
+                or normalized.startswith("config/")
+            ) and "*" not in normalized and not (PROJECT_ROOT / normalized).exists():
+                # Non-glob source paths must still exist after package splits.
                 missing_paths.append(f"{rule['id']}:{normalized}")
 
         for command in rule.get("commands", []):
@@ -49,6 +52,62 @@ def test_matrix_references_existing_test_files_and_directories():
 
     assert missing_paths == []
     assert missing_command_tests == []
+
+
+def test_team_workflow_aggregate_ignored_when_collecting_tests_tree():
+    """Full-suite discovery must prefer domain packs over the aggregate re-export."""
+    aggregate = PROJECT_ROOT / "tests" / "test_team_workflow_orchestration_service.py"
+
+    class _Config:
+        args = ["tests"]
+
+    assert test_conftest.pytest_ignore_collect(collection_path=aggregate, config=_Config()) is True
+
+    class _ExplicitAggregate:
+        args = ["tests/test_team_workflow_orchestration_service.py"]
+
+    assert (
+        test_conftest.pytest_ignore_collect(
+            collection_path=aggregate, config=_ExplicitAggregate()
+        )
+        is False
+    )
+
+    class _WithDomainPack:
+        args = [
+            "tests/test_team_workflow_orchestration_service.py",
+            "tests/test_team_workflow_source_collection_cases.py",
+        ]
+
+    assert (
+        test_conftest.pytest_ignore_collect(
+            collection_path=aggregate, config=_WithDomainPack()
+        )
+        is True
+    )
+
+
+def test_team_workflow_collection_modifyitems_drops_aggregate_when_domains_present():
+    class _Item:
+        def __init__(self, nodeid: str):
+            self.nodeid = nodeid
+
+    items = [
+        _Item("tests/test_team_workflow_orchestration_service.py::test_a"),
+        _Item("tests/test_team_workflow_source_collection_cases.py::test_a"),
+        _Item("tests/test_team_workflow_structure_cases.py::test_b"),
+        _Item("tests/test_other.py::test_c"),
+    ]
+    test_conftest.drop_team_workflow_aggregate_duplicates(items)
+    assert [item.nodeid for item in items] == [
+        "tests/test_team_workflow_source_collection_cases.py::test_a",
+        "tests/test_team_workflow_structure_cases.py::test_b",
+        "tests/test_other.py::test_c",
+    ]
+
+    only_aggregate = [_Item("tests/test_team_workflow_orchestration_service.py::test_a")]
+    test_conftest.drop_team_workflow_aggregate_duplicates(only_aggregate)
+    assert len(only_aggregate) == 1
 
 
 def test_runtime_manager_isolation_hint_skips_pure_test_files(tmp_path: Path):
@@ -141,9 +200,28 @@ def test_selector_matches_teams_style_map_to_teams_validation_commands():
 
     assert result["matchedRules"][0]["id"] == "teams-knowledge"
     assert "web/src/routes/TeamsRoute.styles.ts" in result["matchedRules"][0]["matchedFiles"]
-    assert any("tests/test_team_workflow_orchestration_service.py" in command for command in result["commands"])
+    assert any("tests/test_team_workflow_facade_contract.py" in command for command in result["commands"])
+    assert any("tests/test_team_workflow_source_collection_cases.py" in command for command in result["commands"])
+    assert any("--dist loadfile" in command for command in result["commands"])
     assert any("TeamsRoute.layout.test.ts" in command for command in result["commands"])
+    assert any("src/routes/teams" in command for command in result["commands"])
     assert any("build_research_flow_site.mjs" in command for command in result["commands"])
+    assert "local-parallel" in result["validationLayers"]
+    assert "remote-distributed" in result["validationLayers"]
+
+
+def test_selector_matches_team_workflows_package_routes():
+    result = select_tests.select_tests(
+        [
+            "core/web/routes/team_workflows/source_collection.py",
+            "core/web/services/team_workflow/experiment_api/plan.py",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    assert any(rule["id"] == "teams-knowledge" for rule in result["matchedRules"])
+    assert any("tests/test_team_workflow_facade_contract.py" in command for command in result["commands"])
+    assert any("tests/test_team_workflow_structure_packs.py" in command for command in result["commands"])
 
 
 def test_selector_matches_large_file_split_extracted_paths():
@@ -160,7 +238,7 @@ def test_selector_matches_large_file_split_extracted_paths():
     rule_ids = {rule["id"] for rule in result["matchedRules"]}
     assert {"web-session-chat", "teams-knowledge", "frontend-workbench"}.issubset(rule_ids)
     assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
-    assert any("tests/test_team_workflow_orchestration_service.py" in command for command in result["commands"])
+    assert any("tests/test_team_workflow_source_collection_cases.py" in command for command in result["commands"])
     assert any(
         command == "node web/node_modules/vitest/vitest.mjs run"
         for command in result["commands"]

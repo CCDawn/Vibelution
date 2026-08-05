@@ -44,11 +44,5 @@ def test_web_search_health_endpoint_reports_token_dependency(monkeypatch):
     assert payload["stage"] == "token_fetch"
     assert payload["searchApiCalled"] is False
 
-
-def test_reset_routes_report_migration_to_launcher():
-    response = client.get("/api/reset/summary")
-
-    assert response.status_code == 410
-    payload = response.json()["detail"]
-    assert payload["code"] == "reset_migrated_to_launcher"
-    assert payload["launcherPath"] == "/launcher"
+# reset /api migration-to-launcher coverage lives in test_reset_service.py
+# (summary + preview + execute + workspace side-effect checks).

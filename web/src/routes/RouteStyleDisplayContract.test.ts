@@ -3,7 +3,7 @@ import { basename } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import chatRouteSource from "./ChatCodingRoute.tsx?raw";
+import chatRouteSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
 import chatLayoutSource from "./chat/useChatWorkbenchLayout.ts?raw";
 import gitRouteSource from "./GitRoute.tsx?raw";
 import selfEvolutionTrackSource from "./SelfEvolutionTrack.tsx?raw";

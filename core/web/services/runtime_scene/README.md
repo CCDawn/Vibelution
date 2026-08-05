@@ -36,4 +36,4 @@ Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 
 ## Related
 
-- Structure plans: `docs/plans/2026-07-21-service-optimization-phase13-runtime-scene.md`, phase14 plan
+- Historical plans: `docs/archive/plans/2026-06-07/` (phase13–19 runtime_scene notes)

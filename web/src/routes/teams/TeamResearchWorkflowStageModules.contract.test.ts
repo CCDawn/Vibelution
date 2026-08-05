@@ -1,14 +1,20 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), "utf8");
+const routeShellSource = readFileSync(new URL("./TeamsRouteWorkbench.tsx", import.meta.url), "utf8");
+const routeModelSource = readFileSync(new URL("./useTeamsWorkbenchModel.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchFoundation.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8");
+const scCompositionSource = readFileSync(new URL("./useTeamsScComposition.ts", import.meta.url), "utf8");
+const injectRenderersSource = readFileSync(new URL("./teamSourceCollectionInjectRenderers.tsx", import.meta.url), "utf8");
+const researchSurfacesSource = readFileSync(new URL("./createTeamsResearchSurfaces.ts", import.meta.url), "utf8");
+const routeSource = [routeShellSource, routeModelSource, scCompositionSource, injectRenderersSource, researchSurfacesSource].join("\n");
+
 const surfaceSource = readFileSync(new URL("./teamResearchWorkflowSurfaceRenderers.tsx", import.meta.url), "utf8");
 const modulesSource = readFileSync(new URL("./TeamResearchWorkflowStageModules.tsx", import.meta.url), "utf8");
 const routeAndSurfaceSource = `${routeSource}\n${surfaceSource}`;
 
 describe("TeamResearchWorkflowStageModules extraction contract", () => {
   it("TeamsRoute composes stage modules once via the extracted component", () => {
-    expect(routeSource).toContain("createResearchWorkflowSurfaceRenderers");
+    expect(routeSource).toMatch(/createTeamsResearchSurfaces|createTeamsWorkbenchResearchSurfaces|buildTeamsWorkbenchResearchSurfacesFromBag/);
     expect(surfaceSource).toContain('from "./TeamResearchWorkflowStageModules"');
     expect(routeAndSurfaceSource).toContain("function renderResearchWorkflowModules(");
     expect(surfaceSource.match(/<TeamResearchWorkflowStageModules[\s\S]*?\/>/g)?.length).toBe(1);

@@ -2,8 +2,8 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { SourceCollectionDraft } from "./teams/source-collection/presentationModel";
-import type { SourceCollectionPhaseCloseGate } from "./teams/source-collection/stageProjection";
+import type { SourceCollectionDraft } from "../presentationModel";
+import type { SourceCollectionPhaseCloseGate } from "../stageProjection";
 import { TeamSourceCollectionPhaseCloseGatePanel } from "./TeamSourceCollectionPhaseCloseGatePanel";
 import { TeamSourceCollectionSearchBriefPanel } from "./TeamSourceCollectionSearchBriefPanel";
 import panelSource from "./TeamSourceCollectionSearchBriefPanel.tsx?raw";

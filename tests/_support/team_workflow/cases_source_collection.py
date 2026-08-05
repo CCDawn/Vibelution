@@ -996,6 +996,24 @@ def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor
             "promptCachePolicy": {"requirement": "disabled"},
         },
     )
+    run_id = run_response["run"]["runId"]
+    # Ingestion hard gate requires at least one ready source candidate for the run.
+    team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Approved predictive coding source for ingestion routing",
+            "sourceUrl": "https://doi.org/10.0000/ingestion-routing",
+            "sourceKind": "paper",
+            "summary": "Seed candidate so ingestion stage can open under product preflight.",
+            "allowedForAnalysis": True,
+            "qualityStatus": "approved",
+            "metadata": {
+                "sourceCollectionRunId": run_id,
+                "doi": "10.0000/ingestion-routing",
+            },
+            "createdByAgent": discovery["agentId"],
+        },
+    )
 
     def fake_submit_session_message(session_id, content, **kwargs):
         submitted.append({"sessionId": session_id, "content": content, "kwargs": kwargs})
@@ -1010,7 +1028,7 @@ def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor
 
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
-        run_response["run"]["runId"],
+        run_id,
         {
             "stageId": "ingestion",
             "agentId": ingestor["agentId"],
@@ -2048,6 +2066,7 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
         },
     )
     run_id = stage_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     monkeypatch.setattr(
         session_service,
         "submit_session_message",
@@ -2850,6 +2869,7 @@ def test_research_stage_status_reconciles_terminal_stage_task_snapshot_as_interr
         },
     )
     run_id = stage_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     monkeypatch.setattr(
         session_service,
         "submit_session_message",
@@ -2914,6 +2934,7 @@ def test_research_stage_status_reconciles_blocked_stage_task_turn_result(tmp_pat
         },
     )
     run_id = stage_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     monkeypatch.setattr(
         session_service,
         "submit_session_message",
@@ -3071,6 +3092,7 @@ def test_source_collection_context_reports_actual_candidate_page(tmp_path, monke
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     for index in range(3):
         team_workflow_orchestration_service.register_candidate_source(
             team["teamId"],
@@ -3135,6 +3157,7 @@ def test_source_collection_context_compact_candidate_paging_stays_model_visible(
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     candidate_ids = []
     for index in range(15):
         candidate = team_workflow_orchestration_service.register_candidate_source(
@@ -3209,6 +3232,7 @@ def test_source_collection_context_retry_missing_returns_only_uncovered_candidat
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     candidates = [
         team_workflow_orchestration_service.register_candidate_source(
             team["teamId"],
@@ -3317,6 +3341,7 @@ def test_source_collection_context_evidence_mode_returns_bounded_summary_and_sou
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     summary = "Predictive coding evidence retained from the governed source-collection record. " * 8
     candidate = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
@@ -3439,6 +3464,7 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     candidates = [
         team_workflow_orchestration_service.register_candidate_source(
             team["teamId"],
@@ -3671,6 +3697,7 @@ def test_source_collection_extraction_resume_after_interrupted_reading_prioritiz
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     for index in range(8):
         team_workflow_orchestration_service.register_candidate_source(
             team["teamId"],
@@ -3767,6 +3794,7 @@ def test_source_collection_context_minimal_strips_stale_candidate_artifacts(tmp_
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     for index in range(5):
         team_workflow_orchestration_service.register_candidate_source(
             team["teamId"],
@@ -3838,6 +3866,7 @@ def test_source_quality_stage_writeback_materializes_candidate_extraction_decisi
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     approved = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
         {
@@ -4035,6 +4064,7 @@ def test_source_collection_ingestion_stage_writeback_uses_scoped_team_base_when_
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     source = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
         {
@@ -4159,6 +4189,7 @@ def test_content_extraction_writeback_requires_candidate_coverage_and_materializ
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     candidates = [
         team_workflow_orchestration_service.register_candidate_source(
             team["teamId"],
@@ -4266,6 +4297,7 @@ def test_content_extraction_writeback_materializes_candidate_evidence_ledger(tmp
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     candidate = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
         {
@@ -4372,6 +4404,7 @@ def test_source_collection_context_reconciles_checklist_updates_after_writeback(
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     candidate = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
         {
@@ -4458,6 +4491,7 @@ def test_source_collection_stage_turn_completion_reconciles_post_writeback_check
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     candidate = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
         {
@@ -5469,6 +5503,7 @@ def test_source_quality_writeback_downgrades_completed_when_candidate_coverage_i
         },
     )
     run_id = run_response["run"]["runId"]
+    _seed_source_collection_raw_records(run_id)
     candidates = [
         team_workflow_orchestration_service.register_candidate_source(
             team["teamId"],
@@ -7517,16 +7552,52 @@ def test_load_source_collection_work_run_summary_marks_missing_data_run_stale(tm
     assert summary["latest"]["staleReason"] == "missing_data_processing_run"
     assert "missing_data_processing_run" in summary["latest"]["staleReasons"]
 
-def test_source_collection_summary_cleanses_active_work_run_invalid_storage_path(tmp_path, monkeypatch):
-    _use_tmp_project_root(tmp_path, monkeypatch)
-    _use_fake_local_research_config(monkeypatch)
-    team = team_service.create_team(name="挑战杯科研团队")
-    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+def _seed_invalid_source_collection_active_work_run(
+    *,
+    tmp_path,
+    monkeypatch,
+    team_id: str,
+    run_id: str,
+    path_leaf: str,
+) -> WorkRunStore:
+    """Isolate WorkRunStore under tmp and seed an active snapshot with a bad storagePath.
+
+    Product code filters non-active / stale snapshots to ``{}``; the store must stay
+    process-local so xdist loadfile neighbors cannot clobber activeRunId.
+    """
+    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs" / path_leaf)
     monkeypatch.setattr(
         team_workflow_orchestration_service,
         "_source_collection_work_run_store",
         lambda: source_work_runs,
     )
+    invalid_path = tmp_path / "workspace" / path_leaf
+    invalid_path.mkdir(parents=True, exist_ok=True)
+    source_work_runs.persist_snapshot(
+        team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+        {
+            "runId": run_id,
+            "runKind": team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+            "status": "running",
+            "currentPhase": "running",
+            "teamId": team_id,
+            "storagePath": str(invalid_path),
+        },
+        active_run_id=run_id,
+    )
+    seeded = source_work_runs.load_active_snapshot(
+        team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND
+    )
+    assert isinstance(seeded, dict)
+    assert seeded.get("runId") == run_id
+    assert seeded.get("teamId") == team_id
+    return source_work_runs
+
+
+def test_source_collection_summary_cleanses_active_work_run_invalid_storage_path(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -7537,36 +7608,26 @@ def test_source_collection_summary_cleanses_active_work_run_invalid_storage_path
         },
     )
     run_id = run_response["run"]["runId"]
-    invalid_path = tmp_path / "workspace" / "legacy-source-collection-summary"
-    invalid_path.mkdir(parents=True, exist_ok=True)
-    source_work_runs.persist_snapshot(
-        team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
-        {
-            "runId": run_id,
-            "runKind": team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
-            "status": "running",
-            "teamId": team["teamId"],
-            "storagePath": str(invalid_path),
-        },
-        active_run_id=run_id,
+    _seed_invalid_source_collection_active_work_run(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        team_id=team["teamId"],
+        run_id=run_id,
+        path_leaf="legacy-source-collection-summary",
     )
 
     payload = team_workflow_orchestration_service.get_source_collection_summary(team["teamId"], run_id=run_id)
+    active = payload.get("activeWorkRun")
 
-    assert payload["activeWorkRun"]["runId"] == run_id
-    assert "storagePath" not in payload["activeWorkRun"]
-    assert "pathValidationError" in payload["activeWorkRun"]
+    assert isinstance(active, dict) and active, "activeWorkRun should remain visible after path cleanse"
+    assert active.get("runId") == run_id
+    assert "storagePath" not in active
+    assert "pathValidationError" in active
 
 def test_source_collection_run_context_bundle_cleanses_invalid_active_storage_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
-    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
-    monkeypatch.setattr(
-        team_workflow_orchestration_service,
-        "_source_collection_work_run_store",
-        lambda: source_work_runs,
-    )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
@@ -7577,25 +7638,24 @@ def test_source_collection_run_context_bundle_cleanses_invalid_active_storage_pa
         },
     )
     run_id = run_response["run"]["runId"]
-    invalid_path = tmp_path / "workspace" / "legacy-source-collection-context"
-    invalid_path.mkdir(parents=True, exist_ok=True)
-    source_work_runs.persist_snapshot(
-        team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
-        {
-            "runId": run_id,
-            "runKind": team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
-            "status": "running",
-            "teamId": team["teamId"],
-            "storagePath": str(invalid_path),
-        },
-        active_run_id=run_id,
+    _seed_invalid_source_collection_active_work_run(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        team_id=team["teamId"],
+        run_id=run_id,
+        path_leaf="legacy-source-collection-context",
     )
 
     bundle = team_workflow_orchestration_service._source_collection_run_context_bundle(team["teamId"], run_id)
+    active = bundle.get("activeWorkRun")
 
-    assert bundle["activeWorkRun"]["runId"] == run_id
-    assert "storagePath" not in bundle["activeWorkRun"]
-    assert "pathValidationError" in bundle["activeWorkRun"]
+    assert isinstance(active, dict) and active, (
+        "activeWorkRun must stay non-empty when snapshot is running for this team/run; "
+        "empty {} used to raise KeyError('runId') under parallel suites"
+    )
+    assert active.get("runId") == run_id
+    assert "storagePath" not in active
+    assert "pathValidationError" in active
 
 
 def test_challenge_stage_task_uses_configured_agent_model_without_official_evidence_qualification(

@@ -57,4 +57,4 @@ Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 ## Related
 
 - Routes: `core/web/routes/agents.py`
-- Structure plan: `docs/plans/2026-07-20-backend-structure-p0.md`
+- Historical plans: `docs/archive/plans/2026-06-07/`

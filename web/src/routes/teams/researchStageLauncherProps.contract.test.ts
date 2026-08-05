@@ -6,7 +6,9 @@ import {
   type TeamResearchStageLauncherPanelProps,
 } from "./researchStageLauncherProps";
 
-const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), "utf8");
+const routeShellSource = readFileSync(new URL("./TeamsRouteWorkbench.tsx", import.meta.url), "utf8");
+const routeModelSource = readFileSync(new URL("./useTeamsWorkbenchModel.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchFoundation.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8");
+const routeSource = `${routeShellSource}\n${routeModelSource}`;
 const primarySurfaceSource = readFileSync(
   new URL("./teamResearchPrimarySurfaceRenderers.tsx", import.meta.url),
   "utf8",

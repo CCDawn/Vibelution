@@ -1,0 +1,11 @@
+"""Team workflow routes package (Clarity P5/B1)."""
+from __future__ import annotations
+from ._router import router
+from . import orchestration as _orchestration  # noqa: F401
+from . import research_projects as _research_projects  # noqa: F401
+from . import source_collection as _source_collection  # noqa: F401
+from . import stage_rounds as _stage_rounds  # noqa: F401
+from . import experiment as _experiment  # noqa: F401
+from . import knowledge as _knowledge  # noqa: F401
+from . import research_ops as _research_ops  # noqa: F401
+__all__ = ["router"]

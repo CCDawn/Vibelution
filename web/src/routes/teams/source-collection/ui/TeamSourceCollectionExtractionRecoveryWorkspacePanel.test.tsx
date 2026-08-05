@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { TeamSourceCollectionExtractionRecoveryWorkspacePanel } from "./TeamSourceCollectionExtractionRecoveryWorkspacePanel";
-import type { SourceCollectionStageCardProjection } from "./teams/source-collection/stageProjection";
+import type { SourceCollectionStageCardProjection } from "../stageProjection";
 
 function projectionWithClosure(input: {
   blockedCount?: number;

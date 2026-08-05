@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 
 import type { TeamWorkflowCandidateGraphNode, TeamWorkflowCandidateGraphPayload } from "../api/types";
+import { VNativeButton } from "../components/vui";
 import {
   type TeamWorkflowGraphLayout,
   type TeamWorkflowGraphNodeView,
@@ -221,7 +222,7 @@ export function TeamWorkflowGraphView({
           const isFocus = focus === node.candidateId;
           const isNeighbor = !focus || neighborIds.has(node.candidateId);
           return (
-            <button
+            <VNativeButton
               key={node.candidateId}
               type="button"
               className={[
@@ -234,11 +235,12 @@ export function TeamWorkflowGraphView({
               title={`${node.candidateId} · ${node.currentState}`}
               data-testid={`workflow-graph-node-${node.candidateId}`}
               data-focus={isFocus ? "true" : "false"}
+              data-vui="workflow-graph-node"
               onClick={() => onFocusCandidate?.(node.candidateId)}
             >
               <strong>{node.title || node.candidateId}</strong>
               <span>{stateLabel(node.currentState)}</span>
-            </button>
+            </VNativeButton>
           );
         })}
       </div>

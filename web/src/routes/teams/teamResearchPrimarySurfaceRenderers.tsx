@@ -8,9 +8,9 @@ import { ResearchStageNav } from "./ResearchStageNav";
 import { ResearchWorkflowErrorSurface } from "./ResearchWorkflowErrorSurface";
 import {
   TeamResearchStageLauncherPanel,
-  TeamResearchStageStandalonePagePanel,
   TeamWorkflowModelEvidenceStatusPanel,
 } from "./teamLazyPanels";
+import { createExperimentController } from "./createExperimentController";
 import { workflowIngestionStatusLabel } from "./source-collection/presentationModel";
 import { workflowStateLabel } from "./workflowPresentation";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
@@ -374,67 +374,46 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
 
 
 
+  // P5/F4: experiment domain controller owns stage chrome + refresh (once per factory).
+  const experimentController = createExperimentController({
+    lang,
+    selectedTeam,
+    linkedChatRoomId,
+    syncTeamChatRoomMutation,
+    activeTeamMemberCount,
+    selectedTeamSyncPending,
+    researchStageRoundStatusQuery,
+    experimentPlanningStatusQuery,
+    experimentPlanningStatus,
+    researchStageUnlock,
+    selectResearchWorkspaceView,
+    createExperimentPlanMutation,
+    materializeEngineeringProxyHypothesisMutation,
+    completeScientificHypothesisFromDesignMutation,
+    reviewExperimentHypothesisMutation,
+    createExperimentHypothesisRevisionMutation,
+    freezeExperimentDesignMutation,
+    registerExperimentBaselineArtifactMutation,
+    runExperimentSmokeMutation,
+    registerExperimentSmokeResultMutation,
+    registerExperimentFullRunResultMutation,
+    requestExperimentKnowledgeIngestionMutation,
+    createResearchLoopMutation,
+    recordResearchLoopEvidenceMutation,
+    recordResearchLoopDecisionMutation,
+    materializeResearchLoopIterationDesignMutation,
+    researchLoopTemplatesQuery,
+    researchLoopStatusQuery,
+    experimentMethodCatalogQuery,
+    renderExperimentPlanningLedgerPanel,
+    renderResearchLoopPanel,
+  });
+
   function renderResearchStageStandalonePage(
     stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">,
     options?: { embeddedInBoard?: boolean },
   ) {
-    const refreshStageWorkspace = () => {
-      createExperimentPlanMutation.reset();
-      materializeEngineeringProxyHypothesisMutation.reset();
-      completeScientificHypothesisFromDesignMutation.reset();
-      reviewExperimentHypothesisMutation.reset();
-      createExperimentHypothesisRevisionMutation.reset();
-      freezeExperimentDesignMutation.reset();
-      registerExperimentBaselineArtifactMutation.reset();
-      runExperimentSmokeMutation.reset();
-      registerExperimentSmokeResultMutation.reset();
-      registerExperimentFullRunResultMutation.reset();
-      requestExperimentKnowledgeIngestionMutation.reset();
-      createResearchLoopMutation.reset();
-      recordResearchLoopEvidenceMutation.reset();
-      recordResearchLoopDecisionMutation.reset();
-      materializeResearchLoopIterationDesignMutation.reset();
-      void Promise.all([
-        researchStageRoundStatusQuery.refetch(),
-        experimentPlanningStatusQuery.refetch(),
-        experimentMethodCatalogQuery.refetch(),
-        researchLoopTemplatesQuery.refetch(),
-        researchLoopStatusQuery.refetch(),
-      ]);
-    };
-
-    return (
-      <TeamResearchStageStandalonePagePanel
-        stageView={stageView}
-        lang={lang}
-        researchStagePhases={researchStagePhases}
-        experimentPlanningStatus={experimentPlanningStatus}
-        experimentPlanningStatusQuery={experimentPlanningStatusQuery}
-        selectedTeam={selectedTeam}
-        selectedTeamStartResearchStagePending={selectedTeamStartResearchStagePending}
-        linkedChatRoomId={linkedChatRoomId || ""}
-        syncTeamChatRoomMutation={syncTeamChatRoomMutation}
-        activeTeamMemberCount={activeTeamMemberCount}
-        selectedTeamSyncPending={selectedTeamSyncPending}
-        researchStageRoundStatusQuery={researchStageRoundStatusQuery}
-        refreshStageWorkspace={refreshStageWorkspace}
-        renderResearchStageAgentPanel={renderResearchStageAgentPanel}
-        launchResearchStage={launchResearchStage}
-        selectedTeamStartResearchStageError={selectedTeamStartResearchStageError}
-        selectedTeamStartResearchStageResult={selectedTeamStartResearchStageResult}
-        researchStageStartFeedbackText={researchStageStartFeedbackText}
-        renderExperimentPlanningLedgerPanel={renderExperimentPlanningLedgerPanel}
-        renderResearchLoopPanel={renderResearchLoopPanel}
-        researchStageUnlock={researchStageUnlock || {
-          knowledge_collection: true,
-          experiment: true,
-          iteration: true,
-        }}
-        onSelectResearchStage={(view) => selectResearchWorkspaceView(view)}
-        onBackToOverview={() => selectResearchWorkspaceView("overview")}
-        embeddedInBoard={options?.embeddedInBoard ?? false}
-      />
-    );
+    return experimentController.renderStandalonePage(stageView, options);
   }
 
 

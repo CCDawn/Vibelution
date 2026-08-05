@@ -1,24 +1,29 @@
-"""Team workflow orchestration service tests (aggregate entry).
+"""Team workflow orchestration service tests — compatibility aggregate entry.
 
-Implementation lives under ``tests/_support/team_workflow/``:
+Domain packs (preferred for ``pytest-xdist --dist loadfile``)::
 
-- ``helpers.py`` — shared fakes/fixtures
-- ``cases_structure.py``
-- ``cases_source_collection.py``
-- ``cases_experiment.py``
-- ``cases_research_knowledge.py``
-- ``cases_remainder.py``
+- ``test_team_workflow_structure_cases.py``
+- ``test_team_workflow_source_collection_cases.py``
+- ``test_team_workflow_experiment_cases.py``
+- ``test_team_workflow_research_knowledge_cases.py``
+- ``test_team_workflow_remainder_cases.py``
 
-This module re-exports every case so selectors/docs that reference
-``tests/test_team_workflow_orchestration_service.py`` keep working without
-double-collecting when the full suite runs.
+Case implementations live under ``tests/_support/team_workflow/``.
 
-Run one domain without loading others::
+When this file is the **only** team-workflow case collector in the invocation
+(e.g. historical docs still pass this path), it re-exports every domain so the
+full behavioral suite still runs.
 
-    py -3 -m pytest tests/_support/team_workflow/cases_source_collection.py -q
+When the full ``tests/`` tree or any domain pack is also collected,
+``conftest.pytest_ignore_collect`` skips this aggregate to avoid double-collection.
 
-(Pytest collects an explicit path even though the filename does not match
-``test_*.py``.)
+Run one domain::
+
+    py -3 -m pytest tests/test_team_workflow_source_collection_cases.py -q
+
+Or the legacy aggregate path (still works alone)::
+
+    py -3 -m pytest tests/test_team_workflow_orchestration_service.py -q
 """
 from __future__ import annotations
 
