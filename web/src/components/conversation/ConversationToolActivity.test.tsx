@@ -242,8 +242,9 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toMatch(/代码图谱 · \{&quot;status&quot;/);
   });
 
-  it("keeps Codex-style tool rail frame, capped height, and plain-text chrome", () => {
-    expect(styles.activity).toContain("border-y");
+  it("keeps Codex-style tool rail without horizontal frame lines, capped height, and plain-text chrome", () => {
+    expect(styles.activity).toContain("border-0");
+    expect(styles.activity).not.toContain("border-y");
     expect(styles.activity).toContain("max-h-[min(18rem,42vh)]");
     expect(styles.activity).toContain("overflow-y-auto");
     expect(styles.itemBody).toContain("text-[var(--fg-tertiary)]");
