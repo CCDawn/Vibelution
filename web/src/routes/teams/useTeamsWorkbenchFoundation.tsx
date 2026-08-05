@@ -1105,8 +1105,6 @@ export function useTeamsWorkbenchFoundation({
     researchAdvanceAction,
     researchStageHandoff,
     researchStageUnlock,
-    selectedTeamStartResearchStagePending,
-    researchStageCanLaunch,
     lang,
     teamsQuery,
     agentSummaryQuery,
@@ -1354,9 +1352,12 @@ export function useTeamsWorkbenchFoundation({
     TEAMS_BOARD_INSPECTOR_PANE,
     TEAMS_LAYOUT_ID,
     TEAMS_RAIL_PANE,
-    scComposition,
-    researchStageCanLaunchFromSc,
-    selectedTeamStartResearchStagePendingFromSc,
+    // SC composition layer: standalone page renderer, display state, stage modules, etc.
+    // Must be on the bag — shell phase reads these flat (not only via scComposition).
+    ...scLayer,
     researchStageStartFeedbackText,
+    // Late-bound launch guards win over scLayer aliases.
+    selectedTeamStartResearchStagePending: selectedTeamStartResearchStagePendingFromSc,
+    researchStageCanLaunch: researchStageCanLaunchFromSc,
   };
 }
