@@ -1,14 +1,10 @@
 /**
- * Production research overview surface — easy-ops IA:
- * 1) Stage rail (one-click switch)
- * 2) Continue primary + optional advance secondary
- * 3) Read-only three-stage board
- * 4) Advanced details collapsed
+ * Production research overview strip — end-user IA (flow only):
+ * Stage rail + continue/advance primary. Main body is the organization canvas
+ * (shell canvas mode), not a second kanban wall.
  *
- * Loading contract (progressive-fill): this shell mounts immediately on
- * overview. Primary CTA and stage kanban keep fixed geometry; inner slots
- * fill via `loading` on child bars/boards — never swap the whole surface
- * for a fill VStateSurface mid-load.
+ * Loading contract (progressive-fill): fixed CTA geometry; metrics skeleton
+ * in place — never swap the whole strip for a fill surface mid-load.
  */
 import type { ReactNode } from "react";
 
@@ -16,7 +12,6 @@ import {
   ResearchPrimaryActionBar,
   type ResearchPrimaryActionBarProps,
 } from "./ResearchPrimaryActionBar";
-import { ResearchOverviewSecondary } from "./ResearchOverviewSecondary";
 
 export type ResearchOverviewSurfaceProps = {
   lang: "zh" | "en";
@@ -25,12 +20,26 @@ export type ResearchOverviewSurfaceProps = {
   stageNav?: ReactNode;
   /** Live-region notice after cross-stage advance */
   notice?: string;
-  /** Productized workflow error / cascade reset, rendered above stages when present */
+  /** Productized workflow error / cascade reset */
   errorSlot?: ReactNode;
-  /** Stage launcher (presentationMode=overview) */
-  stages: ReactNode;
-  /** Advanced disclosure body */
+  /**
+   * @deprecated Stage board is no longer part of end-user overview.
+   * Main content lives on the organization canvas.
+   */
+  stages?: ReactNode;
+  /**
+   * @deprecated Advanced details stay out of end-user overview.
+   */
   advanced?: ReactNode;
+  /** Compact strip over canvas (no extra section chrome). */
+  density?: "flow" | "page";
+  /** Canvas tools merged into the flow strip (auto-layout, etc.). */
+  trailingActions?: ReactNode;
+  /**
+   * Placed inside the next-step card on the right (4 stage cards).
+   * Not a second row under the hero.
+   */
+  sideSlot?: ReactNode;
   className?: string;
 };
 
@@ -40,62 +49,68 @@ export function ResearchOverviewSurface({
   stageNav,
   notice,
   errorSlot,
-  stages,
-  advanced,
+  density = "flow",
+  trailingActions = null,
+  sideSlot = null,
   className = "",
 }: ResearchOverviewSurfaceProps) {
-  return (
-    <div
-      className={["grid min-w-0 gap-4", className].filter(Boolean).join(" ")}
-      data-testid="research-overview-surface"
-      data-vui="research-overview-surface"
-    >
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 px-0.5">
-        <h3 className="m-0 text-[13px] font-[740] text-[var(--fg-primary)]">
-          {lang === "zh" ? "项目推进" : "Project progress"}
-        </h3>
-        <span className="text-[12px] text-[var(--fg-tertiary)]">
-          {lang === "zh" ? "主按钮继续当前 · 次按钮进入下一阶段" : "Primary continues · secondary advances"}
-        </span>
-      </div>
-
-      {stageNav ? (
-        <div data-testid="research-overview-stage-nav" className="min-w-0">
-          {stageNav}
-        </div>
-      ) : null}
-
-      <div data-testid="research-overview-hero" className="grid min-w-0 gap-3">
-        <ResearchPrimaryActionBar lang={lang} {...primary} />
-        {notice ? (
+  const headerSlot =
+    stageNav || trailingActions ? (
+      <div className="flex min-w-0 w-full flex-wrap items-center justify-between gap-2">
+        {stageNav ? (
+          <div data-testid="research-overview-stage-nav" className="min-w-0">
+            {stageNav}
+          </div>
+        ) : (
+          <span />
+        )}
+        {trailingActions ? (
           <div
-            className="rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 text-[12.5px] text-[var(--fg-primary)]"
-            role="status"
-            aria-live="polite"
-            data-testid="research-advance-notice"
+            className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5"
+            data-testid="research-overview-trailing-actions"
           >
-            {notice}
+            {trailingActions}
           </div>
         ) : null}
-        {errorSlot ? <div data-testid="research-overview-error">{errorSlot}</div> : null}
       </div>
+    ) : null;
 
-      <div className="flex min-w-0 items-baseline justify-between gap-3 px-0.5">
-        <h3 className="m-0 text-[13px] font-[740] text-[var(--fg-primary)]">
-          {lang === "zh" ? "阶段看板" : "Stage board"}
-        </h3>
-        <span className="text-[12px] text-[var(--fg-tertiary)]">
-          {lang === "zh" ? "卡片可打开阶段 · 推进请用上方按钮" : "Cards open stages · advance via CTAs above"}
-        </span>
-      </div>
-
-      <div data-testid="research-overview-stages" className="min-w-0">
-        {stages}
-      </div>
-
-      {advanced ? (
-        <ResearchOverviewSecondary lang={lang}>{advanced}</ResearchOverviewSecondary>
-      ) : null}
+  return (
+    <div
+      className={[
+        "grid min-w-0 content-start",
+        density === "flow" ? "gap-2" : "gap-3",
+        className,
+      ].filter(Boolean).join(" ")}
+      data-testid="research-overview-surface"
+      data-vui="research-overview-surface"
+      data-overview-density="flow-only"
+    >
+      <section
+        className="grid min-w-0 gap-2"
+        data-testid="research-overview-flow"
+        aria-label={lang === "zh" ? "流程控制" : "Flow control"}
+      >
+        <div data-testid="research-overview-hero" className="grid min-w-0 gap-2">
+          <ResearchPrimaryActionBar
+            lang={lang}
+            {...primary}
+            headerSlot={headerSlot}
+            sideSlot={sideSlot}
+          />
+          {notice ? (
+            <div
+              className="rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 text-[12.5px] text-[var(--fg-primary)]"
+              role="status"
+              aria-live="polite"
+              data-testid="research-advance-notice"
+            >
+              {notice}
+            </div>
+          ) : null}
+          {errorSlot ? <div data-testid="research-overview-error">{errorSlot}</div> : null}
+        </div>
+      </section>
     </div>
   );
 }

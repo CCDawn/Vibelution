@@ -17,6 +17,7 @@ import type {
   AgentConfigWorkspaceWithTeamIndexes,
   AgentTeamIndexGroup,
 } from "../agentWorkspaceCache";
+import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
   agentSearchText,
   formatTimestamp,
@@ -67,7 +68,7 @@ export function referenceRoute(reference: AgentConfigReference) {
     return contractRoute;
   }
   if (reference.kind === "team" && reference.sourceId) {
-    return `/teams?team=${encodeURIComponent(reference.sourceId)}`;
+    return teamWorkspaceRoute(reference.sourceId);
   }
   return reference.route || "";
 }

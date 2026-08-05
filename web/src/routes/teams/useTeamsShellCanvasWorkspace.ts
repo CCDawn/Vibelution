@@ -93,7 +93,8 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
     () =>
       requestedTeamShellMode
       ?? teamShellModeFromResearchView(forcedResearchWorkspaceView ?? requestedResearchWorkspaceView)
-      ?? "board",
+      // End-user research home is canvas (flow + org graph), not board kanban.
+      ?? "canvas",
   );
   const [challengeTeamSurface, setChallengeTeamSurface] = useState<"workspace" | "progress">("workspace");
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
@@ -116,6 +117,16 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
       setResearchWorkspaceView(requestedResearchWorkspaceView);
     }
   }, [forcedResearchWorkspaceView, requestedResearchWorkspaceView]);
+
+  // End-user home (overview/canvas view) always uses org canvas shell — not board kanban.
+  useEffect(() => {
+    if (
+      (researchWorkspaceView === "overview" || researchWorkspaceView === "canvas")
+      && teamShellMode !== "canvas"
+    ) {
+      setTeamShellMode("canvas");
+    }
+  }, [researchWorkspaceView, teamShellMode]);
 
   useEffect(() => {
     if (requestedVisibleTeamId) {

@@ -41,7 +41,7 @@ describe("teamResearchPrimarySurfaceRenderers extraction", () => {
     expect(renderersSource).toContain("function renderResearchOverviewSurface(");
     expect(renderersSource).toContain("function renderResearchStageStandalonePage(");
     expect(renderersSource).toContain("ResearchOverviewSurface");
-    expect(renderersSource).toContain("ResearchBoardKanban");
+    expect(renderersSource).not.toContain("ResearchBoardKanban");
     expect(renderersSource).toContain("TeamResearchStageLauncherPanel");
     // F4: experiment stage chrome via createExperimentController + ExperimentStageComposer
     expect(renderersSource).toContain("createExperimentController");

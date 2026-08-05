@@ -23,6 +23,12 @@ export type TeamsWorkbenchCanvasPageProps = {
   researchWorkflowTeamSelected: boolean;
   researchCanvasReadOnly: boolean;
   validationValid: boolean;
+  /** Stage rail + next-step CTA above the org canvas (research end-user home). */
+  researchFlowSlot?: ReactNode;
+  /** When true, hide canvas-local path/stats/actions chrome. */
+  hideCanvasToolbar?: boolean;
+  /** When true, canvas column uses full width (no node inspector). */
+  hideInspector?: boolean;
   inspectorBody: ReactNode;
   selectedTeam: Team | null;
   selectedTeamReferenceName?: string;
@@ -86,6 +92,8 @@ export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPagePr
       styles={p.styles}
       researchWorkflowTeamSelected={p.researchWorkflowTeamSelected}
       researchCanvasReadOnly={p.researchCanvasReadOnly}
+      researchFlowSlot={p.researchFlowSlot}
+      hideInspector={p.hideInspector}
       validationValid={p.validationValid}
       inspectorTitle={
         p.researchCanvasReadOnly
@@ -108,6 +116,7 @@ export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPagePr
           activeAgents={p.activeAgents}
           agentDisplay={agentDisplayInfo}
           researchCanvasReadOnly={p.researchCanvasReadOnly}
+          hideToolbar={p.hideCanvasToolbar}
           researchCanvasAutoLayoutActive={p.researchCanvasAutoLayoutActive}
           showCommunicationEdges={p.showCommunicationEdges}
           organizationEdgeCount={p.organizationEdgeCount}

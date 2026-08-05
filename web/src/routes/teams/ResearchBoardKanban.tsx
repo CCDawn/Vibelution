@@ -44,8 +44,9 @@ function SkeletonCard() {
 }
 
 /**
- * Preview-aligned three-column research board (read-only cards + 查看).
+ * End-user three-column research board (read-only cards + 查看).
  * Column count/geometry is fixed; only card interiors progressive-fill.
+ * Long machine titles/bodies are clamped so overview stays scannable.
  */
 export function ResearchBoardKanban({
   lang,
@@ -66,7 +67,7 @@ export function ResearchBoardKanban({
 
   return (
     <section
-      className={["researchBoardKanban grid min-w-0 gap-3", className].filter(Boolean).join(" ")}
+      className={["researchBoardKanban grid min-w-0 gap-2", className].filter(Boolean).join(" ")}
       data-testid="research-board-kanban"
       data-vui="research-board-kanban"
       data-loading={loading ? "true" : "false"}
@@ -78,14 +79,11 @@ export function ResearchBoardKanban({
           <h3 className="m-0 text-[13px] font-[740] text-[var(--fg-primary)]">
             {lang === "zh" ? "阶段看板" : "Stage board"}
           </h3>
-          <span className="text-[12px] text-[var(--fg-tertiary)]">
-            {lang === "zh" ? "卡片只读 · 操作请用上方主按钮" : "Read-only cards · use the primary CTA above"}
-          </span>
         </div>
       ) : null}
-      {/* Always three columns; narrow viewports scroll horizontally instead of stacking into a list. */}
+      {/* Prefer project-stable 3-col recipe; scroll horizontally on narrow widths. */}
       <div
-        className="grid min-w-0 grid-cols-[repeat(3,minmax(240px,1fr))] items-start gap-3 overflow-x-auto pb-1 [scrollbar-gutter:stable]"
+        className="!grid min-w-0 !grid-cols-[repeat(3,minmax(0,1fr))] items-start gap-2.5 overflow-x-auto pb-1 [scrollbar-gutter:stable] max-[900px]:min-w-[720px]"
         data-testid="research-board-columns"
       >
         {renderedColumns.map((column) => (
@@ -94,11 +92,11 @@ export function ResearchBoardKanban({
             tone="inset"
             elevation="flat"
             padding="compact"
-            className="grid min-h-[320px] min-w-[240px] content-start gap-2.5"
+            className="grid min-h-[280px] min-w-0 content-start gap-2"
             data-testid={`research-board-column-${column.id}`}
           >
             <div className="flex min-w-0 items-center justify-between gap-2">
-              <h4 className="m-0 text-[13px] font-[760] text-[var(--fg-primary)]">
+              <h4 className="m-0 truncate text-[13px] font-[760] text-[var(--fg-primary)]">
                 {lang === "zh" ? column.titleZh : column.titleEn}
               </h4>
               {loading ? (
@@ -110,7 +108,7 @@ export function ResearchBoardKanban({
               )}
             </div>
             {loading ? (
-              <div className="grid gap-2.5" data-testid={`research-board-column-skeleton-${column.id}`}>
+              <div className="grid gap-2" data-testid={`research-board-column-skeleton-${column.id}`}>
                 <SkeletonCard />
                 <SkeletonCard />
               </div>
@@ -121,19 +119,30 @@ export function ResearchBoardKanban({
                 elevation="flat"
                 padding="compact"
                 className={[
-                  "grid min-w-0 gap-2 border border-[var(--vui-border-subtle)]",
+                  "grid min-w-0 gap-1.5 border border-[var(--vui-border-subtle)]",
                   card.active ? "border-[var(--fg-primary)] shadow-[inset_0_0_0_1px_var(--fg-primary)]" : "",
                 ].filter(Boolean).join(" ")}
                 data-active={card.active ? "true" : "false"}
               >
-                <strong className="text-[13px] font-[740] text-[var(--fg-primary)]">{card.title}</strong>
-                <p className="m-0 text-[12px] leading-snug text-[var(--fg-secondary)]">{card.body}</p>
+                <strong
+                  className="min-w-0 truncate text-[13px] font-[740] leading-snug text-[var(--fg-primary)]"
+                  title={card.title}
+                >
+                  {card.title}
+                </strong>
+                <p
+                  className="m-0 line-clamp-2 min-w-0 text-[12px] leading-snug text-[var(--fg-secondary)]"
+                  title={card.body}
+                >
+                  {card.body}
+                </p>
                 {card.meta.length ? (
-                  <div className="flex min-w-0 flex-wrap gap-1.5">
-                    {card.meta.map((item) => (
+                  <div className="flex min-w-0 flex-wrap gap-1">
+                    {card.meta.slice(0, 3).map((item) => (
                       <span
                         key={item}
-                        className="rounded-md bg-[var(--vui-control-muted)] px-1.5 py-0.5 text-[10.5px] text-[var(--fg-tertiary)]"
+                        className="max-w-full truncate rounded-md bg-[var(--vui-control-muted)] px-1.5 py-0.5 text-[10.5px] text-[var(--fg-tertiary)]"
+                        title={item}
                       >
                         {item}
                       </span>
@@ -141,10 +150,10 @@ export function ResearchBoardKanban({
                   </div>
                 ) : null}
                 <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-[var(--fg-tertiary)]">
-                  <span>{card.foot}</span>
+                  <span className="min-w-0 truncate" title={card.foot}>{card.foot}</span>
                   <VNativeButton
                     type="button"
-                    className="!min-h-7 !gap-1 !border-transparent !bg-transparent !px-2 !text-[12px] !text-[var(--fg-secondary)]"
+                    className="!min-h-7 shrink-0 !gap-1 !border-transparent !bg-transparent !px-2 !text-[12px] !text-[var(--fg-secondary)]"
                     onClick={() => onOpenCard?.(column.id, card.id)}
                   >
                     <Eye size={13} />

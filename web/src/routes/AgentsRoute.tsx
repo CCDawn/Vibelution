@@ -90,6 +90,7 @@ import {
 import { type AgentTaskDraft } from "./AgentTaskProfilePanel";
 import { AgentWorkspaceLayoutPanel } from "./AgentWorkspaceLayoutPanel";
 import { governanceStatusLabel } from "./agents/agentStatusPresentation";
+import { teamWorkspaceRoute } from "./teams/researchWorkspaceModel";
 
 const AgentEffectiveConfigurationInspectorPanel = lazy(() =>
   import("./AgentEffectiveConfigurationPanel").then((module) => ({
@@ -2227,7 +2228,7 @@ export function AgentsRoute() {
     teamRelations: {
       relations: selectedTeamRelations,
       onOpenTeam: (teamId: string) => {
-        void navigate(`/teams?team=${encodeURIComponent(teamId)}`);
+        void navigate(teamWorkspaceRoute(teamId));
       },
     },
     configChanges: {

@@ -7,7 +7,7 @@ import type { SetURLSearchParams } from "react-router-dom";
 
 import type { Team } from "../../api/types";
 import {
-  researchWorkspaceAnchorId,
+  teamWorkspaceRoute,
   type ResearchWorkspaceView,
 } from "./researchWorkspaceModel";
 import { isResearchWorkflowTeam } from "./teamKindModel";
@@ -41,47 +41,35 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
   } = options;
 
   function selectResearchWorkspaceView(view: ResearchWorkspaceView) {
-    setResearchWorkspaceView(view);
-    // Keep URL in sync so stageStandalone / deep links / refresh match React state.
     const nextParams = new URLSearchParams(searchParams);
     if (effectiveTeamId) {
       nextParams.set("team", effectiveTeamId);
     }
-    nextParams.set("researchView", view);
-    if (view === "canvas") {
+    // overview / legacy canvas → single team home; stage pages → board workbench.
+    if (view === "overview" || view === "canvas") {
+      setResearchWorkspaceView("overview");
+      nextParams.set("researchView", "overview");
       setTeamShellMode("canvas");
       nextParams.set("teamMode", "canvas");
     } else {
-      // Stage destinations (experiment / iteration / overview / KC) live on board shell.
+      setResearchWorkspaceView(view);
+      nextParams.set("researchView", view);
       if (teamShellMode !== "board") {
         setTeamShellMode("board");
       }
       nextParams.set("teamMode", "board");
     }
     setSearchParams(nextParams, { replace: true });
-    if (view === "canvas") {
-      window.requestAnimationFrame(() => {
-        document.getElementById(researchWorkspaceAnchorId(view))?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      });
-    }
   }
 
   function selectTeamRecord(team: Team) {
     setSelectedTeamId(team.teamId);
     setSelectedNodeId("");
-    if (isResearchWorkflowTeam(team)) {
-      setResearchWorkspaceView(teamShellMode === "canvas" ? "canvas" : "overview");
-    }
-    const nextParams = new URLSearchParams();
-    nextParams.set("team", team.teamId);
-    nextParams.set("teamMode", teamShellMode);
-    if (isResearchWorkflowTeam(team)) {
-      nextParams.set("researchView", teamShellMode === "canvas" ? "canvas" : "overview");
-    }
-    setSearchParams(nextParams);
+    // Always open the canonical home (flow + canvas); stage destinations use selectResearchWorkspaceView.
+    setResearchWorkspaceView("overview");
+    setTeamShellMode("canvas");
+    const query = teamWorkspaceRoute(team.teamId).split("?")[1] || "";
+    setSearchParams(new URLSearchParams(query));
   }
 
   function selectTeamShellMode(mode: TeamShellMode) {
@@ -90,16 +78,17 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
     nextParams.set("teamMode", mode);
     if (mode === "canvas") {
       if (researchWorkflowTeamSelected) {
-        setResearchWorkspaceView("canvas");
-        nextParams.set("researchView", "canvas");
-      }
-    } else {
-      if (researchWorkspaceView === "canvas") {
+        // Canvas shell always lands on the single team home (overview + flow + graph).
         setResearchWorkspaceView("overview");
-      }
-      if (nextParams.get("researchView") === "canvas") {
         nextParams.set("researchView", "overview");
       }
+    } else if (
+      researchWorkspaceView === "canvas"
+      || researchWorkspaceView === "overview"
+    ) {
+      // Board without a stage target still keeps overview params; stage pages set their own view.
+      setResearchWorkspaceView("overview");
+      nextParams.set("researchView", "overview");
     }
     setSearchParams(nextParams, { replace: true });
   }

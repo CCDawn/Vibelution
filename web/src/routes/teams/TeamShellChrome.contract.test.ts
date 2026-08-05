@@ -1,18 +1,17 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const modeSwitchSource = readFileSync(new URL("./TeamShellModeSwitch.tsx", import.meta.url), "utf8");
+const toolbarSource = readFileSync(new URL("./TeamShellToolbar.tsx", import.meta.url), "utf8");
 const railSource = readFileSync(new URL("./TeamShellRail.tsx", import.meta.url), "utf8");
 const kanbanSource = readFileSync(new URL("./ResearchBoardKanban.tsx", import.meta.url), "utf8");
 
 describe("Team shell chrome selection + board layout", () => {
-  it("mode switch active segment is raised surface, not ink slab", () => {
-    expect(modeSwitchSource).toContain("raised surface, not ink slab");
-    expect(modeSwitchSource).toContain("!bg-[var(--vui-surface-base)]");
-    expect(modeSwitchSource).toContain("!text-[var(--fg-primary)]");
-    // Guard against regression to monochrome selected segment.
-    expect(modeSwitchSource).not.toContain("!bg-[var(--fg-primary)]");
-    expect(modeSwitchSource).not.toContain("!text-[var(--vui-surface-base)]");
+  it("toolbar is identity-only (no board/canvas switch or refresh)", () => {
+    expect(toolbarSource).toContain("team-shell-toolbar-identity");
+    expect(toolbarSource).not.toContain("TeamShellModeSwitch");
+    expect(toolbarSource).not.toContain("VIconButton");
+    expect(toolbarSource).not.toContain("刷新团队");
+    expect(toolbarSource).toContain("teamName");
   });
 
   it("rail selected team is muted row + inset edge, not full ink fill", () => {
@@ -26,13 +25,11 @@ describe("Team shell chrome selection + board layout", () => {
     expect(railSource).not.toContain("!text-white");
   });
 
-  it("stage board stays three columns with horizontal scroll instead of stacking", () => {
-    expect(kanbanSource).toContain("Always three columns");
-    expect(kanbanSource).toContain("grid-cols-[repeat(3,minmax(240px,1fr))]");
+  it("legacy stage board (if mounted) stays three columns with horizontal scroll", () => {
+    // End-user home no longer mounts this kanban; keep geometry contract if reused.
+    expect(kanbanSource).toContain("grid-cols-[repeat(3,minmax(0,1fr))]");
     expect(kanbanSource).toContain("overflow-x-auto");
-    expect(kanbanSource).toContain("min-w-[240px]");
     expect(kanbanSource).toContain('data-testid="research-board-columns"');
-    // Guard against responsive single-column collapse that flattens the board into a list.
     expect(kanbanSource).not.toContain("grid-cols-1");
     expect(kanbanSource).not.toContain("md:grid-cols-3");
   });

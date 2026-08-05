@@ -17,7 +17,10 @@ describe("teamShellModel", () => {
 
   it("maps research view to shell mode", () => {
     expect(teamShellModeFromResearchView("canvas")).toBe("canvas");
-    expect(teamShellModeFromResearchView("overview")).toBe("board");
+    // End-user home (overview) uses org canvas + flow strip.
+    expect(teamShellModeFromResearchView("overview")).toBe("canvas");
+    expect(teamShellModeFromResearchView("experiment")).toBe("board");
+    expect(teamShellModeFromResearchView("iteration")).toBe("board");
   });
 
   it("labels modes in zh/en", () => {

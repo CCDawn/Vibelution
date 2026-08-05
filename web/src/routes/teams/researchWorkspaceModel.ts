@@ -89,8 +89,13 @@ export function parseResearchWorkspaceView(value: string | null): ResearchWorksp
   if (!value) {
     return null;
   }
+  // Legacy aliases → current product views.
   if (value === "source_collection") {
     return "knowledge_collection";
+  }
+  // "canvas" is not a separate page: org canvas is the overview home body.
+  if (value === "canvas") {
+    return "overview";
   }
   return value in RESEARCH_WORKSPACE_LABELS ? (value as ResearchWorkspaceView) : null;
 }
@@ -99,7 +104,7 @@ export function researchWorkspaceStageRoute(
   teamId = RESEARCH_TEAM_ID,
   view: ResearchStageWorkspaceView = "knowledge_collection",
 ) {
-  return `/teams?team=${encodeURIComponent(teamId)}&researchView=${encodeURIComponent(view)}`;
+  return `/teams?team=${encodeURIComponent(teamId)}&researchView=${encodeURIComponent(view)}&teamMode=board`;
 }
 
 export function researchSourceCollectionRoute(teamId = RESEARCH_TEAM_ID) {
@@ -118,10 +123,20 @@ export function challengeQuestionDetailRoute(
   return `/teams?${params.toString()}`;
 }
 
+/**
+ * Canonical research / team home for end users:
+ * flow strip (stage + next step) + organization canvas.
+ * All "返回团队页面" / overview back links should use this — not a bare `?team=` URL
+ * and not a separate canvas-only view.
+ */
 export function teamWorkspaceRoute(teamId = RESEARCH_TEAM_ID) {
-  return `/teams?team=${encodeURIComponent(teamId)}`;
+  return `/teams?team=${encodeURIComponent(teamId)}&researchView=overview&teamMode=canvas`;
 }
 
+/**
+ * Historical name for the org-canvas home. Same destination as {@link teamWorkspaceRoute}
+ * so overview and canvas are not two competing pages.
+ */
 export function researchCanvasRoute(teamId = RESEARCH_TEAM_ID) {
-  return `/teams?team=${encodeURIComponent(teamId)}&researchView=canvas`;
+  return teamWorkspaceRoute(teamId);
 }

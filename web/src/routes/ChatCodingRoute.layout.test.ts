@@ -606,9 +606,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndActionsSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
     expect(routeAndActionsSource).toContain("reselectDirectSessionRef.current(normalizedSessionId)");
     expect(routeAndActionsSource).toContain("String(activeSessionId || \"\").trim() !== normalizedSessionId");
-    expect(routeAndSelectionSource).toContain(
-      "selectDirectSessionMutation.mutate({ sessionId: normalizedSessionId, generation })",
-    );
+    // Select is generation-guarded and short-debounced so rapid tab thrash collapses to one POST.
+    expect(routeAndSelectionSource).toContain("selectDirectSessionMutation.mutate({ sessionId: latestSessionId, generation })");
+    expect(routeAndSelectionSource).toContain("setTimeout");
+    expect(routeAndSelectionSource).toContain("80");
+    expect(routeSource).toContain("shouldShowStickyTranscriptPending");
+    expect(routeSource).toContain("resolveStickySessionDetailPaint");
+    expect(routeSource).toContain("transcriptPending: sessionTranscriptPending");
+    expect(routeSource).not.toContain("isForeignSessionDetailQueryKey(query.queryKey, activeId)");
     expect(routeAndSelectionSource).toContain("if (latestSessionId && latestSessionId !== nextDetail.id)");
     expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail)");
     expect(routeAndSelectionSource).toContain("chatWorkspaceCache.afterSessionSelected()");
@@ -2282,10 +2287,12 @@ describe("ChatCodingRoute layout contract", () => {
     );
 
     expect(openDirectSessionSource).toContain("setActiveSession(normalizedSessionId)");
-    expect(openDirectSessionSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false })");
+    expect(openDirectSessionSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true })");
     expect(openDirectSessionSource.indexOf("setActiveSession(normalizedSessionId)")).toBeLessThan(
-      openDirectSessionSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false })"),
+      openDirectSessionSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true })"),
     );
+    expect(routeSource).toContain("resolveStickySessionDetailPaint");
+    expect(routeSource).toContain("shouldShowStickyTranscriptPending");
   });
 
   it("logs direct session stream connect decisions with visibility inputs", () => {
@@ -2335,7 +2342,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).toContain("styles.conversationAvatarGroup");
     expect(directSessionIndexItemSource).toContain("styles.directSessionItem");
     expect(groupSessionIndexItemsSource).toContain("styles.groupSessionItem");
-    expect(routeAndActionsSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false })");
+    expect(routeAndActionsSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true })");
     expect(directSessionIndexItemSource).not.toContain("styles.conversationKindBadgeDirect");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeChild");
     expect(groupSessionIndexItemsStyles.conversationKindBadgeGroup).toBeTypeOf("string");
@@ -2933,7 +2940,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).toContain("团队群聊");
     expect(groupSessionIndexItemsSource).toContain("团队群聊待同步");
     expect(groupSessionIndexItemsSource).not.toContain("styles.teamTreeLabelRow");
-    expect(conversationIndexTreeSource).toContain("`/teams?team=${encodeURIComponent(team.teamId)}`");
+    expect(conversationIndexTreeSource).toContain("teamWorkspaceRoute(team.teamId)");
     expect(conversationIndexTreeSource).toContain("未绑定团队的群聊");
     expect(conversationIndexTreeSource).toContain("onToggleConversationGroup(\"setupTeams\")");
     expect(conversationIndexTreeSource).toContain("onToggleConversationGroup(\"standaloneGroups\")");

@@ -24,7 +24,29 @@ const styles = {
     "knowledgeCompletionFlowNodeHeader min-w-0 flex flex-wrap items-center gap-1.5 [&_strong]:shrink-0 [&_span]:min-w-0 [&_span]:truncate",
   knowledgeCompletionFlowNodes:
     "knowledgeCompletionFlowNodes min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-stretch gap-2",
+  // Compact 2×2 beside next-step CTA on research home (stable utilities only — no arbitrary fr grids).
+  knowledgeCompletionFlowNodesRail:
+    "knowledgeCompletionFlowNodesRail !grid !grid-cols-2 !items-stretch !gap-1.5",
+  knowledgeCompletionFlowNodeRail:
+    "knowledgeCompletionFlowNodeRail !min-h-0 !gap-1.5 !p-1.5 [font-size:var(--vui-font-xs)]",
   knowledgeCompletionFlowPanel: `knowledgeCompletionFlowPanel min-w-0 grid gap-2 overflow-hidden ${vuiFlatPanelClass} p-2`,
+  knowledgeCompletionFlowPanelRail:
+    // Nested inside next-step card — no extra outer chrome/border.
+    "knowledgeCompletionFlowPanelRail !m-0 !gap-1.5 !border-0 !bg-transparent !p-0 !shadow-none",
+  /**
+   * Next-step hero: left CTA + right 4-card flow.
+   * Must live in this @source style map — inline min-[900px]:grid-cols-[…fr…] is purged.
+   */
+  researchPrimaryHeroHeader:
+    "researchPrimaryHeroHeader flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-3 py-2 sm:px-4",
+  researchPrimaryHeroSplit:
+    "researchPrimaryHeroSplit !grid min-w-0 !grid-cols-1 !items-stretch !gap-3 !p-3 sm:!p-4 md:!grid-cols-2",
+  researchPrimaryHeroSplitSolo:
+    "researchPrimaryHeroSplitSolo grid min-w-0 gap-3 p-3 sm:p-4",
+  researchPrimaryHeroMain:
+    "researchPrimaryHeroMain min-w-0 content-start",
+  researchPrimaryHeroSide:
+    "researchPrimaryHeroSide min-h-0 min-w-0 border-t border-[var(--vui-border-subtle)] pt-3 md:border-t-0 md:border-l md:pl-3 md:pt-0",
   researchCanvasPanelHidden: `researchCanvasPanelHidden min-w-0 grid min-h-0 gap-2 p-2 ${vuiFlatPanelClass} hidden !hidden`,
   researchDiscussionPanel: `researchDiscussionPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   researchInspector:

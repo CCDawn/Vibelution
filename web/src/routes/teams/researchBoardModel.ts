@@ -42,27 +42,71 @@ function phaseFor(
 function cardFromPhase(
   phase: ResearchStagePhaseStatus | undefined,
   fallback: ResearchBoardCard,
+  lang: "zh" | "en",
 ): ResearchBoardCard {
   if (!phase) {
     return fallback;
   }
   const round = phase.latestRound;
   const status = String(phase.status || fallback.foot);
-  const title = round
+  const rawTitle = round
     ? String((round as { topic?: string }).topic || phase.label || fallback.title)
     : (phase.label || fallback.title);
   return {
     id: String(phase.activeRoundId || phase.stageType || fallback.id),
-    title,
+    title: productBoardTitle(rawTitle, fallback.title),
     body: fallback.body,
     meta: [
-      phase.roundCount ? `rounds ${phase.roundCount}` : "",
-      phase.activeRoundId ? "active" : "",
+      phase.roundCount
+        ? (lang === "zh" ? `第 ${phase.roundCount} 轮` : `Round ${phase.roundCount}`)
+        : "",
+      phase.activeRoundId
+        ? (lang === "zh" ? "进行中" : "Active")
+        : "",
     ].filter(Boolean),
-    foot: status || fallback.foot,
+    foot: humanizeBoardStatus(status || fallback.foot, lang),
     active: Boolean(phase.activeRoundId || phase.canContinue),
   };
 }
+
+/** Prefer short human titles; keep machine ids out of the primary line. */
+function productBoardTitle(raw: string, fallback: string): string {
+  const value = String(raw || "").trim();
+  if (!value) return fallback;
+  // exp-plan-… / dprun-… / uuid-like ids → keep fallback product title
+  if (/^(exp-plan|dprun|run|plan)[-_]/i.test(value)) return fallback || value;
+  if (/^[0-9a-f]{8,}$/i.test(value)) return fallback || value;
+  return value;
+}
+
+function humanizeBoardStatus(raw: string, lang: "zh" | "en"): string {
+  const value = String(raw || "").trim();
+  if (!value) return value;
+  const key = value.toLowerCase().replace(/[\s-]+/g, "_");
+  const zh: Record<string, string> = {
+    active: "进行中",
+    planning: "规划中",
+    needs_attention: "需关注",
+    frozen: "已冻结",
+    executable: "可执行",
+    not_started: "未开始",
+    waiting_upstream: "等待上游",
+    needs_review: "待审查",
+  };
+  const en: Record<string, string> = {
+    active: "Active",
+    planning: "Planning",
+    needs_attention: "Needs attention",
+    frozen: "Frozen",
+    executable: "Ready",
+    not_started: "Not started",
+    waiting_upstream: "Waiting",
+    needs_review: "Needs review",
+  };
+  const table = lang === "zh" ? zh : en;
+  return table[key] || value;
+}
+
 
 export function buildResearchBoardColumns(input: ResearchBoardModelInput): ResearchBoardColumn[] {
   const knowledge = phaseFor(input.phases, "knowledge_collection");
@@ -78,10 +122,14 @@ export function buildResearchBoardColumns(input: ResearchBoardModelInput): Resea
         ? `批次 ${input.sourceRunCount} · 候选 ${input.sourceCandidateCount}${input.knowledgeStatusLabel ? ` · ${input.knowledgeStatusLabel}` : ""}`
         : `Runs ${input.sourceRunCount} · candidates ${input.sourceCandidateCount}${input.knowledgeStatusLabel ? ` · ${input.knowledgeStatusLabel}` : ""}`,
       meta: [
-        input.sourceRunLabel || "",
-        input.sourceCandidateCount ? (input.lang === "zh" ? `候选 ${input.sourceCandidateCount}` : `${input.sourceCandidateCount} candidates`) : "",
+        input.sourceCandidateCount
+          ? (input.lang === "zh" ? `候选 ${input.sourceCandidateCount}` : `${input.sourceCandidateCount} candidates`)
+          : "",
       ].filter(Boolean),
-      foot: input.knowledgeStatusLabel || (input.lang === "zh" ? "进行中" : "In progress"),
+      foot: humanizeBoardStatus(
+        input.knowledgeStatusLabel || (input.lang === "zh" ? "进行中" : "In progress"),
+        input.lang,
+      ),
       active: true,
     });
   }
@@ -94,14 +142,18 @@ export function buildResearchBoardColumns(input: ResearchBoardModelInput): Resea
         : "Create the search plan and team assignments.",
       meta: input.lang === "zh" ? ["资料寻找", "提炼", "入库"] : ["find", "extract", "ingest"],
       foot: input.lang === "zh" ? "未开始" : "Not started",
-    }),
+    }, input.lang),
   );
 
   const experimentCards: ResearchBoardCard[] = [];
   if (input.experimentDesignFrozen || input.frozenDesignLabel) {
+    const frozenTitle = productBoardTitle(
+      input.frozenDesignLabel || "",
+      input.lang === "zh" ? "冻结设计" : "Frozen design",
+    );
     experimentCards.push({
       id: "ex-frozen",
-      title: input.frozenDesignLabel || (input.lang === "zh" ? "冻结设计" : "Frozen design"),
+      title: frozenTitle,
       body: input.lang === "zh"
         ? "实验设计已冻结；可进入执行迭代或补证据。"
         : "Design is frozen; move to iteration or add evidence.",
@@ -119,14 +171,17 @@ export function buildResearchBoardColumns(input: ResearchBoardModelInput): Resea
         : "Draft hypothesis, variables, and reproduction contract.",
       meta: input.lang === "zh" ? ["假设", "变量", "冻结设计"] : ["hypothesis", "vars", "freeze"],
       foot: input.lang === "zh" ? "等待上游" : "Waiting upstream",
-    }),
+    }, input.lang),
   );
 
   const iterationCards: ResearchBoardCard[] = [];
   if (input.bestCandidateId) {
     iterationCards.push({
       id: "it-best",
-      title: input.bestCandidateId,
+      title: productBoardTitle(
+        input.bestCandidateId,
+        input.lang === "zh" ? "当前最佳候选" : "Best candidate",
+      ),
       body: input.lang === "zh"
         ? "当前最佳候选 · 独立门禁，不汇总总分。"
         : "Current best candidate · independent gates, no total score.",
@@ -138,7 +193,10 @@ export function buildResearchBoardColumns(input: ResearchBoardModelInput): Resea
   if (input.latestDiagnostic) {
     iterationCards.push({
       id: "it-diag",
-      title: input.latestDiagnostic,
+      title: productBoardTitle(
+        input.latestDiagnostic,
+        input.lang === "zh" ? "最近诊断" : "Latest diagnostic",
+      ),
       body: input.lang === "zh"
         ? "最近诊断单独展示，不覆盖主线结果。"
         : "Latest diagnostic is separate from the mainline result.",
@@ -156,7 +214,7 @@ export function buildResearchBoardColumns(input: ResearchBoardModelInput): Resea
           : "Run, evaluate, and iterate after the design is frozen.",
         meta: input.lang === "zh" ? ["批次", "评估", "晋升"] : ["runs", "eval", "promote"],
         foot: input.lang === "zh" ? "等待上游" : "Waiting upstream",
-      }),
+      }, input.lang),
     );
   }
 

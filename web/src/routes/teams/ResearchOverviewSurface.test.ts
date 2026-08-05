@@ -13,21 +13,30 @@ const primaryRenderersSource = readFileSync(
 );
 
 describe("ResearchOverviewSurface product contract", () => {
-  it("keeps project-progress → stage-nav → continue/advance CTA → stages → advanced order", () => {
-    const progressLabel = surfaceSource.indexOf("项目推进");
-    const stageNav = surfaceSource.indexOf('data-testid="research-overview-stage-nav"');
-    const hero = surfaceSource.indexOf('data-testid="research-overview-hero"');
-    const stages = surfaceSource.indexOf('data-testid="research-overview-stages"');
-    // Secondary is the last composition slot (not the import line).
-    const secondarySlot = surfaceSource.indexOf("{advanced ? (");
-    expect(progressLabel).toBeGreaterThan(-1);
-    expect(stageNav).toBeGreaterThan(progressLabel);
-    expect(hero).toBeGreaterThan(stageNav);
-    expect(stages).toBeGreaterThan(hero);
-    expect(secondarySlot).toBeGreaterThan(stages);
-    expect(surfaceSource.slice(secondarySlot)).toContain("ResearchOverviewSecondary");
-    expect(surfaceSource).toContain("阶段看板");
-    expect(surfaceSource).toContain("主按钮继续当前");
+  it("keeps end-user IA: flow control only (stage-nav + CTA); canvas owns main body", () => {
+    expect(surfaceSource).toContain('data-testid="research-overview-flow"');
+    expect(surfaceSource).toContain('data-testid="research-overview-stage-nav"');
+    expect(surfaceSource).toContain('data-testid="research-overview-hero"');
+    // No kanban / advanced wall on overview strip.
+    expect(surfaceSource).not.toContain("ResearchOverviewSecondary");
+    expect(surfaceSource).not.toContain("ResearchBoardKanban");
+    expect(surfaceSource).not.toContain('data-testid="research-overview-stages"');
+    expect(surfaceSource).toContain('data-overview-density="flow-only"');
+    expect(surfaceSource).toContain("流程控制");
+    expect(surfaceSource).toContain("research-overview-trailing-actions");
+    expect(surfaceSource).toContain("trailingActions");
+    expect(surfaceSource).toContain("sideSlot");
+    // Stage nav + layout tools are inside the next-step card (headerSlot), not a free row above.
+    expect(surfaceSource).toContain("headerSlot={headerSlot}");
+    expect(primarySource).toContain("researchPrimaryHeroHeader");
+    expect(primarySource).toContain("research-primary-header-slot");
+    expect(primarySource).toContain("researchPrimaryHeroSplit");
+    expect(primarySource).toContain("research-primary-side-slot");
+  });
+
+  it("wires research overview through primary renderers without board kanban", () => {
+    expect(primaryRenderersSource).toContain("ResearchOverviewSurface");
+    expect(primaryRenderersSource).not.toContain("ResearchBoardKanban");
   });
 
   it("primary CTA uses monochrome ink accent, not teal brand wash", () => {
@@ -40,7 +49,6 @@ describe("ResearchOverviewSurface product contract", () => {
     expect(routeSource).toContain("renderResearchOverviewSurface");
     // Composition lives in the extracted primary-surface factory (not inline in TeamsRoute).
     expect(primaryRenderersSource).toContain("ResearchOverviewSurface");
-    expect(primaryRenderersSource).toContain("ResearchBoardKanban");
     expect(routeSource).not.toContain("function renderResearchOverviewSurface(");
     // Must not re-embed a second hero CTA bar under the workflow panel.
     expect(routeSource).not.toMatch(/showResearchOverview\s*\?\s*\(\s*<div[^>]*research-overview-hero/);
@@ -62,12 +70,8 @@ describe("ResearchOverviewSurface product contract", () => {
     expect(primarySource).toContain("loading");
     expect(primarySource).toContain("research-primary-cta-skeleton");
     expect(primarySource).toContain("data-loading");
-    const kanbanSource = readFileSync(new URL("./ResearchBoardKanban.tsx", import.meta.url), "utf8");
-    expect(kanbanSource).toContain("loading");
-    expect(kanbanSource).toContain("research-board-column-skeleton");
-    // Overview progressive fill is owned by the primary-surface factory extract.
+    // Overview progressive fill is owned by the primary-surface factory extract (CTA metrics only).
     expect(primaryRenderersSource).toContain("loading: overviewWorkflowPending");
-    expect(primaryRenderersSource).toContain("loading={overviewWorkflowPending}");
     expect(primaryRenderersSource).not.toMatch(
       /function renderResearchOverviewSurface\(\) \{\s*if \(!teamWorkflow\)/,
     );

@@ -176,7 +176,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
         />
       );
     }
-    function renderKnowledgeCollectionCompletionFlowPanel() {
+    function renderKnowledgeCollectionCompletionFlowPanel(options?: { presentation?: "board" | "rail" }) {
       const {
         lang,
         openSourceCollectionStageAgentChat,
@@ -228,6 +228,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
           lang={lang}
           researchWorkflowTeamSelected={researchWorkflowTeamSelected}
           researchCanvasReadOnly={researchCanvasReadOnly}
+          presentation={options?.presentation ?? "board"}
           selectedTeamKnowledgeCollectionWorkRun={selectedTeamKnowledgeCollectionWorkRun}
           sourceCollectionCompletionFlow={sourceCollectionCompletionFlow}
           sourceCollectionCompletionFlowNodes={Array.isArray(sourceCollectionCompletionFlowNodes) ? sourceCollectionCompletionFlowNodes : []}
