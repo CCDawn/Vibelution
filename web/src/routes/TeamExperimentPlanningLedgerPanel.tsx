@@ -235,6 +235,44 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   renderResearchLoopPanel: (activePlan: ExperimentPlanRecord | null, variant?: "experiment" | "iteration") => ReactNode;
 };
 
+const FALLBACK_BASELINE_ARTIFACT_DRAFT: ExperimentBaselineArtifactDraft = {
+  artifactPath: "",
+  reproductionCommand: "",
+  evaluationCommand: "",
+  metricValue: "",
+};
+const FALLBACK_SMOKE_RESULT_DRAFT: ExperimentSmokeResultDraft = {
+  status: "needs_review",
+  metricValue: "",
+  baselineMetricValue: "",
+  delta: "",
+  resultPath: "",
+  logRef: "",
+  evaluationCommand: "",
+  notes: "",
+};
+const FALLBACK_FULL_RUN_RESULT_DRAFT: ExperimentFullRunResultDraft = {
+  status: "needs_review",
+  metricValue: "",
+  baselineMetricValue: "",
+  smokeMetricValue: "",
+  delta: "",
+  resultPath: "",
+  logRef: "",
+  configPath: "",
+  reproductionCommand: "",
+  evaluationCommand: "",
+  notes: "",
+};
+const FALLBACK_KNOWLEDGE_INGESTION_DRAFT: ExperimentKnowledgeIngestionDraft = {
+  knowledgeBaseId: "research-team-experiment-kb",
+  targetDomain: "挑战杯实验结果",
+  title: "",
+  summary: "",
+  notes: "",
+  wakeStewardAgent: true,
+};
+
 export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningLedgerPanelProps) {
   const {
     lang,
@@ -244,13 +282,13 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     experimentMethodCatalogQuery,
     preferredExperimentMethod,
     searchParams,
-    experimentBaselineArtifactDraft,
+    experimentBaselineArtifactDraft: experimentBaselineArtifactDraftProp,
     setExperimentBaselineArtifactDraft,
-    experimentSmokeResultDraft,
+    experimentSmokeResultDraft: experimentSmokeResultDraftProp,
     setExperimentSmokeResultDraft,
-    experimentFullRunResultDraft,
+    experimentFullRunResultDraft: experimentFullRunResultDraftProp,
     setExperimentFullRunResultDraft,
-    experimentKnowledgeIngestionDraft,
+    experimentKnowledgeIngestionDraft: experimentKnowledgeIngestionDraftProp,
     setExperimentKnowledgeIngestionDraft,
     selectedTeamCreateExperimentPlanPending,
     selectedTeamCreateExperimentPlanError,
@@ -296,6 +334,15 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     renderResearchLoopPanel,
   } = props;
 
+  // Research surface bag may omit drafts if wiring drops fields — never crash the workbench.
+  const experimentBaselineArtifactDraft =
+    experimentBaselineArtifactDraftProp ?? FALLBACK_BASELINE_ARTIFACT_DRAFT;
+  const experimentSmokeResultDraft =
+    experimentSmokeResultDraftProp ?? FALLBACK_SMOKE_RESULT_DRAFT;
+  const experimentFullRunResultDraft =
+    experimentFullRunResultDraftProp ?? FALLBACK_FULL_RUN_RESULT_DRAFT;
+  const experimentKnowledgeIngestionDraft =
+    experimentKnowledgeIngestionDraftProp ?? FALLBACK_KNOWLEDGE_INGESTION_DRAFT;
 
     const latestKnowledgeIngestionMutationPayload = selectedTeamRequestExperimentKnowledgeIngestionResult;
     const latestFullRunMutationPayload = selectedTeamRegisterExperimentFullRunResultResult;
