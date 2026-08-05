@@ -1117,10 +1117,31 @@ def _source_collection_stage_writeback_closure_summary(
         message = f"Agent 已回写，但没有生成{target_label}；已{action_label} {processed}/{total}，{missing} 条待补，{invalid} 个 ID 未匹配。"
     elif task_status in {"blocked", "failed"}:
         user_status = "failed"
-        message = f"Agent 任务未完成，尚未生成{target_label}。"
+        message = f"Agent 任务未完成，尚未生成{target_label}。推进结果：失败（不合格）。"
+        if stage_id == "ingestion" or agent_role == "source_ingestor":
+            retry_instruction = (
+                "系统判定本轮入库未产生正式知识/入库包。"
+                "不要用 status=blocked 当作结束：请用 completed 或 needs_review，"
+                "并在 result 中写入通过候选与入库决策；若关系图缺边请先完成整理关系再重试。"
+                "写回必须带 team_id 与 task_id。"
+            )
+        else:
+            retry_instruction = (
+                "系统判定本轮阶段未产生可用产物。请用 completed/needs_review 回写真实结果；"
+                "不要用 blocked 代替未完成的工作。写回必须带 team_id 与 task_id。"
+            )
     else:
         user_status = "failed" if artifact_status == "no_effect" else "partial"
-        message = f"Agent 已回写，但没有生成可用{target_label}。"
+        message = (
+            f"Agent 已回写，但没有生成可用{target_label}。推进结果：失败（不合格）。"
+            if artifact_status == "no_effect"
+            else f"Agent 已回写，但{target_label}仍不完整。"
+        )
+        if artifact_status == "no_effect" and (stage_id == "ingestion" or agent_role == "source_ingestor"):
+            retry_instruction = (
+                "本轮 writeback 没有物化正式知识。请重新打开入库任务，"
+                "以 completed/needs_review 写回入库决策与通过候选；关系图未就绪时先修关系阶段。"
+            )
 
     return {
         "schemaVersion": 1,
@@ -1145,6 +1166,9 @@ def _source_collection_stage_writeback_closure_summary(
         "invalidIds": invalid_ids,
         "retryInstruction": retry_instruction,
         "nextAction": retry_instruction,
+        "advanceOutcome": "failed" if user_status in {"failed", "interrupted"} and not artifact_complete else (
+            "succeeded" if user_status == "success" and artifact_complete else "partial"
+        ),
     }
 
 

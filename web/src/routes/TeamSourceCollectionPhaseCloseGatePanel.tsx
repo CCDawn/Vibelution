@@ -114,53 +114,31 @@ export function TeamSourceCollectionPhaseCloseGatePanel({
   const reasons = (gate?.blockingReasons ?? []).filter(Boolean).slice(0, 2);
 
   if (compact) {
+    // Compact lives above TeamStagePipeline (01–04 cards). Do not re-list all four stages here —
+    // that was pure duplication. Keep only score + next CTA + optional runtime facts.
     return (
       <section
         className={`${styles.phaseCloseGatePanel} ${styles.phaseCloseGatePanelCompact}`}
         data-vui-product="source-collection-phase-close-gate"
         data-compact="true"
+        data-compact-steps="hidden"
         aria-label={isZh ? "本轮进度" : "Run progress"}
       >
         <div className={styles.phaseCloseGateHeader}>
           <div>
             <span className={styles.phaseCloseGateEyebrow}>{isZh ? "本轮进度" : "Run progress"}</span>
             <strong>{compactGateTitle(gate, loading, nextStage, lang)}</strong>
+            <span className={styles.phaseCloseGateCompactHint}>
+              {isZh
+                ? "阶段明细见下方 01–04；此处只标进度与下一步。"
+                : "Stage details are in the 01–04 cards below; this card is score + next only."}
+            </span>
           </div>
           <span className={`${styles.phaseCloseGateTag} ${gateTone(gate?.status)}`}>
             {gate?.passed ? <CheckCircle2 size={13} aria-hidden /> : null}
             {gate ? `${closedLoopCount}/${stageCount}` : "0/4"}
           </span>
         </div>
-
-        <ol className={styles.phaseCloseGateSteps}>
-          {STAGE_ORDER.map((stageId, index) => {
-            const stage = gate?.stages?.find((item) => item.stageId === stageId);
-            const passed = Boolean(stage?.passed);
-            const current = !passed && nextStage === stageId;
-            return (
-              <li
-                key={stageId}
-                className={passed
-                  ? styles.phaseCloseGateStepDone
-                  : current
-                    ? styles.phaseCloseGateStepCurrent
-                    : styles.phaseCloseGateStep}
-              >
-                <span>{passed ? <CheckCircle2 size={12} aria-hidden /> : index + 1}</span>
-                <div>
-                  <strong>{stageLabel(stageId, lang)}</strong>
-                  <small>
-                    {passed
-                      ? (isZh ? "已完成" : "Completed")
-                      : current
-                        ? (isZh ? "下一步" : "Next")
-                        : (isZh ? "未开始" : "Not started")}
-                  </small>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
 
         {nextStage && gate?.status === "needs_continue" ? (
           <VNativeButton

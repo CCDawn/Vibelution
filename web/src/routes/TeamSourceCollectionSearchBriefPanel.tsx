@@ -1,4 +1,4 @@
-import { Plus, Search, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react";
 
 import { VNativeButton, VNativeInput, VNativeTextarea } from "../components/vui";
@@ -13,10 +13,7 @@ type TeamSourceCollectionSearchBriefPanelProps = {
   draft: SourceCollectionDraft;
   modeFields: ReactNode;
   hasExistingRun: boolean;
-  canStart: boolean;
-  startPending: boolean;
   onDraftChange: (patch: Partial<SourceCollectionDraft>) => void;
-  onSubmit: () => void;
 };
 
 function joinQuerySeeds(items: string[]) {
@@ -28,10 +25,7 @@ export function TeamSourceCollectionSearchBriefPanel({
   draft,
   modeFields,
   hasExistingRun,
-  canStart,
-  startPending,
   onDraftChange,
-  onSubmit,
 }: TeamSourceCollectionSearchBriefPanelProps) {
   const isZh = lang === "zh";
   const [newQuery, setNewQuery] = useState("");
@@ -220,22 +214,13 @@ export function TeamSourceCollectionSearchBriefPanel({
       <div className={styles.actionRow}>
         <span className={styles.actionHint}>
           {isZh
-            ? (hasExistingRun ? "会新建批次，不覆盖当前资料" : "开始后会创建可追踪的资料批次")
-            : (hasExistingRun ? "Creates a new run without overwriting current sources" : "Creates a traceable source run")}
+            ? (hasExistingRun
+              ? "方案会用于右侧「推荐下一步」推进搜索；不会在这里重复开搜。"
+              : "填好主题与问题后，请只在右侧「推荐下一步」开始搜集。")
+            : (hasExistingRun
+              ? "This brief feeds the single right-rail next-step action; search is not started here."
+              : "After editing the brief, start collection only from the right-rail next step.")}
         </span>
-        <VNativeButton
-          type="button"
-          className={styles.primaryAction}
-          disabled={!canStart || startPending}
-          onClick={onSubmit}
-        >
-          <Search size={13} aria-hidden />
-          {startPending
-            ? (isZh ? "正在启动" : "Starting")
-            : hasExistingRun
-              ? (isZh ? "按当前方案搜索下一批" : "Search next batch")
-              : (isZh ? "开始搜索" : "Start search")}
-        </VNativeButton>
       </div>
     </section>
   );

@@ -17,7 +17,96 @@ _AUTO_FORMAL_RETRY_STATUSES = {
     "incomplete",
     "timed_out",
     "timeout",
+    # Product bar: blocked/no-product stage tasks are failures and must re-open as formal retry.
+    "blocked",
 }
+
+# Ingestion must not open when the candidate graph is clearly not ready.
+_INGESTION_GRAPH_MISSING_LINK_HARD_LIMIT = 5
+
+
+def assert_source_collection_stage_advance_ready(
+    *,
+    stage_id: str,
+    record_count: int,
+    approved_or_source_candidate_count: int,
+    graph_node_count: int,
+    graph_edge_count: int,
+    graph_missing_link_count: int,
+) -> None:
+    """
+    Hard product gate for stage advance. Fail loudly before opening Agent chat.
+    Mirrors web stageAdvancePreflight so UI and API agree.
+    """
+    s = _service()
+    normalized_stage = s._normalize_source_collection_stage_id(stage_id, default="")
+    records = max(0, int(record_count or 0))
+    candidates = max(0, int(approved_or_source_candidate_count or 0))
+    nodes = max(0, int(graph_node_count or 0))
+    edges = max(0, int(graph_edge_count or 0))
+    missing = max(0, int(graph_missing_link_count or 0))
+
+    if normalized_stage == "extraction" and records <= 0:
+        raise s.TeamWorkflowOrchestrationError(
+            "推进失败（不合格）：还没有原始资料，无法提炼。请先完成找资料。"
+        )
+    if normalized_stage == "relations" and candidates <= 0:
+        raise s.TeamWorkflowOrchestrationError(
+            "推进失败（不合格）：没有可整理的候选资料。请先完成提炼/审查。"
+        )
+    if normalized_stage != "ingestion":
+        return
+    if candidates <= 0:
+        raise s.TeamWorkflowOrchestrationError(
+            "推进失败（不合格）：没有可入库的候选资料。请先完成提炼。"
+        )
+    if nodes > 0 and edges <= 0:
+        raise s.TeamWorkflowOrchestrationError(
+            f"推进失败（不合格）：关系图有 {nodes} 个节点但 0 条边，入库会被系统拦截。请先完成整理关系。"
+        )
+    if missing > _INGESTION_GRAPH_MISSING_LINK_HARD_LIMIT:
+        raise s.TeamWorkflowOrchestrationError(
+            f"推进失败（不合格）：关系缺口 {missing}，入库不能当作成功。请先修整理关系。"
+        )
+
+
+def _source_collection_run_graph_metrics(
+    team_id: str,
+    run_id: str,
+    source_candidates: list[dict[str, Any]],
+) -> dict[str, int]:
+    s = _service()
+    source_candidate_ids = {
+        s._trim_text(item.get("candidateId"), max_length=160)
+        for item in source_candidates
+        if isinstance(item, dict) and s._trim_text(item.get("candidateId"), max_length=160)
+    }
+    with s._WORKFLOW_LOCK:
+        candidate_store = s._load_candidate_store(team_id)
+        stored_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+    graph_candidates = [
+        item
+        for item in stored_candidates
+        if str(item.get("candidateType") or "") == "candidate_graph"
+        and not s._candidate_is_archived(item)
+        and s._source_collection_candidate_graph_matches_run(item, source_candidate_ids)
+    ]
+    latest_graph = s._latest_candidate_record(graph_candidates) or {}
+    metadata = latest_graph.get("metadata") if isinstance(latest_graph.get("metadata"), dict) else {}
+    graph_payload = metadata.get("graph") if isinstance(metadata.get("graph"), dict) else {}
+    if not graph_payload and isinstance(latest_graph.get("graph"), dict):
+        graph_payload = latest_graph.get("graph") or {}
+    if not graph_payload and isinstance(latest_graph.get("payload"), dict):
+        graph_payload = latest_graph.get("payload") or {}
+    summary = graph_payload.get("summary") if isinstance(graph_payload.get("summary"), dict) else {}
+    nodes = list(graph_payload.get("nodes") or []) if isinstance(graph_payload.get("nodes"), list) else []
+    edges = list(graph_payload.get("edges") or []) if isinstance(graph_payload.get("edges"), list) else []
+    missing_links = list(graph_payload.get("missingLinks") or []) if isinstance(graph_payload.get("missingLinks"), list) else []
+    return {
+        "nodeCount": int(summary.get("nodeCount") or len(nodes) or 0),
+        "edgeCount": int(summary.get("edgeCount") or len(edges) or 0),
+        "missingLinkCount": int(summary.get("missingLinkCount") or len(missing_links) or 0),
+    }
 
 
 def _service():
@@ -265,6 +354,31 @@ def start_source_collection_stage_session_task(
     source_candidates = run_bundle["sourceCandidates"]
     run_status = run_bundle["runStatus"]
     active_work_run = run_bundle["activeWorkRun"]
+    # Product bar: refuse stage open when upstream is not ready (same contract as UI preflight).
+    graph_metrics = _source_collection_run_graph_metrics(
+        normalized_team_id,
+        normalized_run_id,
+        source_candidates if isinstance(source_candidates, list) else [],
+    )
+    approved_or_source_count = 0
+    for item in source_candidates if isinstance(source_candidates, list) else []:
+        if not isinstance(item, dict):
+            continue
+        quality = str(item.get("qualityStatus") or item.get("currentState") or "").lower()
+        if "approv" in quality or "screened" in quality or "ready" in quality or "synced" in quality:
+            approved_or_source_count += 1
+        elif s._trim_text(item.get("candidateId"), max_length=160):
+            # Count concrete source/manifest candidates even before quality label is perfect.
+            if str(item.get("candidateType") or "") in {"source_manifest", "paper_note", "algorithm_hypothesis"}:
+                approved_or_source_count += 1
+    assert_source_collection_stage_advance_ready(
+        stage_id=stage_id,
+        record_count=len(records) if isinstance(records, list) else 0,
+        approved_or_source_candidate_count=max(approved_or_source_count, len(source_candidates) if isinstance(source_candidates, list) else 0),
+        graph_node_count=graph_metrics["nodeCount"],
+        graph_edge_count=graph_metrics["edgeCount"],
+        graph_missing_link_count=graph_metrics["missingLinkCount"],
+    )
     if not agent_role:
         agent_role = s._normalize_source_collection_agent_role(s._source_collection_agent_role_for_id(assignments, agent_id, stage_id))
     allowed_roles = s.SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES[stage_id]

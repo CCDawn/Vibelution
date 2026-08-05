@@ -28,17 +28,8 @@ type TeamSourceCollectionActiveStagePanelProps = {
   stageId: TeamSourceCollectionActiveStageId;
   title: ReactNode;
   status: ReactNode;
-  inputLabel: ReactNode;
-  outputLabel: ReactNode;
-  nextLabel: ReactNode;
-  /** Extraction micro-flow: always-visible next step when provided. */
+  /** Extraction micro-flow step chips when provided. */
   flowSteps?: ExtractionFlowStep[] | null;
-  flowNowHint?: ReactNode;
-  flowAfterHint?: ReactNode;
-  /** Optional eyebrow above the hero primary (e.g. 点这里推进). */
-  primaryActionEyebrow?: ReactNode;
-  /** Optional helper under the hero primary. */
-  primaryActionHint?: ReactNode;
   primaryAction: TeamSourceCollectionActiveStageAction;
   /** Extra secondary actions after primary (e.g. 补导入 / 重新复核). */
   secondaryActions?: ReactNode;
@@ -57,6 +48,8 @@ type TeamSourceCollectionActiveStagePanelProps = {
   renderIntegratedRecovery?: () => ReactNode;
   renderGraphPanel: () => ReactNode;
   renderMemoryPanel: () => ReactNode;
+  /** Compact actions under the stage card (e.g. project reset buttons only). */
+  footer?: ReactNode;
 };
 
 const SC_STAGE_RIGHT_PANE = {
@@ -71,14 +64,7 @@ export function TeamSourceCollectionActiveStagePanel({
   stageId,
   title,
   status,
-  inputLabel,
-  outputLabel,
-  nextLabel,
   flowSteps = null,
-  flowNowHint = null,
-  flowAfterHint = null,
-  primaryActionEyebrow = null,
-  primaryActionHint = null,
   primaryAction,
   secondaryActions = null,
   agentChatAction,
@@ -91,6 +77,7 @@ export function TeamSourceCollectionActiveStagePanel({
   renderIntegratedRecovery,
   renderGraphPanel,
   renderMemoryPanel,
+  footer = null,
 }: TeamSourceCollectionActiveStagePanelProps) {
   const integratedRecovery = stageId === "extraction" && renderIntegratedRecovery
     ? renderIntegratedRecovery()
@@ -140,29 +127,10 @@ export function TeamSourceCollectionActiveStagePanel({
               </li>
             ))}
           </ol>
-          <div className={styles.sourceCollectionStageFlowHints}>
-            <span className={styles.sourceCollectionStageFlowNow}>
-              <b>{lang === "zh" ? "现在" : "Now"}</b>
-              {flowNowHint}
-            </span>
-            <span>
-              <b>{lang === "zh" ? "做完后" : "Then"}</b>
-              {flowAfterHint}
-            </span>
-          </div>
         </div>
-      ) : (
-        <div className={styles.sourceCollectionStageHandoff}>
-          <span><b>{lang === "zh" ? "输入" : "Input"}</b>{inputLabel}</span>
-          <span><b>{lang === "zh" ? "输出" : "Output"}</b>{outputLabel}</span>
-          <span className={styles.sourceCollectionStageHandoffNext}><b>{lang === "zh" ? "下一步" : "Next"}</b>{nextLabel}</span>
-        </div>
-      )}
+      ) : null}
       {collapseSecondaryActions || hasFlowGuide ? (
         <div className={styles.sourceCollectionStageNextAction} role="region" aria-label={lang === "zh" ? "推荐下一步操作" : "Recommended next action"}>
-          {primaryActionEyebrow ? (
-            <p className={styles.sourceCollectionStageNextActionLabel}>{primaryActionEyebrow}</p>
-          ) : null}
           {primaryAction.badge ? (
             <span className={styles.sourceCollectionStageNextActionBadge}>{primaryAction.badge}</span>
           ) : null}
@@ -177,9 +145,6 @@ export function TeamSourceCollectionActiveStagePanel({
           >
             {primaryAction.label}
           </VButton>
-          {primaryActionHint ? (
-            <p className={styles.sourceCollectionStageNextActionHint}>{primaryActionHint}</p>
-          ) : null}
         </div>
       ) : (
         <div className={styles.sourceCollectionStageChatActions}>
@@ -206,7 +171,7 @@ export function TeamSourceCollectionActiveStagePanel({
       ) : null}
       {(collapseSecondaryActions || hasFlowGuide) ? (
         <details className={styles.sourceCollectionStageMoreActions}>
-          <summary>{lang === "zh" ? "更多操作（一般不用）" : "More actions (usually unused)"}</summary>
+          <summary>{lang === "zh" ? "更多操作" : "More"}</summary>
           <div className={styles.sourceCollectionStageMoreActionsBody}>
             {secondaryActions}
             {agentChatAction}
@@ -215,6 +180,11 @@ export function TeamSourceCollectionActiveStagePanel({
         </details>
       ) : null}
       <div className={styles.sourceCollectionStageErrors}>{errors}</div>
+      {footer ? (
+        <div className={styles.sourceCollectionStageProjectReset} data-testid="source-collection-stage-project-reset">
+          {footer}
+        </div>
+      ) : null}
     </div>
   );
 

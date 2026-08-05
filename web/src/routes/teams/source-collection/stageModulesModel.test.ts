@@ -4,6 +4,7 @@ import {
   buildSourceCollectionBoardChrome,
   buildSourceCollectionCompletionFlowNodes,
   buildSourceCollectionStandaloneStageModules,
+  pickSourceCollectionPipelineModule,
   type SourceCollectionStageModule,
 } from "./stageModulesModel";
 
@@ -28,14 +29,99 @@ const module: SourceCollectionStageModule = {
 };
 
 describe("stageModulesModel", () => {
-  it("picks board current module and next-step label", () => {
+  it("picks board current module and next-step label from nextLabel", () => {
     const chrome = buildSourceCollectionBoardChrome({
       lang: "zh",
       sourceCollectionStageModules: [module],
       sourceCollectionStageFocusLabel: "focus",
     });
     expect(chrome.sourceCollectionBoardCurrentModule?.id).toBe("finding");
-    expect(chrome.sourceCollectionBoardNextStepLabel).toBe("Find");
+    expect(chrome.sourceCollectionBoardNextStepLabel).toBe("next");
+  });
+
+  it("pipeline primary skips done finding and owns extraction", () => {
+    const finding: SourceCollectionStageModule = {
+      ...module,
+      id: "finding",
+      label: "找资料",
+      state: "done",
+      actionLabel: "搜索下一批",
+      nextLabel: "进入资料提炼",
+    };
+    const extraction: SourceCollectionStageModule = {
+      ...module,
+      id: "extraction",
+      label: "提炼",
+      state: "pending",
+      actionLabel: "Agent 提炼资料",
+      nextLabel: "Agent 继续提炼",
+    };
+    const picked = pickSourceCollectionPipelineModule([finding, extraction]);
+    expect(picked?.id).toBe("extraction");
+    expect(picked?.actionLabel).toBe("Agent 提炼资料");
+    const chrome = buildSourceCollectionBoardChrome({
+      lang: "zh",
+      sourceCollectionStageModules: [finding, extraction],
+      sourceCollectionStageFocusLabel: "focus",
+    });
+    expect(chrome.sourceCollectionBoardNextStepLabel).toBe("Agent 继续提炼");
+  });
+
+  it("pipeline primary hands off to extraction when finding nextLabel is handoff even if state still pending", () => {
+    const finding: SourceCollectionStageModule = {
+      ...module,
+      id: "finding",
+      label: "找资料",
+      state: "pending",
+      actionLabel: "搜索下一批",
+      nextLabel: "进入资料提炼",
+    };
+    const extraction: SourceCollectionStageModule = {
+      ...module,
+      id: "extraction",
+      label: "提炼",
+      state: "idle",
+      actionLabel: "Agent 提炼资料",
+      nextLabel: "进入资料关系整理",
+    };
+    expect(pickSourceCollectionPipelineModule([finding, extraction])?.id).toBe("extraction");
+  });
+
+  it("keeps pipeline on relations when graph missing links would block ingestion", () => {
+    const finding: SourceCollectionStageModule = {
+      ...module,
+      id: "finding",
+      state: "done",
+      nextLabel: "进入资料提炼",
+    };
+    const extraction: SourceCollectionStageModule = {
+      ...module,
+      id: "extraction",
+      state: "done",
+      nextLabel: "进入资料关系整理",
+    };
+    const relations: SourceCollectionStageModule = {
+      ...module,
+      id: "relations",
+      label: "整理关系",
+      state: "done",
+      actionLabel: "Agent 整理关系",
+      nextLabel: "进入资料入库",
+    };
+    const ingestion: SourceCollectionStageModule = {
+      ...module,
+      id: "ingestion",
+      label: "入库",
+      state: "failed",
+      actionLabel: "Agent 继续入库",
+      nextLabel: "完成入库",
+    };
+    const picked = pickSourceCollectionPipelineModule(
+      [finding, extraction, relations, ingestion],
+      { nodeCount: 19, edgeCount: 19, missingLinkCount: 60 },
+    );
+    expect(picked?.id).toBe("relations");
+    expect(picked?.actionLabel).toBe("Agent 整理关系");
   });
 
   it("falls back completion flow nodes from stage modules", () => {

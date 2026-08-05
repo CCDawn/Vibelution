@@ -46,11 +46,9 @@ const styles = {
   wide:
     "col-span-2 max-[1180px]:col-span-1",
   actionRow:
-    "flex min-w-0 items-center justify-between gap-2 border-t border-[color:var(--border-soft)] pt-3",
+    "flex min-w-0 items-center border-t border-[color:var(--border-soft)] pt-3",
   actionHint:
     "min-w-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-tertiary)]",
-  primaryAction:
-    "shrink-0 border-[color:var(--accent-cool)] !bg-[color:var(--accent-cool)] !text-white hover:!bg-[color:color-mix(in_srgb,var(--accent-cool)_88%,black)]",
 } as const;
 
 export default styles;

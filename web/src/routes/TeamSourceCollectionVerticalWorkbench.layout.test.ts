@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import persistedHeightListShellSource from "../components/layout/PersistedHeightListShell.tsx?raw";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import activeStageSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
 import activeStageStyles from "./TeamSourceCollectionActiveStagePanel.styles";
 import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
@@ -11,29 +12,30 @@ import standaloneStageStyles from "./TeamSourceCollectionStandaloneStagePanel.st
 import { SOURCE_COLLECTION_RESULT_PAGE_SIZE } from "./teams/source-collection/presentationModel";
 
 describe("source collection vertical three-column workbench", () => {
-  it("places run context, result workspace, and stage controls in persistent desktop rails", () => {
-    expect(standaloneStageStyles.sourceCollectionPageBody).toContain(
-      "grid-cols-[clamp(300px,20vw,348px)_minmax(520px,1fr)_clamp(270px,17vw,338px)]",
-    );
-    expect(standaloneStageStyles.sourceCollectionLeftRail).toContain("col-start-1");
-    expect(standaloneStageStyles.sourceCollectionPageGrid).toContain("col-start-2 col-span-2");
-    expect(activeStageStyles.sourceCollectionStageWorkspace).toContain(
-      "grid-cols-[minmax(0,1fr)_clamp(270px,17vw,338px)]",
-    );
-    expect(activeStageStyles.sourceCollectionStageResult).toContain(
-      "col-start-1 row-start-1 row-span-2",
-    );
-    expect(activeStageStyles.sourceCollectionStageWorkspaceHeader).toContain(
-      "col-start-2 row-start-1",
-    );
+  it("uses persisted VSplitWorkspace rails instead of fixed clamp grid columns", () => {
+    expect(standaloneStageSource).toContain("VSplitWorkspace");
+    expect(standaloneStageSource).toContain("WORKBENCH_LAYOUT_IDS.teamsSourceCollection");
+    expect(standaloneStageSource).toContain('id: "sc-left"');
+    expect(standaloneStageStyles.sourceCollectionPageBody).toContain("flex");
+    expect(standaloneStageStyles.sourceCollectionPageBody).not.toContain("grid-cols-[clamp");
+    expect(standaloneStageStyles.sourceCollectionLeftRail).not.toContain("col-start-1");
+
+    expect(activeStageSource).toContain("VSplitWorkspace");
+    expect(activeStageSource).toContain("WORKBENCH_LAYOUT_IDS.teamsSourceCollectionStage");
+    expect(activeStageSource).toContain('id: "sc-stage"');
+    expect(activeStageStyles.sourceCollectionStageWorkspace).toContain("flex");
+    expect(activeStageStyles.sourceCollectionStageWorkspace).not.toContain("grid-cols-[minmax(0,1fr)_clamp");
+    expect(WORKBENCH_LAYOUT_IDS.teamsSourceCollection).toBe("teams-source-collection");
+    expect(WORKBENCH_LAYOUT_IDS.teamsSourceCollectionStage).toBe("teams-source-collection-stage");
   });
 
   it("keeps stage navigation free of duplicated long action buttons", () => {
     expect(standaloneStageSource).not.toContain("actions={");
-    expect(standaloneStageSource).not.toContain('from "../components/vui"');
+    // Standalone imports VSplitWorkspace from vui; still no VButton spray.
+    expect(standaloneStageSource).not.toContain("VButton");
   });
 
-  it("groups errors and results into explicit grid surfaces", () => {
+  it("groups errors and results into explicit surfaces", () => {
     expect(activeStageSource).toContain("sourceCollectionStageErrors");
     expect(activeStageSource).toContain("sourceCollectionStageResult");
     expect(activeStageStyles.sourceCollectionStageChatActions).toContain(

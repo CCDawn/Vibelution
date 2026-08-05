@@ -7,6 +7,8 @@ const styles = {
     "phaseCloseGateHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 max-[640px]:grid-cols-[minmax(0,1fr)] [&>div]:min-w-0 [&_strong]:block [&_strong]:text-[var(--fg-primary)] [&_span]:min-w-0 [&_span]:break-words [&_span]:[overflow-wrap:anywhere]",
   phaseCloseGateEyebrow:
     "mb-0.5 block [font-size:var(--vui-font-xs)] font-[760] uppercase tracking-[0.06em] text-[var(--fg-tertiary)]",
+  phaseCloseGateCompactHint:
+    "mt-1 block [font-size:var(--vui-font-xs)] font-[650] leading-snug text-[var(--fg-tertiary)]",
   phaseCloseGatePanel:
     "phaseCloseGatePanel min-w-0 grid content-start gap-2 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] bg-[color:var(--source-workbench-panel)] px-2.5 py-2",
   phaseCloseGatePanelCompact:

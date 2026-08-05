@@ -65,6 +65,9 @@ const styles = {
   sourceCollectionStageAsideHost:
     "sourceCollectionStageAsideHost flex h-full min-h-0 min-w-0 flex-col overflow-hidden p-0.5",
   sourceCollectionStageWorkspaceHeader: `sourceCollectionStageWorkspaceHeader min-w-0 !grid grid-cols-[minmax(0,1fr)] content-start items-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} p-2 h-full min-h-0 overflow-y-auto [scrollbar-gutter:stable] [&>div]:min-w-0 [&>div:first-child]:grid [&>div:first-child]:gap-0.5 [&>div>strong]:min-w-0 [&>div>strong]:truncate [&>div>span]:min-w-0 [&>div>span]:break-words`,
+  /** Compact project-reset actions under the stage card (buttons only, no copy wall). */
+  sourceCollectionStageProjectReset:
+    "sourceCollectionStageProjectReset min-w-0 grid gap-1.5 border-t border-[var(--vui-border-subtle)] pt-2 mt-0.5 empty:hidden [&_[data-vui=button]]:!w-full [&_[data-vui=button]]:!justify-center",
 } as const;
 
 export default styles;

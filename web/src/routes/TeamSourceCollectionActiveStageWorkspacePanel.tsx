@@ -4,10 +4,11 @@
  * Extraction stage merges recovery/verification into the right stage card.
  */
 import { useState, type ReactNode } from "react";
-import { CircleX, Link2, MessageSquare, RefreshCw } from "lucide-react";
+import { CircleX, Link2, MessageSquare, RefreshCw, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { VConfirmDialog, VNativeButton, VTooltip } from "../components/vui";
+import { VButton, VConfirmDialog, VNativeButton, VTooltip } from "../components/vui";
+import { ResearchWorkflowErrorSurface } from "./teams/ResearchWorkflowErrorSurface";
 import { researchStageAgentManagementRoute } from "./teams/researchStageAgentPresentation";
 import { buildExtractionRecoveryViewModel } from "./teams/source-collection/extractionRecoveryViewModel";
 import { buildExtractionStageFlowGuide } from "./teams/source-collection/extractionStageFlowGuide";
@@ -68,6 +69,14 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   renderSourceCollectionMemoryPanel: () => ReactNode;
   /** Extraction recovery inputs — when set, merge into extraction stage card. */
   extractionRecovery?: SourceCollectionExtractionRecoveryBag;
+  /** Project-level source-collection reset (compact buttons under stage card). */
+  projectReset?: {
+    available: boolean;
+    pending: boolean;
+    includeDownstream: boolean;
+    error: Error | null;
+    onReset: (input: { includeDownstream: boolean }) => void;
+  } | null;
 };
 
 export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceCollectionActiveStageWorkspacePanelProps) {
@@ -94,6 +103,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     renderSourceCollectionGraphPanel,
     renderSourceCollectionMemoryPanel,
     extractionRecovery,
+    projectReset = null,
   } = props;
 
   const activeModule =
@@ -394,10 +404,6 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
       )
     : null;
 
-  const pipelineProgressHint = lang === "zh"
-    ? `流水线当前：${pipelineModule.label} · 点下方固定按钮推进（与左栏选中卡片无关）`
-    : `Pipeline: ${pipelineModule.label} · use the fixed progress button (independent of the open card)`;
-
   const pipelineBlockedFailureText = pipelineTaskBlocked
     ? (
         lang === "zh"
@@ -424,6 +430,54 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
 
   const advanceFailureText = sourceCollectionStageAdvanceFailure || pipelineBlockedFailureText;
 
+  const projectResetFooter = projectReset?.available || projectReset?.error ? (
+    <>
+      {projectReset.available ? (
+        <>
+          <VButton
+            type="button"
+            variant="danger"
+            density="compact"
+            onPress={() => projectReset.onReset({ includeDownstream: false })}
+            isDisabled={projectReset.pending}
+            icon={<Trash2 size={14} />}
+            data-testid="source-collection-reset-sources-only"
+          >
+            {projectReset.pending && !projectReset.includeDownstream
+              ? (lang === "zh" ? "正在清空…" : "Clearing…")
+              : (lang === "zh" ? "清空本项目资料并重新开始" : "Clear this project's sources and restart")}
+          </VButton>
+          <VButton
+            type="button"
+            variant="danger"
+            density="compact"
+            onPress={() => projectReset.onReset({ includeDownstream: true })}
+            isDisabled={projectReset.pending}
+            icon={<Trash2 size={14} />}
+            data-testid="source-collection-reset-cascade"
+          >
+            {projectReset.pending && projectReset.includeDownstream
+              ? (lang === "zh" ? "正在清空…" : "Clearing…")
+              : (lang === "zh" ? "连同实验与迭代一起清空" : "Clear sources + experiment/iteration")}
+          </VButton>
+        </>
+      ) : null}
+      {projectReset.error ? (
+        <ResearchWorkflowErrorSurface
+          lang={lang}
+          message={projectReset.error.message}
+          pending={projectReset.pending}
+          onRecommendedAction={(action) => {
+            if (action !== "reset_progress_cascade" && action !== "reset_source_only") {
+              return;
+            }
+            projectReset.onReset({ includeDownstream: action === "reset_progress_cascade" });
+          }}
+        />
+      ) : null}
+    </>
+  ) : null;
+
   return (
     <>
       <TeamSourceCollectionActiveStagePanel
@@ -432,18 +486,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
       compact={sourceCollectionActiveStageCompact}
       title={activeModule.label}
       status={recoveryViewModel ? recoveryViewModel.statusLabel : activeModule.status}
-      inputLabel={activeModule.inputLabel}
-      outputLabel={activeModule.outputLabel}
-      nextLabel={pipelineModule.nextLabel || activeModule.nextLabel}
       flowSteps={useExtractionGuidePrimary ? extractionFlowGuide?.steps : null}
-      flowNowHint={useExtractionGuidePrimary ? extractionFlowGuide?.nowHint : null}
-      flowAfterHint={useExtractionGuidePrimary ? extractionFlowGuide?.afterHint : null}
-      primaryActionEyebrow={lang === "zh" ? "流程推进" : "Stage advance"}
-      primaryActionHint={useExtractionGuidePrimary
-        ? (lang === "zh"
-          ? `做完后：${extractionFlowGuide!.afterHint}`
-          : `Then: ${extractionFlowGuide!.afterHint}`)
-        : pipelineProgressHint}
       primaryAction={{
         ...primaryAction,
         // Keep the button label short — no 推进：/推荐：/系统重试： stacking.
@@ -453,6 +496,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
       }}
       secondaryActions={secondaryActions}
       collapseSecondaryActions
+      footer={projectResetFooter}
       agentChatAction={primaryStageAgentChatRoute ? (
         <Link
           to={primaryStageAgentChatRoute}

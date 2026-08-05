@@ -150,7 +150,7 @@ describe("source collection display state", () => {
     expect(deriveSourceCollectionDisplayState({ ...baseInput, backgroundActive: true }).phase).toBe("running");
   });
 
-  it("shows a returned batch as continuable instead of still running", () => {
+  it("marks finding search step done when a batch returned so pipeline can hand off to extraction", () => {
     const state = deriveSourceCollectionDisplayState({
       ...baseInput,
       searchOpenAssignmentCount: 3,
@@ -161,7 +161,8 @@ describe("source collection display state", () => {
     expect(state.phase).toBe("needs_continue");
     expect(state.active).toBe(false);
     expect(state.statusText).toBe("已返回一批");
-    expect(state.decisionText).toContain("还有 3 个搜索任务可继续");
+    expect(state.searchStepState).toBe("done");
+    expect(state.decisionText).toContain("主按钮进入提炼");
   });
 });
 

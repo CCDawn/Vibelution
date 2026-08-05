@@ -129,6 +129,42 @@ describe("TeamSourceCollectionExtractionRecoveryWorkspacePanel", () => {
     expect(markup).toContain("1/14");
   });
 
+  it("treats incomplete coverage without hard failures as continue-progress, not failure", () => {
+    const projection = {
+      status: "partial_current_inputs",
+      counts: { input: 19, output: 0, pending: 19 },
+      latestTask: {
+        coverageSummary: {
+          applicable: true,
+          blocked: 0,
+          complete: false,
+          invalid: 0,
+          missing: 19,
+          processed: 0,
+          total: 19,
+        },
+        closureSummary: {
+          blockedCount: 0,
+          failedCount: 0,
+          successCount: 0,
+          userStatus: "pending",
+        },
+        invalidCandidateIds: [],
+        invalidRecordIds: [],
+      },
+    } as unknown as SourceCollectionStageCardProjection;
+
+    const markup = renderRecoveryPanel(projection);
+
+    expect(markup).toContain("继续提炼");
+    expect(markup).toContain("待补提炼");
+    expect(markup).toContain("待处理");
+    expect(markup).toContain("不是系统故障");
+    expect(markup).toContain("继续 Agent 提炼");
+    expect(markup).not.toContain("提炼失败恢复");
+    expect(markup).not.toContain("提炼失败");
+  });
+
   it("separates source verification from missing evidence anchors", () => {
     const markup = renderRecoveryPanel(projectionWithClosure({
       blockedCount: 2,
