@@ -1,7 +1,7 @@
-import { CircleDot, MessageCircleHeart, UsersRound } from "lucide-react";
+import { UsersRound } from "lucide-react";
 
 import type { ConversationSummary, Team } from "../api/types";
-import { VChip, VNativeButton, VTooltip } from "../components/vui";
+import { VNativeButton, VTooltip } from "../components/vui";
 import type { ConversationIndexTeam } from "./conversationIndexModel";
 import { conversationIndexTeamMemberCount } from "./conversationIndexModel";
 import styles from "./GroupSessionIndexItems.styles";
@@ -19,16 +19,16 @@ export function teamStatusLabel(status: string | undefined, lang: "zh" | "en", f
 
 export function teamMemberPreview(team: Pick<Team, "members" | "memberCount">, lang: "zh" | "en") {
   const memberCount = conversationIndexTeamMemberCount(team);
-  if (!memberCount) {
-    return lang === "zh" ? "0人" : "0";
+  if (lang === "zh") {
+    return `${memberCount} 人`;
   }
-  return lang === "zh" ? `${memberCount}人` : String(memberCount);
+  return String(memberCount);
 }
 
 export function teamMemberStatusTitle(team: Pick<Team, "members" | "memberCount">, lang: "zh" | "en") {
   const memberCount = conversationIndexTeamMemberCount(team);
   if (!memberCount) {
-    return lang === "zh" ? "成员：0人 / 未配置成员" : "Members: 0 / not configured";
+    return lang === "zh" ? "成员：0 人 / 未配置成员" : "Members: 0 / not configured";
   }
   return lang === "zh" ? `成员：${teamMemberPreview(team, lang)}` : `Members: ${teamMemberPreview(team, lang)}`;
 }
@@ -44,6 +44,16 @@ function indexItemTooltip(title: string, details: string[]) {
       {details.filter(Boolean).map((detail) => <span key={detail}>{detail}</span>)}
     </span>
   );
+}
+
+function statusDotClass(kind: "active" | "pending" | "muted") {
+  if (kind === "pending") {
+    return styles.sessionStatusDotPending;
+  }
+  if (kind === "muted") {
+    return styles.sessionStatusDotMuted;
+  }
+  return styles.sessionStatusDot;
 }
 
 type GroupConversationIndexItemProps = {
@@ -71,43 +81,46 @@ export function GroupConversationIndexItem({
 }: GroupConversationIndexItemProps) {
   const title = conversation.title.trim() || fallbackSummary;
   const itemClassName = active
-    ? `${styles.sessionItem} ${styles.groupSessionItem} ${styles.sessionItemActive}`
+    ? `${styles.sessionItem} ${styles.groupSessionItem} ${styles.teamTreeItemActive}`
     : `${styles.sessionItem} ${styles.groupSessionItem}`;
   const groupStatus = statusLabel(conversation.status);
-  const memberLabel = lang === "zh" ? `成员：${conversation.participantCount ?? 0}` : `Members: ${conversation.participantCount ?? 0}`;
+  const memberLabel = lang === "zh"
+    ? `成员：${conversation.participantCount ?? 0} 人`
+    : `Members: ${conversation.participantCount ?? 0}`;
+  const memberPreview = lang === "zh"
+    ? `${conversation.participantCount ?? 0} 人`
+    : String(conversation.participantCount ?? 0);
   const tooltip = indexItemTooltip(title, [groupStatus, `${kindLabel} · ${memberLabel}`]);
+  const statusKind = String(conversation.status || "").trim().toLowerCase() === "active" ? "active" : "muted";
 
   return (
     <div className={itemClassName}>
       <VTooltip content={tooltip} width="wide">
         <VNativeButton
           type="button"
-          className={styles.sessionItemMain}
+          className={styles.teamSessionItemMain}
           aria-current={active ? "true" : undefined}
           aria-label={[title, groupStatus, kindLabel, memberLabel].join(" · ")}
           onClick={() => onOpen(roomId)}
         >
-          <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
-            <UsersRound size={18} />
+          <span className={styles.conversationAvatarGroup} aria-hidden="true">
+            <UsersRound size={15} />
           </span>
           <span className={styles.conversationCopy}>
             <span className={styles.conversationTitleRow}>
-              <span className={styles.sessionItemTitle}>{title}</span>
-              <span aria-label={groupStatus}>
-                <VChip tone="success" className={styles.sessionState}>
-                  <CircleDot size={10} aria-hidden="true" />
-                </VChip>
+              <span className={styles.teamSessionItemTitle}>{title}</span>
+              <span
+                className={styles.sessionState}
+                aria-label={groupStatus}
+                title={groupStatus}
+              >
+                <span className={statusDotClass(statusKind)} aria-hidden="true" />
               </span>
             </span>
-            <span className={styles.conversationMetaRow}>
-              <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`} aria-label={kindLabel}>
-                <MessageCircleHeart size={10} aria-hidden="true" />
-              </span>
-              <span aria-label={memberLabel}>
-                <UsersRound size={10} aria-hidden="true" />
-                {conversation.participantCount ?? 0}
-              </span>
-              <time>{formatTime(conversation.updatedAt)}</time>
+            <span className={styles.teamConversationMetaRow}>
+              <span className={styles.conversationMetaItem}>{kindLabel}</span>
+              <span className={styles.conversationMetaMuted}>{memberPreview}</span>
+              <time className={styles.conversationMetaMuted}>{formatTime(conversation.updatedAt)}</time>
             </span>
           </span>
         </VNativeButton>
@@ -140,56 +153,84 @@ export function TeamConversationIndexItem({
 }: TeamConversationIndexItemProps) {
   void teamRoute;
   const itemClassName = active
-    ? `${styles.sessionItem} ${styles.teamTreeItem} ${styles.sessionItemActive}`
+    ? `${styles.sessionItem} ${styles.teamTreeItem} ${styles.teamTreeItemActive}`
     : `${styles.sessionItem} ${styles.teamTreeItem}`;
   const title = String(displayTitle || team.name || "").trim() || team.name;
   const teamName = String(team.name || "").trim();
   const secondaryTeamName = teamName && teamName !== title ? teamName : "";
   const teamStatus = teamStatusLabel(team.status, lang, statusLabel);
-  const roomTitle = roomId ? (lang === "zh" ? "团队群聊已同步" : "Team room linked") : (lang === "zh" ? "团队群聊待同步" : "Team room pending");
+  const roomLinked = Boolean(roomId);
+  const roomTitle = roomLinked
+    ? (lang === "zh" ? "团队群聊已同步" : "Team room linked")
+    : (lang === "zh" ? "团队群聊待同步" : "Team room pending");
+  const roomMeta = roomLinked
+    ? (lang === "zh" ? "已同步" : "Linked")
+    : (lang === "zh" ? "待同步" : "Pending");
   const memberTitle = teamMemberStatusTitle(team, lang);
+  const memberPreview = teamMemberPreview(team, lang);
   const duplicateCount = Number(team.conversationIndexDuplicateCount) || 0;
   const duplicateTitle = lang === "zh"
     ? `已合并 ${duplicateCount} 个同名团队记录`
     : `${duplicateCount} same-name Team records merged`;
+  const duplicateMeta = lang === "zh" ? `合并 ${duplicateCount}` : `merged ${duplicateCount}`;
   const disabledReasonId = roomId ? undefined : `team-row-disabled-reason-${team.teamId}`;
-  const tooltip = indexItemTooltip(title, [secondaryTeamName, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""]);
+  const tooltip = indexItemTooltip(title, [
+    secondaryTeamName,
+    teamStatus,
+    memberTitle,
+    roomTitle,
+    duplicateCount > 1 ? duplicateTitle : "",
+  ]);
+  const statusKind: "active" | "pending" | "muted" = !roomLinked
+    ? "pending"
+    : String(team.status || "").trim().toLowerCase() === "active"
+      ? "active"
+      : "muted";
+
   const row = (
     <VNativeButton
       type="button"
-      className={styles.sessionItemMain}
+      className={styles.teamSessionItemMain}
       disabled={!roomId}
       aria-current={active ? "true" : undefined}
       aria-describedby={disabledReasonId}
-      aria-label={[title, secondaryTeamName, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""].filter(Boolean).join(" · ")}
+      aria-label={[
+        title,
+        secondaryTeamName,
+        teamStatus,
+        memberTitle,
+        roomTitle,
+        duplicateCount > 1 ? duplicateTitle : "",
+      ].filter(Boolean).join(" · ")}
       onClick={() => onOpen(roomId)}
     >
-      <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
-        <UsersRound size={18} />
+      <span className={styles.conversationAvatarGroup} aria-hidden="true">
+        <UsersRound size={15} />
       </span>
       <span className={styles.conversationCopy}>
         <span className={styles.conversationTitleRow}>
-          <span className={styles.sessionItemTitle}>{title}</span>
-          <span aria-label={teamStatus}>
-            <VChip tone="success" className={styles.sessionState}>
-              <CircleDot size={10} aria-hidden="true" />
-            </VChip>
+          <span className={styles.teamSessionItemTitle}>{title}</span>
+          <span
+            className={styles.sessionState}
+            aria-label={roomLinked ? teamStatus : roomTitle}
+            title={roomLinked ? teamStatus : roomTitle}
+          >
+            <span className={statusDotClass(statusKind)} aria-hidden="true" />
           </span>
         </span>
-        <span className={styles.conversationMetaRow}>
-          <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`} aria-label={lang === "zh" ? "团队" : "Team"}>
-            <UsersRound size={10} aria-hidden="true" />
-          </span>
-          <span aria-label={memberTitle}>
-            <UsersRound size={10} aria-hidden="true" />
-            {teamMemberPreview(team, lang)}
-          </span>
-          <span aria-label={roomTitle}>
-            <MessageCircleHeart size={10} aria-hidden="true" />
-          </span>
+        <span className={styles.teamConversationMetaRow}>
+          {secondaryTeamName ? (
+            <span className={styles.conversationMetaItem}>{secondaryTeamName}</span>
+          ) : (
+            <span className={styles.conversationMetaItem}>
+              {lang === "zh" ? "群聊" : "Group chat"}
+            </span>
+          )}
+          <span className={styles.conversationMetaMuted}>{memberPreview}</span>
+          <span className={styles.conversationMetaMuted}>{roomMeta}</span>
           {duplicateCount > 1 ? (
-            <span aria-label={duplicateTitle}>
-              {lang === "zh" ? `合并${duplicateCount}` : `merged ${duplicateCount}`}
+            <span className={styles.conversationMetaMuted} aria-label={duplicateTitle}>
+              {duplicateMeta}
             </span>
           ) : null}
         </span>

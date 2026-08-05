@@ -1468,12 +1468,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusRing).toContain("relative");
     expect(routeStyles.tokenStatusRing).toContain("conic-gradient");
     expect(routeStyles.tokenStatusBar).toContain("[&>span]:w-[calc(var(--token-status-value)*1%)]");
-    expect(routeStyles.cacheDetailBoundaryTrack).toContain("[&_span+span]:border-l");
+    expect(routeStyles.cacheDetailBoundaryTrack).toContain("flex");
+    expect(routeStyles.cacheDetailBoundaryTrack).toContain("h-2");
     expect(routeStyles.cacheDetailBoundaryHit).toContain("w-[var(--cache-boundary-hit-width)]");
     expect(routeStyles.cacheDetailBoundaryMiss).toContain("w-[var(--cache-boundary-miss-width)]");
     expect(routeStyles.cacheDetailBoundaryUnknown).toContain("w-[var(--cache-boundary-unknown-width)]");
     expect(routeStyles.cacheDetailSegmentHeader).toContain("flex");
-    expect(routeStyles.cacheDetailSegmentHeader).toContain("items-center");
+    expect(routeStyles.cacheDetailSegmentHeader).toContain("items-baseline");
     expect(routeStyles.cacheDetailSegmentHeader).not.toContain("rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)]");
     expect(routeStyles.cacheDetailSegmentHeader).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(routeStyles.cacheDetailSegmentHeader).not.toContain("shadow-[var(--vui-shadow-hairline)]");
@@ -1962,7 +1963,7 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.cliAgentTerminalCommand, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [chatRuntimeNoticeStackStyles.notice, "grid-cols-[16px_minmax(0,1fr)]"],
       [chatToolApprovalDialogStyles.dialog, "grid-cols-[28px_minmax(0,1fr)_auto]"],
-      [routeStyles.cacheDetailCalibrationNote, "grid-cols-[auto_minmax(0,1fr)_auto]"],
+      [routeStyles.cacheDetailCalibrationNote, "gap-1"],
       [routeStyles.rightIndexTabs, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [routeStyles.memberIndexSummary, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [routeStyles.groupAgentOption, "grid-cols-[auto_28px_minmax(0,1fr)]"],
@@ -2324,7 +2325,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndActionsSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false })");
     expect(directSessionIndexItemSource).not.toContain("styles.conversationKindBadgeDirect");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeChild");
-    expect(groupSessionIndexItemsSource).toContain("styles.conversationKindBadgeGroup");
+    expect(groupSessionIndexItemsStyles.conversationKindBadgeGroup).toBeTypeOf("string");
+    expect(groupSessionIndexItemsSource).toContain("styles.teamConversationMetaRow");
 
     expect(routeStyles.conversationAvatar).toBeTypeOf("string");
     expect(routeStyles.conversationAvatarDirect).toBeTypeOf("string");
@@ -2890,8 +2892,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("formatTime={formatConversationIndexTime}");
     expect(groupSessionIndexItemsSource).toContain("export function teamStatusLabel");
     expect(groupSessionIndexItemsSource).toContain("teamStatusLabel(team.status, lang, statusLabel)");
-    expect(groupSessionIndexItemsSource).toContain("CircleDot");
+    expect(groupSessionIndexItemsSource).toContain("sessionStatusDot");
     expect(groupSessionIndexItemsSource).not.toContain("Clock3");
+    expect(groupSessionIndexItemsSource).not.toContain("CircleDot");
     expect(groupSessionIndexItemsSource).toContain("teamMemberPreview(team, lang)");
     expect(groupSessionIndexItemsSource).not.toContain("team.linkedChatRoom?.title");
     expect(groupSessionIndexItemsSource).not.toContain("team.members ?? []");
@@ -3075,16 +3078,17 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(groupSessionIndexItemsStyles.sessionItem).toContain("overflow-hidden");
     expect(groupSessionIndexItemsStyles.sessionItem).toMatch(/border border-vui-border-subtle|border border-\[var\(--vui-border-subtle\)\]/);
-    expect(groupSessionIndexItemsStyles.sessionItem).toMatch(/!bg-vui-surface-row|!bg-\[var\(--vui-surface-row\)\]/);
     expect(groupSessionIndexItemsStyles.conversationAvatar).toContain("h-8");
     expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("min-h-[60px]");
     expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("grid-cols-[32px_minmax(0,1fr)]");
     expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("[border:0]");
-    expect(groupSessionIndexItemsSource).toContain("VChip tone=\"success\"");
-    expect(groupSessionIndexItemsStyles.sessionState).toContain("!h-[22px]");
+    expect(groupSessionIndexItemsStyles.teamSessionItemMain).toContain("min-h-[3.25rem]");
+    expect(groupSessionIndexItemsSource).toContain("sessionStatusDot");
+    expect(groupSessionIndexItemsSource).not.toContain("VChip tone=\"success\"");
+    expect(groupSessionIndexItemsStyles.sessionStatusDot).toContain("state-success");
     expect(groupSessionIndexItemsStyles.teamTreeItem).toContain("overflow-hidden");
-    expect(groupSessionIndexItemsStyles.teamTreeItem).not.toContain("bg-transparent");
-    expect(groupSessionIndexItemsStyles.groupSessionItem).not.toContain("bg-transparent");
+    expect(groupSessionIndexItemsStyles.teamTreeItem).toContain("!bg-transparent");
+    expect(groupSessionIndexItemsStyles.groupSessionItem).toContain("!bg-transparent");
   });
 
   it("selects requested direct sessions without waiting for the session index", () => {

@@ -62,10 +62,11 @@ describe("GroupSessionIndexItems helpers", () => {
     }));
 
     expect(markup).toContain('data-vui="native-button"');
-    expect(markup).toContain('data-vui="chip"');
+    expect(markup).not.toContain('data-vui="chip"');
     expect(markup).not.toContain('data-vui="button"');
-    expect(markup).toContain('aria-label="团队群聊 · 启用中 · 群聊 · 成员：3"');
-    expect(markup).not.toContain('title=');
+    expect(markup).toContain('aria-label="团队群聊 · 启用中 · 群聊 · 成员：3 人"');
+    expect(markup).toContain(">群聊</span>");
+    expect(markup).toContain(">3 人</span>");
   });
 
   it("keeps active group semantics on the native row button and falls back when the title is empty", () => {
@@ -113,10 +114,12 @@ describe("GroupSessionIndexItems helpers", () => {
     }));
 
     expect(markup).toContain('data-vui="native-button"');
-    expect(markup).toContain('data-vui="chip"');
+    expect(markup).not.toContain('data-vui="chip"');
     expect(markup).not.toContain('data-vui="button"');
-    expect(markup).toContain('aria-label="科研团队 · 启用中 · 成员：2人 · 团队群聊已同步"');
-    expect(markup).not.toContain('title=');
+    expect(markup).toContain('aria-label="科研团队 · 启用中 · 成员：2 人 · 团队群聊已同步"');
+    expect(markup).toContain(">群聊</span>");
+    expect(markup).toContain(">2 人</span>");
+    expect(markup).toContain(">已同步</span>");
   });
 
   it("keeps active Team semantics on the native row button", () => {
@@ -176,10 +179,21 @@ describe("GroupSessionIndexItems helpers", () => {
         { memberId: "3", agentId: "a3", agentCode: "A003", agentName: "证据审查", role: "evidence", purpose: "", agentStatus: "active" },
         { memberId: "4", agentId: "a4", agentCode: "A004", agentName: "未展示", role: "extra", purpose: "", agentStatus: "active" },
       ],
-    }), "zh")).toBe("4人");
+    }), "zh")).toBe("4 人");
     expect(teamMemberPreview(team({ memberCount: 2 }), "en")).toBe("2");
-    expect(teamMemberPreview(team({ memberCount: 0 }), "zh")).toBe("0人");
-    expect(teamMemberStatusTitle(team({ memberCount: 0 }), "zh")).toBe("成员：0人 / 未配置成员");
+    expect(teamMemberPreview(team({ memberCount: 0 }), "zh")).toBe("0 人");
+    expect(teamMemberStatusTitle(team({ memberCount: 0 }), "zh")).toBe("成员：0 人 / 未配置成员");
+  });
+
+  it("aligns team tree rows with flat agent directory chrome", () => {
+    expect(styles.teamTreeItem).toContain("!bg-transparent");
+    expect(styles.teamTreeItem).toContain("!border-0");
+    expect(styles.groupSessionItem).toContain("!bg-transparent");
+    expect(styles.teamSessionItemMain).toContain("min-h-[3.25rem]");
+    expect(styles.teamSessionItemTitle).toContain("[font-size:var(--vui-font-sm)]");
+    expect(styles.teamConversationMetaRow).toContain("flex");
+    expect(styles.conversationAvatarGroup).toContain("accent-cool");
+    expect(styles.sessionStatusDot).toContain("state-success");
   });
 
   it("uses Team category before kind and falls back to a localized custom label", () => {
