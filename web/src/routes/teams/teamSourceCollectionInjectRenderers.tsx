@@ -178,6 +178,8 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
     selectedTeamRecordSourceCollectionOutputError,
     selectedTeamExecuteSourceCollectionSearchError,
     selectedTeamStartSourceCollectionStageTaskError,
+    sourceCollectionStageAdvanceFailure,
+    sourceCollectionPipelineGraphHealth,
     selectedTeamExecuteSourceCollectionSearchResult,
     selectedTeamRecordSourceCollectionOutputResult,
     candidateGraphNodeCount,
@@ -294,15 +296,12 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
         sourceCollectionRawRecordCount={sourceCollectionRawRecordCount}
         sourceCollectionRecordClickableSourceCount={sourceCollectionRecordClickableSourceCount}
         sourceCollectionRecordLocalFileCount={sourceCollectionRecordLocalFileCount}
-        sourceCollectionStageModules={sourceCollectionStageModules}
-        sourceCollectionStageActionReadinessFor={sourceCollectionStageActionReadinessFor}
         sourceCollectionDraft={sourceCollectionDraft}
         sourceCollectionCollectedCountLabel={sourceCollectionCollectedCountLabel}
         selectedSourceCollectionStorageArtifacts={selectedSourceCollectionStorageArtifacts}
         sourceCollectionBoardNextStepLabel={sourceCollectionBoardNextStepLabel}
         sourceCollectionSourceFilter={sourceCollectionSourceFilter}
         setSourceCollectionSourceFilter={setSourceCollectionSourceFilter}
-        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
         sourceCollectionRecordFilterCounts={sourceCollectionRecordFilterCounts}
         renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
         sourceCollectionCollectedCountText={sourceCollectionCollectedCountText}
@@ -501,27 +500,11 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
     return (
       <TeamSourceCollectionSearchBriefShell
         lang={lang}
-        resetAvailable={sourceCollectionResetAvailable}
-        runCount={sourceCollectionRuns.length}
-        resetPending={selectedResearchProjectSourceCollectionResetPending}
-        resetIncludeDownstream={Boolean(
-          resetResearchProjectSourceCollectionMutation.variables?.includeDownstream,
-        )}
-        resetError={
-          selectedResearchProjectSourceCollectionResetError instanceof Error
-            ? selectedResearchProjectSourceCollectionResetError
-            : null
-        }
-        onReset={({ includeDownstream }) => runSourceCollectionProjectReset(includeDownstream)}
         draft={sourceCollectionDraft}
         modeFields={renderSourceCollectionModeFields()}
         hasExistingRun={Boolean(selectedSourceCollectionRun)}
-        canStart={sourceCollectionCanStart}
-        startPending={selectedTeamStartSourceCollectionPending}
-        teamId={selectedTeam?.teamId}
-        onDraftChange={(patch) => setSourceCollectionDraft((current: Record<string, unknown>) => ({ ...current, ...patch }))}
-        onStart={({ teamId, draft }) => {
-          startSourceCollectionRunMutation.mutate({ teamId, draft });
+        onDraftChange={(patch) => {
+          setSourceCollectionDraft((current: Record<string, unknown>) => ({ ...current, ...patch }));
         }}
       />
     );
@@ -663,11 +646,27 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
         sourceCollectionRunAvailable={Boolean(selectedSourceCollectionRunEffectiveId)}
         sourceCollectionFindingStageCompact={sourceCollectionFindingStageCompact}
         selectedTeamStartSourceCollectionStageTaskError={selectedTeamStartSourceCollectionStageTaskError}
+        sourceCollectionStageAdvanceFailure={sourceCollectionStageAdvanceFailure || ""}
+        pipelineGraphHealth={sourceCollectionPipelineGraphHealth || null}
         renderSourceCollectionConversation={renderSourceCollectionConversation}
         renderSourceCollectionScreeningPanel={renderSourceCollectionScreeningPanel}
         renderSourceCollectionGraphPanel={renderSourceCollectionGraphPanel}
         renderSourceCollectionMemoryPanel={renderSourceCollectionMemoryPanel}
         extractionRecovery={buildActiveStageExtractionRecoveryBag()}
+        projectReset={{
+          available: Boolean(sourceCollectionResetAvailable),
+          pending: Boolean(selectedResearchProjectSourceCollectionResetPending),
+          includeDownstream: Boolean(
+            resetResearchProjectSourceCollectionMutation.variables?.includeDownstream,
+          ),
+          error:
+            selectedResearchProjectSourceCollectionResetError instanceof Error
+              ? selectedResearchProjectSourceCollectionResetError
+              : null,
+          onReset: ({ includeDownstream }: { includeDownstream: boolean }) => {
+            runSourceCollectionProjectReset(includeDownstream);
+          },
+        }}
       />
     );
   }
