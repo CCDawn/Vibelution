@@ -28,4 +28,21 @@ describe("teamSourceCollectionInjectRenderers extraction", () => {
     expect(injectSource).toContain("export function createSourceCollectionInjectRenderers");
     expect(injectSource).toContain("renderSourceCollectionActiveStagePanel");
   });
+
+  it("SC inject wrappers mount panels via teamLazyPanels (not static workspace packs)", () => {
+    const activeStageInject = readFileSync(
+      new URL("./TeamSourceCollectionActiveStageInject.tsx", import.meta.url),
+      "utf8",
+    );
+    const controlsInject = readFileSync(
+      new URL("./TeamSourceCollectionControlsInject.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(activeStageInject).toContain('from "./teamLazyPanels"');
+    expect(activeStageInject).not.toMatch(
+      /import\s*\{\s*TeamSourceCollectionActiveStageWorkspacePanel[\s\S]*\}\s*from\s*"\.\.\/TeamSourceCollectionActiveStageWorkspacePanel"/,
+    );
+    expect(controlsInject).toContain('from "./teamLazyPanels"');
+    expect(controlsInject).toMatch(/import type \{[^}]*TeamSourceCollectionControlsWorkspacePanelProps/);
+  });
 });

@@ -1,10 +1,9 @@
 /**
  * SC inject claim: graph workspace body ownership.
+ * Runtime panel is lazy-packed (teamLazyPanels).
  */
-import {
-  TeamSourceCollectionGraphWorkspacePanel,
-  type TeamSourceCollectionGraphWorkspacePanelProps,
-} from "../TeamSourceCollectionGraphWorkspacePanel";
+import type { TeamSourceCollectionGraphWorkspacePanelProps } from "../TeamSourceCollectionGraphWorkspacePanel";
+import { TeamSourceCollectionGraphWorkspacePanel } from "./teamLazyPanels";
 
 export type TeamSourceCollectionGraphInjectProps = TeamSourceCollectionGraphWorkspacePanelProps;
 

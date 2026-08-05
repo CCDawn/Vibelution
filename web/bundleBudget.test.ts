@@ -50,7 +50,7 @@ describe("bundle budget", () => {
   });
 
   it("classifies TeamsRoute under the known residual budget, not the generic route budget", () => {
-    writeAsset("TeamsRoute-CcYah-sm.js", 400 * 1024);
+    writeAsset("TeamsRoute-CcYah-sm.js", 395 * 1024);
 
     const result = checkBundleBudget(tempRoot);
 
@@ -60,7 +60,7 @@ describe("bundle budget", () => {
   });
 
   it("fails when TeamsRoute grows beyond its residual budget", () => {
-    writeAsset("TeamsRoute-CcYah-sm.js", 420 * 1024);
+    writeAsset("TeamsRoute-CcYah-sm.js", 405 * 1024);
 
     const result = checkBundleBudget(tempRoot);
 

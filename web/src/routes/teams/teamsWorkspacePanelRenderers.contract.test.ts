@@ -30,6 +30,8 @@ describe("teamsWorkspacePanelRenderers extraction", () => {
     expect(renderersSource).toContain("function renderResearchCanvasReadOnlyPanel(");
     expect(renderersSource).toContain("function renderTeamNodeBindingPanel(");
     expect(renderersSource).toContain("TeamMemoryIndexPanel");
+    expect(renderersSource).toContain('from "./teamLazyPanels"');
+    expect(renderersSource).not.toContain('from "../TeamMemoryIndexPanel"');
     expect(renderersSource).toContain("TeamExperimentPlanningLedgerPanel");
   });
 });

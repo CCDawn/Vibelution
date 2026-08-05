@@ -1,10 +1,8 @@
 /**
  * SC inject: screening workspace + recommended-next-hint presentation.
  */
-import {
-  TeamSourceCollectionScreeningWorkspacePanel,
-  type TeamSourceCollectionScreeningWorkspacePanelProps,
-} from "../TeamSourceCollectionScreeningWorkspacePanel";
+import type { TeamSourceCollectionScreeningWorkspacePanelProps } from "../TeamSourceCollectionScreeningWorkspacePanel";
+import { TeamSourceCollectionScreeningWorkspacePanel } from "./teamLazyPanels";
 import { resolveSourceCollectionScreeningRecommendedNextHint } from "./source-collection/injectModel";
 
 export type TeamSourceCollectionScreeningInjectProps = Omit<

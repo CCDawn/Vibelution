@@ -1,15 +1,16 @@
 import type { ComponentProps, ReactNode } from "react";
 
-import { TeamSourceCollectionPhaseCloseGatePanel } from "../TeamSourceCollectionPhaseCloseGatePanel";
-import { TeamWorkflowCandidatePreviewPanel } from "../TeamWorkflowCandidatePreviewPanel";
 import type { TeamWorkflowCandidatePreviewItem } from "../TeamWorkflowCandidatePreviewPanel";
 import {
+  TeamSourceCollectionPhaseCloseGatePanel,
   TeamWorkflowCandidateGraphStatusPanel,
+  TeamWorkflowCandidatePreviewPanel,
   TeamWorkflowCoordinationStatusPanel,
   TeamWorkflowKnowledgeIngestionStatusPanel,
   TeamWorkflowPaperNoteChunkStatusPanel,
   TeamWorkflowSourceQualityStatusPanel,
-} from "../TeamWorkflowStatusPanels";
+  TeamsSourceCollectionPanel,
+} from "./teamLazyPanels";
 import {
   SOURCE_COLLECTION_RESULT_PAGE_SIZE,
   workflowIngestionStatusLabel,
@@ -19,7 +20,6 @@ import {
   workflowCoordinationStatusLabel,
   workflowStateLabel,
 } from "./workflowPresentation";
-import { TeamsSourceCollectionPanel } from "./TeamsSourceCollectionPanel";
 
 type Lang = "zh" | "en";
 

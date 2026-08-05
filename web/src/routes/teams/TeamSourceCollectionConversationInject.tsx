@@ -1,10 +1,9 @@
 /**
  * SC inject claim: conversation / raw-records workspace ownership.
+ * Runtime panel is lazy-packed (teamLazyPanels).
  */
-import {
-  TeamSourceCollectionConversationWorkspacePanel,
-  type TeamSourceCollectionConversationWorkspacePanelProps,
-} from "../TeamSourceCollectionConversationWorkspacePanel";
+import type { TeamSourceCollectionConversationWorkspacePanelProps } from "../TeamSourceCollectionConversationWorkspacePanel";
+import { TeamSourceCollectionConversationWorkspacePanel } from "./teamLazyPanels";
 
 export type TeamSourceCollectionConversationInjectProps = TeamSourceCollectionConversationWorkspacePanelProps;
 

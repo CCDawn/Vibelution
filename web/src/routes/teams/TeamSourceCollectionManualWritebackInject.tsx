@@ -4,10 +4,8 @@
  */
 import type { FormEvent } from "react";
 
-import {
-  TeamSourceCollectionManualWritebackPanel,
-  type TeamSourceCollectionManualWritebackDraft,
-} from "../TeamSourceCollectionManualWritebackPanel";
+import type { TeamSourceCollectionManualWritebackDraft } from "../TeamSourceCollectionManualWritebackPanel";
+import { TeamSourceCollectionManualWritebackPanel } from "./teamLazyPanels";
 import {
   buildSourceCollectionManualWritebackAssignmentOptions,
   canSubmitSourceCollectionManualWriteback,

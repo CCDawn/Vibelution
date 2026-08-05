@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 - 2026-08-06
+
+- Teams: SC inject wrappers and workflow stage modules mount panels via `teamLazyPanels` / dynamic import so workspace packs leave the eager `TeamsRoute` graph.
+- Teams: memory index and standalone SC stage panel no longer static-import into the route bag.
+- Bundle: `TeamsRoute` ~396 → ~383 KiB residual; SC pack lands as secondary `teamSourceCollectionPanels` chunk.
+
 ## 1.1.0 - 2026-08-06
 
 Public baseline after the post-1.0.16 workbench stretch. Version number and this note catch up to code that already shipped on `main`.

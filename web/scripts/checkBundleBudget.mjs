@@ -29,11 +29,12 @@ export const BUNDLE_BUDGETS = [
     maxBytes: 360 * 1024,
   },
   {
-    // Teams foundation bag residual (SC + research shell). Challenge-cup ops are lazy;
-    // further extract must shrink this before tightening the generic route budget.
+    // Teams foundation bag residual (SC presentation + shell still eager).
+    // SC workspace panels / workflow hosts are secondary-lazy via teamLazyPanels.
+    // Keep slightly above generic route budget until Mid/Tail presentation leaves the bag.
     name: "known Teams route residual",
     pattern: /^TeamsRoute-[\w-]+\.js$/,
-    maxBytes: 410 * 1024,
+    maxBytes: 400 * 1024,
   },
   {
     name: "route or feature chunks",

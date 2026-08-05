@@ -1,10 +1,8 @@
 /**
  * SC inject: run switcher options, empty-run hint, and historical-run jump.
  */
-import {
-  TeamSourceCollectionRunSwitcherPanel,
-  type TeamSourceCollectionRunSwitcherRun,
-} from "../TeamSourceCollectionRunSwitcherPanel";
+import type { TeamSourceCollectionRunSwitcherRun } from "../TeamSourceCollectionRunSwitcherPanel";
+import { TeamSourceCollectionRunSwitcherPanel } from "./teamLazyPanels";
 import type { DataProcessingRunListPayload } from "../../api/types";
 import {
   buildSourceCollectionRunSwitcherOptions,

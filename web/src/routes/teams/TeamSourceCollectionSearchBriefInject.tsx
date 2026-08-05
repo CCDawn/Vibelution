@@ -4,7 +4,7 @@
  */
 import type { ReactNode } from "react";
 
-import { TeamSourceCollectionSearchBriefPanel } from "../TeamSourceCollectionSearchBriefPanel";
+import { TeamSourceCollectionSearchBriefPanel } from "./teamLazyPanels";
 import type { SourceCollectionDraft } from "./source-collection/presentationModel";
 
 export type TeamSourceCollectionSearchBriefInjectProps = {

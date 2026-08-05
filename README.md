@@ -8,7 +8,7 @@
 
 不是托管聊天壳，也不打算把你的仓库默认送上云端。配置和密钥放在用户目录的外部 `config.toml`，不进这个 git 仓库。
 
-当前版本 **1.1.0**（见 [VERSION](VERSION) · [CHANGELOG.md](CHANGELOG.md)）。
+当前版本 **1.1.1**（见 [VERSION](VERSION) · [CHANGELOG.md](CHANGELOG.md)）。
 
 文档入口：[快速开始](#快速开始) · [当前能力](#当前能力) · [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/product](docs/product/README.md) · [LICENSE](LICENSE)
 
