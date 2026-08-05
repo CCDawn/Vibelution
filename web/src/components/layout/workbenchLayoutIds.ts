@@ -23,6 +23,10 @@ export const WORKBENCH_LAYOUT_IDS = {
   skills: "skills",
   supervisedReview: "supervised-review",
   teams: "teams",
+  /** Knowledge-collection standalone: left config rail width. */
+  teamsSourceCollection: "teams-source-collection",
+  /** Knowledge-collection stage workspace: right action rail width. */
+  teamsSourceCollectionStage: "teams-source-collection-stage",
   tools: "tools",
 } as const;
 

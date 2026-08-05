@@ -10,18 +10,21 @@ const primaryRenderersSource = readFileSync(
 );
 
 describe("ResearchOverviewSurface product contract", () => {
-  it("keeps project-progress → single-CTA → stages → advanced order in JSX body", () => {
+  it("keeps project-progress → stage-nav → continue/advance CTA → stages → advanced order", () => {
     const progressLabel = surfaceSource.indexOf("项目推进");
+    const stageNav = surfaceSource.indexOf('data-testid="research-overview-stage-nav"');
     const hero = surfaceSource.indexOf('data-testid="research-overview-hero"');
     const stages = surfaceSource.indexOf('data-testid="research-overview-stages"');
     // Secondary is the last composition slot (not the import line).
     const secondarySlot = surfaceSource.indexOf("{advanced ? (");
     expect(progressLabel).toBeGreaterThan(-1);
-    expect(hero).toBeGreaterThan(progressLabel);
+    expect(stageNav).toBeGreaterThan(progressLabel);
+    expect(hero).toBeGreaterThan(stageNav);
     expect(stages).toBeGreaterThan(hero);
     expect(secondarySlot).toBeGreaterThan(stages);
     expect(surfaceSource.slice(secondarySlot)).toContain("ResearchOverviewSecondary");
     expect(surfaceSource).toContain("阶段看板");
+    expect(surfaceSource).toContain("主按钮继续当前");
   });
 
   it("primary CTA uses monochrome ink accent, not teal brand wash", () => {
@@ -40,14 +43,15 @@ describe("ResearchOverviewSurface product contract", () => {
     expect(routeSource).not.toMatch(/showResearchOverview\s*\?\s*\(\s*<div[^>]*research-overview-hero/);
   });
 
-  it("primary bar is a single solid CTA with no sibling ghost open-stage control", () => {
+  it("primary bar continues current stage; advance is a separate secondary CTA", () => {
     expect(primarySource).toContain('data-testid="research-primary-cta"');
-    expect(primarySource).toContain("Single solid CTA");
+    expect(primarySource).toContain('data-testid="research-advance-cta"');
+    expect(primarySource).toContain("continue current stage");
     expect(primarySource).not.toContain("打开对应阶段工作台");
     expect(primarySource).toContain("research-stage-handoff-banner");
     // CTA text + arrow must use trailingIcon, not multi-child label slot (truncation breaks layout).
     expect(primarySource).toContain("trailingIcon=");
-    expect(primarySource).not.toContain("<span>{buttonLabel}</span>");
+    expect(primarySource).not.toContain("handoff?.action ?? action");
   });
 
   it("keeps progressive skeleton contract: fixed geometry loading, not fill swap", () => {
