@@ -1427,6 +1427,20 @@ export function LauncherRoute() {
       setLastControlOperation(operation);
       markControlledProjectLifecycleOperation(operation);
       postLauncherLifecycleControlTelemetry(operation, "requested");
+      // Immediate feedback — restart/stop used to look like a no-op until status poll returned.
+      if (operation === "restart") {
+        setNotice({
+          tone: "neutral",
+          text: copy.lifecycleRestartingDetail,
+          source: "lifecycle-control",
+        });
+      } else if (operation === "stop" || operation === "force-stop") {
+        setNotice({
+          tone: "neutral",
+          text: copy.lifecycleStoppingDetail || copy.commandDone,
+          source: "lifecycle-control",
+        });
+      }
     },
     onSuccess: (response, operation) => {
       postLauncherLifecycleControlTelemetry(
@@ -2125,14 +2139,25 @@ export function LauncherRoute() {
                 forceStop: copy.forceStop,
               }}
               disabled={busy}
+              disabledReason={busy ? copy.startDisabledBusy : undefined}
               restartDisabled={destructiveActionDisabled}
               stopDisabled={stopDisabled}
               forceStopDisabled={forceStopDisabled}
+              restartDisabledReason={destructiveActionDisabledReason}
+              stopDisabledReason={stopDisabledReason}
+              forceStopDisabledReason={forceStopDisabledReason}
               showForceStop
               triggerClassName={styles.statusBarButton}
               contentClassName="vui-app-appshell lifecycleMenuPanel min-w-0"
               itemClassName="vui-app-appshell lifecycleMenuItem min-w-0"
               dangerItemClassName="vui-app-appshell lifecycleMenuDangerItem min-w-0"
+              onBlockedAction={(_action, reason) => {
+                setNotice({
+                  tone: "warning",
+                  text: reason,
+                  source: "lifecycle-control",
+                });
+              }}
               onAction={(action: VWorkbenchPowerMenuAction) => {
                 if (action === "restart") {
                   controlMutation.mutate("restart");

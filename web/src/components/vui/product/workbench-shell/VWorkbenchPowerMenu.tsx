@@ -17,13 +17,23 @@ export type VWorkbenchPowerMenuLabels = {
 export type VWorkbenchPowerMenuProps = {
   labels: VWorkbenchPowerMenuLabels;
   onAction: (action: VWorkbenchPowerMenuAction) => void;
+  /**
+   * Fired when the user activates a blocked action (soft-disabled item).
+   * Surfaces should show a notice — native disabled items give zero feedback.
+   */
+  onBlockedAction?: (action: VWorkbenchPowerMenuAction, reason: string) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   /** Disable the whole trigger (e.g. restart already in flight). */
   disabled?: boolean;
+  /** Why the whole menu trigger is disabled (busy / lifecycle in flight). */
+  disabledReason?: string;
   restartDisabled?: boolean;
   stopDisabled?: boolean;
   forceStopDisabled?: boolean;
+  restartDisabledReason?: string;
+  stopDisabledReason?: string;
+  forceStopDisabledReason?: string;
   showForceStop?: boolean;
   /**
    * `icon` — AppShell top-bar power glyph.
@@ -48,12 +58,17 @@ export type VWorkbenchPowerMenuProps = {
 export function VWorkbenchPowerMenu({
   labels,
   onAction,
+  onBlockedAction,
   open,
   onOpenChange,
   disabled = false,
+  disabledReason = "",
   restartDisabled = false,
   stopDisabled = false,
   forceStopDisabled = false,
+  restartDisabledReason = "",
+  stopDisabledReason = "",
+  forceStopDisabledReason = "",
   showForceStop = true,
   variant = "icon",
   triggerClassName,
@@ -75,32 +90,65 @@ export function VWorkbenchPowerMenu({
     onOpenChange?.(next);
   };
 
+  function selectAction(
+    action: VWorkbenchPowerMenuAction,
+    blocked: boolean,
+    reason: string,
+  ) {
+    if (disabled || blocked) {
+      const message = String(reason || disabledReason || "").trim()
+        || (action === "restart"
+          ? labels.restart
+          : action === "stop"
+            ? labels.stop
+            : labels.forceStop);
+      onBlockedAction?.(action, message);
+      return;
+    }
+    onAction(action);
+  }
+
+  // Soft-disabled: keep items selectable so surfaces can show a notice.
+  // Hard Radix `disabled` + pointer-events-none yields zero click/hover feedback.
   const items: VDropdownMenuItem[] = [
     {
       id: "restart",
       icon: <RefreshCw size={15} aria-hidden="true" />,
-      disabled: restartDisabled || disabled,
+      disabled: false,
+      title: restartDisabled || disabled
+        ? (restartDisabledReason || disabledReason || labels.restart)
+        : labels.restart,
       label: labels.restart,
-      onSelect: () => onAction("restart"),
+      onSelect: () => selectAction("restart", restartDisabled, restartDisabledReason),
     },
     {
       id: "stop",
       icon: <Power size={15} aria-hidden="true" />,
-      disabled: stopDisabled || disabled,
+      disabled: false,
+      title: stopDisabled || disabled
+        ? (stopDisabledReason || disabledReason || labels.stop)
+        : labels.stop,
       label: labels.stop,
-      onSelect: () => onAction("stop"),
+      onSelect: () => selectAction("stop", stopDisabled, stopDisabledReason),
     },
     ...(showForceStop
       ? [{
           id: "force-stop",
           icon: <Power size={15} aria-hidden="true" />,
           danger: true as const,
-          disabled: forceStopDisabled || disabled,
+          disabled: false,
+          title: forceStopDisabled || disabled
+            ? (forceStopDisabledReason || disabledReason || labels.forceStop)
+            : labels.forceStop,
           label: labels.forceStop,
-          onSelect: () => onAction("force-stop"),
+          onSelect: () => selectAction("force-stop", forceStopDisabled, forceStopDisabledReason),
         }]
       : []),
   ];
+
+  const triggerTooltip = disabled && disabledReason
+    ? disabledReason
+    : labels.menu;
 
   const trigger = variant === "labeled" ? (
     <VButton
@@ -108,9 +156,10 @@ export function VWorkbenchPowerMenu({
       variant="secondary"
       className={triggerClassName}
       aria-label={labels.menu}
-      tooltip={labels.menu}
-      title={labels.menu}
+      tooltip={triggerTooltip}
+      title={triggerTooltip}
       isDisabled={disabled}
+      disabledReason={disabled ? disabledReason : undefined}
       icon={triggerIcon ?? <Power size={15} aria-hidden="true" />}
     >
       <span>{labels.menu}</span>
@@ -121,9 +170,10 @@ export function VWorkbenchPowerMenu({
       isIconOnly
       className={triggerClassName}
       aria-label={labels.menu}
-      tooltip={labels.menu}
-      title={labels.menu}
+      tooltip={triggerTooltip}
+      title={triggerTooltip}
       isDisabled={disabled}
+      disabledReason={disabled ? disabledReason : undefined}
       icon={triggerIcon ?? <Power size={16} aria-hidden="true" />}
     />
   );
