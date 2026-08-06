@@ -240,12 +240,12 @@ describe("research project workspace", () => {
     expect(experimentActionSource).not.toContain('teamId: selectedTeam?.teamId || ""');
   });
 
-  it("mounts the Challenge Program workspace for every Challenge Cup research view", () => {
+  it("mounts the Challenge Program workspace only on the explicit progress surface", () => {
     expect(teamResearchStageLauncherPanelSource).toContain(
       "const challengeProgramSurfaceSelected =",
     );
-    expect(teamResearchStageLauncherPanelSource).toContain(
-      "const challengeProgramSurfaceSelected = challengeCupResearchTeamSelected;",
+    expect(teamResearchStageLauncherPanelSource).toMatch(
+      /const challengeProgramSurfaceSelected =\s+challengeCupResearchTeamSelected && challengeTeamSurface === "progress";/,
     );
     expect(teamResearchStageLauncherPanelSource).toContain(
       "if (challengeProgramSurfaceSelected) {",

@@ -687,7 +687,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     researchWorkflowTeamSelected
     && (researchWorkspaceView === "experiment" || researchWorkspaceView === "iteration")
   ) {
-    if (challengeCupResearchTeamSelected) {
+    if (challengeCupResearchTeamSelected && challengeTeamSurface === "progress") {
       return renderResearchStageLauncher("interactive");
     }
     return renderResearchStageStandalonePage(

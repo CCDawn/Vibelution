@@ -36,4 +36,10 @@ describe("TeamResearchStageLauncherPanel lifecycle truth", () => {
     expect(source).toContain("researchExperimentMethodReadonly");
     expect(panelAndProps).toContain("flattenResearchStageLauncherProps");
   });
+
+  it("keeps historical Challenge Cup projection behind the progress surface", () => {
+    expect(source).toContain(
+      'challengeCupResearchTeamSelected && challengeTeamSurface === "progress"',
+    );
+  });
 });
