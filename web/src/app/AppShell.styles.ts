@@ -71,38 +71,7 @@ const styles = {
     "vui-app-appshell brandGate min-w-0",
   brandSubtle:
     "vui-app-appshell brandSubtle min-w-0",
-  gitBranchName:
-    "vui-app-appshell gitBranchName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
-  gitChip:
-    `vui-app-appshell gitChip min-w-0 ${vuiControlPillClass}`,
-  gitCommitItem: `vui-app-appshell gitCommitItem min-w-0 ${vuiOpaqueRowClass} p-2`,
-  gitCommitList:
-    "vui-app-appshell gitCommitList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  gitCount:
-    "vui-app-appshell gitCount min-w-0",
-  gitCountGrid:
-    "vui-app-appshell gitCountGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  gitFileItem: `vui-app-appshell gitFileItem min-w-0 ${vuiOpaqueRowClass} p-2`,
-  gitFileList:
-    "vui-app-appshell gitFileList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  gitHeadline:
-    "vui-app-appshell gitHeadline min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
-  gitMetaGrid:
-    "vui-app-appshell gitMetaGrid min-w-0 flex flex-wrap items-center gap-1.5 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  gitMiniHeader:
-    "vui-app-appshell gitMiniHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  gitMiniPanel: `vui-app-appshell gitMiniPanel min-w-0 ${vuiGlassPanelClass} p-2`,
-  gitQuietState:
-    "vui-app-appshell gitQuietState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  gitSection:
-    "vui-app-appshell gitSection min-w-0",
-  gitSectionHeader:
-    "vui-app-appshell gitSectionHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  gitSignalGrid:
-    "vui-app-appshell gitSignalGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  gitWorktreeItem: `vui-app-appshell gitWorktreeItem min-w-0 ${vuiOpaqueRowClass} p-2`,
-  gitWorktreeList:
-    "vui-app-appshell gitWorktreeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  // Git mini-panel styles live in AppShellUtilityMenu.styles (VUI composition).
   lifecycleMenuCluster:
     "vui-app-appshell lifecycleMenuCluster min-w-0",
   lifecycleMenuClusterOpen:

@@ -1,6 +1,15 @@
 import type { RuntimeSummary } from "../api/types";
 import type { Language, ShellTranslationKey } from "../i18n/shellDictionary";
 import {
+  VMetricChip,
+  VPanelHeader,
+  VStatusChip,
+  VStatusStrip,
+  VSurface,
+  VTooltip,
+  type VStatusTone,
+} from "../components/vui";
+import {
   backendSystemTone,
   frontendSystemTone,
   lifecycleStateLabel,
@@ -11,7 +20,6 @@ import {
   type RuntimeControllerState,
   type SystemStatusTone,
 } from "./systemStatus";
-import { VTooltip } from "../components/vui";
 import styles from "./AppShellStatusGuidePanel.styles";
 
 export type AppShellStatusSummaryCard = {
@@ -37,6 +45,13 @@ export type AppShellStatusGuidePanelProps = {
   workbench?: RuntimeSummary["workbench"] | null;
   buildId: string;
 };
+
+function systemToneToStatus(tone: SystemStatusTone): VStatusTone {
+  if (tone === "running") return "success";
+  if (tone === "caution") return "warning";
+  if (tone === "failed") return "danger";
+  return "neutral";
+}
 
 export function AppShellStatusGuidePanel({
   lang,
@@ -132,29 +147,42 @@ export function AppShellStatusGuidePanel({
     ...card,
     ...detailsById[card.id],
   }));
+  const lifecycleTone = systemToneToStatus(lifecycleStateTone(lifecycleProof?.overallState));
 
   return (
-    <div className={styles.statusGuidePanel} role="note" aria-live="polite">
-      <VTooltip content={t("systemStatusGuideHint")} width="wide">
-        <div
-          className={styles.statusGuideHeader}
-          tabIndex={0}
-          aria-label={`${t("systemStatusGuide")}: ${t("systemStatusGuideHint")}`}
-        >
-          <strong>{t("systemStatusGuide")}</strong>
-        </div>
-      </VTooltip>
+    <VSurface
+      tone="card"
+      elevation="flat"
+      padding="compact"
+      className={styles.statusGuidePanel}
+      role="note"
+      aria-live="polite"
+      ariaLabel={t("systemStatusGuide")}
+    >
+      <VPanelHeader
+        headingLevel={3}
+        className={styles.statusGuideHeader}
+        title={t("systemStatusGuide")}
+        tooltip={t("systemStatusGuideHint")}
+        tooltipLabel={t("systemStatusGuide")}
+      />
       <div className={styles.statusGuideGrid}>
         {detailCards.map((item) => (
-          <section key={item.id} className={styles.statusGuideCard}>
+          <VSurface
+            key={item.id}
+            tone="row"
+            elevation="flat"
+            padding="compact"
+            className={styles.statusGuideCard}
+            ariaLabel={`${item.label}: ${item.value}`}
+          >
             <VTooltip content={item.note} width="wide">
               <div
                 className={styles.statusGuideCardHeader}
                 tabIndex={0}
                 aria-label={`${item.label}: ${item.value}. ${item.note}`}
               >
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
+                <VMetricChip label={item.label} value={item.value} />
               </div>
             </VTooltip>
             <ul className={styles.statusGuideList}>
@@ -166,53 +194,50 @@ export function AppShellStatusGuidePanel({
                     tabIndex={0}
                     aria-label={`${state.label}: ${state.detail}`}
                   >
-                    <span className={`${styles.statusDot} ${styles[`status_${state.tone}`]}`} />
-                    <span className={styles.statusGuideStateLabel}>{state.label}</span>
+                    <VStatusChip tone={systemToneToStatus(state.tone)} className={styles.statusGuideStateChip}>
+                      {state.label}
+                    </VStatusChip>
                   </li>
                 </VTooltip>
               ))}
             </ul>
-          </section>
+          </VSurface>
         ))}
       </div>
-      <section className={styles.lifecycleProofCard}>
-        <VTooltip content={lifecycleProof?.summary || t("lifecycleProofUnavailable")} width="wide">
-          <div
-            className={styles.lifecycleProofHeader}
-            tabIndex={0}
-            aria-label={`${t("lifecycleProofTitle")}: ${lifecycleProof?.overallLabel || t("lifecycleProofUnavailable")}. ${
-              lifecycleProof?.summary || t("lifecycleProofUnavailable")
-            }`}
-          >
-            <span>{t("lifecycleProofTitle")}</span>
-            <strong>
-              <span
-                className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(lifecycleProof?.overallState)}`]}`}
-              />
+      <VSurface
+        tone="row"
+        elevation="flat"
+        padding="compact"
+        className={styles.lifecycleProofCard}
+        ariaLabel={t("lifecycleProofTitle")}
+      >
+        <VPanelHeader
+          headingLevel={4}
+          className={styles.lifecycleProofHeader}
+          title={t("lifecycleProofTitle")}
+          tooltip={lifecycleProof?.summary || t("lifecycleProofUnavailable")}
+          tooltipLabel={t("lifecycleProofTitle")}
+          actions={(
+            <VStatusChip tone={lifecycleTone}>
               {lifecycleProof?.overallLabel || t("lifecycleProofUnavailable")}
-            </strong>
-          </div>
-        </VTooltip>
+            </VStatusChip>
+          )}
+        />
         {lifecycleProof ? (
           <>
-            <div className={styles.lifecycleProofMeta}>
-              <VTooltip
-                content={`${t("lifecycleProofDesiredObserved")}: ${lifecycleProof.desiredState} / ${lifecycleProof.observedState}`}
-              >
-                <span tabIndex={0} aria-label={`${t("lifecycleProofDesiredObserved")}: ${lifecycleProof.desiredState} / ${lifecycleProof.observedState}`}>
-                  {t("lifecycleProofDesiredObserved")}
-                  <strong>
-                    {lifecycleProof.desiredState} / {lifecycleProof.observedState}
-                  </strong>
-                </span>
-              </VTooltip>
-              <VTooltip content={`${t("lifecycleProofVerifiedAt")}: ${lifecycleProof.verifiedAt || "-"}`}>
-                <span tabIndex={0} aria-label={`${t("lifecycleProofVerifiedAt")}: ${lifecycleProof.verifiedAt || "-"}`}>
-                  {t("lifecycleProofVerifiedAt")}
-                  <strong>{lifecycleProof.verifiedAt || "-"}</strong>
-                </span>
-              </VTooltip>
-            </div>
+            <VStatusStrip
+              className={styles.lifecycleProofMeta}
+              items={[
+                {
+                  label: t("lifecycleProofDesiredObserved"),
+                  value: `${lifecycleProof.desiredState} / ${lifecycleProof.observedState}`,
+                },
+                {
+                  label: t("lifecycleProofVerifiedAt"),
+                  value: lifecycleProof.verifiedAt || "-",
+                },
+              ]}
+            />
             <ul className={styles.lifecycleProofList}>
               {lifecycleProof.components.map((component) => (
                 <VTooltip key={component.id} content={component.detail} width="wide">
@@ -221,18 +246,17 @@ export function AppShellStatusGuidePanel({
                     tabIndex={0}
                     aria-label={`${component.label}: ${lifecycleStateLabel(component.state, lang)}. ${component.detail}`}
                   >
-                    <span
-                      className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(component.state)}`]}`}
-                    />
                     <span className={styles.lifecycleProofName}>{component.label}</span>
-                    <strong>{lifecycleStateLabel(component.state, lang)}</strong>
+                    <VStatusChip tone={systemToneToStatus(lifecycleStateTone(component.state))}>
+                      {lifecycleStateLabel(component.state, lang)}
+                    </VStatusChip>
                   </li>
                 </VTooltip>
               ))}
             </ul>
           </>
         ) : null}
-      </section>
-    </div>
+      </VSurface>
+    </VSurface>
   );
 }
