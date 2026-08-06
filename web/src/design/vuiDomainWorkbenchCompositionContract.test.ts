@@ -70,17 +70,22 @@ describe("Wave 6B Memory knowledge workbench composition", () => {
 });
 
 describe("Chat session workbench composition", () => {
-  it("marks Chat dual-pane shell recipe and registry layout id on the workbench composer", () => {
-    // ChatCodingRoute.tsx is a thin re-export; composition lives in the workbench host.
+  it("marks Chat dual-pane shell recipe and registry layout id on the geometry host", () => {
+    // ChatCodingRoute.tsx is a thin re-export; geometry host is ChatSessionWorkbenchShell.
     const entry = readFileSync(resolve(routesRoot, "ChatCodingRoute.tsx"), "utf8");
     const workbench = readFileSync(resolve(routesRoot, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
+    const shell = readFileSync(resolve(routesRoot, "chat/ChatSessionWorkbenchShell.tsx"), "utf8");
     expect(entry).toContain("ChatCodingRouteWorkbench");
-    expect(workbench).toContain('data-vui-recipe="chat-session-workbench"');
-    expect(workbench).toContain('data-vui-domain-recipe="chat-dual-pane"');
-    expect(workbench).toContain("WORKBENCH_LAYOUT_IDS.chat");
-    expect(workbench).toContain("data-vui-layout-id");
-    // Session page recipe stays planned until dual-pane geometry is extracted.
+    expect(workbench).toContain("ChatSessionWorkbenchShell");
+    expect(workbench).toContain("useChatWorkbenchLayout");
+    expect(shell).toContain('data-vui-recipe="chat-session-workbench"');
+    expect(shell).toContain('data-vui-domain-recipe="chat-dual-pane"');
+    expect(shell).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(shell).toContain("data-vui-layout-id");
+    expect(shell).toContain('data-vui="chat-session-workbench-shell"');
+    // Full VSessionWorkbenchPage stays planned until slot migration finishes.
     expect(workbench).not.toContain("VSessionWorkbenchPage");
+    expect(shell).not.toContain("VSessionWorkbenchPage");
   });
 });
 

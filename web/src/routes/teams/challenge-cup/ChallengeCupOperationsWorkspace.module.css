@@ -833,6 +833,13 @@
   box-shadow: var(--vui-shadow-soft);
 }
 
+.panel-heading-lead {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .filter-strip {
   flex-wrap: wrap;
   gap: 12px;
@@ -1289,6 +1296,7 @@
 .platform-canvas-header > div > span,
 .platform-task-card > div > span,
 .platform-data-surface > header > div > span,
+.platform-data-surface-header > div > p,
 .design-summary > header > span,
 .run-summary > header > span,
 .platform-inspector section > span {
@@ -1301,14 +1309,17 @@
 }
 
 .platform-project-identity > div,
-.platform-canvas-header > div > div {
+.platform-canvas-header > div > div,
+.platform-canvas-title-row,
+.platform-project-title-row {
   display: flex;
   flex-wrap: wrap;
   gap: 9px;
   align-items: center;
 }
 
-.platform-project-identity h1 {
+.platform-project-identity h1,
+.platform-project-title {
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -1465,7 +1476,8 @@
   border-top: 1px solid var(--line);
 }
 
-.platform-stage-objects > header {
+.platform-stage-objects > header,
+.platform-stage-objects-heading {
   display: flex;
   min-height: 22px;
   align-items: center;
@@ -1576,6 +1588,14 @@
 .platform-canvas-header h2 {
   margin: 0;
   font-size: 20px;
+}
+
+.platform-data-surface-header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 
 .platform-canvas-actions {

@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import {
   VEmptyState,
   VNativeButton,
+  VPanelHeader,
+  VRouteHeader,
   VRouteLinkButton,
   VStatusChip,
   type VStatusTone,
@@ -330,33 +332,38 @@ export function ChallengeCupOperationsWorkspace({
     return (
       <section className={cx("workspace", "platform-workspace")} aria-label="通用科研工作台" data-testid="challenge-cup-platform-workspace">
         <main className={cx("platform-frame")}>
-          {!renderedProjectSwitcher ? <header className={cx("platform-project-header")}>
-            <div className={cx("platform-project-identity")}>
-              <span>研究计划</span>
-              <div>
-                <h1>{programTitle}</h1>
-                <VStatusChip className={cx("status-pill")} tone={vuiStatusTone(stageState(activeStage).tone)}>
-                  {stageState(activeStage).label}
-                </VStatusChip>
-                <span className={cx("autosave-label")}>{isLoading ? "同步中" : projection ? "投影已同步" : "投影不可用"}</span>
-              </div>
-              <p>研究主题：{researchTopic.trim() || programTitle}</p>
-            </div>
-            <div className={cx("platform-project-actions")}>
-              <span>项目操作</span>
-              <VRouteLinkButton
-                className={cx("button", "secondary")}
-                icon={<GraphMark />}
-                to={graphHref}
-                variant="secondary"
-              >
-                研究关系图
-              </VRouteLinkButton>
-              <VNativeButton className={cx("button", "secondary")} type="button" onClick={onRefresh} disabled={isRefreshing}>
-                {isRefreshing ? "刷新中" : "刷新状态"}
-              </VNativeButton>
-            </div>
-          </header> : null}
+          {!renderedProjectSwitcher ? (
+            <VRouteHeader
+              className={cx("platform-project-header")}
+              eyebrow="研究计划"
+              title={(
+                <span className={cx("platform-project-title-row")}>
+                  <span className={cx("platform-project-title")}>{programTitle}</span>
+                  <VStatusChip className={cx("status-pill")} tone={vuiStatusTone(stageState(activeStage).tone)}>
+                    {stageState(activeStage).label}
+                  </VStatusChip>
+                  <span className={cx("autosave-label")}>{isLoading ? "同步中" : projection ? "投影已同步" : "投影不可用"}</span>
+                </span>
+              )}
+              meta={`研究主题：${researchTopic.trim() || programTitle}`}
+              actions={(
+                <div className={cx("platform-project-actions")}>
+                  <span>项目操作</span>
+                  <VRouteLinkButton
+                    className={cx("button", "secondary")}
+                    icon={<GraphMark />}
+                    to={graphHref}
+                    variant="secondary"
+                  >
+                    研究关系图
+                  </VRouteLinkButton>
+                  <VNativeButton className={cx("button", "secondary")} type="button" onClick={onRefresh} disabled={isRefreshing}>
+                    {isRefreshing ? "刷新中" : "刷新状态"}
+                  </VNativeButton>
+                </div>
+              )}
+            />
+          ) : null}
 
           {isLoading ? (
             <section className={cx("platform-state")} aria-live="polite" data-testid="challenge-cup-platform-loading">
@@ -406,9 +413,11 @@ export function ChallengeCupOperationsWorkspace({
                     );
                   })}
                   <section className={cx("platform-stage-objects")} aria-label="当前阶段对象">
-                    <header>
-                      <span>当前对象 · {stageObjects.length}</span>
-                    </header>
+                    <VPanelHeader
+                      className={cx("platform-stage-objects-heading")}
+                      headingLevel={null}
+                      title={`当前对象 · ${stageObjects.length}`}
+                    />
                     {stageObjects.length > 0 ? stageObjects.map((item, index) => (
                       <Link
                         className={cx("platform-stage-object", index === 0 && "selected")}
@@ -426,26 +435,30 @@ export function ChallengeCupOperationsWorkspace({
 
                 <div className={cx("platform-grid")}>
                 <section className={cx("platform-canvas")} aria-labelledby="platform-stage-title">
-                  <header className={cx("platform-canvas-header")}>
-                    <div>
-                      <span>阶段 {PLATFORM_STAGE_META[activeStage].index} · 当前工作区</span>
-                      <div>
-                        <h2 id="platform-stage-title">{PLATFORM_STAGE_META[activeStage].label}</h2>
+                  <VPanelHeader
+                    className={cx("platform-canvas-header")}
+                    headingLevel={2}
+                    eyebrow={`阶段 ${PLATFORM_STAGE_META[activeStage].index} · 当前工作区`}
+                    title={(
+                      <span id="platform-stage-title" className={cx("platform-canvas-title-row")}>
+                        {PLATFORM_STAGE_META[activeStage].label}
                         <VStatusChip className={cx("status-pill")} tone={vuiStatusTone(stageState(activeStage).tone)}>
                           {stageState(activeStage).label}
                         </VStatusChip>
+                      </span>
+                    )}
+                    actions={(
+                      <div className={cx("platform-canvas-actions")}>
+                        <VRouteLinkButton
+                          className={cx("button", "secondary")}
+                          to={activeStageHref}
+                          variant="secondary"
+                        >
+                          查看阶段详情
+                        </VRouteLinkButton>
                       </div>
-                    </div>
-                    <div className={cx("platform-canvas-actions")}>
-                      <VRouteLinkButton
-                        className={cx("button", "secondary")}
-                        to={activeStageHref}
-                        variant="secondary"
-                      >
-                        查看阶段详情
-                      </VRouteLinkButton>
-                    </div>
-                  </header>
+                    )}
+                  />
 
                   {activeStage === "knowledge_collection" ? (
                     <div className={cx("platform-stage-content")}>
@@ -488,14 +501,19 @@ export function ChallengeCupOperationsWorkspace({
                       </section>
 
                       <section className={cx("platform-data-surface")} aria-labelledby="platform-source-title">
-                        <header>
-                          <div><span>资料工作表</span><h3 id="platform-source-title">题目、证据与审核队列</h3></div>
-                          <div className={cx("dataset-tabs")} aria-label="资料视图">
-                            <span className={cx("selected")}>资料 {questions.length}</span>
-                            <span>Claim Map 0</span>
-                            <span>审核队列 {pendingQuestions.length}</span>
-                          </div>
-                        </header>
+                        <VPanelHeader
+                          className={cx("platform-data-surface-header")}
+                          headingLevel={3}
+                          eyebrow="资料工作表"
+                          title={<span id="platform-source-title">题目、证据与审核队列</span>}
+                          actions={(
+                            <div className={cx("dataset-tabs")} aria-label="资料视图">
+                              <span className={cx("selected")}>资料 {questions.length}</span>
+                              <span>Claim Map 0</span>
+                              <span>审核队列 {pendingQuestions.length}</span>
+                            </div>
+                          )}
+                        />
                         <div className={cx("table-wrap", "platform-table")}>
                           <table>
                             <thead><tr><th>对象</th><th>类型</th><th>机器验证</th><th>人工审核</th><th>证据</th></tr></thead>
@@ -535,7 +553,11 @@ export function ChallengeCupOperationsWorkspace({
                   ) : activeStage === "experiment" ? (
                     <div className={cx("platform-stage-content", "platform-design-content")}>
                       <section className={cx("design-summary")}>
-                        <header><span>Experiment Design</span><h3>冻结前的研究设计与治理检查</h3></header>
+                        <VPanelHeader
+                          headingLevel={3}
+                          eyebrow="Experiment Design"
+                          title="冻结前的研究设计与治理检查"
+                        />
                         <div className={cx("design-grid")}>
                           <article><span>研究计划</span><strong>{stage1.acceptance.researchPlanPresent ? "已生成" : "待生成"}</strong><p>研究问题、假设与可执行协议来自正式投影。</p></article>
                           <article><span>反馈修订</span><strong>v{Math.max(1, stage1.acceptance.feedbackRevisionCount)}</strong><p>仅展示已登记的修订次数，不推断不存在的版本。</p></article>
@@ -574,7 +596,11 @@ export function ChallengeCupOperationsWorkspace({
                   ) : (
                     <div className={cx("platform-stage-content", "platform-run-content")}>
                       <section className={cx("run-summary")}>
-                        <header><span>Run history</span><h3>代表性深研案例与版本链</h3></header>
+                        <VPanelHeader
+                          headingLevel={3}
+                          eyebrow="Run history"
+                          title="代表性深研案例与版本链"
+                        />
                         <div className={cx("run-list")}>
                           {(stage3?.caseRecords.length ? stage3.caseRecords : []).map((record) => (
                             <article key={record.caseId}>
@@ -783,15 +809,17 @@ export function ChallengeCupOperationsWorkspace({
 
               <div className={cx("overview-grid")}>
                 <section className={cx("surface", "progress-surface")} aria-labelledby="challenge-progress-title">
-                  <header className={cx("surface-header")}>
-                    <div>
-                      <span className={cx("eyebrow")}>MVP 进度</span>
-                      <h2 id="challenge-progress-title">{machineRequired} 个问题的验证与审核轨迹</h2>
-                    </div>
-                    <VStatusChip className={cx("badge")} tone={humanGate ? "success" : "warning"}>
-                      人工验收 {humanPercent}%
-                    </VStatusChip>
-                  </header>
+                  <VPanelHeader
+                    className={cx("surface-header")}
+                    headingLevel={2}
+                    eyebrow="MVP 进度"
+                    title={<span id="challenge-progress-title">{machineRequired} 个问题的验证与审核轨迹</span>}
+                    actions={(
+                      <VStatusChip className={cx("badge")} tone={humanGate ? "success" : "warning"}>
+                        人工验收 {humanPercent}%
+                      </VStatusChip>
+                    )}
+                  />
 
                   <div className={cx("progress-rail")}>
                     {questions.map((question, index) => (
@@ -869,10 +897,13 @@ export function ChallengeCupOperationsWorkspace({
                   </section>
 
                   <section className={cx("surface", "gate-summary")} aria-labelledby="challenge-gate-title">
-                    <header className={cx("surface-header", "compact")}>
-                      <div><span className={cx("eyebrow")}>验收门禁</span><h2 id="challenge-gate-title">完成条件</h2></div>
-                      <VStatusChip className={cx("badge")} tone="neutral">{completeGateCount} / 4</VStatusChip>
-                    </header>
+                    <VPanelHeader
+                      className={cx("surface-header", "compact")}
+                      headingLevel={2}
+                      eyebrow="验收门禁"
+                      title={<span id="challenge-gate-title">完成条件</span>}
+                      actions={<VStatusChip className={cx("badge")} tone="neutral">{completeGateCount} / 4</VStatusChip>}
+                    />
                     <ul className={cx("check-list")}>
                       <li className={cx(schemaGate && "done")}><span />结构化输出符合 Schema</li>
                       <li className={cx(citationGate && "done")}><span />来源与证据锚点完整</li>
@@ -902,14 +933,20 @@ export function ChallengeCupOperationsWorkspace({
               role="tabpanel"
               tabIndex={-1}
             >
-              <header className={cx("panel-heading")}>
-                <div><span className={cx("eyebrow")}>题目与结果</span><h2>人工抽检队列</h2><p>机器结果与人工决定分开记录，任何待审项都不会被计为正式通过。</p></div>
-                <div className={cx("panel-actions")}>
-                  <VStatusChip className={cx("badge")} tone={humanOutstanding > 0 ? "warning" : "success"}>
-                    {humanOutstanding} 个待处理结果
-                  </VStatusChip>
-                </div>
-              </header>
+              <VPanelHeader
+                className={cx("panel-heading")}
+                headingLevel={2}
+                eyebrow="题目与结果"
+                title="人工抽检队列"
+                actions={(
+                  <div className={cx("panel-actions")}>
+                    <VStatusChip className={cx("badge")} tone={humanOutstanding > 0 ? "warning" : "success"}>
+                      {humanOutstanding} 个待处理结果
+                    </VStatusChip>
+                  </div>
+                )}
+              />
+              <p className={cx("panel-heading-lead")}>机器结果与人工决定分开记录，任何待审项都不会被计为正式通过。</p>
               <div className={cx("question-review-list")}>
                 {(pendingQuestions.length ? pendingQuestions : questions).map((question) => (
                   <article className={cx("review-row")} key={question.id}>
@@ -937,16 +974,25 @@ export function ChallengeCupOperationsWorkspace({
               role="tabpanel"
               tabIndex={-1}
             >
-              <header className={cx("panel-heading")}>
-                <div><span className={cx("eyebrow")}>证据链</span><h2>模型调用与来源追踪</h2><p>只显示可审计摘要；原始请求、密钥和完整提示词不会暴露在前端。</p></div>
-              </header>
+              <VPanelHeader
+                className={cx("panel-heading")}
+                headingLevel={2}
+                eyebrow="证据链"
+                title="模型调用与来源追踪"
+              />
+              <p className={cx("panel-heading-lead")}>只显示可审计摘要；原始请求、密钥和完整提示词不会暴露在前端。</p>
               <div className={cx("evidence-grid")}>
                 <article className={cx("surface", "evidence-card")}><span>正式模型调用</span><strong>{officialCallCount} 条</strong><p>{modelLabel} provider · 调用 ID 与响应摘要可追踪</p></article>
                 <article className={cx("surface", "evidence-card")}><span>问题结果</span><strong>{machineCompleted} 条</strong><p>每题保留输出摘要、状态和证据引用</p></article>
                 <article className={cx("surface", "evidence-card")}><span>Schema 校验</span><strong>{machineCompleted} / {machineRequired}</strong><p>当前 MVP 输出结构校验状态</p></article>
               </div>
               <section className={cx("surface", "evidence-ledger")}>
-                <header className={cx("surface-header", "compact")}><div><span className={cx("eyebrow")}>最近证据</span><h2>可审计事件</h2></div></header>
+                <VPanelHeader
+                  className={cx("surface-header", "compact")}
+                  headingLevel={2}
+                  eyebrow="最近证据"
+                  title="可审计事件"
+                />
                 <ol>
                   {questions.map((question) => (
                     <li key={question.id}>
@@ -965,12 +1011,18 @@ export function ChallengeCupOperationsWorkspace({
               role="tabpanel"
               tabIndex={-1}
             >
-              <header className={cx("panel-heading")}>
-                <div><span className={cx("eyebrow")}>Agent 团队</span><h2>{agents.length} 个角色按职责分组</h2><p>总览只保留团队健康摘要；模型、职责和入口在这里集中管理。</p></div>
-                <VStatusChip className={cx("badge")} tone={readyAgentCount === agents.length ? "success" : "warning"}>
-                  {readyAgentCount} / {agents.length} 可用
-                </VStatusChip>
-              </header>
+              <VPanelHeader
+                className={cx("panel-heading")}
+                headingLevel={2}
+                eyebrow="Agent 团队"
+                title={`${agents.length} 个角色按职责分组`}
+                actions={(
+                  <VStatusChip className={cx("badge")} tone={readyAgentCount === agents.length ? "success" : "warning"}>
+                    {readyAgentCount} / {agents.length} 可用
+                  </VStatusChip>
+                )}
+              />
+              <p className={cx("panel-heading-lead")}>总览只保留团队健康摘要；模型、职责和入口在这里集中管理。</p>
               <div className={cx("agent-table")} role="table" aria-label="挑战杯 Agent 团队">
                 <div className={cx("agent-row", "agent-head")} role="row">
                   <span role="columnheader">Agent</span><span role="columnheader">职责</span><span role="columnheader">所属工作区</span><span role="columnheader">模型</span><span role="columnheader">状态</span><span role="columnheader" />
