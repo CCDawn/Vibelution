@@ -3,6 +3,7 @@
  * Route owns state/mutations; this module only mounts already-extracted panels.
  */
 import { agentDisplayInfo } from "../agentDisplay";
+import { ChallengeCupStageAgentConfigurationPanel } from "./challenge-cup/ChallengeCupStageAgentConfigurationPanel";
 import {
   TeamAiSearchWorkspacePanel,
   TeamExperimentPlanningLedgerPanel,
@@ -45,6 +46,16 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
           lang={lang}
           bindings={bindings}
           agentDirectoryHydrating={agentDirectoryHydrating}
+        />
+      );
+    }
+    function renderChallengeCupStageAgentConfiguration(stageType: ResearchStageType) {
+      const { lang, researchStageAgentBindingsByStage } = ctx;
+      return (
+        <ChallengeCupStageAgentConfigurationPanel
+          bindings={researchStageAgentBindingsByStage[stageType] ?? []}
+          lang={lang}
+          stageType={stageType}
         />
       );
     }
@@ -483,6 +494,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
 
   return {
     renderResearchStageAgentSummary,
+    renderChallengeCupStageAgentConfiguration,
     renderResearchStageAgentPanel,
     renderTeamMemoryIndex,
     renderResearchCanvasReadOnlyPanel,

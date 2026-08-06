@@ -1,0 +1,58 @@
+.package {
+  overflow: hidden;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-soft);
+  background: var(--vui-surface-panel);
+  box-shadow: var(--vui-shadow-hairline);
+}
+
+.header {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--vui-border-subtle);
+}
+
+.header h3 {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: 0.94rem;
+}
+
+.list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  list-style: none;
+}
+
+.record {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 15px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-control);
+  background: var(--vui-surface-muted);
+}
+
+.title {
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  min-height: 104px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-soft);
+  background: var(--vui-surface-panel);
+}

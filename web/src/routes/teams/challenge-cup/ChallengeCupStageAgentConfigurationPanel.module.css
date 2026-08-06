@@ -1,0 +1,45 @@
+.panel {
+  overflow: hidden;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-soft);
+  background: var(--vui-surface-panel);
+  box-shadow: var(--vui-shadow-hairline);
+}
+
+.header {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--vui-border-subtle);
+}
+
+.header h3 {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: 0.9rem;
+}
+
+.cards {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.card {
+  min-height: 58px;
+}
+
+.identity {
+  flex: 1 1 auto;
+}
+
+.identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controls {
+  margin-left: auto;
+}

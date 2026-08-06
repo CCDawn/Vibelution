@@ -47,7 +47,7 @@ function task(overrides: Partial<TeamResearchProjectAgentTask> = {}): TeamResear
 }
 
 describe("ResearchProjectAgentTaskPanel", () => {
-  it("shows fixed Agent responsibility, flat session title, attempt, and active state", () => {
+  it("shows a compact responsibility, status, and action row while session detail is hover-only", () => {
     const markup = renderToStaticMarkup(
       <ResearchProjectAgentTaskPanel
         stage="experiment"
@@ -60,13 +60,16 @@ describe("ResearchProjectAgentTaskPanel", () => {
     );
 
     expect(markup).toContain("实验规划");
-    expect(markup).toContain("神经预测编码实验｜实验规划");
-    expect(markup).toContain("第 1 次");
     expect(markup).toContain("运行中");
     expect(markup).toContain('data-vui="status-chip"');
     expect(markup).toContain('data-tone="accent"');
     expect(markup).toContain("继续会话");
     expect(markup).toContain("实验证据");
+    expect(markup).not.toContain("神经预测编码实验｜实验规划");
+    expect(markup).not.toContain("第 1 次");
+    expect(panelSource).toContain("VTooltip");
+    expect(panelSource).not.toContain("description:");
+    expect(panelSource).not.toContain('status === "completed") return "success"');
   });
 
   it("only exposes a formal retry for a terminal failed task", () => {

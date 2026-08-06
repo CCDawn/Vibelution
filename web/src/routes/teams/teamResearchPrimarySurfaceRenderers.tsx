@@ -124,6 +124,7 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
     activeTeamMemberCount,
     selectedTeamSyncPending,
     renderResearchStageAgentPanel,
+    renderChallengeCupStageAgentConfiguration,
     renderExperimentPlanningLedgerPanel,
     renderResearchLoopPanel,
   } = ctx;
@@ -203,6 +204,7 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
           searchParams,
         }}
         renderResearchStageAgentSummary={renderResearchStageAgentSummary}
+        renderChallengeCupStageAgentConfiguration={renderChallengeCupStageAgentConfiguration}
       />
     );
   }
