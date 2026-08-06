@@ -776,7 +776,20 @@ def resolve_agent_tool_path(
 
     raw = Path(str(path_str or "").strip() or ".")
     anchor = Path(base_dir).resolve() if base_dir is not None else PROJECT_ROOT.resolve()
-    resolved = raw.resolve() if raw.is_absolute() else (anchor / raw).resolve()
+
+    # Lexical join under anchor (works when target does not exist yet).
+    try:
+        from core.infrastructure.path_containment import contain_path
+
+        joined = contain_path(str(anchor), str(raw) if raw.is_absolute() else str(raw))
+        # contain_path treats candidate relative to project_root=anchor
+        if joined.get("resolved"):
+            resolved = Path(str(joined["resolved"]))
+        else:
+            resolved = raw.resolve() if raw.is_absolute() else (anchor / raw).resolve()
+    except Exception:
+        resolved = raw.resolve() if raw.is_absolute() else (anchor / raw).resolve()
+
     if _agent_has_danger_full_access():
         return resolved
 
@@ -787,6 +800,17 @@ def resolve_agent_tool_path(
         roots = [PROJECT_ROOT.resolve()]
         if workspace_override is not None:
             roots.append(workspace_override.resolve())
+
+    try:
+        from core.infrastructure.path_containment import contain_path
+
+        for root in roots:
+            check = contain_path(str(root), str(resolved))
+            if check.get("ok") and check.get("resolved"):
+                return Path(str(check["resolved"]))
+    except Exception:
+        pass
+
     if any(_path_is_within(resolved, root) for root in roots):
         return resolved
 
