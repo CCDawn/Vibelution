@@ -56,16 +56,12 @@ describe("ChatCodingRoute left status panel layout contract", () => {
     expect(styles.companionBlock).not.toContain("!flex-1");
   });
 
-  it("lets compact meta rows and action labels wrap without horizontal scrollbars", () => {
-    expect(styles.inlineMetaList).toContain("overflow-visible");
+  it("keeps compact meta rows and action labels single-line truncated in the dense rail", () => {
     expect(styles.inlineMetaList).not.toContain("overflow-auto");
-    expect(styles.inlineMetaPill).toContain("[&_span]:whitespace-normal");
-    expect(styles.inlineMetaPill).toContain("[&_strong]:whitespace-normal");
-    expect(styles.inlineStat).toContain("[&_strong]:whitespace-normal");
+    expect(styles.inlineMetaPill).toContain("[&_strong]:truncate");
+    expect(styles.inlineStat).toContain("[&_strong]:truncate");
     expect(styles.featureChip).toContain("[&_strong]:truncate");
-    expect(styles.petShowcaseAction).toContain("[&_span]:whitespace-normal");
-    expect(styles.inlineMetaPill).not.toContain("[&_strong]:truncate");
-    expect(styles.petShowcaseAction).not.toContain("[&_span]:truncate");
+    expect(styles.petShowcaseAction).toContain("[&_span]:truncate");
   });
 
   it("keeps provider failure status compact and hides numeric operator identities", () => {

@@ -14,7 +14,7 @@ import type {
   ExperimentMethodId,
   ResearchProjectAgentTaskKind,
 } from "../api/types";
-import { VNativeButton, VNativeInput, VStringSelect } from "../components/vui";
+import { VNativeButton, VNativeInput, VPanelHeader, VStringSelect } from "../components/vui";
 import type { ChallengeCupWorkspaceAgent } from "./teams/challenge-cup/ChallengeCupOperationsWorkspace";
 import {
   researchIterationLifecycleStatusLabel,
@@ -707,33 +707,38 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
           className={styles.challengeProgramResults}
           aria-labelledby="challenge-mvp-results-title"
         >
-          <header className={styles.challengeProgramResultsHeader}>
-            <div>
-              <strong id="challenge-mvp-results-title">{lang === "zh" ? "MVP 验收结果" : "MVP acceptance results"}</strong>
-              <span>
-                {lang === "zh"
-                  ? `机器验证 ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}；人工审核与机器验证分开记录`
-                  : `Machine validation ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}; human review is tracked separately`}
+          <VPanelHeader
+            className={styles.challengeProgramResultsHeader}
+            headingLevel={null}
+            title={<strong id="challenge-mvp-results-title">{lang === "zh" ? "MVP 验收结果" : "MVP acceptance results"}</strong>}
+            actions={(
+              <span className={`${styles.researchStageStatus} ${challengeHumanReviewOutstandingCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
+                {challengeTrialRevisionRequiredCount > 0
+                  ? (lang === "zh" ? "MVP 需修订" : "MVP revision required")
+                  : challengeTrialReviewRequiredCount > 0
+                    ? (lang === "zh" ? "MVP 待人工审核" : "MVP human review pending")
+                    : (lang === "zh" ? "MVP 可验收" : "MVP ready for acceptance")}
               </span>
-            </div>
-            <span className={`${styles.researchStageStatus} ${challengeHumanReviewOutstandingCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
-              {challengeTrialRevisionRequiredCount > 0
-                ? (lang === "zh" ? "MVP 需修订" : "MVP revision required")
-                : challengeTrialReviewRequiredCount > 0
-                  ? (lang === "zh" ? "MVP 待人工审核" : "MVP human review pending")
-                  : (lang === "zh" ? "MVP 可验收" : "MVP ready for acceptance")}
-            </span>
-          </header>
+            )}
+          />
+          <p className="m-0 mb-2 text-[var(--fg-secondary)] [font-size:var(--vui-font-xs)] leading-tight">
+            {lang === "zh"
+              ? `机器验证 ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}；人工审核与机器验证分开记录`
+              : `Machine validation ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}; human review is tracked separately`}
+          </p>
           <div className={styles.challengeProgramResultGrid}>
             <article id="challenge-mvp-sample" className={styles.challengeProgramResultCard}>
-              <header>
-                <strong>{lang === "zh" ? "黄金样例" : "Golden sample"}</strong>
-                <span className={`${styles.researchStageStatus} ${goldenSampleApproved ? styles.researchStageStatusRecorded : styles.researchStageStatusPending}`}>
-                  {goldenSampleApproved
-                    ? (lang === "zh" ? "人工审核通过" : "human review approved")
-                    : (lang === "zh" ? "待人工审核" : "human review pending")}
-                </span>
-              </header>
+              <VPanelHeader
+                headingLevel={null}
+                title={<strong>{lang === "zh" ? "黄金样例" : "Golden sample"}</strong>}
+                actions={(
+                  <span className={`${styles.researchStageStatus} ${goldenSampleApproved ? styles.researchStageStatusRecorded : styles.researchStageStatusPending}`}>
+                    {goldenSampleApproved
+                      ? (lang === "zh" ? "人工审核通过" : "human review approved")
+                      : (lang === "zh" ? "待人工审核" : "human review pending")}
+                  </span>
+                )}
+              />
               <div className={styles.challengeProgramQuestionList}>
                 <span>{stage1.mvpManifest.goldenSampleQuestionId}</span>
               </div>
@@ -744,16 +749,19 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
               </p>
             </article>
             <article id="challenge-mvp-trials" className={styles.challengeProgramResultCard}>
-              <header>
-                <strong>{lang === "zh" ? "三题试运行" : "Three trial questions"}</strong>
-                <span className={`${styles.researchStageStatus} ${challengeHumanReviewOutstandingCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
-                  {challengeTrialRevisionRequiredCount > 0
-                    ? (lang === "zh" ? `需修订 ${challengeTrialRevisionRequiredCount}` : `${challengeTrialRevisionRequiredCount} require revision`)
-                    : challengeTrialReviewRequiredCount > 0
-                      ? (lang === "zh" ? `待人工抽检 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} awaiting human review`)
-                      : (lang === "zh" ? "审核完成" : "review complete")}
-                </span>
-              </header>
+              <VPanelHeader
+                headingLevel={null}
+                title={<strong>{lang === "zh" ? "三题试运行" : "Three trial questions"}</strong>}
+                actions={(
+                  <span className={`${styles.researchStageStatus} ${challengeHumanReviewOutstandingCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
+                    {challengeTrialRevisionRequiredCount > 0
+                      ? (lang === "zh" ? `需修订 ${challengeTrialRevisionRequiredCount}` : `${challengeTrialRevisionRequiredCount} require revision`)
+                      : challengeTrialReviewRequiredCount > 0
+                        ? (lang === "zh" ? `待人工抽检 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} awaiting human review`)
+                        : (lang === "zh" ? "审核完成" : "review complete")}
+                  </span>
+                )}
+              />
               <div className={styles.challengeProgramQuestionList}>
                 {(stage1.mvpManifest.trialQuestionIds ?? stage1.mvpManifest.testQuestionIds).map((questionId) => <span key={questionId}>{questionId}</span>)}
               </div>
@@ -764,12 +772,15 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
               </p>
             </article>
             <article id="challenge-mvp-roadmap" className={styles.challengeProgramResultCard}>
-              <header>
-                <strong>{lang === "zh" ? "MVP 后续范围" : "Post-MVP scope"}</strong>
-                <span className={`${styles.researchStageStatus} ${styles.researchStageStatusPending}`}>
-                  {lang === "zh" ? "暂缓" : "deferred"}
-                </span>
-              </header>
+              <VPanelHeader
+                headingLevel={null}
+                title={<strong>{lang === "zh" ? "MVP 后续范围" : "Post-MVP scope"}</strong>}
+                actions={(
+                  <span className={`${styles.researchStageStatus} ${styles.researchStageStatusPending}`}>
+                    {lang === "zh" ? "暂缓" : "deferred"}
+                  </span>
+                )}
+              />
               <p>{lang === "zh" ? "125 题批跑与三案例深研不计入本轮 MVP 完成条件。" : "The 125-question run and three deep cases are outside this MVP."}</p>
               <p>
                 {deepCase
