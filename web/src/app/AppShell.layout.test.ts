@@ -119,14 +119,21 @@ describe("AppShell layout contract", () => {
     expect(statusGuideSource).toContain("lifecycleProofCard");
     expect(statusGuideSource).toContain("lifecycleStateLabel");
     expect(statusGuideSource).toContain("systemFrontendPossible_connected");
-    expect(statusGuideSource).toContain('import { VTooltip } from "../components/vui"');
-    expect(statusGuideSource).toContain('<VTooltip content={t("systemStatusGuideHint")} width="wide">');
+    // Status guide is VUI product composition (not hand-rolled statusDot rows).
+    expect(statusGuideSource).toContain("VSurface");
+    expect(statusGuideSource).toContain("VPanelHeader");
+    expect(statusGuideSource).toContain("VStatusChip");
+    expect(statusGuideSource).toContain("VMetricChip");
+    expect(statusGuideSource).toContain("VStatusStrip");
+    expect(statusGuideSource).toContain("VTooltip");
+    expect(statusGuideSource).not.toContain("statusDot");
     expect(statusGuideSource).toContain('<VTooltip content={item.note} width="wide">');
     expect(statusGuideSource).toContain("data-current={state.label === item.value ? \"true\" : undefined}");
     expect(statusGuideSource).toContain("content={state.detail}");
     expect(statusGuideSource).toContain("content={component.detail}");
     expect(statusGuideSource).toContain("tabIndex={0}");
-    expect(statusGuideSource).not.toContain("title=");
+    // Native title dumps are banned; VPanelHeader `title=` product prop is allowed.
+    expect(statusGuideSource).not.toMatch(/\stitle=\{(item|state|component)\./);
     expect(statusGuideSource).not.toContain("statusGuideNote");
     expect(statusGuideStyles.statusGuidePanel).toBeTypeOf("string");
     expect(statusGuideStyles.lifecycleProofCard).toBeTypeOf("string");
@@ -135,6 +142,7 @@ describe("AppShell layout contract", () => {
     expect(statusGuideStyles.lifecycleProofList).toBeTypeOf("string");
     expect(statusGuideStylesSource).toContain("statusGuideGrid");
     expect(statusGuideStylesSource).toContain("lifecycleProofCard");
+    expect(statusGuideStylesSource).not.toContain("statusDot");
     expect(shellSource).not.toContain("rightStatusCards.map((item) => (\n                <span key={item.id} className={styles.statusBadge}>");
   });
 
@@ -417,9 +425,13 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('role="region"');
     expect(utilityMenuSource).not.toContain('role="menu"');
     expect(utilityMenuSource).not.toContain('role="menuitem"');
-    expect(utilityMenuSource).toContain('import { VButton, VNativeInput, VRouteLinkButton, VTooltip } from "../components/vui"');
+    expect(utilityMenuSource).toContain("VMetricStrip");
+    expect(utilityMenuSource).toContain("VSurface");
+    expect(utilityMenuSource).toContain("VPanelHeader");
+    expect(utilityMenuSource).toContain("VChip");
     expect(utilityMenuSource).toContain("<VNativeInput");
     expect(utilityMenuSource).toContain("<VRouteLinkButton");
+    expect(utilityMenuSource).toContain("<VMetricStrip");
     expect(utilityMenuSource).not.toMatch(/<input\b/);
     expect(utilityMenuSource).not.toContain("<NavLink");
     expect(utilityMenuSource).not.toContain("hidden={!utilityOpen}");
@@ -427,7 +439,8 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('t("navUsage")');
     expect(utilityMenuSource).toContain('<VTooltip content={t("usageUtilityTitle")}>');
     expect(utilityMenuSource).toContain('<VTooltip content={t("topUtilityMenuHint")} width="wide">');
-    expect(utilityMenuSource).toContain('<VTooltip content={gitTitle} width="wide">');
+    expect(utilityMenuSource).toContain("gitHeroLabel");
+    expect(utilityMenuSource).toContain("gitMiniPanel");
     expect(utilityMenuSource).toContain('tooltip={node.path}');
     expect(utilityMenuSource).not.toContain('title={t("usageUtilityTitle")}');
     expect(utilityMenuSource).not.toContain('title={gitTitle}');
@@ -452,7 +465,14 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("icon={<Settings size={16}");
     expect(utilityMenuSource).toContain("requiresAttention");
     expect(utilityMenuSource).toContain("gitStatusLevel");
-    expect(utilityMenuSource).toContain("gitSignalGrid");
+    // Git mini panel is VUI product composition (not hand-rolled signal grids).
+    expect(utilityMenuSource).not.toContain("gitSignalGrid");
+    expect(utilityMenuSource).not.toContain("gitCountGrid");
+    expect(utilityMenuSource).not.toContain("gitMetaGrid");
+    expect(utilityMenuSource).not.toContain("gitMiniHeader");
+    expect(utilityMenuSource).toContain("gitMetricStrip");
+    expect(utilityMenuSource).toContain("gitMetricStack");
+    expect(utilityMenuSource).toContain("gitDetails");
     expect(utilityMenuSource.indexOf("className={styles.gitMiniPanel}")).toBeLessThan(utilityMenuSource.indexOf('id="utility-file-navigator"'));
     expect(utilityMenuSource).toContain("gitStatus.localCommits.commits");
     expect(utilityMenuSource).toContain("gitPendingWorktrees");
@@ -462,12 +482,15 @@ describe("AppShell layout contract", () => {
     expect(styles.utilityPopoverContent).toBeTypeOf("string");
     expect(utilityMenuStyles.utilityPanel).toBeTypeOf("string");
     expect(utilityMenuStyles.utilityButtonGrid).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitSignalGrid).toBeTypeOf("string");
+    expect(utilityMenuStyles.gitMetricStrip).toBeTypeOf("string");
+    expect(utilityMenuStyles.gitMetricStack).toBeTypeOf("string");
+    expect(utilityMenuStyles.gitMiniPanel).toBeTypeOf("string");
     expect(utilityMenuStyles.gitSectionHeader).toBeTypeOf("string");
     expect(utilityMenuStyles.gitCommitList).toBeTypeOf("string");
     expect(utilityMenuStyles.gitWorktreeList).toBeTypeOf("string");
     expect(utilityMenuStylesSource).toContain("utilityFileButton");
-    expect(utilityMenuStylesSource).toContain("gitSignalGrid");
+    expect(utilityMenuStylesSource).toContain("gitMetricStrip");
+    expect(utilityMenuStylesSource).not.toContain("gitSignalGrid");
   });
 
   it("keeps active work details in a click VPopover off the primary chip", () => {

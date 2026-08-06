@@ -1,14 +1,5 @@
-import {
-  vuiControlPillClass,
-  vuiControlQuietChromeClass,
-} from "../design/vuiChromeRecipes";
-
-import {
-  vuiOpaqueRowClass,
-  vuiStateCoolInfoClass,
-  vuiStateDangerSoftClass,
-  vuiStateSelectedRowClass,
-} from "../design/vuiSurfaceRecipes";
+import { vuiControlQuietChromeClass } from "../design/vuiChromeRecipes";
+import { vuiStateSelectedRowClass } from "../design/vuiSurfaceRecipes";
 
 /**
  * Utility popover style hooks.
@@ -17,53 +8,36 @@ import {
  * grid-template that fights the shell CSS cascade.
  */
 const styles = {
-  gitBranchName: "vui-app-appshell gitBranchName min-w-0",
-  gitChip: `vui-app-appshell gitChip min-w-0 ${vuiControlPillClass}`,
-  gitCommitItem: `vui-app-appshell gitCommitItem min-w-0 ${vuiOpaqueRowClass}`,
-  gitCommitList: "vui-app-appshell gitCommitList min-w-0",
-  gitCount: "vui-app-appshell gitCount min-w-0 shrink-0 font-semibold",
-  gitCountGrid: "vui-app-appshell gitCountGrid min-w-0",
-  gitFileItem: `vui-app-appshell gitFileItem min-w-0 ${vuiOpaqueRowClass}`,
-  gitFileList: "vui-app-appshell gitFileList min-w-0",
-  gitHeadline: "vui-app-appshell gitHeadline min-w-0",
-  gitMetaGrid: "vui-app-appshell gitMetaGrid min-w-0",
-  gitMiniHeader: "vui-app-appshell gitMiniHeader min-w-0",
-  gitMiniPanel: "vui-app-appshell gitMiniPanel min-w-0",
-  gitQuietState: "vui-app-appshell gitQuietState min-w-0",
-  gitSection: "vui-app-appshell gitSection min-w-0",
-  gitSectionHeader: "vui-app-appshell gitSectionHeader min-w-0",
-  gitSignalGrid: "vui-app-appshell gitSignalGrid min-w-0",
-  gitWorktreeItem: `vui-app-appshell gitWorktreeItem min-w-0 ${vuiOpaqueRowClass}`,
-  gitWorktreeList: "vui-app-appshell gitWorktreeList min-w-0",
-  statusDot:
-    "vui-app-appshell statusDot block h-2 w-2 shrink-0 grow-0 self-center rounded-full border-0 bg-current p-0 leading-none",
-  status_active: `vui-app-appshell status_active min-w-0 ${vuiStateSelectedRowClass}`,
-  status_blocked:
-    "vui-app-appshell status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  status_caution: "vui-app-appshell status_caution text-[var(--state-warning)]",
-  status_danger: `vui-app-appshell status_danger min-w-0 ${vuiStateDangerSoftClass}`,
-  status_done: "vui-app-appshell status_done min-w-0",
-  status_error: `vui-app-appshell status_error min-w-0 ${vuiStateDangerSoftClass}`,
-  status_failed: "vui-app-appshell status_failed text-[var(--state-error)]",
-  status_idle: "vui-app-appshell status_idle text-[color-mix(in_srgb,var(--fg-tertiary)_74%,transparent)]",
-  status_info: `vui-app-appshell status_info min-w-0 ${vuiStateCoolInfoClass}`,
-  status_mental: "vui-app-appshell status_mental min-w-0",
-  status_missing: "vui-app-appshell status_missing min-w-0",
-  status_muted: "vui-app-appshell status_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  status_neutral: "vui-app-appshell status_neutral min-w-0",
-  status_ok:
-    "vui-app-appshell status_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
-  status_pending: "vui-app-appshell status_pending min-w-0",
-  status_ready:
-    "vui-app-appshell status_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
-  status_running: "vui-app-appshell status_running text-[var(--state-success)]",
-  status_status: "vui-app-appshell status_status min-w-0",
-  status_success:
-    "vui-app-appshell status_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
-  status_thought: "vui-app-appshell status_thought min-w-0",
-  status_warn: "vui-app-appshell status_warn min-w-0",
-  status_warning:
-    "vui-app-appshell status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  gitBranchChip: "vui-app-appshell gitBranchChip max-w-[min(14rem,60%)] min-w-0 shrink truncate",
+  gitChipRow:
+    "vui-app-appshell gitChipRow flex min-w-0 max-w-full flex-wrap items-center gap-1.5 text-[var(--fg-tertiary)]",
+  gitCommitItem:
+    "vui-app-appshell gitCommitItem grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 [font-size:var(--vui-font-xs)]",
+  gitCommitList: "vui-app-appshell gitCommitList grid min-w-0 gap-1",
+  gitDetails: "vui-app-appshell gitDetails group min-w-0",
+  gitDetailsSummary:
+    "vui-app-appshell gitDetailsSummary inline-flex cursor-pointer list-none items-center gap-1 rounded-[var(--radius-control)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-secondary)] [&::-webkit-details-marker]:hidden",
+  gitFileItem:
+    "vui-app-appshell gitFileItem grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 [font-size:var(--vui-font-xs)]",
+  gitFileList: "vui-app-appshell gitFileList grid min-w-0 gap-1",
+  // VSurface owns card chrome; neutralize legacy shell double border/padding on .gitMiniPanel.
+  gitMiniPanel:
+    "vui-app-appshell gitMiniPanel grid min-w-0 gap-2.5 !border-0 !bg-transparent !p-0 !shadow-none",
+  gitMetricStack: "vui-app-appshell gitMetricStack grid min-w-0 gap-1.5",
+  gitMetricStrip: "vui-app-appshell gitMetricStrip min-w-0",
+  gitOpenLink: `vui-app-appshell gitOpenLink min-w-0 shrink-0 ${vuiControlQuietChromeClass} !h-7 !min-h-7 !px-2 !text-[11px]`,
+  gitPanelHeader:
+    "vui-app-appshell gitPanelHeader min-w-0 [&_h3]:text-[var(--vui-font-sm)] [&_h3]:font-semibold",
+  gitQuietState:
+    "vui-app-appshell gitQuietState m-0 min-w-0 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
+  gitSection: "vui-app-appshell gitSection grid min-w-0 gap-1.5",
+  gitSectionHeader:
+    "vui-app-appshell gitSectionHeader flex min-w-0 items-center justify-between gap-2 [font-size:var(--vui-font-xs)]",
+  gitSummaryLine:
+    "vui-app-appshell gitSummaryLine m-0 min-w-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)]",
+  gitValueChip: "vui-app-appshell gitValueChip shrink-0",
+  gitWorktreeItem: "vui-app-appshell gitWorktreeItem grid min-w-0 gap-0.5 [font-size:var(--vui-font-xs)]",
+  gitWorktreeList: "vui-app-appshell gitWorktreeList grid min-w-0 gap-1",
   // Full-width grid cell chrome; layout (inline-flex, height) owned by shell CSS.
   utilityButton: `vui-app-appshell utilityButton min-w-0 w-full max-w-full ${vuiControlQuietChromeClass} hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-content]]:justify-center [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:overflow-hidden`,
   utilityButtonActive: `vui-app-appshell utilityButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
@@ -72,8 +46,11 @@ const styles = {
   utilityFileButtonActive: `vui-app-appshell utilityFileButtonActive min-w-0 ${vuiStateSelectedRowClass} grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
   utilityFileChildren: "vui-app-appshell utilityFileChildren min-w-0",
   utilityFileDir: "vui-app-appshell utilityFileDir min-w-0",
-  utilityFileHeader: "vui-app-appshell utilityFileHeader min-w-0",
-  utilityFilePanel: "vui-app-appshell utilityFilePanel min-w-0",
+  utilityFileHeader:
+    "vui-app-appshell utilityFileHeader min-w-0 flex items-center [&_h3]:text-[var(--vui-font-sm)] [&_h3]:font-semibold",
+  // VSurface owns card chrome; neutralize legacy shell double border/padding.
+  utilityFilePanel:
+    "vui-app-appshell utilityFilePanel grid min-w-0 gap-2 !border-0 !bg-transparent !p-0 !shadow-none",
   utilityFileSearch: "vui-app-appshell utilityFileSearch min-w-0",
   utilityFileState: "vui-app-appshell utilityFileState min-w-0",
   utilityFileTree: "vui-app-appshell utilityFileTree min-w-0",
