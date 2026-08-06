@@ -35,7 +35,8 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(lifecycleSource).toContain("editingSessionIdRef.current === variables.sessionId");
     // Create must keep placeholder rename open; blur during temp→real remap is suppressed.
     expect(lifecycleSource).toContain("suppressRenameBlurUntilRef.current = Date.now() + 2500");
-    expect(lifecycleSource).toContain("defaultNewSessionTitle(lang)");
+    // New sessions default to the Agent display name (backend + optimistic shell).
+    expect(lifecycleSource).toContain("agentDisplayName || defaultNewSessionTitle(lang)");
     expect(lifecycleSource).not.toContain("renameAgentDirectoryEntries(agents, agentId, confirmedTitle)");
   });
 

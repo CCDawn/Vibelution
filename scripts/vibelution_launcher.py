@@ -396,11 +396,11 @@ def _windows_creation_flag_names(*, detach: bool = False) -> tuple[str, ...]:
     if os.name != "nt":
         return ()
     # MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS.
-    # Waitable children (tsc/vite/npm-cli): CREATE_NO_WINDOW only.
-    # True background services that already use pythonw may use DETACHED alone.
+    # Waitable children (tsc/vite/npm-cli/git): CREATE_NO_WINDOW only.
+    # True background pythonw services: DETACHED + CREATE_NEW_PROCESS_GROUP.
     if detach:
         return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP")
-    return ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+    return ("CREATE_NO_WINDOW",)
 
 
 def _windows_creation_flags(*, detach: bool = False) -> int:
@@ -454,7 +454,38 @@ def _run_checked(args: list[str], *, cwd: Path, label: str) -> None:
         raise RuntimeError(f"{label} failed with exit code {result.returncode}.")
 
 
+def _resolve_git_executable() -> str:
+    """Prefer Git mingw64 git.exe; avoid Git\\cmd trampoline console flash."""
+    try:
+        from core.infrastructure.no_console_git import resolve_git_executable
+
+        return resolve_git_executable()
+    except Exception:
+        if os.name == "nt":
+            for root in (
+                os.environ.get("ProgramFiles"),
+                os.environ.get("ProgramW6432"),
+                os.environ.get("ProgramFiles(x86)"),
+                r"C:\Program Files",
+            ):
+                if not root:
+                    continue
+                mingw = Path(root) / "Git" / "mingw64" / "bin" / "git.exe"
+                try:
+                    if mingw.is_file() and mingw.stat().st_size > 200_000:
+                        return str(mingw.resolve())
+                except OSError:
+                    continue
+        return shutil.which("git.exe" if os.name == "nt" else "git") or shutil.which("git") or "git"
+
+
 def _run_capture(args: list[str], *, cwd: Path, label: str, timeout: float = 15.0) -> str:
+    env = os.environ.copy()
+    first = Path(str(args[0] if args else "")).name.lower()
+    if first in {"git", "git.exe"} or first.endswith("git.exe"):
+        env.setdefault("GIT_TERMINAL_PROMPT", "0")
+        env.setdefault("GCM_INTERACTIVE", "never")
+        env.setdefault("GIT_OPTIONAL_LOCKS", "0")
     result = subprocess.run(
         args,
         cwd=str(cwd),
@@ -462,6 +493,7 @@ def _run_capture(args: list[str], *, cwd: Path, label: str, timeout: float = 15.
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
         creationflags=_windows_creation_flags(),
         startupinfo=_hidden_startup_info(),
         check=False,
@@ -501,7 +533,7 @@ def _runtime_relevant_worktree_status(worktree_status: str) -> tuple[list[str], 
 
 def _runtime_source_identity(*, allow_dirty: bool | None = None) -> dict[str, object]:
     allow_dirty_worktree = _allow_dirty_launch() if allow_dirty is None else bool(allow_dirty)
-    git_command = shutil.which("git.exe" if os.name == "nt" else "git") or shutil.which("git") or "git"
+    git_command = _resolve_git_executable()
     root_text = _run_capture(
         [git_command, "rev-parse", "--show-toplevel"],
         cwd=PROJECT_ROOT,
@@ -560,7 +592,7 @@ def _runtime_source_identity_light(*, allow_dirty: bool | None = None) -> dict[s
     """Cheap mid-start recheck: branch/commit/frontend tree only (no porcelain scan)."""
 
     allow_dirty_worktree = _allow_dirty_launch() if allow_dirty is None else bool(allow_dirty)
-    git_command = shutil.which("git.exe" if os.name == "nt" else "git") or shutil.which("git") or "git"
+    git_command = _resolve_git_executable()
     root_text = _run_capture(
         [git_command, "rev-parse", "--show-toplevel"],
         cwd=PROJECT_ROOT,
@@ -1743,11 +1775,43 @@ def _stop_backend() -> dict:
 
 
 def _focus_backend(port: int, host: str) -> dict:
+    """Non-destructive focus: require a healthy workbench backend, recover stale state.
+
+    Runtime-manager "already open" short-circuit calls internal-focus. Launcher state can
+    lag (backendPid=0 or a dead pid) while the project backend is still healthy on the
+    bound port — treat live health as source of truth so start does not hard-fail.
+    """
     state = _read_state()
+    port = int(port or state.get("backendPort") or state.get("port") or DEFAULT_PORT)
+    host = str(host or state.get("host") or DEFAULT_HOST).strip() or DEFAULT_HOST
     pid = int(state.get("backendPid") or 0)
     if pid > 0 and _pid_alive(pid) and _backend_healthy(port, host):
         return state
-    raise RuntimeError("Workbench focus requested but no running workbench backend is available.")
+    if not _backend_healthy(port, host):
+        raise RuntimeError("Workbench focus requested but no running workbench backend is available.")
+    owner_pid = _listening_pid_for_port(port)
+    recovered_pid = 0
+    if owner_pid > 0 and (_is_project_workbench_pid(owner_pid) or pid <= 0 or not _pid_alive(pid)):
+        recovered_pid = owner_pid
+    elif pid > 0 and _pid_alive(pid):
+        recovered_pid = pid
+    next_state = {
+        **state,
+        "backendPid": int(recovered_pid or pid or 0),
+        "backendPort": port,
+        "port": port,
+        "host": host,
+        "desiredState": "open",
+        "observedState": "open",
+        "phase": "steady",
+        "failureMessage": "",
+        "statusLine": "Workbench is running.",
+        "lastReason": str(state.get("lastReason") or "python_launcher_focus"),
+        "lastSource": "python_launcher",
+        "updatedAt": _now_iso(),
+    }
+    _write_state(next_state)
+    return next_state
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

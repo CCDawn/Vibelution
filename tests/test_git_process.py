@@ -2,6 +2,7 @@ from pathlib import Path
 import subprocess
 
 from core.infrastructure import git_process
+from core.infrastructure import no_console_git as ncg
 
 
 def test_resolve_git_executable_prefers_direct_windows_git(monkeypatch, tmp_path):
@@ -10,32 +11,40 @@ def test_resolve_git_executable_prefers_direct_windows_git(monkeypatch, tmp_path
     direct_git = install_root / "mingw64" / "bin" / "git.exe"
     cmd_git.parent.mkdir(parents=True)
     direct_git.parent.mkdir(parents=True)
-    cmd_git.write_text("", encoding="utf-8")
-    direct_git.write_text("", encoding="utf-8")
+    cmd_git.write_bytes(b"x" * 40_000)
+    direct_git.write_bytes(b"y" * 500_000)
 
-    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
-    monkeypatch.setattr(git_process.shutil, "which", lambda name: str(cmd_git) if name == "git" else None)
-    git_process.resolve_git_executable.cache_clear()
+    monkeypatch.setattr(ncg, "_is_windows", lambda: True)
+    monkeypatch.setattr(ncg.shutil, "which", lambda name: str(cmd_git) if name in {"git", "git.exe"} else None)
+    monkeypatch.delenv("ProgramFiles", raising=False)
+    monkeypatch.delenv("ProgramW6432", raising=False)
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("LocalAppData", raising=False)
+    ncg.clear_git_executable_cache()
 
     try:
-        assert Path(git_process.resolve_git_executable()) == direct_git
+        assert Path(git_process.resolve_git_executable()) == direct_git.resolve()
     finally:
-        git_process.resolve_git_executable.cache_clear()
+        ncg.clear_git_executable_cache()
 
 
 def test_resolve_git_executable_falls_back_to_discovered_git(monkeypatch, tmp_path):
     cmd_git = tmp_path / "Git" / "cmd" / "git.exe"
     cmd_git.parent.mkdir(parents=True)
-    cmd_git.write_text("", encoding="utf-8")
+    cmd_git.write_bytes(b"x" * 40_000)
 
-    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
-    monkeypatch.setattr(git_process.shutil, "which", lambda name: str(cmd_git) if name == "git" else None)
-    git_process.resolve_git_executable.cache_clear()
+    monkeypatch.setattr(ncg, "_is_windows", lambda: True)
+    monkeypatch.setattr(ncg.shutil, "which", lambda name: str(cmd_git) if name in {"git", "git.exe"} else None)
+    monkeypatch.delenv("ProgramFiles", raising=False)
+    monkeypatch.delenv("ProgramW6432", raising=False)
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("LocalAppData", raising=False)
+    ncg.clear_git_executable_cache()
 
     try:
         assert Path(git_process.resolve_git_executable()) == cmd_git
     finally:
-        git_process.resolve_git_executable.cache_clear()
+        ncg.clear_git_executable_cache()
 
 
 def test_no_console_subprocess_kwargs_hides_windows_process(monkeypatch):
@@ -44,11 +53,11 @@ def test_no_console_subprocess_kwargs_hides_windows_process(monkeypatch):
             self.dwFlags = 0
             self.wShowWindow = -1
 
-    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
-    monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
-    monkeypatch.setattr(git_process.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
-    monkeypatch.setattr(git_process.subprocess, "STARTF_USESHOWWINDOW", 0x00000001, raising=False)
-    monkeypatch.setattr(git_process.subprocess, "SW_HIDE", 0, raising=False)
+    monkeypatch.setattr(ncg, "_is_windows", lambda: True)
+    monkeypatch.setattr(ncg.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(ncg.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
+    monkeypatch.setattr(ncg.subprocess, "STARTF_USESHOWWINDOW", 0x00000001, raising=False)
+    monkeypatch.setattr(ncg.subprocess, "SW_HIDE", 0, raising=False)
 
     kwargs = git_process.no_console_subprocess_kwargs()
 
@@ -61,8 +70,8 @@ def test_run_git_uses_resolved_executable_and_no_console(monkeypatch, tmp_path):
     calls = []
     resolved_git = str(tmp_path / "Git" / "mingw64" / "bin" / "git.exe")
     monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
-    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
-    monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(ncg, "_is_windows", lambda: True)
+    monkeypatch.setattr(ncg.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))

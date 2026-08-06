@@ -32,6 +32,7 @@ export type UseChatWorkspaceActionsOptions = {
   queryClient: QueryClient;
   chatWorkspaceCache: ChatWorkspaceCache;
   latestDirectSessionSelectionRef: MutableRefObject<string>;
+  latestDirectSessionSelectionAtRef: MutableRefObject<number>;
   reselectDirectSessionRef: MutableRefObject<(sessionId: string) => void>;
   activeSessionId?: string | null;
   setActiveSession: (sessionId: string) => void;
@@ -121,6 +122,7 @@ export function useChatWorkspaceActions({
   queryClient,
   chatWorkspaceCache,
   latestDirectSessionSelectionRef,
+  latestDirectSessionSelectionAtRef,
   reselectDirectSessionRef,
   activeSessionId = null,
   setActiveSession,
@@ -218,7 +220,10 @@ export function useChatWorkspaceActions({
     }
     setSessionContextMenu(null);
     // Instant active switch (T0). Network select is generation-guarded (T1).
+    // Stamp intent before setActiveSession so the URL-sync effect does not
+    // immediately revert to the previous ?session= while navigate is in flight.
     latestDirectSessionSelectionRef.current = normalizedSessionId;
+    latestDirectSessionSelectionAtRef.current = Date.now();
     // Temp create shells are local-only — never select/prefetch against the API.
     const tempLocal = isTempSessionId(normalizedSessionId);
     if (!tempLocal) {
@@ -244,6 +249,7 @@ export function useChatWorkspaceActions({
     }
   }, [
     activeSessionId,
+    latestDirectSessionSelectionAtRef,
     latestDirectSessionSelectionRef,
     navigate,
     queryClient,

@@ -20,8 +20,9 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STATUS_LIMIT = 80
 MAX_STATUS_LIMIT = 500
-GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS = 1.5
-GIT_STATUS_METADATA_CACHE_TTL_SECONDS = 30.0
+# Utility menu polls ~6s; keep snapshot warm so runtime does not thrash git.exe.
+GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS = 8.0
+GIT_STATUS_METADATA_CACHE_TTL_SECONDS = 45.0
 DEFAULT_COMMIT_LIMIT = 20
 MAX_COMMIT_LIMIT = 60
 STATUS_LOCAL_COMMIT_LIMIT = 5

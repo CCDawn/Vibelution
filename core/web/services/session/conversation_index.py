@@ -1166,7 +1166,19 @@ def create_chat_session(
         }
         now = s._now_timestamp()
         session_id = s._new_conversation_id(existing_ids)
-        normalized_title = s.trim_lines(title or "", max_lines=1).strip() or s.text_for(lang, zh="新会话", en="New session")
+        # Prefer the bound Agent display name over the generic "新会话" placeholder so
+        # new tabs are immediately identifiable in multi-agent workspaces.
+        fallback_title = s.text_for(lang, zh="新会话", en="New session")
+        if bound_agent is not None:
+            agent_name = str(
+                bound_agent.get("displayName")
+                or bound_agent.get("agentCode")
+                or bound_agent.get("name")
+                or ""
+            ).strip()
+            if agent_name:
+                fallback_title = s.trim_lines(agent_name, max_lines=1).strip()[:120] or fallback_title
+        normalized_title = s.trim_lines(title or "", max_lines=1).strip() or fallback_title
         conversation = s._make_empty_conversation(
             session_id,
             title=normalized_title,
@@ -1507,6 +1519,11 @@ def _select_direct_session_collision_owner(
             and str(session_id or "").strip() == s.agent_directory_service.KNOWLEDGE_STEWARD_DIRECT_SESSION_ID
         ):
             return agent
+        if (
+            str(agent.get("agentId") or "").strip() == s.agent_directory_service.CODE_DELIVERY_AUDIT_AGENT_ID
+            and str(session_id or "").strip() == s.agent_directory_service.CODE_DELIVERY_AUDIT_DIRECT_SESSION_ID
+        ):
+            return agent
     protected_agents = [agent for agent in agents if s._agent_direct_session_collision_owner_protected(agent)]
     if protected_agents:
         return sorted(protected_agents, key=s._agent_direct_session_collision_owner_sort_key)[0]
@@ -1532,6 +1549,7 @@ def _agent_direct_session_collision_owner_protected(agent: dict[str, Any]) -> bo
         "ceo",
         "organization_advisor",
         s.agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY,
+        s.agent_directory_service.CODE_DELIVERY_AUDIT_ROLE_KEY,
     }
 
 
