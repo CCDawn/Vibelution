@@ -1,5 +1,6 @@
 import { TriangleAlert } from "lucide-react";
 
+import { VStatusChip, VSurface } from "../components/vui";
 import styles from "./MemoryWarningStrip.styles";
 
 type MemoryWarningStripProps = {
@@ -13,10 +14,19 @@ export function MemoryWarningStrip({ label, warnings }: MemoryWarningStripProps)
   }
 
   return (
-    <section className={styles.warningStrip} aria-label={label}>
-      <TriangleAlert size={16} />
-      <strong>{label}</strong>
-      <span>{warnings.join("；")}</span>
-    </section>
+    <VSurface
+      as="section"
+      tone="row"
+      elevation="flat"
+      padding="compact"
+      className={styles.warningStrip}
+      ariaLabel={label}
+    >
+      <VStatusChip tone="warning" className={styles.warningChip}>
+        <TriangleAlert size={12} aria-hidden="true" />
+        {label}
+      </VStatusChip>
+      <span className={styles.warningBody}>{warnings.join("；")}</span>
+    </VSurface>
   );
 }

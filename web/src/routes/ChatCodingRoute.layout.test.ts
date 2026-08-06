@@ -2948,7 +2948,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("formatTime={formatConversationIndexTime}");
     expect(groupSessionIndexItemsSource).toContain("export function teamStatusLabel");
     expect(groupSessionIndexItemsSource).toContain("teamStatusLabel(team.status, lang, statusLabel)");
-    expect(groupSessionIndexItemsSource).toContain("sessionStatusDot");
+    expect(groupSessionIndexItemsSource).toContain("VStatusChip");
+    expect(groupSessionIndexItemsSource).toContain("sessionStatusChip");
+    expect(groupSessionIndexItemsSource).not.toContain("sessionStatusDot");
     expect(groupSessionIndexItemsSource).not.toContain("Clock3");
     expect(groupSessionIndexItemsSource).not.toContain("CircleDot");
     expect(groupSessionIndexItemsSource).toContain("teamMemberPreview(team, lang)");
@@ -3139,9 +3141,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("grid-cols-[32px_minmax(0,1fr)]");
     expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("[border:0]");
     expect(groupSessionIndexItemsStyles.teamSessionItemMain).toContain("min-h-[3.25rem]");
-    expect(groupSessionIndexItemsSource).toContain("sessionStatusDot");
-    expect(groupSessionIndexItemsSource).not.toContain("VChip tone=\"success\"");
-    expect(groupSessionIndexItemsStyles.sessionStatusDot).toContain("state-success");
+    expect(groupSessionIndexItemsSource).toContain("VStatusChip");
+    expect(groupSessionIndexItemsSource).toContain("sessionStatusChip");
+    expect(groupSessionIndexItemsSource).not.toContain("sessionStatusDot");
+    expect(groupSessionIndexItemsStyles.sessionStatusChip).toContain("sessionStatusChip");
     expect(groupSessionIndexItemsStyles.teamTreeItem).toContain("overflow-hidden");
     expect(groupSessionIndexItemsStyles.teamTreeItem).toContain("!bg-transparent");
     expect(groupSessionIndexItemsStyles.groupSessionItem).toContain("!bg-transparent");

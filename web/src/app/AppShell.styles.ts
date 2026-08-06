@@ -47,11 +47,13 @@ const styles = {
   activeWorkDetailPanel:
     "vui-app-appshell activeWorkDetailPanel min-w-0 grid gap-2 p-2.5",
   activeWorkDetailTitle:
-    "vui-app-appshell activeWorkDetailTitle min-w-0 grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)] [&_span]:rounded-full [&_span]:border [&_span]:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] [&_span]:bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] [&_span]:px-1.5 [&_span]:py-0.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:font-medium [&_span]:text-[var(--accent-cool)]",
+    "vui-app-appshell activeWorkDetailTitle min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   activeWorkInlineDetails:
     "vui-app-appshell activeWorkInlineDetails min-w-0",
   activeWorkInlineItem:
     "vui-app-appshell activeWorkInlineItem min-w-0",
+  activeWorkItemToneChip:
+    "vui-app-appshell activeWorkItemToneChip !min-h-5 max-w-[7rem] shrink-0 truncate !px-1.5 !text-[10px]",
   activeWorkKicker:
     "vui-app-appshell activeWorkKicker min-w-0 shrink-0 [font-size:var(--vui-font-xs)] font-medium text-[var(--fg-tertiary)]",
   activeWorkMore:
@@ -60,6 +62,8 @@ const styles = {
     "vui-app-appshell activeWorkPopoverContent z-[95] w-[min(420px,calc(100vw-2rem))] max-w-[min(420px,calc(100vw-2rem))] border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--border-strong))] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   activeWorkStatus:
     "vui-app-appshell activeWorkStatus min-w-0 shrink-0 rounded-full border border-[color-mix(in_srgb,var(--state-warning)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-medium text-[var(--state-warning)]",
+  activeWorkToneChip:
+    "vui-app-appshell activeWorkToneChip !min-h-5 max-w-[6.5rem] shrink-0 truncate !px-1.5 !text-[10px]",
   activeWorkSummary: `vui-app-appshell activeWorkSummary min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass}`,
   brand:
     "vui-app-appshell brand min-w-0",
@@ -164,6 +168,8 @@ const styles = {
     "whitespace-nowrap leading-none [&>*]:!self-center [&>*]:leading-none",
   statusSummaryCount:
     "vui-app-appshell statusSummaryCount inline-flex h-[18px] min-h-[18px] max-h-[18px] shrink-0 items-center justify-center tabular-nums leading-none text-[var(--fg-tertiary)]",
+  statusSummaryToneChip:
+    "vui-app-appshell statusSummaryToneChip !min-h-5 max-w-[7rem] shrink-0 truncate !px-1.5 !text-[10px]",
   status_active:
     `vui-app-appshell status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_blocked:

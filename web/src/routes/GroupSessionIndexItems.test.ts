@@ -193,7 +193,7 @@ describe("GroupSessionIndexItems helpers", () => {
     expect(styles.teamSessionItemTitle).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.teamConversationMetaRow).toContain("flex");
     expect(styles.conversationAvatarGroup).toContain("accent-cool");
-    expect(styles.sessionStatusDot).toContain("state-success");
+    expect(styles.sessionStatusChip).toContain("sessionStatusChip");
   });
 
   it("uses Team category before kind and falls back to a localized custom label", () => {

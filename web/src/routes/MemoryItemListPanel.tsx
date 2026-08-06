@@ -1,5 +1,5 @@
 import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
-import { VButton, VNativeInput, VStateSurface } from "../components/vui";
+import { VButton, VNativeInput, VStateSurface, VStatusChip, type VStatusTone } from "../components/vui";
 import type { MemoryItem, MemorySection } from "../api/types";
 import styles from "./MemoryItemListPanel.styles";
 import {
@@ -43,7 +43,7 @@ type MemoryItemListPanelProps = {
   copy: MemoryItemListCopy;
   formatTimestamp: (value: string) => string;
   formatSourceOrigin: (section: MemorySection, item: MemoryItem) => string;
-  statusClassName: (active: boolean, injected: boolean) => string;
+  statusTone: (active: boolean, injected: boolean) => VStatusTone;
   channelPills: (item: MemoryItem) => MemoryItemListChannelPill[];
   onSelectPair: (sectionId: string, itemId: string) => void;
   onToggleSelection: (sectionId: string, itemId: string) => void;
@@ -65,7 +65,7 @@ export function MemoryItemListPanel({
   copy,
   formatTimestamp,
   formatSourceOrigin,
-  statusClassName,
+  statusTone,
   channelPills,
   onSelectPair,
   onToggleSelection,
@@ -89,11 +89,11 @@ export function MemoryItemListPanel({
         const statusLabel = item.inPrompt ? copy.inPrompt : item.agentVisible ? copy.canUse : copy.manualOnly;
         const managedStateBadges = (
           <>
-            {item.managedState?.userManaged ? <span className={styles.statusPill}>{copy.userManaged}</span> : null}
-            {item.managedState?.overridden ? <span className={styles.statusPill}>{copy.overridden}</span> : null}
-            {item.managedState?.disabled ? <span className={styles.statusPill}>{copy.disabledByUser}</span> : null}
-            {!item.exists ? <span className={styles.statusPill}>{copy.missing}</span> : null}
-            {item.contentTruncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
+            {item.managedState?.userManaged ? <VStatusChip tone="neutral">{copy.userManaged}</VStatusChip> : null}
+            {item.managedState?.overridden ? <VStatusChip tone="warning">{copy.overridden}</VStatusChip> : null}
+            {item.managedState?.disabled ? <VStatusChip tone="danger">{copy.disabledByUser}</VStatusChip> : null}
+            {!item.exists ? <VStatusChip tone="danger">{copy.missing}</VStatusChip> : null}
+            {item.contentTruncated ? <VStatusChip tone="warning">{copy.truncated}</VStatusChip> : null}
           </>
         );
         const compactItemBody = (
@@ -122,7 +122,7 @@ export function MemoryItemListPanel({
             <span className={styles.manageItemFooter}>
               <span className={styles.manageItemSummary}>{item.summary}</span>
               <span className={styles.manageItemBadges}>
-                <span className={statusClassName(item.agentVisible, item.inPrompt)}>{statusLabel}</span>
+                <VStatusChip tone={statusTone(item.agentVisible, item.inPrompt)}>{statusLabel}</VStatusChip>
                 {managedStateBadges}
               </span>
             </span>
@@ -140,7 +140,7 @@ export function MemoryItemListPanel({
             <span className={styles.itemPath}>{sourcePath}</span>
             <span className={styles.itemSummary}>{item.summary}</span>
             <span className={styles.itemBadges}>
-              <span className={statusClassName(item.agentVisible, item.inPrompt)}>{statusLabel}</span>
+              <VStatusChip tone={statusTone(item.agentVisible, item.inPrompt)}>{statusLabel}</VStatusChip>
               {managedStateBadges}
               {channelPills(item).map((pill) => (
                 <span key={`${item.id}:${pill.label}`} className={styles.channelPill} title={pill.hint}>

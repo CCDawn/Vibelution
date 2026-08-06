@@ -1,7 +1,14 @@
 import type { ReactNode } from "react";
 
-import { VPanelHeader } from "../../components/vui";
-import styles, { statusTone } from "./ResearchMemoryEvidencePanel.styles";
+import { VPanelHeader, VStatusChip, type VStatusTone } from "../../components/vui";
+import styles from "./ResearchMemoryEvidencePanel.styles";
+
+function claimStatusVuiTone(status: string): VStatusTone {
+  if (status === "qualified") return "success";
+  if (status === "unsupported") return "warning";
+  if (status === "rejected") return "danger";
+  return "neutral";
+}
 
 export type ResearchMemoryEvidenceRef = {
   type: string;
@@ -162,9 +169,9 @@ export function ResearchMemoryEvidencePanel({
             className={styles.claimDetails}
           >
             <summary className={styles.claimSummary}>
-              <span className={`${styles.statusBadge} ${statusTone[claim.status] || statusTone.not_established}`}>
+              <VStatusChip tone={claimStatusVuiTone(claim.status)}>
                 {claimStatusLabel(claim.status, lang)}
-              </span>
+              </VStatusChip>
               <span className={styles.claimTitle}>{claim.claim}</span>
             </summary>
             <div className={styles.claimBody}>

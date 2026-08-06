@@ -47,12 +47,8 @@ const styles = {
     "grid gap-1 [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-secondary)]",
   sessionState:
     "vui-routes-chatcodingroute sessionState inline-grid shrink-0 place-items-center",
-  sessionStatusDot:
-    "vui-routes-chatcodingroute sessionStatusDot inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--state-success)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--state-success)_18%,transparent)]",
-  sessionStatusDotMuted:
-    "vui-routes-chatcodingroute sessionStatusDotMuted inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--fg-tertiary)] opacity-70",
-  sessionStatusDotPending:
-    "vui-routes-chatcodingroute sessionStatusDotPending inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--state-warning)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--state-warning)_18%,transparent)]",
+  sessionStatusChip:
+    "vui-routes-chatcodingroute sessionStatusChip !min-h-5 max-w-[5.5rem] shrink-0 truncate !px-1.5 !text-[10px]",
   // Flat rail row: matches AgentConversationDirectory agent rows under the same team section.
   teamTreeItem:
     `vui-routes-chatcodingroute teamTreeItem min-w-0 overflow-hidden !border-0 !bg-transparent shadow-none transition-[background-color] hover:!bg-vui-surface-card focus-within:!bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)]`,

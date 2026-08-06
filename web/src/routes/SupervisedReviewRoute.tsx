@@ -17,7 +17,18 @@ import {
   SupervisedWorktreeRun,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VButton, VListDetailPage, VNativeInput, VNativeTextarea, VRouteLinkButton, VStringSelect, VTabs, VTooltip } from "../components/vui";
+import {
+  VButton,
+  VListDetailPage,
+  VNativeInput,
+  VNativeTextarea,
+  VRouteLinkButton,
+  VStatusChip,
+  VStringSelect,
+  VTabs,
+  VTooltip,
+  type VStatusTone,
+} from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -307,17 +318,17 @@ export function SupervisedReviewRoute() {
     return lang === "zh" ? "丢弃" : "Discard";
   }
 
-  function statusTone(status: string) {
+  function statusTone(status: string): VStatusTone {
     if (status === "positive") {
-      return styles.statusPositive;
+      return "success";
     }
     if (status === "negative") {
-      return styles.statusNegative;
+      return "danger";
     }
     if (status === "discard") {
-      return styles.statusDiscard;
+      return "warning";
     }
-    return styles.statusPending;
+    return "neutral";
   }
 
   function submitCurrentDecision() {
@@ -611,7 +622,7 @@ export function SupervisedReviewRoute() {
                         icon={itemSelected ? <SquareCheckBig size={16} /> : <Square size={16} />} />
                       <strong>{item.topicSummary || item.candidateId}</strong>
                     </div>
-                    <span className={`${styles.statusBadge} ${statusTone(item.status)}`}>{statusLabel(item.status)}</span>
+                    <VStatusChip tone={statusTone(item.status)}>{statusLabel(item.status)}</VStatusChip>
                   </div>
                   <p className={styles.queueHeadline}>{item.structuredSample.promptSeed || "--"}</p>
                   <div className={styles.signalRow}>
@@ -641,7 +652,7 @@ export function SupervisedReviewRoute() {
                   <p className={styles.detailLead}>{detailCandidate.reviewProfile.suggestedReason}</p>
                 </div>
                 <div className={styles.detailHeaderActions}>
-                  <span className={`${styles.statusBadge} ${statusTone(detailCandidate.status)}`}>{statusLabel(detailCandidate.status)}</span>
+                  <VStatusChip tone={statusTone(detailCandidate.status)}>{statusLabel(detailCandidate.status)}</VStatusChip>
                   <span className={styles.secondaryPill}>{decisionLabel((detailCandidate.reviewProfile.suggestedDecision as ReviewDecision) || "positive")}</span>
                 </div>
               </div>

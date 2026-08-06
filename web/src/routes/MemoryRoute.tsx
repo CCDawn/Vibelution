@@ -55,7 +55,8 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurface } from "../components/vui";
+import { VButton, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurface, VStatusChip } from "../components/vui";
+import { memoryProposalStatusTone, memoryVisibilityTone } from "./memoryStatusTone";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
@@ -1632,16 +1633,6 @@ function filterCount(pairs: MemoryPair[], filterMode: FilterMode) {
 
 function manageFilterCount(pairs: MemoryPair[], filterMode: ManageFilterMode) {
   return pairs.filter(({ item }) => itemMatchesManageFilter(item, filterMode)).length;
-}
-
-function statusClassName(active: boolean, injected: boolean) {
-  if (injected) {
-    return `${styles.statusPill} ${styles.statusPillPrompt}`;
-  }
-  if (active) {
-    return `${styles.statusPill} ${styles.statusPillVisible}`;
-  }
-  return `${styles.statusPill} ${styles.statusPillMuted}`;
 }
 
 function contentLanguage(contentType: string) {
@@ -3342,7 +3333,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       copy={copy}
       formatTimestamp={(value) => formatTimestamp(value, lang)}
       formatSourceOrigin={sourceOriginLabel}
-      statusClassName={statusClassName}
+      statusTone={memoryVisibilityTone}
       channelPills={(item) => itemChannelPills(copy, item)}
       onSelectPair={selectMemoryPair}
       onToggleSelection={toggleMemorySelection}
@@ -3357,15 +3348,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     setSearchText("");
   };
 
-  const renderProjectMemoryProposalStatus = (status: string) => {
-    const className =
-      status === "pending"
-        ? `${styles.statusPill} ${styles.statusPillVisible}`
-        : status === "conflict"
-          ? `${styles.statusPill} ${styles.statusPillPrompt}`
-          : `${styles.statusPill} ${styles.statusPillMuted}`;
-    return <span className={className}>{status || "-"}</span>;
-  };
+  const renderProjectMemoryProposalStatus = (status: string) => (
+    <VStatusChip tone={memoryProposalStatusTone(status)}>{status || "-"}</VStatusChip>
+  );
 
   const isPendingProjectMemoryOnly = memoryProposalStatusFilter === "pending";
   const projectMemoryQueueEmptyText = isPendingProjectMemoryOnly ? copy.projectMemoryQueueEmptyPending : copy.projectMemoryQueueEmptyAll;

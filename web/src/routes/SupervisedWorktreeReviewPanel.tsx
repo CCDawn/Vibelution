@@ -2,7 +2,7 @@ import { GitMerge, LoaderCircle, Save, SearchCheck, ShieldCheck, Trash2 } from "
 import { useEffect, useMemo, useState } from "react";
 
 import type { EvolutionActionState, SupervisedWorktreeRun } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VStatusChip } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
 import styles from "./SupervisedWorktreeReviewPanel.styles";
@@ -205,9 +205,9 @@ export function SupervisedWorktreeReviewPanel({
         {highlightedIsSelfOrigin && highlightedWorktreeRun ? (
           <div className={styles.worktreeReviewGateClass}>
             <div className={styles.worktreeReviewHeaderClass}>
-              <span className={highlightedReviewPending ? styles.statusPillClass : styles.secondaryPillClass}>
+              <VStatusChip tone={highlightedReviewPending ? "warning" : "success"}>
                 {highlightedReviewPending ? t("selfWorktreeReviewPending") : t("selfWorktreeReviewApprovedStatus")}
-              </span>
+              </VStatusChip>
               <strong className={styles.truncateTextClass} title={highlightedSelfOrigin?.goal || highlightedWorktreeRun.runId}>
                 {highlightedSelfOrigin?.goal || highlightedWorktreeRun.runId}
               </strong>

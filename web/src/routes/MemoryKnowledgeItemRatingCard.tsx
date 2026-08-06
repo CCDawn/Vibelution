@@ -1,7 +1,7 @@
 import { CheckCircle2 } from "lucide-react";
 
 import type { KnowledgeItem } from "../api/types";
-import { VButton, VNativeInput, VStringSelect } from "../components/vui";
+import { VButton, VNativeInput, VStatusChip, VStringSelect } from "../components/vui";
 import styles from "./MemoryKnowledgeItemRatingCard.styles";
 
 export type MemoryKnowledgeRatingDraft = {
@@ -48,7 +48,7 @@ export function MemoryKnowledgeItemRatingCard({
           <strong>{item.title}</strong>
           <p>{item.summary || item.content}</p>
         </div>
-        <span className={styles.statusPill}>{item.importanceLevel}</span>
+        <VStatusChip tone="neutral">{item.importanceLevel}</VStatusChip>
       </div>
       <div className={styles.metaGrid}>
         <span>{copy.confidence}: {item.confidence}</span>

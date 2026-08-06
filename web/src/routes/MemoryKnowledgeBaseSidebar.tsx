@@ -1,6 +1,6 @@
 import { Database } from "lucide-react";
 
-import { VButton, VStateSurface, VTooltip } from "../components/vui";
+import { VButton, VStateSurface, VStatusChip, VTooltip } from "../components/vui";
 import styles from "./MemoryKnowledgeBaseSidebar.styles";
 
 export type MemoryKnowledgeBaseSidebarCopy = {
@@ -65,12 +65,12 @@ export function MemoryKnowledgeBaseSidebar({
       <VTooltip content={toolVisibilityTooltip} width="wide">
         <section className={styles.governanceMiniPanel} tabIndex={0} aria-label={`${copy.toolVisibility}说明`}>
           <strong>{copy.toolVisibility}</strong>
-          <span className={styles.statusPill}>
+          <VStatusChip tone="success">
             {copy.yes}: {visibleTools.length}
-          </span>
-          <span className={hiddenTools.length ? styles.statusPillMuted : styles.statusPill}>
+          </VStatusChip>
+          <VStatusChip tone={hiddenTools.length ? "warning" : "success"}>
             {copy.missing}: {hiddenTools.length}
-          </span>
+          </VStatusChip>
         </section>
       </VTooltip>
       {isLoading ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}

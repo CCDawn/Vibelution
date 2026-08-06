@@ -50,8 +50,8 @@ const mutedLineClass = "min-w-0 break-words [font-size:var(--vui-font-xs)] leadi
 const warningLineClass = "min-w-0 break-words [font-size:var(--vui-font-xs)] not-italic leading-[1.35] text-[var(--state-warning)]";
 const lifecycleSectionClass = `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-[7px] overflow-hidden ${vuiFlatPanelClass} p-2`;
 const lifecycleTimelineClass = "grid min-h-0 min-w-0 max-w-full content-start gap-1.5 overflow-auto overflow-x-hidden pr-1";
-const lifecycleRowClass = `grid grid-cols-[14px_minmax(0,1fr)] gap-[7px] ${rowSurface}`;
-const lifecycleDotClass = "mt-[5px] h-[9px] w-[9px] rounded-full bg-vui-fg-tertiary";
+const lifecycleRowClass = `grid grid-cols-[auto_minmax(0,1fr)] items-start gap-[7px] ${rowSurface}`;
+const lifecycleToneChipClass = "!min-h-5 !w-5 !min-w-5 !justify-center !px-0 !text-[10px]";
 const lifecycleTitleClass = "flex items-center justify-between gap-2";
 const lifecycleKindClass = "[font-size:var(--vui-font-xs)] text-vui-fg-primary";
 const lifecycleSummaryClass = "m-0 my-[3px] min-w-0 break-words [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
@@ -60,7 +60,7 @@ const chipCodeClass = `max-w-full overflow-hidden truncate whitespace-nowrap rou
 const refListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const evidenceRefListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const emptyInlineClass = "[font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
-const statusPillBaseClass = "inline-flex min-h-[22px] items-center whitespace-nowrap rounded-full border border-vui-border-soft px-[7px] [font-size:var(--vui-font-xs)]";
+const statusPillBaseClass = "!min-h-[22px] max-w-full truncate !px-[7px] !text-[var(--vui-font-xs)]";
 const emptyStateClass = `grid min-h-16 content-start gap-1 break-words rounded-[var(--radius-panel)] border border-dashed border-vui-border-soft ${vuiOpaqueRowClass} p-2.5`;
 
 const styles = {
@@ -104,7 +104,7 @@ const styles = {
   lifecycleSectionClass,
   lifecycleTimelineClass,
   lifecycleRowClass,
-  lifecycleDotClass,
+  lifecycleToneChipClass,
   lifecycleTitleClass,
   lifecycleKindClass,
   lifecycleSummaryClass,

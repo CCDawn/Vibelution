@@ -23,7 +23,22 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VPanelHeader, VRouteLinkButton, VStateSurface, VStringSelect, VTabs, VTooltip } from "../components/vui";
+import {
+  VButton,
+  VConfirmDialog,
+  VContextualHint,
+  VDenseOpsPage,
+  VIconButton,
+  VNativeInput,
+  VPanelHeader,
+  VRouteLinkButton,
+  VStateSurface,
+  VStatusChip,
+  VStringSelect,
+  VTabs,
+  VTooltip,
+  type VStatusTone,
+} from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -156,6 +171,21 @@ function statusTone(tool: ToolRegistryItem): ToolStatusTone {
     return "enabled";
   }
   return "idle";
+}
+
+function statusToneToVui(tone: ToolStatusTone): VStatusTone {
+  if (tone === "error") return "danger";
+  if (tone === "active") return "success";
+  if (tone === "enabled") return "accent";
+  return "neutral";
+}
+
+function toolStatusLabel(tool: ToolRegistryItem, lang: "zh" | "en"): string {
+  const tone = statusTone(tool);
+  if (tone === "error") return lang === "zh" ? "无效" : "Invalid";
+  if (tone === "active") return lang === "zh" ? "活跃" : "Active";
+  if (tone === "enabled") return lang === "zh" ? "已启用" : "Enabled";
+  return lang === "zh" ? "空闲" : "Idle";
 }
 
 function scopeStateForTool(tool: ToolRegistryItem, scopeId: string): ToolAgentScopeState {
@@ -1818,7 +1848,9 @@ export function ToolsRoute() {
                           tooltip={tool.description || t("toolsNoDescription")}
                           onClick={(event) => handleToolRowClick(tool, event)}
                         >
-                          <span className={`${styles.statusDot} ${styles[`status_${statusTone(tool)}`]}`} />
+                          <VStatusChip tone={statusToneToVui(statusTone(tool))} className={styles.toolStatusChip}>
+                            {toolStatusLabel(tool, lang)}
+                          </VStatusChip>
                           <span className={styles.toolCopy}>
                             <strong>{tool.name}</strong>
                             <span>
@@ -2087,9 +2119,9 @@ export function ToolsRoute() {
                   <h2>{activeTool.name}</h2>
                   <p>{activeTool.description || t("toolsNoDescription")}</p>
                 </div>
-                <span className={`${styles.stateBadge} ${styles[`state_${statusTone(activeTool)}`]}`}>
+                <VStatusChip tone={statusToneToVui(statusTone(activeTool))}>
                   {activeTool.status}
-                </span>
+                </VStatusChip>
               </section>
               <div className={styles.metaGrid}>
                 <section>

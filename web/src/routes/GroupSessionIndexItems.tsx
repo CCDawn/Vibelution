@@ -1,7 +1,7 @@
 import { UsersRound } from "lucide-react";
 
 import type { ConversationSummary, Team } from "../api/types";
-import { VNativeButton, VTooltip } from "../components/vui";
+import { VNativeButton, VStatusChip, VTooltip, type VStatusTone } from "../components/vui";
 import type { ConversationIndexTeam } from "./conversationIndexModel";
 import { conversationIndexTeamMemberCount } from "./conversationIndexModel";
 import styles from "./GroupSessionIndexItems.styles";
@@ -15,6 +15,12 @@ export function teamStatusLabel(status: string | undefined, lang: "zh" | "en", f
     return lang === "zh" ? "已归档" : "Archived";
   }
   return fallback(normalized || String(status ?? ""));
+}
+
+function statusKindTone(kind: "active" | "pending" | "muted"): VStatusTone {
+  if (kind === "active") return "success";
+  if (kind === "pending") return "warning";
+  return "neutral";
 }
 
 export function teamMemberPreview(team: Pick<Team, "members" | "memberCount">, lang: "zh" | "en") {
@@ -44,16 +50,6 @@ function indexItemTooltip(title: string, details: string[]) {
       {details.filter(Boolean).map((detail) => <span key={detail}>{detail}</span>)}
     </span>
   );
-}
-
-function statusDotClass(kind: "active" | "pending" | "muted") {
-  if (kind === "pending") {
-    return styles.sessionStatusDotPending;
-  }
-  if (kind === "muted") {
-    return styles.sessionStatusDotMuted;
-  }
-  return styles.sessionStatusDot;
 }
 
 type GroupConversationIndexItemProps = {
@@ -109,13 +105,13 @@ export function GroupConversationIndexItem({
           <span className={styles.conversationCopy}>
             <span className={styles.conversationTitleRow}>
               <span className={styles.teamSessionItemTitle}>{title}</span>
-              <span
-                className={styles.sessionState}
+              <VStatusChip
+                tone={statusKindTone(statusKind)}
+                className={styles.sessionStatusChip}
                 aria-label={groupStatus}
-                title={groupStatus}
               >
-                <span className={statusDotClass(statusKind)} aria-hidden="true" />
-              </span>
+                {groupStatus}
+              </VStatusChip>
             </span>
             <span className={styles.teamConversationMetaRow}>
               <span className={styles.conversationMetaItem}>{kindLabel}</span>
@@ -210,13 +206,13 @@ export function TeamConversationIndexItem({
       <span className={styles.conversationCopy}>
         <span className={styles.conversationTitleRow}>
           <span className={styles.teamSessionItemTitle}>{title}</span>
-          <span
-            className={styles.sessionState}
+          <VStatusChip
+            tone={statusKindTone(statusKind)}
+            className={styles.sessionStatusChip}
             aria-label={roomLinked ? teamStatus : roomTitle}
-            title={roomLinked ? teamStatus : roomTitle}
           >
-            <span className={statusDotClass(statusKind)} aria-hidden="true" />
-          </span>
+            {roomLinked ? teamStatus : roomTitle}
+          </VStatusChip>
         </span>
         <span className={styles.teamConversationMetaRow}>
           {secondaryTeamName ? (

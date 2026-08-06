@@ -1,7 +1,8 @@
 import { CheckCircle2, Eye, Link2 } from "lucide-react";
 
 import type { KnowledgeStewardOverview, KnowledgeStewardRecommendation, KnowledgeStewardWorkbenchPayload } from "../api/types";
-import { VButton, VRouteLinkButton, VTooltip } from "../components/vui";
+import { VButton, VRouteLinkButton, VStatusChip, VTooltip } from "../components/vui";
+import { memoryPriorityTone } from "./memoryStatusTone";
 import styles from "./MemoryKnowledgeStewardPanel.styles";
 
 export type MemoryKnowledgeStewardPanelCopy = {
@@ -82,9 +83,9 @@ export function MemoryKnowledgeStewardPanel({
           <h2>{knowledgeSteward?.steward.functionalDisplayName || copy.knowledgeSteward}</h2>
         </div>
         <div className={styles.managementActions}>
-          <span className={knowledgeSteward?.steward.protected ? styles.statusPill : styles.statusPillMuted}>
+          <VStatusChip tone={knowledgeSteward?.steward.protected ? "warning" : "neutral"}>
             {knowledgeSteward?.steward.protected ? copy.protectedAgent : knowledgeSteward?.steward.status || copy.missing}
-          </span>
+          </VStatusChip>
           <VRouteLinkButton
             className={styles.detailActionButton}
             to={knowledgeSteward?.steward.directChatPath || "/chat"}
@@ -151,7 +152,7 @@ export function MemoryKnowledgeStewardPanel({
             return (
               <VTooltip key={recommendation.recommendationId} content={recommendationTooltip} width="wide">
                 <section className={styles.stewardRecommendationRow} tabIndex={0} aria-label={`${recommendation.title}说明`}>
-                  <span className={styles.statusPill}>{recommendation.priority}</span>
+                  <VStatusChip tone={memoryPriorityTone(recommendation.priority)}>{recommendation.priority}</VStatusChip>
                   <strong>{recommendation.title}</strong>
                   <VButton type="button" className={styles.detailActionButton} onClick={() => onTraceTarget(recommendation.targetId)}
                     icon={<Eye size={14}/>}
@@ -178,9 +179,9 @@ export function MemoryKnowledgeStewardPanel({
               <VTooltip key={stage.stageId} content={stageTooltip} width="wide">
                 <section className={styles.stewardStageCard} tabIndex={0} aria-label={`${stageTitle}说明`}>
                   <div>
-                    <span className={stage.status === "clear" ? styles.statusPillMuted : styles.statusPill}>
+                    <VStatusChip tone={stage.status === "clear" ? "success" : "warning"}>
                       {formatPolicyToken(stage.status)}
-                    </span>
+                    </VStatusChip>
                     <strong>{stageTitle}</strong>
                   </div>
                   <small>
@@ -198,7 +199,7 @@ export function MemoryKnowledgeStewardPanel({
             return (
               <VTooltip key={action.actionId} content={actionTooltip} width="wide">
                 <VButton type="button" className={styles.stewardActionRow} onClick={() => onTraceTarget(action.targetId)}>
-                  <span className={styles.statusPill}>{action.priority}</span>
+                  <VStatusChip tone={memoryPriorityTone(action.priority)}>{action.priority}</VStatusChip>
                   <strong>{action.title}</strong>
                 </VButton>
               </VTooltip>

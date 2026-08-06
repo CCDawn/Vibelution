@@ -6,6 +6,7 @@ import {
   VNativeInput,
   VNativeTextarea,
   VPanelHeader,
+  VStatusChip,
 } from "../components/vui";
 import type {
   EngineeringProxyHypothesisDraft,
@@ -234,9 +235,9 @@ export function TeamExperimentHypothesisGovernancePanel(
                 <strong className={styles.candidateTitle}>
                   {candidate.title || candidate.candidateId}
                 </strong>
-                <span className={styles.statusBadge}>
+                <VStatusChip tone="neutral">
                   {hypothesisStatusLabel(candidate, lang)}
-                </span>
+                </VStatusChip>
               </div>
               <p className={styles.hypothesis} title={candidate.hypothesis || candidate.summary || undefined}>
                 {candidate.hypothesis || candidate.summary || "-"}

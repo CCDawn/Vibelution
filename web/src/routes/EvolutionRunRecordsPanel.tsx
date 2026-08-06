@@ -2,7 +2,7 @@ import { ArrowUpRight, CheckCircle2, LoaderCircle, Sparkles, Trash2 } from "luci
 import type { CSSProperties, ReactNode } from "react";
 
 import type { EvolutionLibraryEntry, EvolutionRun } from "../api/types";
-import { VButton, VCheckbox, VTooltip } from "../components/vui";
+import { VButton, VCheckbox, VStatusChip, VTooltip } from "../components/vui";
 import type { Language, TranslationKey } from "../i18n/dictionary";
 import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supervisedRunRecordLabel";
 import styles from "./EvolutionRunRecordsPanel.styles";
@@ -319,9 +319,9 @@ export function EvolutionRunRecordsPanel({
                     >
                       {t("selectRunForDelete")}
                     </VCheckbox>
-                    <span className={run.canDelete ? styles.secondaryPill : styles.statusPill}>
+                    <VStatusChip tone={run.canDelete ? "neutral" : "warning"}>
                       {run.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
-                    </span>
+                    </VStatusChip>
                   </div>
                   <VButton
                     type="button"

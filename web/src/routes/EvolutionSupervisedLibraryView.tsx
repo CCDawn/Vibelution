@@ -8,6 +8,7 @@ import {
   VCheckbox,
   VInput,
   VStateSurface,
+  VStatusChip,
   VStringSelect,
   VSurface,
   VTabs,
@@ -184,7 +185,7 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
             <p className={styles.eyebrow}>{t("pendingReview")}</p>
             <h2 className={styles.detailTitle}>{item.title}</h2>
           </div>
-          <span className={styles.statusPill}>{item.outcomeSemantics.proposalStatusLabel}</span>
+          <VStatusChip tone="accent">{item.outcomeSemantics.proposalStatusLabel}</VStatusChip>
         </div>
         <div className={styles.detailSection}>
           <h3>{t("reviewHeadline")}</h3>
@@ -420,11 +421,11 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                       || (libraryView === "items" ? t("libraryItems") : t("pendingReview"))}
                   </h2>
                 </div>
-                <span className={selectedProposalSummary ? styles.statusPill : styles.secondaryPill}>
+                <VStatusChip tone={selectedProposalSummary ? "accent" : "neutral"}>
                   {selectedProposalSummary
                     ? selectedProposalSummary.outcomeSemantics.proposalStatusLabel
                     : intakeModeLabel(currentIntakeMode)}
-                </span>
+                </VStatusChip>
               </div>
               <p className={styles.statusLead}>
                 {selectedProposalSummary
@@ -575,9 +576,9 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                           >
                             {t("selectForBatchDelete")}
                           </VCheckbox>
-                          <span className={item.canDelete ? styles.secondaryPill : styles.statusPill}>
+                          <VStatusChip tone={item.canDelete ? "neutral" : "warning"}>
                             {item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
-                          </span>
+                          </VStatusChip>
                         </div>
                         <VButton
                           type="button"
@@ -624,9 +625,9 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                           >
                             {t("selectForBatchDelete")}
                           </VCheckbox>
-                          <span className={item.canDelete ? styles.secondaryPill : styles.statusPill}>
+                          <VStatusChip tone={item.canDelete ? "neutral" : "warning"}>
                             {item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
-                          </span>
+                          </VStatusChip>
                         </div>
                         <VButton
                           type="button"
@@ -689,9 +690,9 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                         </p>
                         <h2 className={styles.detailTitle}>{proposalDetail.title}</h2>
                       </div>
-                      <span className={styles.statusPill}>
+                      <VStatusChip tone="accent">
                         {proposalDetail.outcomeSemantics.proposalStatusLabel}
-                      </span>
+                      </VStatusChip>
                     </div>
 
                     <div className={styles.detailSection}>
