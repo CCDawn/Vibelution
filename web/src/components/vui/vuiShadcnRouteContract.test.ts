@@ -129,8 +129,12 @@ describe("VUI shadcn route contract", () => {
     expect(chatEntry.split(/\r?\n/).length).toBeLessThan(40);
 
     const chat = readFileSync(resolve(routesDir, "chat/ChatCodingRouteWorkbench.tsx"), "utf-8");
-    expect(chat).toContain('data-vui-recipe="chat-session-workbench"');
-    expect(chat).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    const chatShell = readFileSync(resolve(routesDir, "chat/ChatSessionWorkbenchShell.tsx"), "utf-8");
+    expect(chat).toContain("ChatSessionWorkbenchShell");
+    expect(chat).toContain("useChatWorkbenchLayout");
+    expect(chatShell).toContain("VSessionWorkbenchPage");
+    expect(chatShell).toContain('domainRecipe="chat-session-workbench"');
+    expect(chatShell).toContain("WORKBENCH_LAYOUT_IDS.chat");
     expect(chat).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(chat).not.toMatch(/renderers\/shadcn/);
 

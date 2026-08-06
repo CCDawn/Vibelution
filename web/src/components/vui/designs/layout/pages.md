@@ -10,6 +10,7 @@
 | 左 rail + 看板 | `VBoardWorkbenchPage` | 团队看板类 |
 | 画布+检查器 | `VCanvasWorkbenchPage` | 图/流程/画布 |
 | 多轨（模式切换）+ 满高主区 | `VTrackWorkbenchPage` | Evolution 监督/自进化等 |
+| 会话双轨（索引+会话+状态） | `VSessionWorkbenchPage` | Chat 等 session 工作台 |
 | 仅分栏积木 | `VSplitWorkspace` | 被 recipe 组合 |
 | 底层工作台 section | `VWorkbenchPage` | recipe 内部根 / 例外宿主 |
 | 最简 section | `VPage` | 非满高最简页 |
@@ -285,6 +286,63 @@ import { VCanvasWorkbenchPage } from "@/components/vui";
 
 ### 实现落点
 - `layout/VCanvasWorkbenchPage.tsx`
+
+---
+
+## VSessionWorkbenchPage
+
+### 功能
+会话工作台：可选路由顶栏 + **indexRail / session / statusRail** 三槽 + resize 句柄 + overlay；承载 Chat 双轨几何 host。
+
+### 适用范围
+- **适用**：Chat 会话工作台；未来同类 session 双/三栏。
+- **不适用**：主从列表选中 → `VListDetailPage`；运维表 → `VDenseOpsPage`；模式轨 multi-rail → `VTrackWorkbenchPage`。
+
+| 场景 | 选择 |
+| --- | --- |
+| Chat 编码/会话 | `VSessionWorkbenchPage`（经 `ChatSessionWorkbenchShell`） |
+| Evolution 多轨 | `VTrackWorkbenchPage` |
+
+### 使用方式
+```tsx
+import { VSessionWorkbenchPage } from "@/components/vui";
+
+<VSessionWorkbenchPage
+  hostAsRoot
+  layoutRef={layoutRef}
+  className={gridClassName}
+  hostStyle={cssVars}
+  domainRecipe="chat-session-workbench"
+  layoutId={WORKBENCH_LAYOUT_IDS.chat}
+  overlay={backdrop}
+  statusRail={<StatusRail />}
+  leftResizeHandle={<PaneCollapseHandle side="left" ... />}
+  session={<CenterConversation />}
+  rightResizeHandle={<PaneCollapseHandle side="right" ... />}
+  indexRail={<ConversationIndex />}
+>
+  {dialogs}
+</VSessionWorkbenchPage>
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| `hostAsRoot` | 默认 true：host 即 page 根（Chat 网格） | false 时外包 `VWorkbenchPage` + 可选 header |
+| `session` / `indexRail` / `statusRail` | 三主区 | 宽度记忆走 layoutId + 域 hook |
+| `layoutRef` / `layoutId` | 几何 host 与持久化 id | Chat 双写仍在 `useChatWorkbenchLayout` |
+| `domainRecipe` | 域标记 | 如 `chat-session-workbench` |
+| children | 对话框等 host 级内容 | 勿塞业务三栏 |
+
+### 非职责
+- 不实现双写宽度 / 响应式 collapse 算法（route hook）。
+- 不替代 list-detail 主从选中。
+
+### 实现落点
+- `layout/VSessionWorkbenchPage.tsx`
+- Chat 适配：`routes/chat/ChatSessionWorkbenchShell.tsx`
+
+### 反冗余
+- 禁止再手写 Chat 顶层 grid host；禁止平行 `VChatPage`。
 
 ---
 

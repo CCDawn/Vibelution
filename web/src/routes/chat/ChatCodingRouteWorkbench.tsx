@@ -2981,8 +2981,8 @@ export function ChatCodingRoute() {
       style={layoutStyle}
       responsiveMode={responsiveLayout.mode}
       statusRailCollapsed={statusRailCollapsed}
-    >
-      {responsiveOverlayOpen ? (
+      overlay={
+      responsiveOverlayOpen ? (
         <VButton
           type="button"
           className={styles.overlayBackdrop}
@@ -2991,7 +2991,9 @@ export function ChatCodingRoute() {
         >
           <span className="sr-only">{lang === "zh" ? "关闭侧栏" : "Close side panel"}</span>
         </VButton>
-      ) : null}
+      ) : null
+      }
+      statusRail={(
       <Suspense fallback={null}>
       <ChatStatusRail
         statusRailClassName={statusRailClassName}
@@ -3097,8 +3099,9 @@ export function ChatCodingRoute() {
         onPetInteraction={handlePetInteraction}
       />
       </Suspense>
-
-      {responsiveLayout.leftVisible ? <PaneCollapseHandle
+      )}
+      leftResizeHandle={
+      responsiveLayout.leftVisible ? <PaneCollapseHandle
         side="left"
         collapsed={conversationIndexCollapsed}
         separatorLabel={t("resizeLeftPanel")}
@@ -3112,8 +3115,9 @@ export function ChatCodingRoute() {
         onToggle={() => setLeftRailCollapsed((current) => !current)}
         onPointerDown={(event) => handleResizeStart("left", event)}
         onKeyDown={(event) => handleResizeKeyDown("left", event)}
-      /> : null}
-
+      /> : null
+      }
+      center={(
       <section className={centerPaneClassName} data-vui-region="chat-conversation-center">
         <div className={styles.tabStrip}>
           {/* Pinned back chip — short label only; full destination stays in title/aria. */}
@@ -3470,8 +3474,9 @@ export function ChatCodingRoute() {
           )}
         </div>
       </section>
-
-      {responsiveLayout.rightVisible ? <PaneCollapseHandle
+      )}
+      rightResizeHandle={
+      responsiveLayout.rightVisible ? <PaneCollapseHandle
         side="right"
         collapsed={statusRailCollapsed}
         separatorLabel={t("resizeRightPanel")}
@@ -3485,8 +3490,9 @@ export function ChatCodingRoute() {
         onToggle={() => setRightPaneCollapsed((current) => !current)}
         onPointerDown={(event) => handleResizeStart("right", event)}
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
-      /> : null}
-
+      /> : null
+      }
+      conversationIndex={(
       <ChatConversationIndexRail
         conversationIndexPaneClassName={conversationIndexPaneClassName}
         conversationIndexCollapsed={conversationIndexCollapsed}
@@ -3546,6 +3552,8 @@ export function ChatCodingRoute() {
         chatRoomModeLabel={chatRoomModeLabel}
         chatRoomPurposeLabel={chatRoomPurposeLabel}
       />
+      )}
+    >
       {cacheDetailOpen && cacheDetailAvailable ? (
         <Suspense fallback={null}>
           <CacheDetailDialog

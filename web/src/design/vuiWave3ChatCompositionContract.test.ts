@@ -21,11 +21,22 @@ const designRoot = resolve(import.meta.dirname);
 describe("Wave 3B Chat session workbench composition", () => {
   it("marks the Chat layout root as the session workbench recipe", () => {
     const routeSource = readFileSync(resolve(routesRoot, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
-    expect(routeSource).toContain('data-vui-recipe="chat-session-workbench"');
+    const shellSource = readFileSync(resolve(routesRoot, "chat/ChatSessionWorkbenchShell.tsx"), "utf8");
+    const recipeSource = readFileSync(
+      resolve(routesRoot, "../components/vui/layout/VSessionWorkbenchPage.tsx"),
+      "utf8",
+    );
+    expect(routeSource).toContain("ChatSessionWorkbenchShell");
     expect(routeSource).toContain('data-vui-region="chat-conversation-center"');
-    expect(routeSource).toContain("data-vui-layout-id");
-    expect(routeSource).toContain("WORKBENCH_LAYOUT_IDS.chat");
     expect(routeSource).toContain("PaneCollapseHandle");
+    expect(routeSource).toContain("statusRail={");
+    expect(routeSource).toContain("center={");
+    expect(routeSource).toContain("conversationIndex={");
+    expect(shellSource).toContain("VSessionWorkbenchPage");
+    expect(shellSource).toContain('domainRecipe="chat-session-workbench"');
+    expect(shellSource).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(recipeSource).toContain('data-vui-recipe="session-workbench-page"');
+    expect(recipeSource).toContain("data-vui-layout-id");
   });
 
   it("keeps Chat width dual-write on shellStore (Wave 6D boundary)", () => {
