@@ -144,7 +144,10 @@ def _seed_agent_avatars(root):
     avatar_dir = root / "assets" / "agent-avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
     for filename in agent_directory_service.AGENT_AVATAR_FILENAMES:
-        (avatar_dir / filename).write_bytes(b"\x89PNG\r\n\x1a\navatar")
+        if filename.endswith(".svg"):
+            (avatar_dir / filename).write_text("<svg><path /></svg>", encoding="utf-8")
+        else:
+            (avatar_dir / filename).write_bytes(b"\x89PNG\r\n\x1a\navatar")
 
 
 def _avatar_url_path(value: str) -> str:
@@ -1128,9 +1131,13 @@ def test_agent_directory_assigns_default_avatar_from_bundled_assets(tmp_path, mo
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_agent_avatars(tmp_path)
 
-    chat_agent = agent_directory_service.create_agent_instance(display_name="会话 Agent")
+    chat_agent = agent_directory_service.create_agent_instance(
+        display_name="会话 Agent",
+        llm_bindings={"dialogue": {"modelId": "relay/gpt-5.6"}},
+    )
     deep_agent = agent_directory_service.create_agent_instance(
         display_name="深搜 Agent",
+        llm_bindings={"dialogue": {"modelId": "dashscope/qwen3.5-plus"}},
         primary_mode="research",
         role_key="research_deep",
         prompt_template_id="prompt-research-deep",
@@ -1140,16 +1147,21 @@ def test_agent_directory_assigns_default_avatar_from_bundled_assets(tmp_path, mo
 
     assert chat_agent["avatarImagePath"].startswith("workspace/avatars/")
     assert chat_agent["avatarImageUrl"].startswith("/api/agents/avatar-image/")
-    assert chat_agent["avatarImagePath"] == "workspace/avatars/01-session-agent.png"
-    assert deep_agent["avatarImagePath"] == "workspace/avatars/06-deep-investigator.png"
-    assert _avatar_url_path(deep_agent["avatarImageUrl"]) == "/api/agents/avatar-image/06-deep-investigator.png"
+    assert chat_agent["avatarImagePath"] == "workspace/avatars/model-openai.svg"
+    assert deep_agent["avatarImagePath"] == "workspace/avatars/model-qwen.svg"
+    assert _avatar_url_path(deep_agent["avatarImageUrl"]) == "/api/agents/avatar-image/model-qwen.svg"
     assert "?v=" in deep_agent["avatarImageUrl"]
     assert agents[chat_agent["agentId"]]["avatarImageUrl"] == chat_agent["avatarImageUrl"]
     assert agents[deep_agent["agentId"]]["metadata"]["avatarImageSource"] == "default"
 
-    response = client.get("/api/agents/avatar-image/06-deep-investigator.png")
+    response = client.get("/api/agents/avatar-image/model-qwen.svg")
     assert response.status_code == 200
-    assert response.content.startswith(b"\x89PNG")
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    assert response.content.startswith(b"<svg")
+
+    options_response = client.get("/api/agents/avatar-options?modelId=dashscope/qwen3.5-plus")
+    assert options_response.status_code == 200
+    assert options_response.json()["modelDefault"]["filename"] == "model-qwen.svg"
 
 
 def test_agent_avatar_image_url_changes_when_file_changes(tmp_path, monkeypatch):
@@ -1254,7 +1266,7 @@ def test_agent_avatar_can_be_selected_uploaded_and_reset(tmp_path, monkeypatch):
         json={"resetToDefault": True},
     )
     assert reset_response.status_code == 200
-    assert reset_response.json()["avatarImagePath"] == "workspace/avatars/06-deep-investigator.png"
+    assert reset_response.json()["avatarImagePath"] == "workspace/avatars/model-generic.svg"
     assert reset_response.json()["metadata"]["avatarImageSource"] == "default"
 
 

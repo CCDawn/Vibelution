@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from core.infrastructure import developer_sandbox
 from core.web.services import agent_directory_service
 from core.web.services.agent_directory import mutations as agent_directory_mutations
+from core.web.services.agent_directory.avatar_model_defaults import model_default_avatar_filename
 
 
 def _use_isolated_agent_directory(tmp_path, monkeypatch):
@@ -132,6 +133,95 @@ def test_declared_default_agent_avatars_are_tracked_bundled_assets():
     ]
 
     assert missing == []
+
+
+def test_model_avatar_default_mapping_uses_model_name_not_provider_route():
+    assert model_default_avatar_filename("relay/gpt-5.6-luna") == "model-openai.svg"
+    assert model_default_avatar_filename("lan/qwen3.5-32b") == "model-qwen.svg"
+    assert model_default_avatar_filename("anything/deepseek-r1-distill-llama") == "model-deepseek.svg"
+    assert model_default_avatar_filename("anthropic/claude-sonnet-4-6") == "model-anthropic.svg"
+    assert model_default_avatar_filename("relay/unknown-model") == "model-generic.svg"
+
+
+def test_only_bundled_model_logos_accept_svg_avatar_paths(tmp_path, monkeypatch):
+    project_root, _data_home = _use_isolated_agent_directory(tmp_path, monkeypatch)
+    _patch_primary_model(monkeypatch)
+    avatar_dir = project_root / "assets" / "agent-avatars"
+    avatar_dir.mkdir(parents=True)
+    bundled_logo = avatar_dir / "model-openai.svg"
+    bundled_logo.write_text("<svg><path /></svg>", encoding="utf-8")
+    custom_dir = tmp_path / "config" / "avatars" / "agents"
+    custom_dir.mkdir(parents=True)
+    (custom_dir / "model-openai.svg").write_text("<svg>shadow</svg>", encoding="utf-8")
+
+    assert agent_directory_service.agent_avatar_filename("workspace/avatars/model-openai.svg") == "model-openai.svg"
+    assert agent_directory_service.agent_avatar_filename("workspace/avatars/custom.svg") == ""
+    assert agent_directory_service.resolve_agent_avatar_file("model-openai.svg") == bundled_logo
+
+
+def test_default_avatar_uses_dialogue_model_logo_and_reprojects_legacy_defaults(tmp_path, monkeypatch):
+    project_root, _data_home = _use_isolated_agent_directory(tmp_path, monkeypatch)
+    _patch_primary_model(monkeypatch)
+    avatar_dir = project_root / "assets" / "agent-avatars"
+    avatar_dir.mkdir(parents=True)
+    (avatar_dir / "01-session-agent.png").write_bytes(b"\x89PNG\r\n\x1a\nlegacy")
+    (avatar_dir / "model-openai.svg").write_text("<svg><path /></svg>", encoding="utf-8")
+    (avatar_dir / "model-qwen.svg").write_text("<svg><path /></svg>", encoding="utf-8")
+    (avatar_dir / "model-generic.svg").write_text("<svg><path /></svg>", encoding="utf-8")
+
+    agent = agent_directory_service.create_agent_instance(
+        display_name="模型默认头像",
+        llm_bindings={"dialogue": {"modelId": "relay/gpt-5.6"}},
+    )
+    legacy_default = {
+        **agent,
+        "metadata": {
+            "avatarImagePath": "workspace/avatars/01-session-agent.png",
+            "avatarImageSource": "default",
+        },
+    }
+
+    assert agent["avatarImagePath"] == "workspace/avatars/model-openai.svg"
+    assert (
+        agent_directory_service.resolve_agent_avatar_path_for_projection(legacy_default)
+        == "workspace/avatars/model-openai.svg"
+    )
+
+
+def test_default_avatar_changes_with_dialogue_model_but_preserves_custom_avatar(tmp_path, monkeypatch):
+    project_root, _data_home = _use_isolated_agent_directory(tmp_path, monkeypatch)
+    _patch_primary_model(monkeypatch)
+    avatar_dir = project_root / "assets" / "agent-avatars"
+    avatar_dir.mkdir(parents=True)
+    (avatar_dir / "01-session-agent.png").write_bytes(b"\x89PNG\r\n\x1a\ncustom")
+    (avatar_dir / "model-openai.svg").write_text("<svg><path /></svg>", encoding="utf-8")
+    (avatar_dir / "model-qwen.svg").write_text("<svg><path /></svg>", encoding="utf-8")
+    (avatar_dir / "model-generic.svg").write_text("<svg><path /></svg>", encoding="utf-8")
+
+    agent = agent_directory_service.create_agent_instance(
+        display_name="模型切换头像",
+        llm_bindings={"dialogue": {"modelId": "relay/gpt-5.6"}},
+    )
+    replaced = agent_directory_service.replace_agent_llm_bindings_if_current(
+        agent["agentId"],
+        expected_updated_at=agent["updatedAt"],
+        llm_bindings={"dialogue": {"modelId": "dashscope/qwen3.5-plus"}},
+    )
+
+    assert replaced["avatarImagePath"] == "workspace/avatars/model-qwen.svg"
+
+    custom = agent_directory_service.update_agent_avatar(
+        agent["agentId"],
+        avatar_image_path="workspace/avatars/01-session-agent.png",
+    )
+    after_custom_model_change = agent_directory_service.replace_agent_llm_bindings_if_current(
+        agent["agentId"],
+        expected_updated_at=custom["updatedAt"],
+        llm_bindings={"dialogue": {"modelId": "relay/gpt-5.7"}},
+    )
+
+    assert after_custom_model_change["avatarImagePath"] == "workspace/avatars/01-session-agent.png"
+    assert after_custom_model_change["metadata"]["avatarImageSource"] == "custom"
 
 
 def test_agent_directory_repairs_model_primary_to_configured_primary_profile(tmp_path, monkeypatch):

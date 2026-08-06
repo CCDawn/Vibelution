@@ -54,6 +54,7 @@ from .agent_directory.profiles import (
     _persona_profile_has_content,
     _task_profile_has_content,
 )
+from .agent_directory.avatar_model_defaults import MODEL_AVATAR_FILENAMES
 from .agent_directory.policies import (
     _context_compression_base_policy_for_agents,
     _context_compression_policy_from_config,
@@ -514,7 +515,9 @@ AGENT_AVATAR_RELATIVE_DIR = PurePosixPath("workspace/avatars")
 AGENT_AVATAR_ASSET_DIR_NAME = "agent-avatars"
 AGENT_AVATAR_CONFIG_DIR_NAME = "avatars"
 AGENT_AVATAR_CONFIG_AGENT_DIR_NAME = "agents"
+AGENT_AVATAR_MODEL_FILENAMES = MODEL_AVATAR_FILENAMES
 AGENT_AVATAR_FILENAMES = (
+    *AGENT_AVATAR_MODEL_FILENAMES,
     "01-session-agent.png",
     "02-diagnose-agent.png",
     "03-inspect-agent.png",

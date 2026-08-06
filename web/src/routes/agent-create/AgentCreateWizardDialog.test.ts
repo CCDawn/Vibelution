@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import dialogSource from "./AgentCreateWizardDialog.tsx?raw";
 import dialogStyles from "./AgentCreateWizardDialog.styles";
+import panelSource from "../AgentCreatePanel.tsx?raw";
 
 describe("AgentCreateWizardDialog contract", () => {
   it("hosts creation in VDialog with viewport-clamped content", () => {
@@ -20,8 +21,16 @@ describe("AgentCreateWizardDialog contract", () => {
 
   it("loads avatar options while open for create-time library picks", () => {
     expect(dialogSource).toContain("/api/agents/avatar-options");
+    expect(dialogSource).toContain("modelId=${encodeURIComponent(selectedModelId)}");
+    expect(dialogSource).toContain('["agent-avatar-options", selectedModelId]');
     expect(dialogSource).toContain("avatarOptions=");
     expect(dialogSource).toContain("avatarOptionsPending=");
+  });
+
+  it("previews the backend-projected model logo instead of a role avatar", () => {
+    expect(panelSource).toContain("avatarOptions?.modelDefault?.url");
+    expect(panelSource).not.toContain('filename.startsWith("01-session")');
+    expect(panelSource).toContain("默认按所选模型使用 Logo");
   });
 
   it("loads options only while open, preserves the draft, and creates no implicit session", () => {
