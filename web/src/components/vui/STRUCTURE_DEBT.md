@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | `TeamsRoute.tsx` | Thick orchestrator; shell recipes + SC/canvas extracts in progress (other owner). | keep recipes; continue module extract |
 | Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | optional inspector UX polish |
-| Chat coding | **`VSessionWorkbenchPage` + `ChatSessionWorkbenchShell` + `useChatWorkbenchLayout`**; dual-pane math in hook | Done for page recipe + slots; keep dual-write domain math |
+| Chat coding | **`VSessionWorkbenchPage` + shell slots + `ChatCenterTabStrip` / `ChatCenterSessionSurface` / index panel content**; dual-pane math in `useChatWorkbenchLayout` | Continue peeling orchestrator into chat/* packs |
 | Memory | Outer `VDenseOpsPage` + layoutId; sources/knowledge/agent-memory → `VSplitWorkspace` | Done for three-pane shells |
 | Config settings | **Migrated** nav/main + model-assets to `VSplitWorkspace` layoutIds | Done for shell width ownership |
 | Research flow canvas | **Migrated** `VCanvasWorkbenchPage` + **`WORKBENCH_LAYOUT_IDS.researchFlow`** inspector resize | Done for inspector width memory |

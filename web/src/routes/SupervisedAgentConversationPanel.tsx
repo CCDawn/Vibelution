@@ -10,6 +10,7 @@ import {
   VButton,
   VChip,
   VEmptyState,
+  VPanelHeader,
   VStatusChip,
   VStatusStrip,
   VSurface,
@@ -281,22 +282,28 @@ export function SupervisedAgentConversationPanel({
         id={selectedPanelId}
         aria-labelledby={selectedTabId}
       >
-        <header className={styles.selectedHeader}>
+        <div className={styles.selectedHeader}>
           <div className={styles.selectedIdentity}>
             <span className={styles.selectedAvatar} aria-hidden="true">{roleAvatar(selectedRole, lang)}</span>
             <div className={styles.selectedCopy}>
-              <div className={styles.selectedTitleRow}>
-                <h3 className={styles.selectedTitle}>{assistantDisplayName}</h3>
-                <VChip className={styles.identityChip} tone="neutral">
-                  {roleLabel(selectedRole)}
-                </VChip>
-                <VStatusChip
-                  className={styles.identityChip}
-                  tone={memberStatusTone(selectedRawStatus, selectedActive)}
-                >
-                  {selectedActive ? (lang === "zh" ? "现场" : "Live") : selectedStatus}
-                </VStatusChip>
-              </div>
+              <VPanelHeader
+                className={styles.selectedTitleRow}
+                headingLevel={3}
+                title={<span className={styles.selectedTitle}>{assistantDisplayName}</span>}
+                actions={(
+                  <>
+                    <VChip className={styles.identityChip} tone="neutral">
+                      {roleLabel(selectedRole)}
+                    </VChip>
+                    <VStatusChip
+                      className={styles.identityChip}
+                      tone={memberStatusTone(selectedRawStatus, selectedActive)}
+                    >
+                      {selectedActive ? (lang === "zh" ? "现场" : "Live") : selectedStatus}
+                    </VStatusChip>
+                  </>
+                )}
+              />
               <p className={styles.selectedDescription}>{roleDescription(selectedRole)}</p>
             </div>
           </div>
@@ -331,7 +338,7 @@ export function SupervisedAgentConversationPanel({
               </dd>
             </div>
           </dl>
-        </header>
+        </div>
 
         <VToolbar
           ariaLabel={lang === "zh" ? "Agent 会话工具栏" : "Agent conversation toolbar"}
