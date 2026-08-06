@@ -46,22 +46,34 @@ def _run(cmd: str, cwd: Path) -> None:
 def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path):
     import subprocess
 
+    from core.infrastructure import no_console_git as ncg
+
     calls = []
     install_root = tmp_path / "Git"
     cmd_git = install_root / "cmd" / "git.exe"
     direct_git = install_root / "mingw64" / "bin" / "git.exe"
+    true_exe = install_root / "usr" / "bin" / "true.exe"
     cmd_git.parent.mkdir(parents=True)
     direct_git.parent.mkdir(parents=True)
-    cmd_git.write_text("", encoding="utf-8")
-    direct_git.write_text("", encoding="utf-8")
+    true_exe.parent.mkdir(parents=True)
+    # Real mingw binary must exceed size floor used by no_console_git.
+    direct_git.write_bytes(b"0" * 250_000)
+    cmd_git.write_bytes(b"wrapper")
+    true_exe.write_bytes(b"true")
 
     service = GitMemoryService.__new__(GitMemoryService)
     service._project_root = tmp_path
 
-    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
-    monkeypatch.setattr(git_process.shutil, "which", lambda name: str(cmd_git) if name == "git" else None)
-    monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
-    git_process.resolve_git_executable.cache_clear()
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    monkeypatch.delenv("ProgramW6432", raising=False)
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("LocalAppData", raising=False)
+    monkeypatch.setattr(ncg, "_is_windows", lambda: True)
+    monkeypatch.setattr(ncg.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    # Hostile process env that previously caused visible cmd flash.
+    monkeypatch.setenv("GIT_EDITOR", r"C:\Windows\System32\cmd.exe /c exit 0")
+    monkeypatch.setenv("GIT_PAGER", "")
+    ncg.clear_git_executable_cache()
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
@@ -72,10 +84,15 @@ def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path):
     try:
         service._run_git(["status", "--porcelain=1"])
     finally:
-        git_process.resolve_git_executable.cache_clear()
+        ncg.clear_git_executable_cache()
 
-    assert calls[0][0] == [str(direct_git), "status", "--porcelain=1"]
+    assert calls[0][0][0] == str(direct_git.resolve()) or calls[0][0][0] == str(direct_git)
+    assert calls[0][0][1:] == ["status", "--porcelain=1"]
     assert calls[0][1]["creationflags"] & 0x08000000
+    env = calls[0][1]["env"]
+    assert env["GIT_PAGER"] == "cat"
+    assert env["GCM_INTERACTIVE"] == "never"
+    assert "cmd.exe" not in str(env.get("GIT_EDITOR", "")).lower()
 
 
 def _init_git_repo(tmp_path: Path) -> Path:

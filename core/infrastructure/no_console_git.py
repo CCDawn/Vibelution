@@ -145,6 +145,56 @@ def no_console_subprocess_kwargs() -> dict:
     return kwargs
 
 
+def _git_install_root(git_exe: str) -> Path | None:
+    try:
+        path = Path(git_exe).resolve()
+    except OSError:
+        path = Path(git_exe)
+    # .../mingw64/bin/git.exe -> Git root
+    if path.parent.name.lower() == "bin" and path.parent.parent.name.lower() == "mingw64":
+        return path.parent.parent.parent
+    root = _install_root_from_wrapper(path)
+    return root
+
+
+def _no_op_editor(git_exe: str) -> str:
+    """Editor that never allocates a visible console (overrides cmd.exe-based GIT_EDITOR)."""
+
+    root = _git_install_root(git_exe)
+    if root is not None:
+        true_exe = root / "usr" / "bin" / "true.exe"
+        if true_exe.is_file():
+            return str(true_exe)
+    # Last resort: builtin no-op accepted by Git for Windows.
+    return ":"
+
+
+def apply_no_console_git_env(env: dict | None = None, *, git_exe: str | None = None) -> dict:
+    """Force non-interactive, no-pager, no-editor env for product Git.
+
+    Uses assignment (not setdefault): empty-string or cmd.exe-based values in the
+    process environment otherwise keep flashing consoles (e.g. GIT_EDITOR=cmd.exe).
+    """
+
+    merged = dict(env or os.environ)
+    exe = str(git_exe or resolve_git_executable())
+    editor = _no_op_editor(exe)
+    # Overwrite — never leave empty GIT_PAGER / interactive GCM / cmd GIT_EDITOR.
+    merged["GIT_TERMINAL_PROMPT"] = "0"
+    merged["GCM_INTERACTIVE"] = "never"
+    merged["GIT_OPTIONAL_LOCKS"] = "0"
+    merged["GIT_PAGER"] = "cat"
+    merged["PAGER"] = "cat"
+    merged["TERM"] = "dumb"
+    merged["GIT_EDITOR"] = editor
+    merged["EDITOR"] = editor
+    merged["VISUAL"] = editor
+    # Avoid less.exe / more.com when a helper ignores GIT_PAGER.
+    merged["LESS"] = "FRX"
+    merged["LV"] = "-c"
+    return merged
+
+
 def run_git(
     args: Sequence[str],
     *,
@@ -153,16 +203,11 @@ def run_git(
 ) -> subprocess.CompletedProcess[str]:
     """Run ``git <args>`` with no console window on Windows."""
 
-    env = os.environ.copy()
-    env.setdefault("GIT_TERMINAL_PROMPT", "0")
-    env.setdefault("GCM_INTERACTIVE", "never")
-    env.setdefault("GIT_OPTIONAL_LOCKS", "0")
-    env.setdefault("GIT_PAGER", "cat")
-    # Prevent credential UI / helper popups during identity probes.
-    env.setdefault("GCM_INTERACTIVE", "never")
+    git_exe = resolve_git_executable()
+    env = apply_no_console_git_env(git_exe=git_exe)
     kwargs = no_console_subprocess_kwargs()
     return subprocess.run(
-        [resolve_git_executable(), *list(args)],
+        [git_exe, *list(args)],
         cwd=str(cwd),
         stdin=subprocess.DEVNULL,
         capture_output=True,
