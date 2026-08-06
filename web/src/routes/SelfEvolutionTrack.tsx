@@ -59,6 +59,7 @@ import {
   VNativeTextarea,
   VRouteLinkButton,
   VStateSurface,
+  VTabs,
 } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
@@ -1645,22 +1646,23 @@ export function SelfEvolutionTrack({
               ) : null}
             </div>
           </section>
-          <div className={styles.segmentedTabs}>
-            <VButton
-              type="button"
-              className={activePage === "workspace" ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
-              onClick={() => setActivePage("workspace")}
-            >
-              {t("selfWorkspacePage")}
-            </VButton>
-            <VButton
-              type="button"
-              className={activePage === "status" ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
-              onClick={() => setActivePage("status")}
-            >
-              {t("selfStatusPage")}
-            </VButton>
-          </div>
+          <VTabs
+            density="compact"
+            className={styles.pageTabs}
+            listClassName={styles.pageTabsList}
+            triggerClassName={styles.pageTabsTrigger}
+            aria-label={lang === "zh" ? "自进化页面" : "Self-evolution page"}
+            value={activePage}
+            onValueChange={(value) => {
+              if (value === "workspace" || value === "status") {
+                setActivePage(value);
+              }
+            }}
+            items={[
+              { id: "workspace", label: t("selfWorkspacePage") },
+              { id: "status", label: t("selfStatusPage") },
+            ]}
+          />
         </div>
 
         <div className={styles.trackBody}>
@@ -1704,58 +1706,63 @@ export function SelfEvolutionTrack({
                   {statusLabel(observationRunModeActive ? (observationRun?.status || "idle") : conversationTask.status)}
                 </span>
               </div>
-              <div className={styles.modeSwitch} role="tablist" aria-label={lang === "zh" ? "自进化模式" : "Self-evolution mode"}>
-                <VButton
-                  type="button"
-                  role="tab"
-                  aria-selected={selfEvolutionMode === "isolated_development"}
-                  value="isolated_development"
-                  className={selfEvolutionMode === "isolated_development" ? styles.modeTabActive : styles.modeTab}
-                  onClick={() => setSelfEvolutionMode("isolated_development")}
-                >
-                  {lang === "zh" ? "隔离开发" : "Isolated development"}
-                </VButton>
-                <VButton
-                  type="button"
-                  role="tab"
-                  aria-selected={selfEvolutionMode === "observation"}
-                  value="observation"
-                  className={selfEvolutionMode === "observation" ? styles.modeTabActive : styles.modeTab}
-                  onClick={() => setSelfEvolutionMode("observation")}
-                >
-                  {lang === "zh" ? "自主观察" : "Observation"}
-                </VButton>
-              </div>
+              <VTabs
+                density="compact"
+                className={styles.modeTabs}
+                listClassName={styles.modeTabsList}
+                triggerClassName={styles.modeTabsTrigger}
+                aria-label={lang === "zh" ? "自进化模式" : "Self-evolution mode"}
+                value={selfEvolutionMode}
+                onValueChange={(value) => {
+                  if (value === "isolated_development" || value === "observation") {
+                    setSelfEvolutionMode(value);
+                  }
+                }}
+                items={[
+                  {
+                    id: "isolated_development",
+                    label: lang === "zh" ? "隔离开发" : "Isolated development",
+                  },
+                  {
+                    id: "observation",
+                    label: lang === "zh" ? "自主观察" : "Observation",
+                  },
+                ]}
+              />
 
               {observationRunModeActive ? (
                 <>
                   <div className={styles.observationConfigForm}>
                     <div className={styles.formField}>
                       <span>{lang === "zh" ? "模型输入" : "Model input"}</span>
-                      <div className={styles.modeSwitch} role="tablist" aria-label={lang === "zh" ? "观察模型输入模式" : "Observation model input mode"}>
-                        <VButton
-                          type="button"
-                          role="tab"
-                          aria-selected={observationInputModeValue === "prompt"}
-                          value="prompt"
-                          className={observationInputModeValue === "prompt" ? styles.modeTabActive : styles.modeTab}
-                          isDisabled={observationRunActive || observationStartPending}
-                          onClick={() => setObservationInputMode("prompt")}
-                        >
-                          {lang === "zh" ? "提示词输入" : "Prompt input"}
-                        </VButton>
-                        <VButton
-                          type="button"
-                          role="tab"
-                          aria-selected={observationInputModeValue === "blank"}
-                          value="blank"
-                          className={observationInputModeValue === "blank" ? styles.modeTabActive : styles.modeTab}
-                          isDisabled={observationRunActive || observationStartPending}
-                          onClick={() => setObservationInputMode("blank")}
-                        >
-                          {lang === "zh" ? "空白输入实验" : "Blank-input experiment"}
-                        </VButton>
-                      </div>
+                      <VTabs
+                        density="compact"
+                        className={styles.modeTabs}
+                        listClassName={styles.modeTabsList}
+                        triggerClassName={styles.modeTabsTrigger}
+                        aria-label={lang === "zh" ? "观察模型输入模式" : "Observation model input mode"}
+                        value={observationInputModeValue}
+                        onValueChange={(value) => {
+                          if (observationRunActive || observationStartPending) {
+                            return;
+                          }
+                          if (value === "prompt" || value === "blank") {
+                            setObservationInputMode(value);
+                          }
+                        }}
+                        items={[
+                          {
+                            id: "prompt",
+                            label: lang === "zh" ? "提示词输入" : "Prompt input",
+                            disabled: observationRunActive || observationStartPending,
+                          },
+                          {
+                            id: "blank",
+                            label: lang === "zh" ? "空白输入实验" : "Blank-input experiment",
+                            disabled: observationRunActive || observationStartPending,
+                          },
+                        ]}
+                      />
                     </div>
                     <label className={styles.formField}>
                       <span>{lang === "zh" ? "观察提示词" : "Observation prompt"}</span>

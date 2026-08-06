@@ -1,5 +1,6 @@
-import { NavLink } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 
+import { VRouteLinkButton } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./AgentManagementNav.styles";
 
@@ -28,8 +29,10 @@ function sectionLabel(section: AgentManagementSection, lang: string) {
   return (lang === "zh" ? zh : en)[section];
 }
 
-
-
+/** Exact path match for agent management section tabs (do not treat /agents/prompts as /agents). */
+function isExactSectionPath(pathname: string, href: string) {
+  return pathname === href || pathname === `${href}/`;
+}
 
 type AgentManagementNavProps = {
   active: AgentManagementSection;
@@ -38,22 +41,25 @@ type AgentManagementNavProps = {
 
 export function AgentManagementNav({ active, className = "" }: AgentManagementNavProps) {
   const { lang } = useShellI18n();
+  const location = useLocation();
   const label = lang === "zh" ? "Agent 管理导航" : "Agent management navigation";
 
   return (
     <nav className={className ? `${styles.navClass} ${className}` : styles.navClass} aria-label={label}>
-      {ITEMS.map((item) => (
-        <NavLink
-          key={item.key}
-          to={item.href}
-          end={item.key === "agents" || item.key === "prompts" || item.key === "tools" || item.key === "skills"}
-          className={({ isActive }) =>
-            isActive || active === item.key ? `${styles.linkClass} ${styles.linkActiveClass}` : styles.linkClass
-          }
-        >
-          {sectionLabel(item.key, lang)}
-        </NavLink>
-      ))}
+      {ITEMS.map((item) => {
+        const routeActive = isExactSectionPath(location.pathname, item.href) || active === item.key;
+        return (
+          <VRouteLinkButton
+            key={item.key}
+            chrome="shell-nav"
+            to={item.href}
+            className={routeActive ? `${styles.linkClass} ${styles.linkActiveClass}` : styles.linkClass}
+            aria-current={routeActive ? "page" : undefined}
+          >
+            {sectionLabel(item.key, lang)}
+          </VRouteLinkButton>
+        );
+      })}
     </nav>
   );
 }

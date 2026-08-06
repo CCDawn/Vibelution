@@ -54,6 +54,86 @@ describe("chat active turn layer", () => {
     expect(message?.content).toBe("你好");
   });
 
+  it("does not triple the answer when full-body contentDelta is republished without replaceContent", () => {
+    const full = "你好，我是 Vibelution。有什么可以帮你？";
+    // Incremental chunks then two full-body republishes (clear/rebuild + done), as observed
+    // on Pixel Grok turns: pendingTextLength ≈ 3 × answer length.
+    let layer = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({
+      contentDelta: "你好",
+      turnItems: [{
+        version: 2,
+        id: "answer:0",
+        itemId: "answer",
+        type: "assistant_message",
+        kind: "assistant_message",
+        channel: "answer",
+        phase: "final_answer",
+        status: "in_progress",
+        provisional: true,
+        terminal: false,
+        text: "你好",
+      }],
+    } as never));
+    layer = mergeAssistantDeltaIntoActiveTurnLayer(layer, assistantDelta({
+      contentDelta: "，我是 Vibelution。有什么可以帮你？",
+      turnItems: [{
+        version: 2,
+        id: "answer:0",
+        itemId: "answer",
+        type: "assistant_message",
+        kind: "assistant_message",
+        channel: "answer",
+        phase: "final_answer",
+        status: "in_progress",
+        provisional: true,
+        terminal: false,
+        text: full,
+      }],
+    } as never));
+    layer = mergeAssistantDeltaIntoActiveTurnLayer(layer, assistantDelta({
+      contentDelta: full,
+      replaceContent: false,
+      turnItems: [{
+        version: 2,
+        id: "answer:1",
+        itemId: "answer",
+        type: "assistant_message",
+        kind: "assistant_message",
+        channel: "answer",
+        phase: "final_answer",
+        status: "in_progress",
+        provisional: true,
+        terminal: false,
+        text: full,
+      }],
+    } as never));
+    layer = mergeAssistantDeltaIntoActiveTurnLayer(layer, assistantDelta({
+      contentDelta: full,
+      replaceContent: false,
+      done: true,
+      turnItems: [{
+        version: 2,
+        id: "answer:2",
+        itemId: "answer",
+        type: "assistant_message",
+        kind: "assistant_message",
+        channel: "answer",
+        phase: "final_answer",
+        status: "completed",
+        provisional: false,
+        terminal: true,
+        text: full,
+      }],
+    } as never));
+
+    expect(layer?.answerContent).toBe(full);
+    expect(layer?.turnItems?.[0]?.text).toBe(full);
+    expect(activeTurnLayerTextLength(layer)).toBe(full.length);
+    const message = activeTurnLayerToConversationMessage(layer);
+    expect(message?.content).toBe(full);
+    expect(message?.content?.split(full).length - 1).toBe(1);
+  });
+
   it("creates an optimistic assistant layer as soon as the user submits content", () => {
     const active = createOptimisticActiveTurnLayer({
       sessionId: "session-1",

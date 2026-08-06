@@ -23,7 +23,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VRouteLinkButton, VStateSurface, VStringSelect, VTooltip } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VRouteLinkButton, VStateSurface, VStringSelect, VTabs, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -1991,32 +1991,43 @@ export function ToolsRoute() {
                                   {tags.length ? <small>{tags.join(" / ")}</small> : null}
                                 </span>
                               </span>
-                              <div className={styles.segmentedControl} aria-label={tool.name}>
-                                <VButton
-                                  type="button"
-                                  variant="ghost"
-                                  className={mode === "inherited" || mode === "excluded" ? styles.segmentActive : styles.segmentButton}
-                                  onPress={() => updateToolPolicyMode(tool.name, "inherited")}
-                                >
-                                  {policyDraftModeLabel(mode === "excluded" ? "excluded" : "inherited", lang)}
-                                </VButton>
-                                <VButton
-                                  type="button"
-                                  variant="ghost"
-                                  className={mode === "allowed" ? styles.segmentActive : styles.segmentButton}
-                                  onPress={() => updateToolPolicyMode(tool.name, "allowed")}
-                                >
-                                  {policyDraftModeLabel("allowed", lang)}
-                                </VButton>
-                                <VButton
-                                  type="button"
-                                  variant="ghost"
-                                  className={mode === "blocked" ? styles.segmentActiveDanger : styles.segmentButton}
-                                  onPress={() => updateToolPolicyMode(tool.name, "blocked")}
-                                >
-                                  {policyDraftModeLabel("blocked", lang)}
-                                </VButton>
-                              </div>
+                              {(() => {
+                                const tabsValue = mode === "allowed" || mode === "blocked" ? mode : "inherited";
+                                return (
+                                  <div
+                                    className={styles.policyTabsHost}
+                                    data-policy-mode={tabsValue}
+                                  >
+                                    <VTabs
+                                      density="compact"
+                                      className={styles.policyTabs}
+                                      listClassName={styles.policyTabsList}
+                                      triggerClassName={styles.policyTabsTrigger}
+                                      aria-label={tool.name}
+                                      value={tabsValue}
+                                      onValueChange={(value) => {
+                                        if (value === "inherited" || value === "allowed" || value === "blocked") {
+                                          updateToolPolicyMode(tool.name, value);
+                                        }
+                                      }}
+                                      items={[
+                                        {
+                                          id: "inherited",
+                                          label: policyDraftModeLabel(mode === "excluded" ? "excluded" : "inherited", lang),
+                                        },
+                                        {
+                                          id: "allowed",
+                                          label: policyDraftModeLabel("allowed", lang),
+                                        },
+                                        {
+                                          id: "blocked",
+                                          label: policyDraftModeLabel("blocked", lang),
+                                        },
+                                      ]}
+                                    />
+                                  </div>
+                                );
+                              })()}
                             </div>
                           );
                         })}

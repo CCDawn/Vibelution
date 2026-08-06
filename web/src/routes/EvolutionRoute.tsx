@@ -47,10 +47,11 @@ import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
   VMetricStrip,
-  VRouteHeader,
   VSection,
   VSurface,
+  VTabs,
   VTooltip,
+  VTrackWorkbenchPage,
 } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
@@ -2046,71 +2047,70 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
 
   return (
-    <div
+    <VTrackWorkbenchPage
       ref={evolutionLayoutRef}
+      fill
       className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page}
+      ariaLabel={routeTitle}
+      domainRecipe="evolution-multi-rail"
       data-vui-recipe="evolution-workbench"
-      data-vui-domain-recipe="evolution-multi-rail"
       data-vui-layout-id={EVOLUTION_LAYOUT_ID}
       data-evolution-track={activeTrack}
-    >
-      {showRouteToolbar ? (
-        <VRouteHeader
-          aria-label={routeTitle}
-          hideIntro={hideSupervisedToolbarIntro}
-          className={
-            hideSupervisedToolbarIntro
-              ? styles.toolbarSupervisedFocus
-              : styles.toolbar
-          }
-          eyebrow={routeEyebrow}
-          title={routeTitle}
-          meta={routeSubtitle}
-          actions={(
-            <div
-            className={
-              hideSupervisedToolbarIntro
-                ? styles.toolbarControlsSupervisedFocus
-                : styles.toolbarControls
+      header={
+        showRouteToolbar
+          ? {
+              ariaLabel: routeTitle,
+              hideIntro: hideSupervisedToolbarIntro,
+              className: hideSupervisedToolbarIntro
+                ? styles.toolbarSupervisedFocus
+                : styles.toolbar,
+              eyebrow: routeEyebrow,
+              title: routeTitle,
+              meta: routeSubtitle,
+              actions: (
+                <div
+                  className={
+                    hideSupervisedToolbarIntro
+                      ? styles.toolbarControlsSupervisedFocus
+                      : styles.toolbarControls
+                  }
+                >
+                  {showTrackToggle ? (
+                    <VTabs
+                      density="compact"
+                      className={styles.trackTabs}
+                      listClassName={styles.trackTabsList}
+                      triggerClassName={styles.trackTabsTrigger}
+                      aria-label={lang === "zh" ? "进化轨道" : "Evolution track"}
+                      value={activeTrack}
+                      onValueChange={(value) => {
+                        if (value === "supervised" || value === "self") {
+                          setEvolutionTrack(value);
+                        }
+                      }}
+                      items={[
+                        { id: "supervised", label: t("supervisedEvolutionMode") },
+                        { id: "self", label: t("selfEvolutionMode") },
+                      ]}
+                    />
+                  ) : null}
+
+                  {activeTrack === "supervised" ? (
+                    <SupervisedWorkspaceControls
+                      activeView={evolutionView}
+                      activeWorkflowStepId={supervisedWorkspaceActiveStepId}
+                      onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}
+                      overviewIntakeMode={overview?.intakeMode}
+                      configIntakeMode={configQuery.data?.intakeMode}
+                      tabSummaries={supervisedTabSummaries}
+                    />
+                  ) : null}
+                </div>
+              ),
             }
-          >
-            {showTrackToggle ? (
-              <div className={styles.segmented}>
-                {([
-                  { key: "supervised", label: t("supervisedEvolutionMode") },
-                  { key: "self", label: t("selfEvolutionMode") },
-                ] as const).map((track) => (
-                  <VButton
-                    key={track.key}
-                    type="button"
-                    className={
-                      activeTrack === track.key
-                        ? `${styles.segmentButton} ${styles.segmentButtonActive}`
-                        : styles.segmentButton
-                    }
-                    onPress={() => setEvolutionTrack(track.key)}
-                  >
-                    {track.label}
-                  </VButton>
-                ))}
-              </div>
-            ) : null}
-
-            {activeTrack === "supervised" ? (
-              <SupervisedWorkspaceControls
-                activeView={evolutionView}
-                activeWorkflowStepId={supervisedWorkspaceActiveStepId}
-                onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}
-                overviewIntakeMode={overview?.intakeMode}
-                configIntakeMode={configQuery.data?.intakeMode}
-                tabSummaries={supervisedTabSummaries}
-              />
-            ) : null}
-            </div>
-          )}
-        />
-      ) : null}
-
+          : null
+      }
+    >
       {activeTrack === "self" ? (
         <EvolutionSelfTrackBoundary
           lang={lang}
@@ -2603,6 +2603,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           formatAvailableActions={formatAvailableActions}
         />
       ) : null}
-    </div>
+    </VTrackWorkbenchPage>
   );
 }

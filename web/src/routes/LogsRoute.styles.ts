@@ -56,6 +56,16 @@ const styles = {
     "diagnosticsSummaryText min-w-[12rem] flex-1 [overflow-wrap:anywhere] [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-[560px]:min-w-0",
   eventTypeList:
     "eventTypeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  filterTabs: "filterTabs inline-grid w-fit max-w-full min-w-0 gap-0",
+  filterTabsList:
+    "filterTabsList inline-flex w-fit max-w-full flex-wrap items-center gap-1.5 border-0 bg-transparent p-0",
+  filterTabsTrigger:
+    `filterTabsTrigger min-w-0 ${vuiControlQuietClass} ` +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
+    "data-[state=active]:text-[var(--accent-cool)]",
+  filterTabLabel: "inline-flex min-w-0 items-center gap-1.5",
+  // Legacy aliases for style geometry contracts.
   filterButton:
     `filterButton min-w-0 ${vuiControlQuietClass}`,
   filterButtonActive:

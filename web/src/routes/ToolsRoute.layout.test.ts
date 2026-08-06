@@ -84,7 +84,6 @@ const contentSizedActionStyles = [
   "refreshButton",
   "returnButton",
   "secondaryButton",
-  "segmentButton",
 ] as const;
 
 function classTokens(className: string): string[] {
@@ -268,8 +267,10 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.toolBundleApplyGrid");
     expect(routeSource).not.toContain("styles.toolBundleApplyCard");
     expect(routeSource).toContain("toggleToolPolicyScope(\"writeScopes\", \"shared\"");
-    expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"allowed\")");
-    expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"blocked\")");
+    expect(routeSource).toContain("updateToolPolicyMode(tool.name, value)");
+    expect(routeSource).toContain('id: "allowed"');
+    expect(routeSource).toContain('id: "blocked"');
+    expect(routeSource).toContain('id: "inherited"');
     expect(routeSource).toContain("保存工具配置");
     expect(routeSource).toContain("/tool-policy/validate");
     expect(routeSource).toContain('method: "PUT"');
@@ -282,7 +283,11 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).not.toContain("会话必备，不可移除");
     expect(routeSource).not.toContain("Required for sessions");
     expect(routeSource).toContain("styles.toolPermissionList");
-    expect(routeSource).toContain("styles.segmentedControl");
+    expect(routeSource).toContain("styles.policyTabsHost");
+    expect(routeSource).toContain("<VTabs");
+    expect(routeSource).toContain("data-policy-mode={tabsValue}");
+    expect(routeSource).not.toContain("styles.segmentedControl");
+    expect(routeSource).not.toContain("styles.segmentButton");
     expect(routeSource).toContain("styles.toolAgentFitPanel");
     expect(routeSource).toContain("styles.policyStatePill");
     expect(routeSource).not.toContain("这里用于测试工具，不在这里配置 Agent");
@@ -295,7 +300,8 @@ describe("ToolsRoute layout contract", () => {
     expect(stylesSource).toContain(".toolDetailPanel");
     expect(stylesSource).toContain(".deepLinkFocus");
     expect(stylesSource).toContain(".toolPermissionList");
-    expect(stylesSource).toContain(".segmentedControl");
+    expect(stylesSource).toContain(".policyTabsHost");
+    expect(stylesSource).toContain(".policyTabsTrigger");
   });
 
   it("avoids fixed registry and Agent polling on the Tools workspace", () => {
@@ -502,6 +508,9 @@ describe("ToolsRoute layout contract", () => {
       expect(tokens).toContain("max-w-full");
       expect(tokens).not.toContain("w-full");
     }
+    // Policy mode switch is VTabs; host owns compact end-align geometry.
+    expect(styles.policyTabs).toContain("w-fit");
+    expect(styles.policyTabsHost).toContain("justify-end");
   });
 
   it("keeps the Agent policy draft summary in a four-column grid", () => {
@@ -544,7 +553,8 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.selectableToolRow).toContain("grid-cols-[28px_minmax(0,1fr)]");
     expect(styles.toolCopy).toContain("[&>strong]:truncate");
     expect(styles.toolPermissionRow).toContain("max-[640px]:grid-cols-[1fr]");
-    expect(styles.segmentedControl).toContain("max-[640px]:justify-start");
+    expect(styles.policyTabsHost).toContain("max-[640px]:justify-start");
+    expect(styles.policyTabsHost).toContain("data-policy-mode=blocked");
   });
 
   it("uses compact scan grids for detail and Agent scope panels", () => {

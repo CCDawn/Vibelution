@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import type { LauncherStartupSettings } from "../api/launcher";
 import type { WorkbenchWindowMode, WorkbenchWindowModeUpdateRequest } from "../api/types";
-import { VButton, VNativeInput, VStringSelect, VTooltip } from "../components/vui";
+import { VButton, VNativeInput, VStringSelect, VTabs, VTooltip } from "../components/vui";
 import styles from "./LauncherStartupSettingsPanel.styles";
 
 type LauncherStartupSettingsCopy = {
@@ -255,30 +255,46 @@ export function LauncherStartupSettingsPanel({
         />
         {frontendPortOverride ? <small>{copy.portOverride}: {frontendPortOverride}</small> : null}
       </label>
-      <div className={styles.segmentedControl} role="group" aria-label={copy.windowMode}>
-        <VButton
-          type="button"
-          variant="secondary"
-          data-active={draft.workbench.windowMode === "fullscreen"}
-          isDisabled={controlsDisabled}
-          onPress={() => saveWindowMode({ windowMode: "fullscreen" })}
-          tooltip={copy.windowModeFullscreen}
-          icon={pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} /> : <Maximize2 size={14} />}
-        >
-          <span>{copy.windowModeFullscreen}</span>
-        </VButton>
-        <VButton
-          type="button"
-          variant="secondary"
-          data-active={draft.workbench.windowMode === "windowed"}
-          isDisabled={controlsDisabled}
-          onPress={() => saveWindowMode({ windowMode: "windowed" })}
-          tooltip={copy.windowModeWindowed}
-          icon={pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} /> : <Minimize2 size={14} />}
-        >
-          <span>{copy.windowModeWindowed}</span>
-        </VButton>
-      </div>
+      <VTabs
+        density="compact"
+        className={styles.windowModeTabs}
+        listClassName={styles.windowModeTabsList}
+        triggerClassName={styles.windowModeTabsTrigger}
+        aria-label={copy.windowMode}
+        value={draft.workbench.windowMode === "windowed" ? "windowed" : "fullscreen"}
+        onValueChange={(value) => {
+          if (controlsDisabled) {
+            return;
+          }
+          if (value === "fullscreen" || value === "windowed") {
+            saveWindowMode({ windowMode: value });
+          }
+        }}
+        items={[
+          {
+            id: "fullscreen",
+            label: (
+              <span className={styles.windowModeTabLabel}>
+                {pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
+                <span>{copy.windowModeFullscreen}</span>
+              </span>
+            ),
+            title: copy.windowModeFullscreen,
+            disabled: controlsDisabled,
+          },
+          {
+            id: "windowed",
+            label: (
+              <span className={styles.windowModeTabLabel}>
+                {pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Minimize2 size={14} aria-hidden="true" />}
+                <span>{copy.windowModeWindowed}</span>
+              </span>
+            ),
+            title: copy.windowModeWindowed,
+            disabled: controlsDisabled,
+          },
+        ]}
+      />
       <label className={styles.settingField}>
         <span>{copy.windowSize}</span>
         <VStringSelect

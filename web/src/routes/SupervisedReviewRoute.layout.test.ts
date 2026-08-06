@@ -38,7 +38,7 @@ describe("SupervisedReviewRoute layout contract", () => {
   });
 
   it("keeps routine review guidance on the relevant controls while preserving visible decisions and errors", () => {
-    expect(routeSource).toContain('tooltip={value === "pending"');
+    expect(routeSource).toContain('title: value === "pending"');
     expect(routeSource).toContain("disabledReason={bulkDeleteMutation.isPending");
     expect(routeSource).toContain("disabledReason={decisionMutation.isPending");
     expect(routeSource).toContain("content={positiveDatasetVisible");

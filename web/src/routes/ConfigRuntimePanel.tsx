@@ -1,6 +1,6 @@
 import { SlidersHorizontal } from "lucide-react";
 
-import { VButton, VSection } from "../components/vui";
+import { VSection, VTabs } from "../components/vui";
 import type { ConfigCopy } from "./ConfigRoute";
 import styles from "./ConfigRuntimePanel.styles";
 
@@ -35,24 +35,34 @@ export function ConfigRuntimePanel({
           <strong>{copy.intakeMode}</strong>
           <span>{copy.runtimeBody}</span>
         </div>
-        <div className={styles.segmented} role="group" aria-label={copy.intakeMode}>
-            {(["manual_review", "auto"] as const).map((mode) => (
-              <VButton
-                key={mode}
-                type="button"
-                aria-pressed={currentIntakeMode === mode}
-                className={
-                  currentIntakeMode === mode
-                    ? `${styles.segmentButton} ${styles.segmentButtonActive}`
-                    : styles.segmentButton
-                }
-                isDisabled={structuredActionsDisabled}
-                onClick={() => onIntakeModeChange(mode)}
-              >
-                {intakeLabel(mode)}
-              </VButton>
-            ))}
-        </div>
+        <VTabs
+          density="compact"
+          className={styles.intakeTabs}
+          listClassName={styles.intakeTabsList}
+          triggerClassName={styles.intakeTabsTrigger}
+          aria-label={copy.intakeMode}
+          value={currentIntakeMode === "auto" ? "auto" : "manual_review"}
+          onValueChange={(value) => {
+            if (structuredActionsDisabled) {
+              return;
+            }
+            if (value === "manual_review" || value === "auto") {
+              onIntakeModeChange(value);
+            }
+          }}
+          items={[
+            {
+              id: "manual_review",
+              label: intakeLabel("manual_review"),
+              disabled: structuredActionsDisabled,
+            },
+            {
+              id: "auto",
+              label: intakeLabel("auto"),
+              disabled: structuredActionsDisabled,
+            },
+          ]}
+        />
       </div>
     </VSection>
   );

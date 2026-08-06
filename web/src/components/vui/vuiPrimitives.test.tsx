@@ -301,6 +301,7 @@ describe("VUI foundation primitives", () => {
 
     expect(markup).toContain('data-vui="route-link-button"');
     expect(markup).toContain('data-renderer="shadcn"');
+    expect(markup).toContain('data-chrome="button"');
     expect(markup).toContain('data-variant="primary"');
     expect(markup).toContain('href="/teams?team=research-team"');
     expect(markup).toContain('data-slot="vui-button-icon"');
@@ -308,6 +309,19 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-slot="vui-button-trailing-icon"');
     expect(markup).toContain("focus-visible:shadow-[var(--vui-shadow-focus)]");
     expect(markup).not.toContain("<button");
+
+    const shellNav = renderToStaticMarkup(
+      <MemoryRouter>
+        <VRouteLinkButton chrome="shell-nav" to="/chat" className="navLink">
+          Chat
+        </VRouteLinkButton>
+      </MemoryRouter>,
+    );
+    expect(shellNav).toContain('data-chrome="shell-nav"');
+    expect(shellNav).not.toContain('data-variant=');
+    expect(shellNav).not.toContain('data-density=');
+    expect(shellNav).toContain("navLink");
+    expect(shellNav).toContain("Chat");
   });
 
   it("renders panels as background-integrated native surfaces", () => {

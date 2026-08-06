@@ -128,9 +128,10 @@ describe("workbench layout gate (Wave 5)", () => {
 
   it("keeps Evolution multi-rail on registry layoutId (domain resize exception)", () => {
     const evolution = readFileSync(resolve(webSrc, "routes/EvolutionRoute.tsx"), "utf-8");
+    expect(evolution).toContain("VTrackWorkbenchPage");
     expect(evolution).toContain("WORKBENCH_LAYOUT_IDS.evolution");
     expect(evolution).toContain("usePersistedPaneResize");
-    expect(evolution).toContain('data-vui-domain-recipe="evolution-multi-rail"');
+    expect(evolution).toContain('domainRecipe="evolution-multi-rail"');
     expect(evolution).toContain('data-vui-recipe="evolution-workbench"');
     expect(evolution).toContain("runs-queue");
     expect(evolution).toContain("library-list");

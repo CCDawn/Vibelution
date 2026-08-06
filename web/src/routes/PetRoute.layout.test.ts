@@ -6,19 +6,30 @@ import stylesSource from "./PetRoute.styles.ts?raw";
 
 const surfaceKeys = [
   "surfaceClass",
-  "heroClass",
   "metricCardClass",
   "cardClass",
+  "headerClass",
 ] as const;
 
 describe("PetRoute layout contract", () => {
-  it("keeps the route root background-aware and CSS-module free", () => {
-    expect(styles.pageClass).toContain("h-full");
-    expect(styles.pageClass).toContain("overflow-auto");
-    expect(styles.pageClass).not.toContain("bg-[var(--surface-page)]");
-    expect(styles.pageClass).not.toContain("bg-vui-surface-glass");
+  it("hosts the companion page on VDenseOpsPage recipe", () => {
+    expect(routeSource).toContain("VDenseOpsPage");
+    expect(routeSource).toContain('data-vui-domain-recipe="pet-companion"');
+    expect(routeSource).toContain('data-vui-recipe="pet-companion-page"');
+    expect(routeSource).toContain("headerClassName={styles.headerClass}");
+    expect(routeSource).toContain("bodyClassName={styles.bodyClass}");
+    expect(routeSource).not.toContain("<header");
     expect(routeSource).not.toContain(".module.css");
     expect(routeSource).toContain('import styles from "./PetRoute.styles"');
+  });
+
+  it("keeps the recipe body scrollable without a hand-rolled page shell", () => {
+    expect(styles.pageClass).toContain("min-w-0");
+    expect(styles.pageClass).not.toContain("bg-[var(--surface-page)]");
+    expect(styles.pageClass).not.toContain("bg-vui-surface-glass");
+    expect(styles.bodyClass).toContain("overflow-auto");
+    expect(styles.bodyClass).toContain("min-w-0");
+    expect(styles.headerClass).toContain("min-w-0");
   });
 
   it("keeps PetRoute surfaces on shared opaque VUI panel recipes", () => {
@@ -52,7 +63,7 @@ describe("PetRoute layout contract", () => {
 
   it("keeps metrics, badges, and narrow layouts from forcing horizontal overflow", () => {
     expect(styles.pageClass).toContain("min-w-0");
-    expect(styles.heroClass).toContain("min-w-0");
+    expect(styles.bodyClass).toContain("min-w-0");
     expect(styles.metricGridClass).toContain("min-w-0");
     expect(styles.statusGridClass).toContain("min-w-0");
     expect(styles.metricCardClass).toContain("min-w-0");

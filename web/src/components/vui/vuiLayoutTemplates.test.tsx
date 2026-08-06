@@ -22,6 +22,7 @@ import {
   VSplitWorkspace,
   VStateSurface,
   VStatusStrip,
+  VTrackWorkbenchPage,
   VUI_PAGE_FILL_CLASS,
   VWorkbenchPage,
 } from "./index";
@@ -263,6 +264,38 @@ describe("VUI workbench layout templates", () => {
     expect(canvasMarkup).toContain('data-vui="canvas-workbench-inspector"');
     expect(canvasMarkup).toContain("Graph");
     expect(canvasMarkup).toContain("Node");
+  });
+
+  it("renders the track workbench page recipe with optional header and body fill", () => {
+    const withHeader = renderToStaticMarkup(
+      <VTrackWorkbenchPage
+        ariaLabel="Evolution"
+        domainRecipe="evolution-multi-rail"
+        header={{
+          title: "Supervised",
+          actions: <button type="button">Track A</button>,
+        }}
+      >
+        <div>Multi-rail body</div>
+      </VTrackWorkbenchPage>,
+    );
+    expect(withHeader).toContain('data-vui-recipe="track-workbench-page"');
+    expect(withHeader).toContain('data-vui-domain-recipe="evolution-multi-rail"');
+    expect(withHeader).toContain('data-fill="true"');
+    expect(withHeader).toContain('data-vui="route-header"');
+    expect(withHeader).toContain('data-vui="track-workbench-body"');
+    expect(withHeader).toContain("Multi-rail body");
+    expect(withHeader).toContain("Track A");
+
+    const bodyOnly = renderToStaticMarkup(
+      <VTrackWorkbenchPage ariaLabel="Self track" header={null}>
+        <div>Self workspace</div>
+      </VTrackWorkbenchPage>,
+    );
+    expect(bodyOnly).toContain('data-vui="track-workbench-body"');
+    expect(bodyOnly).toContain("Self workspace");
+    expect(bodyOnly).not.toContain('data-vui="route-header"');
+    expect(bodyOnly).toContain("!grid-rows-[minmax(0,1fr)]");
   });
 
   it("renders the dense-ops page recipe with toolbar and empty state", () => {

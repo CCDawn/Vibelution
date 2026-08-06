@@ -65,10 +65,13 @@ function planWithSmoke(): ExperimentPlanRecord {
 
 describe("bounded Smoke iteration evidence prefill", () => {
   it("keeps evidence review and final decision choices mouse-operable", () => {
-    expect(panelSource).toContain('role="group" aria-label={lang === "zh" ? "证据类型"');
-    expect(panelSource).toContain('role="group" aria-label={lang === "zh" ? "状态"');
-    expect(panelSource).toContain('role="group" aria-label={lang === "zh" ? "决策"');
-    expect(panelSource).not.toContain("value={researchLoopDecisionDraft.decision}");
+    expect(panelSource).toContain("<VTabs");
+    expect(panelSource).toContain('aria-label={lang === "zh" ? "证据类型" : "Evidence type"}');
+    expect(panelSource).toContain('aria-label={lang === "zh" ? "状态" : "Status"}');
+    expect(panelSource).toContain('aria-label={lang === "zh" ? "决策" : "Decision"}');
+    expect(panelSource).toContain("value={String(researchLoopDecisionDraft.decision || \"\")}");
+    expect(panelSource).not.toContain("aria-pressed={researchLoopDecisionDraft.decision");
+    expect(panelSource).not.toContain("<select");
   });
 
   it("prefills the review form with the real run evidence and proxy boundary", () => {

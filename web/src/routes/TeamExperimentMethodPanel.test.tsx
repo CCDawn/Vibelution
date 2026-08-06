@@ -361,7 +361,10 @@ describe("TeamExperimentMethodPanel", () => {
     expect(styles.form).toContain("grid-cols-1");
     expect(styles.form).not.toContain("min-h-[18rem]");
     expect(loadingMarkup).toContain("读取实验方式");
-    expect(panelSource).toContain("aria-pressed={draft.researchMode === mode.modeId}");
+    expect(panelSource).toContain("<VTabs");
+    expect(panelSource).toContain("researchModeTabs");
+    expect(panelSource).toContain("value={draft.researchMode}");
+    expect(panelSource).not.toContain("aria-pressed={draft.researchMode === mode.modeId}");
     expect(panelSource).toContain("aria-pressed={draft.experimentMethod === method.methodId}");
     expect(panelSource).toContain('aria-live="polite"');
   });

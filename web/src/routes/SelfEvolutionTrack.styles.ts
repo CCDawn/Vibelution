@@ -69,14 +69,20 @@ export const selfEvolutionTrackStyles = {
   panelStack: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden",
   // Wave 6A: PaneCollapseHandle owns the visual rule; breakpoint hide only.
   sidebarResizer: "max-[1180px]:hidden",
-  segmentedTabs: "inline-flex self-center items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1 max-[1180px]:self-start",
-  tabButton: "min-h-8 cursor-pointer rounded-md border-0 bg-transparent px-3 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]",
-  tabButtonActive: "bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]",
-  modeSwitch: "inline-flex w-fit flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
-  modeTab:
-    "inline-flex min-h-8 w-fit cursor-pointer items-center justify-center rounded-md border border-transparent px-3 py-1 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]",
-  modeTabActive:
-    "inline-flex min-h-8 w-fit cursor-pointer items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] px-3 py-1 [font-size:var(--vui-font-sm)] font-semibold text-[var(--accent-warm-2)]",
+  pageTabs: "inline-grid w-fit max-w-full min-w-0 gap-0 self-center max-[1180px]:self-start",
+  pageTabsList:
+    "inline-flex min-w-0 max-w-full items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
+  pageTabsTrigger:
+    "min-h-8 rounded-md border-0 bg-transparent px-3 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] data-[state=active]:text-[var(--accent-warm-2)]",
+  modeTabs: "inline-grid w-fit max-w-full min-w-0 gap-0",
+  modeTabsList:
+    "inline-flex w-fit max-w-full flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
+  modeTabsTrigger:
+    "min-h-8 w-fit rounded-md border border-transparent px-3 py-1 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)] " +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] " +
+    "data-[state=active]:font-semibold data-[state=active]:text-[var(--accent-warm-2)]",
   surface: `${panelSurface} p-3.5 max-[760px]:p-4`,
   loadingShell:
     "grid min-h-[148px] max-h-[180px] content-start self-start overflow-hidden grid-cols-[minmax(240px,300px)_minmax(0,1fr)] gap-2 max-[1180px]:min-h-[172px] max-[1180px]:max-h-[210px] max-[1180px]:grid-cols-1",

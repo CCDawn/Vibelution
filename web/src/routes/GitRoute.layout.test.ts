@@ -119,8 +119,7 @@ describe("GitRoute layout contract", () => {
       "commitScopeBox",
     ] as const;
     const actionControlKeys = [
-      "filterButton",
-      "filterButtonActive",
+      "filterTabsTrigger",
       "selectionButton",
       "secondaryButton",
       "primaryButton",
@@ -134,6 +133,7 @@ describe("GitRoute layout contract", () => {
       expect(gitRouteStyles[key]).toContain("h-[var(--vui-control-height-sm)]");
       expect(gitRouteStyles[key]).not.toContain("bg-[var(--surface-card)]");
     }
+    expect(gitRouteStyles.filterTabsTrigger).toContain("data-[state=active]");
     expect(gitRouteStyles.commitActions).toContain("flex");
     expect(gitRouteStyles.commitActions).toContain("flex-wrap");
   });

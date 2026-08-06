@@ -171,6 +171,13 @@ const styles = {
     "[margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.08em]",
   feedbackText:
     "[margin:0] [color:var(--fg-secondary)] [line-height:1.55] [white-space:pre-wrap]",
+  filterTabs: "inline-grid w-fit max-w-full min-w-0 gap-0",
+  filterTabsList:
+    "inline-flex [align-items:center] [gap:6px] [padding:3px] [border-radius:var(--radius-panel)] [border:1px_solid_var(--border-soft)] [background:var(--vui-surface-panel)]",
+  filterTabsTrigger:
+    "[min-height:26px] [padding:0_8px] [border:0] [border-radius:var(--radius-control)] [background:transparent] [color:var(--fg-secondary)] [transition:background-color_140ms_ease,_color_140ms_ease] " +
+    "data-[state=active]:[background:color-mix(in_srgb,_var(--accent-warm)_16%,_transparent)] data-[state=active]:[color:var(--accent-warm-2)]",
+  // Legacy aliases for style contracts.
   filterButton:
     "[min-height:26px] [padding:0_8px] [border:0] [border-radius:var(--radius-control)] [background:transparent] [color:var(--fg-secondary)] [transition:background-color_140ms_ease,_color_140ms_ease]",
   filterButtonActive:
@@ -239,8 +246,9 @@ const styles = {
     `[margin:0] [padding:9px_10px] [line-height:1.45] [overflow-wrap:anywhere] [color:var(--fg-secondary)] ${rowSurfaceSoft}`,
   overviewGrid:
     "grid [grid-template-columns:minmax(300px,_var(--evolution-live-launch-width,_348px))_12px_minmax(360px,_1fr)_12px_minmax(300px,_var(--evolution-live-run-width,_360px))] [grid-template-rows:minmax(0,_1fr)] [grid-auto-rows:minmax(0,_1fr)] [align-items:stretch] [align-content:stretch] min-h-0 [height:100%] [overflow:hidden] [padding-right:4px] max-[1360px]:[grid-template-columns:minmax(292px,_0.92fr)_12px_minmax(360px,_1.32fr)_12px_minmax(292px,_0.9fr)] max-[1360px]:[grid-template-rows:minmax(0,_1fr)] max-[1360px]:[gap:0] max-[1360px]:[overflow:hidden] max-[1200px]:[grid-template-columns:minmax(0,_1fr)_minmax(292px,_0.82fr)] max-[1200px]:[grid-template-rows:minmax(180px,_0.58fr)_minmax(300px,_1fr)] max-[1200px]:[overflow:auto] max-[1200px]:[gap:10px] max-[900px]:[grid-template-columns:1fr] max-[900px]:[grid-template-rows:max-content_max-content_max-content] max-[900px]:[align-content:start] max-[900px]:[height:auto] max-[900px]:[min-height:100%] max-[900px]:[overflow:auto]",
+  // Fill geometry owned by VTrackWorkbenchPage; keep padding/gap chrome only.
   page:
-    "grid [grid-template-rows:auto_minmax(0,_1fr)] [gap:6px] [height:calc(100dvh_-_var(--shell-topbar-height))] [max-height:calc(100dvh_-_var(--shell-topbar-height))] min-h-0 [padding:6px_10px_10px] [overflow:hidden] max-[900px]:[gap:6px] max-[640px]:[padding-inline:10px]",
+    "min-h-0 min-w-0 max-w-full gap-1.5 p-[6px_10px_10px] max-[640px]:px-2.5",
   paneCollapsed:
     "[padding:0] [border:0] [overflow:hidden] [visibility:hidden]",
   pathText:
@@ -280,24 +288,23 @@ const styles = {
     "flex [align-items:center] [justify-content:space-between] [gap:12px] min-w-0",
   sectionTitle:
     "[margin:3px_0_0] [line-height:1.18] [margin-top:2px] [font-size:0.98rem]",
-  // Soft segment select (raised surface) — matches TeamShellModeSwitch, not ink slab.
-  segmentButton:
-    "[min-height:26px] [padding:0_8px] [border:1px_solid_transparent] [border-radius:999px] [background:transparent] [color:var(--fg-secondary)] [font-weight:700] [transition:background-color_140ms_ease,_color_140ms_ease,_box-shadow_140ms_ease]",
-  segmentButtonActive:
-    "[border-color:var(--vui-border-subtle)] [background:var(--vui-surface-base)] [color:var(--fg-primary)] [box-shadow:0_1px_2px_rgba(0,0,0,0.06)]",
-  segmented:
-    "inline-flex [align-items:center] [gap:4px] [padding:3px] [border-radius:999px] [border:1px_solid_var(--vui-border-subtle)] [background:var(--vui-surface-row)]",
+  // Soft track switcher — VTabs list chrome; selected state uses data-[state=active].
+  trackTabs: "inline-grid w-fit max-w-full min-w-0 gap-0",
+  trackTabsList:
+    "inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-[3px]",
+  trackTabsTrigger:
+    "min-h-[26px] rounded-full border border-transparent px-2 font-bold text-[var(--fg-secondary)] shadow-none " +
+    "data-[state=active]:border-[var(--vui-border-subtle)] data-[state=active]:bg-[var(--vui-surface-base)] " +
+    "data-[state=active]:text-[var(--fg-primary)] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.06)]",
   selectInput:
     "[width:100%] min-w-0 [min-height:31px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-workspace)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)]",
   selectionBar:
     "flex [align-items:center] [justify-content:space-between] [gap:10px] [flex-wrap:wrap]",
   selectionSummary:
     "inline-flex [align-items:center] [gap:8px] [color:var(--fg-secondary)]",
-  // Self track is the only page child (no route toolbar). One 1fr row fills the
-  // viewport; inner trackShell must keep its own auto | 1fr so the status bar
-  // stays content-height instead of stretching.
+  // Self track: no route header; recipe already single-row fill. Keep surface chrome.
   selfPage:
-    "[grid-template-rows:minmax(0,1fr)] [gap:0] [padding:8px_12px_12px] [background:color-mix(in_srgb,_var(--vui-surface-panel)_78%,_var(--vui-surface-workspace))] [min-h-0] [align-content:stretch] max-[900px]:[grid-template-rows:minmax(0,1fr)] max-[900px]:[gap:0]",
+    "!gap-0 px-3 py-2 pb-3 [background:color-mix(in_srgb,_var(--vui-surface-panel)_78%,_var(--vui-surface-workspace))] min-h-0 content-stretch max-[900px]:!gap-0",
   sourceInventoryBar:
     `${rowSurfaceSoft} flex [flex-wrap:wrap] [gap:6px_10px] [padding:4px_8px] min-w-0 [&_span]:inline-flex [&_span]:[align-items:center] [&_span]:[gap:6px] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)]`,
   sourceMetaCompact:

@@ -141,10 +141,12 @@ describe("VUI overlay alignment gate", () => {
     expect(read("components/vui/product/agent-management/AgentPermissionPresetControl.tsx")).toContain("<VPopover");
   });
 
-  it("locks context menus on VDropdownMenu", () => {
+  it("locks context menus on VDropdownMenu and shell power on VWorkbenchPowerMenu", () => {
     expect(read("routes/AgentContextMenu.tsx")).toContain("<VDropdownMenu");
     expect(read("routes/SessionContextMenu.tsx")).toContain("<VDropdownMenu");
-    expect(read("app/AppShell.tsx")).toContain("<VDropdownMenu");
+    // AppShell power lifecycle uses the unified product composition (not a bare VDropdownMenu).
+    expect(read("app/AppShell.tsx")).toContain("<VWorkbenchPowerMenu");
+    expect(read("components/vui/product/workbench-shell/VWorkbenchPowerMenu.tsx")).toContain("<VDropdownMenu");
   });
 
   it("keeps product routes free of VNativeSelect (form selects use VStringSelect)", () => {

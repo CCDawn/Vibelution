@@ -1562,6 +1562,9 @@ describe("AgentsRoute layout contract", () => {
     expect(managementBriefPanelSource).toContain("styles.nextActionButton");
     expect(managementBriefPanelSource).not.toContain('className="w-full"');
     expect(detailHeaderPanelSource).toContain("styles.detailTabs");
+    expect(detailHeaderPanelSource).toContain("<VTabs");
+    expect(detailHeaderPanelSource).toContain("styles.detailTabsTrigger");
+    expect(detailHeaderPanelSource).not.toContain("VNativeButton");
     expect(selectedDetailContentPanelSource).toContain("activePane === \"overview\"");
     expect(selectedDetailContentPanelSource).toContain("activePane === \"config\"");
     expect(routeSource).not.toContain("activePane === \"policies\"");

@@ -2,6 +2,8 @@
 
 选型与反冗余入口。路径均为 `designs/` 相对路径。
 
+> **设计使用约定：** 点开任一组件说明后，先读 **功能 → 适用范围 → 使用方式** 三节，再决定是否采用或扩展。禁止在未读对应说明时新建平行组件。
+
 ## Primitives
 
 | 组件 | 设计说明 |
@@ -45,6 +47,7 @@
 | `VSettingsFormPage` | [layout/pages.md](./layout/pages.md#vsettingsformpage) |
 | `VBoardWorkbenchPage` | [layout/pages.md](./layout/pages.md#vboardworkbenchpage) |
 | `VCanvasWorkbenchPage` | [layout/pages.md](./layout/pages.md#vcanvasworkbenchpage) |
+| `VTrackWorkbenchPage` | [layout/pages.md](./layout/pages.md#vtrackworkbenchpage) |
 | `VSplitWorkspace` | [layout/pages.md](./layout/pages.md#vsplitworkspace) |
 
 ## Layout — chrome & structure
@@ -57,6 +60,7 @@
 | `VTabs` | [layout/chrome.md](./layout/chrome.md#vtabs) |
 | `VActionGroup` | [layout/chrome.md](./layout/chrome.md#vactiongroup) |
 | `VStatusStrip` | [layout/chrome.md](./layout/chrome.md#vstatusstrip) |
+| `VWorkbenchPowerMenu` | [layout/chrome.md](./layout/chrome.md#vworkbenchpowermenu) |
 | `VSection` | [layout/structure.md](./layout/structure.md#vsection) |
 | `VStack` | [layout/structure.md](./layout/structure.md#vstack) |
 | `VHStack` | [layout/structure.md](./layout/structure.md#vhstack) |
@@ -122,5 +126,4 @@
 | 候选 | 聚类 | 为何不立刻建 | 设计占位 |
 | --- | --- | --- | --- |
 | `VSessionWorkbenchPage` | Chat 双轨 | 先验证能否用 list-detail + domain 槽 | [layout/planned.md](./layout/planned.md#vsessionworkbenchpage) |
-| `VTrackWorkbenchPage` | Evolution 双轨 | 先 DenseOps + 内嵌 split | [layout/planned.md](./layout/planned.md#vtrackworkbenchpage) |
 | `VFilterListDetailPage` | Agents 筛选+列表+详情 | 先塞进 ListDetail 的 list 槽 | [layout/planned.md](./layout/planned.md#vfilterlistdetailpage) |

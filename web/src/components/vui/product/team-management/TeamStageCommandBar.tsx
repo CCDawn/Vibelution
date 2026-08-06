@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 
+import { VNativeButton } from "../../primitives/VNativeButton";
 import { TEAM_STAGE_TONE_STYLE, type TeamStageTone } from "./TeamStageCard";
 
 export type TeamStageStat = {
@@ -141,7 +142,7 @@ export function TeamStageCommandBar({
               );
               if (step.onClick) {
                 return (
-                  <button
+                  <VNativeButton
                     key={step.id}
                     type="button"
                     role="listitem"
@@ -153,7 +154,7 @@ export function TeamStageCommandBar({
                     data-selected={step.selected ? "true" : "false"}
                   >
                     {body}
-                  </button>
+                  </VNativeButton>
                 );
               }
               return (
@@ -189,7 +190,7 @@ export function TeamStageCommandBar({
             );
             if (stat.onClick) {
               return (
-                <button
+                <VNativeButton
                   key={stat.key}
                   type="button"
                   className={pillClass}
@@ -197,7 +198,7 @@ export function TeamStageCommandBar({
                   onClick={stat.onClick}
                 >
                   {content}
-                </button>
+                </VNativeButton>
               );
             }
             return (

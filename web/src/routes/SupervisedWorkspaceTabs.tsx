@@ -1,6 +1,6 @@
 import { type TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
-import { VButton } from "../components/vui";
+import { VTabs } from "../components/vui";
 import styles from "./SupervisedWorkspaceTabs.styles";
 
 export type SupervisedWorkspaceView = "live" | "runs" | "library" | "review";
@@ -24,7 +24,6 @@ const WORKFLOW_STEPS: Array<{ key: SupervisedWorkspaceWorkflowStep; view: Superv
   { key: "rerun_score", view: "library" },
   { key: "approval", view: "review" },
 ];
-
 
 function supervisedFlowLabel(view: SupervisedWorkspaceView, t: (key: TranslationKey) => string) {
   if (view === "live") {
@@ -60,48 +59,59 @@ export function SupervisedWorkspaceTabs({
 }: SupervisedWorkspaceTabsProps) {
   const { t } = useAppI18n({ domains: ["evolution"] });
   const normalizedActiveWorkflowStepId = String(activeWorkflowStepId || "").trim();
+  const activeStepKey = (
+    WORKFLOW_STEPS.find((step) =>
+      normalizedActiveWorkflowStepId
+        ? step.key === normalizedActiveWorkflowStepId
+        : step.view === activeView,
+    )?.key
+    ?? WORKFLOW_STEPS[0].key
+  );
 
   return (
-    <div className={styles.flowTabsClass} role="tablist" aria-label={t("navSupervisedEvolution")}>
-      {WORKFLOW_STEPS.map((step) => {
+    <VTabs
+      density="compact"
+      className={styles.flowTabsRootClass}
+      listClassName={styles.flowTabsClass}
+      triggerClassName={styles.flowTabClass}
+      aria-label={t("navSupervisedEvolution")}
+      value={activeStepKey}
+      onValueChange={(value) => {
+        const step = WORKFLOW_STEPS.find((item) => item.key === value);
+        if (step) {
+          onWorkflowStepSelect?.(step.key);
+        }
+      }}
+      items={WORKFLOW_STEPS.map((step, index) => {
         const label = supervisedFlowLabel(step.view, t);
         const hint = supervisedFlowHint(step.view, t);
         const summary = summaries[step.key];
-        const selected = normalizedActiveWorkflowStepId
-          ? step.key === normalizedActiveWorkflowStepId
-          : step.view === activeView;
         const tabDescription = [label, summary?.status, summary?.detail]
           .filter(Boolean)
           .join(" ");
-        return (
-          <VButton
-            key={step.key}
-            type="button"
-            role="tab"
-            contentLayout="plain"
-            aria-label={tabDescription}
-            title={tabDescription}
-            aria-selected={selected}
-            className={selected ? `${styles.flowTabClass} ${styles.flowTabActiveClass}` : styles.flowTabClass}
-            onPress={() => onWorkflowStepSelect?.(step.key)}
-          >
-            <span className={selected ? `${styles.stepIndexClass} ${styles.stepIndexActiveClass}` : styles.stepIndexClass}>{WORKFLOW_STEPS.indexOf(step) + 1}</span>
-            <span className={styles.stepBodyClass}>
-              <span className={styles.stepLabelClass}>{label}</span>
-              <span className={styles.stepHintClass}>{hint}</span>
-              {summary ? (
-                <span className={styles.stepMetaClass}>
-                  <span className={styles.stepMetaItemClass}>{summary.status}</span>
-                  {summary.detail ? <span className={styles.stepMetaItemClass}>{summary.detail}</span> : null}
-                </span>
+        return {
+          id: step.key,
+          title: tabDescription,
+          label: (
+            <>
+              <span data-step-index className={styles.stepIndexClass}>{index + 1}</span>
+              <span className={styles.stepBodyClass}>
+                <span className={styles.stepLabelClass}>{label}</span>
+                <span className={styles.stepHintClass}>{hint}</span>
+                {summary ? (
+                  <span className={styles.stepMetaClass}>
+                    <span className={styles.stepMetaItemClass}>{summary.status}</span>
+                    {summary.detail ? <span className={styles.stepMetaItemClass}>{summary.detail}</span> : null}
+                  </span>
+                ) : null}
+              </span>
+              {summary?.count !== undefined ? (
+                <span className={styles.stepCountClass}>{summary.count}</span>
               ) : null}
-            </span>
-            {summary?.count !== undefined ? (
-              <span className={styles.stepCountClass}>{summary.count}</span>
-            ) : null}
-          </VButton>
-        );
+            </>
+          ),
+        };
       })}
-    </div>
+    />
   );
 }

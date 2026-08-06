@@ -45,9 +45,12 @@ describe("supervised workspace controls", () => {
     expect(tabsSource).toContain('key: "rerun_score"');
     expect(tabsSource).toContain('key: "approval"');
     expect(tabsSource).toContain("onWorkflowStepSelect?.(step.key)");
-    expect(tabsSource).toContain("role=\"tab\"");
+    expect(tabsSource).toContain("<VTabs");
+    expect(tabsSource).toContain("listClassName={styles.flowTabsClass}");
+    expect(tabsSource).toContain("triggerClassName={styles.flowTabClass}");
     expect(tabsSource).not.toContain("NavLink");
     expect(tabsSource).not.toContain("href: \"/supervised-evolution/runs\"");
+    expect(tabsSource).not.toContain("VButton");
     expect(tabsSource).toContain("stepHintClass");
     expect(evolutionDictionarySource).toContain('supervisedFlowLive: "基线评测"');
     expect(evolutionDictionarySource).toContain('supervisedFlowRuns: "提出建议与改良"');
@@ -93,10 +96,14 @@ describe("supervised workspace controls", () => {
     expect(tabsStylesSource).toContain("h-5 w-5");
     expect(tabsStylesSource).toContain("min-w-6");
     expect(tabsStylesSource).toContain("hidden overflow-hidden");
-    expect(tabsStylesSource).toContain("max-[1120px]:grid-cols-[repeat(4,minmax(100px,150px))]");
+    expect(tabsStylesSource).toContain("max-[1120px]:!grid-cols-[repeat(4,minmax(100px,150px))]");
     expect(tabsSource).not.toContain("repeat(2");
     expect(controlsStylesSource).toContain("min-h-[34px]");
     expect(controlsStylesSource).toContain("min-h-[26px]");
+    expect(controlsStylesSource).toContain("intakeTabsTriggerClass");
+    expect(controlsStylesSource).toContain("data-[state=active]");
+    expect(controlsSource).toContain("<VTabs");
+    expect(controlsSource).not.toContain("aria-pressed={currentIntakeMode");
     expect(controlsStylesSource).toContain("flowRegionClass");
     expect(tabsStylesSource).toContain("min-w-0");
   });
@@ -105,7 +112,8 @@ describe("supervised workspace controls", () => {
     expect(controlsSource).toContain("modeImpactHint");
     expect(controlsSource).toContain("候选池的手工治理动作会被锁定");
     expect(controlsSource).toContain("保留接纳、激活、回滚和删除操作");
-    expect(controlsSource).toContain("tooltip={modeImpactHint(mode)}");
+    expect(controlsSource).toContain("title: modeImpactHint(\"manual_review\")");
+    expect(controlsSource).toContain("title: modeImpactHint(\"auto\")");
   });
 
   it("keeps workflow tabs from expanding into tall VButton cards", () => {
@@ -116,8 +124,9 @@ describe("supervised workspace controls", () => {
     expect(tabsStylesSource).not.toContain("stepMetaClass = \"flex");
     expect(tabsStylesSource).toContain("stepMetaClass = \"sr-only");
     expect(tabsSource).toContain("const tabDescription");
-    expect(tabsSource).toContain("aria-label={tabDescription}");
-    expect(tabsSource).toContain("title={tabDescription}");
+    expect(tabsSource).toContain("title: tabDescription");
+    expect(tabsStylesSource).toContain("data-[state=active]");
+    expect(tabsStylesSource).toContain("data-step-index");
   });
 
   it("feeds workflow step summaries into the supervised flow tabs", () => {

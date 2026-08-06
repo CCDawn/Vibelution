@@ -42,7 +42,8 @@ export type UsePersistedPaneResizeOptions = {
 };
 
 export type UsePersistedPaneResizeResult = {
-  layoutRef: RefObject<HTMLDivElement | null>;
+  /** Host element for width reclamp (section/div page roots or workspace grids). */
+  layoutRef: RefObject<HTMLElement | null>;
   widths: PaneWidthMap;
   draggingPaneId: string | null;
   setPaneWidth: (paneId: string, width: number) => void;
@@ -72,7 +73,7 @@ export function usePersistedPaneResize({
   panes,
   preserveMainMinWidth = 360,
 }: UsePersistedPaneResizeOptions): UsePersistedPaneResizeResult {
-  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<HTMLElement | null>(null);
   const specs = useMemo(() => paneSpecMap(panes), [panes]);
   const [widths, setWidths] = useState<PaneWidthMap>(() => resolvePaneWidths(layoutId, panes));
   const [drag, setDrag] = useState<DragState | null>(null);

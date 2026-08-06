@@ -33,14 +33,36 @@ describe("VDropdownMenu contract", () => {
     expect(session).not.toContain('role="menuitem"');
   });
 
-  it("AppShell lifecycle power menu uses trigger-mode VDropdownMenu", () => {
+  it("AppShell and Launcher share VWorkbenchPowerMenu (Radix dropdown composition)", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
-    expect(shell).toContain("VDropdownMenu");
-    expect(shell).toContain("contentClassName={styles.lifecycleMenuPanel}");
-    expect(shell).toContain('align="end"');
-    expect(shell).toContain('id: "shutdown"');
-    expect(shell).toContain('id: "restart"');
+    const launcher = readFileSync(resolve(vuiRoot, "../../routes/LauncherRoute.tsx"), "utf8");
+    const powerMenu = readFileSync(
+      resolve(vuiRoot, "product/workbench-shell/VWorkbenchPowerMenu.tsx"),
+      "utf8",
+    );
+    const lifecycleActions = readFileSync(
+      resolve(vuiRoot, "../../app/workbenchLifecycleActions.ts"),
+      "utf8",
+    );
+    expect(powerMenu).toContain("VDropdownMenu");
+    expect(powerMenu).toContain('id: "restart"');
+    expect(powerMenu).toContain('id: "stop"');
+    expect(powerMenu).toContain('id: "force-stop"');
+    expect(shell).toContain("VWorkbenchPowerMenu");
+    expect(shell).toContain('variant="icon"');
     expect(shell).not.toContain("lifecycleMenuRef");
     expect(shell).not.toContain('role="menuitem"');
+    expect(launcher).toContain("VWorkbenchPowerMenu");
+    expect(launcher).toContain('variant="labeled"');
+    // No parallel status-bar restart/stop/force buttons outside the unified menu.
+    expect(launcher).not.toContain('onPress={() => controlMutation.mutate("restart")}');
+    expect(launcher).not.toContain('onPress={() => controlMutation.mutate("stop")}');
+    expect(launcher).not.toContain('onPress={() => controlMutation.mutate("force-stop")}');
+    // Menu + control request path are both shared.
+    expect(shell).toContain('useWorkbenchLifecycleActions("app_shell")');
+    expect(launcher).toContain('useWorkbenchLifecycleActions("launcher_route")');
+    expect(lifecycleActions).toContain("requestWorkbenchLifecycleOperation");
+    expect(lifecycleActions).toContain("app_shell_shutdown_button");
+    expect(lifecycleActions).toContain("launcher_route_stop_button");
   });
 });

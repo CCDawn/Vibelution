@@ -4,7 +4,7 @@ import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { ConfigSummary, EvolutionOverview } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VButton } from "../components/vui";
+import { VTabs } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./SupervisedWorkspaceControls.styles";
 import {
@@ -112,25 +112,36 @@ export function SupervisedWorkspaceControls({
       <div className={styles.modeRegionClass}>
         <div className={styles.intakeControlClass}>
           <span className={styles.controlLabelClass}>{t("intakeMode")}</span>
-          <div className={styles.intakeSegmentedClass}>
-            {(["manual_review", "auto"] as const).map((mode) => (
-              <VButton
-                key={mode}
-                type="button"
-                className={
-                  currentIntakeMode === mode
-                    ? `${styles.intakeButtonClass} ${styles.intakeButtonActiveClass}`
-                    : styles.intakeButtonClass
-                }
-                aria-pressed={currentIntakeMode === mode}
-                isDisabled={intakeModeMutation.isPending}
-                tooltip={modeImpactHint(mode)}
-                onPress={() => intakeModeMutation.mutate(mode)}
-              >
-                {intakeModeLabel(mode)}
-              </VButton>
-            ))}
-          </div>
+          <VTabs
+            density="compact"
+            className={styles.intakeTabsClass}
+            listClassName={styles.intakeTabsListClass}
+            triggerClassName={styles.intakeTabsTriggerClass}
+            aria-label={t("intakeMode")}
+            value={currentIntakeMode}
+            onValueChange={(value) => {
+              if (intakeModeMutation.isPending) {
+                return;
+              }
+              if (value === "manual_review" || value === "auto") {
+                intakeModeMutation.mutate(value);
+              }
+            }}
+            items={[
+              {
+                id: "manual_review",
+                label: intakeModeLabel("manual_review"),
+                title: modeImpactHint("manual_review"),
+                disabled: intakeModeMutation.isPending,
+              },
+              {
+                id: "auto",
+                label: intakeModeLabel("auto"),
+                title: modeImpactHint("auto"),
+                disabled: intakeModeMutation.isPending,
+              },
+            ]}
+          />
         </div>
       </div>
     </div>

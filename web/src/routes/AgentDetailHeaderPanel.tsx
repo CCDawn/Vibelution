@@ -1,7 +1,7 @@
 import { PanelRight, Play } from "lucide-react";
 
 import type { AgentAvatarOptionsPayload } from "../api/types";
-import { VButton, VNativeButton, VTooltip } from "../components/vui";
+import { VButton, VTabs, VTooltip } from "../components/vui";
 import {
   AgentAvatarEditorPanel,
   type AgentAvatarEditorPanelCopy,
@@ -145,17 +145,29 @@ export function AgentDetailHeaderPanel<TPane extends string>({
       </section>
 
       <nav className={styles.detailTabs} aria-label={title}>
-        {panes.map((pane) => (
-          <VNativeButton
-            key={pane.id}
-            type="button"
-            className={activePane === pane.id ? styles.detailTabActive : styles.detailTab}
-            onClick={() => onSelectPane(pane.id)}
-          >
-            <span>{pane.label}</span>
-            {pane.count > 0 ? <strong>{pane.count}</strong> : null}
-          </VNativeButton>
-        ))}
+        <VTabs
+          density="compact"
+          className={styles.detailTabsHost}
+          listClassName={styles.detailTabsList}
+          triggerClassName={styles.detailTabsTrigger}
+          aria-label={title}
+          value={String(activePane)}
+          onValueChange={(value) => {
+            const next = panes.find((pane) => String(pane.id) === value);
+            if (next) {
+              onSelectPane(next.id);
+            }
+          }}
+          items={panes.map((pane) => ({
+            id: String(pane.id),
+            label: (
+              <>
+                <span>{pane.label}</span>
+                {pane.count > 0 ? <strong>{pane.count}</strong> : null}
+              </>
+            ),
+          }))}
+        />
       </nav>
     </div>
   );

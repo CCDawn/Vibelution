@@ -1,4 +1,4 @@
-import { VNativeButton } from "../../components/vui";
+import { VTabs } from "../../components/vui";
 import type { TeamShellMode } from "./teamShellModel";
 import { teamShellModeLabel } from "./teamShellModel";
 
@@ -10,7 +10,7 @@ export type TeamShellModeSwitchProps = {
 };
 
 /**
- * Board vs Canvas mode switch — VNativeButton segment control for dense ops.
+ * Board vs Canvas mode switch — VTabs segment control for dense ops.
  */
 export function TeamShellModeSwitch({
   lang,
@@ -20,38 +20,42 @@ export function TeamShellModeSwitch({
 }: TeamShellModeSwitchProps) {
   return (
     <div
-      className={[
-        "teamShellModeSwitch inline-flex items-center gap-0.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-0.5",
-        className,
-      ].filter(Boolean).join(" ")}
-      role="tablist"
-      aria-label={lang === "zh" ? "展示模式" : "Presentation mode"}
+      className={["teamShellModeSwitch inline-grid w-fit max-w-full min-w-0", className].filter(Boolean).join(" ")}
       data-testid="team-shell-mode-switch"
       data-vui="team-shell-mode-switch"
     >
-      {(["board", "canvas"] as const).map((item) => {
-        const active = mode === item;
-        return (
-          <VNativeButton
-            key={item}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            data-active={active ? "true" : "false"}
-            data-testid={`team-shell-mode-${item}`}
-            className={[
-              // shadcn-like segment: active is raised surface, not ink slab.
-              "!min-h-8 !rounded-full !px-3.5 !text-[12.5px] !font-[700]",
-              active
-                ? "!border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-base)] !text-[var(--fg-primary)] !shadow-[var(--vui-shadow-hairline,0_1px_2px_rgba(0,0,0,0.06))]"
-                : "!border-transparent !bg-transparent !text-[var(--fg-secondary)] hover:!bg-[var(--vui-control-muted)] hover:!text-[var(--fg-primary)]",
-            ].join(" ")}
-            onClick={() => onChange(item)}
-          >
-            {teamShellModeLabel(item, lang)}
-          </VNativeButton>
-        );
-      })}
+      <VTabs
+        density="compact"
+        className="inline-grid w-fit max-w-full min-w-0 gap-0"
+        listClassName="inline-flex items-center gap-0.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-0.5"
+        triggerClassName={
+          "!min-h-8 !rounded-full !px-3.5 !text-[12.5px] !font-[700] border-transparent bg-transparent text-[var(--fg-secondary)] " +
+          "data-[state=active]:!border-[var(--vui-border-subtle)] data-[state=active]:!bg-[var(--vui-surface-base)] " +
+          "data-[state=active]:!text-[var(--fg-primary)] data-[state=active]:!shadow-[var(--vui-shadow-hairline,0_1px_2px_rgba(0,0,0,0.06))] " +
+          "hover:!bg-[var(--vui-control-muted)] hover:!text-[var(--fg-primary)]"
+        }
+        aria-label={lang === "zh" ? "展示模式" : "Presentation mode"}
+        value={mode}
+        onValueChange={(value) => {
+          if (value === "board" || value === "canvas") {
+            onChange(value);
+          }
+        }}
+        items={[
+          {
+            id: "board",
+            label: (
+              <span data-testid="team-shell-mode-board">{teamShellModeLabel("board", lang)}</span>
+            ),
+          },
+          {
+            id: "canvas",
+            label: (
+              <span data-testid="team-shell-mode-canvas">{teamShellModeLabel("canvas", lang)}</span>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

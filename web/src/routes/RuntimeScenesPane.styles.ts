@@ -57,6 +57,16 @@ const styles = {
     `emptySurface min-w-0 ${panelSurface} [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   eyebrow:
     "eyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  filterTabs: "filterTabs inline-grid w-fit max-w-full min-w-0 gap-0",
+  filterTabsList:
+    "filterTabsList inline-flex w-fit max-w-full flex-wrap items-center gap-1.5 border-0 bg-transparent p-0",
+  filterTabsTrigger:
+    `filterTabsTrigger min-w-0 ${buttonBase} ` +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
+    "data-[state=active]:text-[var(--accent-cool)]",
+  filterTabLabel: "inline-flex min-w-0 items-center gap-1.5",
+  // Legacy aliases for style geometry contracts.
   filterButton:
     `filterButton min-w-0 ${buttonBase}`,
   filterButtonActive:

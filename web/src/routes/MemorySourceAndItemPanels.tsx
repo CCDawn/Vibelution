@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { Brain, Database, Search, TriangleAlert } from "lucide-react";
 
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VTabs } from "../components/vui";
 import styles from "./MemorySourceAndItemPanels.styles";
 
 export type MemorySourceFilterView = {
@@ -91,20 +91,24 @@ export function MemorySourcePanel({
         <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} />
       </label>
 
-      <div className={styles.filterGroup} aria-label={copy.filters}>
-        {filterOptions.map((option) => (
-          <VButton
-            key={option.id}
-            type="button"
-            className={option.id === activeFilterId ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-            onClick={() => onFilterChange(option.id)}
-            aria-pressed={option.id === activeFilterId}
-          >
-            <span>{option.label}</span>
-            <strong>{option.count}</strong>
-          </VButton>
-        ))}
-      </div>
+      <VTabs
+        density="compact"
+        className={styles.filterTabs}
+        listClassName={styles.filterTabsList}
+        triggerClassName={styles.filterTabsTrigger}
+        aria-label={copy.filters}
+        value={activeFilterId}
+        onValueChange={(value) => onFilterChange(value)}
+        items={filterOptions.map((option) => ({
+          id: option.id,
+          label: (
+            <>
+              <span>{option.label}</span>
+              <strong>{option.count}</strong>
+            </>
+          ),
+        }))}
+      />
 
       <VButton
         type="button"

@@ -29,10 +29,19 @@ const styles = {
   issue_warning:
     `${vuiStateWarmSoftClass}`,
   detailTabs: `flex min-w-0 items-end gap-6 overflow-x-auto [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] [border-left:0] [border-right:0] [border-top:0] ${vuiWorkspaceFillClass} px-0`,
+  detailTabsHost: "detailTabsHost inline-grid w-fit max-w-full min-w-0 gap-0",
+  detailTabsList:
+    "detailTabsList inline-flex min-w-0 max-w-full items-end gap-6 border-0 bg-transparent p-0",
+  detailTabsTrigger:
+    "detailTabsTrigger inline-flex min-h-10 w-fit min-w-max items-center justify-center gap-1.5 rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] shadow-none " +
+    "hover:border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] hover:text-[var(--fg-primary)] " +
+    "data-[state=active]:border-[var(--accent-cool)] data-[state=active]:bg-transparent data-[state=active]:text-[var(--accent-cool)] " +
+    "data-[state=active]:shadow-none [&_strong]:[font-size:var(--vui-font-xs)]",
+  // Legacy aliases for style-source geometry contracts.
   detailTab:
-    "inline-flex min-h-10 w-fit min-w-max items-center justify-center gap-1.5 border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] hover:border-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] hover:text-[var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)]",
+    "inline-flex min-h-10 w-fit min-w-max items-center justify-center gap-1.5 border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)]",
   detailTabActive:
-    "inline-flex min-h-10 w-fit min-w-max items-center justify-center gap-1.5 border-x-0 border-t-0 border-b-2 border-[var(--accent-cool)] bg-transparent px-0.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--accent-cool)] [&_strong]:[font-size:var(--vui-font-xs)]",
+    "inline-flex min-h-10 w-fit min-w-max items-center justify-center gap-1.5 border-x-0 border-t-0 border-b-2 border-[var(--accent-cool)] bg-transparent px-0.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--accent-cool)]",
   // Legacy contract aliases retained for downstream style-source checks.
   agentRoleTag: "inline-flex",
   agentRoleTag_chat: "text-[var(--accent-warm-2)]",

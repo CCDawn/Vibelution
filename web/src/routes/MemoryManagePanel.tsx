@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { Brain, Pencil, Search, Square, SquareCheckBig, Trash2, Undo2 } from "lucide-react";
 
-import { VButton, VNativeInput, VSection, VStateSurface, VSurface } from "../components/vui";
+import { VButton, VNativeInput, VSection, VStateSurface, VSurface, VTabs } from "../components/vui";
 import styles from "./MemoryManagePanel.styles";
 
 export type MemoryManageFilterView = {
@@ -126,20 +126,24 @@ export function MemoryManagePanel({
             meta={visibleItemCount}
             aria-label={copy.manageFilters}
           >
-            <div className={styles.filterGroup}>
-              {manageFilterOptions.map((option) => (
-                <VButton
-                  key={option.id}
-                  type="button"
-                  className={option.id === activeManageFilterId ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-                  onClick={() => onManageFilterChange(option.id)}
-                  aria-pressed={option.id === activeManageFilterId}
-                >
-                  <span>{option.label}</span>
-                  <strong>{option.count}</strong>
-                </VButton>
-              ))}
-            </div>
+            <VTabs
+              density="compact"
+              className={styles.filterTabs}
+              listClassName={styles.filterTabsList}
+              triggerClassName={styles.filterTabsTrigger}
+              aria-label={copy.manageFilters}
+              value={activeManageFilterId}
+              onValueChange={(value) => onManageFilterChange(value)}
+              items={manageFilterOptions.map((option) => ({
+                id: option.id,
+                label: (
+                  <>
+                    <span>{option.label}</span>
+                    <strong>{option.count}</strong>
+                  </>
+                ),
+              }))}
+            />
           </VSection>
           <section className={styles.manageSourceFilters} aria-label={copy.sourceFilters}>
             <VButton

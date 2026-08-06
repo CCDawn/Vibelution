@@ -9,7 +9,7 @@ import type {
   ExperimentPurposeId,
   ExperimentResearchModeId,
 } from "../api/types";
-import { VNativeButton, VNativeInput, VNativeTextarea, VStringSelect } from "../components/vui";
+import { VNativeButton, VNativeInput, VNativeTextarea, VStringSelect, VTabs } from "../components/vui";
 import type { ExperimentHypothesisCandidateSummary } from "./teams/experimentLoopModel";
 import styles from "./TeamExperimentMethodPanel.styles";
 
@@ -451,19 +451,28 @@ export function TeamExperimentMethodPanel({
 
       <div className={styles.section}>
         <span>{isZh ? "科研闭环" : "Research loop"}</span>
-        <div className={styles.segmented} role="group" aria-label={isZh ? "科研闭环模式" : "Research loop mode"}>
-          {catalog.researchModes.map((mode) => (
-            <VNativeButton
-              key={mode.modeId}
-              className={[styles.segment, draft.researchMode === mode.modeId ? styles.segmentActive : ""].join(" ")}
-              aria-pressed={draft.researchMode === mode.modeId}
-              disabled={locked}
-              onClick={() => setDraft((current) => ({ ...current, researchMode: mode.modeId }))}
-            >
-              {isZh ? mode.labelZh : mode.labelEn}
-            </VNativeButton>
-          ))}
-        </div>
+        <VTabs
+          density="compact"
+          className={styles.researchModeTabs}
+          listClassName={styles.researchModeTabsList}
+          triggerClassName={styles.researchModeTabsTrigger}
+          aria-label={isZh ? "科研闭环模式" : "Research loop mode"}
+          value={draft.researchMode}
+          onValueChange={(value) => {
+            if (locked) {
+              return;
+            }
+            setDraft((current) => ({
+              ...current,
+              researchMode: value as ExperimentResearchModeId,
+            }));
+          }}
+          items={catalog.researchModes.map((mode) => ({
+            id: mode.modeId,
+            label: isZh ? mode.labelZh : mode.labelEn,
+            disabled: locked,
+          }))}
+        />
       </div>
 
       <div className={styles.selectionRow}>

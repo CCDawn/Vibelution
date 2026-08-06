@@ -11,12 +11,14 @@ const styles = {
     "inline-flex min-h-6 w-fit shrink-0 items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
   section:
     "min-w-0 grid gap-1.5 [&>span]:[font-size:var(--vui-font-xs)] [&>span]:font-semibold [&>span]:text-[var(--fg-secondary)]",
-  segmented:
-    "min-w-0 flex flex-wrap gap-1 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] p-1",
-  segment:
-    "min-h-8 w-fit rounded-[calc(var(--radius-control)-2px)] border border-transparent px-2.5 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] transition-colors hover:bg-[var(--vui-surface-panel)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-cool)] disabled:cursor-not-allowed disabled:opacity-55",
-  segmentActive:
-    "border-[color-mix(in_srgb,var(--accent-cool)_32%,var(--vui-border-subtle))] bg-[var(--vui-surface-panel)] text-[var(--accent-cool)] shadow-[var(--vui-shadow-inset-accent)]",
+  researchModeTabs: "min-w-0 inline-grid w-fit max-w-full gap-0",
+  researchModeTabsList:
+    "min-w-0 flex flex-wrap gap-1 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] p-1 border-0",
+  researchModeTabsTrigger:
+    "min-h-8 w-fit rounded-[calc(var(--radius-control)-2px)] border border-transparent px-2.5 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] " +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-cool)_32%,var(--vui-border-subtle))] " +
+    "data-[state=active]:bg-[var(--vui-surface-panel)] data-[state=active]:text-[var(--accent-cool)] " +
+    "data-[state=active]:shadow-[var(--vui-shadow-inset-accent)]",
   methodGrid:
     "min-w-0 grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1 max-[860px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[560px]:grid-cols-[minmax(0,1fr)]",
   methodButton: `min-h-10 min-w-0 ${vuiOpaqueRowClass} px-2 py-1.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-cool)] disabled:cursor-not-allowed disabled:opacity-55`,

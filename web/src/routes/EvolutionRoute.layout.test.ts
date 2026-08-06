@@ -69,13 +69,13 @@ const evolutionSources = [
 
 describe("EvolutionRoute library user flow contract", () => {
   it("uses VUI composition for supervised Evolution surfaces without native control wrappers", () => {
-    expect(routeSource).toContain("VRouteHeader");
+    expect(routeSource).toContain("VTrackWorkbenchPage");
     expect(routeSource).toContain("VMetricStrip");
     expect(supervisedLibraryViewSource).toContain("VStateSurface");
     expect(supervisedLiveSetupPanelSource).toContain("VStringSelect");
     expect(routeSource).toContain("onKeepWorktreeChange={setKeepWorktree}");
     expect(supervisedLiveSetupPanelSource).toContain("onChange={onKeepWorktreeChange}");
-    expect(routeSource).toContain("hideIntro={hideSupervisedToolbarIntro}");
+    expect(routeSource).toContain("hideIntro: hideSupervisedToolbarIntro");
     expect(routeSource).not.toContain('"\\u200B"');
     expect(activeRunMonitorPanelSource).toContain("<VButton");
     expect(proposalActionBandsPanelSource).toContain("<VButton");
@@ -431,20 +431,25 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("lets the self-evolution workspace fill the remaining viewport height", () => {
+    expect(routeSource).toContain("VTrackWorkbenchPage");
+    expect(routeSource).toContain("fill");
+    expect(routeSource).toContain('data-vui-recipe="evolution-workbench"');
+    expect(routeSource).toContain('domainRecipe="evolution-multi-rail"');
     expect(routeSource).toContain('const showRouteToolbar = activeTrack !== "self";');
     expect(routeSource).toContain('activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page');
-    expect(routeSource).toContain("{showRouteToolbar ? (");
-    expect(routeStyles.page).toContain("[height:calc(100dvh_-_var(--shell-topbar-height))]");
-    expect(routeStyles.page).toContain("[max-height:calc(100dvh_-_var(--shell-topbar-height))]");
-    expect(routeStyles.selfPage).toMatch(/grid-template-rows:minmax\(0,?_?1fr\)/);
-    expect(routeStyles.selfPage).toContain("[gap:0]");
+    expect(routeSource).toContain("header={");
+    expect(routeSource).toContain("showRouteToolbar");
+    // Page host fill is owned by VTrackWorkbenchPage; route styles only add chrome.
+    expect(routeStyles.page).toContain("min-h-0");
+    expect(routeStyles.page).toContain("max-w-full");
+    expect(routeStyles.page).not.toContain("calc(100dvh");
+    expect(routeStyles.page).not.toContain("max-[900px]:[height:auto]");
+    expect(routeStyles.page).not.toContain("max-[900px]:[overflow:visible]");
+    expect(routeStyles.selfPage).toMatch(/!gap-0|\[gap:0\]/);
+    expect(routeStyles.selfPage).toMatch(/max-\[900px\]:!gap-0|max-\[900px\]:\[gap:0\]/);
     expect(selfTrackBoundaryStyles.selfModeStack).toMatch(/grid-rows-\[minmax\(0,1fr\)\]|grid-template-rows:minmax\(0,?_?1fr\)/);
     expect(selfTrackBoundaryStyles.selfModeStack).toMatch(/overflow-hidden|\[overflow:hidden\]/);
     expect(selfTrackBoundaryStyles.selfModeStack).not.toContain("auto_minmax(0,1fr)");
-    expect(routeStyles.page).not.toContain("max-[900px]:[height:auto]");
-    expect(routeStyles.page).not.toContain("max-[900px]:[overflow:visible]");
-    expect(routeStyles.selfPage).toMatch(/max-\[900px\]:\[grid-template-rows:minmax\(0,?_?1fr\)\]/);
-    expect(routeStyles.selfPage).toContain("max-[900px]:[gap:0]");
     expect(selfTrackBoundaryStyles.selfModeStack).toMatch(/max-\[900px\]:h-full|max-\[900px\]:\[height:100%\]/);
     expect(selfTrackBoundaryStyles.selfModeStack).toMatch(/max-\[900px\]:overflow-auto|max-\[900px\]:\[overflow:auto\]/);
     expect(selfTrackBoundaryStylesSource).toContain("structuredEmptyState");
@@ -965,14 +970,14 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("hides the supervised toolbar intro with content-sized chrome (no full-width empty band)", () => {
     expect(routeSource).toContain('const hideSupervisedToolbarIntro = activeTrack === "supervised"');
-    expect(routeSource).toContain("hideIntro={hideSupervisedToolbarIntro}");
+    expect(routeSource).toContain("hideIntro: hideSupervisedToolbarIntro");
     expect(routeSource).toContain("styles.toolbarSupervisedFocus");
     expect(routeSource).not.toContain("styles.toolbarHeaderHidden");
     // Do not stack generic `toolbar` (flex-wrap full row) on top of hideIntro chrome.
     expect(routeSource).not.toContain("`${styles.toolbar} ${styles.toolbarSupervisedFocus}`");
     expect(routeSource).toContain("hideSupervisedToolbarIntro");
     expect(routeSource).toContain("styles.toolbarControlsSupervisedFocus");
-    expect(routeSource).toContain("aria-label={routeTitle}");
+    expect(routeSource).toContain("ariaLabel: routeTitle");
     expect(routeStyles.toolbarSupervisedFocus).toContain("w-fit");
     expect(routeStyles.toolbarSupervisedFocus).toContain("justify-self-end");
     expect(routeStyles.toolbarSupervisedFocus).toContain("self-start");

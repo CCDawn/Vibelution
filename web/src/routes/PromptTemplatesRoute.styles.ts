@@ -28,6 +28,14 @@ const panelDescriptionClass = "m-0 mt-0.5 [font-size:var(--vui-font-xs)] leading
 const searchBoxClass = `flex min-h-8 items-center gap-2 ${fieldSurfaceClass} px-2 text-vui-fg-tertiary`;
 const searchInputClass = "min-w-0 w-full border-0 bg-transparent text-vui-fg-primary outline-0";
 const filterRowClass = "flex flex-wrap gap-[5px]";
+const filterTabsClass = "inline-grid w-fit max-w-full min-w-0 gap-0";
+const filterTabsListClass = "inline-flex min-w-0 max-w-full flex-wrap items-center gap-[5px] border-0 bg-transparent p-0";
+const filterTabsTriggerClass =
+  `${controlButtonClass} ` +
+  "data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] " +
+  "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_14%,transparent)] " +
+  "data-[state=active]:text-[var(--accent-warm-2)]";
+// Legacy aliases for style geometry contracts.
 const filterButtonClass = controlButtonClass;
 const filterButtonActiveClass = `${filterButtonClass} border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_14%,transparent)] text-[var(--accent-warm-2)]`;
 const primaryButtonClass = `${controlButtonClass} border-[color-mix(in_srgb,var(--accent-warm)_34%,var(--border-soft))] text-[var(--accent-warm-2)]`;
@@ -99,6 +107,9 @@ const styles = {
   searchBoxClass,
   searchInputClass,
   filterRowClass,
+  filterTabsClass,
+  filterTabsListClass,
+  filterTabsTriggerClass,
   filterButtonClass,
   filterButtonActiveClass,
   primaryButtonClass,
