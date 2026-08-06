@@ -81,9 +81,75 @@ describe("codexNativeTranscriptSurface", () => {
       rolloutTraceEvents: [expect.objectContaining({ kind: "ToolCallStarted" })],
     });
     expect(surface.hasAssistantMarkdown).toBe(true);
-    expect(surface.suppressProjectedProcess).toBe(true);
+    // Lifecycle arrays alone do not suppress outer process (tools may still be on feedback/timeline).
+    expect(surface.suppressProjectedProcess).toBe(false);
     expect(surface.suppressProjectedResponse).toBe(true);
+    // Lifecycle still suppresses the turn-status note so it does not stack under final answer.
     expect(surface.suppressProjectedTurnStatus).toBe(true);
+  });
+
+  it("suppresses outer process only when native cells already render process rows", () => {
+    const answerOnly = resolveCodexTranscriptSurface(message({
+      content: "answer only",
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "message-1",
+        cells: [
+          {
+            id: "native-answer-only",
+            kind: "assistant_markdown",
+            messageId: "message-1",
+            status: "completed",
+            tone: "neutral",
+            text: "answer only",
+            phase: "final_answer",
+            terminal: true,
+          },
+        ],
+        toolCalls: [
+          {
+            toolCallId: "tool_call:hint",
+            rawOperationId: "hint",
+            status: "completed",
+            title: "hint tool",
+            runtimeKind: "tool",
+          },
+        ],
+      },
+    }), projectedCells);
+    expect(answerOnly.suppressProjectedProcess).toBe(false);
+
+    const withProcessCell = resolveCodexTranscriptSurface(message({
+      content: "with process",
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "message-1",
+        cells: [
+          {
+            id: "native-tool",
+            kind: "tool_call",
+            messageId: "message-1",
+            status: "completed",
+            tone: "neutral",
+            title: "grep_search_tool",
+            summary: "done",
+          },
+          {
+            id: "native-answer",
+            kind: "assistant_markdown",
+            messageId: "message-1",
+            status: "completed",
+            tone: "neutral",
+            text: "with process",
+            phase: "final_answer",
+            terminal: true,
+          },
+        ],
+      },
+    }), projectedCells);
+    expect(withProcessCell.suppressProjectedProcess).toBe(true);
   });
 
   it("normalizes legacy markdown and preserves terminal error metadata at the native boundary", () => {

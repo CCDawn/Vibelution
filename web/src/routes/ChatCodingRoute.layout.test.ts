@@ -410,9 +410,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"reject\" })");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatToolApprovalDialog");
     expect(chatSessionWorkspacePanelSource).toContain("variant=\"banner\"");
-    expect(chatSessionWorkspacePanelSource).toContain("toolApprovalHost");
-    expect(chatSessionWorkspacePanelSource).toContain("data-chat-tool-approval-host");
-    expect(chatSessionWorkspacePanelSource).toContain("toolApproval={null}");
+    // Composer-adjacent host (not sticky column top).
+    expect(chatSessionWorkspacePanelSource).toContain('data-chat-tool-approval-host="composer"');
+    expect(chatSessionWorkspacePanelSource).not.toContain("toolApprovalHost");
+    expect(chatSessionWorkspacePanelSource).not.toContain("sticky top-0");
+    expect(chatSessionWorkspacePanelSource).toContain("toolApproval={approvalSurface}");
     expect(chatSessionWorkspacePanelSource).toContain("conversationShell");
     expect(chatSessionWorkspacePanelSource).toContain('from "./ChatToolApprovalDialog"');
     expect(chatSessionWorkspacePanelSource.indexOf("<ChatToolApprovalDialog")).toBeLessThan(
@@ -445,11 +447,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatToolApprovalDialogSource).toContain("Y Yes · A Always · N No");
     expect(chatToolApprovalDialogSource).toContain("Y 是 · A 始终 · N 否");
     expect(chatToolApprovalDialogSource).toContain("className={styles.toolItem}");
-    expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[28px_minmax(0,1fr)_auto]");
-    expect(chatToolApprovalDialogStyles.dialog).toContain("max-w-[min(40rem,100%)]");
-    expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-[var(--vui-elevation-panel)]");
+    expect(chatToolApprovalDialogSource).toContain("showGrant");
+    expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[22px_minmax(0,1fr)_auto]");
+    expect(chatToolApprovalDialogStyles.dialog).toContain("max-w-[min(44rem,100%)]");
+    expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(chatToolApprovalDialogStyles.actions).toContain("flex");
     expect(chatToolApprovalDialogStyles.commandPreview).toContain("font-mono");
+    expect(chatToolApprovalDialogStyles.commandPreview).toContain("[-webkit-line-clamp:2]");
     expect(chatToolApprovalDialogStyles.toolList).toContain("sr-only");
     expect(chatToolApprovalDialogStyles.toolItem).toContain("min-w-0");
   });
@@ -2003,7 +2007,7 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.petShowcaseActions, "grid-cols-3", false],
       [routeStyles.cliAgentTerminalCommand, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [chatRuntimeNoticeStackStyles.notice, "grid-cols-[16px_minmax(0,1fr)]"],
-      [chatToolApprovalDialogStyles.dialog, "grid-cols-[28px_minmax(0,1fr)_auto]"],
+      [chatToolApprovalDialogStyles.dialog, "grid-cols-[22px_minmax(0,1fr)_auto]"],
       [routeStyles.cacheDetailCalibrationNote, "gap-1"],
       [routeStyles.rightIndexTabs, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [routeStyles.memberIndexSummary, "grid-cols-[auto_minmax(0,1fr)_auto]"],
