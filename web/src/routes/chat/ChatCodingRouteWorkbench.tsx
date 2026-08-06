@@ -215,6 +215,7 @@ import { useChatSessionSelection } from "./useChatSessionSelection";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
+import { eventInsideContextMenuSurface } from "./chatContextMenuDismiss";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
 import {
   useChatSessionRenameMenu,
@@ -383,6 +384,7 @@ export function ChatCodingRoute() {
   const removeSessionWorkspace = useChatWorkbenchStore((state) => state.removeSession);
   const closePreviewTab = useChatWorkbenchStore((state) => state.closePreviewTab);
   const latestDirectSessionSelectionRef = useRef("");
+  const latestDirectSessionSelectionAtRef = useRef(0);
   const directSessionSelectionGenerationRef = useRef(0);
   const reselectDirectSessionRef = useRef<(sessionId: string) => void>(() => undefined);
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
@@ -571,7 +573,12 @@ export function ChatCodingRoute() {
     if (!sessionContextMenu && !agentContextMenu) {
       return;
     }
-    function closeSessionContextMenu() {
+    function closeSessionContextMenu(event?: Event) {
+      // Radix portals the menu outside the React tree; a global pointerdown must
+      // not unmount it before item onSelect (rename/create) can run.
+      if (event && eventInsideContextMenuSurface(event.target)) {
+        return;
+      }
       setSessionContextMenu(null);
       setAgentContextMenu(null);
     }
@@ -931,6 +938,7 @@ export function ChatCodingRoute() {
     syncSessionDetail,
     setSessionComposerErrors,
     latestDirectSessionSelectionRef,
+    latestDirectSessionSelectionAtRef,
     directSessionSelectionGenerationRef,
     reselectDirectSessionRef,
     activeSessionId,
@@ -2632,6 +2640,7 @@ export function ChatCodingRoute() {
     queryClient,
     chatWorkspaceCache,
     latestDirectSessionSelectionRef,
+    latestDirectSessionSelectionAtRef,
     reselectDirectSessionRef,
     activeSessionId,
     setActiveSession,
@@ -2810,6 +2819,10 @@ export function ChatCodingRoute() {
             teams={teams}
             onContextMenu={openAgentContextMenu}
             onOpenAgent={(agent, latestSession) => {
+              const agentId = String(agent.agentId || "").trim();
+              if (agentId) {
+                setSelectedAgentId(agentId);
+              }
               if (latestSession?.id) {
                 handleOpenDirectSession(latestSession.id);
                 return;
