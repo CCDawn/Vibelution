@@ -37,15 +37,16 @@ def run_git(
     run_kwargs = dict(kwargs)
     # Always force no-console kwargs last so callers cannot strip CREATE_NO_WINDOW.
     run_kwargs.update(no_console_subprocess_kwargs())
-    env = dict(run_kwargs.pop("env", None) or os.environ)
-    env.setdefault("GIT_TERMINAL_PROMPT", "0")
-    env.setdefault("GCM_INTERACTIVE", "never")
-    env.setdefault("GIT_OPTIONAL_LOCKS", "0")
-    env.setdefault("GIT_PAGER", "cat")
-    run_kwargs["env"] = env
+    # Force-overwrite pager/editor/prompt env (setdefault loses to empty or cmd.exe GIT_EDITOR).
+    git_exe = resolve_git_executable()
+    caller_env = run_kwargs.pop("env", None)
+    run_kwargs["env"] = no_console_git.apply_no_console_git_env(
+        dict(caller_env) if caller_env is not None else None,
+        git_exe=git_exe,
+    )
     if "stdin" not in run_kwargs:
         run_kwargs["stdin"] = subprocess.DEVNULL
-    command = git_command(args)
+    command = [git_exe, *[str(arg) for arg in args]]
     attempts = max(0, int(retries or 0)) + 1
     for attempt in range(attempts):
         result = subprocess.run(

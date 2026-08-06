@@ -1100,6 +1100,33 @@ class SelfEvolvingAgent:
 
         self._mental_model_enabled_override = None if enabled is None else bool(enabled)
 
+    def set_turn_status_tail_config(self, config: Optional[dict] = None) -> None:
+        """Session-level Turn Status Bar composition (blocks/limits)."""
+        try:
+            from core.orchestration.turn_status_tail_config import normalize_turn_status_tail_config
+
+            self._turn_status_tail_config = normalize_turn_status_tail_config(config)
+        except Exception:
+            self._turn_status_tail_config = None
+
+    def set_turn_status_tail_context(
+        self,
+        *,
+        session_id: str = "",
+        agent_id: str = "",
+        task: str = "",
+        worktree: str = "",
+        cache_hint: Optional[dict] = None,
+    ) -> None:
+        """Identity / task context for optional tail sections (not secrets)."""
+        self._turn_status_tail_context = {
+            "session_id": str(session_id or "").strip(),
+            "agent_id": str(agent_id or "").strip(),
+            "task": str(task or "").strip(),
+            "worktree": str(worktree or "").strip(),
+            "cache_hint": dict(cache_hint) if isinstance(cache_hint, dict) else None,
+        }
+
     def set_runtime_status_enabled_override(self, enabled: Optional[bool]) -> None:
         """Override runtime-status inject for this agent instance / turn request."""
 
@@ -1149,6 +1176,7 @@ class SelfEvolvingAgent:
 
         Must not sit before the current user: a rewritten mid-list status bar severs
         DeepSeek automatic prefix cache so prior tool results never become hits.
+        Session may select which tail sections append (git brief/paths, clock, …).
         """
 
         if not self.is_runtime_status_inject_enabled_for_turn():
@@ -1172,8 +1200,52 @@ class SelfEvolvingAgent:
             mental_enabled=mental_enabled,
             mental_model=self.mental_model if mental_enabled else None,
         )
-        return upsert_turn_status_bar_message(messages, build_turn_status_bar_message(snapshot))
+        tail_config = getattr(self, "_turn_status_tail_config", None)
+        tail_ctx = getattr(self, "_turn_status_tail_context", None)
+        if not isinstance(tail_ctx, dict):
+            tail_ctx = {}
+        include_git = False
+        try:
+            from core.orchestration.turn_status_tail_config import (
+                BLOCK_GIT_BRIEF,
+                BLOCK_GIT_PATHS,
+                block_enabled,
+                normalize_turn_status_tail_config,
+            )
 
+            cfg = normalize_turn_status_tail_config(tail_config)
+            include_git = block_enabled(cfg, BLOCK_GIT_BRIEF) or block_enabled(cfg, BLOCK_GIT_PATHS)
+        except Exception:
+            cfg = tail_config
+            include_git = False
+        recent_tools: list[str] = []
+        try:
+            from core.authorization.tool_authorization_service import current_execution_authorization
+
+            auth = current_execution_authorization()
+            recent = getattr(auth, "recent_tool_names", None) or getattr(auth, "tool_names", None)
+            if isinstance(recent, (list, tuple)):
+                recent_tools = [str(item).strip() for item in recent if str(item).strip()]
+        except Exception:
+            recent_tools = []
+        try:
+            from core.orchestration.turn_status_bar import collect_turn_status_tail_extras
+
+            extras = collect_turn_status_tail_extras(
+                session_id=str(tail_ctx.get("session_id") or ""),
+                agent_id=str(tail_ctx.get("agent_id") or snapshot.agent_id or ""),
+                task=str(tail_ctx.get("task") or ""),
+                recent_tools=recent_tools,
+                include_git=include_git,
+                cache_hint=tail_ctx.get("cache_hint") if isinstance(tail_ctx.get("cache_hint"), dict) else None,
+                worktree=str(tail_ctx.get("worktree") or ""),
+            )
+        except Exception:
+            extras = {}
+        return upsert_turn_status_bar_message(
+            messages,
+            build_turn_status_bar_message(snapshot, config=cfg, extras=extras),
+        )
     def is_mental_model_enabled_for_turn(self) -> bool:
         override = getattr(self, "_mental_model_enabled_override", None)
         return resolve_feature_decision(

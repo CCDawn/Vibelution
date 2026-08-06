@@ -119,7 +119,10 @@ export function resolveCodexTranscriptSurface(
       { hasExplicitFinalCell },
     );
     const hasNoFinalAnswerStatus = isNoFinalAnswerStatusContent(String(message.content ?? ""));
-    const hasNativeProcessProjection = hasNativeProcessCells(cells) || hasNativeLifecycleProjection(transcript);
+    // Only suppress the outer process rail when process is actually rendered as cells.
+    // Lifecycle metadata alone must not hide feedback/timeline tools (would drop the process UI).
+    const hasNativeProcessProjection = hasNativeProcessCells(cells);
+    const hasLifecycleHints = hasNativeLifecycleProjection(transcript);
     const suppressProjectedError = cells.some((cell) => (
       cell.kind === "error_notice"
       || (cell.terminal === true && cell.status === "failed")
@@ -133,10 +136,12 @@ export function resolveCodexTranscriptSurface(
       source: "message.codexTranscript",
       cells,
       hasAssistantMarkdown,
+      // Codex order: process cells then final inside the surface. Outer processNode is
+      // only for fallback timelines when cells do not already carry process rows.
       suppressProjectedProcess: hasNativeProcessProjection,
       suppressProjectedResponse,
       suppressProjectedTurnStatus: suppressProjectedError
-        || (hasNoFinalAnswerStatus ? false : suppressProjectedResponse || hasNativeProcessProjection),
+        || (hasNoFinalAnswerStatus ? false : suppressProjectedResponse || hasNativeProcessProjection || hasLifecycleHints),
       suppressProjectedError,
     };
   }

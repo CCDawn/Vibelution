@@ -258,4 +258,55 @@ describe("assistantDisplayPlan", () => {
     expect(plan.answerOwner).toBe("timeline_assistant_text");
     expect(plan.suppressProjectedResponse).toBe(true);
   });
+
+  it("renders process alongside answer only when cells do not already own process", () => {
+    const fullAnswer = "最终回答。";
+    const answerOnlySurface = nativeSurface([
+      {
+        id: "final",
+        kind: "assistant_markdown",
+        messageId: "message-1",
+        status: "completed",
+        tone: "neutral",
+        phase: "final_answer",
+        terminal: true,
+        text: fullAnswer,
+      },
+    ]);
+    const alongside = resolveAssistantDisplayPlan({
+      message: message({ content: fullAnswer }),
+      surface: answerOnlySurface,
+      hasAgentMessageTimeline: true,
+    });
+    expect(alongside.nativeOwnsFinalAnswer).toBe(true);
+    expect(alongside.suppressProjectedProcess).toBe(false);
+    expect(alongside.shouldRenderNativeProcessAlongsideAnswer).toBe(true);
+
+    const processInCells = resolveAssistantDisplayPlan({
+      message: message({ content: fullAnswer }),
+      surface: nativeSurface([
+        {
+          id: "tool",
+          kind: "tool_call",
+          messageId: "message-1",
+          status: "completed",
+          tone: "neutral",
+          title: "run",
+        },
+        {
+          id: "final",
+          kind: "assistant_markdown",
+          messageId: "message-1",
+          status: "completed",
+          tone: "neutral",
+          phase: "final_answer",
+          terminal: true,
+          text: fullAnswer,
+        },
+      ]),
+      hasAgentMessageTimeline: true,
+    });
+    expect(processInCells.suppressProjectedProcess).toBe(true);
+    expect(processInCells.shouldRenderNativeProcessAlongsideAnswer).toBe(false);
+  });
 });
