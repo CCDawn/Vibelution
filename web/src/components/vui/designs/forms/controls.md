@@ -245,7 +245,7 @@ import { VStringSelect } from "@/components/vui";
 ## VCheckbox
 
 ### 功能
-复选框：布尔开关与批量选择项。
+复选框：布尔开关与批量选择项。控件本体只有一层描边；无文字时不额外渲染按钮式外框。
 
 ### 适用范围
 - **适用**：表单布尔、列表多选行。
@@ -260,12 +260,12 @@ import { VStringSelect } from "@/components/vui";
 ```tsx
 import { VCheckbox } from "@/components/vui";
 
-<VCheckbox checked={on} onCheckedChange={setOn}>启用</VCheckbox>
+<VCheckbox isSelected={on} onChange={setOn}>启用</VCheckbox>
 ```
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| checked / onCheckedChange | 受控布尔 | 与 label 关联 |
+| isSelected / onChange | 受控布尔 | 与 label 关联；无 children 时必须提供 aria-label |
 
 ### 实现落点
 - `forms/VCheckbox.tsx` → `ShadcnCheckbox`

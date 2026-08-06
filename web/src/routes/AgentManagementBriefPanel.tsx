@@ -42,6 +42,7 @@ export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPa
   const incomplete = brief.items.filter((item) => !item.complete);
   const allReady = incomplete.length === 0 && brief.actions.length === 0;
   const checklistItems = allReady ? brief.items : incomplete.length ? incomplete : brief.items;
+  const hintContent = allReady ? `${copy.managementBriefHint} ${copy.nextAllReady}` : `${copy.managementBriefHint} ${brief.statusDetail}`;
 
   if (allReady) {
     return (
@@ -51,9 +52,8 @@ export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPa
             <p className={styles.panelEyebrow}>{copy.managementBriefTitle}</p>
             <h3 className={styles.contextualHintRow}>
               {brief.statusLabel}
-              <VContextualHint content={copy.managementBriefHint} label={`${copy.managementBriefTitle}说明`} />
+              <VContextualHint content={hintContent} label={`${copy.managementBriefTitle}说明`} width="wide" />
             </h3>
-            <span>{copy.nextAllReady}</span>
           </div>
           <strong>{brief.score}</strong>
         </div>
@@ -68,9 +68,8 @@ export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPa
           <p className={styles.panelEyebrow}>{copy.managementBriefTitle}</p>
           <h3 className={styles.contextualHintRow}>
             {brief.statusLabel}
-            <VContextualHint content={copy.managementBriefHint} label={`${copy.managementBriefTitle}说明`} />
+            <VContextualHint content={hintContent} label={`${copy.managementBriefTitle}说明`} width="wide" />
           </h3>
-          <span>{brief.statusDetail}</span>
         </div>
         <strong>{brief.score}</strong>
       </div>
@@ -87,10 +86,9 @@ export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPa
           </VNativeButton>
         ))}
       </div>
-      <div className={styles.nextActionList}>
-        <span>{copy.nextActionsTitle}</span>
-        {brief.actions.length ? (
-          brief.actions.map((action) => (
+      {brief.actions.length ? (
+        <div className={styles.nextActionList} aria-label={copy.nextActionsTitle}>
+          {brief.actions.map((action) => (
             <VTooltip key={action.id} content={action.detail} width="wide">
               <VNativeButton
                 type="button"
@@ -106,11 +104,9 @@ export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPa
                 <strong>{action.label}</strong>
               </VNativeButton>
             </VTooltip>
-          ))
-        ) : (
-          <p>{copy.nextAllReady}</p>
-        )}
-      </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

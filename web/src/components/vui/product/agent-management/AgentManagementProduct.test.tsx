@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { VuiProvider } from "../../VuiProvider";
 import {
   AgentBulkActionBar,
+  AgentDenseList,
   AgentPageHeader,
   AgentSummaryStrip,
   AgentWorkspacePanel,
@@ -55,6 +56,17 @@ describe("Agent Management VUI product components", () => {
     expect(markup).not.toContain("<p>");
   });
 
+  it("does not repeat an eyebrow already contained in the Agent title", () => {
+    const markup = renderToStaticMarkup(
+      <VuiProvider>
+        <AgentPageHeader eyebrow="Agent" title="研究 Agent" />
+      </VuiProvider>,
+    );
+
+    expect(markup).toContain("研究 Agent");
+    expect(markup).not.toContain(">Agent</span>");
+  });
+
   it("renders summary metrics as one dense strip", () => {
     const metrics: AgentSummaryMetric[] = [
       { id: "agents", label: "Agents", value: "11", detail: "Total agents" },
@@ -79,7 +91,7 @@ describe("Agent Management VUI product components", () => {
     expect(markup).not.toContain('title="Total agents"');
     expect(markup).not.toContain("overflow-hidden");
     expect(markup).not.toContain("overflow-x-auto");
-    expect(markup).toContain("repeat(auto-fit,minmax(88px,1fr))");
+    expect(markup).toContain("flex-wrap items-stretch");
   });
 
   it("renders compact status metadata accessibly when provided", () => {
@@ -129,10 +141,58 @@ describe("Agent Management VUI product components", () => {
     expect(filterSource).toContain("bg-transparent");
     expect(filterSource).not.toContain("rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[var(--vui-surface-row)]");
     expect(denseListSource).toContain('data-vui="agent-row"');
-    expect(denseListSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(denseListSource).toContain("grid-cols-[28px_minmax(0,1fr)]");
     expect(denseListSource).toContain("rounded-[var(--radius-control)]");
-    expect(denseListSource).toContain("col-span-2 flex flex-wrap");
+    expect(denseListSource).toContain("<VTooltip content={rowTooltip} width=\"wide\">");
     expect(denseListSource).not.toContain("grid-cols-[minmax(180px,1.3fr)");
+    expect(filterSource).not.toContain("accent-cool");
+    expect(denseListSource).not.toContain("accent-cool");
+    expect(denseListSource).not.toContain("state-success");
+    expect(filterSource).toContain("vui-control-muted");
+    expect(denseListSource).toContain("vui-control-muted");
+  });
+
+  it("keeps Agent rows to primary identity and local issue state by default", () => {
+    const markup = renderToStaticMarkup(
+      <VuiProvider>
+        <AgentDenseList
+          columns={[{
+            id: "research",
+            label: "科研执行",
+            count: 1,
+            rows: [{
+              id: "evidence",
+              name: "证据 Agent",
+              roleLabel: "证据边界",
+              roleTone: "research",
+              avatarInitials: "证",
+              modelLabel: "model-x",
+              modelDetail: "long model detail",
+              promptLabel: "核验证据",
+              runtimeLabel: "运行中",
+              runtimeTone: "running",
+              modes: ["核验"],
+              issueLabel: "冲突 3",
+              issueTone: "warning",
+              issueSummary: "需要处理三项冲突。",
+              active: false,
+              bulkSelected: false,
+              selectLabel: "选择证据 Agent",
+            }],
+          }]}
+          columnLabels={{ agent: "Agent", model: "模型", prompt: "提示词", runtime: "运行", modes: "模式", reminders: "提醒" }}
+          onSelectRow={() => undefined}
+          onToggleBulk={() => undefined}
+        />
+      </VuiProvider>,
+    );
+
+    expect(markup).toContain("证据 Agent");
+    expect(markup).toContain("证据边界");
+    expect(markup).toContain("冲突 3");
+    expect(markup).not.toContain("model-x");
+    expect(markup).not.toContain("核验证据");
+    expect(markup).not.toContain("运行中");
   });
 
   it("renders bulk actions as a dense product toolbar without inline prose", () => {

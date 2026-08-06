@@ -54,12 +54,17 @@ describe("VUI quiet-workbench aesthetic primitives", () => {
         <VStatusChip tone="success">Ready</VStatusChip>
       </div>,
     );
+    const successMarkup = renderToStaticMarkup(
+      <VStatusChip tone="success">Ready</VStatusChip>,
+    );
 
     expect(markup).toContain('data-tone="danger"');
     expect(markup).toContain('data-tone="warning"');
     expect(markup).toContain('data-tone="success"');
     expect(markup).toContain("var(--state-error)");
     expect(markup).toContain("var(--state-warning)");
-    expect(markup).toContain("var(--state-success)");
+    expect(markup).toContain('data-slot="status-chip-dot"');
+    expect(successMarkup).not.toContain("var(--state-success)");
+    expect(successMarkup).not.toContain("rounded-full border");
   });
 });

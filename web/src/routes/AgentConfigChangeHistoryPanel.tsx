@@ -1,7 +1,7 @@
 import { History, Save, Trash2 } from "lucide-react";
 
 import type { AgentConfigChanges } from "../api/types";
-import { VButton, VEmptyState, VPanel, VPanelHeader, VStateSurface } from "../components/vui";
+import { VButton, VEmptyState, VPanel, VPanelHeader } from "../components/vui";
 import styles from "./AgentConfigChangeHistoryPanel.styles";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
@@ -55,6 +55,8 @@ export function AgentConfigChangeHistoryPanel({
         className={styles.panelHeader}
         headingLevel={3}
         title="草稿与版本"
+        tooltip="草稿不影响运行；只有配置页的保存操作才会发布，并留下关联会话的版本证据。"
+        tooltipLabel="草稿与版本说明"
         actions={(
           <div className={styles.actions}>
             {configDirty ? (
@@ -71,7 +73,6 @@ export function AgentConfigChangeHistoryPanel({
           </div>
         )}
       />
-      <p className={styles.panelDescription}>草稿不影响运行；只有配置页的保存操作才会发布，并留下关联会话的版本证据。</p>
 
       {loading ? (
         <ProgressiveRegionSkeleton variant="list" label="正在读取草稿与版本记录" />
@@ -139,9 +140,7 @@ export function AgentConfigChangeHistoryPanel({
       ) : null}
 
       {!loading && !draft && !revisions.length ? (
-        <VEmptyState title="尚无草稿或版本记录" icon={<History size={16} />}>
-          在配置页修改后可保存草稿；发布后的变更会在这里保留简要证据。
-        </VEmptyState>
+        <VEmptyState title="尚无草稿或版本记录" icon={<History size={16} />} />
       ) : null}
     </VPanel>
   );

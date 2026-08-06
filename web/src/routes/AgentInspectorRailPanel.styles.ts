@@ -11,7 +11,7 @@ const styles = {
   closeButton: "self-start",
   railBody:
     "grid min-h-0 min-w-0 content-start gap-0 overflow-auto overscroll-contain [&_>_*]:rounded-none [&_>_*]:border-x-0 [&_>_*+[data-vui-product],_&>_*+section]:border-t [&_>_*+[data-vui-product],_&>_*+section]:border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)]",
-  emptyRail: `grid h-full min-h-0 place-content-center place-items-center gap-2 border border-dashed border-[color-mix(in_srgb,var(--vui-border-subtle)_80%,transparent)] ${vuiInsetFillClass} p-4 text-center text-[var(--fg-tertiary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-[1.4]`,
+  emptyRail: `grid h-full min-h-0 place-content-center place-items-center gap-2 border border-dashed border-[color-mix(in_srgb,var(--vui-border-subtle)_80%,transparent)] ${vuiInsetFillClass} p-4 text-center [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-secondary)]`,
 } as const;
 
 export default styles;

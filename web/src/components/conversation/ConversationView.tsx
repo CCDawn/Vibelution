@@ -32,6 +32,7 @@ import { useAppI18n } from "../../i18n/useAppI18n";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
+import { ConversationTranscriptLoadingState } from "./ConversationTranscriptLoadingState";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
 import {
   buildOperationDetailRows,
@@ -3650,14 +3651,7 @@ export function ConversationView({
       <div ref={timelineRef} className={styles.timeline}>
         {displayMessages.length === 0 && !activeTurnMessage ? (
           transcriptPending ? (
-            <div className={styles.emptyStateHost}>
-              <VStateSurface
-                fill
-                className={styles.emptyState}
-                tone="loading"
-                title={t("sessionTranscriptLoading")}
-              />
-            </div>
+            <ConversationTranscriptLoadingState label={t("sessionTranscriptLoading")} />
           ) : (
             <div className={styles.emptyStateHost}>
               <VStateSurface

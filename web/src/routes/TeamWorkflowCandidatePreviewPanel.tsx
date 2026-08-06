@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 
-import { VNativeButton } from "../components/vui";
+import { VButton } from "../components/vui";
 import {
   TeamCandidateCard,
   type TeamCandidateCardProps,
@@ -41,26 +41,27 @@ export function TeamWorkflowCandidatePreviewPanel({
   return (
     <div className={styles.workflowCandidateListPanel}>
       <div className={styles.workflowCandidateListHeader}>
-        <div>
-          <strong>{lang === "zh" ? "候选仓库预览" : "Candidate library preview"}</strong>
-          <span>
-            {lang === "zh"
-              ? `当前显示 ${items.length} 条候选；完整筛选、分页和详情在资料工作台中处理。`
-              : `${items.length} candidates shown; use the source workspace for filtering, paging, and details.`}
-          </span>
-        </div>
-        <div>
-          <VNativeButton type="button" onClick={onOpenLibrary} disabled={!canOpenLibrary}>
-            {lang === "zh" ? "查看完整候选库" : "Full library"}
-          </VNativeButton>
-          <VNativeButton
+        <strong>{lang === "zh" ? "候选仓库" : "Candidates"}</strong>
+        <div className={styles.workflowCandidateListActions}>
+          <VButton
             type="button"
-            onClick={onOpenReview}
-            disabled={reviewDisabled}
-            title={reviewTitle}
+            variant="secondary"
+            isDisabled={!canOpenLibrary}
+            tooltip={lang === "zh" ? "打开完整候选库" : "Open the full candidate library"}
+            onPress={onOpenLibrary}
           >
-            {lang === "zh" ? "进入资料提炼复核" : "Open review"}
-          </VNativeButton>
+            {lang === "zh" ? "候选库" : "Library"}
+          </VButton>
+          <VButton
+            type="button"
+            variant="primary"
+            isDisabled={reviewDisabled}
+            disabledReason={reviewDisabled ? reviewTitle : undefined}
+            tooltip={reviewDisabled ? undefined : reviewTitle}
+            onPress={onOpenReview}
+          >
+            {lang === "zh" ? "提炼复核" : "Review"}
+          </VButton>
         </div>
       </div>
       <div
@@ -68,18 +69,14 @@ export function TeamWorkflowCandidatePreviewPanel({
         id="research-workflow-candidates"
         role="region"
         tabIndex={0}
-        aria-label={lang === "zh" ? "科研流程候选仓库预览，可向下滚动查看更多" : "Research workflow candidate preview, scroll for more"}
+        aria-label={lang === "zh" ? "科研流程候选仓库" : "Research workflow candidates"}
       >
         <div className={styles.workflowCandidateList}>
           {items.map(({ id, ...item }) => (
             <TeamCandidateCard key={id} {...item} />
           ))}
         </div>
-        {listNeedsScrollHint ? (
-          <div className={styles.workflowCandidateListScrollHint} aria-hidden="true">
-            <span>{lang === "zh" ? "向下滚动查看更多候选，或打开完整候选库分页处理" : "Scroll for more candidates, or open the full paged library"}</span>
-          </div>
-        ) : null}
+        {listNeedsScrollHint ? <span className={styles.workflowCandidateListScrollCue} aria-hidden="true" /> : null}
       </div>
     </div>
   );

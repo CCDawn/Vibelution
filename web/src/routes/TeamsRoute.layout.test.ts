@@ -1282,9 +1282,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamSourceCollectionScreeningPanel");
     expect(teamSourceCollectionScreeningPanelSource).toContain("source-collection-screening-panel");
     expect(teamSourceCollectionScreeningPanelSource).toContain("sourceCollectionScreeningListShell");
-    expect(teamSourceCollectionScreeningPanelSource).toContain("sourceCollectionScreeningScrollHint");
-    expect(teamSourceCollectionScreeningPanelSource).toContain("质量审查候选列表，可向下滚动查看更多");
-    expect(teamSourceCollectionScreeningPanelSource).toContain("向下滚动查看更多本页候选");
+    expect(teamSourceCollectionScreeningPanelSource).toContain("sourceCollectionScreeningScrollCue");
+    expect(teamSourceCollectionScreeningPanelSource).toContain("质量审查候选列表");
+    expect(teamSourceCollectionScreeningPanelSource).not.toContain("可向下滚动查看更多");
+    expect(teamSourceCollectionScreeningPanelSource).not.toContain("向下滚动查看更多本页候选");
     expect(routeSource).not.toContain("TeamSourceCollectionCandidateWorkspacePanel");
     expect(teamSourceCollectionCandidatePanelSource).toContain("source-collection-candidates-panel");
     expect(routeSource).toContain("TeamSourceCollectionGraphPanel");
@@ -2273,9 +2274,12 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStatusPanelsSource).toContain("Source extraction Agent");
     expect(teamResearchWorkflowStageModulesSource).toContain("TeamWorkflowCandidatePreviewPanel");
     expect(routeSource).toContain("teamWorkflowCandidatePreviewItems");
-    expect(teamWorkflowCandidatePreviewPanelSource).toContain("候选仓库预览");
-    expect(teamWorkflowCandidatePreviewPanelSource).toContain("查看完整候选库");
-    expect(teamWorkflowCandidatePreviewPanelSource).toContain("向下滚动查看更多候选，或打开完整候选库分页处理");
+    expect(teamWorkflowCandidatePreviewPanelSource).toContain("候选仓库");
+    expect(teamWorkflowCandidatePreviewPanelSource).not.toContain("VMetricChip");
+    expect(teamWorkflowCandidatePreviewPanelSource).toContain("VButton");
+    expect(teamWorkflowCandidatePreviewPanelSource).toContain("提炼复核");
+    expect(teamWorkflowCandidatePreviewPanelSource).not.toContain("当前显示");
+    expect(teamWorkflowCandidatePreviewPanelSource).not.toContain("向下滚动查看更多候选");
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListPanel");
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListScroll");
     expect(routeSource).toContain("生成分块计划");
@@ -3095,12 +3099,11 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).toContain("overflow-hidden");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
-    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("[&>div:first-child>strong]:truncate");
-    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("[&>div:first-child>span]:break-words");
-    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("[&_[data-vui=native-button]]:w-fit");
-    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("[&_[data-vui=native-button]]:whitespace-nowrap");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("items-center");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("justify-between");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListTitle).toContain("[&>strong]:truncate");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListActions).toContain("shrink-0");
+    expect(teamWorkflowCandidatePreviewPanelStylesSource).not.toContain("data-vui=native-button");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListScroll).toContain("[scrollbar-gutter:stable]");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateList).toContain("[&_[data-vui-product=team-candidate-card]]:max-w-full");
 

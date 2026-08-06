@@ -1,12 +1,13 @@
-import { AlertTriangle, Bot, RefreshCw } from "lucide-react";
+import { AlertTriangle, Bot } from "lucide-react";
 import { type ReactNode } from "react";
 
-import { VButton, VEmptyState } from "../components/vui";
+import { VButton, VEmptyState, VStateSurface } from "../components/vui";
 import {
   AgentDenseList,
   type AgentDenseColumn,
   type AgentDenseListProps,
 } from "../components/vui/product/agent-management";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 type AgentListStatePanelCopy = {
   loadFailed: string;
@@ -72,21 +73,32 @@ export function AgentListStatePanel({
 
   if (presentation === "initial-error") {
     return (
-      <VEmptyState icon={<AlertTriangle size={22} />} title={copy.loadFailed}>
+      <VEmptyState
+        icon={<AlertTriangle size={22} />}
+        title={copy.loadFailed}
+        actions={<VButton variant="secondary" onPress={onRetry}>{copy.retry}</VButton>}
+      >
         {errorText(error)}
-        <VButton variant="secondary" onPress={onRetry}>{copy.retry}</VButton>
       </VEmptyState>
     );
   }
 
   if (presentation === "initial-loading") {
-    return <VEmptyState aria-busy={isPending && !hasWorkspace || undefined} icon={<RefreshCw size={22} />} title={copy.loading} />;
+    return <ProgressiveRegionSkeleton className="p-2.5" label={copy.loading} variant="list" />;
   }
 
   const backgroundStatus = presentation === "refreshing"
-    ? <p role="status">{copy.refreshing}</p>
+    ? <span className="sr-only" role="status">{copy.refreshing}</span>
     : presentation === "error-with-data"
-      ? <div role="status">{copy.staleError} <VButton variant="secondary" onPress={onRetry}>{copy.retry}</VButton></div>
+      ? (
+        <VStateSurface
+          role="status"
+          density="compact"
+          tone="error"
+          title={copy.staleError}
+          actions={<VButton variant="secondary" onPress={onRetry}>{copy.retry}</VButton>}
+        />
+      )
       : null;
 
   if (visibleAgentCount === 0) {

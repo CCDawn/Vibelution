@@ -4,6 +4,9 @@ export {
   VEmbeddedPanel,
   VMetricChip,
   VStateRow,
-  VStatusChip,
-  type VStatusTone,
 } from "./VWorkbenchAesthetic";
+export {
+  VStatusChip,
+  type VStatusChipProps,
+  type VStatusTone,
+} from "./VStatusChip";

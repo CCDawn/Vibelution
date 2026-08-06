@@ -6,7 +6,7 @@ import type {
   AgentRunHistory,
   AgentRuntimeEvidenceMatch,
 } from "../api/types";
-import { VButton, VStateSurface } from "../components/vui";
+import { VButton, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./AgentActivityHistoryPanel.styles";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
@@ -120,14 +120,25 @@ export function AgentActivityHistoryPanel({
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelEyebrow}>{copy.sessions}</p>
-            <h3>{agent.directSessionId || "-"}</h3>
+            <VTooltip
+              width="wide"
+              content={(
+                <span className={styles.tooltipMeta}>
+                  <code>{agent.workspacePath || "-"}</code>
+                  <span>{copy.logs}: {formatTimestamp(agent.updatedAt, lang)}</span>
+                </span>
+              )}
+            >
+              <h3
+                className={styles.metadataTrigger}
+                tabIndex={0}
+                aria-label={`${agent.directSessionId || "-"}：${agent.workspacePath || "-"}`}
+              >
+                {agent.directSessionId || "-"}
+              </h3>
+            </VTooltip>
           </div>
           <MessageSquare size={16} />
-        </div>
-        <div className={styles.pathList}>
-          <code>{agent.workspacePath || "-"}</code>
-          <code>{agent.directSessionId || "-"}</code>
-          <span>{copy.logs}: {formatTimestamp(agent.updatedAt, lang)}</span>
         </div>
       </section>
 
@@ -145,9 +156,16 @@ export function AgentActivityHistoryPanel({
           <div className={styles.activityTimelineList}>
             {activityTimeline.map((item) => (
               <article key={item.id} className={`${styles.activityTimelineItem} ${styles[`activityTimelineItem_${item.kind}`]}`}>
-                <strong>{item.title}</strong>
+                <VTooltip content={item.meta} width="wide">
+                  <strong
+                    className={styles.metadataTrigger}
+                    tabIndex={0}
+                    aria-label={`${item.title}：${item.meta}`}
+                  >
+                    {item.title}
+                  </strong>
+                </VTooltip>
                 <p>{item.body}</p>
-                <small>{item.meta}</small>
                 <div className={styles.timelineActions}>
                   {item.sessionId ? (
                     <VButton type="button" variant="ghost" icon={<ExternalLink size={13} />} onPress={() => onOpenSession(item.sessionId)}>
@@ -187,16 +205,28 @@ export function AgentActivityHistoryPanel({
           <div className={styles.runHistoryList}>
             {runHistory?.runs.map((run) => (
               <article key={run.runId} className={styles.runHistoryItem}>
-                <strong>{run.status || run.currentPhase || run.runKind}</strong>
+                <VTooltip
+                  width="wide"
+                  content={`${run.currentPhase || run.sessionId || "-"} · ${formatTimestamp(run.updatedAt || run.startedAt, lang)}`}
+                >
+                  <strong className={styles.metadataTrigger} tabIndex={0}>
+                    {run.status || run.currentPhase || run.runKind}
+                  </strong>
+                </VTooltip>
                 <span>{run.summary || run.runId}</span>
-                <small>{run.currentPhase || run.sessionId || "-"} · {formatTimestamp(run.updatedAt || run.startedAt, lang)}</small>
               </article>
             ))}
             {runHistory?.subAgentRuns.map((run) => (
               <article key={run.runId} className={styles.runHistoryItem}>
-                <strong>{copy.subAgentRuns} · {run.status || run.currentPhase || run.runKind}</strong>
+                <VTooltip
+                  width="wide"
+                  content={`${run.contextMode || "-"} · ${copy.maxDepth} ${run.depth}/${run.maxDepth} · ${formatTimestamp(run.updatedAt || run.createdAt, lang)}`}
+                >
+                  <strong className={styles.metadataTrigger} tabIndex={0}>
+                    {copy.subAgentRuns} · {run.status || run.currentPhase || run.runKind}
+                  </strong>
+                </VTooltip>
                 <span>{run.summary || run.subRunId || run.runId}</span>
-                <small>{run.contextMode || "-"} · {copy.maxDepth} {run.depth}/{run.maxDepth} · {formatTimestamp(run.updatedAt || run.createdAt, lang)}</small>
               </article>
             ))}
           </div>
@@ -236,10 +266,23 @@ export function AgentActivityHistoryPanel({
                   className={focusedMessageId === messageId ? `${styles.inboxMessageItem} ${styles.inboxMessageItemFocused}` : styles.inboxMessageItem}
                 >
                   <div className={styles.inboxMessageTop}>
-                    <span>
-                      <strong>{message.sourceAgentName || message.sourceAgentCode || message.sourceAgentId || "-"}</strong>
-                      <small>{formatTimestamp(message.createdAt, lang)} · {message.kind || "agent_message"}</small>
-                    </span>
+                    <VTooltip
+                      width="wide"
+                      content={(
+                        <span className={styles.tooltipMeta}>
+                          <span>{formatTimestamp(message.createdAt, lang)} · {message.kind || "agent_message"}</span>
+                          <span>{copy.wakeStatus}: {message.delivery?.wakeStatus || "pending"} · thread {message.threadId || "-"}</span>
+                        </span>
+                      )}
+                    >
+                      <span
+                        className={styles.metadataTrigger}
+                        tabIndex={0}
+                        aria-label={`${message.sourceAgentName || message.sourceAgentCode || message.sourceAgentId || "-"}：${copy.wakeStatus} ${message.delivery?.wakeStatus || "pending"}`}
+                      >
+                        <strong>{message.sourceAgentName || message.sourceAgentCode || message.sourceAgentId || "-"}</strong>
+                      </span>
+                    </VTooltip>
                     <VButton
                       type="button"
                       variant="secondary"
@@ -250,9 +293,6 @@ export function AgentActivityHistoryPanel({
                     </VButton>
                   </div>
                   <p>{message.summary || message.content || message.threadId || messageId}</p>
-                  <small>
-                    {copy.wakeStatus}: {message.delivery?.wakeStatus || "pending"} · thread {message.threadId || "-"}
-                  </small>
                 </article>
               );
             })}

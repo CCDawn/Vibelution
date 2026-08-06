@@ -49,59 +49,28 @@ export type AgentDenseListProps = {
 };
 
 const PILL_BASE =
-  "inline-flex items-center justify-center min-h-[22px] px-[7px] border rounded-full text-[0.7rem] font-bold whitespace-nowrap";
+  "inline-flex items-center justify-center min-h-[22px] px-[7px] border rounded-full [font-size:var(--vui-font-xs)] font-bold not-italic whitespace-nowrap";
 
 const ROLE_TAG_BASE =
-  "inline-flex items-center justify-self-start min-h-[22px] max-w-full px-[7px] border rounded-full text-[0.66rem] leading-none overflow-hidden text-ellipsis whitespace-nowrap";
-
-const MODE_PILL =
-  "inline-flex items-center min-h-[22px] px-[6px] border border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] rounded-full bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] text-[0.7rem] not-italic whitespace-nowrap";
+  "inline-flex min-h-[18px] max-w-full items-center justify-self-start overflow-hidden text-ellipsis whitespace-nowrap px-0.5 [font-size:var(--vui-font-xs)] font-[600] not-italic leading-none text-[var(--fg-secondary)]";
 
 const AVATAR =
-  "grid place-items-center shrink-0 w-[30px] h-[30px] rounded-full overflow-hidden text-[var(--fg-primary)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [font-family:var(--font-display)] font-extrabold text-[0.66rem]";
-
-function runtimeToneClass(tone: string): string {
-  if (tone === "running") {
-    return "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]";
-  }
-  if (tone === "failed" || tone === "blocked") {
-    return "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]";
-  }
-  return "border-[color-mix(in_srgb,var(--fg-tertiary)_24%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_8%,transparent)] text-[var(--fg-secondary)]";
-}
+  "grid place-items-center shrink-0 w-[30px] h-[30px] rounded-full overflow-hidden text-[var(--fg-primary)] bg-[var(--vui-control-muted)] [font-family:var(--font-display)] font-extrabold text-[0.66rem]";
 
 function issueToneClass(tone: string): string {
   if (tone === "ok") {
-    return "border-[color-mix(in_srgb,var(--state-success)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]";
+    return "border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)]";
   }
   if (tone === "warning") {
     return "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,transparent)] text-[var(--accent-warm-2)]";
   }
   if (tone === "info") {
-    return "border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]";
+    return "border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)]";
   }
   if (tone === "blocking") {
     return "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]";
   }
   return "border-[color-mix(in_srgb,var(--fg-tertiary)_24%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_8%,transparent)] text-[var(--fg-secondary)]";
-}
-
-function roleToneClass(tone: string): string {
-  switch (tone) {
-    case "chat":
-      return "border-[color-mix(in_srgb,var(--accent-warm)_34%,var(--border-soft))] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]";
-    case "research":
-      return "border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--border-soft))] bg-[color-mix(in_srgb,var(--accent-cool)_13%,transparent)] text-[var(--accent-cool-2)]";
-    case "self":
-      return "border-[color-mix(in_srgb,var(--state-success)_34%,var(--border-soft))] bg-[color-mix(in_srgb,var(--state-success)_12%,transparent)] text-[var(--state-success)]";
-    case "supervised":
-      return "border-[color-mix(in_srgb,var(--state-warning)_36%,var(--border-soft))] bg-[color-mix(in_srgb,var(--state-warning)_12%,transparent)] text-[var(--state-warning)]";
-    case "tool":
-    case "memory":
-      return "border-[color-mix(in_srgb,var(--fg-tertiary)_30%,var(--border-soft))] bg-[color-mix(in_srgb,var(--fg-tertiary)_10%,transparent)] text-[var(--fg-secondary)]";
-    default:
-      return "border-[color-mix(in_srgb,var(--fg-tertiary)_24%,var(--border-soft))] bg-[color-mix(in_srgb,var(--fg-tertiary)_8%,transparent)] text-[var(--fg-secondary)]";
-  }
 }
 
 function AgentRow({
@@ -113,14 +82,22 @@ function AgentRow({
   onSelectRow: AgentDenseListProps["onSelectRow"];
   onToggleBulk: AgentDenseListProps["onToggleBulk"];
 }) {
-  const rowTooltip = [row.issueSummary, row.modelDetail].filter(Boolean).join("\n");
+  const rowTooltip = (
+    <span className="grid gap-1">
+      <span>{row.modelLabel}</span>
+      {row.modelDetail ? <span>{row.modelDetail}</span> : null}
+      <span>{row.promptLabel}</span>
+      {row.modes.length ? <span>{row.modes}</span> : null}
+      {row.issueSummary ? <span>{row.issueSummary}</span> : null}
+    </span>
+  );
   const rowClass = [
-    "w-full min-h-[58px] p-1.5 border border-[var(--vui-border-hairline)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] min-w-0 grid grid-cols-[28px_minmax(0,1fr)] items-center gap-1.5",
+    "w-full min-h-[46px] p-1.5 border border-[var(--vui-border-hairline)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] min-w-0 grid grid-cols-[28px_minmax(0,1fr)] items-center gap-1.5",
     "transition-[border-color,background] duration-150 hover:bg-[var(--vui-surface-row-hover)]",
     row.active
       ? "border-[color-mix(in_srgb,var(--accent-warm)_48%,var(--vui-border-hairline))] bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-row))]"
       : "",
-    row.bulkSelected ? "border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-hairline))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]" : "",
+    row.bulkSelected ? "border-[color-mix(in_srgb,var(--fg-primary)_22%,var(--vui-border-hairline))] bg-[var(--vui-control-muted)]" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -147,12 +124,11 @@ function AgentRow({
   );
 
   const showIssue = row.issueTone !== "ok";
-  const showRuntime = row.runtimeTone !== "idle";
   const agentCard = (
     <VNativeButton
       type="button"
       data-vui="agent-row"
-      className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 border-0 bg-transparent p-0 text-left text-[var(--fg-primary)]"
+      className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)] items-center border-0 bg-transparent p-0 text-left text-[var(--fg-primary)]"
       onClick={(event) => onSelectRow(row.id, event)}
     >
       <span className="grid grid-cols-[30px_minmax(0,1fr)] items-center gap-2 min-w-0 overflow-hidden text-ellipsis">
@@ -164,26 +140,15 @@ function AgentRow({
           )}
         </span>
         <span className="grid min-w-0 gap-1">
-          <strong className="min-w-0 overflow-hidden text-[color-mix(in_srgb,var(--fg-primary)_88%,var(--accent-cool))] text-[0.82rem] text-ellipsis whitespace-nowrap">
-            {row.name}
-          </strong>
-          <em className={[ROLE_TAG_BASE, roleToneClass(row.roleTone)].join(" ")}>{row.roleLabel}</em>
-        </span>
-      </span>
-      {showIssue ? (
-        <span className="flex items-center justify-items-end min-w-0">
-          <span className={[PILL_BASE, issueToneClass(row.issueTone)].join(" ")}>{row.issueLabel}</span>
-        </span>
-      ) : null}
-      <span className="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 text-[0.72rem] text-[var(--fg-secondary)]">
-        <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
-          {row.modelLabel}
-        </span>
-        {showRuntime ? (
-          <span className={[PILL_BASE, runtimeToneClass(row.runtimeTone)].join(" ")}>{row.runtimeLabel}</span>
-        ) : null}
-        <span className="sr-only">
-          {row.promptLabel} {row.modes.map((mode) => String(mode)).join(" ")}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <strong className="min-w-0 overflow-hidden text-[var(--fg-primary)] text-[var(--vui-font-sm)] text-ellipsis whitespace-nowrap">
+              {row.name}
+            </strong>
+            {showIssue ? (
+              <em className={[PILL_BASE, issueToneClass(row.issueTone)].join(" ")}>{row.issueLabel}</em>
+            ) : null}
+          </span>
+          <em data-tone={row.roleTone} className={ROLE_TAG_BASE}>{row.roleLabel}</em>
         </span>
       </span>
     </VNativeButton>
@@ -192,7 +157,7 @@ function AgentRow({
   return (
     <div className={rowClass}>
       <VTooltip content={row.selectLabel}>{selectionControl}</VTooltip>
-      {rowTooltip ? <VTooltip content={rowTooltip} width="wide">{agentCard}</VTooltip> : agentCard}
+      <VTooltip content={rowTooltip} width="wide">{agentCard}</VTooltip>
     </div>
   );
 }
@@ -222,7 +187,7 @@ export function AgentDenseList({ columns, columnLabels, onSelectRow, onToggleBul
                 {column.label}
               </strong>
             </div>
-            <em className="inline-flex items-center justify-center min-w-[24px] min-h-[22px] px-[7px] border border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--border-soft))] rounded-full bg-[color-mix(in_srgb,var(--accent-cool)_9%,transparent)] text-[var(--accent-cool)] text-[0.72rem] not-italic font-extrabold">
+            <em className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-[6px] bg-[var(--vui-control-muted)] px-1 text-[0.72rem] font-extrabold not-italic text-[var(--fg-secondary)]">
               {column.count}
             </em>
           </div>

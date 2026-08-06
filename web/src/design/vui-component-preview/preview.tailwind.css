@@ -1,0 +1,27 @@
+@import "../tailwind.css";
+
+@source "./**/*.{ts,tsx}";
+
+/* The main product shell intentionally locks body scrolling. This standalone
+   gallery owns its own document flow so every component group remains reachable. */
+html {
+  min-height: 100%;
+  overflow-y: auto;
+}
+
+body {
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-vui-preview] * {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}

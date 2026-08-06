@@ -12,8 +12,8 @@ const styles = {
     "sourceCollectionScreeningListShell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[color:var(--border-soft)] bg-[color:var(--source-workbench-card)] p-1.5 text-[var(--fg-primary)] items-start self-start [scrollbar-gutter:stable]",
   sourceCollectionListResizeHandle:
     "sourceCollectionListResizeHandle",
-  sourceCollectionScreeningScrollHint:
-    "sourceCollectionScreeningScrollHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  sourceCollectionScreeningScrollCue:
+    "sourceCollectionScreeningScrollCue pointer-events-none sticky bottom-0 block h-4 bg-gradient-to-t from-[var(--source-workbench-card)] to-transparent",
   workflowCandidateList:
     "workflowCandidateList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   workflowIngestionActions:

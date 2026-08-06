@@ -1,7 +1,7 @@
 import { ShieldCheck, Wrench } from "lucide-react";
 
 import { AgentToolGovernanceRequest } from "../api/types";
-import { VButton, VContextualHint, VStateSurface } from "../components/vui";
+import { VButton, VContextualHint, VStateSurface, VTooltip } from "../components/vui";
 import { governanceStatusLabel } from "./agents/agentStatusPresentation";
 import styles from "./AgentToolGovernancePanel.styles";
 
@@ -42,7 +42,7 @@ function governanceRiskLabel(value: string, lang: "zh" | "en") {
 function governanceDeltaSummary(request: AgentToolGovernanceRequest | undefined, lang: "zh" | "en") {
   const delta = request?.policyDelta;
   if (!delta) {
-    return "-";
+    return "";
   }
   const parts = [
     `${lang === "zh" ? "授权" : "Grant"} ${delta.grantTools?.length ?? 0}`,
@@ -86,12 +86,19 @@ export function AgentToolGovernancePanel({
         {requests.length ? (
           requests.map((request) => {
             const requestPending = pendingRequestId === request.requestId;
+            const requestLabel = `${governanceStatusLabel(request.status, lang)} · ${governanceRiskLabel(request.riskLevel, lang)}`;
+            const requestDetail = [
+              governanceDeltaSummary(request, lang),
+              request.reason || request.approvalReason || request.requestId,
+            ].filter(Boolean).join(" · ");
             return (
               <article key={request.requestId} className={styles.toolGovernanceItem}>
                 <div>
-                  <strong>{governanceStatusLabel(request.status, lang)} · {governanceRiskLabel(request.riskLevel, lang)}</strong>
-                  <span>{governanceDeltaSummary(request, lang)}</span>
-                  <small>{request.reason || request.approvalReason || request.requestId}</small>
+                  <VTooltip content={requestDetail} width="wide">
+                    <span className={styles.governanceMetaTrigger} tabIndex={0} aria-label={`${requestLabel}：${requestDetail}`}>
+                      <strong>{requestLabel}</strong>
+                    </span>
+                  </VTooltip>
                 </div>
                 {request.status === "pending_review" ? (
                   <div className={styles.governanceActions}>

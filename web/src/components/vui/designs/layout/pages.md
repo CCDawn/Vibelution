@@ -443,6 +443,7 @@ import { VSplitWorkspace } from "@/components/vui";
 | --- | --- | --- |
 | sidebar / main / aside | 列 | 空列勿占宽 |
 | resize.layoutId | 宽度记忆 | 仅 registry id |
+| columnsClassName | 固定列模板覆盖 | 默认列宽带 16rem 回退，未注入页面变量时仍保持桌面横向分栏 |
 
 ### 实现落点
 - `layout/VSplitWorkspace.tsx` + `usePersistedPaneResize`

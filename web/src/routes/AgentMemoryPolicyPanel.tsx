@@ -1,6 +1,6 @@
 import { ExternalLink, X } from "lucide-react";
 
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VTooltip } from "../components/vui";
 import styles from "./AgentMemoryPolicyPanel.styles";
 
 export type AgentMemoryPolicyDraft = {
@@ -165,20 +165,23 @@ export function AgentMemoryPolicyPanel({
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.memoryPolicyTitle}</p>
-          <h3>{policyId || "-"}</h3>
+          <h3>
+            <VTooltip width="wide" content={<code className={styles.rootPathTooltip}>{rootPath || "-"}</code>}>
+              <span className={styles.policyIdTrigger} tabIndex={0} aria-label={`${copy.memoryPolicyTitle}：${policyId || "-"}；${rootPath || "-"}`}>
+                {policyId || "-"}
+              </span>
+            </VTooltip>
+          </h3>
         </div>
         <span className={dirty ? styles.dirtyPill : styles.cleanPill}>
           {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
         </span>
       </div>
-      <div className={styles.pathList}>
-        <code>{rootPath || "-"}</code>
-      </div>
       <div className={styles.memoryPolicyGrid}>
         {sharedGroupSections.map((section) => (
           <section key={section.field}>
             <span>{section.label}</span>
-            <div className={styles.tagList}>
+            <div className={styles.tagList} aria-label={draft[section.field].length ? undefined : `${section.label}：${section.emptyLabel}`}>
               {draft[section.field].length ? draft[section.field].map((group) => (
                 <VButton
                   key={`${section.field}:${group}`}
@@ -190,7 +193,7 @@ export function AgentMemoryPolicyPanel({
                 >
                   {group}
                 </VButton>
-              )) : <small>{section.emptyLabel}</small>}
+              )) : null}
             </div>
             <div className={styles.inlineAdd}>
               <VNativeInput
@@ -208,7 +211,7 @@ export function AgentMemoryPolicyPanel({
         {knowledgeBaseSections.map((section) => (
           <section key={section.field}>
             <span>{section.label}</span>
-            <div className={styles.tagList}>
+            <div className={styles.tagList} aria-label={draft[section.field].length ? undefined : `${section.label}：${section.emptyLabel}`}>
               {draft[section.field].length ? draft[section.field].map((knowledgeBaseId) => (
                 <VButton
                   key={`${section.field}:${knowledgeBaseId}`}
@@ -220,7 +223,7 @@ export function AgentMemoryPolicyPanel({
                 >
                   {knowledgeBaseId}
                 </VButton>
-              )) : <small>{section.emptyLabel}</small>}
+              )) : null}
             </div>
             <div className={styles.inlineAdd}>
               <VNativeInput

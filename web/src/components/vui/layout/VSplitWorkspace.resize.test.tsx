@@ -40,5 +40,6 @@ describe("VSplitWorkspace resizable", () => {
     );
     expect(html).not.toContain("data-vui-resizable");
     expect(html).toContain("grid-cols-");
+    expect(html).toContain("--vui-workspace-sidebar,16rem");
   });
 });

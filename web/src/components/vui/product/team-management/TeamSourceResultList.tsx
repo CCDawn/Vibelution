@@ -1,13 +1,10 @@
 import { type ReactNode } from "react";
 
-import { VChip } from "../../primitives/VChip";
 import { VNativeButton } from "../../primitives/VNativeButton";
 import { VTooltip } from "../../primitives/VTooltip";
 
-import {
-  teamSourceResultToneToVuiTone,
-  type TeamSourceResultTone,
-} from "./teamSourceTone";
+import { TeamStatusLabel } from "./TeamStatusLabel";
+import { type TeamSourceResultTone } from "./teamSourceTone";
 
 export type { TeamSourceResultTone } from "./teamSourceTone";
 
@@ -50,8 +47,8 @@ const ROW_BASE =
 
 const ROW_INTERACTIVE =
   "transition-[border-color,box-shadow,background] duration-150 ease-[var(--vui-ease)] " +
-  "hover:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] hover:bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-row))] hover:shadow-[var(--vui-shadow-inset-accent),var(--vui-elevation-1)] " +
-  "has-[:focus-visible]:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] has-[:focus-visible]:shadow-[var(--vui-shadow-inset-accent),var(--vui-elevation-1)]";
+  "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:shadow-[var(--vui-elevation-1)] " +
+  "has-[:focus-visible]:border-[var(--border-strong)] has-[:focus-visible]:shadow-[var(--vui-elevation-1)]";
 
 const ACTIVATION_BUTTON =
   "inline-flex w-full min-w-0 items-center justify-start rounded-[var(--radius-control)] bg-transparent p-0 text-left " +
@@ -59,9 +56,7 @@ const ACTIVATION_BUTTON =
   "focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)] [&>strong]:block [&>strong]:min-w-0 [&>strong]:truncate";
 
 const ROW_SELECTED =
-  "border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]";
-
-const STATUS_CHIP = "justify-self-start min-w-0 max-w-full";
+  "border-[color:color-mix(in_srgb,var(--fg-primary)_28%,var(--border-strong))] bg-[color:color-mix(in_srgb,var(--fg-primary)_3%,var(--vui-surface-row))] shadow-[inset_2px_0_0_color-mix(in_srgb,var(--fg-primary)_62%,transparent)]";
 
 export function TeamSourceResultItem({
   tone,
@@ -76,15 +71,15 @@ export function TeamSourceResultItem({
   activateTitle,
 }: TeamSourceResultItemProps) {
   const statusBadge = (
-    <VChip
-      tone={teamSourceResultToneToVuiTone(tone)}
-      className={STATUS_CHIP}
+    <TeamStatusLabel
+      tone={tone}
+      className="justify-self-start"
       tabIndex={statusTitle ? 0 : undefined}
       role={statusTitle ? "status" : undefined}
       aria-label={statusTitle}
     >
       {statusLabel}
-    </VChip>
+    </TeamStatusLabel>
   );
   const titleValue = <strong tabIndex={titleTooltip && !onActivate ? 0 : undefined} aria-label={titleTooltip}>{title}</strong>;
   const sourceValue = source.href ? (
@@ -144,7 +139,7 @@ export function TeamSourceResultItem({
       </div>
       <div
         data-missing={source.missing ? "true" : undefined}
-        className="grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden [font-size:var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[980px]:col-span-2 data-[missing=true]:text-[var(--state-warning)]"
+        className="grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden [font-size:var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--fg-secondary)] [&_a]:underline-offset-2 [&_a:hover]:underline [&_code]:text-[var(--fg-tertiary)] max-[980px]:col-span-2 data-[missing=true]:text-[var(--state-warning)]"
       >
         <span className="text-[var(--fg-tertiary)]">{source.label}</span>
         {source.title ? (

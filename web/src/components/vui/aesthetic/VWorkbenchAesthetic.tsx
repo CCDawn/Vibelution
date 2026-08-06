@@ -1,8 +1,7 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 import { VSurface } from "../primitives/VSurface";
-
-export type VStatusTone = "neutral" | "accent" | "success" | "warning" | "danger";
+import { type VStatusTone } from "./VStatusChip";
 
 type DivProps = ComponentPropsWithoutRef<"div">;
 
@@ -26,11 +25,6 @@ type VStateRowProps = VDenseRowProps & {
 type VMetricChipProps = DivProps & {
   label: ReactNode;
   value: ReactNode;
-};
-
-type VStatusChipProps = DivProps & {
-  children: ReactNode;
-  tone?: VStatusTone;
 };
 
 const stateToneClass: Record<VStatusTone, string> = {
@@ -127,25 +121,6 @@ export function VMetricChip({ className, label, value, ...props }: VMetricChipPr
     >
       <span className="text-vui-fg-tertiary">{label}</span>
       <strong className="font-semibold text-vui-fg-primary">{value}</strong>
-    </span>
-  );
-}
-
-export function VStatusChip({ className, children, tone = "neutral", ...props }: VStatusChipProps) {
-  return (
-    <span
-      {...props}
-      data-vui="status-chip"
-      data-tone={tone}
-      className={[
-        "inline-flex min-h-6 w-fit max-w-full items-center rounded-full border px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none",
-        stateToneClass[tone],
-        className,
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      {children}
     </span>
   );
 }

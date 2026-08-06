@@ -9,7 +9,6 @@ import styles from "./AgentListWorkspacePanel.styles";
 
 type AgentListWorkspacePanelProps = {
   ariaLabel: string;
-  headerEyebrow: string;
   headerTitle: string;
   visibleAgentCount: number;
   bulkOperations: ComponentProps<typeof AgentBulkOperationsPanel>;
@@ -18,7 +17,6 @@ type AgentListWorkspacePanelProps = {
 
 export function AgentListWorkspacePanel({
   ariaLabel,
-  headerEyebrow,
   headerTitle,
   visibleAgentCount,
   bulkOperations,
@@ -34,7 +32,7 @@ export function AgentListWorkspacePanel({
       ].filter(Boolean).join(" ")}
     >
       <VPanelHeader
-        eyebrow={headerEyebrow}
+        className={styles.listHeader}
         title={headerTitle}
         actions={
           <>

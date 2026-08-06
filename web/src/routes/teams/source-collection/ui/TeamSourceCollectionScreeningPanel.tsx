@@ -86,16 +86,12 @@ export function TeamSourceCollectionScreeningPanel({
           expandToContent
           role="region"
           tabIndex={0}
-          aria-label={lang === "zh" ? "质量审查候选列表，可向下滚动查看更多" : "Quality-review candidate list, scroll for more"}
+          aria-label={lang === "zh" ? "质量审查候选列表" : "Quality-review candidates"}
         >
           <div className={`${styles.workflowCandidateList} ${styles.sourceCollectionScreeningList}`}>
             {children}
           </div>
-          {listNeedsScrollHint ? (
-            <div className={styles.sourceCollectionScreeningScrollHint} aria-hidden="true">
-              <span>{lang === "zh" ? "向下滚动查看更多本页候选" : "Scroll down for more candidates on this page"}</span>
-            </div>
-          ) : null}
+          {listNeedsScrollHint ? <span className={styles.sourceCollectionScreeningScrollCue} aria-hidden="true" /> : null}
         </PersistedHeightListShell>
       ) : (
         <div className={styles.empty}>{emptyMessage}</div>

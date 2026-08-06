@@ -7,7 +7,7 @@
 ## TeamStageCard
 
 ### 功能
-阶段卡片展示（tone + 内容），表达流水线中的某一阶段。
+阶段卡片展示当前阶段名称与状态，表达流水线中的某一阶段。
 
 ### 适用范围
 - **适用**：阶段 pipeline 中的阶段语义卡。
@@ -20,12 +20,21 @@
 
 ### 使用方式
 ```tsx
-<TeamStageCard tone="active" title="搜集" meta="3 项" />
+<TeamStageCard
+  index={0}
+  label="知识采集"
+  status="当前"
+  metric="42 / 48"
+  nextLabel="完成交接"
+  tone="active"
+  onActivate={openStage}
+/>
 ```
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| tone / title / meta | 状态与标题 | 组合 VSurface 视觉 |
+| label / status | 主名称与状态 | 状态使用中性文字，不模拟按钮或 success 胶囊 |
+| metric / nextLabel / title | 进度与补充信息 | 仅 hover / focus 展示，不增加卡片行数 |
 
 ### 反冗余
 - 不与通用 kanban 卡平行扩张。
@@ -35,7 +44,7 @@
 ## TeamStageCommandBar
 
 ### 功能
-阶段命令/统计条，承载阶段级操作与计数。
+阶段命令/统计条，承载阶段级操作与计数；补充说明只在 hover / focus 读取。
 
 ### 适用范围
 - **适用**：团队阶段视图命令带。
@@ -48,12 +57,13 @@
 
 ### 使用方式
 ```tsx
-<TeamStageCommandBar stats={...} actions={...} />
+<TeamStageCommandBar title="知识采集" subtitle="当前科研阶段" stats={stats} steps={steps} />
 ```
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| stats / actions | 统计与按钮 | 按钮必须 VButton |
+| title / subtitle | 当前阶段与补充说明 | subtitle 仅 hover / focus 展示 |
+| stats / steps | 统计与阶段导航 | 单一中性分段组；每项保持局部相邻，不使用分散对齐 |
 
 ---
 
@@ -190,11 +200,11 @@
 ## TeamSourceResultStats
 
 ### 功能
-资料结果统计条（命中数、过滤数等）。
+资料结果的紧凑指标组，标签和值保持相邻，不横向拉散。
 
 ### 适用范围
 - **适用**：结果列表上方/下方统计。
-- **不适用**：页级 MetricStrip 总览。
+- **不适用**：跨页总览指标 → `VMetricStrip`。
 
 | 场景 | 选择 |
 | --- | --- |
@@ -203,19 +213,44 @@
 
 ### 使用方式
 ```tsx
-<TeamSourceResultStats total={n} filtered={m} />
+<TeamSourceResultStats stats={[{ key: "ready", label: "候选", value: 48 }]} />
 ```
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| total / filtered | 计数 | 文案短 |
+| stats | 标签和值 | 每项为内容宽度，不用等分列 |
+
+---
+
+## TeamStatusLabel
+
+### 功能
+团队域的非交互状态文字，以小圆点和文字传达状态，不使用按钮、胶囊或填充底色。
+
+### 适用范围
+- **适用**：`TeamCandidateCard`、`TeamSourceResultItem` 内的紧凑状态。
+- **不适用**：可点击筛选或操作；这类需求使用对应 VUI 控件。
+
+| 场景 | 选择 |
+| --- | --- |
+| 非交互状态 | `TeamStatusLabel` |
+| 可点击筛选 | `VChip` / 对应产品筛选控件 |
+
+### 使用方式
+```tsx
+<TeamStatusLabel tone="ready">候选</TeamStatusLabel>
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| tone / children | 状态语义与短标签 | `ready` 保持中性；仅 warning / danger 使用告警色 |
 
 ---
 
 ## TeamSourceEmptyState
 
 ### 功能
-资料空态（可带领域 facts）。
+资料空态（可带领域 facts）。默认以居中的图标、标题和可选操作形成紧凑 blank slate。
 
 ### 适用范围
 - **适用**：资料无结果且需领域说明。
@@ -233,7 +268,9 @@
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| title / facts | 文案与事实 | 可组合 EmptyState 结构 |
+| title / icon | 标题与视觉锚点 | 标题必填；图标默认使用中性检索空态 |
+| description / facts | 可选补充内容 | 无必要时不渲染说明；facts 使用紧凑键值对 |
+| actions / footer | 操作与尾部 | 居中排列，不制造整行色块 |
 
 ### 反冗余
 - 通用空态用 `VEmptyState`。
@@ -243,7 +280,7 @@
 ## TeamCandidateCard
 
 ### 功能
-候选卡片，展示团队候选实体摘要与动作。
+候选卡片，展示团队候选实体的主名称、状态与明确动作。
 
 ### 适用范围
 - **适用**：团队候选列表卡。
@@ -256,9 +293,10 @@
 
 ### 使用方式
 ```tsx
-<TeamCandidateCard candidate={c} onPromote={...} />
+<TeamCandidateCard title="文献记录" statusLabel="待复核" tone="warning" actions={actions} />
 ```
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| candidate / actions | 数据与操作 | 动作 VButton |
+| title / statusLabel / actions | 主数据与操作 | 默认一行；状态无控件外观，动作使用 VUI 按钮 |
+| summary / meta / source | 支撑信息与来源 | hover / focus 可读；来源以独立图标链接保留 |

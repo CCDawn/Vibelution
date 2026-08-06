@@ -44,13 +44,13 @@ const STATUS_BUTTON_BASE =
   "inline-flex min-w-0 flex-1 items-center justify-between gap-2 min-h-[30px] px-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-transparent text-[var(--fg-secondary)] text-[0.76rem] font-bold transition-[background,color,border-color] duration-150 hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-primary)]";
 
 const STATUS_BUTTON_ACTIVE =
-  "border-[color-mix(in_srgb,var(--accent-cool)_40%,var(--border-soft))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool-2)]";
+  "border-[color-mix(in_srgb,var(--fg-primary)_18%,var(--border-soft))] bg-[var(--vui-control-muted)] text-[var(--fg-primary)]";
 
 const GROUP_LABEL =
   "inline-flex items-center gap-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
 
 const COUNT_BADGE =
-  "inline-flex items-center justify-center min-w-[22px] min-h-[22px] rounded-full text-[0.72rem] not-italic font-bold bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] text-[var(--accent-cool)]";
+  "inline-flex min-h-5 min-w-5 items-center justify-center rounded-[6px] bg-[var(--vui-control-muted)] px-1 text-[0.72rem] font-bold not-italic text-[var(--fg-secondary)]";
 
 const HEALTH_BADGE =
   "inline-flex items-center justify-center gap-1 min-w-[22px] min-h-[22px] px-[7px] rounded-full text-[0.72rem] not-italic bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]";
@@ -143,7 +143,7 @@ export function AgentFilterRail({
     >
       <label
         data-vui-product="agent-filter-search"
-        className="flex items-center gap-2 min-h-[32px] px-[9px] rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--vui-surface-workspace)_84%,var(--vui-surface-row))] text-[var(--fg-tertiary)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_44%,transparent)] focus-within:shadow-[var(--focus-ring)] focus-within:text-[var(--fg-secondary)]"
+        className="flex items-center gap-2 min-h-[32px] px-[9px] rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--vui-surface-workspace)_84%,var(--vui-surface-row))] text-[var(--fg-tertiary)] focus-within:border-[var(--vui-border-strong)] focus-within:shadow-[var(--focus-ring)] focus-within:text-[var(--fg-secondary)]"
       >
         <Search size={15} className="shrink-0" />
         <VNativeInput
