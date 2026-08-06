@@ -2,7 +2,8 @@ import { Brain, CheckCircle2, Copy as CopyIcon, Eye, FileText, Link2, TriangleAl
 import type { ReactNode } from "react";
 
 import type { MemoryItem, MemorySection } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VStatusChip } from "../components/vui";
+import { memoryVisibilityTone } from "./memoryStatusTone";
 import styles from "./MemoryDetailPanel.styles";
 
 type MemoryDetailPanelCopy = {
@@ -68,16 +69,6 @@ type MemoryDetailPanelProps = {
   onCopyCurrentLink: () => void;
 };
 
-function statusClassName(active: boolean, injected: boolean) {
-  if (injected) {
-    return `${styles.statusPill} ${styles.statusPillPrompt}`;
-  }
-  if (active) {
-    return `${styles.statusPill} ${styles.statusPillVisible}`;
-  }
-  return `${styles.statusPill} ${styles.statusPillMuted}`;
-}
-
 function contentLanguage(contentType: string) {
   if (contentType === "json") {
     return "json";
@@ -124,9 +115,9 @@ export function MemoryDetailPanel({
               <h2>{item.title}</h2>
               <p>{item.summary}</p>
             </div>
-            <span className={statusClassName(item.agentVisible, item.inPrompt)}>
+            <VStatusChip tone={memoryVisibilityTone(item.agentVisible, item.inPrompt)}>
               {item.inPrompt ? copy.inPrompt : item.agentVisible ? copy.canUse : copy.manualOnly}
-            </span>
+            </VStatusChip>
           </section>
 
           {activeImpact ? (

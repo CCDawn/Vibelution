@@ -1,7 +1,7 @@
 import { Brain, Database, FileText, Search } from "lucide-react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VNativeInput, VSplitWorkspace, VStateSurface } from "../components/vui";
+import { VButton, VNativeInput, VSplitWorkspace, VStateSurface, VStatusChip } from "../components/vui";
 import styles from "./MemoryAgentMemoryPanel.styles";
 
 export type MemoryAgentMemorySummaryView = {
@@ -204,12 +204,12 @@ export function MemoryAgentMemoryPanel({
                   <span className={styles.itemOrigin}>{agent.origin}</span>
                   <span className={styles.itemPath}>{agent.path}</span>
                   <span className={styles.itemBadges}>
-                    <span className={agent.hasPrivateMemory ? styles.statusPillVisible : styles.statusPill}>
+                    <VStatusChip tone={agent.hasPrivateMemory ? "success" : "neutral"}>
                       {copy.agentMemoryPrivateFiles}: {agent.privateFileCount}
-                    </span>
-                    <span className={styles.statusPill}>
+                    </VStatusChip>
+                    <VStatusChip tone="neutral">
                       {copy.agentMemoryFormalBases}: {agent.formalKnowledgeBaseCount}
-                    </span>
+                    </VStatusChip>
                   </span>
                 </VButton>
               ))}
@@ -257,9 +257,9 @@ export function MemoryAgentMemoryPanel({
                   <span className={styles.itemPath}>{item.path}</span>
                   <span className={styles.itemSummary}>{item.summary}</span>
                   <span className={styles.itemBadges}>
-                    <span className={styles.statusPill}>{item.sizeText}</span>
-                    <span className={styles.statusPill}>{item.contentType}</span>
-                    {item.truncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
+                    <VStatusChip tone="neutral">{item.sizeText}</VStatusChip>
+                    <VStatusChip tone="neutral">{item.contentType}</VStatusChip>
+                    {item.truncated ? <VStatusChip tone="neutral">{copy.truncated}</VStatusChip> : null}
                   </span>
                 </VButton>
               ))}

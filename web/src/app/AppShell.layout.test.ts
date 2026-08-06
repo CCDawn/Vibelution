@@ -169,16 +169,18 @@ describe("AppShell layout contract", () => {
     expect(styles.statusSummaryChip).toContain("whitespace-nowrap");
     expect(styles.statusSummaryChip).toContain("!items-center");
     expect(styles.statusSummaryChip).toContain("!py-0");
-    expect(styles.statusDot).toContain("self-center");
-    expect(styles.statusDot).not.toContain("align-middle");
-    expect(styles.statusBadgeLabel).toContain("leading-none");
+    // Top bar status uses VStatusChip (not hand-rolled statusDot).
+    expect(shellSource).toContain("VStatusChip");
+    expect(shellSource).toContain("systemToneToStatus");
+    expect(shellSource).not.toContain("styles.statusDot");
+    expect(styles.statusSummaryToneChip).toBeTypeOf("string");
+    expect(styles.activeWorkToneChip).toBeTypeOf("string");
     expect(styles.statusBadgeValue).toContain("leading-none");
     expect(styles.statusBadgeValue).toContain("[font-size:var(--vui-font-xs)]");
     expect(shellStyles).toContain("align-self: center");
-    expect(shellStyles).toMatch(/\.statusDot\s*\{[^}]*align-self:\s*center/);
     expect(shellStyles).toContain("@media (max-width: 1279px)");
     expect(shellStyles).toContain("@media (max-width: 1180px)");
-    expect(shellStyles).toContain(".topClock span:last-child");
+    expect(shellStyles).toContain(".topClock time");
     expect(shellStyles).toContain("@media (max-width: 980px)");
     expect(shellStyles).toContain("overscroll-behavior-x: contain");
     expect(shellStyles).toContain(".returnButton");
@@ -208,7 +210,8 @@ describe("AppShell layout contract", () => {
       shellStyles.indexOf("@media (max-width: 1279px)"),
       shellStyles.indexOf("@media (max-width: 1180px)"),
     );
-    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).topClock span:last-child");
+    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).topClock time");
+    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryToneChip");
     expect(compactDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
     expect(compactDesktopBlock).toContain("display: none");
 
@@ -216,7 +219,8 @@ describe("AppShell layout contract", () => {
       shellStyles.indexOf("@media (max-width: 1180px)"),
       shellStyles.indexOf("@media (max-width: 980px)"),
     );
-    expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).topClock span:last-child");
+    expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).topClock time");
+    expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryToneChip");
     expect(narrowDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
 
     const wrappedTopBarBlock = shellStyles.slice(

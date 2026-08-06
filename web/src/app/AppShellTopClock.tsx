@@ -43,8 +43,7 @@ export function AppShellTopClock({ lang, systemTimeLabel }: AppShellTopClockProp
 
   return (
     <div className={styles.topClock} title={timezone} aria-label={`${systemTimeLabel}: ${currentTime}`}>
-      <span className={`${styles.statusDot} ${styles.status_idle}`} />
-      <span>{currentTime}</span>
+      <time dateTime={new Date(clockNow).toISOString()}>{currentTime}</time>
     </div>
   );
 }

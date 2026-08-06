@@ -362,6 +362,8 @@ const styles = {
     `state_warning min-w-0 ${vuiStateWarningSoftClass}`,
   statusDot:
     "statusDot min-w-0 inline-block h-2 w-2 rounded-full bg-current",
+  toolStatusChip:
+    "toolStatusChip !min-h-5 max-w-[4.5rem] shrink-0 truncate !px-1.5 !text-[10px]",
   status_active:
     `status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_allowed:

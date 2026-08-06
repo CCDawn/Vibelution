@@ -10,7 +10,18 @@ import { getKernelTaskTimeline, listKernelTasks, selectKernelTaskId } from "../a
 import { queryKeys } from "../api/queryKeys";
 import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/types";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VActionGroup, VButton, VIconButton, VListDetailPage, VMetricStrip, VSelect, VStateSurface, VSurface } from "../components/vui";
+import {
+  VActionGroup,
+  VButton,
+  VIconButton,
+  VListDetailPage,
+  VMetricStrip,
+  VSelect,
+  VStateSurface,
+  VStatusChip,
+  VSurface,
+  type VStatusTone,
+} from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.styles";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
@@ -88,18 +99,18 @@ const COPY = {
   },
 } as const;
 
-function statusTone(status: string) {
+function statusTone(status: string): VStatusTone {
   const normalized = String(status || "").trim().toLowerCase();
   if (normalized === "succeeded" || normalized === "delivered") {
-    return "border-[color-mix(in_srgb,var(--state-success)_30%,transparent)] text-[var(--state-success)]";
+    return "success";
   }
   if (normalized === "running" || normalized === "queued") {
-    return "border-[color-mix(in_srgb,var(--accent-cool)_30%,transparent)] text-[var(--accent-cool)]";
+    return "accent";
   }
   if (normalized === "blocked" || normalized === "failed" || normalized === "cancelled") {
-    return "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] text-[var(--state-error)]";
+    return "danger";
   }
-  return "text-vui-fg-secondary";
+  return "neutral";
 }
 
 function shortId(value: string) {
@@ -401,7 +412,9 @@ function LedgerBucket({
 function LifecycleRow({ item }: { item: KernelTimelineItem }) {
   return (
     <div className={styles.lifecycleRowClass}>
-      <span className={`${styles.lifecycleDotClass} ${statusTone(item.status)}`} />
+      <VStatusChip tone={statusTone(item.status)} className={styles.lifecycleToneChipClass} aria-hidden="true">
+        ·
+      </VStatusChip>
       <div>
         <div className={styles.lifecycleTitleClass}>
           <strong className={styles.lifecycleKindClass}>{item.kind}</strong>
@@ -451,5 +464,9 @@ function RefList({
 }
 
 function StatusPill({ status }: { status: string }) {
-  return <span className={`${styles.statusPillBaseClass} ${statusTone(status)}`}>{status || "unknown"}</span>;
+  return (
+    <VStatusChip tone={statusTone(status)} className={styles.statusPillBaseClass}>
+      {status || "unknown"}
+    </VStatusChip>
+  );
 }

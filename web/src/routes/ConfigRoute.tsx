@@ -85,6 +85,7 @@ import {
   VSection,
   VSettingsFormPage,
   VSplitWorkspace,
+  VStatusChip,
   VStatusStrip,
   VStringSelect,
   VStateSurface,
@@ -1838,7 +1839,7 @@ function ConfigSectionEditor({
               {configHint(metaMap, absolutePath, lang) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath, lang)}</p> : null}
             </div>
           </div>
-          <span className={styles.inlineBadge}>{count}</span>
+          <VStatusChip tone="neutral">{count}</VStatusChip>
         </VButton>
         {expanded ? <div className={styles.treeBody}>{children}</div> : null}
       </div>
@@ -1862,7 +1863,7 @@ function ConfigSectionEditor({
               <strong>{presentation.commonTitle}</strong>
               <span>{presentation.commonHint}</span>
             </div>
-            <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.common)}</span>
+            <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>
           </div>
           <div className={styles.userProfilePrimaryGrid}>
             <div className={styles.userProfileIdentityFields}>{field("display_name")}</div>
@@ -1897,7 +1898,7 @@ function ConfigSectionEditor({
               <span>{presentation.advancedHint}</span>
             </div>
             <div className={styles.configAdvancedToggleMeta}>
-              <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.advanced)}</span>
+              <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.advanced)}</VStatusChip>
               <ChevronRight
                 size={16}
                 className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
@@ -1968,7 +1969,7 @@ function ConfigSectionEditor({
                 <strong>{presentation.commonTitle}</strong>
                 <span>{presentation.commonHint}</span>
               </div>
-              <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.common)}</span>
+              <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.common)}</VStatusChip>
             </div>
             <div
               className={`${styles.treeGrid} ${configCommonGridClass(commonEntries.length)}`}
@@ -1996,7 +1997,7 @@ function ConfigSectionEditor({
                   <span>{presentation.advancedHint}</span>
                 </div>
                 <div className={styles.configAdvancedToggleMeta}>
-                  <span className={styles.inlineBadge}>{presentation.advancedCountLabel(tierCounts.advanced)}</span>
+                  <VStatusChip tone="neutral">{presentation.advancedCountLabel(tierCounts.advanced)}</VStatusChip>
                   <ChevronRight
                     size={16}
                     className={advancedExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}
@@ -2086,7 +2087,7 @@ function ConfigSectionEditor({
         <div className={styles.sectionHeaderActions}>
           <div className={styles.sectionHeaderMeta}>
             <span className={styles.sectionHeaderMetaLabel}>{copy.fieldCountLabel}</span>
-            <span className={styles.inlineBadge}>{section.fieldCount}</span>
+            <VStatusChip tone="neutral">{section.fieldCount}</VStatusChip>
           </div>
           <div className={styles.sectionToolbarGroup}>
             <VButton

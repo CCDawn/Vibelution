@@ -7,7 +7,7 @@ import type {
   KnowledgeRagRetrievalPayload,
   KnowledgeSearchPayload,
 } from "../api/types";
-import { VNativeInput, VStringSelect } from "../components/vui";
+import { VNativeInput, VStatusChip, VStringSelect } from "../components/vui";
 import { MemoryKnowledgeRagPanel, type MemoryKnowledgeRagPanelCopy } from "./MemoryKnowledgeRagPanel";
 import styles from "./MemoryKnowledgeSearchPanel.styles";
 
@@ -138,7 +138,7 @@ export function MemoryKnowledgeSearchPanel({
           <section key={`search:${item.knowledgeItemId}`} className={styles.knowledgeRow}>
             <strong>{item.title}</strong>
             <span>{item.summary || item.content}</span>
-            <span className={styles.statusPill}>{item.importanceLevel}</span>
+            <VStatusChip tone="neutral">{item.importanceLevel}</VStatusChip>
             <small>{item.teamName} · {item.knowledgeBaseName} · {item.sourceTypes.join(", ") || copy.sourceArtifacts}</small>
             <small>{copy.semanticScore}: {Math.round(Number(item.semanticScore || 0) * 100)}% · {item.matchReason}</small>
           </section>

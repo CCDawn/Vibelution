@@ -1,7 +1,8 @@
 import { CheckCircle2, Eye } from "lucide-react";
 
 import type { KnowledgeGovernancePlanPayload, KnowledgeGovernanceTask, KnowledgeOperationsHealthPayload } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VStatusChip } from "../components/vui";
+import { memoryPriorityTone } from "./memoryStatusTone";
 import styles from "./MemoryKnowledgeGovernancePanel.styles";
 
 export type MemoryKnowledgeGovernancePanelCopy = {
@@ -65,7 +66,7 @@ export function MemoryKnowledgeGovernancePanel({
         <div className={styles.knowledgeProposalList}>
           {(operationsHealth?.findings ?? []).slice(0, 8).map((finding) => (
             <section key={finding.findingId} className={styles.knowledgeRow}>
-              <span className={styles.statusPill}>{finding.severity}</span>
+              <VStatusChip tone={memoryPriorityTone(finding.severity)}>{finding.severity}</VStatusChip>
               <strong>{finding.findingType}</strong>
               <span>{finding.message}</span>
               <small>{finding.knowledgeBaseName} · {finding.count}</small>
@@ -87,7 +88,7 @@ export function MemoryKnowledgeGovernancePanel({
             <p className={styles.panelEyebrow}>{copy.governancePlan}</p>
             <h2>{copy.planOnly}</h2>
           </div>
-          <span className={styles.statusPillMuted}>{governancePlan?.mode ?? "recommendations_only"}</span>
+          <VStatusChip tone="neutral">{governancePlan?.mode ?? "recommendations_only"}</VStatusChip>
         </div>
         <div className={styles.healthStrip}>
           <span>{copy.noDirectApply}: {governancePlan?.operatingBoundary.canDirectlyApplyKnowledge ? copy.yes : copy.no}</span>
@@ -97,7 +98,7 @@ export function MemoryKnowledgeGovernancePanel({
         <div className={styles.knowledgeProposalList}>
           {(governancePlan?.actions ?? []).slice(0, 8).map((action) => (
             <section key={action.planActionId} className={styles.knowledgeRow}>
-              <span className={styles.statusPill}>{action.priority}</span>
+              <VStatusChip tone={memoryPriorityTone(action.priority)}>{action.priority}</VStatusChip>
               <strong>{action.title}</strong>
               <span>{action.nextStep}</span>
               <small>{action.kind} · {action.recommendedTool}</small>
@@ -124,7 +125,7 @@ export function MemoryKnowledgeGovernancePanel({
         <div className={styles.knowledgeProposalList}>
           {governanceTasks.slice(0, 8).map((task) => (
             <section key={task.taskId} className={styles.knowledgeRow}>
-              <span className={styles.statusPill}>{task.priority}</span>
+              <VStatusChip tone={memoryPriorityTone(task.priority)}>{task.priority}</VStatusChip>
               <strong>{task.title}</strong>
               <span>{task.summary || task.targetId}</span>
               <small>{task.taskType} · {task.targetStatus} · {task.knowledgeBaseName}</small>

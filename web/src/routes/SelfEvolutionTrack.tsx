@@ -59,6 +59,7 @@ import {
   VNativeTextarea,
   VRouteLinkButton,
   VStateSurface,
+  VStatusChip,
   VTabs,
 } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
@@ -1595,7 +1596,7 @@ export function SelfEvolutionTrack({
               <div className={styles.runActionText}>
                 <div className={styles.runActionMeta}>
                   <span className={styles.secondaryPill}>{activeModeLabel}</span>
-                  <span className={styles.statusPill}>{activeStatusLabel}</span>
+                  <VStatusChip tone="accent">{activeStatusLabel}</VStatusChip>
                   <span className={styles.secondaryPill}>
                     {lang === "zh" ? `事务 ${transactionItems.length}` : `Transactions ${transactionItems.length}`}
                   </span>
@@ -1702,9 +1703,9 @@ export function SelfEvolutionTrack({
                   <p className={styles.eyebrow}>{t("selfEvolutionMode")}</p>
                   <h3 className={styles.sectionTitle}>{observationRunModeActive ? (lang === "zh" ? "观察配置" : "Observation config") : t("selfWorkspacePage")}</h3>
                 </div>
-                <span className={styles.statusPill}>
+                <VStatusChip tone="neutral">
                   {statusLabel(observationRunModeActive ? (observationRun?.status || "idle") : conversationTask.status)}
-                </span>
+                </VStatusChip>
               </div>
               <VTabs
                 density="compact"
@@ -1888,7 +1889,7 @@ export function SelfEvolutionTrack({
                   <p className={styles.eyebrow}>{t("petSelfCompanion")}</p>
                   <h3 className={styles.sectionTitle}>{pet?.name ?? t("loadingPetState")}</h3>
                 </div>
-                <span className={styles.statusPill}>{t(petCompanionState.stateKey)}</span>
+                <VStatusChip tone="neutral">{t(petCompanionState.stateKey)}</VStatusChip>
               </div>
 
               <div className={styles.petCompanionCopy}>
@@ -1951,7 +1952,7 @@ export function SelfEvolutionTrack({
                           <p className={styles.eyebrow}>{approvalStep.label}</p>
                           <h3 className={styles.sectionTitle}>{lang === "zh" ? "人工审批" : "Human approval"}</h3>
                         </div>
-                        <span className={styles.statusPill}>{statusLabel(approvalStep.status)}</span>
+                        <VStatusChip tone="neutral">{statusLabel(approvalStep.status)}</VStatusChip>
                       </div>
                       <div className={styles.detailStack}>
                         {approvalEvidenceItems.map((item) => (

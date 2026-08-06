@@ -783,7 +783,11 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps full diagnostic timestamps and migration model identifiers in VUI tooltips", () => {
-    expect(healthDiagnosticsPanelSource).toContain('import { VButton, VSection, VTooltip } from "../components/vui"');
+    expect(healthDiagnosticsPanelSource).toContain("VStatusChip");
+    expect(healthDiagnosticsPanelSource).toContain('from "../components/vui"');
+    expect(healthDiagnosticsPanelSource).toContain("VButton");
+    expect(healthDiagnosticsPanelSource).toContain("VSection");
+    expect(healthDiagnosticsPanelSource).toContain("VTooltip");
     expect(healthDiagnosticsPanelSource).toContain("<VTooltip content={helper.updatedAt}>");
     expect(healthDiagnosticsPanelSource).toContain("<VTooltip content={helper.lastModifiedAt}>");
     expect(healthDiagnosticsPanelSource).not.toContain("title={helper.updatedAt}");

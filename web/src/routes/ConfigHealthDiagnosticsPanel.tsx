@@ -1,7 +1,7 @@
 import { ExternalLink, RefreshCw } from "lucide-react";
 
 import { type HealthDiagnostics, type HealthFinding, type HealthQuickAction, type LogHelper, type SessionHelper } from "../api/types";
-import { VButton, VSection, VTooltip } from "../components/vui";
+import { VButton, VSection, VStatusChip, VTooltip, type VStatusTone } from "../components/vui";
 import styles from "./ConfigHealthDiagnosticsPanel.styles";
 
 export type ConfigLanguage = "zh" | "en";
@@ -91,24 +91,16 @@ function healthStatusLabel(status: string, copy: ConfigHealthDiagnosticsPanelCop
   return copy.healthStatusOk;
 }
 
-function healthStatusClassName(status: string) {
-  if (status === "blocked") {
-    return `${styles.inlineBadge} ${styles.healthBadgeBlocked}`;
-  }
-  if (status === "warning") {
-    return `${styles.inlineBadge} ${styles.inlineBadgeWarning}`;
-  }
-  return `${styles.inlineBadge} ${styles.statusBadgeReady}`;
+function healthStatusTone(status: string): VStatusTone {
+  if (status === "blocked") return "danger";
+  if (status === "warning") return "warning";
+  return "success";
 }
 
-function healthSeverityClassName(severity: string) {
-  if (severity === "blocked") {
-    return `${styles.inlineBadge} ${styles.healthBadgeBlocked}`;
-  }
-  if (severity === "warning") {
-    return `${styles.inlineBadge} ${styles.inlineBadgeWarning}`;
-  }
-  return styles.inlineBadge;
+function healthSeverityTone(severity: string): VStatusTone {
+  if (severity === "blocked") return "danger";
+  if (severity === "warning") return "warning";
+  return "neutral";
 }
 
 function formatFindingId(id: string) {
@@ -137,9 +129,9 @@ export function ConfigHealthDiagnosticsPanel({
       actions={
           <div className={styles.sectionHeaderActions}>
             {diagnostics ? (
-              <span className={healthStatusClassName(diagnostics.status)}>
+              <VStatusChip tone={healthStatusTone(diagnostics.status)}>
                 {healthStatusLabel(diagnostics.status, copy)}
-              </span>
+              </VStatusChip>
             ) : null}
             <VButton type="button" className={styles.actionButton} onClick={onRefresh} isDisabled={loading}
               icon={<RefreshCw size={14} />}
@@ -173,7 +165,7 @@ export function ConfigHealthDiagnosticsPanel({
           <div className={styles.healthPanel}>
             <div className={styles.healthPanelHeader}>
               <h3>{copy.healthPriority}</h3>
-              <span className={styles.inlineBadge}>{priorityFindings.length.toLocaleString()}</span>
+              <VStatusChip tone="neutral">{priorityFindings.length.toLocaleString()}</VStatusChip>
             </div>
             {priorityFindings.length ? (
               <div className={styles.findingList}>
@@ -188,7 +180,7 @@ export function ConfigHealthDiagnosticsPanel({
           <div className={styles.healthPanel}>
             <div className={styles.healthPanelHeader}>
               <h3>{copy.healthQuickActions}</h3>
-              <span className={styles.inlineBadge}>{quickActions.length.toLocaleString()}</span>
+              <VStatusChip tone="neutral">{quickActions.length.toLocaleString()}</VStatusChip>
             </div>
             {quickActions.length ? (
               <div className={styles.quickActionList}>
@@ -230,9 +222,9 @@ function HealthFindingCard({ finding, copy }: { finding: HealthFinding; copy: Co
           <p className={styles.matrixTitle}>{formatFindingId(finding.id)}</p>
           <h4>{finding.title}</h4>
         </div>
-        <span className={healthSeverityClassName(finding.severity)}>
+        <VStatusChip tone={healthSeverityTone(finding.severity)}>
           {healthStatusLabel(finding.severity, copy)}
-        </span>
+        </VStatusChip>
       </div>
       <p className={styles.cardSubtle}>{finding.summary}</p>
       {finding.evidence.length ? (
@@ -272,9 +264,9 @@ function HealthQuickActionLink({ action, copy }: { action: HealthQuickAction; co
   return (
     <a className={styles.quickActionItem} href={href}>
       <div>
-        <span className={healthSeverityClassName(action.severity)}>
+        <VStatusChip tone={healthSeverityTone(action.severity)}>
           {action.findingId ? formatFindingId(action.findingId) : action.source}
-        </span>
+        </VStatusChip>
         <strong>{action.title}</strong>
         <small>{action.description}</small>
       </div>
@@ -292,9 +284,9 @@ function SessionHelperCard({ helper, lang, copy }: { helper: SessionHelper; lang
           <p className={styles.matrixTitle}>{helper.activeSessionId || helper.id}</p>
           <h3 className={styles.cardTitle}>{helper.title}</h3>
         </div>
-        <span className={healthStatusClassName(helper.status)}>
+        <VStatusChip tone={healthStatusTone(helper.status)}>
           {helper.statusLabel || healthStatusLabel(helper.status, copy)}
-        </span>
+        </VStatusChip>
       </div>
       <p className={styles.cardSubtle}>{helper.description}</p>
       <div className={styles.logHelperMetaGrid}>
@@ -331,11 +323,11 @@ function SessionHelperCard({ helper, lang, copy }: { helper: SessionHelper; lang
       </div>
       <p className={styles.cardSubtle}>{helper.recommendedAction}</p>
       <div className={styles.cardBadges}>
-        <span className={`${styles.inlineBadge} ${styles.inlineBadgeWarning}`}>{copy.healthProtected}</span>
+        <VStatusChip tone="warning">{copy.healthProtected}</VStatusChip>
         {helper.findingIds?.length ? (
-          <span className={styles.inlineBadge}>
+          <VStatusChip tone="neutral">
             {copy.healthRelatedFindings} {helper.findingIds.length}
-          </span>
+          </VStatusChip>
         ) : null}
       </div>
       {helper.protectedReason ? <p className={styles.helperText}>{helper.protectedReason}</p> : null}
@@ -359,9 +351,9 @@ function LogHelperCard({ helper, lang, copy }: { helper: LogHelper; lang: Config
           <p className={styles.matrixTitle}>{helper.rootPath}</p>
           <h3 className={styles.cardTitle}>{helper.title}</h3>
         </div>
-        <span className={healthStatusClassName(helper.status)}>
+        <VStatusChip tone={healthStatusTone(helper.status)}>
           {helper.statusLabel || healthStatusLabel(helper.status, copy)}
-        </span>
+        </VStatusChip>
       </div>
       <p className={styles.cardSubtle}>{helper.description}</p>
       <div className={styles.logHelperMetaGrid}>
@@ -390,13 +382,13 @@ function LogHelperCard({ helper, lang, copy }: { helper: LogHelper; lang: Config
       </div>
       <p className={styles.cardSubtle}>{helper.recommendedAction}</p>
       <div className={styles.cardBadges}>
-        <span className={helper.protected ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}` : styles.inlineBadge}>
+        <VStatusChip tone={helper.protected ? "warning" : "neutral"}>
           {helper.protected ? copy.healthProtected : copy.healthMaintenanceAvailable}
-        </span>
+        </VStatusChip>
         {helper.findingIds?.length ? (
-          <span className={styles.inlineBadge}>
+          <VStatusChip tone="neutral">
             {copy.healthRelatedFindings} {helper.findingIds.length}
-          </span>
+          </VStatusChip>
         ) : null}
       </div>
       {helper.protectedReason ? <p className={styles.helperText}>{helper.protectedReason}</p> : null}

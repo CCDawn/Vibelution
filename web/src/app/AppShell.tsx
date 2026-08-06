@@ -90,6 +90,7 @@ import { VButton } from "../components/vui/primitives/VButton";
 import { VIconButton } from "../components/vui/primitives/VIconButton";
 import { VPopover } from "../components/vui/primitives/VPopover";
 import { VRouteLinkButton } from "../components/vui/primitives/VRouteLinkButton";
+import { VStatusChip, type VStatusTone } from "../components/vui";
 import {
   VWorkbenchPowerMenu,
   type VWorkbenchPowerMenuAction,
@@ -131,6 +132,13 @@ export function isShellPrimaryNavActive(pathname: string, to: string): boolean {
     return path === "/";
   }
   return path === target || path.startsWith(`${target}/`);
+}
+
+function systemToneToStatus(tone: SystemStatusTone): VStatusTone {
+  if (tone === "running") return "success";
+  if (tone === "caution") return "warning";
+  if (tone === "failed") return "danger";
+  return "neutral";
 }
 
 function shellPrimaryNavClass(pathname: string, to: string) {
@@ -2270,12 +2278,15 @@ export function AppShell() {
                   aria-haspopup="dialog"
                   aria-label={activeWorkChipAriaLabel}
                 >
-                  <span className={`${styles.statusDot} ${styles[`status_${activeWorkIndicator.tone}`]}`} aria-hidden="true" />
-                  <span className={styles.activeWorkKicker}>{t("activeWorkNow")}</span>
+                  <VStatusChip
+                    tone={systemToneToStatus(activeWorkIndicator.tone)}
+                    className={styles.activeWorkToneChip}
+                  >
+                    {activeWorkIndicator.tone === "running"
+                      ? t("activeWorkNow")
+                      : statusLabel(activeWorkIndicator.status)}
+                  </VStatusChip>
                   <strong>{activeWorkIndicator.label}</strong>
-                  {activeWorkIndicator.tone !== "running" ? (
-                    <span className={styles.activeWorkStatus}>{statusLabel(activeWorkIndicator.status)}</span>
-                  ) : null}
                   <span className={styles.activeWorkInlineDetails} aria-hidden="true">
                     {activeWorkIndicator.items.slice(0, 2).map((item) => (
                       <span key={`${item.kind}-${item.runId || item.status}-inline`} className={styles.activeWorkInlineItem}>
@@ -2307,7 +2318,6 @@ export function AppShell() {
                       <div className={styles.activeWorkDetailCopy}>
                         <div className={styles.activeWorkDetailTitle}>
                           <strong>{item.label}</strong>
-                          <span>{statusLabel(item.status)}</span>
                         </div>
                         {item.summary ? <p>{item.summary}</p> : null}
                         {runIdDisplay ? (
@@ -2317,7 +2327,9 @@ export function AppShell() {
                     );
                     return (
                       <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
-                        <span className={`${styles.statusDot} ${styles[`status_${item.tone}`]}`} />
+                        <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
+                          {statusLabel(item.status)}
+                        </VStatusChip>
                         {item.href ? (
                           <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={detailAria}>
                             {detailCopy}
@@ -2458,7 +2470,6 @@ export function AppShell() {
                   trailingIcon={<ChevronDown size={13} className={styles.utilityChevron} />}
                 >
                   <span className={styles.utilityTriggerLabel}>{t("topUtilityMenuShort")}</span>
-                  <span className={`${styles.statusDot} ${styles.status_idle}`} />
                 </VButton>
               )}
             >
@@ -2545,8 +2556,12 @@ export function AppShell() {
                   aria-expanded={statusGuideOpen}
                   aria-label={`${t("systemStatusGuide")}: ${primaryStatusCard.label} ${primaryStatusCard.value}`}
                 >
-                  <span className={`${styles.statusDot} ${styles[`status_${primaryStatusCard.tone}`]}`} aria-hidden="true" />
-                  <span className={styles.statusBadgeLabel}>{primaryStatusCard.label}</span>
+                  <VStatusChip
+                    tone={systemToneToStatus(primaryStatusCard.tone)}
+                    className={styles.statusSummaryToneChip}
+                  >
+                    {primaryStatusCard.label}
+                  </VStatusChip>
                   <strong className={styles.statusBadgeValue}>{primaryStatusCard.value}</strong>
                   <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>
                 </VButton>

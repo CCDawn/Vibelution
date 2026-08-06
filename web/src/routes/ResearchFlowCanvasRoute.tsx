@@ -40,7 +40,9 @@ import {
   VNativeTextarea,
   VRouteLinkButton,
   VStateSurface,
+  VStatusChip,
   VStringSelect,
+  type VStatusTone,
 } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
 import styles from "./ResearchFlowCanvasRoute.styles";
@@ -960,8 +962,12 @@ function statusLabel(status: string) {
   return STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
 }
 
-function statusClass(status: string) {
-  return styles[`status_${status}` as keyof typeof styles] ?? styles.status_idle;
+function canvasNodeStatusTone(status: string): VStatusTone {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "running" || normalized === "active" || normalized === "ready") return "success";
+  if (normalized === "blocked" || normalized === "failed" || normalized === "error") return "danger";
+  if (normalized === "warning" || normalized === "pending" || normalized === "queued") return "warning";
+  return "neutral";
 }
 
 function nodeStatusToneClass(status: string) {
@@ -2570,8 +2576,9 @@ export function ResearchFlowCanvasRoute() {
                     >
                       <span className={styles.nodeTopline}>
                         <span className={styles.nodeStatusCluster}>
-                          <span className={styles.nodeStatusDot} aria-hidden="true" />
-                          <span className={`${styles.statusPill} ${statusClass(node.status)}`}>{statusLabel(node.status)}</span>
+                          <VStatusChip tone={canvasNodeStatusTone(node.status)}>
+                            {statusLabel(node.status)}
+                          </VStatusChip>
                         </span>
                         <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
                           {display.functionLabel}

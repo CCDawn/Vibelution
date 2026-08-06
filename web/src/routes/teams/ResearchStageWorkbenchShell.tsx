@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { ArrowLeft, RefreshCw, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { VButton, VNativeButton } from "../../components/vui";
+import { VButton, VNativeButton, VStatusChip } from "../../components/vui";
 import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
 import type { ResearchStageUnlock } from "./researchPrimaryActionModel";
 import {
@@ -108,7 +108,9 @@ export function ResearchStageWorkbenchShell({
           <div className={styles.sourceCollectionPageTitleLine}>
             <h1>{title}</h1>
             {statusBadge != null && statusBadge !== "" ? (
-              <span className={statusBadgeClassName || styles.sourceCollectionRunBadge}>{statusBadge}</span>
+              <VStatusChip tone="neutral" className={statusBadgeClassName || styles.sourceCollectionRunBadge}>
+                {statusBadge}
+              </VStatusChip>
             ) : null}
           </div>
           <ResearchStageNav

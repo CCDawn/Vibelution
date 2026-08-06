@@ -9,7 +9,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VStatusChip } from "../components/vui";
 import { type SupervisedRunControlSummary } from "./supervisedRunSummary";
 import styles from "./EvolutionActiveRunMonitorPanel.styles";
 
@@ -149,9 +149,9 @@ function EvolutionActiveRunClosedLoopLedgerPanel({
             {ledger.title}
           </strong>
         </div>
-        <span className={ledger.statusTone === "primary" ? styles.statusPill : styles.secondaryPill}>
+        <VStatusChip tone={ledger.statusTone === "primary" ? "accent" : "neutral"}>
           {ledger.statusLabel}
-        </span>
+        </VStatusChip>
       </div>
       <p>{ledger.description}</p>
       <div className={styles.closedLoopLedgerEvidenceGrid}>
@@ -191,11 +191,11 @@ export function EvolutionActiveRunMonitorPanel({
         </div>
         {run ? (
           <div className={styles.liveStatusRow}>
-            {header.statusLabel ? <span className={styles.statusPill}>{header.statusLabel}</span> : null}
-            {header.sourceKindLabel ? <span className={styles.secondaryPill}>{header.sourceKindLabel}</span> : null}
+            {header.statusLabel ? <VStatusChip tone="accent">{header.statusLabel}</VStatusChip> : null}
+            {header.sourceKindLabel ? <VStatusChip tone="neutral">{header.sourceKindLabel}</VStatusChip> : null}
           </div>
         ) : (
-          <span className={styles.secondaryPill}>{header.fallbackStatusLabel}</span>
+          <VStatusChip tone="neutral">{header.fallbackStatusLabel}</VStatusChip>
         )}
       </div>
 

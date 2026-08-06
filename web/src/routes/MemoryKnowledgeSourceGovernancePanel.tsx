@@ -1,7 +1,7 @@
 import { CheckCircle2, Copy as CopyIcon, Database, Eye, FileText, Link2, Pencil, XCircle } from "lucide-react";
 
 import type { KnowledgeCentralSource, KnowledgeOwnerSource } from "../api/types";
-import { VButton, VNativeInput, VNativeTextarea, VStringSelect } from "../components/vui";
+import { VButton, VNativeInput, VNativeTextarea, VStatusChip, VStringSelect } from "../components/vui";
 import styles from "./MemoryKnowledgeSourceGovernancePanel.styles";
 
 export type MemoryKnowledgeSourceOwnerType = "team" | "agent";
@@ -321,7 +321,7 @@ export function MemoryKnowledgeSourceGovernancePanel({
                 <article key={source.inboxSourceId} className={styles.sourceRecord}>
                   <div className={styles.sourceRecordHeader}>
                     <strong>{source.title || source.inboxSourceId}</strong>
-                    <span className={reviewable ? styles.statusPill : styles.statusPillMuted}>{source.status}</span>
+                    <VStatusChip tone={reviewable ? "success" : "neutral"}>{source.status}</VStatusChip>
                   </div>
                   <p>{source.summary || source.sourceType}</p>
                   <div className={styles.sourceRecordMeta}>
@@ -374,7 +374,7 @@ export function MemoryKnowledgeSourceGovernancePanel({
           <article key={source.centralSourceId} className={styles.sourceRecord}>
             <div className={styles.sourceRecordHeader}>
               <strong>{source.title || source.centralSourceId}</strong>
-              <span className={styles.statusPill}>{source.status}</span>
+              <VStatusChip tone="neutral">{source.status}</VStatusChip>
             </div>
             <p>{source.summary || source.sourceType}</p>
             <div className={styles.sourceRecordMeta}>

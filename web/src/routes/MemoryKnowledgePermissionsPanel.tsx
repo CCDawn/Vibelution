@@ -1,4 +1,5 @@
 import type { KnowledgeIngestionAdapter, KnowledgePermissionAuditPayload } from "../api/types";
+import { VStatusChip } from "../components/vui";
 import styles from "./MemoryKnowledgePermissionsPanel.styles";
 
 type KnowledgePermissionEntry = KnowledgePermissionAuditPayload["knowledgeBases"][number]["permissions"][string] | string | null | undefined;
@@ -84,9 +85,9 @@ export function MemoryKnowledgePermissionsPanel({
               ].map(({ label, permission }) => {
                 const normalizedPermission = normalizeKnowledgePermission(permission);
                 return (
-                  <small key={label} className={normalizedPermission.allowed ? styles.statusPill : styles.statusPillMuted}>
+                  <VStatusChip key={label} tone={normalizedPermission.allowed ? "success" : "neutral"}>
                     {label}: {normalizedPermission.allowed ? copy.yes : normalizedPermission.reason}
-                  </small>
+                  </VStatusChip>
                 );
               })}
             </section>
