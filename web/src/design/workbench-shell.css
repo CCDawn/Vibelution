@@ -1286,11 +1286,13 @@
   white-space: nowrap;
 }
 
+/*
+ * Lifecycle power menu panel is rendered via Radix DropdownMenu Portal (document.body).
+ * It is NOT a child of .lifecycleMenuCluster, so cluster-open selectors never match.
+ * Keep hit-testing and visibility on the panel itself; positioning/open animation is
+ * owned by Radix/shadcn (do not force absolute + pointer-events:none here).
+ */
 :where(.vui-app-appshell).lifecycleMenuPanel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 30;
   display: grid;
   gap: 5px;
   min-width: 178px;
@@ -1299,20 +1301,11 @@
   border-radius: var(--radius-panel);
   background: var(--shell-panel);
   box-shadow: var(--vui-shadow-soft);
-  opacity: 0;
-  transform: translateY(-4px);
-  pointer-events: none;
-  transition: opacity 150ms ease, transform 150ms ease;
+  pointer-events: auto;
 }
 
 :where(.vui-app-appshell).lifecycleMenuPanel[hidden] {
   display: none;
-}
-
-:where(.vui-app-appshell).lifecycleMenuClusterOpen .lifecycleMenuPanel {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
 }
 
 :where(.vui-app-appshell).lifecycleMenuItem,

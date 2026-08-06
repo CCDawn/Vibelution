@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, type CSSProperties, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import {
   ArrowLeft,
   ChevronDown,
@@ -8,7 +8,6 @@ import {
   Moon,
   PanelTopClose,
   PanelTopOpen,
-  Power,
   RefreshCw,
   Settings,
   Sun,
@@ -16,14 +15,20 @@ import {
 } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
-import { cancelRuntimeLifecycleCommand, forceStopLauncherBundle, restartLauncherBundle, stopLauncherBundle } from "../api/launcher";
+import { cancelRuntimeLifecycleCommand } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
   ConfigSummary,
-  RuntimeControlBlockedDetail,
   RuntimeSummary,
 } from "../api/types";
+import {
+  formatActiveWorkRunsDetail,
+  isActiveWorkRestartBlocked,
+  isActiveWorkStopBlocked,
+  parseRuntimeControlBlockedDetail,
+} from "./workbenchLifecycleActions";
+import { useWorkbenchLifecycleActions } from "./useWorkbenchLifecycleActions";
 import { useShellI18n } from "../i18n/useShellI18n";
 import {
   collectBrowserMemorySnapshot,
@@ -75,15 +80,20 @@ import {
   consumeNextWorkbenchWindowUnloadAllowance,
   hasRecentControlledProjectLifecycleOperation,
   isElectronDesktopShell,
+  markControlledProjectLifecycleOperation,
   projectWindowCloseGuardMessage,
   shouldArmBrowserProjectCloseGuard,
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
 import { useStableBeforeUnload } from "./useStableBeforeUnload";
 import { VButton } from "../components/vui/primitives/VButton";
-import { VDropdownMenu } from "../components/vui/primitives/VDropdownMenu";
 import { VIconButton } from "../components/vui/primitives/VIconButton";
 import { VPopover } from "../components/vui/primitives/VPopover";
+import { VRouteLinkButton } from "../components/vui/primitives/VRouteLinkButton";
+import {
+  VWorkbenchPowerMenu,
+  type VWorkbenchPowerMenuAction,
+} from "../components/vui/product/workbench-shell";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
@@ -113,12 +123,26 @@ const LazyAppShellStatusGuidePanel = lazy(() =>
     }),
 );
 
-function linkClassName({ isActive }: { isActive: boolean }) {
-  return isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink;
+/** Prefix-active match for primary shell routes (/agents covers /agents/prompts). */
+export function isShellPrimaryNavActive(pathname: string, to: string): boolean {
+  const path = String(pathname || "").trim() || "/";
+  const target = String(to || "").trim() || "/";
+  if (target === "/") {
+    return path === "/";
+  }
+  return path === target || path.startsWith(`${target}/`);
 }
 
-function mobileLinkClassName({ isActive }: { isActive: boolean }) {
-  return isActive ? `${styles.mobileRouteLink} ${styles.mobileRouteLinkActive}` : styles.mobileRouteLink;
+function shellPrimaryNavClass(pathname: string, to: string) {
+  return isShellPrimaryNavActive(pathname, to)
+    ? `${styles.navLink} ${styles.navLinkActive}`
+    : styles.navLink;
+}
+
+function shellMobileNavClass(pathname: string, to: string) {
+  return isShellPrimaryNavActive(pathname, to)
+    ? `${styles.mobileRouteLink} ${styles.mobileRouteLinkActive}`
+    : styles.mobileRouteLink;
 }
 
 /** True when the click should keep native browser behavior (new tab, etc.). */
@@ -604,19 +628,6 @@ export function shutdownActiveWorkBlockedMessage(lang: string, activeWorkDetails
   ].filter(Boolean).join("\n\n");
 }
 
-function runtimeBlockedDetail(error: unknown): RuntimeControlBlockedDetail | null {
-  if (!(error instanceof Error)) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(error.message) as { detail?: RuntimeControlBlockedDetail };
-    const detail = parsed?.detail;
-    return detail && typeof detail === "object" ? detail : null;
-  } catch {
-    return null;
-  }
-}
-
 export function shutdownLocallyCompleteBody(lang: string): string {
   return lang === "en"
     ? "The backend is no longer reachable, so the close flow has already passed the point where this window can receive a final confirmation. You can close this remaining window."
@@ -685,6 +696,7 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const navigationType = useNavigationType();
+  const { request: requestLifecycle } = useWorkbenchLifecycleActions("app_shell");
   const [shutdownOpen, setShutdownOpen] = useState(false);
   const [shutdownTitle, setShutdownTitle] = useState("");
   const [shutdownDetail, setShutdownDetail] = useState("");
@@ -819,8 +831,8 @@ export function AppShell() {
   const selfEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "self_evolution");
   const refreshFrontendLabel = lang === "en" ? "Refresh frontend" : "刷新前端";
   const lifecycleMenuLabel = lang === "en" ? "Workbench power actions" : "工作台电源操作";
-  const closeWorkbenchLabel = lang === "en" ? "Close workbench" : "关闭工作台";
-  const forceCloseWorkbenchLabel = lang === "en" ? "Force close workbench" : "强制关闭工作台";
+  const closeWorkbenchLabel = lang === "en" ? "Stop workbench" : "停止工作台";
+  const forceCloseWorkbenchLabel = lang === "en" ? "Force stop" : "强制停止";
   const restartWorkbenchLabel = lang === "en" ? "Restart workbench" : "重启工作台";
   const hideTopBarLabel = lang === "en" ? "Hide top bar" : "隐藏顶部栏";
   const showTopBarLabel = lang === "en" ? "Show top bar" : "显示顶部栏";
@@ -1185,13 +1197,14 @@ export function AppShell() {
       shutdownLocalCompletionLoggedRef.current = false;
       emitBrowserTelemetry(buildShutdownRequestedTelemetry(), { preferBeacon: true });
 
-      const payload = await stopLauncherBundle("app_shell_shutdown_button");
+      const payload = await requestLifecycle("stop");
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         if (payload.commandId) {
           cancelSupersededLifecycleCommand(payload.commandId, "shutdown");
         }
         return;
       }
+      markControlledProjectLifecycleOperation("stop");
       emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("shutdown", payload), { preferBeacon: true });
       if (payload.commandId) {
         setLifecycleCommandId(payload.commandId);
@@ -1204,13 +1217,10 @@ export function AppShell() {
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         return;
       }
-      const blocked = runtimeBlockedDetail(error);
-      if (blocked?.code === "active_work_stop_blocked" || blocked?.code === "active_work_requires_confirmation") {
+      const blocked = parseRuntimeControlBlockedDetail(error);
+      if (isActiveWorkStopBlocked(blocked)) {
         lifecycleOverlayDismissedRef.current = false;
-        const blockedDetails = blocked.activeWorkRuns
-          ?.map((item) => [item.kind, item.status, item.runId || item.sessionId].filter(Boolean).join(" · "))
-          .filter(Boolean)
-          .join(" · ") ?? "";
+        const blockedDetails = formatActiveWorkRunsDetail(blocked?.activeWorkRuns);
         setShutdownRequested(false);
         setRestartRequested(false);
         setShutdownOpen(true);
@@ -1256,6 +1266,7 @@ export function AppShell() {
     clearRestartCompletionDismissTimer,
     emitBrowserTelemetry,
     lang,
+    requestLifecycle,
     restartRequested,
     shutdownBody,
     shutdownHeading,
@@ -1298,10 +1309,12 @@ export function AppShell() {
         { preferBeacon: true },
       );
 
-      const payload = await forceStopLauncherBundle("app_shell_force_shutdown_button");
+      const payload = await requestLifecycle("force-stop");
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         return;
       }
+      markControlledProjectLifecycleOperation("force-stop");
+      allowNextWorkbenchWindowUnload();
       emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("force_shutdown", payload), { preferBeacon: true });
       if (payload.commandId) {
         setLifecycleCommandId(payload.commandId);
@@ -1349,6 +1362,7 @@ export function AppShell() {
     emitBrowserTelemetry,
     forceShutdownBody,
     forceShutdownHeading,
+    requestLifecycle,
     restartRequested,
     shutdownErrorBody,
   ]);
@@ -1377,13 +1391,14 @@ export function AppShell() {
       setShutdownDetail(restartBody);
       emitBrowserTelemetry(buildRestartRequestedTelemetry(), { preferBeacon: true });
 
-      const payload = await restartLauncherBundle();
+      const payload = await requestLifecycle("restart");
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         if (payload.commandId) {
           cancelSupersededLifecycleCommand(payload.commandId, "restart");
         }
         return;
       }
+      markControlledProjectLifecycleOperation("restart");
       emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("restart", payload), { preferBeacon: true });
       if (payload.commandId) {
         setLifecycleCommandId(payload.commandId);
@@ -1395,13 +1410,10 @@ export function AppShell() {
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         return;
       }
-      const blocked = runtimeBlockedDetail(error);
-      if (blocked?.code === "active_work_restart_blocked" || blocked?.code === "active_work_requires_confirmation") {
+      const blocked = parseRuntimeControlBlockedDetail(error);
+      if (isActiveWorkRestartBlocked(blocked)) {
         lifecycleOverlayDismissedRef.current = false;
-        const blockedDetails = blocked.activeWorkRuns
-          ?.map((item) => [item.kind, item.status, item.runId || item.sessionId].filter(Boolean).join(" · "))
-          .filter(Boolean)
-          .join(" · ") ?? "";
+        const blockedDetails = formatActiveWorkRunsDetail(blocked?.activeWorkRuns);
         setRestartRequested(false);
         setShutdownRequested(false);
         setShutdownOpen(true);
@@ -1448,6 +1460,7 @@ export function AppShell() {
     clearRestartCompletionDismissTimer,
     emitBrowserTelemetry,
     lang,
+    requestLifecycle,
     restartBody,
     restartHeading,
     restartUnconfirmedBody,
@@ -2321,58 +2334,84 @@ export function AppShell() {
 
         <nav className={styles.nav} data-shell-group="navigation" aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
           {chatEnabled ? (
-            <NavLink
+            <VRouteLinkButton
+              chrome="shell-nav"
               to="/chat"
-              className={linkClassName}
+              className={shellPrimaryNavClass(location.pathname, "/chat")}
+              aria-current={isShellPrimaryNavActive(location.pathname, "/chat") ? "page" : undefined}
               onPointerEnter={() => preloadChatRouteForNav("pointerenter")}
               onFocus={() => preloadChatRouteForNav("focus")}
               onClick={(event) => handlePrimaryNavClick(event, "/chat")}
             >
               {t("navChat")}
-            </NavLink>
+            </VRouteLinkButton>
           ) : (
             <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Chat is disabled" : "对话未启用"}>
               {t("navChat")}
             </span>
           )}
           {supervisedEvolutionEnabled ? (
-            <NavLink
+            <VRouteLinkButton
+              chrome="shell-nav"
               to="/supervised-evolution"
-              className={linkClassName}
+              className={shellPrimaryNavClass(location.pathname, "/supervised-evolution")}
+              aria-current={isShellPrimaryNavActive(location.pathname, "/supervised-evolution") ? "page" : undefined}
               onClick={(event) => handlePrimaryNavClick(event, "/supervised-evolution")}
             >
               {t("navSupervisedEvolution")}
-            </NavLink>
+            </VRouteLinkButton>
           ) : (
             <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Supervised evolution is disabled" : "监督进化未启用"}>
               {t("navSupervisedEvolution")}
             </span>
           )}
           {selfEvolutionEnabled ? (
-            <NavLink
+            <VRouteLinkButton
+              chrome="shell-nav"
               to="/self-evolution"
-              className={linkClassName}
+              className={shellPrimaryNavClass(location.pathname, "/self-evolution")}
+              aria-current={isShellPrimaryNavActive(location.pathname, "/self-evolution") ? "page" : undefined}
               onClick={(event) => handlePrimaryNavClick(event, "/self-evolution")}
             >
               {t("navSelfEvolution")}
-            </NavLink>
+            </VRouteLinkButton>
           ) : (
             <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Self evolution is disabled" : "自进化未启用"}>
               {t("navSelfEvolution")}
             </span>
           )}
-          <NavLink to="/teams" className={linkClassName} onClick={(event) => handlePrimaryNavClick(event, "/teams")}>
+          <VRouteLinkButton
+            chrome="shell-nav"
+            to="/teams"
+            className={shellPrimaryNavClass(location.pathname, "/teams")}
+            aria-current={isShellPrimaryNavActive(location.pathname, "/teams") ? "page" : undefined}
+            onClick={(event) => handlePrimaryNavClick(event, "/teams")}
+          >
             {t("navTeams")}
-          </NavLink>
-          <NavLink to="/kernel" className={linkClassName} onClick={(event) => handlePrimaryNavClick(event, "/kernel")}>
+          </VRouteLinkButton>
+          <VRouteLinkButton
+            chrome="shell-nav"
+            to="/kernel"
+            className={shellPrimaryNavClass(location.pathname, "/kernel")}
+            aria-current={isShellPrimaryNavActive(location.pathname, "/kernel") ? "page" : undefined}
+            onClick={(event) => handlePrimaryNavClick(event, "/kernel")}
+          >
             Kernel
-          </NavLink>
-          <NavLink to="/memory" className={linkClassName} onClick={(event) => handlePrimaryNavClick(event, "/memory")}>
+          </VRouteLinkButton>
+          <VRouteLinkButton
+            chrome="shell-nav"
+            to="/memory"
+            className={shellPrimaryNavClass(location.pathname, "/memory")}
+            aria-current={isShellPrimaryNavActive(location.pathname, "/memory") ? "page" : undefined}
+            onClick={(event) => handlePrimaryNavClick(event, "/memory")}
+          >
             {t("navMemory")}
-          </NavLink>
-          <NavLink
+          </VRouteLinkButton>
+          <VRouteLinkButton
+            chrome="shell-nav"
             to="/agents"
-            className={linkClassName}
+            className={shellPrimaryNavClass(location.pathname, "/agents")}
+            aria-current={isShellPrimaryNavActive(location.pathname, "/agents") ? "page" : undefined}
             onClick={(event) => handlePrimaryNavClick(event, "/agents")}
             onPointerEnter={() => {
               // C1.1: soft-warm Agents structured workbench copy (not flat TranslationKey).
@@ -2382,7 +2421,7 @@ export function AppShell() {
             }}
           >
             {t("navAgents")}
-          </NavLink>
+          </VRouteLinkButton>
         </nav>
         <div className={styles.mobileNav} data-shell-group="mobile-navigation" aria-label={activePrimaryRouteLabel}>
           <span className={styles.mobileNavLabel}>{activePrimaryRouteLabel}</span>
@@ -2426,31 +2465,53 @@ export function AppShell() {
               <div className={styles.utilityPopoverBody}>
                 <nav id="shell-mobile-route-menu" className={styles.mobileRouteMenu} aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
                   {chatEnabled ? (
-                    <NavLink
+                    <VRouteLinkButton
+                      chrome="shell-nav"
                       to="/chat"
-                      className={mobileLinkClassName}
+                      className={shellMobileNavClass(location.pathname, "/chat")}
+                      aria-current={isShellPrimaryNavActive(location.pathname, "/chat") ? "page" : undefined}
                       onClick={() => {
                         preloadChatRouteForNav("click");
                         closeUtilityMenu();
                       }}
                     >
                       {t("navChat")}
-                    </NavLink>
+                    </VRouteLinkButton>
                   ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navChat")}</span>}
                   {supervisedEvolutionEnabled ? (
-                    <NavLink to="/supervised-evolution" className={mobileLinkClassName} onClick={closeUtilityMenu}>
+                    <VRouteLinkButton
+                      chrome="shell-nav"
+                      to="/supervised-evolution"
+                      className={shellMobileNavClass(location.pathname, "/supervised-evolution")}
+                      aria-current={isShellPrimaryNavActive(location.pathname, "/supervised-evolution") ? "page" : undefined}
+                      onClick={closeUtilityMenu}
+                    >
                       {t("navSupervisedEvolution")}
-                    </NavLink>
+                    </VRouteLinkButton>
                   ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSupervisedEvolution")}</span>}
                   {selfEvolutionEnabled ? (
-                    <NavLink to="/self-evolution" className={mobileLinkClassName} onClick={closeUtilityMenu}>
+                    <VRouteLinkButton
+                      chrome="shell-nav"
+                      to="/self-evolution"
+                      className={shellMobileNavClass(location.pathname, "/self-evolution")}
+                      aria-current={isShellPrimaryNavActive(location.pathname, "/self-evolution") ? "page" : undefined}
+                      onClick={closeUtilityMenu}
+                    >
                       {t("navSelfEvolution")}
-                    </NavLink>
+                    </VRouteLinkButton>
                   ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSelfEvolution")}</span>}
-                  <NavLink to="/teams" className={mobileLinkClassName} onClick={closeUtilityMenu}>{t("navTeams")}</NavLink>
-                  <NavLink to="/kernel" className={mobileLinkClassName} onClick={closeUtilityMenu}>Kernel</NavLink>
-                  <NavLink to="/memory" className={mobileLinkClassName} onClick={closeUtilityMenu}>{t("navMemory")}</NavLink>
-                  <NavLink to="/agents" className={mobileLinkClassName} onClick={closeUtilityMenu}>{t("navAgents")}</NavLink>
+                  <VRouteLinkButton chrome="shell-nav" to="/teams" className={shellMobileNavClass(location.pathname, "/teams")} aria-current={isShellPrimaryNavActive(location.pathname, "/teams") ? "page" : undefined} onClick={closeUtilityMenu}>
+                    {t("navTeams")}
+                  </VRouteLinkButton>
+                  <VRouteLinkButton chrome="shell-nav" to="/kernel" className={shellMobileNavClass(location.pathname, "/kernel")} aria-current={isShellPrimaryNavActive(location.pathname, "/kernel") ? "page" : undefined} onClick={closeUtilityMenu}>
+                    Kernel
+                  </VRouteLinkButton>
+                  <VRouteLinkButton chrome="shell-nav" to="/memory" className={shellMobileNavClass(location.pathname, "/memory")} aria-current={isShellPrimaryNavActive(location.pathname, "/memory") ? "page" : undefined} onClick={closeUtilityMenu}>
+                    {t("navMemory")}
+                  </VRouteLinkButton>
+                  <VRouteLinkButton chrome="shell-nav" to="/agents" className={shellMobileNavClass(location.pathname, "/agents")} aria-current={isShellPrimaryNavActive(location.pathname, "/agents") ? "page" : undefined} onClick={closeUtilityMenu}>
+                    {t("navAgents")}
+                  </VRouteLinkButton>
                 </nav>
                 <Suspense fallback={null}>
                   <LazyAppShellUtilityMenu
@@ -2534,113 +2595,83 @@ export function AppShell() {
             icon={<PanelTopClose size={16} />}
             onPress={() => setTopBarMode("hidden")}
           />
-          <div
-            className={
-              lifecycleMenuOpen
-                ? `${styles.lifecycleMenuCluster} ${styles.lifecycleMenuClusterOpen}`
-                : styles.lifecycleMenuCluster
-            }
-          >
-            <VDropdownMenu
-              open={lifecycleMenuOpen}
-              onOpenChange={setLifecycleMenuOpen}
-              align="end"
-              side="bottom"
-              aria-label={lifecycleMenuLabel}
-              contentClassName={styles.lifecycleMenuPanel}
-              itemClassName={styles.lifecycleMenuItem}
-              dangerItemClassName={styles.lifecycleMenuDangerItem}
-              trigger={(
-                <VButton
-                  type="button"
-                  isIconOnly
-                  className={styles.actionIconButton}
-                  aria-label={lifecycleMenuLabel}
-                  tooltip={lifecycleMenuLabel}
-                  title={lifecycleMenuLabel}
-                  isDisabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
-                  icon={<Power size={16} />}
-                />
-              )}
-              items={[
-                {
-                  id: "shutdown",
-                  icon: <Power size={15} />,
-                  disabled: restartRequested || (shutdownInFlight && !shutdownSettled),
-                  label: closeWorkbenchLabel,
-                  onSelect: () => {
-                    const proceed = () => {
-                      void beginShutdown();
-                    };
-                    if (requestWorkbenchExitGuard("shutdown", proceed)) {
-                      proceed();
-                    }
-                  },
-                },
-                ...(forceCloseVisible
-                  ? [{
-                      id: "force-shutdown",
-                      icon: <Power size={15} />,
-                      danger: true,
-                      disabled: restartRequested,
-                      label: forceCloseWorkbenchLabel,
-                      onSelect: () => {
-                        void beginForceShutdown();
+          <VWorkbenchPowerMenu
+            open={lifecycleMenuOpen}
+            onOpenChange={setLifecycleMenuOpen}
+            variant="icon"
+            labels={{
+              menu: lifecycleMenuLabel,
+              restart: restartWorkbenchLabel,
+              stop: closeWorkbenchLabel,
+              forceStop: forceCloseWorkbenchLabel,
+            }}
+            disabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
+            restartDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
+            stopDisabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
+            forceStopDisabled={restartRequested}
+            showForceStop={forceCloseVisible}
+            triggerClassName={styles.actionIconButton}
+            contentClassName={styles.lifecycleMenuPanel}
+            itemClassName={styles.lifecycleMenuItem}
+            dangerItemClassName={styles.lifecycleMenuDangerItem}
+            clusterClassName={styles.lifecycleMenuCluster}
+            clusterOpenClassName={styles.lifecycleMenuClusterOpen}
+            onAction={(action: VWorkbenchPowerMenuAction) => {
+              if (action === "stop") {
+                const proceed = () => {
+                  void beginShutdown();
+                };
+                if (requestWorkbenchExitGuard("shutdown", proceed)) {
+                  proceed();
+                }
+                return;
+              }
+              if (action === "force-stop") {
+                void beginForceShutdown();
+                return;
+              }
+              const proceed = () => {
+                if (activeWorkIndicator) {
+                  setShutdownOpen(true);
+                  setShutdownSettled(false);
+                  setShutdownRequested(false);
+                  setRestartRequested(false);
+                  setLifecycleAction("restart");
+                  setLifecycleCommandId("");
+                  setLifecycleCancelPending(false);
+                  setShutdownTitle(restartHeading);
+                  setShutdownDetail(restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle));
+                  emitBrowserTelemetry(
+                    {
+                      phase: "restart",
+                      eventCode: "browser.user_action.restart_blocked_active_work",
+                      message: "Restart was blocked because active work is running.",
+                      level: "warning",
+                      fields: {
+                        action: "restart",
+                        source: "app_shell",
+                        activeWorkCount: activeWorkIndicator.count,
+                        activeWorkKinds: activeWorkIndicator.items.map((item) => item.kind),
                       },
-                    }]
-                  : []),
-                {
-                  id: "restart",
-                  icon: <RefreshCw size={15} />,
-                  disabled: restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled),
-                  label: restartWorkbenchLabel,
-                  onSelect: () => {
-                    const proceed = () => {
-                      if (activeWorkIndicator) {
-                        setShutdownOpen(true);
-                        setShutdownSettled(false);
-                        setShutdownRequested(false);
-                        setRestartRequested(false);
-                        setLifecycleAction("restart");
-                        setLifecycleCommandId("");
-                        setLifecycleCancelPending(false);
-                        setShutdownTitle(restartHeading);
-                        setShutdownDetail(restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle));
-                        emitBrowserTelemetry(
-                          {
-                            phase: "restart",
-                            eventCode: "browser.user_action.restart_blocked_active_work",
-                            message: "Restart was blocked because active work is running.",
-                            level: "warning",
-                            fields: {
-                              action: "restart",
-                              source: "app_shell",
-                              activeWorkCount: activeWorkIndicator.count,
-                              activeWorkKinds: activeWorkIndicator.items.map((item) => item.kind),
-                            },
-                          },
-                          { preferBeacon: true },
-                        );
-                        return;
-                      }
-                      void beginRestart();
-                    };
-                    if (requestWorkbenchExitGuard("restart", proceed)) {
-                      proceed();
-                    }
-                  },
-                },
-              ]}
-            />
-          </div>
-          <NavLink
+                    },
+                    { preferBeacon: true },
+                  );
+                  return;
+                }
+                void beginRestart();
+              };
+              if (requestWorkbenchExitGuard("restart", proceed)) {
+                proceed();
+              }
+            }}
+          />
+          <VRouteLinkButton
             to="/config"
             className={styles.actionIconButton}
             aria-label={t("navConfig")}
             title={t("navConfig")}
-          >
-            <Settings size={16} />
-          </NavLink>
+            icon={<Settings size={16} aria-hidden="true" />}
+          />
         </div>
       </header>
 

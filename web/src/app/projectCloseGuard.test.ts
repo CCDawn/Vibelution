@@ -237,6 +237,22 @@ describe("project close guard", () => {
     expect(hasRecentControlledProjectLifecycleOperation(documentLike, 2_000)).toBe(false);
   });
 
+  it("treats force-stop as a controlled close operation so the window can unload", () => {
+    const documentLike = makeCookieDocument();
+
+    markControlledProjectLifecycleOperation("force-stop", documentLike, 1_000);
+
+    expect(hasRecentControlledProjectLifecycleOperation(documentLike, 2_000)).toBe(true);
+    expect(
+      shouldBlockWorkbenchWindowClose({
+        controlledLifecycleOperationInFlight: hasRecentControlledProjectLifecycleOperation(documentLike, 2_000),
+        shutdownRequested: false,
+        restartRequested: false,
+        runtimeControllerState: "managed",
+      }),
+    ).toBe(false);
+  });
+
   it("arms a browser beforeunload confirmation", () => {
     const event = {
       preventDefault: vi.fn(),

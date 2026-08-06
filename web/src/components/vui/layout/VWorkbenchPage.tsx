@@ -1,4 +1,4 @@
-import { type ComponentPropsWithoutRef, type ReactNode } from "react";
+import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 import { cn } from "../lib/cn";
 import { VUI_PAGE_FILL_CLASS } from "./pageRecipeClasses";
@@ -13,16 +13,20 @@ export type VWorkbenchPageProps = ComponentPropsWithoutRef<"section"> & {
   fill?: boolean;
 };
 
-export function VWorkbenchPage({
-  ariaLabel,
-  children,
-  className,
-  fill = false,
-  ...props
-}: VWorkbenchPageProps) {
+export const VWorkbenchPage = forwardRef<HTMLElement, VWorkbenchPageProps>(function VWorkbenchPage(
+  {
+    ariaLabel,
+    children,
+    className,
+    fill = false,
+    ...props
+  },
+  ref,
+) {
   return (
     <section
       {...props}
+      ref={ref}
       data-vui="workbench-page"
       data-fill={fill ? "true" : "false"}
       aria-label={ariaLabel}
@@ -38,4 +42,4 @@ export function VWorkbenchPage({
       {children}
     </section>
   );
-}
+});

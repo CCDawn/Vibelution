@@ -244,7 +244,9 @@ export function markControlledProjectLifecycleOperation(
   documentLike?: CookieLikeDocument,
   atMs = Date.now(),
 ) {
-  if (operation !== "stop" && operation !== "restart") {
+  // force-stop is also a controlled close path; without it, beforeunload still blocks
+  // the Edge app window after the user explicitly force-closes from the power menu.
+  if (operation !== "stop" && operation !== "restart" && operation !== "force-stop") {
     return;
   }
   const target = cookieDocument(documentLike);
@@ -272,7 +274,7 @@ export function hasRecentControlledProjectLifecycleOperation(
   }
   const raw = decodeURIComponent(readCookieValue(target.cookie, CONTROLLED_LIFECYCLE_COOKIE));
   const [operation, timestampText] = raw.split(":");
-  if (operation !== "stop" && operation !== "restart") {
+  if (operation !== "stop" && operation !== "restart" && operation !== "force-stop") {
     return false;
   }
   const timestamp = Number(timestampText);

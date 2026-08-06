@@ -6,7 +6,7 @@ import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHan
 import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VNativeInput, VStateSurface, VTooltip } from "../components/vui";
+import { VButton, VNativeInput, VStateSurface, VTabs, VTooltip } from "../components/vui";
 import styles from "./MemoryProjectMemoryQueuePanel.styles";
 
 const MEMORY_PROJECT_QUEUE_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.memory;
@@ -111,24 +111,21 @@ export function MemoryProjectMemoryQueuePanel({
           <p className={styles.panelEyebrow}>{copy.governance}</p>
           <h2>{copy.projectMemoryQueue}</h2>
         </div>
-        <div className={styles.projectMemoryQueueControls} aria-label={copy.status}>
-          <VButton
-            type="button"
-            className={isPendingOnly ? styles.filterButtonActive : styles.filterButton}
-            aria-pressed={isPendingOnly}
-            onClick={() => onFilterChange("pending")}
-          >
-            {copy.projectMemoryQueuePendingOnly}
-          </VButton>
-          <VButton
-            type="button"
-            className={!isPendingOnly ? styles.filterButtonActive : styles.filterButton}
-            aria-pressed={!isPendingOnly}
-            onClick={() => onFilterChange("")}
-          >
-            {copy.projectMemoryQueueAll}
-          </VButton>
-        </div>
+        <VTabs
+          density="compact"
+          className={styles.queueFilterTabs}
+          listClassName={styles.queueFilterTabsList}
+          triggerClassName={styles.queueFilterTabsTrigger}
+          aria-label={copy.status}
+          value={isPendingOnly ? "pending" : "all"}
+          onValueChange={(value) => {
+            onFilterChange(value === "pending" ? "pending" : "");
+          }}
+          items={[
+            { id: "pending", label: copy.projectMemoryQueuePendingOnly },
+            { id: "all", label: copy.projectMemoryQueueAll },
+          ]}
+        />
       </div>
       <VTooltip content={copy.projectMemoryQueueHint} width="wide">
         <div

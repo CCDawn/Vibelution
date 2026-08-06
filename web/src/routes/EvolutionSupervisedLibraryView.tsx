@@ -10,6 +10,7 @@ import {
   VStateSurface,
   VStringSelect,
   VSurface,
+  VTabs,
   VTextarea,
   VTooltip,
 } from "../components/vui";
@@ -329,22 +330,23 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                   <p className={styles.eyebrow}>{t("recentLibraryAdditions")}</p>
                   <h2 className={styles.sectionTitle}>{t("library")}</h2>
                 </div>
-                <div className={styles.filterSegmented}>
-                  {(["items", "pending"] as const).map((view) => (
-                    <VButton
-                      key={view}
-                      type="button"
-                      className={
-                        libraryView === view
-                          ? `${styles.filterButton} ${styles.filterButtonActive}`
-                          : styles.filterButton
-                      }
-                      onClick={() => onLibraryViewChange(view)}
-                    >
-                      {view === "items" ? t("libraryItems") : t("pendingReview")}
-                    </VButton>
-                  ))}
-                </div>
+                <VTabs
+                  density="compact"
+                  className={styles.filterTabs}
+                  listClassName={styles.filterTabsList}
+                  triggerClassName={styles.filterTabsTrigger}
+                  aria-label={t("library")}
+                  value={libraryView}
+                  onValueChange={(value) => {
+                    if (value === "items" || value === "pending") {
+                      onLibraryViewChange(value);
+                    }
+                  }}
+                  items={[
+                    { id: "items", label: t("libraryItems") },
+                    { id: "pending", label: t("pendingReview") },
+                  ]}
+                />
               </div>
               <div className={styles.summaryMetricStrip}>
                 <article className={styles.stripItem}>

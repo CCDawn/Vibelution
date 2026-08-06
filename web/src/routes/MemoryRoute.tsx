@@ -10,7 +10,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { NavLink, useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -2198,6 +2198,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
+  const location = useLocation();
   const pageVisible = usePageVisibility();
   const [searchParams, setSearchParams] = useSearchParams();
   const searchParamText = searchParams.toString();
@@ -3303,18 +3304,24 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const renderSubnav = () => (
     <nav className={styles.subnav} aria-label={copy.title}>
-      {MEMORY_VIEWS.map((view) => (
-        <NavLink
-          key={view.key}
-          to={view.href}
-          end={view.key === "overview"}
-          className={({ isActive }) =>
-            isActive || forcedView === view.key ? `${styles.subnavLink} ${styles.subnavLinkActive}` : styles.subnavLink
-          }
-        >
-          {memoryViewLabel(copy, view.key)}
-        </NavLink>
-      ))}
+      {MEMORY_VIEWS.map((view) => {
+        const path = location.pathname;
+        const routeActive = view.key === "overview"
+          ? path === "/memory" || path === "/memory/"
+          : path === view.href || path.startsWith(`${view.href}/`);
+        const active = routeActive || forcedView === view.key;
+        return (
+          <VRouteLinkButton
+            key={view.key}
+            chrome="shell-nav"
+            to={view.href}
+            className={active ? `${styles.subnavLink} ${styles.subnavLinkActive}` : styles.subnavLink}
+            aria-current={active ? "page" : undefined}
+          >
+            {memoryViewLabel(copy, view.key)}
+          </VRouteLinkButton>
+        );
+      })}
     </nav>
   );
 

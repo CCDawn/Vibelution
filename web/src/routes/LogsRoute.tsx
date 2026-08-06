@@ -35,7 +35,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
-import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTooltip } from "../components/vui";
+import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTabs, VTooltip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
 import {
@@ -786,24 +786,31 @@ export function LogsRoute() {
   const selectPackageFileLabel = lang === "zh" ? "选择文件" : "Select file";
   const deselectPackageFileLabel = lang === "zh" ? "取消选择文件" : "Deselect file";
   const severityFilterControl = (
-    <div className={styles.filterGroup} role="group" aria-label={t("logSeverityFilter")}>
-      {severityFilterOptions.map((option) => {
+    <VTabs
+      density="compact"
+      className={styles.filterTabs}
+      listClassName={styles.filterTabsList}
+      triggerClassName={styles.filterTabsTrigger}
+      aria-label={t("logSeverityFilter")}
+      value={severityFilter}
+      onValueChange={(value) => {
+        if (severityFilterOptions.some((option) => option.value === value)) {
+          setSeverityFilter(value as LogSeverityFilter);
+        }
+      }}
+      items={severityFilterOptions.map((option) => {
         const Icon = option.icon;
-        const active = severityFilter === option.value;
-        return (
-          <VButton
-            key={option.value}
-            type="button"
-            variant="secondary"
-            className={active ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-            onPress={() => setSeverityFilter(option.value)}
-            icon={<Icon size={14} />}
-          >
-            <span>{option.label}</span>
-          </VButton>
-        );
+        return {
+          id: option.value,
+          label: (
+            <span className={styles.filterTabLabel}>
+              <Icon size={14} aria-hidden="true" />
+              <span>{option.label}</span>
+            </span>
+          ),
+        };
       })}
-    </div>
+    />
   );
   const previewActions = (
     <div className={styles.previewActions}>

@@ -18,6 +18,7 @@ import {
   VStateSurface,
   VStatusChip,
   VSurface,
+  VTabs,
   VTooltip,
 } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -278,16 +279,23 @@ export function SkillsRoute() {
           </label>
 
           <div className={styles.filterRowClass}>
-            {SOURCE_FILTERS.map((filter) => (
-              <VButton
-                key={filter}
-                type="button"
-                className={sourceFilter === filter ? `${styles.filterButtonClass} ${styles.filterButtonActiveClass}` : styles.filterButtonClass}
-                onPress={() => setSourceFilter(filter)}
-              >
-                {sourceFilterLabel(filter, lang)}
-              </VButton>
-            ))}
+            <VTabs
+              density="compact"
+              className={styles.filterTabsClass}
+              listClassName={styles.filterTabsListClass}
+              triggerClassName={styles.filterTabsTriggerClass}
+              aria-label={copy.title}
+              value={sourceFilter}
+              onValueChange={(value) => {
+                if ((SOURCE_FILTERS as readonly string[]).includes(value)) {
+                  setSourceFilter(value as SkillSourceFilter);
+                }
+              }}
+              items={SOURCE_FILTERS.map((filter) => ({
+                id: filter,
+                label: sourceFilterLabel(filter, lang),
+              }))}
+            />
           </div>
 
           <VDenseToolbar ariaLabel={copy.bulkSelected}>

@@ -1,27 +1,24 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, LoaderCircle, Play, Power, RefreshCw, Square } from "lucide-react";
+import { ExternalLink, LoaderCircle, Play, RefreshCw } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import {
   getLauncherStatus,
   getLauncherDeveloperNoiseOverview,
   getLauncherMaintenanceSummary,
-  forceStopLauncherBundle,
   applyLauncherDeveloperCleanup,
   applyLauncherMaintenancePlan,
   previewLauncherDeveloperCleanup,
   previewLauncherMaintenancePlan,
   reattachLauncherSupervisor,
   resetLauncherDeveloperSandbox,
-  restartLauncherBundle,
   saveLauncherWorkbenchWindowMode,
-  startLauncherBundle,
-  stopLauncherBundle,
   updateLauncherDeveloperMode,
   updateLauncherStartupSettings,
 } from "../api/launcher";
+import { useWorkbenchLifecycleActions } from "../app/useWorkbenchLifecycleActions";
 import { queryKeys } from "../api/queryKeys";
 import type {
   LauncherDeveloperCleanupAction,
@@ -51,6 +48,10 @@ import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VDenseOpsPage, VStateSurface, VTooltip } from "../components/vui";
+import {
+  VWorkbenchPowerMenu,
+  type VWorkbenchPowerMenuAction,
+} from "../components/vui/product/workbench-shell";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
@@ -244,6 +245,9 @@ type LauncherCopy = {
   forceStopHint: string;
   forceStopDisabledClosed: string;
   forceStopDisabledInFlight: string;
+  powerMenu: string;
+  stopWorkbench: string;
+  restart: string;
   useCheckAction: string;
   useStartAction: string;
   useWaitAction: string;
@@ -894,6 +898,7 @@ export function LauncherRoute() {
   const { lang } = useShellI18n({ configEnabled: false });
   const queryClient = useQueryClient();
   const pageVisible = usePageVisibility();
+  const { request: requestLifecycle } = useWorkbenchLifecycleActions("launcher_route");
   const locale = lang === "zh" ? "zh-CN" : "en-US";
   const {
     layoutRef: launcherLayoutRef,
@@ -918,8 +923,10 @@ export function LauncherRoute() {
         refresh: "刷新",
         start: "启动",
         stop: "停止",
-        forceStop: "强制关闭",
-        restart: "重启",
+        forceStop: "强制停止",
+        powerMenu: "工作台电源操作",
+        restart: "重启工作台",
+        stopWorkbench: "停止工作台",
         open: "打开",
         lifecycleControls: "生命周期控制",
         startDisabled: "启动暂不可用",
@@ -1152,8 +1159,10 @@ export function LauncherRoute() {
         refresh: "Refresh",
         start: "Start",
         stop: "Stop",
-        forceStop: "Force close",
-        restart: "Restart",
+        forceStop: "Force stop",
+        powerMenu: "Workbench power actions",
+        restart: "Restart workbench",
+        stopWorkbench: "Stop workbench",
         open: "Open",
         lifecycleControls: "Lifecycle controls",
         startDisabled: "Start is temporarily unavailable",
@@ -1413,18 +1422,7 @@ export function LauncherRoute() {
     refetchInterval: false,
   });
   const controlMutation = useMutation({
-    mutationFn: async (operation: LauncherOperation) => {
-      if (operation === "start") {
-        return startLauncherBundle();
-      }
-      if (operation === "stop") {
-        return stopLauncherBundle("launcher_route_stop_button");
-      }
-      if (operation === "force-stop") {
-        return forceStopLauncherBundle("launcher_route_force_stop_button");
-      }
-      return restartLauncherBundle();
-    },
+    mutationFn: async (operation: LauncherOperation) => requestLifecycle(operation),
     onMutate: (operation) => {
       setLastControlOperation(operation);
       markControlledProjectLifecycleOperation(operation);
@@ -2118,12 +2116,35 @@ export function LauncherRoute() {
             <VButton type="button" variant="primary" className={`${styles.statusBarButton} ${styles.primaryButton}`} onPress={() => controlMutation.mutate("start")} isDisabled={startDisabled} disabledReason={startDisabledReason} tooltip={copy.start} icon={<Play size={15} />}>
               <span>{copy.start}</span>
             </VButton>
-            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("restart")} isDisabled={destructiveActionDisabled} disabledReason={destructiveActionDisabledReason} tooltip={copy.restart} icon={<RefreshCw size={15} />}>
-              <span>{copy.restart}</span>
-            </VButton>
-            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("stop")} isDisabled={stopDisabled} disabledReason={stopDisabledReason} tooltip={copy.stop} icon={<Square size={15} />}>
-              <span>{copy.stop}</span>
-            </VButton>
+            <VWorkbenchPowerMenu
+              variant="labeled"
+              labels={{
+                menu: copy.powerMenu,
+                restart: copy.restart,
+                stop: copy.stopWorkbench,
+                forceStop: copy.forceStop,
+              }}
+              disabled={busy}
+              restartDisabled={destructiveActionDisabled}
+              stopDisabled={stopDisabled}
+              forceStopDisabled={forceStopDisabled}
+              showForceStop
+              triggerClassName={styles.statusBarButton}
+              contentClassName="vui-app-appshell lifecycleMenuPanel min-w-0"
+              itemClassName="vui-app-appshell lifecycleMenuItem min-w-0"
+              dangerItemClassName="vui-app-appshell lifecycleMenuDangerItem min-w-0"
+              onAction={(action: VWorkbenchPowerMenuAction) => {
+                if (action === "restart") {
+                  controlMutation.mutate("restart");
+                  return;
+                }
+                if (action === "stop") {
+                  controlMutation.mutate("stop");
+                  return;
+                }
+                controlMutation.mutate("force-stop");
+              }}
+            />
             {bundle?.url ? (
               <VTooltip content={copy.open} width="compact">
                 <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer">
@@ -2160,12 +2181,11 @@ export function LauncherRoute() {
 
           <div className={styles.dangerZone}>
             <span>{copy.forceStop}</span>
-            <small>{forceStopDisabled ? forceStopDisabledReason : copy.forceStopHint}</small>
-            <div className={styles.dangerActions}>
-              <VButton type="button" variant="danger" className={`${styles.iconButton} ${styles.dangerButton}`} onPress={() => controlMutation.mutate("force-stop")} isDisabled={forceStopDisabled} disabledReason={forceStopDisabledReason} tooltip={copy.forceStopHint} icon={<Power size={15} />}>
-                <span>{copy.forceStop}</span>
-              </VButton>
-            </div>
+            <small>
+              {forceStopDisabled
+                ? forceStopDisabledReason
+                : `${copy.forceStopHint} · ${copy.powerMenu}`}
+            </small>
           </div>
         </div>
       )}

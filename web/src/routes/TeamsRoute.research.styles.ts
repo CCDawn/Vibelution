@@ -53,14 +53,17 @@ const styles = {
     "researchInspector min-w-0",
   researchLoopActive:
     `researchLoopActive min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border p-2 max-[760px]:grid-cols-[minmax(0,1fr)] ${vuiStateSelectedRowClass} [&>div:first-child]:grid [&>div:first-child]:min-w-0 [&>div:first-child]:gap-1 [&_strong]:min-w-0 [&_strong]:break-words [&_small]:min-w-0 [&_small]:break-words [&_small]:leading-[var(--vui-line-readable)]`,
-  researchLoopChoice:
-    "researchLoopChoice min-w-0 max-w-full !h-auto !min-h-[var(--vui-control-height-sm)] !whitespace-normal break-words px-2 py-1 text-left leading-[var(--vui-line-compact)]",
-  researchLoopChoiceActive:
-    `researchLoopChoiceActive ${vuiStateSelectedRowFillClass} !border-[color:color-mix(in_srgb,var(--accent-cool)_52%,var(--border-soft))] !text-[var(--fg-primary)]`,
   researchLoopChoiceField:
     "researchLoopChoiceField min-w-0 grid content-start gap-1",
-  researchLoopChoiceGrid:
-    "researchLoopChoiceGrid min-w-0 flex flex-wrap items-stretch gap-1",
+  researchLoopChoiceTabs:
+    "researchLoopChoiceTabs min-w-0 inline-grid w-full max-w-full gap-0",
+  researchLoopChoiceTabsList:
+    "researchLoopChoiceTabsList min-w-0 flex flex-wrap items-stretch gap-1 border-0 bg-transparent p-0",
+  researchLoopChoiceTabsTrigger:
+    "researchLoopChoiceTabsTrigger min-w-0 max-w-full !h-auto !min-h-[var(--vui-control-height-sm)] !whitespace-normal break-words px-2 py-1 text-left leading-[var(--vui-line-compact)] " +
+    "data-[state=active]:!border-[color:color-mix(in_srgb,var(--accent-cool)_52%,var(--border-soft))] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
+    "data-[state=active]:!text-[var(--fg-primary)]",
   researchLoopDecisionForm:
     "researchLoopDecisionForm min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   researchLoopEvidenceForm:

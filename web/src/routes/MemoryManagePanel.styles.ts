@@ -18,6 +18,15 @@ const styles = {
     `detailActionButton min-w-0 ${vuiControlQuietClass}`,
   emptyDetail:
     "emptyDetail min-h-[96px]",
+  filterTabs: "filterTabs inline-grid w-fit max-w-full min-w-0 gap-0",
+  filterTabsList:
+    "filterTabsList inline-flex min-w-0 max-w-full flex-wrap items-center gap-1.5 border-0 bg-transparent p-0",
+  filterTabsTrigger:
+    `filterTabsTrigger min-w-0 ${vuiControlQuietClass} gap-1.5 ` +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
+    "data-[state=active]:text-[var(--accent-cool)]",
+  // Legacy aliases for style geometry contracts.
   filterButton:
     `filterButton min-w-0 ${vuiControlQuietClass}`,
   filterButtonActive:

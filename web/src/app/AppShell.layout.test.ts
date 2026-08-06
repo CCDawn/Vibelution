@@ -417,9 +417,11 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('role="region"');
     expect(utilityMenuSource).not.toContain('role="menu"');
     expect(utilityMenuSource).not.toContain('role="menuitem"');
-    expect(utilityMenuSource).toContain('import { VButton, VNativeInput, VTooltip } from "../components/vui"');
+    expect(utilityMenuSource).toContain('import { VButton, VNativeInput, VRouteLinkButton, VTooltip } from "../components/vui"');
     expect(utilityMenuSource).toContain("<VNativeInput");
+    expect(utilityMenuSource).toContain("<VRouteLinkButton");
     expect(utilityMenuSource).not.toMatch(/<input\b/);
+    expect(utilityMenuSource).not.toContain("<NavLink");
     expect(utilityMenuSource).not.toContain("hidden={!utilityOpen}");
     expect(utilityMenuSource).toContain('to="/usage"');
     expect(utilityMenuSource).toContain('t("navUsage")');
@@ -439,6 +441,15 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('to="/git"');
     expect(utilityMenuSource).toContain('href="/launcher"');
     expect(utilityMenuSource).toContain('target="_blank"');
+    // Shell SPA links are VRouteLinkButton (primary nav uses shell-nav chrome).
+    expect(shellSource).toContain("<VRouteLinkButton");
+    expect(shellSource).toContain('chrome="shell-nav"');
+    expect(shellSource).toContain("shellPrimaryNavClass");
+    expect(shellSource).toContain("shellMobileNavClass");
+    expect(shellSource).toContain("isShellPrimaryNavActive");
+    expect(shellSource).not.toContain("<NavLink");
+    expect(shellSource).toContain('to="/config"');
+    expect(shellSource).toContain("icon={<Settings size={16}");
     expect(utilityMenuSource).toContain("requiresAttention");
     expect(utilityMenuSource).toContain("gitStatusLevel");
     expect(utilityMenuSource).toContain("gitSignalGrid");
@@ -578,14 +589,21 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("lifecycleMenuCluster");
     expect(shellSource).toContain("lifecycleMenuPanel");
     expect(shellSource).toContain("lifecycleMenuOpen");
-    expect(shellSource).toContain("<VDropdownMenu");
+    expect(shellSource).toContain("VWorkbenchPowerMenu");
+    expect(shellSource).toContain('variant="icon"');
     expect(shellSource).toContain("contentClassName={styles.lifecycleMenuPanel}");
-    expect(shellSource).toContain('id: "shutdown"');
-    expect(shellSource).toContain('id: "restart"');
-    expect(shellSource).toContain("restartLauncherBundle");
-    expect(shellSource).toContain("stopLauncherBundle");
-    expect(shellSource).toContain("forceStopLauncherBundle");
+    // Lifecycle control goes through the shared action path (not raw launcher helpers).
+    expect(shellSource).toContain('useWorkbenchLifecycleActions("app_shell")');
+    expect(shellSource).toContain('requestLifecycle("stop")');
+    expect(shellSource).toContain('requestLifecycle("force-stop")');
+    expect(shellSource).toContain('requestLifecycle("restart")');
+    expect(shellSource).not.toContain("stopLauncherBundle");
+    expect(shellSource).not.toContain("forceStopLauncherBundle");
+    expect(shellSource).not.toContain("restartLauncherBundle");
     expect(shellSource).toContain("cancelRuntimeLifecycleCommand");
+    expect(shellSource).toContain("parseRuntimeControlBlockedDetail");
+    expect(shellSource).toContain("isActiveWorkStopBlocked");
+    expect(shellSource).toContain("isActiveWorkRestartBlocked");
     expect(shellSource).not.toContain('"/api/runtime/restart"');
     expect(shellSource).not.toContain('"/api/runtime/shutdown"');
     expect(shellSource).toContain("restartWorkbenchLabel");
@@ -608,6 +626,12 @@ describe("AppShell layout contract", () => {
     expect(styles.lifecycleMenuPanel).toBeTypeOf("string");
     expect(styles.lifecycleMenuItem).toBeTypeOf("string");
     expect(styles.lifecycleMenuDangerItem).toBeTypeOf("string");
+    // Portal menu must not rely on .lifecycleMenuClusterOpen for hit-testing
+    // (panel is portaled to document.body, outside the cluster).
+    const panelRule = shellStyles.match(/\.lifecycleMenuPanel\s*\{[\s\S]*?\n\}/);
+    expect(panelRule?.[0] ?? "").toContain("pointer-events: auto");
+    expect(panelRule?.[0] ?? "").not.toContain("pointer-events: none");
+    expect(shellStyles).not.toContain(".lifecycleMenuClusterOpen .lifecycleMenuPanel");
   });
 
   it("lets lifecycle wait overlays be cancelled without stopping active work", () => {
@@ -671,7 +695,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('data-shell-group="mobile-navigation"');
     expect(shellSource).toContain('id="shell-mobile-route-menu"');
     expect(shellSource).toContain('aria-haspopup="dialog"');
-    expect(shellSource).toContain("mobileLinkClassName");
+    expect(shellSource).toContain("shellMobileNavClass");
     expect(shellSource).toContain("closeUtilityMenu");
   });
 

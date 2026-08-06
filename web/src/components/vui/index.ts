@@ -8,6 +8,7 @@ export {
 export { VButton, type VButtonProps } from "./primitives/VButton";
 export {
   VRouteLinkButton,
+  type VRouteLinkButtonChrome,
   type VRouteLinkButtonProps,
 } from "./primitives/VRouteLinkButton";
 export { VChip, type VChipProps } from "./primitives/VChip";
@@ -91,6 +92,11 @@ export { VBoardWorkbenchPage, type VBoardWorkbenchPageProps } from "./layout/VBo
 export { VCanvasWorkbenchPage, type VCanvasWorkbenchPageProps } from "./layout/VCanvasWorkbenchPage";
 export { VDenseOpsPage, type VDenseOpsPageProps } from "./layout/VDenseOpsPage";
 export { VListDetailPage, type VListDetailPageProps } from "./layout/VListDetailPage";
+export {
+  VTrackWorkbenchPage,
+  type VTrackWorkbenchHeader,
+  type VTrackWorkbenchPageProps,
+} from "./layout/VTrackWorkbenchPage";
 export { VPage, type VPageProps } from "./layout/VPage";
 export {
   VUI_BOARD_CONTENT_PAD_CLASS,
@@ -119,3 +125,9 @@ export { VStack, type VStackProps } from "./layout/VStack";
 export { VTabs, type VTabsItem, type VTabsProps } from "./layout/VTabs";
 export { VToolbar, type VToolbarProps } from "./layout/VToolbar";
 export { VWorkbenchPage, type VWorkbenchPageProps } from "./layout/VWorkbenchPage";
+export {
+  VWorkbenchPowerMenu,
+  type VWorkbenchPowerMenuAction,
+  type VWorkbenchPowerMenuLabels,
+  type VWorkbenchPowerMenuProps,
+} from "./product/workbench-shell";

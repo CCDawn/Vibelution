@@ -268,8 +268,9 @@ describe("SelfEvolutionTrack static assets", () => {
 
   it("offers isolated development and pure observation modes", () => {
     expect(selfEvolutionSource).toContain('type SelfEvolutionMode = "isolated_development" | "observation"');
-    expect(selfEvolutionSource).toContain('value="isolated_development"');
-    expect(selfEvolutionSource).toContain('value="observation"');
+    expect(selfEvolutionSource).toContain('id: "isolated_development"');
+    expect(selfEvolutionSource).toContain('id: "observation"');
+    expect(selfEvolutionSource).toContain("<VTabs");
     expect(selfEvolutionSource).toContain("自主观察");
     expect(selfEvolutionSource).toContain("隔离开发");
   });
@@ -369,7 +370,9 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain('const [observationInputMode, setObservationInputMode] = useState<SelfObservationInputMode>("prompt")');
     expect(selfEvolutionSource).toContain('observationInputModeValue === "blank"');
     expect(selfEvolutionSource).toContain('observationInputModeValue !== "blank" && !observationPromptFilled');
-    expect(selfEvolutionSource).toContain('value="blank"');
+    expect(selfEvolutionSource).toContain('id: "blank"');
+    expect(selfEvolutionSource).toContain('id: "prompt"');
+    expect(selfEvolutionSource).toContain('disabled: observationRunActive || observationStartPending');
     expect(selfEvolutionSource).toContain('disabled={observationRunActive || observationStartPending || observationInputModeValue === "blank"}');
     expect(selfEvolutionSource).toContain("首轮发送内容为空的 user 消息；后续复用同一模型会话");
     expect(selfEvolutionSource).toContain("Later calls continue the same model conversation");

@@ -31,7 +31,7 @@ import {
 } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VIconButton, VNativeInput } from "../components/vui";
+import { VButton, VIconButton, VNativeInput, VTabs } from "../components/vui";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
 import { classifyRuntimeSceneEvent, type LogSeverityFilter, matchesSeverityFilter } from "../logs/logSeverity";
@@ -1051,24 +1051,31 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   const selectedCountLabel =
     lang === "zh" ? `${t("selectedScenes")} ${selectedSceneIds.length} 组` : `${selectedSceneIds.length} ${t("selectedScenes")}`;
   const severityFilterControl = (
-    <div className={styles.filterGroup} role="group" aria-label={t("logSeverityFilter")}>
-      {severityFilterOptions.map((option) => {
+    <VTabs
+      density="compact"
+      className={styles.filterTabs}
+      listClassName={styles.filterTabsList}
+      triggerClassName={styles.filterTabsTrigger}
+      aria-label={t("logSeverityFilter")}
+      value={severityFilter}
+      onValueChange={(value) => {
+        if (severityFilterOptions.some((option) => option.value === value)) {
+          setSeverityFilter(value as LogSeverityFilter);
+        }
+      }}
+      items={severityFilterOptions.map((option) => {
         const Icon = option.icon;
-        const active = severityFilter === option.value;
-        return (
-          <VButton
-            key={option.value}
-            type="button"
-            variant="secondary"
-            className={active ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-            onPress={() => setSeverityFilter(option.value)}
-            icon={<Icon size={14} />}
-          >
-            <span>{option.label}</span>
-          </VButton>
-        );
+        return {
+          id: option.value,
+          label: (
+            <span className={styles.filterTabLabel}>
+              <Icon size={14} aria-hidden="true" />
+              <span>{option.label}</span>
+            </span>
+          ),
+        };
       })}
-    </div>
+    />
   );
 
   function handleToggleSelection(sceneId: string) {

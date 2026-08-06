@@ -11,8 +11,6 @@ const rowSurfaceHover =
   "hover:border-[color-mix(in_srgb,var(--vui-border-soft)_88%,transparent)] hover:!bg-[var(--vui-surface-row-hover)]";
 const mutedControl =
   "inline-flex h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-[9px] py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_82%,transparent)] hover:text-vui-fg-primary disabled:cursor-default disabled:opacity-55";
-const activeControl =
-  "h-[var(--vui-control-height-sm)] border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_14%,var(--vui-control-muted))] text-[var(--accent-warm-2)]";
 
 export const gitRouteStyles = {
   route:
@@ -59,11 +57,15 @@ export const gitRouteStyles = {
     "inline-flex min-h-6 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] px-2 [font-size:var(--vui-font-xs)] text-[var(--accent-cool)]",
   inlineMeta:
     "inline-flex min-h-6 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] px-2 [font-size:var(--vui-font-xs)] text-[var(--accent-cool)]",
-  filterRow: "flex flex-wrap gap-1.5",
+  filterTabs: "inline-grid w-fit max-w-full min-w-0 gap-0",
+  filterTabsList: "inline-flex min-w-0 max-w-full flex-wrap items-center gap-1.5 border-0 bg-transparent p-0",
+  filterTabsTrigger:
+    `${mutedControl} ` +
+    "data-[state=active]:h-[var(--vui-control-height-sm)] " +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_14%,var(--vui-control-muted))] " +
+    "data-[state=active]:text-[var(--accent-warm-2)]",
   selectionRow: "flex gap-1.5",
-  filterButton:
-    mutedControl,
-  filterButtonActive: activeControl,
   selectionButton:
     mutedControl,
   fileList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",

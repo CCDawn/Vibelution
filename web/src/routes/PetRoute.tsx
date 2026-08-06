@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { PetSummary } from "../api/types";
+import { VDenseOpsPage } from "../components/vui";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./PetRoute.styles";
@@ -32,24 +33,30 @@ export function PetRoute() {
     "--pet-progress": `${progress}%`,
   };
   const avatarPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
+  const title = pet?.name ?? t("loadingPetState");
+  const meta = pet?.statusLine ?? t("readingCompanionState");
 
   return (
-    <div className={styles.pageClass}>
-      <section className={styles.heroClass}>
-        <div className={styles.avatarPanelClass}>
+    <VDenseOpsPage
+      className={styles.pageClass}
+      headerClassName={styles.headerClass}
+      bodyClassName={styles.bodyClass}
+      data-vui-domain-recipe="pet-companion"
+      data-vui-recipe="pet-companion-page"
+      ariaLabel={title}
+      eyebrow={t("petSpace")}
+      title={title}
+      meta={meta}
+      actions={(
+        <div className={styles.avatarPanelClass} aria-hidden={false}>
           <div className={styles.avatarOrbClass}>{pet?.name?.[0] ?? "P"}</div>
           <p className={styles.avatarMetaClass}>
             {avatarPresetLabel} {t("preset")}
           </p>
         </div>
-        <div className={styles.heroCopyClass}>
-          <p className={styles.eyebrowClass}>{t("petSpace")}</p>
-          <h1 className={styles.titleClass}>{pet?.name ?? t("loadingPetState")}</h1>
-          <p className={styles.statusLineClass}>{pet?.statusLine ?? t("readingCompanionState")}</p>
-        </div>
-      </section>
-
-      <section className={styles.metricGridClass}>
+      )}
+    >
+      <section className={styles.metricGridClass} aria-label={t("level")}>
         <article className={styles.metricCardClass}>
           <span className={styles.metricLabelClass}>{t("level")}</span>
           <strong className={styles.metricValueClass}>{pet?.level ?? 0}</strong>
@@ -116,6 +123,6 @@ export function PetRoute() {
           )}
         </div>
       </section>
-    </div>
+    </VDenseOpsPage>
   );
 }

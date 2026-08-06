@@ -71,6 +71,16 @@ const styles = {
     "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_12%,transparent)] text-[var(--accent-warm-2)]",
   statusDiscard: `border-[var(--vui-surface-row)] ${vuiOpaqueRowClass} text-[var(--fg-secondary)]`,
   queueControls: "flex flex-col gap-2.5",
+  filterTabs: "inline-grid w-fit max-w-full min-w-0 gap-0",
+  filterTabsList: "inline-flex flex-wrap items-center gap-1.5 border-0 bg-transparent p-0",
+  filterTabsTrigger:
+    `${reviewControlButton} data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_13%,var(--vui-surface-row))] data-[state=active]:text-[var(--accent-warm-2)]`,
+  decisionTabs: "inline-grid w-fit max-w-full min-w-0 gap-0",
+  decisionTabsList: "inline-flex flex-wrap items-center gap-1.5 border-0 bg-transparent p-0",
+  decisionTabsTrigger:
+    `${reviewControlButton} data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] data-[state=active]:text-[var(--accent-warm-2)]`,
+  decisionTabLabel: "inline-flex min-w-0 items-center gap-1.5",
+  // Legacy aliases for style geometry contracts.
   filterSegmented: "flex flex-wrap items-center gap-1.5",
   decisionSegmented: "flex flex-wrap items-center gap-1.5",
   filterButton: reviewControlButton,

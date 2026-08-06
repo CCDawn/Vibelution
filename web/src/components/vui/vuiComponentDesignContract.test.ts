@@ -120,4 +120,41 @@ describe("VUI component design contract", () => {
     const files = walk(designsRoot);
     expect(files.length).toBeGreaterThan(10);
   });
+
+  it("requires 功能 / 适用范围 / 使用方式 in every implemented component design section", () => {
+    const rows = catalogComponents(catalog);
+    const required = ["### 功能", "### 适用范围", "### 使用方式"] as const;
+    const offenders: string[] = [];
+
+    for (const row of rows) {
+      const hrefPath = row.href.replace(/#.*$/, "").replace(/^\.\//, "");
+      // Planned-only stubs live under planned.md — still require the design triad.
+      const filePath = resolve(designsRoot, hrefPath);
+      if (!existsSync(filePath)) {
+        offenders.push(`${row.name}: missing file ${hrefPath}`);
+        continue;
+      }
+      const text = readFileSync(filePath, "utf8");
+      // Section from ## Name until next ## at same level (or EOF).
+      const headingRe = new RegExp(
+        `^##\\s+(?:Component:\\s*\`)?${row.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\`)?\\s*$`,
+        "m",
+      );
+      const start = text.search(headingRe);
+      if (start < 0) {
+        offenders.push(`${row.name}: missing ## ${row.name} in ${hrefPath}`);
+        continue;
+      }
+      const after = text.slice(start + 2);
+      const next = after.search(/\n##\s+/);
+      const section = next < 0 ? text.slice(start) : text.slice(start, start + 2 + next);
+      for (const heading of required) {
+        if (!section.includes(heading)) {
+          offenders.push(`${row.name}: missing ${heading} in ${hrefPath}`);
+        }
+      }
+    }
+
+    expect(offenders, offenders.join("\n")).toEqual([]);
+  });
 });

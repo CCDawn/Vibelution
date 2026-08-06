@@ -1,6 +1,6 @@
 import { FileText, Pencil } from "lucide-react";
-import { NavLink } from "react-router-dom";
 
+import { VRouteLinkButton } from "../components/vui";
 import styles from "./MemoryReviewQueuePanel.styles";
 
 export type MemoryReviewQueueItemView = {
@@ -68,27 +68,27 @@ export function MemoryReviewQueuePanel({ copy, isLoading, errorText, items, onOp
             ) : null}
             <span className={styles.reviewQueueTime}>{item.updatedAt}</span>
             <div className={styles.reviewQueueActions}>
-              <NavLink
+              <VRouteLinkButton
                 className={styles.detailActionButton}
                 to={item.auditHref}
                 onClick={() => onOpenItem(item.id)}
                 title={copy.auditMemory}
                 aria-label={`${copy.auditMemory}: ${item.title}`}
+                icon={<FileText size={14} aria-hidden="true" />}
               >
-                <FileText size={14} />
-                <span>{copy.auditMemory}</span>
-              </NavLink>
+                {copy.auditMemory}
+              </VRouteLinkButton>
               {item.manageHref ? (
-                <NavLink
+                <VRouteLinkButton
                   className={styles.detailActionButton}
                   to={item.manageHref}
                   onClick={() => onOpenItem(item.id)}
                   title={copy.manageMemoryAction}
                   aria-label={`${copy.manageMemoryAction}: ${item.title}`}
+                  icon={<Pencil size={14} aria-hidden="true" />}
                 >
-                  <Pencil size={14} />
-                  <span>{copy.manageMemoryAction}</span>
-                </NavLink>
+                  {copy.manageMemoryAction}
+                </VRouteLinkButton>
               ) : null}
             </div>
           </div>

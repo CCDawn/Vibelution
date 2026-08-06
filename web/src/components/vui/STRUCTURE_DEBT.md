@@ -20,7 +20,7 @@
 | Memory | Outer `VDenseOpsPage` + layoutId; sources/knowledge/agent-memory → `VSplitWorkspace` | Done for three-pane shells |
 | Config settings | **Migrated** nav/main + model-assets to `VSplitWorkspace` layoutIds | Done for shell width ownership |
 | Research flow canvas | **Migrated** `VCanvasWorkbenchPage` + **`WORKBENCH_LAYOUT_IDS.researchFlow`** inspector resize | Done for inspector width memory |
-| Evolution queues | Multi-rail intentional; panels extracted incl. **case-trace / conversation evidence** | Done for current extract plan |
+| Evolution queues | Outer **`VTrackWorkbenchPage`** + multi-rail domain recipe; panels extracted incl. **case-trace / conversation evidence** | Done for page host; keep multi-rail resize exception |
 | Git / Tools / Logs / Launcher | Shared `usePersistedPaneResize` + **`PaneCollapseHandle`** (collapse-to-zero; not VSplit) | Keep hook+collapse pattern; gate documents exception |
 
 ## Cleanup playbook (per surface)

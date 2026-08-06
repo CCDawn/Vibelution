@@ -285,14 +285,21 @@ const styles = {
     `searchBox min-w-0 max-w-full ${quietPanelSurface} grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[6px] px-2 py-[5px]`,
   secondaryButton:
     `secondaryButton min-w-0 ${buttonBase}`,
-  segmentActive:
-    `segmentActive min-w-0 ${activeTone}`,
-  segmentActiveDanger:
-    `segmentActiveDanger min-w-0 ${errorTone}`,
-  segmentButton:
-    `segmentButton min-w-0 ${buttonBase}`,
-  segmentedControl:
-    "segmentedControl min-w-0 flex flex-wrap items-center justify-end gap-1 max-[640px]:justify-start",
+  // Host carries blocked-active danger tint so allowed/inherited keep cool selection.
+  policyTabsHost:
+    "policyTabsHost min-w-0 flex flex-wrap items-center justify-end max-[640px]:justify-start " +
+    "[&[data-policy-mode=blocked]_[data-slot=tabs-trigger][data-state=active]]:border-[color-mix(in_srgb,var(--state-error)_42%,transparent)] " +
+    "[&[data-policy-mode=blocked]_[data-slot=tabs-trigger][data-state=active]]:bg-[color-mix(in_srgb,var(--state-error)_10%,var(--vui-surface-row))] " +
+    "[&[data-policy-mode=blocked]_[data-slot=tabs-trigger][data-state=active]]:text-[var(--state-error)]",
+  policyTabs:
+    "policyTabs inline-grid w-fit max-w-full min-w-0 gap-0",
+  policyTabsList:
+    "policyTabsList inline-flex min-w-0 max-w-full flex-wrap items-center gap-0.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0.5",
+  policyTabsTrigger:
+    "policyTabsTrigger min-w-0 border-0 bg-transparent shadow-none " +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
+    "data-[state=active]:text-[var(--accent-cool)]",
   selectableToolRow:
     `selectableToolRow min-w-0 max-w-full ${warmRowSurface} p-[4px] !grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px]`,
   sourcePill:

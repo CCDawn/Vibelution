@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Activity, ExternalLink, FolderTree, GitBranch, ScrollText, Search } from "lucide-react";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import type { FileTreeNode, GitStatusSummary } from "../api/types";
-import { VButton, VNativeInput, VTooltip } from "../components/vui";
+import { VButton, VNativeInput, VRouteLinkButton, VTooltip } from "../components/vui";
 import type { Language, ShellTranslationKey } from "../i18n/shellDictionary";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { resolvePollingInterval } from "./pollingPolicy";
@@ -78,8 +78,14 @@ function compactWorktreePath(path: string) {
   return path.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) || path;
 }
 
+function utilityNavClass(pathname: string, to: string) {
+  const active = pathname === to || pathname.startsWith(`${to}/`);
+  return active ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton;
+}
+
 export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppShellUtilityMenuProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [utilityFileFilter, setUtilityFileFilter] = useState("");
   const [fileTreeRequested, setFileTreeRequested] = useState(false);
   const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
@@ -187,24 +193,37 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
         </div>
       </VTooltip>
       <div className={styles.utilityButtonGrid}>
+        {/* External control surface: native anchor (not SPA Link) per VRouteLinkButton design boundary. */}
         <a href="/launcher" target="_blank" rel="noreferrer" className={styles.utilityButton} onClick={onClose}>
           <ExternalLink size={16} />
           <span>{lang === "zh" ? "启动器" : "Launcher"}</span>
         </a>
         <VTooltip content={t("usageUtilityTitle")}>
-          <NavLink to="/usage" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} onClick={onClose}>
-            <Activity size={16} />
-            <span>{t("navUsage")}</span>
-          </NavLink>
+          <VRouteLinkButton
+            to="/usage"
+            className={utilityNavClass(location.pathname, "/usage")}
+            onClick={onClose}
+            icon={<Activity size={16} aria-hidden="true" />}
+          >
+            {t("navUsage")}
+          </VRouteLinkButton>
         </VTooltip>
-        <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} onClick={onClose}>
-          <ScrollText size={16} />
-          <span>{t("navLogs")}</span>
-        </NavLink>
-        <NavLink to="/git" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} onClick={onClose}>
-          <GitBranch size={16} />
-          <span>{t("navGit")}</span>
-        </NavLink>
+        <VRouteLinkButton
+          to="/logs"
+          className={utilityNavClass(location.pathname, "/logs")}
+          onClick={onClose}
+          icon={<ScrollText size={16} aria-hidden="true" />}
+        >
+          {t("navLogs")}
+        </VRouteLinkButton>
+        <VRouteLinkButton
+          to="/git"
+          className={utilityNavClass(location.pathname, "/git")}
+          onClick={onClose}
+          icon={<GitBranch size={16} aria-hidden="true" />}
+        >
+          {t("navGit")}
+        </VRouteLinkButton>
         <VButton
           type="button"
           contentLayout="plain"

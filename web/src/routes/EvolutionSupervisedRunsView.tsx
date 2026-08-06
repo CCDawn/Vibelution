@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Suspense, lazy } from "react";
 
 import type { EvolutionLibraryEntry, EvolutionRun } from "../api/types";
-import { VButton, VSection } from "../components/vui";
+import { VSection, VTabs } from "../components/vui";
 import type { Language } from "../i18n/dictionary";
 import type { EvolutionRunRecordsLibraryView, EvolutionRunRecordsPanelLabels } from "./EvolutionRunRecordsPanel";
 import { supervisedRunBucketLabel } from "./evolution/evolutionRouteModel";
@@ -128,22 +128,24 @@ export function EvolutionSupervisedRunsView({
         eyebrow={t("recentRunPerformance")}
         title={t("runList")}
         actions={(
-          <div className={styles.filterSegmented}>
-            {(["all", "success", "failed"] as const).map((filter) => (
-              <VButton
-                key={filter}
-                type="button"
-                className={
-                  runFilter === filter
-                    ? `${styles.filterButton} ${styles.filterButtonActive}`
-                    : styles.filterButton
-                }
-                onClick={() => onRunFilterChange(filter)}
-              >
-                {filter === "all" ? t("allRuns") : supervisedRunBucketLabel(filter, lang, statusLabel)}
-              </VButton>
-            ))}
-          </div>
+          <VTabs
+            density="compact"
+            className={styles.filterTabs}
+            listClassName={styles.filterTabsList}
+            triggerClassName={styles.filterTabsTrigger}
+            aria-label={t("runList")}
+            value={runFilter}
+            onValueChange={(value) => {
+              if (value === "all" || value === "success" || value === "failed") {
+                onRunFilterChange(value);
+              }
+            }}
+            items={([
+              { id: "all" as const, label: t("allRuns") },
+              { id: "success" as const, label: supervisedRunBucketLabel("success", lang, statusLabel) },
+              { id: "failed" as const, label: supervisedRunBucketLabel("failed", lang, statusLabel) },
+            ])}
+          />
         )}
       >
         <div className={styles.runsCommandMetrics}>

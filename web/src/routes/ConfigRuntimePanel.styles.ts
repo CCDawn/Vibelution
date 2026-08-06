@@ -4,10 +4,6 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface = vuiElevatedPanelClass;
-const mutedControl =
-  "[display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_transparent] [background:transparent] [color:var(--vui-fg-secondary)] hover:[cursor:pointer] hover:[color:var(--vui-fg-primary)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]";
-const activeControl =
-  "[background:color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-control-muted))] [border-color:color-mix(in_srgb,var(--accent-cool)_32%,transparent)] [color:var(--accent-warm-2)]";
 const sectionHeaderSurface =
   `[border-bottom:1px_solid_var(--vui-border-subtle)] !${vuiToolbarFillClass}`;
 
@@ -22,12 +18,14 @@ const styles = {
     "vui-routes-configruntimepanel sectionIcon [color:var(--accent-warm-2)] [margin-top:1px]",
   sectionSurface:
     `vui-routes-configruntimepanel sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible]`,
-  segmented:
-    "vui-routes-configruntimepanel segmented [display:inline-flex] [align-items:center] [justify-self:end] [gap:6px] [padding:4px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--control-radius)] [background:var(--vui-surface-toolbar)]",
-  segmentButton:
-    `vui-routes-configruntimepanel segmentButton ${mutedControl} min-w-28 min-h-10 px-4`,
-  segmentButtonActive:
-    `vui-routes-configruntimepanel segmentButtonActive ${activeControl}`,
+  intakeTabs: "vui-routes-configruntimepanel intakeTabs inline-grid w-fit max-w-full min-w-0 justify-self-end gap-0",
+  intakeTabsList:
+    "vui-routes-configruntimepanel intakeTabsList inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[var(--control-radius)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] p-1",
+  intakeTabsTrigger:
+    "vui-routes-configruntimepanel intakeTabsTrigger min-h-10 min-w-28 px-4 font-semibold " +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-cool)_32%,transparent)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-control-muted))] " +
+    "data-[state=active]:text-[var(--accent-warm-2)]",
 };
 
 export default styles;

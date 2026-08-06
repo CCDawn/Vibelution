@@ -3,7 +3,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, CheckCircle2, LibraryBig, LoaderCircle, Search, Square, SquareCheckBig, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { NavLink } from "react-router-dom";
+
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -17,7 +17,7 @@ import {
   SupervisedWorktreeRun,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VButton, VListDetailPage, VNativeInput, VNativeTextarea, VStringSelect, VTooltip } from "../components/vui";
+import { VButton, VListDetailPage, VNativeInput, VNativeTextarea, VRouteLinkButton, VStringSelect, VTabs, VTooltip } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -474,21 +474,26 @@ export function SupervisedReviewRoute() {
           </div>
 
           <div className={styles.queueControls}>
-            <div className={styles.filterSegmented}>
-              {REVIEW_FILTERS.map((value) => (
-                <VButton
-                  key={value}
-                  type="button"
-                  className={filter === value ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-                  tooltip={value === "pending"
-                    ? (lang === "zh" ? "待审样本默认排在前面，便于连续裁决。" : "Pending items stay at the front for continuous review.")
-                    : undefined}
-                  onClick={() => setFilter(value)}
-                >
-                  {filterLabel(value)}
-                </VButton>
-              ))}
-            </div>
+            <VTabs
+              density="compact"
+              className={styles.filterTabs}
+              listClassName={styles.filterTabsList}
+              triggerClassName={styles.filterTabsTrigger}
+              aria-label={lang === "zh" ? "样本筛选" : "Review filter"}
+              value={filter}
+              onValueChange={(value) => {
+                if ((REVIEW_FILTERS as readonly string[]).includes(value)) {
+                  setFilter(value as ReviewFilter);
+                }
+              }}
+              items={REVIEW_FILTERS.map((value) => ({
+                id: value,
+                label: filterLabel(value),
+                title: value === "pending"
+                  ? (lang === "zh" ? "待审样本默认排在前面，便于连续裁决。" : "Pending items stay at the front for continuous review.")
+                  : undefined,
+              }))}
+            />
             <label className={styles.searchField}>
               <Search size={14} />
               <VNativeInput
@@ -725,27 +730,57 @@ export function SupervisedReviewRoute() {
                   ) : null}
                 </div>
 
-                <div className={styles.decisionSegmented}>
-                  {(["positive", "negative", "discard"] as ReviewDecision[]).map((value) => (
-                    <VButton
-                      key={value}
-                      type="button"
-                      className={draftDecision === value ? `${styles.decisionButton} ${styles.decisionButtonActive}` : styles.decisionButton}
-                      isDisabled={detailCandidate.status !== "pending"}
-                      disabledReason={lang === "zh" ? "该样本已经完成裁决。" : "This sample has already been reviewed."}
-                      tooltip={value === "positive"
-                        ? (lang === "zh" ? "收录为可复用的正向训练样本。" : "Keep as a reusable positive training sample.")
-                        : value === "negative"
-                          ? (lang === "zh" ? "收录为带错误归因的反向训练样本。" : "Keep as a negative sample with error attribution.")
-                          : (lang === "zh" ? "不进入正例或负例数据集。" : "Exclude from positive and negative datasets.")}
-                      onClick={() => setDraftDecision(value)}
-
-                        icon={value === "positive" ? <CheckCircle2 size={15} /> : value === "negative" ? <TriangleAlert size={15} /> : <Trash2 size={15} />}
-                      >
-                        {decisionLabel(value)}
-                      </VButton>
-                  ))}
-                </div>
+                <VTabs
+                  density="compact"
+                  className={styles.decisionTabs}
+                  listClassName={styles.decisionTabsList}
+                  triggerClassName={styles.decisionTabsTrigger}
+                  aria-label={lang === "zh" ? "裁决" : "Decision"}
+                  value={draftDecision}
+                  onValueChange={(value) => {
+                    if (detailCandidate.status !== "pending") {
+                      return;
+                    }
+                    if (value === "positive" || value === "negative" || value === "discard") {
+                      setDraftDecision(value);
+                    }
+                  }}
+                  items={([
+                    {
+                      id: "positive" as const,
+                      disabled: detailCandidate.status !== "pending",
+                      title: lang === "zh" ? "收录为可复用的正向训练样本。" : "Keep as a reusable positive training sample.",
+                      label: (
+                        <span className={styles.decisionTabLabel}>
+                          <CheckCircle2 size={15} aria-hidden="true" />
+                          <span>{decisionLabel("positive")}</span>
+                        </span>
+                      ),
+                    },
+                    {
+                      id: "negative" as const,
+                      disabled: detailCandidate.status !== "pending",
+                      title: lang === "zh" ? "收录为带错误归因的反向训练样本。" : "Keep as a negative sample with error attribution.",
+                      label: (
+                        <span className={styles.decisionTabLabel}>
+                          <TriangleAlert size={15} aria-hidden="true" />
+                          <span>{decisionLabel("negative")}</span>
+                        </span>
+                      ),
+                    },
+                    {
+                      id: "discard" as const,
+                      disabled: detailCandidate.status !== "pending",
+                      title: lang === "zh" ? "不进入正例或负例数据集。" : "Exclude from positive and negative datasets.",
+                      label: (
+                        <span className={styles.decisionTabLabel}>
+                          <Trash2 size={15} aria-hidden="true" />
+                          <span>{decisionLabel("discard")}</span>
+                        </span>
+                      ),
+                    },
+                  ])}
+                />
 
                 <div className={styles.formGrid}>
                   <label className={styles.formField}>
@@ -834,12 +869,15 @@ export function SupervisedReviewRoute() {
                       ? (lang === "zh" ? "正例数据集已可用；返回后可直接基于它发起下一轮监督运行。" : "The positive dataset is ready and can be used for the next supervised run.")
                       : (lang === "zh" ? "返回监督运行与数据集控制台。" : "Return to the supervised run and dataset console.")}
                   >
-                    <NavLink to={consoleTarget} className={styles.secondaryAction}>
-                      <ArrowUpRight size={15} />
+                    <VRouteLinkButton
+                      to={consoleTarget}
+                      className={styles.secondaryAction}
+                      icon={<ArrowUpRight size={15} aria-hidden="true" />}
+                    >
                       {positiveDatasetVisible
                         ? (lang === "zh" ? "回控制台并预选正例集" : "Return with positive dataset")
                         : (lang === "zh" ? "回到监督控制台" : "Back to supervised console")}
-                    </NavLink>
+                    </VRouteLinkButton>
                   </VTooltip>
                 </div>
 

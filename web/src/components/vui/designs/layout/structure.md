@@ -2,91 +2,224 @@
 
 ## VSection
 
-### 职责
-带可选标题/提示的内容分区。
+### 功能
+带可选标题/提示的内容分区，用于设置与详情分段。
 
-### 何时使用
-- 设置页卡片区、详情分段
+### 适用范围
+- **适用**：设置页卡片区、详情分段。
+- **不适用**：整页壳 → page recipe；纯堆叠无标题 → `VStack`。
+
+| 场景 | 选择 |
+| --- | --- |
+| 设置分段 | `VSection` |
+| 仅纵向间距 | `VStack` |
+
+### 使用方式
+```tsx
+import { VSection } from "@/components/vui";
+
+<VSection title="连接" description="...">{fields}</VSection>
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| title / description / children | 分区 | 内嵌 FieldRow |
 
 ### 反冗余
-- 不要 `VCardSection` 平行
+- 不要 `VCardSection` 平行。
+
+### 实现落点
+- `layout/VSection.tsx`
 
 ---
 
 ## VStack
 
-### 职责
-纵向 flex 堆叠。
+### 功能
+纵向 flex 堆叠布局原语。
+
+### 适用范围
+- **适用**：垂直排列子块、间距一致。
+- **不适用**：表面样式 → 外包 `VSurface`；横向 → `VHStack`。
+
+| 场景 | 选择 |
+| --- | --- |
+| 纵向表单块 | `VStack` |
+| 横向工具 | `VHStack` |
+
+### 使用方式
+```tsx
+import { VStack } from "@/components/vui";
+
+<VStack gap="sm">{a}{b}</VStack>
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| gap / children | 间距 | 不自带边框 |
 
 ### 非职责
-- 不做表面样式（外包 `VSurface`）
+- 不做表面样式。
+
+### 实现落点
+- `layout/VStack.tsx`
 
 ---
 
 ## VHStack
 
-### 职责
-横向 flex 堆叠。
+### 功能
+横向 flex 堆叠布局原语。
+
+### 适用范围
+- **适用**：横向按钮组、标签行。
+- **不适用**：纵向分段 → `VStack`；工具条语义 → `VToolbar`。
+
+| 场景 | 选择 |
+| --- | --- |
+| 横向动作 | `VHStack` |
+| 工具条 | `VToolbar` |
+
+### 使用方式
+```tsx
+import { VHStack } from "@/components/vui";
+
+<VHStack gap="xs" align="center">{actions}</VHStack>
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| gap / align / children | 对齐 | wrap 由 class 控制 |
+
+### 实现落点
+- `layout/VHStack.tsx`
 
 ---
 
 ## VEmptyState
 
-### 职责
-空态：标题、说明、操作。
+### 功能
+空态：标题、说明、操作，表达「无数据/未选择」。
 
-### 何时使用
-- 列表无数据、未选择详情
+### 适用范围
+- **适用**：列表无数据、未选择详情。
+- **不适用**：加载中 → `VStateSurface`/`VSkeleton`；错误 → `VStateSurface`/`VErrorSummary`。
 
-### 视觉
-- 默认居中；`align="start"` 用于工作台左对齐域
+| 场景 | 选择 |
+| --- | --- |
+| 永久空列表 | `VEmptyState` |
+| 加载中 | `VSkeleton` / `VStateSurface` |
+
+### 使用方式
+```tsx
+import { VEmptyState, VButton } from "@/components/vui";
+
+<VEmptyState title="暂无项目" actions={<VButton>创建</VButton>}>
+  先创建一个项目。
+</VEmptyState>
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| title / children / actions | 文案与 CTA | `align="start"` 工作台左对齐 |
+
+### 实现落点
+- `layout/VEmptyState.tsx`
 
 ---
 
 ## VStateSurface
 
-### 职责
-加载/错误/不可用/空 的状态面（可 skeleton、facts）。
+### 功能
+加载 / 错误 / 不可用 / 空 的状态面（可 skeleton、facts），占位或填满区域。
 
-### 何时使用
-- 冷加载（**尚无稳定 IA/骨架可铺**）、失败恢复、空态、不可用
-- 行内/紧凑通知：`density="compact"`
+### 适用范围
+- **适用**：冷加载（无稳定 IA）、失败恢复、空态、不可用；行内通知 `density="compact"`。
+- **不适用**：主区已有结构仅数据未到 → `VSkeleton`；一行错误 → `VErrorSummary`；列表永久空 → `VEmptyState`。
 
-### 何时不要用
-| 场景 | 改用 |
+| 场景 | 选择 |
 | --- | --- |
-| 主区已有稳定结构，仅数据未到 | `VSkeleton` / progressive region shell（原位填数） |
-| 仅一行错误文案 | `VErrorSummary` |
-| 列表永久空 | `VEmptyState` |
-| 主区加载仍用 `styles.empty` 一行字 | **禁止** — 用本组件 `fill` **或** 结构骨架 |
+| 主区冷加载 | `VStateSurface` fill |
+| 原位骨架 | `VSkeleton` |
+| 表单错误汇总 | `VErrorSummary` |
 
-### `fill`
-- `fill`：占满父级 flex/grid 区域（`flex-1` + 最小高度 + 居中内容）
-- 仅当**没有**可铺的业务几何时使用 fill loading（避免「一行字 + 大片空白」）
-- loading 且未指定 `skeletonLines` 时：`fill` 默认 3 条骨架，非 fill 默认 2 条
-- 父级请用 `VUI_REGION_STATE_HOST_CLASS` 或已有 `flex-1 min-h-0` 链
+### 使用方式
+```tsx
+import { VStateSurface } from "@/components/vui";
 
-### `density`
-- `default`：facts 用 `1fr` 网格（适合总览型状态）
-- `compact`：更紧 padding；facts 为 **内容宽度 chip**（`flex-wrap`），避免宽屏两格被拉成整行空卡
-- **行内失败/中断横幅**（如自进化闭环中断）应用 `compact`
+<VStateSurface fill tone="loading" title="加载中" skeletonLines />
+<VStateSurface density="compact" tone="error" title="失败" facts={[...]} />
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| tone | loading/error/empty/unavailable | 与文案匹配 |
+| fill | 占满父级区域 | 无业务几何时用 |
+| density / facts | compact 横幅；键值 facts | 中断横幅用 compact |
+
+### 实现落点
+- `layout/VStateSurface.tsx`
 
 ---
 
 ## VErrorSummary
 
-### 职责
-错误摘要展示（可多条）。
+### 功能
+错误摘要展示（可多条），用于表单/操作失败汇总。
 
-### 何时使用
-- 表单/操作失败汇总
+### 适用范围
+- **适用**：表单校验失败、操作失败列表。
+- **不适用**：整页加载失败主面 → `VStateSurface`；字段旁单行 → Field 内联 error。
+
+| 场景 | 选择 |
+| --- | --- |
+| 多条错误 | `VErrorSummary` |
+| 整页失败 | `VStateSurface` |
+
+### 使用方式
+```tsx
+import { VErrorSummary } from "@/components/vui";
+
+<VErrorSummary tone="error" items={["名称必填", "超时"]} />
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| items / tone | 错误列表 | 可滚动长列表 |
+
+### 实现落点
+- `layout/VErrorSummary.tsx`
 
 ---
 
 ## VEntityList
 
-### 职责
-简单实体列表渲染（id/label + renderItem）。
+### 功能
+简单实体列表渲染（id/label + renderItem），轻量列表容器。
 
-### 何时使用
-- 轻量列表；重表格用 `VDenseTable`
+### 适用范围
+- **适用**：轻量实体列表、demo/工具侧列表。
+- **不适用**：重表格 → `VDenseTable`；Agent 域密集表 → product `AgentDenseList`。
+
+| 场景 | 选择 |
+| --- | --- |
+| 轻量列表 | `VEntityList` |
+| 运维表 | `VDenseTable` |
+
+### 使用方式
+```tsx
+import { VEntityList } from "@/components/vui";
+
+<VEntityList
+  ariaLabel="代理"
+  items={[{ id: "1", label: "A" }]}
+  renderItem={(item) => <span>{item.label}</span>}
+/>
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| items / renderItem | 数据与行 | 选中态由调用方 class |
+
+### 实现落点
+- `layout/VEntityList.tsx`

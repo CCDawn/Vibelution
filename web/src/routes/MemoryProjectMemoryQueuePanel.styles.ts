@@ -6,7 +6,6 @@ import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiStateDangerSoftClass,
-  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -15,10 +14,14 @@ const styles = {
     `detailActionButton min-w-0 ${vuiControlQuietClass}`,
   emptyState:
     "emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  filterButton:
-    `filterButton min-w-0 ${vuiControlQuietClass}`,
-  filterButtonActive:
-    `filterButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
+  queueFilterTabs: "queueFilterTabs inline-grid w-fit max-w-full min-w-0 gap-0",
+  queueFilterTabsList:
+    "queueFilterTabsList inline-flex min-w-0 max-w-full flex-wrap items-center gap-1 border-0 bg-transparent p-0",
+  queueFilterTabsTrigger:
+    `queueFilterTabsTrigger min-w-0 ${vuiControlQuietClass} ` +
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] " +
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
+    "data-[state=active]:text-[var(--accent-cool)]",
   panelError: `panelError min-w-0 ${vuiFlatPanelClass} p-2 ${vuiStateDangerSoftClass}`,
   panelEyebrow:
     "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",

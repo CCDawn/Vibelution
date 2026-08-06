@@ -249,6 +249,9 @@ describe("MemoryRoute layout contract", () => {
     expect(projectMemoryQueuePanelSource).toContain("export function MemoryProjectMemoryQueuePanel");
     expect(projectMemoryQueuePanelSource).toContain("className={styles.projectMemoryQueuePanel}");
     expect(projectMemoryQueuePanelSource).toContain("VNativeInput");
+    expect(projectMemoryQueuePanelSource).toContain("<VTabs");
+    expect(projectMemoryQueuePanelSource).toContain("queueFilterTabs");
+    expect(projectMemoryQueuePanelSource).not.toContain("filterButtonActive");
     expect(projectMemoryQueuePanelSource).toContain("usePersistedPaneHeight");
     expect(projectMemoryQueuePanelSource).toContain("PaneHeightResizeHandle");
     expect(projectMemoryQueuePanelSource).toContain("project-memory-queue");
@@ -301,7 +304,8 @@ describe("MemoryRoute layout contract", () => {
     expect(sourceAndItemPanelsSource).toContain("export function MemorySourceAndItemPanels");
     expect(sourceAndItemPanelsSource).toContain("styles.sourcePanel");
     expect(sourceAndItemPanelsSource).toContain("styles.itemPanel");
-    expect(sourceAndItemPanelsSource).toContain("styles.filterGroup");
+    expect(sourceAndItemPanelsSource).toContain("styles.filterTabs");
+    expect(sourceAndItemPanelsSource).toContain("<VTabs");
     expect(sourceAndItemPanelsSource).not.toContain("useQuery");
     expect(sourceAndItemPanelsSource).not.toContain("useMutation");
     expect(sourceAndItemPanelsSource).not.toContain("fetchJson");
@@ -1039,7 +1043,9 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeStewardPanelSource).toContain("styles.stewardRecommendations");
     expect(knowledgeStewardPanelSource).toContain("styles.stewardWorkbench");
     expect(knowledgeStewardPanelSource).toContain("styles.stewardStageGrid");
-    expect(knowledgeStewardPanelSource).toContain('import { VButton, VTooltip } from "../components/vui"');
+    expect(knowledgeStewardPanelSource).toContain('import { VButton, VRouteLinkButton, VTooltip } from "../components/vui"');
+    expect(knowledgeStewardPanelSource).toContain("<VRouteLinkButton");
+    expect(knowledgeStewardPanelSource).not.toContain("<NavLink");
     expect(knowledgeStewardPanelSource).toContain("const recommendationTooltip");
     expect(knowledgeStewardPanelSource).toContain("content={recommendationTooltip}");
     expect(knowledgeStewardPanelSource).toContain("const stageTooltip");
@@ -1132,6 +1138,9 @@ describe("MemoryRoute layout contract", () => {
     expect(managePanelSource).toContain("styles.manageSourceFilters");
     expect(managePanelSource).toContain("styles.sourceChip");
     expect(managePanelSource).toContain("styles.bulkActionBar");
+    expect(managePanelSource).toContain("<VTabs");
+    expect(managePanelSource).toContain("filterTabs");
+    expect(managePanelSource).not.toContain("filterButtonActive");
     expect(managePanelSource).not.toContain("useQuery");
     expect(managePanelSource).not.toContain("useMutation");
     expect(managePanelSource).not.toContain("fetchJson");
@@ -1261,7 +1270,8 @@ describe("MemoryRoute layout contract", () => {
     expect(matrixPanelSource).not.toContain("useQuery");
     expect(matrixPanelSource).not.toContain("useMutation");
     expect(matrixPanelSource).not.toContain("fetchJson");
-    expect(sourceAndItemPanelsSource).toContain("styles.filterGroup");
+    expect(sourceAndItemPanelsSource).toContain("styles.filterTabs");
+    expect(sourceAndItemPanelsSource).toContain("<VTabs");
     expect(routeSource).toContain("itemMatchesFilter");
     expect(routeSource).toContain("filterPrompt");
     expect(routeSource).toContain("filterMissing");

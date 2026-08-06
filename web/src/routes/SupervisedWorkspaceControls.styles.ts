@@ -6,13 +6,13 @@ const flowRegionClass = "min-w-0 w-fit max-w-full shrink-0";
 const modeRegionClass = "min-w-0 w-fit shrink-0 justify-self-end max-[900px]:justify-self-end";
 const intakeControlClass = "inline-flex min-h-[34px] max-w-full flex-none items-center gap-1 whitespace-nowrap rounded-full border border-vui-border-soft bg-vui-surface-panel p-[3px]";
 const controlLabelClass = "py-0 pl-[7px] pr-[5px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary max-[760px]:hidden";
-const intakeSegmentedClass = "inline-flex gap-1";
-const intakeButtonClass = [
+const intakeTabsClass = "inline-grid w-fit max-w-full min-w-0 gap-0";
+const intakeTabsListClass = "inline-flex gap-1 border-0 bg-transparent p-0";
+const intakeTabsTriggerClass = [
   "min-h-[26px] rounded-full border-0 bg-transparent px-2 [font-size:var(--vui-font-xs)] text-vui-fg-secondary",
   "transition-colors duration-150 hover:!bg-vui-surface-row-hover hover:text-vui-fg-primary disabled:cursor-wait disabled:opacity-70",
+  "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] data-[state=active]:text-[var(--accent-warm-2)]",
 ].join(" ");
-// surface-role: state-tint — warm soft active chip (no surface structure wash)
-const intakeButtonActiveClass = "bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]";
 
 const styles = {
   controlsShellClass,
@@ -20,9 +20,9 @@ const styles = {
   modeRegionClass,
   intakeControlClass,
   controlLabelClass,
-  intakeSegmentedClass,
-  intakeButtonClass,
-  intakeButtonActiveClass,
+  intakeTabsClass,
+  intakeTabsListClass,
+  intakeTabsTriggerClass,
 } as const;
 
 export default styles;

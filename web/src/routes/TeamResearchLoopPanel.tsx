@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react";
 import { AlertTriangle, Plus, RefreshCw, Save, Send } from "lucide-react";
 
 import type { Team } from "../api/types";
-import { VNativeButton, VNativeInput, VStringSelect } from "../components/vui";
+import { VNativeButton, VNativeInput, VStringSelect, VTabs } from "../components/vui";
 import {
   RESEARCH_LOOP_DECISION_VALUES,
   RESEARCH_LOOP_EVIDENCE_STATUSES,
@@ -413,35 +413,39 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
             <div className={styles.researchLoopEvidenceForm}>
               <div className={styles.researchLoopChoiceField}>
                 <span>{lang === "zh" ? "证据类型" : "Evidence type"}</span>
-                <div className={styles.researchLoopChoiceGrid} role="group" aria-label={lang === "zh" ? "证据类型" : "Evidence type"}>
-                  {evidenceOptions.map((item: any) => (
-                    <VNativeButton
-                      key={item}
-                      type="button"
-                      className={`${styles.researchLoopChoice} ${currentEvidenceType === item ? styles.researchLoopChoiceActive : ""}`}
-                      aria-pressed={currentEvidenceType === item}
-                      onClick={() => setResearchLoopEvidenceDraft((draft) => ({ ...draft, evidenceType: item }))}
-                    >
-                      {item}
-                    </VNativeButton>
-                  ))}
-                </div>
+                <VTabs
+                  density="compact"
+                  className={styles.researchLoopChoiceTabs}
+                  listClassName={styles.researchLoopChoiceTabsList}
+                  triggerClassName={styles.researchLoopChoiceTabsTrigger}
+                  aria-label={lang === "zh" ? "证据类型" : "Evidence type"}
+                  value={String(currentEvidenceType || "")}
+                  onValueChange={(value) => {
+                    setResearchLoopEvidenceDraft((draft) => ({ ...draft, evidenceType: value }));
+                  }}
+                  items={evidenceOptions.map((item: any) => ({
+                    id: String(item),
+                    label: String(item),
+                  }))}
+                />
               </div>
               <div className={styles.researchLoopChoiceField}>
                 <span>{lang === "zh" ? "状态" : "Status"}</span>
-                <div className={styles.researchLoopChoiceGrid} role="group" aria-label={lang === "zh" ? "状态" : "Status"}>
-                  {RESEARCH_LOOP_EVIDENCE_STATUSES.map((status: any) => (
-                    <VNativeButton
-                      key={status}
-                      type="button"
-                      className={`${styles.researchLoopChoice} ${researchLoopEvidenceDraft.status === status ? styles.researchLoopChoiceActive : ""}`}
-                      aria-pressed={researchLoopEvidenceDraft.status === status}
-                      onClick={() => setResearchLoopEvidenceDraft((draft) => ({ ...draft, status }))}
-                    >
-                      {status}
-                    </VNativeButton>
-                  ))}
-                </div>
+                <VTabs
+                  density="compact"
+                  className={styles.researchLoopChoiceTabs}
+                  listClassName={styles.researchLoopChoiceTabsList}
+                  triggerClassName={styles.researchLoopChoiceTabsTrigger}
+                  aria-label={lang === "zh" ? "状态" : "Status"}
+                  value={String(researchLoopEvidenceDraft.status || "")}
+                  onValueChange={(value) => {
+                    setResearchLoopEvidenceDraft((draft) => ({ ...draft, status: value as typeof draft.status }));
+                  }}
+                  items={RESEARCH_LOOP_EVIDENCE_STATUSES.map((status: any) => ({
+                    id: String(status),
+                    label: String(status),
+                  }))}
+                />
               </div>
               <label>
                 <span>{lang === "zh" ? "指标" : "Metric"}</span>
@@ -507,19 +511,24 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
             <div className={styles.researchLoopDecisionForm}>
               <div className={styles.researchLoopChoiceField}>
                 <span>{lang === "zh" ? "决策" : "Decision"}</span>
-                <div className={styles.researchLoopChoiceGrid} role="group" aria-label={lang === "zh" ? "决策" : "Decision"}>
-                  {RESEARCH_LOOP_DECISION_VALUES.map((decision: any) => (
-                    <VNativeButton
-                      key={decision}
-                      type="button"
-                      className={`${styles.researchLoopChoice} ${researchLoopDecisionDraft.decision === decision ? styles.researchLoopChoiceActive : ""}`}
-                      aria-pressed={researchLoopDecisionDraft.decision === decision}
-                      onClick={() => setResearchLoopDecisionDraft((draft) => ({ ...draft, decision }))}
-                    >
-                      {decision}
-                    </VNativeButton>
-                  ))}
-                </div>
+                <VTabs
+                  density="compact"
+                  className={styles.researchLoopChoiceTabs}
+                  listClassName={styles.researchLoopChoiceTabsList}
+                  triggerClassName={styles.researchLoopChoiceTabsTrigger}
+                  aria-label={lang === "zh" ? "决策" : "Decision"}
+                  value={String(researchLoopDecisionDraft.decision || "")}
+                  onValueChange={(value) => {
+                    setResearchLoopDecisionDraft((draft) => ({
+                      ...draft,
+                      decision: value as typeof draft.decision,
+                    }));
+                  }}
+                  items={RESEARCH_LOOP_DECISION_VALUES.map((decision: any) => ({
+                    id: String(decision),
+                    label: String(decision),
+                  }))}
+                />
               </div>
               <label>
                 <span>{lang === "zh" ? "下一模板" : "Next template"}</span>

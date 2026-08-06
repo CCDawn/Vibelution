@@ -489,12 +489,15 @@ describe("ConfigRoute layout contract", () => {
     expect(runtimePanelSource).toContain("styles.behaviorRow");
     expect(runtimePanelSource).toContain("styles.behaviorCopy");
     expect(runtimePanelSource).toContain('aria-label={copy.intakeMode}');
-    expect(runtimePanelSource).toContain('aria-pressed={currentIntakeMode === mode}');
+    expect(runtimePanelSource).toContain("<VTabs");
+    expect(runtimePanelSource).toContain('value={currentIntakeMode === "auto" ? "auto" : "manual_review"}');
     expect(runtimePanelSource).not.toContain("styles.matrixGrid");
     expect(runtimePanelSource).not.toContain("styles.matrixCard");
+    expect(runtimePanelSource).not.toContain("segmentButton");
     expect(runtimePanelStyles.behaviorRow).toContain("[grid-template-columns:minmax(0,1fr)_auto]");
-    expect(runtimePanelStyles.segmentButton).toContain("min-w-28");
-    expect(runtimePanelStyles.segmentButton).toContain("min-h-10");
+    expect(runtimePanelStyles.intakeTabsTrigger).toContain("min-w-28");
+    expect(runtimePanelStyles.intakeTabsTrigger).toContain("min-h-10");
+    expect(runtimePanelStyles.intakeTabsTrigger).toContain("data-[state=active]");
   });
 
   it("keeps the config loading placeholder as a dense board with nav, metrics, and specs", () => {
@@ -993,7 +996,9 @@ describe("ConfigRoute layout contract", () => {
     expect(extractedPanelStylesSource).toContain("var(--vui-control-muted)");
     expect(extractedPanelStylesSource).toContain("var(--vui-border-subtle)");
     expect(overviewPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
-    expect(runtimePanelStyles.segmented).toContain("[background:var(--vui-surface-toolbar)]");
+    expect(runtimePanelStyles.intakeTabsList).toContain("bg-[var(--vui-surface-toolbar)]");
+    expect(runtimePanelSource).toContain("<VTabs");
+    expect(runtimePanelSource).not.toContain("segmentButton");
     expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
     expect(healthDiagnosticsPanelStyles.findingCard).toMatch(/bg-vui-surface-row|var\(--vui-surface-row\)/);
     expect(providerPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);

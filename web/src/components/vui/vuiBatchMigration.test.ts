@@ -51,7 +51,7 @@ const rawControlAllowedFiles = new Set([
 const migrationTargets = [
   {
     path: "app/AppShellUtilityMenu.tsx",
-    expectedPrimitive: "VButton",
+    expectedPrimitive: "VRouteLinkButton",
   },
   {
     path: "components/layout/PaneCollapseHandle.tsx",
@@ -73,6 +73,26 @@ const migrationTargets = [
     path: "routes/PromptTemplatesRoute.tsx",
     expectedPrimitive: "VButton",
   },
+  {
+    path: "components/vui/product/team-management/TeamStageCommandBar.tsx",
+    expectedPrimitive: "VNativeButton",
+  },
+  {
+    path: "routes/AgentManagementNav.tsx",
+    expectedPrimitive: "VRouteLinkButton",
+  },
+  {
+    path: "routes/MemoryReviewQueuePanel.tsx",
+    expectedPrimitive: "VRouteLinkButton",
+  },
+  {
+    path: "routes/MemoryKnowledgeStewardPanel.tsx",
+    expectedPrimitive: "VRouteLinkButton",
+  },
+  {
+    path: "app/AppShell.tsx",
+    expectedPrimitive: 'chrome="shell-nav"',
+  },
 ] as const;
 
 const nativeControlTargets = [
@@ -83,8 +103,8 @@ const nativeControlTargets = [
   },
   {
     path: "routes/AgentDetailHeaderPanel.tsx",
-    expected: ["VNativeButton"],
-    forbidden: ["<button", "<input", "<select", "<textarea"],
+    expected: ["VTabs", "VButton"],
+    forbidden: ["<button", "<input", "<select", "<textarea", "VNativeButton"],
   },
   {
     path: "routes/AgentCoreConfigPanel.tsx",
@@ -198,6 +218,116 @@ const routeShellTargets = [
     path: "routes/ToolsRoute.tsx",
     expected: ["VDenseOpsPage", "VIconButton"],
     forbidden: ["<header className={styles.header}"],
+  },
+  {
+    path: "routes/PetRoute.tsx",
+    expected: ["VDenseOpsPage", 'data-vui-domain-recipe="pet-companion"'],
+    forbidden: ["<header className={styles.header}", "<header className={styles.heroClass}"],
+  },
+  {
+    path: "routes/EvolutionRoute.tsx",
+    expected: ["VTrackWorkbenchPage", "VTabs", 'data-vui-recipe="evolution-workbench"', 'domainRecipe="evolution-multi-rail"'],
+    forbidden: ["styles.segmentButton", "styles.segmented", "VWorkbenchPage"],
+  },
+  {
+    path: "routes/ToolsRoute.tsx",
+    expected: ["VTabs", "policyTabsHost"],
+    forbidden: ["styles.segmentedControl", "styles.segmentButton", "styles.segmentActive"],
+  },
+  {
+    path: "routes/LauncherStartupSettingsPanel.tsx",
+    expected: ["VTabs", "windowModeTabs"],
+    forbidden: ["segmentedControl", "data-active={draft.workbench.windowMode"],
+  },
+  {
+    path: "routes/TeamExperimentMethodPanel.tsx",
+    expected: ["VTabs", "researchModeTabs"],
+    forbidden: ["styles.segmented", "styles.segmentActive", "aria-pressed={draft.researchMode"],
+  },
+  {
+    path: "routes/SelfEvolutionTrack.tsx",
+    expected: ["VTabs", "pageTabs", "modeTabs"],
+    forbidden: ["styles.segmentedTabs", "styles.tabButtonActive", "styles.modeTabActive", "styles.modeSwitch"],
+  },
+  {
+    path: "routes/teams/TeamShellModeSwitch.tsx",
+    expected: ["VTabs", "team-shell-mode-switch"],
+    forbidden: ["VNativeButton", "data-active={active"],
+  },
+  {
+    path: "routes/TeamResearchLoopPanel.tsx",
+    expected: ["VTabs", "researchLoopChoiceTabs"],
+    forbidden: ["researchLoopChoiceActive", "aria-pressed={currentEvidenceType", "aria-pressed={researchLoopEvidenceDraft.status", "aria-pressed={researchLoopDecisionDraft.decision"],
+  },
+  {
+    path: "routes/SupervisedWorkspaceControls.tsx",
+    expected: ["VTabs", "intakeTabsClass"],
+    forbidden: ["intakeButtonActiveClass", "aria-pressed={currentIntakeMode", "intakeSegmentedClass"],
+  },
+  {
+    path: "routes/SupervisedWorkspaceTabs.tsx",
+    expected: ["VTabs", "flowTabsClass", "WORKFLOW_STEPS"],
+    forbidden: ["VButton", "flowTabActiveClass", "role=\"tablist\"", "aria-selected={selected}"],
+  },
+  {
+    path: "routes/SkillsRoute.tsx",
+    expected: ["VTabs", "filterTabsClass"],
+    forbidden: ["filterButtonActiveClass"],
+  },
+  {
+    path: "routes/PromptTemplatesRoute.tsx",
+    expected: ["VTabs", "filterTabsClass"],
+    forbidden: ["filterButtonActiveClass"],
+  },
+  {
+    path: "routes/EvolutionSupervisedRunsView.tsx",
+    expected: ["VTabs", "filterTabs"],
+    forbidden: ["filterButtonActive", "filterSegmented"],
+  },
+  {
+    path: "routes/EvolutionSupervisedLibraryView.tsx",
+    expected: ["VTabs", "filterTabs"],
+    forbidden: ["filterSegmented", "filterButtonActive"],
+  },
+  {
+    path: "routes/MemoryManagePanel.tsx",
+    expected: ["VTabs", "filterTabs"],
+    forbidden: ["filterButtonActive", "aria-pressed={option.id === activeManageFilterId"],
+  },
+  {
+    path: "routes/MemorySourceAndItemPanels.tsx",
+    expected: ["VTabs", "filterTabs"],
+    forbidden: ["filterButtonActive", "aria-pressed={option.id === activeFilterId"],
+  },
+  {
+    path: "routes/SupervisedReviewRoute.tsx",
+    expected: ["VTabs", "filterTabs", "decisionTabs"],
+    forbidden: ["filterSegmented", "decisionSegmented", "filterButtonActive", "decisionButtonActive"],
+  },
+  {
+    path: "routes/LogsRoute.tsx",
+    expected: ["VTabs", "filterTabs"],
+    forbidden: ["filterButtonActive", "setSeverityFilter(option.value)"],
+  },
+  {
+    path: "routes/RuntimeScenesPane.tsx",
+    expected: ["VTabs", "filterTabs"],
+    forbidden: ["filterButtonActive", "setSeverityFilter(option.value)"],
+  },
+  {
+    path: "routes/MemoryProjectMemoryQueuePanel.tsx",
+    expected: ["VTabs", "queueFilterTabs"],
+    forbidden: ["filterButtonActive", "aria-pressed={isPendingOnly"],
+  },
+  {
+    path: "routes/GitRoute.tsx",
+    expected: ["VTabs", "filterTabs"],
+    forbidden: ["filterButtonActive", "styles.filterButton"],
+  },
+  {
+    path: "routes/AgentDetailHeaderPanel.tsx",
+    expected: ["VTabs", "detailTabsTrigger"],
+    forbidden: ["VNativeButton", "detailTabActive"],
   },
 ] as const;
 
@@ -453,10 +583,15 @@ describe("VUI batch migration", () => {
 
   it("keeps Teams source-collection stage actions compact by default", () => {
     // Wave 8F: researchStage* lives in TeamsRoute.research.styles.ts
+    // Stage panel styles live under teams/source-collection/ui (compat re-exports at routes/*).
     const researchSource = readTargetSource("routes/TeamsRoute.research.styles.ts");
     const shellSource = readTargetSource("routes/TeamsRoute.styles.ts");
-    const activeStageSource = readTargetSource("routes/TeamSourceCollectionActiveStagePanel.styles.ts");
-    const screeningSource = readTargetSource("routes/TeamSourceCollectionScreeningPanel.styles.ts");
+    const activeStageSource = readTargetSource(
+      "routes/teams/source-collection/ui/TeamSourceCollectionActiveStagePanel.styles.ts",
+    );
+    const screeningSource = readTargetSource(
+      "routes/teams/source-collection/ui/TeamSourceCollectionScreeningPanel.styles.ts",
+    );
 
     expect(researchSource).toContain("researchStageActions");
     expect(shellSource).not.toContain("sourceCollectionStagePrimaryAction");
@@ -466,8 +601,9 @@ describe("VUI batch migration", () => {
     expect(teamStyles.researchStageActions).toContain("flex");
     expect(teamStyles.researchStageActions).toContain("flex-wrap");
     expect(teamStyles.researchStageActions).not.toContain("grid-template-columns");
-    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStagePrimaryAction).toContain("w-fit");
-    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStagePrimaryAction).not.toMatch(/(^|\s)w-full(\s|$)/);
+    // Primary action is full-width inside the stage column (compact height, not w-fit chip).
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStagePrimaryAction).toContain("!w-full");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStagePrimaryAction).toContain("!min-h-9");
     expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionPanelActions).toContain("flex");
     expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionPanelActions).toContain("flex-wrap");
   });
@@ -475,9 +611,11 @@ describe("VUI batch migration", () => {
   it("keeps PetRoute progress width in Tailwind instead of raw inline width", () => {
     const source = readTargetSource("routes/PetRoute.tsx");
 
+    expect(source).toContain("VDenseOpsPage");
     expect(source).toContain("--pet-progress");
     expect(source).not.toContain("style={{ width: `${progress}%` }}");
     expect(petStyles.progressFillClass).toContain("w-[var(--pet-progress)]");
+    expect(petStyles.bodyClass).toContain("overflow-auto");
   });
 
   it.each(staticInlineStyleCleanupTargets)("$path keeps static layout styles out of raw inline style props", ({ path, forbidden }) => {

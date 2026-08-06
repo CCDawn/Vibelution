@@ -173,7 +173,7 @@ Every primary workbench shell should expose a stable domain marker for contracts
 | Route / shell | Marker |
 | --- | --- |
 | Logs / Git / Tools | `data-vui-domain-recipe` on `VDenseOpsPage` + `data-vui-recipe` on resizable workspace |
-| Evolution | `data-vui-recipe="evolution-workbench"` on page root |
+| Evolution | `VTrackWorkbenchPage` + `data-vui-recipe="evolution-workbench"` / `domainRecipe="evolution-multi-rail"` |
 | Self-evolution track | `data-vui-recipe="evolution-self-workbench"` on workspace layout |
 | Launcher | `data-vui-recipe="launcher-workbench"` on route + workspace |
 | Supervised review | `data-vui-recipe="supervised-review-workbench"` on page + workspace |

@@ -23,6 +23,7 @@ import {
   VStateSurface,
   VStatusChip,
   VSurface,
+  VTabs,
   VTooltip,
 } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -547,16 +548,23 @@ export function PromptTemplatesRoute() {
           </label>
 
           <div className={styles.filterRowClass}>
-            {visibleFilters.map((filter) => (
-              <VButton
-                key={filter}
-                type="button"
-                className={categoryFilter === filter ? styles.filterButtonActiveClass : styles.filterButtonClass}
-                onPress={() => selectCategory(filter)}
-              >
-                {filter === "all" ? copy.all : categoryLabel(filter, lang)}
-              </VButton>
-            ))}
+            <VTabs
+              density="compact"
+              className={styles.filterTabsClass}
+              listClassName={styles.filterTabsListClass}
+              triggerClassName={styles.filterTabsTriggerClass}
+              aria-label={copy.templates}
+              value={categoryFilter}
+              onValueChange={(value) => {
+                if ((CATEGORY_FILTERS as readonly string[]).includes(value)) {
+                  selectCategory(value as PromptCategoryFilter);
+                }
+              }}
+              items={visibleFilters.map((filter) => ({
+                id: filter,
+                label: filter === "all" ? copy.all : categoryLabel(filter, lang),
+              }))}
+            />
           </div>
 
           <VDenseToolbar className={styles.bulkActionBarClass} ariaLabel={copy.bulkSelected}>

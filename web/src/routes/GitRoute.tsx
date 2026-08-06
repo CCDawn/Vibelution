@@ -31,6 +31,7 @@ import {
   VDenseOpsPage,
   VStateSurface,
   VSurface,
+  VTabs,
 } from "../components/vui";
 import { GitDiffView } from "./GitDiffView";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
@@ -839,19 +840,23 @@ export function GitRoute() {
                 </div>
                 <span className={styles.countPill}>{filteredFiles.length}</span>
               </div>
-              <div className={styles.filterRow}>
-                {GIT_FILTERS.map((filter) => (
-                  <VButton
-                    key={filter}
-                    type="button"
-                    variant="secondary"
-                    className={filter === activeFilter ? styles.filterButtonActive : styles.filterButton}
-                    onPress={() => setActiveFilter(filter)}
-                  >
-                    {t(GIT_FILTER_LABEL_KEYS[filter])}
-                  </VButton>
-                ))}
-              </div>
+              <VTabs
+                density="compact"
+                className={styles.filterTabs}
+                listClassName={styles.filterTabsList}
+                triggerClassName={styles.filterTabsTrigger}
+                aria-label={t("gitAllChanges")}
+                value={activeFilter}
+                onValueChange={(value) => {
+                  if ((GIT_FILTERS as readonly string[]).includes(value)) {
+                    setActiveFilter(value as GitFilter);
+                  }
+                }}
+                items={GIT_FILTERS.map((filter) => ({
+                  id: filter,
+                  label: t(GIT_FILTER_LABEL_KEYS[filter]),
+                }))}
+              />
               <div className={styles.selectionRow}>
                 <VButton type="button" variant="secondary" className={styles.selectionButton} onPress={selectVisible} isDisabled={!filteredFiles.length}>
                   {t("gitSelectVisible")}

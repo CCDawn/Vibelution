@@ -44,13 +44,14 @@ function getStringAttributeValue(attribute: ts.JsxAttribute): string | null {
   return null;
 }
 
-function collectNavLinksUsingDocumentReload(source: ts.SourceFile, paths: Set<string>): string[] {
+function collectRouteLinksUsingDocumentReload(source: ts.SourceFile, paths: Set<string>): string[] {
   const usingReload: string[] = [];
+  const routeLinkTags = new Set(["NavLink", "VRouteLinkButton", "Link"]);
 
   function visit(node: ts.Node) {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tagName = node.tagName.getText(source);
-      if (tagName === "NavLink") {
+      if (routeLinkTags.has(tagName)) {
         let toPath: string | null = null;
         let hasReloadDocument = false;
         for (const property of node.attributes.properties) {
@@ -139,11 +140,13 @@ describe("AppShell navigation telemetry", () => {
     const source = ts.createSourceFile("AppShell.tsx", appShellSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
     expect(
-      collectNavLinksUsingDocumentReload(
+      collectRouteLinksUsingDocumentReload(
         source,
         new Set(["/chat", "/supervised-evolution", "/self-evolution", "/teams", "/memory", "/agents", "/logs", "/git", "/config"]),
       ),
     ).toEqual([]);
+    expect(appShellSource).toContain('chrome="shell-nav"');
+    expect(appShellSource).not.toContain("<NavLink");
   });
 
   it("preloads the chat route from navigation before the user waits on the route chunk", () => {

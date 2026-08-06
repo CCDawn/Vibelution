@@ -1,8 +1,7 @@
 import { CheckCircle2, Eye, Link2 } from "lucide-react";
-import { NavLink } from "react-router-dom";
 
 import type { KnowledgeStewardOverview, KnowledgeStewardRecommendation, KnowledgeStewardWorkbenchPayload } from "../api/types";
-import { VButton, VTooltip } from "../components/vui";
+import { VButton, VRouteLinkButton, VTooltip } from "../components/vui";
 import styles from "./MemoryKnowledgeStewardPanel.styles";
 
 export type MemoryKnowledgeStewardPanelCopy = {
@@ -86,10 +85,13 @@ export function MemoryKnowledgeStewardPanel({
           <span className={knowledgeSteward?.steward.protected ? styles.statusPill : styles.statusPillMuted}>
             {knowledgeSteward?.steward.protected ? copy.protectedAgent : knowledgeSteward?.steward.status || copy.missing}
           </span>
-          <NavLink className={styles.detailActionButton} to={knowledgeSteward?.steward.directChatPath || "/chat"}>
-            <Link2 size={14} />
-            <span>{copy.stewardDirectChat}</span>
-          </NavLink>
+          <VRouteLinkButton
+            className={styles.detailActionButton}
+            to={knowledgeSteward?.steward.directChatPath || "/chat"}
+            icon={<Link2 size={14} aria-hidden="true" />}
+          >
+            {copy.stewardDirectChat}
+          </VRouteLinkButton>
         </div>
       </div>
       <div className={styles.stewardGrid}>
