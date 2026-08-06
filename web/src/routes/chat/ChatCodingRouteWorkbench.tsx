@@ -7,7 +7,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Apple,
-  ArrowLeft,
   ArrowUpRight,
   Check,
   ChevronRight,
@@ -165,7 +164,7 @@ import {
   isChildSession,
   isAgentRootSession,
 } from "../DirectSessionIndexItem";
-import { agentCenterConfigRoute, safeAgentCenterReturnToPath } from "../agentCenterRoutes";
+import { agentCenterConfigRoute } from "../agentCenterRoutes";
 import {
   buildChatMentionTargets,
   type ChatMentionTarget,
@@ -188,10 +187,16 @@ import {
   runtimeMatchesSelectedChatSession,
   shouldSuppressComposerErrorForTurnError,
 } from "./chatCodingRouteViewModel";
+import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
+import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
+import {
+  useChatLocaleFormatters,
+  useChatReturnNavigation,
+} from "./useChatWorkbenchPresentation";
 import {
   useChatComposerSubmitActions,
   useChatComposerTurnMutations,
@@ -465,16 +470,7 @@ export function ChatCodingRoute() {
   const requestedRoomId = useMemo(() => {
     return new URLSearchParams(location.search).get("room") ?? "";
   }, [location.search]);
-  const chatReturnTarget = useMemo(() => {
-    return safeAgentCenterReturnToPath(new URLSearchParams(location.search).get("returnTo"));
-  }, [location.search]);
-  const chatReturnLabel = useMemo(() => {
-    const raw = String(new URLSearchParams(location.search).get("returnLabel") || "").trim();
-    if (!raw || raw.length > 80) {
-      return lang === "zh" ? "返回来源" : "Back";
-    }
-    return raw;
-  }, [lang, location.search]);
+  const { chatReturnTarget, chatReturnLabel } = useChatReturnNavigation(location.search, lang);
   useEffect(() => {
     activeTurnLayersBySessionRef.current = activeTurnLayersBySession;
   }, [activeTurnLayersBySession]);
@@ -1510,25 +1506,13 @@ export function ChatCodingRoute() {
 
   const changedFiles = new Set(sessionDetailQuery.data?.changedFiles ?? []);
 
-  const locale = lang === "zh" ? "zh-CN" : "en-US";
-
-  const timeFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      }),
-    [locale],
-  );
-  const numberFormatter = useMemo(() => new Intl.NumberFormat(locale), [locale]);
-  const compactNumberFormatter = useMemo(
-    () => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }),
-    [locale],
-  );
+  const {
+    locale,
+    numberFormatter,
+    compactNumberFormatter,
+    formatTime,
+    formatConversationIndexTime,
+  } = useChatLocaleFormatters(lang);
 
   const runtime = runtimeQuery.data;
   const pet = petQuery.data;
@@ -2608,21 +2592,6 @@ export function ChatCodingRoute() {
       : numberFormatter.format(sessionIndexLoadedCount);
   const sessionIndexProgressVisible = sessionIndexHasMore || sessionIndexTotalEstimate > SESSION_INDEX_PAGE_SIZE;
 
-  function formatTime(value: string) {
-    if (!value) {
-      return "";
-    }
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) {
-      return value;
-    }
-    return timeFormatter.format(parsed);
-  }
-
-  function formatConversationIndexTime(value: string) {
-    return formatTime(value).replace(/:\d{2}$/, "");
-  }
-
   function toggleConversationGroup(groupKey: ConversationIndexDynamicGroupKey) {
     setCollapsedConversationGroups((current) => ({
       ...current,
@@ -3114,30 +3083,27 @@ export function ChatCodingRoute() {
         className={centerPaneClassName}
         surfaceClassName={styles.centerSurface}
         tabStrip={(
-        <div className={styles.tabStrip}>
-          {/* Pinned back chip — short label only; full destination stays in title/aria. */}
-          {chatReturnTarget ? (
-            <Link
-              className={styles.chatReturnLink}
-              to={chatReturnTarget}
-              title={chatReturnLabel}
-              aria-label={chatReturnLabel}
-            >
-              <ArrowLeft size={14} className={styles.chatReturnLinkIcon} aria-hidden="true" />
-              <span>{lang === "zh" ? "返回" : "Back"}</span>
-            </Link>
-          ) : null}
-          {/* Session + file tabs scroll together; never put ml-auto before this region. */}
-          <div className={styles.tabStripSessions}>
-            {groupPanelActive ? (
-              <VButton
-                type="button"
-                className={`${styles.tab} ${styles.tabActive}`}
-                onClick={() => undefined}
-              >
-                {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
-              </VButton>
-            ) : selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 ? (
+          <ChatCenterTabStrip
+            styles={styles}
+            lang={lang}
+            agentSessionLabel={t("agentSession")}
+            chatReturnTarget={chatReturnTarget}
+            chatReturnLabel={chatReturnLabel}
+            groupPanelActive={groupPanelActive}
+            projectBusActive={projectBusActive}
+            showSessionTabs={Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
+            showAgentFallbackTab
+            workspaceActiveTab={workspace.activeTab}
+            leftOverlayVisible={responsiveLayout.leftVisible}
+            rightOverlayVisible={responsiveLayout.rightVisible}
+            conversationIndexOverlayOpen={conversationIndexOverlayOpen}
+            statusRailOverlayOpen={statusRailOverlayOpen}
+            onActivateAgentFallbackTab={() => {
+              activeSessionId && setActiveTab(activeSessionId, "agent");
+            }}
+            onToggleLeftOverlay={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
+            onToggleRightOverlay={() => setResponsiveOverlayPane((current) => current === "right" ? null : "right")}
+            sessionTabs={(
               <AgentSessionTabStrip
                 activeSessionId={activeSessionId}
                 activeCliAgentRunId={activeCliAgentRunId}
@@ -3186,18 +3152,8 @@ export function ChatCodingRoute() {
                 onSetActiveTab={setActiveTab}
                 onSubmitRename={submitRenameSession}
               />
-            ) : (
-              <VButton
-                type="button"
-                className={workspace.activeTab === "agent" ? `${styles.tab} ${styles.tabActive}` : styles.tab}
-                onClick={() => {
-                  activeSessionId && setActiveTab(activeSessionId, "agent");
-                }}
-              >
-                {t("agentSession")}
-              </VButton>
             )}
-            <Suspense fallback={null}>
+            fileTabs={(
               <ChatFileWorkspaceTabs
                 activeTab={workspace.activeTab}
                 closePreviewTabLabel={t("closePreviewTab")}
@@ -3210,52 +3166,24 @@ export function ChatCodingRoute() {
                   activeSessionId && setActiveTab(activeSessionId, tabPath);
                 }}
               />
-            </Suspense>
-          </div>
-          {/* Overlay rail toggles last + ml-auto so they sit on the right when present. */}
-          {!responsiveLayout.leftVisible || !responsiveLayout.rightVisible ? (
-            <div className={styles.overlayPaneControls}>
-              {!responsiveLayout.leftVisible ? (
-                <VButton
-                  id="chat-conversation-index-toggle"
-                  type="button"
-                  className={styles.overlayPaneToggle}
-                  aria-expanded={conversationIndexOverlayOpen}
-                  aria-controls="chat-conversation-index-pane"
-                  onClick={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
-                >
-                  {lang === "zh" ? "会话" : "Chats"}
-                </VButton>
-              ) : null}
-              {!responsiveLayout.rightVisible ? (
-                <VButton
-                  id="chat-status-toggle"
-                  type="button"
-                  className={styles.overlayPaneToggle}
-                  aria-expanded={statusRailOverlayOpen}
-                  aria-controls="chat-status-pane"
-                  onClick={() => setResponsiveOverlayPane((current) => current === "right" ? null : "right")}
-                >
-                  {lang === "zh" ? "状态" : "Status"}
-                </VButton>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+            )}
+          />
         )}
         surface={(
-          <>
-          <ChatCliAgentTerminalStack
-            runs={mountedCliAgentRuns}
-            activeCliAgentRunId={activeCliAgentRunId}
-            activeSessionId={activeSessionId}
+          <ChatCenterSessionSurface
+            terminal={(
+              <ChatCliAgentTerminalStack
+                runs={mountedCliAgentRuns}
+                activeCliAgentRunId={activeCliAgentRunId}
+                activeSessionId={activeSessionId}
+                groupPanelActive={groupPanelActive}
+                lang={lang}
+                TerminalPanel={CliAgentRunTerminalPanel}
+                onTerminalSessionChange={handleCliAgentTerminalSessionChange}
+              />
+            )}
             groupPanelActive={groupPanelActive}
-            lang={lang}
-            TerminalPanel={CliAgentRunTerminalPanel}
-            onTerminalSessionChange={handleCliAgentTerminalSessionChange}
-          />
-          {groupPanelActive ? (
-            <Suspense fallback={null}>
+            groupSurface={(
             <ChatGroupCenterSurface
               lang={lang}
               projectBusActive={projectBusActive}
@@ -3307,8 +3235,8 @@ export function ChatCodingRoute() {
                 )
               }
             />
-            </Suspense>
-          ) : (
+            )}
+            sessionWorkspace={(
             <ChatSessionWorkspacePanel
               activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
               activeCliAgentRunId={activeCliAgentRunId}
@@ -3467,8 +3395,8 @@ export function ChatCodingRoute() {
                 resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "reject" });
               }}
             />
-          )}
-          </>
+            )}
+          />
         )}
       />
       )}

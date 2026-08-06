@@ -11,6 +11,7 @@ import {
   VMetricChip,
   VNativeButton,
   VNativeInput,
+  VPanelHeader,
   VStatusChip,
   VStringSelect,
   type VStatusTone,
@@ -786,22 +787,24 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                 className={styles.experimentSmokeRunEvidence}
                 aria-label={lang === "zh" ? "本次受控 Smoke 证据" : "Bounded smoke evidence"}
               >
-                <header className={styles.experimentSmokeRunHeader}>
-                  <div>
-                    <span>{lang === "zh" ? "本次 Smoke 证据" : "Smoke evidence"}</span>
-                    <strong>{activeSmokeRun.adapter}</strong>
-                  </div>
-                  <div className={styles.experimentSmokeMeta}>
-                    <VStatusChip tone={smokeStatusTone(activeSmokeRun.status)}>
-                      {activeSmokeReviewCopy?.statusLabel ?? activeSmokeRun.status}
-                    </VStatusChip>
-                    {activeSmokeRun.proxyOnly ? (
-                      <VStatusChip tone="warning">
-                        {lang === "zh" ? "仅代理验证" : "Proxy only"}
+                <VPanelHeader
+                  className={styles.experimentSmokeRunHeader}
+                  headingLevel={null}
+                  eyebrow={lang === "zh" ? "本次 Smoke 证据" : "Smoke evidence"}
+                  title={activeSmokeRun.adapter}
+                  actions={(
+                    <div className={styles.experimentSmokeMeta}>
+                      <VStatusChip tone={smokeStatusTone(activeSmokeRun.status)}>
+                        {activeSmokeReviewCopy?.statusLabel ?? activeSmokeRun.status}
                       </VStatusChip>
-                    ) : null}
-                  </div>
-                </header>
+                      {activeSmokeRun.proxyOnly ? (
+                        <VStatusChip tone="warning">
+                          {lang === "zh" ? "仅代理验证" : "Proxy only"}
+                        </VStatusChip>
+                      ) : null}
+                    </div>
+                  )}
+                />
                 {activeSmokeMetricEntries.length > 0 ? (
                   <div className={styles.experimentSmokeMetricList}>
                     {activeSmokeMetricEntries.map((entry) => (
