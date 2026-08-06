@@ -35,6 +35,8 @@ type TeamSourceCollectionActiveStagePanelProps = {
   secondaryActions?: ReactNode;
   agentChatAction: ReactNode;
   agentConfigAction: ReactNode;
+  /** Current-stage Agent cards stay visible beside the operational CTA. */
+  agentConfiguration?: ReactNode;
   /** When true, only the hero primary is shown; secondaries/agent live under 更多操作. */
   collapseSecondaryActions?: boolean;
   errors: ReactNode;
@@ -69,6 +71,7 @@ export function TeamSourceCollectionActiveStagePanel({
   secondaryActions = null,
   agentChatAction,
   agentConfigAction,
+  agentConfiguration = null,
   collapseSecondaryActions = false,
   errors,
   renderConversationPanel,
@@ -110,6 +113,7 @@ export function TeamSourceCollectionActiveStagePanel({
         <strong>{title}</strong>
         <span>{status}</span>
       </div>
+      {agentConfiguration}
       {hasFlowGuide ? (
         <div className={styles.sourceCollectionStageFlowGuide} role="region" aria-label={lang === "zh" ? "当前推荐流程" : "Recommended flow"}>
           <ol className={styles.sourceCollectionStageFlowSteps}>

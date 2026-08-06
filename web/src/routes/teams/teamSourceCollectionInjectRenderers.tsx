@@ -19,6 +19,7 @@ import { TeamSourceCollectionConversationInject } from "./TeamSourceCollectionCo
 import { TeamSourceCollectionFilterBarInject } from "./TeamSourceCollectionFilterBarInject";
 import { TeamSourceCollectionPaginationInject } from "./TeamSourceCollectionPaginationInject";
 import { TeamSourceCollectionStageAgentsInject } from "./TeamSourceCollectionStageAgentsInject";
+import { ChallengeCupStageAgentConfigurationPanel } from "./challenge-cup/ChallengeCupStageAgentConfigurationPanel";
 import {
   buildSourceCollectionControlsFeedbackBag,
   buildSourceCollectionControlsMetricsBag,
@@ -642,6 +643,13 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
         sourceCollectionStagePrimaryAgentBinding={sourceCollectionStagePrimaryAgentBinding}
         stageChatLabels={SOURCE_COLLECTION_STAGE_CHAT_LABELS}
         openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
+        agentConfiguration={(
+          <ChallengeCupStageAgentConfigurationPanel
+            bindings={sourceCollectionStageAgentBindings(selectedSourceCollectionStageId)}
+            lang={lang}
+            stageType="knowledge_collection"
+          />
+        )}
         startSourceCollectionStageSessionTask={startSourceCollectionStageSessionTask}
         sourceCollectionRunAvailable={Boolean(selectedSourceCollectionRunEffectiveId)}
         sourceCollectionFindingStageCompact={sourceCollectionFindingStageCompact}

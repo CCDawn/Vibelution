@@ -48,6 +48,8 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   stageChatLabels: Record<string, { zh: string; en: string }>;
   openSourceCollectionStageAgentChat: (stageId: any) => void;
+  /** Current-stage Agent cards stay visible beside the operational CTA. */
+  agentConfiguration?: ReactNode;
   startSourceCollectionStageSessionTask?: (
     stageId: SourceCollectionStageModuleId,
     options?: { formalRetry?: boolean },
@@ -92,6 +94,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     sourceCollectionStagePrimaryAgentBinding,
     stageChatLabels,
     openSourceCollectionStageAgentChat,
+    agentConfiguration,
     startSourceCollectionStageSessionTask,
     sourceCollectionRunAvailable,
     sourceCollectionFindingStageCompact,
@@ -535,6 +538,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
           </Link>
         </VTooltip>
       )}
+      agentConfiguration={agentConfiguration}
       errors={(
         <>
           {advanceFailureText ? (
