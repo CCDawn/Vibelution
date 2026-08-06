@@ -25,7 +25,9 @@
 [data-vui-provider="shadcn"] button[data-vui="button"],
 [data-vui-provider="shadcn"] button[data-vui="icon-button"] {
   min-height: var(--vui-control-height-sm);
-  font-size: var(--vui-font-sm);
+  font-size: var(--vui-type-control-size);
+  font-weight: var(--vui-weight-semibold);
+  line-height: var(--vui-type-control-line);
   border-width: 1px;
   border-style: solid;
   border-color: var(--vui-component-border);

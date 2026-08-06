@@ -3650,14 +3650,23 @@ export function ConversationView({
       <div ref={timelineRef} className={styles.timeline}>
         {displayMessages.length === 0 && !activeTurnMessage ? (
           transcriptPending ? (
-            <VStateSurface
-              fill
-              className={styles.emptyState}
-              tone="loading"
-              title={t("sessionTranscriptLoading")}
-            />
+            <div className={styles.emptyStateHost}>
+              <VStateSurface
+                fill
+                className={styles.emptyState}
+                tone="loading"
+                title={t("sessionTranscriptLoading")}
+              />
+            </div>
           ) : (
-            <VStateSurface fill className={styles.emptyState} tone="empty" title={t("sessionNoMessages")} />
+            <div className={styles.emptyStateHost}>
+              <VStateSurface
+                className={styles.emptyState}
+                tone="empty"
+                skeletonLines={false}
+                title={t("sessionNoMessages")}
+              />
+            </div>
           )
         ) : (
           <div ref={timelineContentRef} className={styles.timelineContent}>

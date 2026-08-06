@@ -13,8 +13,10 @@ body {
   font-family: var(--font-body);
   background: var(--bg-canvas);
   color: var(--fg-primary);
-  font-size: 16px;
-  line-height: var(--vui-line-readable);
+  font-size: var(--vui-type-body-size);
+  font-weight: var(--vui-weight-regular);
+  line-height: var(--vui-type-body-line);
+  letter-spacing: var(--vui-tracking-normal);
   text-rendering: optimizeLegibility;
   overflow: hidden;
 }

@@ -53,7 +53,7 @@ export function ResearchWorkflowErrorSurface({
         ) : undefined
       }
     >
-      <p className="m-0 text-[var(--vui-font-sm)] leading-relaxed text-[var(--fg-secondary)]">
+      <p className="m-0 [font-size:var(--vui-type-body-size)] leading-[var(--vui-type-body-line)] text-[var(--fg-secondary)]">
         {researchWorkflowErrorBody(presented, lang)}
       </p>
       {message && message !== researchWorkflowErrorBody(presented, lang) ? (

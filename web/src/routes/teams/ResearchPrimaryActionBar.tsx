@@ -153,7 +153,7 @@ export function ResearchPrimaryActionBar({
 
   const mainColumn = (
     <div className="grid min-w-0 content-start gap-3">
-      <div className="flex min-w-0 items-center gap-2 text-[var(--vui-font-xs)] text-[var(--fg-tertiary)]">
+      <div className="flex min-w-0 items-center gap-2 [font-size:var(--vui-type-caption-size)] text-[var(--fg-tertiary)]">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--fg-primary)] px-2 py-0.5 font-semibold text-[var(--vui-surface-base)]">
           <Compass size={12} className="shrink-0" aria-hidden="true" />
           {lang === "zh" ? "下一步" : "Next"}
@@ -178,7 +178,7 @@ export function ResearchPrimaryActionBar({
             <h3 className="m-0 text-[1.125rem] font-[820] leading-snug tracking-tight text-[var(--fg-primary)]">
               {title}
             </h3>
-            <p className="m-0 max-w-[40rem] text-[var(--vui-font-sm)] leading-relaxed text-[var(--fg-secondary)]">
+            <p className="m-0 max-w-[40rem] [font-size:var(--vui-type-body-size)] leading-[var(--vui-type-body-line)] text-[var(--fg-secondary)]">
               {body}
             </p>
           </>
