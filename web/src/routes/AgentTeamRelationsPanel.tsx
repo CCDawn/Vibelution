@@ -1,6 +1,6 @@
 import { ExternalLink, Users } from "lucide-react";
 
-import { VButton, VEmptyState, VPanel } from "../components/vui";
+import { VButton, VEmptyState, VPanel, VPanelHeader } from "../components/vui";
 import styles from "./AgentTeamRelationsPanel.styles";
 
 export type AgentTeamRelationView = {
@@ -23,13 +23,8 @@ type AgentTeamRelationsPanelProps = {
 export function AgentTeamRelationsPanel({ relations, onOpenTeam }: AgentTeamRelationsPanelProps) {
   return (
     <VPanel ariaLabel="团队关系" className={styles.relationsPanel}>
-      <header className={styles.panelHeader}>
-        <div>
-          <h3>团队关系</h3>
-          <p>确认当前 Agent 所属团队和同组成员；成员资格由团队工作区维护。</p>
-        </div>
-      </header>
-      <p className={styles.evidenceNote}>成员关系来自团队画布。委派、审批和运行依赖请在对应团队或运行视图中核验。</p>
+      <VPanelHeader className={styles.panelHeader} headingLevel={3} title="团队关系" />
+      <p className={styles.evidenceNote}>确认当前 Agent 所属团队和同组成员；成员资格由团队工作区维护。成员关系来自团队画布。委派、审批和运行依赖请在对应团队或运行视图中核验。</p>
       {relations.length ? (
         <div className={styles.relationList}>
           {relations.map((relation) => (

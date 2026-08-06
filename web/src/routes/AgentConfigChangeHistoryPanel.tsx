@@ -1,7 +1,7 @@
 import { History, Save, Trash2 } from "lucide-react";
 
 import type { AgentConfigChanges } from "../api/types";
-import { VButton, VEmptyState, VPanel, VStateSurface } from "../components/vui";
+import { VButton, VEmptyState, VPanel, VPanelHeader, VStateSurface } from "../components/vui";
 import styles from "./AgentConfigChangeHistoryPanel.styles";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
@@ -51,25 +51,27 @@ export function AgentConfigChangeHistoryPanel({
 
   return (
     <VPanel ariaLabel="草稿与版本" className={styles.historyPanel}>
-      <header className={styles.panelHeader}>
-        <div>
-          <h3>草稿与版本</h3>
-          <p>草稿不影响运行；只有配置页的保存操作才会发布，并留下关联会话的版本证据。</p>
-        </div>
-        <div className={styles.actions}>
-          {configDirty ? (
-            <VButton
-              type="button"
-              variant="secondary"
-              icon={<Save size={14} />}
-              isDisabled={savePending}
-              onPress={onSaveDraft}
-            >
-              {savePending ? "正在保存草稿…" : "保存当前草稿"}
-            </VButton>
-          ) : null}
-        </div>
-      </header>
+      <VPanelHeader
+        className={styles.panelHeader}
+        headingLevel={3}
+        title="草稿与版本"
+        actions={(
+          <div className={styles.actions}>
+            {configDirty ? (
+              <VButton
+                type="button"
+                variant="secondary"
+                icon={<Save size={14} />}
+                isDisabled={savePending}
+                onPress={onSaveDraft}
+              >
+                {savePending ? "正在保存草稿…" : "保存当前草稿"}
+              </VButton>
+            ) : null}
+          </div>
+        )}
+      />
+      <p className={styles.panelDescription}>草稿不影响运行；只有配置页的保存操作才会发布，并留下关联会话的版本证据。</p>
 
       {loading ? (
         <ProgressiveRegionSkeleton variant="list" label="正在读取草稿与版本记录" />

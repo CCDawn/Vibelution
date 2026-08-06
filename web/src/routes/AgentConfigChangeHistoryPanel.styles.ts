@@ -2,7 +2,8 @@ import { vuiFlatPanelClass, vuiOpaqueRowClass } from "../design/vuiSurfaceRecipe
 
 const styles = {
   historyPanel: `grid min-w-0 [align-content:start] [gap:8px] [padding:10px] ${vuiFlatPanelClass}`,
-  panelHeader: "grid min-w-0 [grid-template-columns:minmax(0,1fr)_auto] [align-items:start] [gap:8px] [&_div]:min-w-0 [&_h3]:m-0 [&_h3]:text-[var(--fg-primary)] [&_h3]:[font-size:var(--vui-font-md)] [&_p]:m-0 [&_p]:mt-1 [&_p]:text-[var(--fg-tertiary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-[1.45] max-[640px]:[grid-template-columns:1fr]",
+  panelHeader: "grid min-w-0 [grid-template-columns:minmax(0,1fr)_auto] [align-items:start] [gap:8px] max-[640px]:[grid-template-columns:1fr]",
+  panelDescription: "m-0 text-[var(--fg-tertiary)] [font-size:var(--vui-font-xs)] leading-[1.45]",
   actions: "flex min-w-0 [flex-wrap:wrap] [gap:6px]",
   draftCard: `grid min-w-0 [gap:7px] [padding:9px] ${vuiOpaqueRowClass}`,
   draftHeader: "flex min-w-0 [flex-wrap:wrap] [align-items:center] [justify-content:space-between] [gap:6px] [&_h4]:m-0 [&_h4]:text-[var(--fg-primary)] [&_h4]:[font-size:var(--vui-font-sm)]",

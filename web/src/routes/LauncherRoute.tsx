@@ -2270,6 +2270,7 @@ export function LauncherRoute() {
         ref={launcherLayoutRef}
         className={styles.workspace}
         style={launcherLayoutStyle}
+        data-vui-recipe="launcher-workbench"
         data-vui-layout-id={LAUNCHER_LAYOUT_ID}
         data-vui-region="launcher-workspace"
       >

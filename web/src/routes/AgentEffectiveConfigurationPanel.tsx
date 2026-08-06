@@ -1,7 +1,7 @@
 import { CheckCircle2, CircleAlert, CircleX, Settings2 } from "lucide-react";
 
 import type { AgentEffectiveConfigurationField } from "../api/types";
-import { VButton, VEmptyState, VNativeButton, VPanel } from "../components/vui";
+import { VButton, VEmptyState, VNativeButton, VPanel, VPanelHeader } from "../components/vui";
 import styles from "./AgentEffectiveConfigurationPanel.styles";
 
 type EffectiveConfigurationField = AgentEffectiveConfigurationField;
@@ -121,15 +121,17 @@ export function AgentEffectiveConfigurationPanel({
 }: AgentEffectiveConfigurationPanelProps) {
   return (
     <VPanel ariaLabel="当前有效配置" className={styles.configurationPanel}>
-      <header className={styles.panelHeader}>
-        <div>
-          <h3>当前有效配置</h3>
-          <p>展示运行时实际生效的值、来源与健康状态；不展示密钥或原始策略 JSON。</p>
-        </div>
-        <VButton type="button" variant="secondary" icon={<Settings2 size={14} />} onPress={onOpenConfig}>
-          修改配置
-        </VButton>
-      </header>
+      <VPanelHeader
+        className={styles.panelHeader}
+        headingLevel={3}
+        title="当前有效配置"
+        actions={(
+          <VButton type="button" variant="secondary" icon={<Settings2 size={14} />} onPress={onOpenConfig}>
+            修改配置
+          </VButton>
+        )}
+      />
+      <p className={styles.panelDescription}>展示运行时实际生效的值、来源与健康状态；不展示密钥或原始策略 JSON。</p>
       <div className={styles.sourceSummary} aria-label="配置来源摘要">
         <strong className={styles.sourceSummaryLabel}>来源</strong>
         <span title={sourceSummary(fields)}>{sourceSummary(fields)}</span>

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { ConfigSummary } from "../api/types";
-import { VButton, VContextualHint } from "../components/vui";
+import { VButton, VPanelHeader } from "../components/vui";
 import styles from "./ConfigSettingsNavigation.styles";
 
 export type ConfigSettingsLanguage = "zh" | "en";
@@ -134,20 +134,15 @@ export function ConfigSettingsSidebar({
   const sidebarHelp = subtitleHint || subtitle;
   return (
     <aside className={styles.sidebar} data-vui-region="config-settings-nav">
-      <header className={styles.sidebarHeader}>
-        <p className={styles.eyebrow}>{language === "zh" ? "设置" : "Settings"}</p>
-        <div className={styles.titleRow}>
-          <h2 className={styles.title}>{title}</h2>
-          {sidebarHelp ? (
-            <VContextualHint
-              label={language === "zh" ? "设置工作台说明" : "Settings workspace details"}
-              content={sidebarHelp}
-              width="wide"
-            />
-          ) : null}
-        </div>
-        {headerAction}
-      </header>
+      <VPanelHeader
+        className={styles.sidebarHeader}
+        eyebrow={language === "zh" ? "设置" : "Settings"}
+        title={title}
+        headingLevel={2}
+        tooltip={sidebarHelp || undefined}
+        tooltipLabel={language === "zh" ? "设置工作台说明" : "Settings workspace details"}
+        actions={headerAction}
+      />
       <div className={styles.status} role="status">
         <span>{language === "zh" ? "配置状态" : "Config status"}</span>
         <strong className={styles.statusValue}>{statusLabel}</strong>

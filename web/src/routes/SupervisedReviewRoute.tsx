@@ -393,7 +393,9 @@ export function SupervisedReviewRoute() {
       columnsClassName=""
       layoutId={REVIEW_LAYOUT_ID}
       resize={{ sidebar: REVIEW_QUEUE_SIDEBAR }}
+      data-vui-recipe="supervised-review-workbench"
       data-vui-domain-recipe="supervised-review-workbench"
+      data-vui-layout-id={REVIEW_LAYOUT_ID}
       data-vui-region="supervised-review-workspace"
       ariaLabel={t("reviewWorkspace")}
       eyebrow={t("navSupervisedEvolution")}
