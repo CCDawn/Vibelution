@@ -20,7 +20,26 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+function Resolve-ProjectDir {
+    # Supports both:
+    #   scripts/install_windows.ps1  (repo layout)
+    #   package-root layout when markers live next to this script
+    $here = $PSScriptRoot
+    $rootMarkers = @(
+        (Join-Path $here "requirements.txt"),
+        (Join-Path $here "scripts\vibelution_launcher.ps1")
+    )
+    if (($rootMarkers | Where-Object { Test-Path -LiteralPath $_ }).Count -ge 2) {
+        return (Resolve-Path -LiteralPath $here).Path
+    }
+    $parent = (Resolve-Path -LiteralPath (Join-Path $here "..")).Path
+    if (-not (Test-Path -LiteralPath (Join-Path $parent "requirements.txt"))) {
+        throw "Cannot locate Vibelution project root from script location: $here"
+    }
+    return $parent
+}
+
+$ProjectDir = Resolve-ProjectDir
 $VenvDir = Join-Path $ProjectDir ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $VenvPythonw = Join-Path $VenvDir "Scripts\pythonw.exe"
@@ -62,7 +81,12 @@ function Resolve-HostPython {
             if ($candidate -eq "py") {
                 $ver = & py -3 -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>$null
                 if ($LASTEXITCODE -eq 0 -and $ver) {
-                    return "py -3"
+                    $parts = $ver.Trim().Split(".")
+                    $major = [int]$parts[0]
+                    $minor = [int]$parts[1]
+                    if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 11)) {
+                        return "py -3"
+                    }
                 }
             } else {
                 $ver = & $cmd.Source -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>$null
@@ -106,10 +130,16 @@ Write-Host "  Python: $hostPython"
 Assert-Command -Name "node" -Hint "Install Node.js 18+ from https://nodejs.org/ (include npm)." | Out-Null
 Assert-Command -Name "npm" -Hint "npm must be on PATH (comes with Node.js)." | Out-Null
 Assert-Command -Name "git" -Hint "Install Git for Windows: https://git-scm.com/download/win" | Out-Null
-$nodeVer = & node --version
-$npmVer = & npm --version
+$nodeVer = (& node --version).Trim()
+$npmVer = (& npm --version).Trim()
 Write-Host "  Node: $nodeVer"
 Write-Host "  npm:  $npmVer"
+if ($nodeVer -match '^v?(\d+)\.') {
+    $nodeMajor = [int]$Matches[1]
+    if ($nodeMajor -lt 18) {
+        throw "Node.js 18+ is required (found $nodeVer). Install from https://nodejs.org/ and re-run."
+    }
+}
 
 Write-Step "Create / reuse project virtualenv"
 if (-not (Test-Path -LiteralPath $VenvPython)) {
