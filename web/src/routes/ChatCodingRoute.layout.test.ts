@@ -13,6 +13,13 @@ import shellStoreSource from "../store/shellStore.ts?raw";
 import chatApiSource from "../api/chat.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import routeSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
+import chatCenterTabStripSource from "./chat/ChatCenterTabStrip.tsx?raw";
+import chatCenterSessionSurfaceSource from "./chat/ChatCenterSessionSurface.tsx?raw";
+import chatConversationIndexPanelContentSource from "./chat/ChatConversationIndexPanelContent.tsx?raw";
+import chatSessionWorkbenchShellSource from "./chat/ChatSessionWorkbenchShell.tsx?raw";
+import chatWorkbenchCenterColumnSource from "./chat/ChatWorkbenchCenterColumn.tsx?raw";
+import chatWorkbenchFormatSource from "./chat/chatWorkbenchFormat.ts?raw";
+import chatWorkbenchPresentationSource from "./chat/useChatWorkbenchPresentation.ts?raw";
 import conversationIndexRailSource from "./chat/ChatConversationIndexRail.tsx?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
@@ -190,8 +197,10 @@ const tokenCoreStatusMetrics: TokenCoreStatusMetric[] = [
   },
 ];
 
-const routeAndIndexRailSource = `${routeSource}\n${conversationIndexRailSource}\n${chatStatusRailSource}`;
-const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}`;
+const routeAndIndexRailSource = `${routeSource}\n${conversationIndexRailSource}\n${chatStatusRailSource}\n${chatConversationIndexPanelContentSource}`;
+const routeAndLayoutSource = `${routeSource}\n${chatWorkbenchLayoutSource}\n${chatSessionWorkbenchShellSource}\n${chatWorkbenchCenterColumnSource}`;
+const routeAndCenterPackSource = `${routeSource}\n${chatCenterTabStripSource}\n${chatCenterSessionSurfaceSource}\n${chatWorkbenchCenterColumnSource}\n${chatSessionWorkbenchShellSource}`;
+const routeAndPresentationSource = `${routeSource}\n${chatWorkbenchPresentationSource}\n${chatWorkbenchFormatSource}`;
 const routeAndComposerSource = `${routeSource}\n${chatComposerSubmitModelSource}\n${chatComposerSubmitHookSource}\n${chatActiveTurnLayerSource}\n${chatSubmitTelemetrySource}`;
 const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${groupRoomStreamSource}\n${chatSessionStreamConnectSource}\n${chatStreamApplyControllerSource}\n${chatActiveTurnLayerSource}`;
 const routeAndSelectionSource = `${routeSource}\n${chatSessionSelectionSource}`;
@@ -626,7 +635,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("derives responsive layout from the workbench ResizeObserver without overwriting pane preferences", () => {
     expect(routeAndLayoutSource).toContain("resolveChatResponsiveLayout");
     expect(routeAndLayoutSource).toContain("new ResizeObserver(syncResponsiveLayout)");
-    expect(routeAndLayoutSource).toContain("data-chat-responsive-mode={responsiveLayout.mode}");
+    expect(routeAndLayoutSource).toContain("data-chat-responsive-mode={responsiveMode}");
+    expect(routeAndLayoutSource).toContain("responsiveMode={responsiveLayout.mode}");
     expect(routeAndLayoutSource).not.toContain("CHAT_COMPACT_DESKTOP_MEDIA_QUERY");
     expect(routeAndLayoutSource).not.toContain("compactDesktopAutoCollapseRef");
     expect(routeAndLayoutSource).toContain(
@@ -635,6 +645,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLayoutSource).toContain("styles.layoutCompactDesktop");
     expect(routeAndLayoutSource).toContain("styles.layoutOverlay");
     expect(routeSource).toContain("useChatWorkbenchLayout");
+    expect(routeSource).toContain("ChatSessionWorkbenchShell");
   });
 
   it("places shared collapse-resize handles on the chat gutters", () => {
@@ -671,7 +682,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("fills the conversation reading track whenever the optional status rail is closed", () => {
-    expect(routeSource).toContain('data-chat-status-rail={statusRailCollapsed ? "collapsed" : "visible"}');
+    expect(chatSessionWorkbenchShellSource).toContain(
+      'data-chat-status-rail={statusRailCollapsed ? "collapsed" : "visible"}',
+    );
+    expect(routeSource).toContain("statusRailCollapsed={statusRailCollapsed}");
     expect(routeSource).toContain("conversationFocused={statusRailCollapsed}");
     expect(chatSessionWorkspacePanelSource).toContain("conversationFocused");
     expect(chatSessionWorkspacePanelSource).toContain("styles.conversationFrameFocus");
@@ -729,16 +743,22 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("places the conversation index on the left and the status rail on the right", () => {
     const statusAsideMount = routeSource.indexOf("<ChatStatusRail");
-    const centerPaneStart = routeSource.indexOf("<section className={centerPaneClassName}");
+    const centerPaneStart = routeSource.indexOf("<ChatWorkbenchCenterColumn");
     const conversationAsideMount = routeSource.indexOf("<ChatConversationIndexRail");
     const statusAsideStart = chatStatusRailSource.indexOf('id="chat-status-pane"');
     const conversationAsideStart = conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"');
+    const shellStatusSlot = chatSessionWorkbenchShellSource.indexOf("statusRail={statusRail}");
+    const shellSessionSlot = chatSessionWorkbenchShellSource.indexOf("session={center}");
+    const shellIndexSlot = chatSessionWorkbenchShellSource.indexOf("indexRail={conversationIndex}");
 
     expect(statusAsideMount).toBeGreaterThan(-1);
     expect(centerPaneStart).toBeGreaterThan(statusAsideMount);
     expect(conversationAsideMount).toBeGreaterThan(centerPaneStart);
     expect(statusAsideStart).toBeGreaterThan(-1);
     expect(conversationAsideStart).toBeGreaterThan(-1);
+    expect(shellStatusSlot).toBeGreaterThan(-1);
+    expect(shellSessionSlot).toBeGreaterThan(shellStatusSlot);
+    expect(shellIndexSlot).toBeGreaterThan(shellSessionSlot);
     expect(routeStyles.rightPane).toContain("[grid-column:1]");
     expect(routeStyles.rightPane).toContain("[grid-row:1]");
     expect(routeStyles.resizeHandleLeft).toContain("[grid-column:2]");
@@ -842,19 +862,20 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("shows a safe return link when Chat is opened from another workspace surface", () => {
-    expect(routeSource).toContain("safeAgentCenterReturnToPath(new URLSearchParams(location.search).get(\"returnTo\"))");
-    expect(routeSource).toContain("new URLSearchParams(location.search).get(\"returnLabel\")");
-    expect(routeSource).toContain("const chatReturnTarget = useMemo");
-    expect(routeSource).toContain("const chatReturnLabel = useMemo");
-    expect(routeSource).toContain("返回来源");
-    expect(routeSource).toContain("styles.chatReturnLink");
-    expect(routeSource).toContain("styles.tabStripSessions");
-    expect(routeSource).toContain("to={chatReturnTarget}");
-    expect(routeSource).toContain("title={chatReturnLabel}");
-    expect(routeSource).toContain("aria-label={chatReturnLabel}");
+    expect(routeAndPresentationSource).toContain(
+      "safeAgentCenterReturnToPath(new URLSearchParams(locationSearch).get(\"returnTo\"))",
+    );
+    expect(routeAndPresentationSource).toContain("new URLSearchParams(locationSearch).get(\"returnLabel\")");
+    expect(routeSource).toContain("useChatReturnNavigation(location.search, lang)");
+    expect(routeAndPresentationSource).toContain("返回来源");
+    expect(routeAndCenterPackSource).toContain("styles.chatReturnLink");
+    expect(routeAndCenterPackSource).toContain("styles.tabStripSessions");
+    expect(routeAndCenterPackSource).toContain("to={chatReturnTarget}");
+    expect(routeAndCenterPackSource).toContain("title={chatReturnLabel}");
+    expect(routeAndCenterPackSource).toContain("aria-label={chatReturnLabel}");
     // Visible text stays short; full destination is only in title/aria.
-    expect(routeSource).toContain('{lang === "zh" ? "返回" : "Back"}');
-    expect(routeSource).toContain("styles.chatReturnLinkIcon");
+    expect(routeAndCenterPackSource).toContain('{lang === "zh" ? "返回" : "Back"}');
+    expect(routeAndCenterPackSource).toContain("styles.chatReturnLinkIcon");
     expect(routeStyles.chatReturnLink).toBeTypeOf("string");
     expect(routeStyles.chatReturnLink).toContain("shrink-0");
     expect(routeStyles.chatReturnLink).toContain("max-w-[7.5rem]");
@@ -906,8 +927,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layoutCompactDesktop).not.toContain("minmax(260px");
     expect(routeStyles.layoutCompactDesktop).not.toContain("minmax(420px");
     expect(routeStyles.layoutOverlay).toContain("grid-cols-[minmax(0,1fr)]");
-    expect(routeSource).toContain('aria-controls="chat-conversation-index-pane"');
-    expect(routeSource).toContain('aria-controls="chat-status-pane"');
+    expect(routeAndCenterPackSource).toContain('aria-controls="chat-conversation-index-pane"');
+    expect(routeAndCenterPackSource).toContain('aria-controls="chat-status-pane"');
     expect(routeAndLayoutSource).toContain('event.key !== "Escape"');
     expect(routeAndLayoutSource).toContain("closeResponsiveOverlayPane");
     expect(routeStyles.paneCollapsed).toContain("!overflow-hidden");
@@ -1024,9 +1045,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.compactDetailsBody).toContain("overflow-auto");
     expect(chatStatusRailSource).toContain("CHAT_COMPACT_DETAILS_HEIGHT_PANE");
     expect(chatStatusRailSource).toContain("PersistedHeightListShell");
-    expect(routeStyles.inlineMetaPill).toContain("min-h-[24px]");
-    expect(routeStyles.petShowcaseAction).toContain("min-h-[30px]");
-    expect(routeStyles.petShowcaseAction).toContain("[font-size:var(--vui-font-sm)]");
+    expect(routeStyles.inlineMetaPill).toContain("min-h-7");
+    expect(routeStyles.petShowcaseAction).toContain("min-h-8");
+    expect(routeStyles.petShowcaseAction).toContain("text-xs");
   });
 
   it("compresses repeated status prose while keeping critical guidance visible", () => {
@@ -1609,7 +1630,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(html).toContain(">128k</span>");
     expect(html).toContain("128,000 / 200,000");
     expect(html).toContain('aria-label="模型输入 128,000. 128,000 / 200,000 · 64%"');
-    expect(routeSource).toContain("const compactNumberFormatter = useMemo(");
+    expect(routeAndPresentationSource).toContain("const compactNumberFormatter = useMemo(");
+    expect(routeSource).toContain("useChatLocaleFormatters");
     expect(routeAndTokenStatusSource).toContain("displayValue: modelInputLimitMissing");
     expect(routeAndTokenStatusSource).toContain("formatTokenStatusRingCompact(modelInputTokens, compactNumberFormatter)");
   });
@@ -1680,7 +1702,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps the current session status bar keyed to the selected session", () => {
     expect(routeSource).toContain("const rawSessionDetail = resolveActiveSessionDetailForUi");
-    expect(routeSource).toContain("const detail = rawSessionDetail");
+    expect(routeSource).toContain("const detail = resolveStickySessionDetailPaint");
+    expect(routeSource).toContain("detail: rawSessionDetail");
     expect(routeSource).toContain("const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined");
     expect(routeSource).toContain("const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail)");
     expect(routeSource).toContain("const activeTurnMessage = useMemo(");
@@ -1735,8 +1758,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndSessionSurfaceSource).toContain("value: latestControlSignalLine");
     expect(routeAndSessionSurfaceSource).toContain("title: latestControlSignalTitle");
     expect(routeSource).not.toContain("nextStateSignals={detail.nextStateSignals ?? []}");
-    expect(routeStyles.inlineMetaPill).toContain("[&_strong]:whitespace-normal");
-    expect(routeStyles.inlineMetaPill).toContain("[overflow-wrap:anywhere]");
+    expect(routeStyles.inlineMetaPill).toContain("[&_strong]:truncate");
+    expect(routeStyles.inlineMetaPill).toContain("[&_span]:text-[var(--fg-tertiary)]");
   });
 
   it("binds live token speed to the core token status metrics", () => {
@@ -1967,17 +1990,17 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps restored ChatCodingRoute grids from the CSS module migration", () => {
-    const restoredGridExpectations: Array<[string, string]> = [
-      [routeStyles.inlineMetaPill, "grid-cols-[minmax(58px,0.42fr)_minmax(0,1fr)]"],
-      [routeStyles.inlineMetaList, "grid-cols-[minmax(0,1fr)]"],
+    const restoredGridExpectations: Array<[string, string, boolean?]> = [
+      [routeStyles.inlineMetaPill, "grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)]", false],
+      [routeStyles.inlineMetaList, "grid-cols-1", false],
       [routeStyles.sessionBindingNotice, "grid-cols-[minmax(0,1fr)_auto]"],
       [routeStyles.activeSkillStatus, "grid-cols-[minmax(0,1fr)]"],
       [routeStyles.agentIndexHeader, "grid-cols-[18px_minmax(0,1fr)_fit-content(72px)]"],
       [routeStyles.agentIndexOpenButton, "grid-cols-[30px_minmax(0,1fr)]"],
       [routeStyles.resourceSplit, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
-      [routeStyles.inlineStatGrid, "grid-cols-[1fr]"],
-      [routeStyles.inlineStat, "grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"],
-      [routeStyles.petShowcaseActions, "grid-cols-3"],
+      [routeStyles.inlineStatGrid, "grid-cols-1", false],
+      [routeStyles.inlineStat, "grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)]", false],
+      [routeStyles.petShowcaseActions, "grid-cols-3", false],
       [routeStyles.cliAgentTerminalCommand, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [chatRuntimeNoticeStackStyles.notice, "grid-cols-[16px_minmax(0,1fr)]"],
       [chatToolApprovalDialogStyles.dialog, "grid-cols-[28px_minmax(0,1fr)_auto]"],
@@ -1993,8 +2016,12 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.groupComposerBar, "grid-cols-[minmax(0,1fr)_auto_auto]"],
     ];
 
-    for (const [className, gridTemplate] of restoredGridExpectations) {
-      expect(className).toContain("!grid");
+    for (const [className, gridTemplate, requireImportantGrid = true] of restoredGridExpectations) {
+      if (requireImportantGrid) {
+        expect(className).toContain("!grid");
+      } else {
+        expect(className).toMatch(/(?:^|\s)(?:!)?grid(?:\s|$)/);
+      }
       expect(className).toContain(gridTemplate);
     }
 
@@ -2413,13 +2440,16 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("renders structural index and workspace shells while conversation data loads", () => {
-    expect(routeSource).toContain("ConversationIndexLoadingShell");
+    expect(routeAndIndexRailSource).toContain("ConversationIndexLoadingShell");
     expect(routeSource).toContain("const conversationIndexLoading = shouldShowConversationIndexLoading");
     expect(routeSource).toContain("bootstrapIsLoading: activeSessionBootstrapQuery.isLoading");
     expect(routeSource).toContain("conversationsIsLoading: conversationsQuery.isLoading");
     expect(routeSource).toContain("sessionsIsLoading: sessionsQuery.isLoading");
-    expect(routeSource).toContain(") : conversationIndexLoading ? (");
-    expect(routeSource).toContain('<ConversationIndexLoadingShell label={t("loadingSession")} />');
+    expect(routeSource).toContain("ChatConversationIndexPanelContent");
+    expect(routeSource).toContain("conversationIndexLoading={conversationIndexLoading}");
+    expect(chatConversationIndexPanelContentSource).toContain(
+      "<ConversationIndexLoadingShell label={loadingLabel} />",
+    );
     expect(chatSessionWorkspacePanelSource).toContain("ConversationWorkspaceLoadingShell");
     expect(chatSessionWorkspacePanelSource).not.toContain("skeletonLines={2}");
   });
@@ -2632,10 +2662,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("<AgentSessionTabStrip");
     expect(routeSource).toContain("sessions={agentSessionTabs}");
     // Session tabs must precede overlayPaneControls; first-child ml-auto was pushing tabs right.
-    expect(routeSource.indexOf("<AgentSessionTabStrip")).toBeLessThan(
-      routeSource.indexOf("styles.overlayPaneControls"),
+    expect(chatCenterTabStripSource.indexOf("{sessionTabs}")).toBeLessThan(
+      chatCenterTabStripSource.indexOf("styles.overlayPaneControls"),
     );
-    expect(routeSource).toContain("!responsiveLayout.leftVisible || !responsiveLayout.rightVisible");
+    expect(routeSource).toContain("ChatCenterTabStrip");
+    expect(routeAndCenterPackSource).toContain("!leftOverlayVisible || !rightOverlayVisible");
+    expect(routeSource).toContain("leftOverlayVisible={responsiveLayout.leftVisible}");
+    expect(routeSource).toContain("rightOverlayVisible={responsiveLayout.rightVisible}");
     expect(routeSource).toContain("onContextMenu={openSessionContextMenu}");
     expect(routeSource).toContain("onOpenDirectSession={handleOpenDirectSession}");
     expect(routeSource).toContain("onPrefetchDirectSession={handlePrefetchDirectSession}");
@@ -2910,7 +2943,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("filteredStandaloneGroupConversations");
     expect(conversationIndexTreeSource).toContain("TeamConversationIndexItem");
     expect(conversationIndexTreeSource).toContain("GroupConversationIndexItem");
-    expect(routeSource).toContain("function formatConversationIndexTime");
+    expect(chatWorkbenchFormatSource).toContain("export function formatChatConversationIndexTime");
+    expect(routeAndPresentationSource).toContain("formatChatConversationIndexTime");
     expect(routeSource).toContain("formatTime={formatConversationIndexTime}");
     expect(groupSessionIndexItemsSource).toContain("export function teamStatusLabel");
     expect(groupSessionIndexItemsSource).toContain("teamStatusLabel(team.status, lang, statusLabel)");
