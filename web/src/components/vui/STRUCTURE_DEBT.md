@@ -21,7 +21,7 @@
 | Config settings | **Migrated** nav/main + model-assets to `VSplitWorkspace` layoutIds | Done for shell width ownership |
 | Research flow canvas | **Migrated** `VCanvasWorkbenchPage` + **`WORKBENCH_LAYOUT_IDS.researchFlow`** inspector resize | Done for inspector width memory |
 | Evolution queues | Outer **`VTrackWorkbenchPage`** + multi-rail domain recipe; panels extracted incl. **case-trace / conversation evidence** | Done for page host; keep multi-rail resize exception |
-| Panel titles residual | Challenge-cup mega shell + chat bubble headers still use domain `<header>` | Prefer `VPanelHeader` when title+actions; leave message chrome domain |
+| Panel titles residual | Module bar = nav chrome (`data-vui=agent-management-module-bar`); chat bubbles use route-local `ChatMessageChromeHeader` | Promote chat chrome to vui/product only with second consumer |
 | Git / Tools / Logs / Launcher | Shared `usePersistedPaneResize` + **`PaneCollapseHandle`** (collapse-to-zero; not VSplit) | Keep hook+collapse pattern; gate documents exception |
 
 ## Cleanup playbook (per surface)

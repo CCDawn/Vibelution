@@ -173,7 +173,6 @@ import {
 import {
   buildConversationComposerBridgeState,
 } from "./ChatConversationComposerBridge";
-import { ConversationIndexLoadingShell } from "./ChatLoadingShell";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
 import {
@@ -189,7 +188,9 @@ import {
   runtimeMatchesSelectedChatSession,
   shouldSuppressComposerErrorForTurnError,
 } from "./chatCodingRouteViewModel";
+import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
+import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
 import {
   useChatComposerSubmitActions,
@@ -2807,29 +2808,22 @@ export function ChatCodingRoute() {
   const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionIsBusy;
   const contextMenuClearHistoryDisabled = contextMenuClearHistoryPending || contextMenuSessionIsBusy;
   const conversationIndexPanel = (
-    <>
-      {sessionComposerErrors.__sessions__ ? (
-        <VStateSurface
-          className={styles.panelState}
-          tone="error"
-          title={sessionComposerErrors.__sessions__}
-        />
-      ) : null}
-      {sessionsErrorState.transientError ? (
-        <div className={styles.panelNotice} role="status">{sessionsErrorMessage}</div>
-      ) : null}
-      {sessionsErrorState.blockingError ? (
-        <VStateSurface className={styles.panelState} tone="error" title={sessionsErrorMessage} />
-      ) : conversationIndexLoading ? (
-        <ConversationIndexLoadingShell label={t("loadingSession")} />
-      ) : filteredConversations.length === 0 && (agentsQuery.data?.length ?? 0) === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
-        <VStateSurface
-          className={styles.panelState}
-          tone="empty"
-          title={sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
-        />
-      ) : (
-        <>
+    <ChatConversationIndexPanelContent
+      styles={styles}
+      loadingLabel={t("loadingSession")}
+      emptyTitle={sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
+      sessionsErrorMessage={sessionsErrorMessage}
+      sessionComposerSessionsError={sessionComposerErrors.__sessions__}
+      sessionsTransientError={Boolean(sessionsErrorState.transientError)}
+      sessionsBlockingError={Boolean(sessionsErrorState.blockingError)}
+      conversationIndexLoading={conversationIndexLoading}
+      isEmpty={
+        filteredConversations.length === 0
+        && (agentsQuery.data?.length ?? 0) === 0
+        && filteredTeams.length === 0
+        && filteredStandaloneGroupConversations.length === 0
+      }
+    >
           <AgentConversationDirectory
             activeAgentId={selectedChatAgentId}
             activeSessionId={activeSessionId}
@@ -2969,9 +2963,7 @@ export function ChatCodingRoute() {
               />
             </Suspense>
           ) : null}
-        </>
-      )}
-    </>
+    </ChatConversationIndexPanelContent>
   );
 
   return (
@@ -3118,7 +3110,10 @@ export function ChatCodingRoute() {
       /> : null
       }
       center={(
-      <section className={centerPaneClassName} data-vui-region="chat-conversation-center">
+      <ChatWorkbenchCenterColumn
+        className={centerPaneClassName}
+        surfaceClassName={styles.centerSurface}
+        tabStrip={(
         <div className={styles.tabStrip}>
           {/* Pinned back chip — short label only; full destination stays in title/aria. */}
           {chatReturnTarget ? (
@@ -3247,8 +3242,9 @@ export function ChatCodingRoute() {
             </div>
           ) : null}
         </div>
-
-        <div className={styles.centerSurface}>
+        )}
+        surface={(
+          <>
           <ChatCliAgentTerminalStack
             runs={mountedCliAgentRuns}
             activeCliAgentRunId={activeCliAgentRunId}
@@ -3472,8 +3468,9 @@ export function ChatCodingRoute() {
               }}
             />
           )}
-        </div>
-      </section>
+          </>
+        )}
+      />
       )}
       rightResizeHandle={
       responsiveLayout.rightVisible ? <PaneCollapseHandle
