@@ -10,7 +10,7 @@
 
 当前版本 **1.1.2**（见 [VERSION](VERSION) · [CHANGELOG.md](CHANGELOG.md)）。
 
-文档入口：[快速开始](#快速开始) · [当前能力](#当前能力) · [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/product](docs/product/README.md) · [LICENSE](LICENSE)
+文档入口：[快速开始](#快速开始) · [Windows 安装（最终用户）](docs/guides/install-windows.md) · [当前能力](#当前能力) · [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/product](docs/product/README.md) · [LICENSE](LICENSE)
 
 ## 界面预览
 
@@ -35,7 +35,7 @@
 | Runtime Scenes | 按次打包前后端、浏览器、生命周期日志，方便查卡住或失败 |
 | Config / Reset / Pet | 模型与运行配置、白名单清理、陪伴体状态 |
 
-默认按本机 workbench 用：能装 Python 3.11+、Node 18+（npm）和 Git 再往下走。没有零安装的在线 SaaS 形态。
+默认按本机 workbench 用。Windows 最终用户见下方 [快速开始 · 最终用户](#最终用户windows推荐)；开发者见 [开发者路径](#开发者路径)。没有零安装的在线 SaaS 形态。Phase 2 规划便携包（内嵌运行时），见 [docs/product/2026-08-06-windows-end-user-install.md](docs/product/2026-08-06-windows-end-user-install.md)。
 
 ## 运行模式
 
@@ -74,6 +74,35 @@ Vibelution/
 
 ## 快速开始
 
+### 最终用户（Windows，推荐）
+
+目标：尽量少步骤打开本机工作台并开始对话配置。详细步骤见 **[docs/guides/install-windows.md](docs/guides/install-windows.md)**。
+
+**Phase 1 前提**（本机需已安装）：Python 3.11+、Node.js 18+（含 npm）、Git、Edge 推荐。
+Phase 2 将提供尽量不要求预装 Python/Node 的便携包。
+
+```powershell
+# 在仓库根目录（或发布包解压目录）
+powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
+# 可选：装完直接启动
+powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1 -Start
+```
+
+然后：
+
+1. 在 `%USERPROFILE%\Documents\Vibelution\config\config.toml` 配置模型与密钥（首次 Launcher 启动常会创建 starter 文件）
+2. 双击桌面 **Vibelution Launcher**，或：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action start
+```
+
+密钥只放外部配置或环境变量，不要提交进 git。
+
+发布方可用 `scripts/package_windows_release.ps1` 打出 `dist/release/windows/` 快照包（仍属 Phase 1：需本机 Python/Node）。
+
+### 开发者路径
+
 依赖：Python 3.11+（建议 3.12）、Node.js 18+（npm）、Git。Windows 若走桌面窗口，建议本机有 Edge。
 
 ```bash
@@ -81,7 +110,7 @@ git clone https://github.com/CCDawn/Vibelution.git
 cd Vibelution
 ```
 
-### 1. 用 launcher（推荐）
+#### 1. 用 launcher（推荐）
 
 ```powershell
 # Windows
@@ -98,7 +127,7 @@ python scripts/vibelution_launcher.py --action start --no-browser
 
 正式路径以 npm / `package-lock` 为准；Bun 只是本地辅助，别为了它改锁文件策略。
 
-### 2. 手动装 Python 依赖
+#### 2. 手动装 Python 依赖
 
 ```bash
 python -m venv .venv
@@ -107,7 +136,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 3. 手动装前端依赖
+#### 3. 手动装前端依赖
 
 ```bash
 cd web
@@ -123,9 +152,9 @@ bun run bun:test
 bun run bun:build
 ```
 
-### 4. 配置 LLM
+#### 4. 配置 LLM
 
-运行配置统一存放在用户级外部路径（默认：`%USERPROFILE%\\Documents\\Vibelution\\config\\config.toml`）。新环境通过 Launcher 首次启动时会自动创建该目录和 starter 文件；也可以设置 `VIBELUTION_CONFIG_HOME` 或 `VIBELUTION_CONFIG_PATH` 指向其他外部配置位置。
+运行配置统一存放在用户级外部路径（默认：`%USERPROFILE%\Documents\Vibelution\config\config.toml`）。新环境通过 Launcher 首次启动时会自动创建该目录和 starter 文件；也可以设置 `VIBELUTION_CONFIG_HOME` 或 `VIBELUTION_CONFIG_PATH` 指向其他外部配置位置。
 
 ```toml
 [runtime]
