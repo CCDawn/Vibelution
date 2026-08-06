@@ -38,9 +38,10 @@ Chat 会话工作台：状态轨 + 主会话 + 可选工具轨；响应式 overl
 - 不替代通用 list-detail。
 
 ### 为何暂缓（2026-08 复核）
-- Chat 已有 `data-vui-recipe="chat-session-workbench"` + `WORKBENCH_LAYOUT_IDS.chat`（`chat/ChatCodingRouteWorkbench.tsx`）。
+- Chat 已有 `data-vui-recipe="chat-session-workbench"` + `WORKBENCH_LAYOUT_IDS.chat`。
+- **已完成几何 host 抽取**：`chat/ChatSessionWorkbenchShell.tsx`（recipe 标记 + layoutRef 根）+ `useChatWorkbenchLayout`（双写宽度 / 响应式）。
 - 双写宽度（`shellStore` ↔ `pane-layouts.v1`）与响应式 overlay 仍是 domain 例外；`VListDetailPage` / `VTrackWorkbenchPage` **不能**直接替换。
-- **下一实现门槛**：先把双轨几何收成单一 hook/composer 输出，再让本 recipe 只包 `statusRail | session | toolRail` 槽，禁止再扩大 ChatCodingRouteWorkbench 行数。
+- **下一实现门槛**：把 workbench 子树拆成 shell 槽（`statusRail | center | conversationIndex` + resize），再让 `VSessionWorkbenchPage` 只包槽位；禁止在 ChatCodingRouteWorkbench 继续堆顶层几何。
 
 ### 反冗余
 - 落地后 Chat 禁止再手写顶层 shell。

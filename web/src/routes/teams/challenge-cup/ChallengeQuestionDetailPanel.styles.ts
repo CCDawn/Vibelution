@@ -1,7 +1,8 @@
 const styles: Record<string, string> = {
   workspace: "grid gap-4 text-[var(--fg-primary)]",
   header:
-    "flex items-center justify-between gap-6 [&_h2]:m-0 [&_h2]:mt-1 [&_h2]:text-[22px] [&_h2]:leading-[1.3] [&_p]:m-0 [&_p]:text-[var(--fg-secondary)]",
+    "flex items-center justify-between gap-6 [&_h2]:m-0 [&_h2]:mt-1 [&_h2]:text-[22px] [&_h2]:leading-[1.3]",
+  questionZh: "m-0 text-[var(--fg-secondary)]",
   headerActions: "flex shrink-0 items-center gap-2",
   eyebrow: "text-xs font-[650] tracking-[0.02em] text-[var(--fg-secondary)]",
   anchorNav:
