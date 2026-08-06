@@ -8,10 +8,8 @@ import { VStateSurface } from "../../components/vui";
 import { ConversationIndexLoadingShell } from "./ChatLoadingShell";
 
 export type ChatConversationIndexPanelContentProps = {
-  styles: {
-    panelState: string;
-    panelNotice: string;
-  };
+  /** Route style map (ChatCodingRoute.styles is Record<string, string>). */
+  styles: Record<string, string>;
   loadingLabel: string;
   emptyTitle: string;
   sessionsErrorMessage: string;

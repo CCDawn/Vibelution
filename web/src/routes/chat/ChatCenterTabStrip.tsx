@@ -9,16 +9,8 @@ import { Suspense } from "react";
 import { VButton } from "../../components/vui";
 
 export type ChatCenterTabStripProps = {
-  styles: {
-    tabStrip: string;
-    chatReturnLink: string;
-    chatReturnLinkIcon: string;
-    tabStripSessions: string;
-    tab: string;
-    tabActive: string;
-    overlayPaneControls: string;
-    overlayPaneToggle: string;
-  };
+  /** Route style map (ChatCodingRoute.styles is Record<string, string>). */
+  styles: Record<string, string>;
   lang: "zh" | "en";
   agentSessionLabel: string;
   chatReturnTarget: string | null;
