@@ -185,6 +185,7 @@ class SessionMessagePayload(BaseModel):
     references: list[dict] = []
     mentalModelEnabled: bool | None = None
     runtimeStatusEnabled: bool | None = None
+    turnStatusTail: dict | None = None
     turnMode: str = ""
     writeIntent: bool | None = None
 
@@ -476,6 +477,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
                 references=payload.references,
                 mental_model_enabled=payload.mentalModelEnabled,
                 runtime_status_enabled=payload.runtimeStatusEnabled,
+                turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,
                 turn_mode=payload.turnMode,
                 write_intent=payload.writeIntent,
             )
@@ -488,6 +490,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
             references=payload.references,
             mental_model_enabled=payload.mentalModelEnabled,
             runtime_status_enabled=payload.runtimeStatusEnabled,
+            turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
         )
@@ -511,6 +514,7 @@ def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPa
             content_utf8_base64=payload.contentUtf8Base64,
             mental_model_enabled=payload.mentalModelEnabled,
             runtime_status_enabled=payload.runtimeStatusEnabled,
+            turn_status_tail=payload.turnStatusTail if isinstance(payload.turnStatusTail, dict) else None,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
         )
