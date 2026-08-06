@@ -1398,13 +1398,11 @@ def _creation_flag_names(*, detach: bool = False) -> tuple[str, ...]:
     if os.name != "nt":
         return ()
     # MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS.
-    # Prefer CREATE_NO_WINDOW for waitable node/tsc/vite so no console host flashes.
-    # DETACHED_PROCESS is only for true background daemons that do not need
-    # CREATE_NO_WINDOW (pythonw has no console subsystem).
-    names = ["CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"]
+    # Waitable node/tsc/vite/git/npm-cli: CREATE_NO_WINDOW only (no console flash).
+    # Background pythonw daemons: DETACHED + CREATE_NEW_PROCESS_GROUP (pythonw has no console).
     if detach:
         return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP")
-    return tuple(names)
+    return ("CREATE_NO_WINDOW",)
 
 
 def _creation_flags(*, detach: bool = False) -> int:
@@ -2020,19 +2018,11 @@ def _frontend_build_provenance_path() -> Path:
 
 
 def _capture_git_text(args: list[str], *, label: str) -> str:
-    git_command = shutil.which("git.exe" if os.name == "nt" else "git") or shutil.which("git") or "git"
+    # Use no-console git helper (mingw git.exe + CREATE_NO_WINDOW only).
     try:
-        result = subprocess.run(
-            [git_command, *args],
-            cwd=str(PROJECT_ROOT),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-            creationflags=_creation_flags(detach=False),
-            startupinfo=_hidden_startup_info(),
-        )
+        from core.infrastructure.no_console_git import run_git
+
+        result = run_git(args, cwd=PROJECT_ROOT, timeout=15)
     except (OSError, subprocess.SubprocessError):
         return ""
     if int(result.returncode or 0) != 0:
@@ -3186,38 +3176,44 @@ class RuntimeManagerDaemon:
                 "workbench.open.already_satisfied",
                 _open_already_satisfied_event_payload(observation, command_id=command_id, no_browser=no_browser),
             )
+            focus_ok = True
             if not no_browser:
                 result = focus_workbench()
                 if result.returncode != 0:
+                    focus_ok = False
+                    # Do not fail the whole open lifecycle: state/pid can lag while the
+                    # observation still looks open. Fall through to a full open/repair.
                     _append_event(
-                        "workbench.open.focus_failed",
+                        "workbench.open.focus_failed_fallback_open",
                         {
                             "commandId": command_id,
                             "returnCode": int(result.returncode),
                             "detail": _launcher_error_detail(result, "Focusing the workbench failed."),
                         },
                     )
-                    raise RuntimeError(_launcher_error_detail(result, "Focusing the workbench failed."))
-                _append_event(
-                    "workbench.open.focus_requested",
-                    {
-                        "commandId": command_id,
-                        "returnCode": int(result.returncode),
-                        "stdout": str(getattr(result, "stdout", "") or "").strip()[-400:],
-                        "stderr": str(getattr(result, "stderr", "") or "").strip()[-400:],
-                    },
-                )
+                else:
+                    _append_event(
+                        "workbench.open.focus_requested",
+                        {
+                            "commandId": command_id,
+                            "returnCode": int(result.returncode),
+                            "stdout": str(getattr(result, "stdout", "") or "").strip()[-400:],
+                            "stderr": str(getattr(result, "stderr", "") or "").strip()[-400:],
+                        },
+                    )
             else:
                 _append_event(
                     "workbench.open.focus_skipped",
                     {"commandId": command_id, "reason": "no_browser"},
                 )
-            persist_workbench_launcher_state_after_open(
-                observation,
-                last_reason=str(workbench.get("lastReason") or args.get("reason") or "already_open"),
-                last_source=str(workbench.get("lastSource") or args.get("source") or "runtime_manager"),
-            )
-            return self._finish_command(command_id, ok=True, message="Workbench is already open.")
+            if focus_ok:
+                persist_workbench_launcher_state_after_open(
+                    observation,
+                    last_reason=str(workbench.get("lastReason") or args.get("reason") or "already_open"),
+                    last_source=str(workbench.get("lastSource") or args.get("source") or "runtime_manager"),
+                )
+                return self._finish_command(command_id, ok=True, message="Workbench is already open.")
+            # Fall through to open_workbench() below.
 
         workbench.update(
             {
