@@ -929,6 +929,9 @@ def test_python_launcher_reattests_reused_build_for_current_matching_tree(monkey
 def test_python_launcher_runtime_identity_requires_clean_main(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("VIBELUTION_ALLOW_NON_MAIN_LAUNCH", raising=False)
+    monkeypatch.setattr(launcher, "_path_looks_like_task_worktree", lambda _root: False)
+    monkeypatch.setattr(launcher, "_is_linked_git_worktree", lambda _cwd, _git: False)
 
     def fake_capture(args, *, cwd, label, timeout=15.0):
         values = {
@@ -939,8 +942,47 @@ def test_python_launcher_runtime_identity_requires_clean_main(monkeypatch, tmp_p
 
     monkeypatch.setattr(launcher, "_run_capture", fake_capture)
 
-    with pytest.raises(RuntimeError, match="requires local main"):
+    with pytest.raises(RuntimeError, match="requires the integration checkout on local main"):
         launcher._runtime_source_identity()
+
+
+def test_python_launcher_runtime_identity_allows_task_worktree_branch(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    worktree = tmp_path / "Vibelution-worktrees" / "feat-task"
+    worktree.mkdir(parents=True)
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", worktree)
+    monkeypatch.delenv("VIBELUTION_ALLOW_NON_MAIN_LAUNCH", raising=False)
+    monkeypatch.delenv("VIBELUTION_ALLOW_DIRTY_LAUNCH", raising=False)
+
+    def fake_capture(args, *, cwd, label, timeout=15.0):
+        values = {
+            "git root identity": str(worktree),
+            "git branch identity": "codex/feat-task",
+            "git commit identity": "b" * 40,
+            "git worktree identity": "",
+            "frontend tree identity": "tree-b",
+            "git dir identity": str(worktree / ".git"),
+            "git common-dir identity": str(tmp_path / ".git"),
+        }
+        return values[label]
+
+    monkeypatch.setattr(launcher, "_run_capture", fake_capture)
+    monkeypatch.setattr(launcher, "_resolve_git_executable", lambda: "git")
+
+    identity = launcher._runtime_source_identity()
+
+    assert identity["branch"] == "codex/feat-task"
+    assert identity["commit"] == "b" * 40
+
+
+def test_python_launcher_subprocess_text_kwargs_replace_invalid_utf8():
+    launcher = _load_python_launcher()
+    kwargs = launcher._subprocess_text_kwargs()
+    assert kwargs["text"] is True
+    assert kwargs["encoding"] == "utf-8"
+    assert kwargs["errors"] == "replace"
+    # Reader-thread must not raise on Windows locale bytes (e.g. 0xbb in GBK).
+    assert b"\xbb".decode(kwargs["encoding"], errors=kwargs["errors"]) == "\ufffd"
 
 
 def test_python_launcher_runtime_identity_rejects_dirty_main(monkeypatch, tmp_path):
