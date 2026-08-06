@@ -630,6 +630,31 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 )
                 if callable(runtime_status_override_configurer):
                     runtime_status_override_configurer(runtime_status_enabled)
+                tail_config_setter = getattr(runtime_agent, "set_turn_status_tail_config", None)
+                if callable(tail_config_setter):
+                    raw_tail = context.get("turn_status_tail")
+                    tail_config_setter(raw_tail if isinstance(raw_tail, dict) else None)
+                tail_context_setter = getattr(runtime_agent, "set_turn_status_tail_context", None)
+                if callable(tail_context_setter):
+                    active_task = context.get("active_task")
+                    task_text = ""
+                    if isinstance(active_task, dict):
+                        task_text = str(
+                            active_task.get("title")
+                            or active_task.get("summary")
+                            or active_task.get("goal")
+                            or ""
+                        ).strip()
+                    user_message = str(context.get("user_message") or "").strip()
+                    if not task_text and user_message:
+                        task_text = user_message[:200]
+                    tail_context_setter(
+                        session_id=str(session_id or "").strip(),
+                        agent_id=str(agent_id or "").strip(),
+                        task=task_text,
+                        worktree="",
+                        cache_hint=None,
+                    )
                 static_runtime_context_seed = getattr(runtime_agent, "seed_static_runtime_context", None)
                 runtime_context_seed = getattr(runtime_agent, "seed_runtime_context", None)
                 volatile_runtime_context_seed = getattr(runtime_agent, "seed_volatile_runtime_context", None)

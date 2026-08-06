@@ -57,6 +57,7 @@ import {
   writeStoredRuntimeStatusToggle,
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
+import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
   resolveSessionStopTurnId,
@@ -72,6 +73,7 @@ export type SubmitTurnVariables = {
   content: string;
   mentalModelEnabled: boolean;
   runtimeStatusEnabled: boolean;
+  turnStatusTail?: ReturnType<typeof loadTurnStatusTailConfig>;
   attachmentIds?: string[];
   references?: SessionReferenceAttachment[];
   requestStartedAtMs: number;
@@ -84,6 +86,7 @@ export type EditResubmitVariables = {
   content: string;
   mentalModelEnabled: boolean;
   runtimeStatusEnabled: boolean;
+  turnStatusTail?: ReturnType<typeof loadTurnStatusTailConfig>;
   attachmentIds?: string[];
 };
 
@@ -138,10 +141,12 @@ export function useChatComposerTurnMutations({
         content,
         mentalModelEnabled,
         runtimeStatusEnabled,
+        turnStatusTail,
         attachmentIds,
         references,
       }: SubmitTurnVariables,
     ) => {
+      const resolvedTail = turnStatusTail ?? loadTurnStatusTailConfig(sessionId);
       postSubmitTelemetry(
         "browser.chat_submit.request_started",
         "Direct chat submit request started.",
@@ -169,6 +174,7 @@ export function useChatComposerTurnMutations({
           references: references ?? [],
           mentalModelEnabled,
           runtimeStatusEnabled,
+          turnStatusTail: resolvedTail,
         }),
       });
     },
@@ -293,6 +299,7 @@ export function useChatComposerTurnMutations({
         content,
         mentalModelEnabled,
         runtimeStatusEnabled,
+        turnStatusTail,
       }: EditResubmitVariables,
     ) =>
       fetchJson<SessionDetail>(`/api/sessions/${sessionId}/messages/edit-resubmit`, {
@@ -307,6 +314,7 @@ export function useChatComposerTurnMutations({
           contentUtf8Base64: encodeUtf8Base64(content),
           mentalModelEnabled,
           runtimeStatusEnabled,
+          turnStatusTail: turnStatusTail ?? loadTurnStatusTailConfig(sessionId),
         }),
       }),
     onMutate: async (variables) => {
@@ -756,6 +764,7 @@ export function useChatComposerSubmitActions({
         content,
         mentalModelEnabled,
         runtimeStatusEnabled,
+        turnStatusTail: loadTurnStatusTailConfig(sessionId),
         attachmentIds: uploaded.map((attachment) => attachment.artifactId).filter(Boolean),
         references,
         requestStartedAtMs: chatStreamPerformanceNowMs(),
@@ -913,6 +922,7 @@ export function useChatComposerSubmitActions({
         content,
         mentalModelEnabled: mentalModelEnabledForNextTurn,
         runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
+        turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
       });
       return;
     }
