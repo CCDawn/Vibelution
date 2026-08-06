@@ -246,12 +246,12 @@ export function useChatWorkspaceLifecycle({
       const tempSessionId = createTempSessionId();
       const previousActiveSessionId = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
       const normalizedAgentId = String(agentId || "").trim();
-      // Match backend create default ("新会话"), not the create-button label ("新建会话").
-      const title = defaultNewSessionTitle(lang);
       const nowIso = new Date().toISOString();
       const agents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
       const agentRow = agents.find((item) => String(item.agentId || "").trim() === normalizedAgentId);
       const agentDisplayName = String(agentRow?.displayName || agentRow?.agentCode || "").trim();
+      // Match backend: prefer Agent display name so tabs are identifiable immediately.
+      const title = agentDisplayName || defaultNewSessionTitle(lang);
       // Remount during temp→real would blur the title input and auto-finish rename; suppress that.
       suppressRenameBlurUntilRef.current = Date.now() + 2500;
       const optimisticDetail: SessionDetail = {
@@ -312,9 +312,16 @@ export function useChatWorkspaceLifecycle({
         return;
       }
       const agentId = String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim();
-      // Prefer server title when it is already a create placeholder; never prefill Agent name.
+      // Prefer server title (now defaults to Agent name); fall back to local Agent label.
       const serverTitle = String(nextDetail.title || "").trim();
-      const title = serverTitle || defaultNewSessionTitle(lang);
+      const agentLabel = String(
+        nextDetail.agentDisplayName
+        || (queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [])
+          .find((item) => String(item.agentId || "").trim() === agentId)
+          ?.displayName
+        || "",
+      ).trim();
+      const title = serverTitle || agentLabel || defaultNewSessionTitle(lang);
       const seededDetail: SessionDetail = {
         ...nextDetail,
         id: nextId,

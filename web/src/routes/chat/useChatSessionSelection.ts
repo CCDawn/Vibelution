@@ -4,6 +4,7 @@ import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateA
 import { fetchJson } from "../../api/client";
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
+import { shouldDeferUrlSessionSync } from "./chatSessionRouteSync";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
@@ -22,6 +23,8 @@ export type UseChatSessionSelectionOptions = {
   syncSessionDetail: (detail: SessionDetail) => void;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   latestDirectSessionSelectionRef: MutableRefObject<string>;
+  /** Epoch ms when latestDirectSessionSelectionRef was last written by user intent. */
+  latestDirectSessionSelectionAtRef: MutableRefObject<number>;
   /** Monotonic generation for the latest user tab selection (stale responses discarded). */
   directSessionSelectionGenerationRef: MutableRefObject<number>;
   reselectDirectSessionRef: MutableRefObject<(sessionId: string) => void>;
@@ -58,6 +61,7 @@ export function useChatSessionSelection({
   syncSessionDetail,
   setSessionComposerErrors,
   latestDirectSessionSelectionRef,
+  latestDirectSessionSelectionAtRef,
   directSessionSelectionGenerationRef,
   reselectDirectSessionRef,
   activeSessionId,
@@ -128,6 +132,7 @@ export function useChatSessionSelection({
       return;
     }
     latestDirectSessionSelectionRef.current = normalizedSessionId;
+    latestDirectSessionSelectionAtRef.current = Date.now();
     directSessionSelectionGenerationRef.current += 1;
     const generation = directSessionSelectionGenerationRef.current;
     if (selectDebounceTimerRef.current != null) {
@@ -186,8 +191,22 @@ export function useChatSessionSelection({
       && !requestedRoomId
       && activeSessionId !== requestedSessionId
     ) {
+      // Optimistic switch sets active before React Router updates ?session=.
+      // Do not stomp that intent back to the stale URL (looks "stuck" on terra).
+      if (
+        shouldDeferUrlSessionSync({
+          requestedSessionId,
+          activeSessionId,
+          intentSessionId: latestDirectSessionSelectionRef.current,
+          intentAtMs: latestDirectSessionSelectionAtRef.current,
+        })
+      ) {
+        return;
+      }
       setActiveGroupRoomId("");
       setActiveSession(requestedSessionId);
+      latestDirectSessionSelectionRef.current = requestedSessionId;
+      latestDirectSessionSelectionAtRef.current = Date.now();
       return;
     }
     if (!activeSessionId && sessions && sessions.length > 0) {
@@ -197,6 +216,8 @@ export function useChatSessionSelection({
   }, [
     activeGroupRoomId,
     activeSessionId,
+    latestDirectSessionSelectionAtRef,
+    latestDirectSessionSelectionRef,
     requestedRoomId,
     requestedSessionId,
     sessions,
