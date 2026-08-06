@@ -11,6 +11,7 @@ import type { SelfEvolutionAutonomousLoopRun } from "../api/types";
 import {
   VButton,
   VMetricStrip,
+  VPanelHeader,
   VRouteLinkButton,
   VStateSurface,
   VSurface,
@@ -212,18 +213,18 @@ export function SelfEvolutionAutonomousLoopPanel({
       tone="panel"
       ariaLabel={lang === "zh" ? "自进化自动闭环" : "Autonomous self-evolution loop"}
     >
-      <header className={styles.header}>
-        <div className={styles.heading}>
-          <span className={styles.eyebrow}>
-            {lang === "zh" ? "自进化自动闭环" : "Autonomous self-evolution"}
+      <VPanelHeader
+        className={styles.header}
+        headingLevel={null}
+        eyebrow={lang === "zh" ? "自进化自动闭环" : "Autonomous self-evolution"}
+        title={run.request.goal}
+        actions={(
+          <span className={styles.statusPill} data-tone={statusTone}>
+            {statusLabel}
           </span>
-          <strong className={styles.title}>{run.request.goal}</strong>
-          <span className={styles.summary}>{headerSummary}</span>
-        </div>
-        <span className={styles.statusPill} data-tone={statusTone}>
-          {statusLabel}
-        </span>
-      </header>
+        )}
+      />
+      <p className={styles.summary}>{headerSummary}</p>
 
       {failed ? (
         <VStateSurface

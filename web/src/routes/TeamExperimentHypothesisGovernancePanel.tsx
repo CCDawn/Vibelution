@@ -5,6 +5,7 @@ import {
   VNativeButton,
   VNativeInput,
   VNativeTextarea,
+  VPanelHeader,
 } from "../components/vui";
 import type {
   EngineeringProxyHypothesisDraft,
@@ -143,17 +144,17 @@ export function TeamExperimentHypothesisGovernancePanel(
       className={styles.panel}
       data-experiment-hypothesis-governance="true"
     >
-      <header className={styles.header}>
-        <div className={styles.headingGroup}>
-          <strong className={styles.title}>
-            {lang === "zh" ? "假设审查" : "Hypothesis review"}
-          </strong>
-        </div>
-        <span className={styles.guardBadge}>
-          <ShieldCheck size={13} />
-          {lang === "zh" ? "需人工批准" : "Human approval"}
-        </span>
-      </header>
+      <VPanelHeader
+        className={styles.header}
+        headingLevel={null}
+        title={lang === "zh" ? "假设审查" : "Hypothesis review"}
+        actions={(
+          <span className={styles.guardBadge}>
+            <ShieldCheck size={13} />
+            {lang === "zh" ? "需人工批准" : "Human approval"}
+          </span>
+        )}
+      />
 
       {activePlan && !activePlanHasGovernedSelection && !planHasProxyCandidate ? (
         <div className={styles.draftGrid}>

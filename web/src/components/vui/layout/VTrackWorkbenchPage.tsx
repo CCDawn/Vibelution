@@ -48,7 +48,11 @@ export type VTrackWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">,
  * Prefer for multi-mode tracks (Evolution supervised/self) where the body owns
  * custom multi-rail layout instead of list-detail or dense-ops tables.
  */
-export const VTrackWorkbenchPage = forwardRef<HTMLElement, VTrackWorkbenchPageProps>(
+/**
+ * forwardRef targets the body host (div) so pane layoutRef typing stays HTMLDivElement.
+ * Width reclamp measures the multi-rail body rather than the page section.
+ */
+export const VTrackWorkbenchPage = forwardRef<HTMLDivElement, VTrackWorkbenchPageProps>(
   function VTrackWorkbenchPage(
     {
       ariaLabel,
@@ -72,7 +76,6 @@ export const VTrackWorkbenchPage = forwardRef<HTMLElement, VTrackWorkbenchPagePr
 
     return (
       <VWorkbenchPage
-        ref={ref}
         ariaLabel={ariaLabel}
         fill={fill}
         data-vui-recipe="track-workbench-page"
@@ -108,6 +111,7 @@ export const VTrackWorkbenchPage = forwardRef<HTMLElement, VTrackWorkbenchPagePr
           </div>
         ) : null}
         <div
+          ref={ref}
           data-vui="track-workbench-body"
           className={cn(fill ? VUI_PAGE_BODY_FILL_CLASS : "min-h-0 min-w-0", bodyClassName)}
         >

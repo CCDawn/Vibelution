@@ -341,7 +341,7 @@ import { VTrackWorkbenchPage, VTabs } from "@/components/vui";
 | `trackChrome` | 可选；顶栏与 body 之间的轨带 | tabs 已在 header.actions 时可省略 |
 | children / bodyClassName | 满高主区 | multi-rail 由域 grid + layoutId 负责 |
 | `domainRecipe` | 域标记 | 与 `data-vui-recipe` 域覆盖并存 |
-| ref | forwardRef | 可挂 `usePersistedPaneResize` layoutRef |
+| ref | forwardRef → **body div** | 可挂 `usePersistedPaneResize` layoutRef（`HTMLDivElement`） |
 
 ### 非职责
 - 不内建 multi-rail 列算法（collapse / 多列仍属 domain + `usePersistedPaneResize`）。

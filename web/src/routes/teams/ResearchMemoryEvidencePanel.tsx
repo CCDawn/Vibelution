@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { VPanelHeader } from "../../components/vui";
 import styles, { statusTone } from "./ResearchMemoryEvidencePanel.styles";
 
 export type ResearchMemoryEvidenceRef = {
@@ -253,14 +254,18 @@ export function ResearchMemoryEvidencePanel({
       data-memory-context-id={summary.contextId}
       data-research-memory-evidence="detail"
     >
-      <header className={styles.detailHeader}>
-        <strong>{title}</strong>
-        <span className={styles.evidenceLabel}>
-          {isZh
-            ? `已引用 ${summary.knowledgeItemCount} 条知识、${summary.successfulRunCount} 个成功结果、${summary.negativeExperimentCount} 条负向实验。`
-            : `Uses ${summary.knowledgeItemCount} knowledge items, ${summary.successfulRunCount} successful results, and ${summary.negativeExperimentCount} negative experiments.`}
-        </span>
-      </header>
+      <VPanelHeader
+        className={styles.detailHeader}
+        headingLevel={null}
+        title={title}
+        eyebrow={(
+          <span className={styles.evidenceLabel}>
+            {isZh
+              ? `已引用 ${summary.knowledgeItemCount} 条知识、${summary.successfulRunCount} 个成功结果、${summary.negativeExperimentCount} 条负向实验。`
+              : `Uses ${summary.knowledgeItemCount} knowledge items, ${summary.successfulRunCount} successful results, and ${summary.negativeExperimentCount} negative experiments.`}
+          </span>
+        )}
+      />
       {content}
     </section>
   );
