@@ -1,9 +1,10 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
-export type VRouteHeaderProps = ComponentPropsWithoutRef<"header"> & {
+export type VRouteHeaderProps = Omit<ComponentPropsWithoutRef<"header">, "title"> & {
   actions?: ReactNode;
   eyebrow?: ReactNode;
   meta?: ReactNode;
+  /** Route title; ReactNode (not the HTML `title` attribute). */
   title: ReactNode;
   /**
    * Hide the eyebrow/title column and shrink-wrap the header around actions.
