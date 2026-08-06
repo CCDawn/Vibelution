@@ -23,7 +23,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VRouteLinkButton, VStateSurface, VStringSelect, VTabs, VTooltip } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VPanelHeader, VRouteLinkButton, VStateSurface, VStringSelect, VTabs, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -1772,18 +1772,22 @@ export function ToolsRoute() {
           <div className={styles.toolList}>
             {visibleToolBundleGroups.map((group) => (
               <section key={group.bundleId} className={styles.toolBundleGroup}>
-                <header className={styles.toolBundleHeader}>
-                  <div>
-                    <strong className={styles.toolBundleTitle}>
+                <VPanelHeader
+                  className={styles.toolBundleHeader}
+                  headingLevel={null}
+                  title={(
+                    <span className={styles.toolBundleTitle}>
                       {group.label}
                       <VContextualHint content={group.description || group.label} label={`${group.label}说明`} width="wide" />
-                    </strong>
-                    <span>{group.tools.length} {lang === "zh" ? "个工具" : "tools"}</span>
-                  </div>
-                  <small>
-                    {lang === "zh" ? "高风险" : "High risk"} {group.highRiskToolCount} · {lang === "zh" ? "显式授权" : "Explicit"} {group.explicitAllowToolCount}
-                  </small>
-                </header>
+                    </span>
+                  )}
+                  eyebrow={`${group.tools.length} ${lang === "zh" ? "个工具" : "tools"}`}
+                  actions={(
+                    <small>
+                      {lang === "zh" ? "高风险" : "High risk"} {group.highRiskToolCount} · {lang === "zh" ? "显式授权" : "Explicit"} {group.explicitAllowToolCount}
+                    </small>
+                  )}
+                />
                 <div className={styles.toolBundleItems}>
                   {group.tools.map((tool) => {
                     const isActive = tool.id === activeTool?.id;
@@ -1965,15 +1969,13 @@ export function ToolsRoute() {
                 <div className={styles.toolPermissionList}>
                   {editablePolicyGroups.map((group) => (
                     <section key={group.bundleId} className={styles.toolPermissionGroup}>
-                      <header className={styles.toolPermissionGroupHeader}>
-                        <div>
-                          <strong>{group.label}</strong>
-                          <span>
-                            {group.tools.length} tools · {lang === "zh" ? "允许" : "Allowed"} {group.allowedCount} · {lang === "zh" ? "禁用" : "Blocked"} {group.blockedCount} · {lang === "zh" ? "未允许" : "Not allowed"} {group.inheritedCount}
-                          </span>
-                        </div>
-                        {group.highRiskCount ? <small>{lang === "zh" ? "高风险" : "High risk"} {group.highRiskCount}</small> : null}
-                      </header>
+                      <VPanelHeader
+                        className={styles.toolPermissionGroupHeader}
+                        headingLevel={null}
+                        title={group.label}
+                        eyebrow={`${group.tools.length} tools · ${lang === "zh" ? "允许" : "Allowed"} ${group.allowedCount} · ${lang === "zh" ? "禁用" : "Blocked"} ${group.blockedCount} · ${lang === "zh" ? "未允许" : "Not allowed"} ${group.inheritedCount}`}
+                        actions={group.highRiskCount ? <small>{lang === "zh" ? "高风险" : "High risk"} {group.highRiskCount}</small> : undefined}
+                      />
                       <div className={styles.toolPermissionGroupList}>
                         {group.tools.map((tool) => {
                           const mode = policyDraftMode(toolPolicyDraft, tool.name);

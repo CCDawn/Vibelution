@@ -7,6 +7,7 @@ import type {
 import {
   VEmptyState,
   VNativeButton,
+  VPanelHeader,
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
@@ -100,22 +101,24 @@ export function ChallengeQuestionDetailPanel({
 
   return (
     <main className={css.workspace} aria-label={`${detail.questionId} 单题白盒验收`}>
-      <header className={css.header}>
-        <div>
-          <span className={css.eyebrow}>MVP 可信性验收 · 单题白盒</span>
-          <h2>{detail.questionId}: {output.question_en}</h2>
-          {output.question_zh ? <p>{output.question_zh}</p> : null}
-        </div>
-        <div className={css.headerActions}>
-          <VStatusChip tone={record.status === "approved" ? "success" : "warning"}>
-            {record.status === "approved" ? "正式批准" : record.status}
-          </VStatusChip>
-          <VNativeButton className={css.secondaryButton} type="button" onClick={onClose}>
-            <ArrowLeft size={15} aria-hidden="true" />
-            返回题目列表
-          </VNativeButton>
-        </div>
-      </header>
+      <VPanelHeader
+        className={css.header}
+        headingLevel={2}
+        eyebrow="MVP 可信性验收 · 单题白盒"
+        title={`${detail.questionId}: ${output.question_en}`}
+        actions={(
+          <div className={css.headerActions}>
+            <VStatusChip tone={record.status === "approved" ? "success" : "warning"}>
+              {record.status === "approved" ? "正式批准" : record.status}
+            </VStatusChip>
+            <VNativeButton className={css.secondaryButton} type="button" onClick={onClose}>
+              <ArrowLeft size={15} aria-hidden="true" />
+              返回题目列表
+            </VNativeButton>
+          </div>
+        )}
+      />
+      {output.question_zh ? <p className={css.questionZh}>{output.question_zh}</p> : null}
 
       <nav className={css.anchorNav} aria-label="白盒验收步骤">
         {[
