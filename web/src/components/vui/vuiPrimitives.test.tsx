@@ -116,12 +116,16 @@ describe("VUI foundation primitives", () => {
         </VToolbar>
       </VuiProvider>,
     );
+    const chipMarkup = renderToStaticMarkup(<VChip tone="accent">mimo-v2.5</VChip>);
 
     expect(markup).toContain('data-vui="button"');
     expect(markup).toContain('data-vui="icon-button"');
     expect(markup).toContain('data-vui="chip"');
     expect(markup).toContain('aria-label="Refresh"');
     expect(markup).toContain("mimo-v2.5");
+    expect(chipMarkup).toContain("rounded-[6px]");
+    expect(chipMarkup).not.toContain("rounded-full");
+    expect(chipMarkup).not.toContain("var(--accent-cool)");
   });
 
   it("renders semantic and legacy surface tones through one opaque card contract", () => {

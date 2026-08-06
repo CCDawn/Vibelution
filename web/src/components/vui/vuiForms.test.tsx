@@ -60,6 +60,8 @@ describe("VUI form primitives", () => {
     expect(markup).toContain('data-slot="checkbox-content"');
     expect(markup).toContain('data-slot="checkbox-control"');
     expect(markup).toContain('data-slot="checkbox-indicator"');
+    expect(markup).toContain("peer-checked:bg-[var(--accent-cool)]");
+    expect(markup).toContain("lucide-check");
     expect(markup).toContain('type="checkbox"');
     expect(markup).toContain("MiMo V2.5");
     expect(markup).toContain("Running only");

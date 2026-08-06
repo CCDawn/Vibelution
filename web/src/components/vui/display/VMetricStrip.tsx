@@ -29,7 +29,7 @@ function toneTextClass(tone: VuiTone | undefined): string {
     return "text-vui-accent-cool";
   }
   if (tone === "success") {
-    return "text-[var(--state-success)]";
+    return "text-vui-fg-primary";
   }
   if (tone === "warning") {
     return "text-[var(--state-warning)]";
@@ -53,14 +53,14 @@ export function VMetricStrip({
       data-vui="metric-strip"
       aria-label={ariaLabel}
       className={[
-        "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(88px,1fr))] rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-toolbar",
+        "flex min-w-0 flex-wrap items-stretch rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-toolbar",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
       {status ? (
-        <div className="grid min-w-[88px] items-center border-r border-vui-border-hairline px-2 py-1">
+        <div className="inline-flex min-w-0 items-center border-r border-vui-border-hairline px-2 py-1">
           {status.title ? (
             <VTooltip content={status.title}>
               <span
@@ -96,7 +96,7 @@ export function VMetricStrip({
             role={metric.detail ? "group" : undefined}
             aria-label={metric.detail ? `${metric.label}：${metric.detail}` : undefined}
             className={[
-              "grid min-w-[88px] grid-cols-[minmax(0,1fr)_auto] items-baseline gap-1 px-2 py-1 focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]",
+              "inline-flex min-w-0 items-baseline gap-1.5 px-2 py-1 focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]",
               index === metrics.length - 1
                 ? ""
                 : "border-r border-vui-border-hairline",
@@ -104,10 +104,10 @@ export function VMetricStrip({
               .filter(Boolean)
               .join(" ")}
           >
-            <span className="truncate [font-size:var(--vui-font-xs)] font-semibold uppercase tracking-[0.04em] text-vui-fg-tertiary">
+            <span className="truncate [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-secondary">
               {metric.label}
             </span>
-            <strong className={["truncate [font-size:var(--vui-font-md)] leading-none", toneTextClass(metric.tone)].join(" ")}>
+            <strong className={["shrink-0 [font-size:var(--vui-font-md)] leading-none", toneTextClass(metric.tone)].join(" ")}>
               {metric.value}
             </strong>
           </div>

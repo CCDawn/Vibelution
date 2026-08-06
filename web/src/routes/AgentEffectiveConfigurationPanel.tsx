@@ -1,7 +1,7 @@
 import { CheckCircle2, CircleAlert, CircleX, Settings2 } from "lucide-react";
 
 import type { AgentEffectiveConfigurationField } from "../api/types";
-import { VButton, VEmptyState, VNativeButton, VPanel, VPanelHeader } from "../components/vui";
+import { VButton, VEmptyState, VNativeButton, VPanel, VPanelHeader, VTooltip } from "../components/vui";
 import styles from "./AgentEffectiveConfigurationPanel.styles";
 
 type EffectiveConfigurationField = AgentEffectiveConfigurationField;
@@ -125,13 +125,14 @@ export function AgentEffectiveConfigurationPanel({
         className={styles.panelHeader}
         headingLevel={3}
         title="当前有效配置"
+        tooltip="展示运行时实际生效的值、来源与健康状态；不展示密钥或原始策略 JSON。"
+        tooltipLabel="当前有效配置说明"
         actions={(
           <VButton type="button" variant="secondary" icon={<Settings2 size={14} />} onPress={onOpenConfig}>
             修改配置
           </VButton>
         )}
       />
-      <p className={styles.panelDescription}>展示运行时实际生效的值、来源与健康状态；不展示密钥或原始策略 JSON。</p>
       <div className={styles.sourceSummary} aria-label="配置来源摘要">
         <strong className={styles.sourceSummaryLabel}>来源</strong>
         <span title={sourceSummary(fields)}>{sourceSummary(fields)}</span>
@@ -147,35 +148,43 @@ export function AgentEffectiveConfigurationPanel({
           {fields.map((field) => {
             const selected = field.key === selectedFieldKey;
             return (
-              <VNativeButton
+              <VTooltip
                 key={field.key}
-                type="button"
-                className={`${styles.configurationRow} ${selected ? styles.configurationRowSelected : ""}`}
-                role="row"
-                aria-pressed={selected}
-                onClick={() => onSelectField(field.key)}
+                width="wide"
+                content={(
+                  <span className="grid gap-1">
+                    <span>{fieldHint(field.key)}</span>
+                    <span>{field.inheritanceChain.length} 层来源</span>
+                  </span>
+                )}
               >
-                <span className={styles.fieldIdentity}>
-                  <strong>{field.label}</strong>
-                  <small>{fieldHint(field.key)}</small>
-                </span>
-                <span className={styles.fieldValue}>
-                  <strong title={valueLine(field)}>{valueLine(field)}</strong>
-                  <small>{field.inheritanceChain.length} 层来源</small>
-                </span>
-                <span className={styles.sourceCell}>
-                  <em className={sourceClass(field.source.kind)}>{field.source.label}</em>
-                </span>
-                <span className={`${styles.statusCell} ${statusClass(field.status)}`}>
-                  <StatusIcon status={field.status} />
-                  {statusLabel(field.status)}
-                </span>
-              </VNativeButton>
+                <VNativeButton
+                  type="button"
+                  className={`${styles.configurationRow} ${selected ? styles.configurationRowSelected : ""}`}
+                  role="row"
+                  aria-pressed={selected}
+                  onClick={() => onSelectField(field.key)}
+                >
+                  <span className={styles.fieldIdentity}>
+                    <strong>{field.label}</strong>
+                  </span>
+                  <span className={styles.fieldValue}>
+                    <strong title={valueLine(field)}>{valueLine(field)}</strong>
+                  </span>
+                  <span className={styles.sourceCell}>
+                    <em className={sourceClass(field.source.kind)}>{field.source.label}</em>
+                  </span>
+                  <span className={`${styles.statusCell} ${statusClass(field.status)}`}>
+                    <StatusIcon status={field.status} />
+                    {statusLabel(field.status)}
+                  </span>
+                </VNativeButton>
+              </VTooltip>
             );
           })}
         </div>
       ) : (
-        <VEmptyState title="暂无有效配置投影">刷新 Agent 工作区后重试。</VEmptyState>
+        <VEmptyState title="暂无有效配置投影" />
       )}
     </VPanel>
   );
@@ -186,11 +195,7 @@ export function AgentEffectiveConfigurationInspectorPanel({
   onOpenConfig,
 }: AgentEffectiveConfigurationInspectorPanelProps) {
   if (!field) {
-    return (
-      <VEmptyState title="选择一个配置项">
-        选择左侧有效配置字段，查看完整继承链。
-      </VEmptyState>
-    );
+    return <VEmptyState title="选择一个配置项" />;
   }
 
   return (
@@ -207,8 +212,18 @@ export function AgentEffectiveConfigurationInspectorPanel({
           >
             <span className={styles.inheritanceIndex}>{index + 1}</span>
             <span className={styles.inheritanceCopy}>
-              <strong>{source.label}{source.active ? " · 当前生效" : ""}</strong>
-              <small>{valueLine({ key: field.key, effectiveValue: source.value })}</small>
+              <VTooltip
+                width="wide"
+                content={valueLine({ key: field.key, effectiveValue: source.value })}
+              >
+                <strong
+                  className={styles.inheritanceTrigger}
+                  tabIndex={0}
+                  aria-label={`${source.label}：${valueLine({ key: field.key, effectiveValue: source.value })}`}
+                >
+                  {source.label}{source.active ? " · 当前生效" : ""}
+                </strong>
+              </VTooltip>
             </span>
           </li>
         ))}

@@ -190,7 +190,7 @@ import { VActionGroup, VButton } from "@/components/vui";
 ## VStatusStrip
 
 ### 功能
-横向状态摘要条（多组 label/value），轻量页头指标。
+横向状态摘要条（多组 label/value），轻量页头指标。整组共用一个低对比表面，单项不模拟可点击按钮。
 
 ### 适用范围
 - **适用**：工作台顶部轻量指标。
@@ -210,7 +210,7 @@ import { VStatusStrip } from "@/components/vui";
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| items | label/value/tone | 保持一行可读 |
+| items | label/value/tone | 标签和值相邻；tone 只强调 value，不为每项生成彩色胶囊 |
 
 ### 实现落点
 - `layout/VStatusStrip.tsx`

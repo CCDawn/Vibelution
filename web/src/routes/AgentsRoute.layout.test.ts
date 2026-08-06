@@ -228,6 +228,10 @@ const listWorkspacePanelSource = readFileSync(
   new URL("./AgentListWorkspacePanel.tsx", import.meta.url),
   "utf-8",
 );
+const inspectorRailPanelSource = readFileSync(
+  new URL("./AgentInspectorRailPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const workspaceLayoutPanelSource = readFileSync(
   new URL("./AgentWorkspaceLayoutPanel.tsx", import.meta.url),
   "utf-8",
@@ -513,7 +517,12 @@ describe("AgentsRoute layout contract", () => {
       onSelectRow: vi.fn(),
       onToggleBulk: vi.fn(),
     });
-    const retryButton = findElement(tree, (element) => element.props.onPress === onRetry);
+    const retryButton = isValidElement(tree)
+      ? findElement(
+          (tree as ReactElement<{ actions?: ReactNode }>).props.actions,
+          (element) => element.props.onPress === onRetry,
+        )
+      : null;
 
     expect(retryButton).toBeTruthy();
     retryButton?.props.onPress();
@@ -673,6 +682,10 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspacePanelSource).toContain('from "./AgentDetailWorkspacePanel.styles"');
     expect(detailWorkspacePanelSource).not.toContain("AgentsRoute.styles");
     expect(listWorkspacePanelSource).toContain("<AgentListStatePanel");
+    expect(listWorkspacePanelSource).not.toContain("headerEyebrow");
+    expect(listWorkspaceStyles.listHeader).toContain("!items-center");
+    expect(listStatePanelSource).toContain("<ProgressiveRegionSkeleton");
+    expect(listStatePanelSource).not.toContain("title={copy.loading}");
     expect(listStatePanelSource).toContain("<AgentDenseList");
     expect(routeSource).toContain("agent.avatarImageUrl");
     expect(routeSource).toContain("<AgentSelectedDetailContentPanel");
@@ -1228,7 +1241,8 @@ describe("AgentsRoute layout contract", () => {
     expect(avatarEditorPanelSource).toContain("content={copy.avatarEditorHint}");
     expect(routeSource).toContain("title: copy.routeHint");
     expect(detailHeaderPanelSource).toContain("className={styles.detailHeader}");
-    expect(managementBriefPanelSource).toContain("content={copy.managementBriefHint}");
+    expect(managementBriefPanelSource).toContain("const hintContent = allReady");
+    expect(managementBriefPanelSource).toContain("content={hintContent}");
     expect(routeSource).toContain("title: copy.personaHint");
     expect(taskProfilePanelSource).toContain("content={copy.taskHint}");
     expect(healthMaintenancePanelSource).toContain("content={copy.maintenanceHint}");
@@ -1603,6 +1617,7 @@ describe("AgentsRoute layout contract", () => {
     expect(selectedDetailContentStyles.overviewAside).toContain("hidden");
     expect(workspaceLayoutPanelSource).toContain("AgentInspectorRailPanel");
     expect(workspaceLayoutPanelSource).toContain("inspectorRail");
+    expect(inspectorRailPanelSource).not.toContain("emptyHint");
     expect(overviewStyles.factGrid).toContain("min-[1540px]:[grid-template-columns:repeat(3,_minmax(0,_1fr))]");
     expect(overviewStyles.policyGrid).toContain("min-[1540px]:[grid-template-columns:repeat(4,_minmax(0,_1fr))]");
     expect(selectedDetailContentPanelSource).toContain("styles.overviewMain");
@@ -1709,10 +1724,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("className={styles.runtimeFocusPanel}");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeNextStep");
-    expect(runtimeFocusPanelSource).toContain("styles.runtimeEvidenceHint");
+    expect(runtimeFocusPanelSource).toContain("VTooltip");
+    expect(runtimeFocusPanelSource).toContain("styles.runtimeMetaTrigger");
     expect(runtimeFocusPanelSource).toContain('from "./AgentRuntimeFocusPanel.styles"');
     expect(runtimeFocusPanelSource).not.toContain("AgentsRoute.styles");
-    expect(runtimeFocusStyles.runtimeEvidenceHint).toBeTruthy();
+    expect(runtimeFocusStyles.runtimeMetaTrigger).toBeTruthy();
     expect(runtimeFocusStyles.runtime_running).toBeTruthy();
     expect(routeSource).toContain("RuntimeFocusEvidenceResult");
     expect(routeSource).toContain("findRuntimeFocusEvidence");
@@ -2170,7 +2186,7 @@ describe("AgentsRoute layout contract", () => {
 
     expect(coreConfigStyles.llmSlotGrid).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(healthMaintenanceStyles.maintenanceIntro).toContain("max-[860px]:[grid-template-columns:1fr]");
-    expect(toolSummaryStyles.policySummaryGrid).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(toolSummaryStyles.policySummaryGrid).toContain("[flex-wrap:wrap]");
     expect(toolGovernanceStyles.toolGovernanceItem).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(bulkConfigStyles.editorGrid).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(overviewStyles.boundarySummaryGrid).toContain("max-[860px]:[grid-template-columns:1fr]");

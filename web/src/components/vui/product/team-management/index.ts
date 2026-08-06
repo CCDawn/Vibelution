@@ -33,6 +33,10 @@ export {
   type TeamSourceResultTone,
 } from "./TeamSourceResultList";
 export {
+  TeamStatusLabel,
+  type TeamStatusLabelProps,
+} from "./TeamStatusLabel";
+export {
   teamSourceResultToneToVuiTone,
 } from "./teamSourceTone";
 export {

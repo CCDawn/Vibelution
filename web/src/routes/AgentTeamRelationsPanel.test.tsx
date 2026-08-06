@@ -27,7 +27,9 @@ describe("AgentTeamRelationsPanel", () => {
     expect(markup).toContain("科研团队");
     expect(markup).toContain("科研规划师");
     expect(markup).toContain("资料寻找");
-    expect(markup).toContain("成员关系来自团队画布");
+    expect(markup).toContain('aria-label="团队关系说明"');
+    expect(markup).not.toContain("成员关系来自团队画布");
+    expect(markup).not.toContain("<small");
     expect(markup).not.toContain("可委派");
     expect(markup).not.toContain("人工门禁");
   });

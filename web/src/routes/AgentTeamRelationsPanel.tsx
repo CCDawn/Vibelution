@@ -1,6 +1,6 @@
 import { ExternalLink, Users } from "lucide-react";
 
-import { VButton, VEmptyState, VPanel, VPanelHeader } from "../components/vui";
+import { VButton, VEmptyState, VPanel, VPanelHeader, VTooltip } from "../components/vui";
 import styles from "./AgentTeamRelationsPanel.styles";
 
 export type AgentTeamRelationView = {
@@ -23,8 +23,13 @@ type AgentTeamRelationsPanelProps = {
 export function AgentTeamRelationsPanel({ relations, onOpenTeam }: AgentTeamRelationsPanelProps) {
   return (
     <VPanel ariaLabel="团队关系" className={styles.relationsPanel}>
-      <VPanelHeader className={styles.panelHeader} headingLevel={3} title="团队关系" />
-      <p className={styles.evidenceNote}>确认当前 Agent 所属团队和同组成员；成员资格由团队工作区维护。成员关系来自团队画布。委派、审批和运行依赖请在对应团队或运行视图中核验。</p>
+      <VPanelHeader
+        className={styles.panelHeader}
+        headingLevel={3}
+        title="团队关系"
+        tooltip="确认当前 Agent 所属团队和同组成员；成员资格由团队工作区维护。成员关系来自团队画布。委派、审批和运行依赖请在对应团队或运行视图中核验。"
+        tooltipLabel="团队关系说明"
+      />
       {relations.length ? (
         <div className={styles.relationList}>
           {relations.map((relation) => (
@@ -34,13 +39,18 @@ export function AgentTeamRelationsPanel({ relations, onOpenTeam }: AgentTeamRela
                 <p>{relation.purpose || "未填写团队目标"}</p>
                 <ul className={styles.memberList} aria-label={`${relation.name} 成员`}>
                   {relation.members.map((member) => (
-                    <li
+                    <VTooltip
                       key={member.agentId}
-                      className={`${styles.member} ${member.current ? styles.memberCurrent : ""}`}
+                      content={member.functionLabel}
                     >
-                      <strong>{member.label}</strong>
-                      <small>{member.functionLabel}</small>
-                    </li>
+                      <li
+                        tabIndex={0}
+                        aria-label={`${member.label}：${member.functionLabel}`}
+                        className={`${styles.member} ${member.current ? styles.memberCurrent : ""}`}
+                      >
+                        <strong>{member.label}</strong>
+                      </li>
+                    </VTooltip>
                   ))}
                 </ul>
               </div>
@@ -57,9 +67,7 @@ export function AgentTeamRelationsPanel({ relations, onOpenTeam }: AgentTeamRela
           ))}
         </div>
       ) : (
-        <VEmptyState title="该 Agent 未加入可见团队" icon={<Users size={16} />}>
-          可在 Teams 页面查看或维护成员关系。
-        </VEmptyState>
+        <VEmptyState title="该 Agent 未加入可见团队" icon={<Users size={16} />} />
       )}
     </VPanel>
   );

@@ -32,11 +32,11 @@ export type VStateSurfaceProps = Omit<ComponentPropsWithoutRef<"section">, "titl
 };
 
 const BASE =
-  "grid min-w-0 w-full content-start gap-2 rounded-[var(--radius-control)] border p-3 text-left " +
+  "grid min-w-0 w-full content-start gap-2 rounded-[var(--vui-radius-soft)] border p-3 text-left " +
   "[font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
 
 const BASE_COMPACT =
-  "grid min-w-0 w-full content-start gap-1.5 rounded-[var(--radius-control)] border px-2.5 py-2 text-left " +
+  "grid min-w-0 w-full content-start gap-1.5 rounded-[var(--vui-radius-soft)] border px-2.5 py-2 text-left " +
   "[font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
 
 /** Full-region occupancy for board/canvas/list-detail main slots. */
@@ -48,8 +48,7 @@ const TONE: Record<VStateSurfaceTone, string> = {
   info:
     "border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-secondary)]",
   loading:
-    "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] " +
-    "bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))] text-[var(--fg-secondary)]",
+    "border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] text-[var(--fg-secondary)]",
   empty:
     "border-dashed border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-secondary)]",
   unavailable:
@@ -95,8 +94,8 @@ const ACTIONS = "flex min-w-0 flex-wrap items-center gap-1.5";
 const SKELETON_STACK = "grid min-w-0 gap-1.5";
 /** Align with VSkeleton / shadcn pulse (border mix, reduced motion via global pulse). */
 const SKELETON_LINE =
-  "block h-2 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] motion-reduce:animate-none";
-const SKELETON_WIDTHS = ["w-[min(100%,520px)]", "w-[min(72%,380px)]", "w-[min(46%,260px)]"];
+  "block h-1.5 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-strong)_52%,transparent)] motion-reduce:animate-none";
+const SKELETON_WIDTHS = ["w-[min(88%,460px)]", "w-[min(64%,340px)]", "w-[min(42%,240px)]"];
 
 function skeletonLineCount(value: boolean | number | undefined): number {
   if (value === true) {

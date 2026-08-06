@@ -1,6 +1,6 @@
 import { ExternalLink, Users } from "lucide-react";
 
-import { VButton, VStateSurface } from "../components/vui";
+import { VButton, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./AgentReferencesPanel.styles";
 
 export type AgentReferenceStatusTone = "active" | "stale";
@@ -67,17 +67,30 @@ export function AgentReferencesPanel({
               <p className={styles.panelEyebrow}>{copy.chatRoomMembership}</p>
               <h3>{chatRoomSummary}</h3>
             </div>
-            <span className={styles.cleanPill}>{copy.readOnlyLabel}</span>
+            <VTooltip content={copy.membershipHelp} width="wide">
+              <span
+                className={`${styles.cleanPill} ${styles.metadataTrigger}`}
+                tabIndex={0}
+                aria-label={`${copy.readOnlyLabel}：${copy.membershipHelp}`}
+              >
+                {copy.readOnlyLabel}
+              </span>
+            </VTooltip>
           </div>
           {chatRooms.length ? (
             <div className={styles.roomMembershipList}>
               {chatRooms.map((room) => (
                 <div key={room.id} className={styles.roomCheckField}>
                   <span className={statusClass(room.statusTone)}>{room.statusLabel}</span>
-                  <span>
-                    <strong>{room.title}</strong>
-                    <small>{room.meta}</small>
-                  </span>
+                  <VTooltip content={room.meta} width="wide">
+                    <span
+                      className={styles.metadataTrigger}
+                      tabIndex={0}
+                      aria-label={`${room.title}：${room.meta}`}
+                    >
+                      <strong>{room.title}</strong>
+                    </span>
+                  </VTooltip>
                   <VButton
                     type="button"
                     variant="ghost"
@@ -92,7 +105,6 @@ export function AgentReferencesPanel({
           ) : (
             <VStateSurface tone="empty" title={copy.noChatRooms} />
           )}
-          <p className={styles.emptyText}>{copy.membershipHelp}</p>
         </section>
       ) : null}
 
@@ -112,9 +124,16 @@ export function AgentReferencesPanel({
                   <strong>{reference.label}</strong>
                   <span className={statusClass(reference.statusTone)}>{reference.statusLabel}</span>
                 </div>
-                <span>{reference.sourceLabel}</span>
                 <div className={styles.referenceMetaRow}>
-                  <small>{reference.meta}</small>
+                  <VTooltip content={reference.meta} width="wide">
+                    <span
+                      className={styles.metadataTrigger}
+                      tabIndex={0}
+                      aria-label={`${reference.sourceLabel}：${reference.meta}`}
+                    >
+                      {reference.sourceLabel}
+                    </span>
+                  </VTooltip>
                   {reference.route ? (
                     <VButton
                       type="button"

@@ -5,6 +5,7 @@ import {
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
+import { Check } from "lucide-react";
 
 import {
   type VuiDensity,
@@ -60,6 +61,7 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
     const inputId = id ?? autoId;
     const isDisabledResolved = Boolean(disabled || isDisabled);
     const controlled = isSelected !== undefined;
+    const hasLabel = Boolean(children);
 
     const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
       onChange?.(event.target.checked);
@@ -68,11 +70,13 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
     return (
       <label
         className={[
-          "inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-control)]",
-          vuiControlMinHeightClass(density),
-          "border border-vui-border-subtle bg-vui-control-muted px-2 text-sm text-vui-fg-secondary shadow-none",
-          "transition-colors",
-          "has-[:checked]:border-vui-accent-cool has-[:checked]:text-vui-fg-primary",
+          "inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] text-sm text-vui-fg-secondary",
+          hasLabel
+            ? `${vuiControlMinHeightClass(density)} px-1`
+            : "size-8 justify-center",
+          "transition-[color,background-color] duration-150 motion-reduce:transition-none",
+          "has-[:checked]:text-vui-fg-primary",
+          "hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)]",
           isDisabledResolved ? "cursor-not-allowed opacity-55" : "cursor-pointer",
           className,
         ]
@@ -85,16 +89,18 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
         data-disabled={isDisabledResolved ? "true" : undefined}
       >
         <span data-slot="checkbox-content" className="inline-flex min-w-0 items-center gap-2">
-          <span data-slot="checkbox-control" className="inline-flex shrink-0 items-center justify-center">
+          <span
+            data-slot="checkbox-control"
+            className="relative inline-grid size-5 shrink-0 place-items-center"
+          >
             <input
               {...props}
               ref={ref}
               id={inputId}
               type="checkbox"
               className={[
-                "h-4 w-4 min-w-4 rounded border border-vui-border-subtle",
-                "bg-vui-control-muted text-vui-accent-cool shadow-none accent-[var(--accent-cool)]",
-                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-vui-accent-cool",
+                "peer absolute inset-0 size-full cursor-pointer appearance-none opacity-0",
+                "focus-visible:outline-none",
                 "disabled:cursor-not-allowed",
               ].join(" ")}
               checked={controlled ? Boolean(isSelected) : undefined}
@@ -103,7 +109,22 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
               aria-label={ariaLabel}
               onChange={handleChange}
             />
-            <span data-slot="checkbox-indicator" aria-hidden="true" className="sr-only" />
+            <span
+              data-slot="checkbox-indicator"
+              aria-hidden="true"
+              className={[
+                "pointer-events-none grid size-5 place-items-center rounded-[6px] border",
+                "border-[var(--vui-border-strong)] bg-[var(--vui-surface-panel)] text-[var(--vui-surface-base)]",
+                "shadow-[inset_0_1px_0_color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]",
+                "transition-[background-color,border-color,box-shadow] duration-150 motion-reduce:transition-none",
+                "peer-checked:border-[var(--accent-cool)] peer-checked:bg-[var(--accent-cool)]",
+                "peer-focus-visible:ring-2 peer-focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+                "peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--vui-surface-panel)]",
+                "[&_svg]:opacity-0 peer-checked:[&_svg]:opacity-100",
+              ].join(" ")}
+            >
+              <Check size={14} strokeWidth={2.5} aria-hidden="true" />
+            </span>
           </span>
           {children ? <span className="min-w-0">{children}</span> : null}
         </span>

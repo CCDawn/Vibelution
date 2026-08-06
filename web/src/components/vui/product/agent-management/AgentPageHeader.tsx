@@ -27,15 +27,20 @@ export function AgentPageHeader({
   tooltipLabel,
   actions = [],
 }: AgentPageHeaderProps) {
+  const normalizedEyebrow = eyebrow.trim().toLocaleLowerCase();
+  const repeatsTitle = normalizedEyebrow.length > 0 && title.trim().toLocaleLowerCase().includes(normalizedEyebrow);
+
   return (
     <header
       data-vui-product="agent-page-header"
       className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-vui-border-hairline bg-vui-surface-page/76 px-3 py-1"
     >
       <div className="grid min-w-0 gap-0.5">
-        <span className="truncate text-[0.64rem] font-semibold uppercase tracking-[0.06em] text-vui-fg-tertiary">
-          {eyebrow}
-        </span>
+        {!repeatsTitle ? (
+          <span className="truncate text-[0.64rem] font-semibold uppercase tracking-[0.06em] text-vui-fg-tertiary">
+            {eyebrow}
+          </span>
+        ) : null}
         <div className="flex min-w-0 items-center gap-1.5">
           <h1 className="m-0 truncate text-[0.95rem] font-bold leading-tight text-vui-fg-primary">
             {title}

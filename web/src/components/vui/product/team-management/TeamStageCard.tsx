@@ -13,16 +13,12 @@ export type TeamStageTone = "active" | "done" | "failed" | "idle" | "pending";
 export const TEAM_STAGE_TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
   active: {
     ["--source-step-border" as string]:
-      "color-mix(in srgb, var(--accent-cool) 58%, var(--border-strong))",
-    ["--source-step-fg" as string]:
-      "color-mix(in srgb, var(--accent-cool) 78%, var(--fg-primary))",
-    boxShadow: "var(--vui-shadow-inset-accent)",
+      "color-mix(in srgb, var(--fg-primary) 34%, var(--border-strong))",
+    ["--source-step-fg" as string]: "var(--fg-primary)",
   },
   done: {
-    ["--source-step-border" as string]:
-      "color-mix(in srgb, var(--accent-success) 50%, var(--border-soft))",
-    ["--source-step-fg" as string]:
-      "color-mix(in srgb, var(--accent-success) 76%, var(--fg-primary))",
+    ["--source-step-border" as string]: "var(--border-soft)",
+    ["--source-step-fg" as string]: "var(--fg-secondary)",
   },
   failed: {
     ["--source-step-border" as string]:
@@ -44,22 +40,22 @@ export const TEAM_STAGE_TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
 };
 
 const CARD_BASE =
-  "grid grid-cols-[minmax(0,1fr)_auto] items-center content-center min-w-0 gap-3 p-2.5 rounded-[var(--vui-radius-soft)] border cursor-pointer overflow-hidden text-[0.72rem] font-[740] " +
+  "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center content-center gap-3 overflow-hidden rounded-[var(--vui-radius-soft)] border p-2.5 text-left text-[0.72rem] font-[740] cursor-pointer " +
   "border-[color:var(--source-step-border,var(--border-soft))] text-[color:var(--source-step-fg,var(--fg-muted))] " +
-  "bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-card)] shadow-[var(--vui-elevation-1-sheen)] " +
-  "transition-[transform,border-color,box-shadow] duration-150 ease-[var(--vui-ease)] will-change-transform " +
-  "hover:-translate-y-px hover:border-[color:color-mix(in_srgb,var(--accent-cool)_56%,var(--source-step-border,var(--border-soft)))] hover:shadow-[var(--vui-elevation-2-sheen)] " +
-  "focus-visible:outline-none focus-visible:-translate-y-px focus-visible:shadow-[var(--vui-elevation-2-sheen)] focus-visible:border-[color:color-mix(in_srgb,var(--accent-cool)_56%,var(--source-step-border,var(--border-soft)))]";
+  "bg-[color:var(--source-workbench-card)] shadow-[var(--vui-elevation-1)] " +
+  "transition-[border-color,box-shadow,background-color] duration-150 ease-[var(--vui-ease)] " +
+  "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:shadow-[var(--vui-elevation-2)] " +
+  "focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus),var(--vui-elevation-2)] focus-visible:border-[var(--border-strong)]";
 
 const CARD_SELECTED =
-  "border-[color:color-mix(in_srgb,var(--accent-cool)_72%,var(--border-strong))] shadow-[var(--vui-shadow-inset-accent),var(--vui-elevation-2)]";
+  "border-[color:color-mix(in_srgb,var(--fg-primary)_34%,var(--border-strong))] bg-[color:color-mix(in_srgb,var(--fg-primary)_3%,var(--source-workbench-card))] shadow-[inset_2px_0_0_color-mix(in_srgb,var(--fg-primary)_72%,transparent),var(--vui-elevation-2)]";
 
 const HEADER = "flex min-w-0 items-center gap-2";
 const STEP_INDEX =
-  "flex h-[22px] min-w-[26px] items-center justify-center rounded-[6px] border border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))] text-[0.62rem] font-[860] text-[color:color-mix(in_srgb,var(--accent-cool)_78%,var(--fg-primary))]";
+  "flex h-[22px] min-w-[26px] items-center justify-center rounded-[6px] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[0.62rem] font-[820] text-[var(--fg-secondary)]";
 const STATUS_BADGE =
-  "max-w-[58%] rounded-full border border-[color:color-mix(in_srgb,var(--source-step-fg,var(--fg-muted))_28%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--source-step-fg,var(--fg-muted))_8%,transparent)] px-2 py-[2px] text-[0.58rem] font-[840] text-[color:var(--source-step-fg,var(--fg-muted))]";
-const BODY = "grid min-w-0 content-start gap-1";
+  "max-w-[58%] text-[0.64rem] font-[720] text-[color:var(--source-step-fg,var(--fg-muted))]";
+const BODY = "flex min-w-0 items-center";
 const ACTION_BUTTON =
   "[&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:text-[0.66rem] [&_[data-vui=native-button]]:font-[840] [&_[data-vui=native-button]]:whitespace-nowrap";
 const ACTION_ROW =
@@ -114,6 +110,15 @@ export function TeamStageCard({
     onActivate();
   };
 
+  const details = (
+    <div className="grid gap-1">
+      <strong>{label}</strong>
+      <span>{status}</span>
+      <span>{metric}</span>
+      <span>{nextLabel}</span>
+      {title ? <span>{title}</span> : null}
+    </div>
+  );
   const card = (
     <article
       data-vui-product="team-stage-card"
@@ -132,24 +137,17 @@ export function TeamStageCard({
             {String(index + 1).padStart(2, "0")}
           </strong>
           <b className={`text-[0.86rem] text-[var(--fg-primary)] ${TEXT_TRUNCATE}`}>{label}</b>
-          <span className={`${STATUS_BADGE} ${TEXT_TRUNCATE} ml-auto`}>
+          <span
+            data-slot="stage-status"
+            className={`${STATUS_BADGE} ${TEXT_TRUNCATE}`}
+          >
             {status}
           </span>
         </div>
-        <em className={`not-italic text-[0.66rem] font-[760] text-[var(--fg-muted)] ${TEXT_TRUNCATE}`}>
-          {metric}
-        </em>
-        <small
-          className={`text-[0.64rem] font-[820] text-[color:var(--source-step-fg,var(--fg-muted))] ${TEXT_TRUNCATE}`}
-        >
-          {nextLabel}
-        </small>
       </div>
       {actions ? <div className={ACTION_ROW}>{actions}</div> : null}
     </article>
   );
 
-  return title ? (
-    <VTooltip content={title} width="wide">{card}</VTooltip>
-  ) : card;
+  return <VTooltip content={details} width="wide">{card}</VTooltip>;
 }

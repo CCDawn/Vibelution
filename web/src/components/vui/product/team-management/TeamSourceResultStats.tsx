@@ -11,9 +11,9 @@ export type TeamSourceResultStatsProps = {
   stats: TeamSourceResultStat[];
 };
 
-const GRID = "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(5.75rem,1fr))] gap-1.5";
+const GRID = "flex min-w-0 flex-wrap items-center gap-1.5";
 const PILL =
-  "flex min-h-6 min-w-0 items-center justify-between gap-1.5 rounded-[var(--radius-control)] " +
+  "inline-flex min-h-6 w-fit max-w-full items-center gap-1.5 rounded-[var(--radius-control)] " +
   "border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 " +
   "[font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]";
 const VALUE = "flex-none text-[var(--fg-primary)]";

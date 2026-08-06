@@ -141,6 +141,9 @@ describe("VUI workbench layout templates", () => {
         />
       </VWorkbenchPage>,
     );
+    const loadingSurfaceMarkup = renderToStaticMarkup(
+      <VStateSurface fill tone="loading" title="Loading research overview" />,
+    );
 
     expect(markup).toContain('data-vui="workbench-page"');
     expect(markup).toContain('data-vui="route-header"');
@@ -149,6 +152,8 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain("text-[var(--font-size-caption)]");
     expect(markup).toContain("text-[var(--font-size-micro)]");
     expect(markup).toContain('data-vui="status-strip"');
+    expect(markup).toContain('data-vui="status-strip-item"');
+    expect(markup).toContain('data-tone="neutral"');
     expect(markup).toContain('data-vui="loading-value"');
     expect(markup).toContain('role="status"');
     expect(markup).toContain('aria-label="Loading agents"');
@@ -157,6 +162,8 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain('data-vui="state-surface"');
     expect(markup).toContain('data-tone="loading"');
     expect(markup).toContain('data-fill="true"');
+    expect(loadingSurfaceMarkup).toContain("bg-[var(--vui-surface-panel)]");
+    expect(loadingSurfaceMarkup).not.toContain("vui-control-muted");
     expect(markup).toContain("Loading research overview");
     expect(markup).toContain('data-density="compact"');
     expect(markup).toContain("observing_interrupted");
@@ -164,6 +171,7 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain("Team detail API");
     expect(markup).toContain("animate-pulse");
     expect(markup).toContain('data-vui="split-workspace"');
+    expect(markup).toContain("--vui-workspace-sidebar,16rem");
     expect(markup).toContain('data-vui="entity-list"');
     expect(markup).toContain('data-vui="empty-state"');
     expect(markup).toContain("Research Console");

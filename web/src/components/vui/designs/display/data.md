@@ -39,7 +39,7 @@ import { VDenseTable } from "@/components/vui";
 ## VMetricStrip
 
 ### 功能
-横向多指标条（多 metric 卡片/格），页头数字摘要。
+横向紧凑多指标条，标签和值在同一局部组内呈现，避免整栏拉开。
 
 ### 适用范围
 - **适用**：页头摘要数字。
@@ -62,7 +62,7 @@ import { VMetricStrip } from "@/components/vui";
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| metrics | id/label/value | value 可 `VLoadingValue` |
+| metrics | id/label/value | value 可 `VLoadingValue`；普通完成值保持中性，只有 warning / danger 使用告警色；补充 detail 仅 hover / focus 展示 |
 
 ### 实现落点
 - `display/VMetricStrip.tsx`

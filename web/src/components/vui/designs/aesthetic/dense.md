@@ -153,7 +153,7 @@ import { VStateRow } from "@/components/vui";
 ## VStatusChip
 
 ### 功能
-工作台状态小片（tone 映射），表达运行/成功/失败等状态。
+工作台状态标签（tone 映射），使用“状态点 + 文字”，不绘制卡片、按钮或胶囊背景。
 
 ### 适用范围
 - **适用**：工作台状态徽章。
@@ -173,7 +173,10 @@ import { VStatusChip } from "@/components/vui";
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| tone / children | 状态语义 | 与状态词表一致 |
+| tone / children | 状态语义 | success 保持中性；warning / danger 才使用告警色 |
 
 ### 反冗余
 - 状态语义优先本组件，勿再用裸 span 色块。
+
+### 实现落点
+- `aesthetic/VStatusChip.tsx`

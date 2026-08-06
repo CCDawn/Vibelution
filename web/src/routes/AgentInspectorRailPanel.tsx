@@ -12,7 +12,6 @@ export type AgentInspectorRailPanelProps = {
   title: string;
   subtitle?: string;
   emptyTitle: string;
-  emptyHint: string;
   closeLabel?: string;
   brief: ComponentProps<typeof AgentManagementBriefPanel> | null;
   resources: ComponentProps<typeof AgentOverviewResourcesPanel> | null;
@@ -26,7 +25,6 @@ export function AgentInspectorRailPanel({
   title,
   subtitle,
   emptyTitle,
-  emptyHint,
   closeLabel,
   brief,
   resources,
@@ -44,7 +42,7 @@ export function AgentInspectorRailPanel({
       <VPanelHeader
         className={styles.railHeader}
         headingLevel={null}
-        eyebrow={title}
+        eyebrow={subtitle ? title : undefined}
         title={subtitle || title}
         actions={
           onClose ? (
@@ -72,9 +70,7 @@ export function AgentInspectorRailPanel({
             tone="empty"
             title={emptyTitle}
             aria-label={emptyTitle}
-          >
-            {emptyHint}
-          </VStateSurface>
+          />
         )}
       </div>
     </AgentWorkspacePanel>

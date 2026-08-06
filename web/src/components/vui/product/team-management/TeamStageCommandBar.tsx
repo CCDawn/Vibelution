@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 
 import { VNativeButton } from "../../primitives/VNativeButton";
+import { VTooltip } from "../../primitives/VTooltip";
 import { TEAM_STAGE_TONE_STYLE, type TeamStageTone } from "./TeamStageCard";
 
 export type TeamStageStat = {
@@ -36,53 +37,41 @@ export type TeamStageCommandBarProps = {
 };
 
 const BAR_BASE =
-  "grid w-full min-w-0 grid-cols-1 gap-2 px-2.5 py-2 rounded-[var(--vui-radius-soft)] border " +
-  "border-[color:var(--source-step-border,color-mix(in_srgb,var(--accent-success)_24%,var(--border-soft)))] " +
-  "bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-panel)] shadow-[var(--vui-elevation-1-sheen)] " +
-  "lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-x-3";
+  "flex w-full min-w-0 flex-wrap items-center gap-2.5 rounded-[var(--vui-radius-soft)] border px-3 py-2.5 text-left " +
+  "border-[color:var(--source-step-border,var(--border-soft))] bg-[color:var(--source-workbench-panel)] shadow-[var(--vui-elevation-1)]";
 
 const TITLE_STRONG =
   "text-[0.82rem] text-[var(--fg-primary)] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
-const TITLE_SUB =
-  "text-[0.64rem] font-[720] text-[var(--fg-muted)] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
 
-/** Right column: steps row then stats row — never share one cramped horizontal line. */
 const RIGHT_CLUSTER =
-  "flex min-w-0 w-full flex-col items-stretch gap-1.5 lg:w-auto lg:max-w-[min(100%,42rem)] lg:items-end";
+  "flex min-w-0 flex-1 flex-wrap items-center gap-2";
 
 const STEPS_ROW =
-  "flex min-w-0 w-full flex-nowrap items-center justify-end gap-1 overflow-x-auto overscroll-x-contain " +
-  "[scrollbar-width:thin]";
+  "flex min-w-0 w-fit flex-nowrap items-center gap-0.5 overflow-x-auto overscroll-x-contain rounded-[8px] " +
+  "border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0.5 [scrollbar-width:thin]";
 
 const STEP_CHIP =
-  "inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.62rem] font-[720] " +
-  "border-[color:color-mix(in_srgb,var(--border-soft)_78%,transparent)] bg-[color:var(--source-workbench-card)] " +
-  "text-[var(--fg-muted)] transition-colors";
+  "inline-flex shrink-0 items-center gap-1 rounded-[6px] border border-transparent px-1.5 py-1 text-[0.62rem] font-[720] " +
+  "bg-transparent text-[var(--fg-tertiary)] transition-[background-color,color,box-shadow] duration-150";
 
 const STEP_CHIP_SELECTED =
-  "border-[color:color-mix(in_srgb,var(--accent-cool)_42%,var(--border-soft))] " +
-  "bg-[color:color-mix(in_srgb,var(--accent-cool)_10%,var(--source-workbench-card))] text-[var(--fg-primary)]";
+  "bg-[var(--source-workbench-card)] text-[var(--fg-primary)] shadow-[var(--vui-elevation-1)]";
 
 const STEP_CHIP_BUTTON =
-  "cursor-pointer hover:border-[color:color-mix(in_srgb,var(--accent-cool)_35%,var(--border-soft))]";
+  "cursor-pointer hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]";
 
 const STEP_INDEX = "tabular-nums font-[820] text-[var(--fg-tertiary)]";
 const STEP_TITLE = "whitespace-nowrap font-[760]";
-const STEP_STATUS =
-  "max-w-[4.5rem] overflow-hidden text-ellipsis whitespace-nowrap text-[0.58rem] opacity-85";
 
-const STATS_GRID = "flex min-w-0 w-full flex-wrap items-center justify-end gap-1.5";
+const STATS_GRID = "flex min-w-0 flex-wrap items-center gap-2";
 const STAT_PILL =
-  "inline-flex min-h-[26px] items-center gap-1.5 px-2 rounded-[7px] whitespace-nowrap " +
-  "border border-[color:color-mix(in_srgb,var(--border-soft)_78%,transparent)] bg-[color:var(--source-workbench-card)] " +
-  "text-[0.64rem] font-[720] text-[var(--fg-muted)]";
+  "inline-flex min-h-[24px] items-center gap-1 whitespace-nowrap text-[0.64rem] font-[680] text-[var(--fg-tertiary)]";
 const STAT_PILL_ACCENT =
-  "border-[color:color-mix(in_srgb,var(--accent-cool)_40%,var(--border-soft))] " +
-  "bg-[color:color-mix(in_srgb,var(--accent-cool)_9%,var(--source-workbench-card))]";
+  "text-[var(--fg-secondary)]";
 const STAT_PILL_DANGER =
-  "border-[color:color-mix(in_srgb,var(--state-danger)_35%,var(--border-soft))] " +
-  "bg-[color:color-mix(in_srgb,var(--state-danger)_8%,var(--source-workbench-card))]";
-const STAT_PILL_BUTTON = "cursor-pointer hover:brightness-[0.98]";
+  "text-[var(--state-danger)]";
+const STAT_PILL_BUTTON =
+  "cursor-pointer rounded-[6px] px-1.5 hover:bg-[var(--vui-control-muted-hover)] focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]";
 const STAT_VALUE = "flex-none text-[0.78rem] font-[820] text-[var(--fg-primary)]";
 
 function statusTooltip(status: ReactNode): string | undefined {
@@ -93,8 +82,8 @@ function statusTooltip(status: ReactNode): string | undefined {
 }
 
 /**
- * Command bar: title left; right column stacks stage steps above summary stats
- * so chips never collide with status pills.
+ * Command bar keeps the active stage, progress, and summary in one local group.
+ * Only actionable entries receive control chrome.
  */
 export function TeamStageCommandBar({
   ariaLabel,
@@ -113,10 +102,9 @@ export function TeamStageCommandBar({
       className={BAR_BASE}
       style={TEAM_STAGE_TONE_STYLE[tone]}
     >
-      <div className="grid min-w-0 gap-0.5">
+      <VTooltip content={subtitle} width="wide">
         <strong className={TITLE_STRONG}>{title}</strong>
-        <span className={TITLE_SUB}>{subtitle}</span>
-      </div>
+      </VTooltip>
       <div className={RIGHT_CLUSTER}>
         {steps && steps.length > 0 ? (
           <div className={STEPS_ROW} role="list" aria-label="stage-progress">
@@ -133,11 +121,6 @@ export function TeamStageCommandBar({
                 <>
                   <span className={STEP_INDEX}>{step.indexLabel}</span>
                   <span className={STEP_TITLE}>{step.title}</span>
-                  {tip ? (
-                    <span className={STEP_STATUS} title={tip}>
-                      {tip}
-                    </span>
-                  ) : null}
                 </>
               );
               if (step.onClick) {

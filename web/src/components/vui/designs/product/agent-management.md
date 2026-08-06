@@ -27,6 +27,7 @@ import { AgentPageHeader } from "@/components/vui/...";
 
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
+| eyebrow / title | 页面识别 | eyebrow 与 title 语义重复时只显示 title |
 | 创建 / 刷新回调 | 域动作 | 按钮用 `VButton` |
 
 ### 非职责
@@ -58,7 +59,7 @@ Agent 筛选侧轨：搜索 + 分组过滤器。
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| query / groups | 搜索与分组 | 输入用 `VNativeInput`/`VInput` |
+| query / groups | 搜索与分组 | 输入用 `VNativeInput`/`VInput`；默认计数与选中态使用中性色 |
 
 ### 反冗余
 - 第二消费者出现前禁止空抽通用 FilterRail。
@@ -86,7 +87,7 @@ Agent 密集列表/表，展示与选择 Agent 实体。
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| items / selectedId | 数据与选中 | 行交互用 VNative* |
+| columns / rows | 数据与选中 | 默认只显示名称、角色与异常状态；头像、角色、计数保持中性，只有 warning / error 使用语义色 |
 
 ---
 

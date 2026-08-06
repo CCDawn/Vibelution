@@ -93,6 +93,14 @@ describe("VUI dual-theme foundation", () => {
     expect(tokensSource).toContain("--radius-card: var(--vui-radius-panel-soft);");
     expect(tokensSource).toContain("--vui-elevation-panel: var(--vui-elevation-1-sheen);");
     expect(tokensSource).toContain("--vui-elevation-overlay: var(--vui-elevation-2-sheen);");
+    expect(tokensSource).toContain("--accent-cool: #0a84ff;");
+    expect(tokensSource).toContain("--accent-cool-2: #409cff;");
+    expect(tokensSource).toContain("--accent-cool: #007aff;");
+    expect(tokensSource).toContain("--accent-cool-2: #0062cc;");
+    expect(tokensSource).not.toContain("#5bb7ae");
+    expect(tokensSource).not.toContain("#8bdad2");
+    expect(tokensSource).not.toContain("#0f766e");
+    expect(tokensSource).not.toContain("#0d9488");
     expect(tailwindSource).toContain("--color-vui-surface-rail: var(--vui-surface-rail)");
     expect(tailwindSource).toContain("--color-vui-surface-raised: var(--vui-surface-raised)");
     expect(tailwindSource).toContain("--color-vui-surface-card: var(--vui-surface-card)");
@@ -351,6 +359,7 @@ describe("VUI dual-theme foundation", () => {
     expect(markup).toContain('data-vui="action-group"');
     expect(markup).toContain("可用");
     expect(markup).toContain("运行中");
+    expect(markup).not.toContain("text-[var(--state-success)]");
   });
 
   it("moves Agent Management product panels onto shared VUI primitives", () => {

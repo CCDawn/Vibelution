@@ -55,53 +55,53 @@ export function AgentContextCompressionPanel({
   const custom = policy.mode === "custom";
 
   return (
-    <VTooltip content={title} width="wide">
-      <section
-        className={styles.fieldWide}
-        tabIndex={0}
-        aria-label={`${copy.contextCompressionPolicy} · ${title}`}
-      >
-        <span>{copy.contextCompressionPolicy}</span>
-        <div className={styles.compressionPolicyGrid}>
-        <VFieldRow label={copy.contextCompressionPolicy}>
-          <VStringSelect
-            ariaLabel={copy.contextCompressionPolicy}
-            value={policy.mode}
-            onValueChange={(value) => onPolicyChange({
-              mode: value === "custom" ? "custom" : "inherit",
-            })}
-            options={[
-              { value: "inherit", label: copy.contextCompressionInherit },
-              { value: "custom", label: copy.contextCompressionCustom },
-            ]}
-          />
-        </VFieldRow>
-        <VCheckbox
-          isSelected={policy.enabled}
-          isDisabled={!custom}
-          onChange={(value) => onPolicyChange({ enabled: value })}
-        >
-          {copy.contextCompressionEnabled}
-        </VCheckbox>
-        <VFieldRow label={copy.contextCompressionMaxTokenLimit}>
-          <VNativeInput
-            type="number"
-            min={1}
-            value={policy.maxTokenLimit}
-            disabled={!custom}
-            onChange={(event) => onPolicyChange({ maxTokenLimit: event.target.value })}
-          />
-        </VFieldRow>
-        <VFieldRow label={copy.contextCompressionMaxCount}>
-          <VNativeInput
-            type="number"
-            min={0}
-            value={policy.maxCompressionsPerSession}
-            disabled={!custom}
-            onChange={(event) => onPolicyChange({ maxCompressionsPerSession: event.target.value })}
-          />
-        </VFieldRow>
+    <section className={styles.fieldWide} aria-label={`${copy.contextCompressionPolicy} · ${title}`}>
+      <div className={styles.compressionPolicyHeader}>
+        <h3>
+          <VTooltip content={title} width="wide">
+            <span className={styles.compressionPolicyTitle} tabIndex={0} aria-label={`${copy.contextCompressionPolicy}：${title}`}>
+              {copy.contextCompressionPolicy}
+            </span>
+          </VTooltip>
+        </h3>
+        <VStringSelect
+          ariaLabel={copy.contextCompressionPolicy}
+          value={policy.mode}
+          onValueChange={(value) => onPolicyChange({
+            mode: value === "custom" ? "custom" : "inherit",
+          })}
+          options={[
+            { value: "inherit", label: copy.contextCompressionInherit },
+            { value: "custom", label: copy.contextCompressionCustom },
+          ]}
+        />
       </div>
+      {custom ? (
+        <>
+        <div className={styles.compressionPolicyGrid}>
+          <VCheckbox
+            isSelected={policy.enabled}
+            onChange={(value) => onPolicyChange({ enabled: value })}
+          >
+            {copy.contextCompressionEnabled}
+          </VCheckbox>
+          <VFieldRow label={copy.contextCompressionMaxTokenLimit}>
+            <VNativeInput
+              type="number"
+              min={1}
+              value={policy.maxTokenLimit}
+              onChange={(event) => onPolicyChange({ maxTokenLimit: event.target.value })}
+            />
+          </VFieldRow>
+          <VFieldRow label={copy.contextCompressionMaxCount}>
+            <VNativeInput
+              type="number"
+              min={0}
+              value={policy.maxCompressionsPerSession}
+              onChange={(event) => onPolicyChange({ maxCompressionsPerSession: event.target.value })}
+            />
+          </VFieldRow>
+        </div>
         <div className={styles.compressionPolicySubgrid}>
         <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "轻量" : "Light"}`}>
           <VNativeInput
@@ -109,7 +109,6 @@ export function AgentContextCompressionPanel({
             min={1}
             max={100}
             value={policy.lightThreshold}
-            disabled={!custom}
             onChange={(event) => onPolicyChange({ lightThreshold: event.target.value })}
           />
         </VFieldRow>
@@ -119,7 +118,6 @@ export function AgentContextCompressionPanel({
             min={1}
             max={100}
             value={policy.standardThreshold}
-            disabled={!custom}
             onChange={(event) => onPolicyChange({ standardThreshold: event.target.value })}
           />
         </VFieldRow>
@@ -129,7 +127,6 @@ export function AgentContextCompressionPanel({
             min={1}
             max={100}
             value={policy.deepThreshold}
-            disabled={!custom}
             onChange={(event) => onPolicyChange({ deepThreshold: event.target.value })}
           />
         </VFieldRow>
@@ -139,7 +136,6 @@ export function AgentContextCompressionPanel({
             min={1}
             max={100}
             value={policy.emergencyThreshold}
-            disabled={!custom}
             onChange={(event) => onPolicyChange({ emergencyThreshold: event.target.value })}
           />
         </VFieldRow>
@@ -148,7 +144,6 @@ export function AgentContextCompressionPanel({
             type="number"
             min={1}
             value={policy.lightSummaryChars}
-            disabled={!custom}
             onChange={(event) => onPolicyChange({ lightSummaryChars: event.target.value })}
           />
         </VFieldRow>
@@ -157,7 +152,6 @@ export function AgentContextCompressionPanel({
             type="number"
             min={1}
             value={policy.standardSummaryChars}
-            disabled={!custom}
             onChange={(event) => onPolicyChange({ standardSummaryChars: event.target.value })}
           />
         </VFieldRow>
@@ -166,7 +160,6 @@ export function AgentContextCompressionPanel({
             type="number"
             min={1}
             value={policy.deepSummaryChars}
-            disabled={!custom}
             onChange={(event) => onPolicyChange({ deepSummaryChars: event.target.value })}
           />
         </VFieldRow>
@@ -175,7 +168,6 @@ export function AgentContextCompressionPanel({
             type="number"
             min={1}
             value={policy.emergencySummaryChars}
-            disabled={!custom}
             onChange={(event) => onPolicyChange({ emergencySummaryChars: event.target.value })}
           />
         </VFieldRow>
@@ -186,25 +178,24 @@ export function AgentContextCompressionPanel({
             type="number"
             min={0}
             value={policy.keepAiMessages}
-            disabled={!custom}
             onChange={(event) => onPolicyChange({ keepAiMessages: event.target.value })}
           />
         </VFieldRow>
         <VCheckbox
           isSelected={policy.preserveErrors}
-          isDisabled={!custom}
           onChange={(value) => onPolicyChange({ preserveErrors: value })}
         >
           {copy.contextCompressionPreserveErrors}
         </VCheckbox>
         <VCheckbox
           isSelected={policy.extractKeyDecisions}
-          isDisabled={!custom}
           onChange={(value) => onPolicyChange({ extractKeyDecisions: value })}
         >
           {copy.contextCompressionExtractDecisions}
         </VCheckbox>
       </div>
+        </>
+      ) : null}
         <div className={styles.configDeepLinkRow}>
           <VButton
             type="button"
@@ -215,7 +206,6 @@ export function AgentContextCompressionPanel({
             {lang === "zh" ? "去上下文配置" : "Open context config"}
           </VButton>
         </div>
-      </section>
-    </VTooltip>
+    </section>
   );
 }

@@ -113,6 +113,7 @@
 | `TeamSourcePagination` | [product/team-management.md](./product/team-management.md#teamsourcepagination) |
 | `TeamSourceResultList` / `TeamSourceResultItem` | [product/team-management.md](./product/team-management.md#teamsourceresultlist) |
 | `TeamSourceResultStats` | [product/team-management.md](./product/team-management.md#teamsourceresultstats) |
+| `TeamStatusLabel` | [product/team-management.md](./product/team-management.md#teamstatuslabel) |
 | `TeamSourceEmptyState` | [product/team-management.md](./product/team-management.md#teamsourceemptystate) |
 | `TeamCandidateCard` | [product/team-management.md](./product/team-management.md#teamcandidatecard) |
 

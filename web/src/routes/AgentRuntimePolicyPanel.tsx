@@ -1,5 +1,5 @@
 import type { AgentDelegationPolicy, AgentSupervisionPolicy } from "../api/types";
-import { VButton, VCheckbox, VFieldRow, VNativeInput, VStringSelect } from "../components/vui";
+import { VButton, VCheckbox, VFieldRow, VNativeInput, VStringSelect, VTooltip } from "../components/vui";
 import styles from "./AgentRuntimePolicyPanel.styles";
 
 export type AgentRuntimePolicyPanelCopy = {
@@ -136,7 +136,23 @@ export function AgentRuntimePolicyPanel({
           </div>
         </section>
         <section>
-          <span>{copy.supervisionPolicyTitle}</span>
+          <VTooltip
+            width="wide"
+            content={(
+              <span className={styles.policyMeta}>
+                <span>{copy.communication}: {inboxPendingCount} pending</span>
+                <span>{copy.context}: {groupContextEventCount} group events</span>
+              </span>
+            )}
+          >
+            <span
+              className={styles.policyMetaTrigger}
+              tabIndex={0}
+              aria-label={`${copy.supervisionPolicyTitle}：${copy.communication} ${inboxPendingCount} pending；${copy.context} ${groupContextEventCount} group events`}
+            >
+              {copy.supervisionPolicyTitle}
+            </span>
+          </VTooltip>
           <div className={styles.toggleGrid}>
             <VCheckbox
               isSelected={supervisionPolicyDraft.supervisionEnabled}
@@ -177,10 +193,6 @@ export function AgentRuntimePolicyPanel({
                 ]}
               />
             </VFieldRow>
-          </div>
-          <div className={styles.pathList}>
-            <span>{copy.communication}: {inboxPendingCount} pending</span>
-            <span>{copy.context}: {groupContextEventCount} group events</span>
           </div>
         </section>
       </div>

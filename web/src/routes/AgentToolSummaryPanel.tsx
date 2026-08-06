@@ -36,6 +36,12 @@ export function AgentToolSummaryPanel({
     ? "工具能力已迁移到 Agent 管理的工具页集中配置；这里保留当前 Agent 的工具摘要和入口。"
     : "Tool permissions are configured in the Agent Tools page. This panel keeps only the current Agent summary and entry point.";
   const actionLabel = lang === "zh" ? "配置工具能力" : "Configure tools";
+  const metrics = [
+    [copy.allowedTools, allowedCount],
+    [copy.preferredTools, preferredCount],
+    [copy.blockedTools, blockedCount],
+    [copy.toolCategoryCount, toolCategoryCount],
+  ] as const;
 
   return (
     <section className={styles.configEditor}>
@@ -54,10 +60,12 @@ export function AgentToolSummaryPanel({
         <Wrench size={16} />
       </div>
       <div className={styles.policySummaryGrid}>
-        <span>{copy.allowedTools}: <strong>{allowedCount}</strong></span>
-        <span>{copy.preferredTools}: <strong>{preferredCount}</strong></span>
-        <span>{copy.blockedTools}: <strong>{blockedCount}</strong></span>
-        <span>{copy.toolCategoryCount}: <strong>{toolCategoryCount}</strong></span>
+        {metrics.map(([label, value]) => (
+          <span key={label}>
+            <b>{label}</b>
+            <strong>{value}</strong>
+          </span>
+        ))}
       </div>
       <div className={styles.editorActions}>
         <VButton type="button" variant="primary" icon={<Wrench size={15} />} onPress={onConfigure}>

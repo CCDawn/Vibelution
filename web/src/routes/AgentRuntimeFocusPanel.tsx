@@ -1,6 +1,6 @@
 import { ExternalLink, Search } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VTooltip } from "../components/vui";
 import styles from "./AgentRuntimeFocusPanel.styles";
 
 export type AgentRuntimeFocusPanelCopy = {
@@ -49,41 +49,41 @@ export function AgentRuntimeFocusPanel({
 }: AgentRuntimeFocusPanelProps) {
   const runtimeToneStyle = styles[`runtime_${tone}` as keyof typeof styles] || styles.runtime_unknown;
   const logsLabel = logsTargetLabel ? `${copy.openLogs} · ${logsTargetLabel}` : copy.openLogs;
+  const runtimeMetaLabel = `${copy.runtimeLatestRun} ${latestRunId}；${copy.runtimeReason} ${runReason}；${copy.runtimeUpdated} ${updatedAt}；${copy.runtimeEvidence} ${evidenceReason} ${evidenceSceneId}`;
 
   return (
     <section className={styles.runtimeFocusPanel}>
       <div className={styles.runtimeFocusHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.runtimeFocus}</p>
-          <h3>{statusLabel}</h3>
+          <h3>
+            <VTooltip
+              width="wide"
+              content={(
+                <span className={styles.runtimeMetaTooltip}>
+                  <span>{copy.runtimeLatestRun}: {latestRunId}</span>
+                  <span>{copy.runtimeReason}: {runReason}</span>
+                  <span>{copy.runtimeUpdated}: {updatedAt}</span>
+                  <span>{copy.runtimeEvidence}: {evidenceReason} · {evidenceSceneId}</span>
+                </span>
+              )}
+            >
+              <span className={styles.runtimeMetaTrigger} tabIndex={0} aria-label={runtimeMetaLabel}>
+                {statusLabel}
+              </span>
+            </VTooltip>
+          </h3>
         </div>
         <span className={`${styles.runtimePill} ${runtimeToneStyle}`}>
           {statusReason}
         </span>
       </div>
-      <p>{summary}</p>
-      <div className={styles.runtimeFocusMeta}>
-        <span>
-          <strong>{copy.runtimeLatestRun}</strong>
-          <code>{latestRunId}</code>
-        </span>
-        <span>
-          <strong>{copy.runtimeReason}</strong>
-          <code>{runReason}</code>
-        </span>
-        <span>
-          <strong>{copy.runtimeUpdated}</strong>
-          <code>{updatedAt}</code>
-        </span>
-      </div>
       <div className={styles.runtimeNextStep}>
-        <strong>{copy.runtimeNextStep}</strong>
-        <span>{nextStep}</span>
-      </div>
-      <div className={styles.runtimeEvidenceHint}>
-        <strong>{copy.runtimeEvidence}</strong>
-        <span>{evidenceReason}</span>
-        <code>{evidenceSceneId}</code>
+        <VTooltip content={summary} width="wide">
+          <span className={styles.runtimeNextStepTrigger} tabIndex={0} aria-label={`${copy.runtimeNextStep}：${nextStep}`}>
+            {nextStep}
+          </span>
+        </VTooltip>
       </div>
       <div className={styles.timelineActions}>
         {onOpenSession ? (

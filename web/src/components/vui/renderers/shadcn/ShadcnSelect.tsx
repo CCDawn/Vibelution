@@ -54,6 +54,20 @@ function hasEnabledOption(options: ShadcnSelectOption[], key: string): boolean {
   return options.some((option) => String(option.id) === key && !option.disabled);
 }
 
+function optionValue(key: string): string {
+  return `vui-select:${encodeURIComponent(key)}`;
+}
+
+function optionKey(
+  options: ShadcnSelectOption[],
+  value: string,
+): string | null {
+  const option = options.find(
+    (candidate) => optionValue(String(candidate.id)) === value,
+  );
+  return option && !option.disabled ? String(option.id) : null;
+}
+
 /**
  * Radix/shadcn Select renderer.
  * Pages must not import this — only VUI form primitives consume it.
@@ -80,30 +94,36 @@ export const ShadcnSelect = forwardRef<HTMLButtonElement, ShadcnSelectProps>(
   ) {
     const controlled = selectedKey !== undefined;
     const normalizedSelected =
-      selectedKey === undefined || selectedKey === null ? "" : String(selectedKey);
+      selectedKey === undefined || selectedKey === null
+        ? undefined
+        : String(selectedKey);
     const normalizedDefault =
       defaultSelectedKey === undefined || defaultSelectedKey === null
         ? undefined
         : String(defaultSelectedKey);
 
-    const resolvedSelected = useMemo(() => {
+    const resolvedSelectedKey = useMemo(() => {
       if (!controlled) {
         return undefined;
       }
-      if (!normalizedSelected) {
+      if (normalizedSelected === undefined) {
         return undefined;
       }
-      return hasEnabledOption(options, normalizedSelected) ? normalizedSelected : undefined;
+      return hasEnabledOption(options, normalizedSelected)
+        ? normalizedSelected
+        : undefined;
     }, [controlled, normalizedSelected, options]);
 
-    const resolvedDefault =
-      !controlled && normalizedDefault && hasEnabledOption(options, normalizedDefault)
+    const resolvedDefaultKey =
+      !controlled &&
+      normalizedDefault !== undefined &&
+      hasEnabledOption(options, normalizedDefault)
         ? normalizedDefault
         : undefined;
 
-    const activeKey = controlled ? resolvedSelected : resolvedDefault;
-    const isPlaceholder = !activeKey;
-    const activeOption = activeKey
+    const activeKey = controlled ? resolvedSelectedKey : resolvedDefaultKey;
+    const isPlaceholder = activeKey === undefined;
+    const activeOption = activeKey !== undefined
       ? options.find((option) => String(option.id) === activeKey)
       : undefined;
     // SSR/static markup: Radix Value may not hydrate label text; mirror known selection.
@@ -122,15 +142,23 @@ export const ShadcnSelect = forwardRef<HTMLButtonElement, ShadcnSelectProps>(
           />
         ) : null}
         <SelectPrimitive.Root
-          // Controlled empty → omit value so placeholder shows (no dummy option id).
-          value={controlled ? resolvedSelected : undefined}
-          defaultValue={!controlled ? resolvedDefault : undefined}
+          value={
+            controlled && resolvedSelectedKey !== undefined
+              ? optionValue(resolvedSelectedKey)
+              : undefined
+          }
+          defaultValue={
+            !controlled && resolvedDefaultKey !== undefined
+              ? optionValue(resolvedDefaultKey)
+              : undefined
+          }
           onValueChange={(next) => {
-            if (!next || !hasEnabledOption(options, next)) {
+            const nextKey = optionKey(options, next);
+            if (nextKey === null) {
               onSelectionChange?.(null);
               return;
             }
-            onSelectionChange?.(next);
+            onSelectionChange?.(nextKey);
           }}
           disabled={disabledAll}
         >
@@ -178,11 +206,11 @@ export const ShadcnSelect = forwardRef<HTMLButtonElement, ShadcnSelectProps>(
             >
               <SelectPrimitive.Viewport className="grid max-h-[inherit] gap-0.5 overflow-y-auto p-1">
                 {options.map((option) => {
-                  const value = String(option.id);
+                  const key = String(option.id);
                   return (
                     <SelectPrimitive.Item
-                      key={value}
-                      value={value}
+                      key={key}
+                      value={optionValue(key)}
                       disabled={option.disabled}
                       className={cn(
                         "relative flex w-full cursor-default select-none items-start gap-2 rounded-[calc(var(--radius-control)-2px)]",

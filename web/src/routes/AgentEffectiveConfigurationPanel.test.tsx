@@ -47,6 +47,9 @@ describe("AgentEffectiveConfigurationPanel", () => {
     expect(markup).toContain("Agent 模型绑定");
     expect(markup).toContain("可委派 · 并发 3 · 深度 2");
     expect(markup).not.toContain('"maxConcurrent"');
+    expect(markup).toContain('aria-label="当前有效配置说明"');
+    expect(markup).not.toContain("<small");
+    expect(markup).not.toContain("展示运行时实际生效");
   });
 
   it("keeps the full inheritance chain in the inspector for the selected field", () => {
@@ -61,5 +64,7 @@ describe("AgentEffectiveConfigurationPanel", () => {
     expect(markup).toContain("全局默认");
     expect(markup).toContain("Agent 模型绑定");
     expect(markup).toContain("当前生效");
+    expect(markup).toContain('tabindex="0"');
+    expect(markup).not.toContain("<small");
   });
 });

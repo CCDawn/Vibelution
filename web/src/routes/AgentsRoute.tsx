@@ -2595,7 +2595,6 @@ export function AgentsRoute() {
         }}
         listWorkspace={{
           ariaLabel: activeGroupLabel,
-          headerEyebrow: copy.agentFilters,
           headerTitle: activeGroupLabel,
           visibleAgentCount: visibleAgents.length,
           bulkOperations: {
@@ -2681,9 +2680,6 @@ export function AgentsRoute() {
             ? selectedEffectiveField.label
             : agentLabel(selectedAgent!),
           emptyTitle: lang === "zh" ? "选择 Agent 查看侧栏" : "Select an Agent",
-          emptyHint: lang === "zh"
-            ? "管理完整度、下一步建议与关联资源会显示在这里。"
-            : "Management score, next steps, and linked resources appear here.",
           brief: selectedAgentDetailContent.brief,
           resources: selectedAgentDetailContent.resources,
           extra: activePane === "effective" ? (

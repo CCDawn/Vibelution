@@ -205,9 +205,9 @@ export function VSplitWorkspace({
     columnsClassName !== undefined
       ? columnsClassName
       : aside
-        ? "grid-cols-[minmax(0,var(--vui-workspace-sidebar))_minmax(0,1fr)_minmax(0,var(--vui-workspace-aside))]"
+        ? "grid-cols-[minmax(0,var(--vui-workspace-sidebar,16rem))_minmax(0,1fr)_minmax(0,var(--vui-workspace-aside,16rem))]"
         : sidebar
-          ? "grid-cols-[minmax(0,var(--vui-workspace-sidebar))_minmax(0,1fr)]"
+          ? "grid-cols-[minmax(0,var(--vui-workspace-sidebar,16rem))_minmax(0,1fr)]"
           : "grid-cols-[minmax(0,1fr)]";
 
   return (

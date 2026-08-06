@@ -131,11 +131,11 @@ import { VEmptyState, VButton } from "@/components/vui";
 ## VStateSurface
 
 ### 功能
-加载 / 错误 / 不可用 / 空 的状态面（可 skeleton、facts），占位或填满区域。
+加载 / 错误 / 不可用 / 空 的状态面（可 skeleton、facts），占位或填满区域。加载态使用中性表面与骨架，不伪装成可操作按钮，也不覆盖已有页面结构。
 
 ### 适用范围
 - **适用**：冷加载（无稳定 IA）、失败恢复、空态、不可用；行内通知 `density="compact"`。
-- **不适用**：主区已有结构仅数据未到 → `VSkeleton`；一行错误 → `VErrorSummary`；列表永久空 → `VEmptyState`。
+- **不适用**：主区已有结构仅数据未到 → 用 `VSkeleton` 组合原位几何；会话时间线加载不得用 `fill` 色块覆盖整块画布；一行错误 → `VErrorSummary`；列表永久空 → `VEmptyState`。
 
 | 场景 | 选择 |
 | --- | --- |
@@ -165,7 +165,7 @@ import { VStateSurface } from "@/components/vui";
 ## VErrorSummary
 
 ### 功能
-错误摘要展示（可多条），用于表单/操作失败汇总。
+错误摘要展示（可多条），采用中性 callout 表面、语义色左边线和紧凑图标/标题结构。
 
 ### 适用范围
 - **适用**：表单校验失败、操作失败列表。
@@ -180,12 +180,18 @@ import { VStateSurface } from "@/components/vui";
 ```tsx
 import { VErrorSummary } from "@/components/vui";
 
-<VErrorSummary tone="error" items={["名称必填", "超时"]} />
+<VErrorSummary
+  tone="error"
+  icon={<AlertTriangle />}
+  summary="无法保存"
+  details="名称必填；请求超时"
+/>
 ```
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| items / tone | 错误列表 | 可滚动长列表 |
+| summary / details / tone | 主错误与可展开诊断 | summary 始终可见；tone 只用于图标与左边线，不大面积染色 |
+| icon / label | 前置图标与短标签 | 图标使用 icon；不要把 React 图标塞进 label 形成上下错位 |
 
 ### 实现落点
 - `layout/VErrorSummary.tsx`

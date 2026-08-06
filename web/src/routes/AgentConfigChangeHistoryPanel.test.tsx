@@ -50,5 +50,7 @@ describe("AgentConfigChangeHistoryPanel", () => {
     expect(markup).toContain("模型绑定");
     expect(markup).toContain("v3");
     expect(markup).toContain("session-123");
+    expect(markup).toContain('aria-label="草稿与版本说明"');
+    expect(markup).not.toContain("草稿不影响运行");
   });
 });
