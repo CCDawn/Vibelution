@@ -59,6 +59,13 @@
 - 工作分级为 `FAST_PATCH / STANDARD_TASK / HIGH_RISK`，使用足以保护正确性、并发与证据的最轻流程。
 - 写入前定位 owning surface、现有测试、用户改动和 active claim；根 `main` 上的 development 写入收到 `ISOLATION_REQUIRED` 时转任务 worktree。
 - 前端使用 TypeScript、Tailwind-first、VUI `V*` 产品 API 和 shadcn/Radix renderer；HeroUI 已移除。触及 UI 的写入前必须对齐 §2 前端红线；完成前跑相关 frontend contract（至少 `vuiShadcnRouteContract` 与触及的 route/layout 测试），不得以「先实现再迁 VUI」交付用户可见路径。
+- **`tsc -b` 不是「开发前默认闸」，是交付/重建闸（Agent 必须主动提前跑）**：
+  - 仓库 **不会** 在打开项目、开始改代码或默认 pre-commit 时自动跑全量 `tsc -b`。`local_quality_gate.py commit` 以 staged 路径快检为主；pre-commit 额外校验 `web` 的 lock 一致性，**不**替你做 TypeScript 全量检查。
+  - Runtime Manager / Launcher 仅在 **open/restart 前端预检需要重建** 时跑 `tsc -b`（例如源码相对 `web/dist` 已过期，或托盘 `forceFrontendRebuild` / `tray_rebuild_and_start`）。若 dist 仍判定 current，预检可 **跳过** `tsc`，旧 dist 仍能继续跑 workbench——类型错误会 **推迟** 到强制重建才爆。
+  - 正式前端构建路径含 typecheck：`web` 下 `npm run build` ≡ `tsc -b && vite build`。
+  - **凡改动 `web/`（含 `*.tsx` / styles / 类型入口）**：在宣称完成、建议用户测试、或建议 Launcher **rebuild/restart** 之前，必须在 `web/` 主动执行 `npx tsc -b --pretty false`（或等价 `npm run build` 中的 typecheck）并报告结果；不得把「等托盘重建再看」当作验证策略。
+  - 组件与 `*.styles.ts` / CSS module 类型必须同步（例如 `styles.gitValueChip` 等 key 先于用法存在）；`tsc` 红时禁止建议 force frontend rebuild，应先修类型再刷新。
+  - 命令与触面表见 [loop.md](docs/guides/loop.md)；Launcher/workbench 预检债见 [07-launcher-runtime-workbench](docs/ops/config/07-launcher-runtime-workbench.md)。
 - 后端 route 保持薄层，公共 DTO 明确，业务与来源权威归 service/pack；projection 不得成为第二写入者。
 - 优先小范围验证；用户可见行为必须有测试与日志决策，关键运行/Agent/工具/配置路径需要可诊断 runtime-scene 证据。
 - 活跃 operator config 是 `%USERPROFILE%\Documents\Vibelution\config\config.toml`；仓库根 config 只作 legacy/template。
@@ -70,8 +77,8 @@
 完成有意义的任务时至少说明：
 
 - 实际改变了什么，以及没有改变什么；
-- 运行了哪些验证，结果与未覆盖边界；
-- Launcher/runtime refresh：`not needed / recommended before user testing / required before release`；
+- 运行了哪些验证，结果与未覆盖边界；触及 `web/` 时必须包含 **`tsc -b`（或完整 frontend build）** 证据，不得仅依赖 Launcher 重建预检事后发现类型错误；
+- Launcher/runtime refresh：`not needed / recommended before user testing / required before release`（若 refresh=rebuild/restart 且改过前端：先确认 `tsc -b` 已绿）；
 - 若触及启动、停止、重启、轮询、Git、工具或服务子进程：说明如何保证无可见控制台（helper/`pythonw`/`CREATE_NO_WINDOW`/`windowsHide`）及验证证据；
 - project-memory 与 version impact 决策；
 - worktree、branch、claim 和 Git 状态；
