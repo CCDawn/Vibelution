@@ -58,13 +58,13 @@ const conversationComposerCodexShell = cv(
   "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-workspace))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_7%,transparent)] max-[719px]:rounded-[16px]",
 );
 const composerNativeFieldTargets =
-  "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[48px] [&_textarea]:max-h-[112px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
-const composerFieldBase = `min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] ${composerNativeFieldTargets}`;
+  "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[72px] [&_textarea]:max-h-[220px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
+const composerFieldBase = `min-w-0 grid gap-1 [font-size:var(--vui-type-caption-size)] text-[var(--fg-secondary)] ${composerNativeFieldTargets}`;
 const composerFieldShell = cv("composerField", composerFieldBase);
 const composerFieldCodexShell = cv(
   "composerFieldCodex",
   composerFieldBase,
-  "grid min-h-[88px] min-w-0 grid-rows-[auto_minmax(36px,1fr)_auto] gap-1 px-3.5 py-2.5 max-[719px]:min-h-[84px] max-[719px]:px-3 max-[719px]:py-2",
+  "grid min-h-[120px] min-w-0 grid-rows-[auto_minmax(56px,1fr)_auto] gap-1.5 px-3.5 py-3 max-[719px]:min-h-[112px] max-[719px]:px-3 max-[719px]:py-2.5",
 );
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerToolbarCodexShell = cv(
@@ -407,8 +407,11 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTurnChangeBadge mt-1 inline-flex w-fit max-w-full items-center rounded-full border border-[color-mix(in_srgb,var(--fg-tertiary)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)] px-2.5 py-1 [font-size:var(--vui-font-xs)] font-normal leading-none text-[var(--fg-tertiary)]",
   conversationCellTimeline:
     "vui-components-conversationview conversationCellTimeline min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  emptyStateHost:
+    "vui-components-conversationview emptyStateHost grid min-h-full w-full min-w-0 flex-1 place-content-center place-items-center px-4 py-10 sm:py-14",
   emptyState:
-    "vui-components-conversationview emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-components-conversationview emptyState w-full max-w-[min(100%,28rem)] min-w-0 justify-items-center border-dashed border-[color-mix(in_srgb,var(--fg-tertiary)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_55%,var(--vui-surface-row))] px-6 py-8 text-center shadow-[var(--vui-shadow-hairline)] " +
+    "[&_strong]:[font-size:var(--vui-type-emphasis-size)] [&_strong]:font-[var(--vui-weight-semibold)] [&_strong]:leading-[var(--vui-type-emphasis-line)] [&_strong]:text-[var(--fg-primary)]",
   executionRequestSummary: `vui-components-conversationview executionRequestSummary min-w-0 ${vuiGlassPanelClass} p-2`,
   executionTraceGroup:
     "vui-components-conversationview executionTraceGroup min-w-0 border-0 bg-transparent",
@@ -1029,7 +1032,7 @@ const styles: Record<string, string> = {
   composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-1.5",
   // End cluster: inference control may shrink; send/stop stays shrink-0 and fully visible.
   composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 max-w-full items-center justify-end gap-1.5 [&_[data-testid=conversation-inference-control]]:min-w-0 [&_[data-testid=conversation-inference-control]]:max-w-[min(200px,42vw)]",
-  inputCodex: "vui-components-conversationview inputCodex min-h-[36px] max-h-[180px] w-full resize-none overflow-y-auto !border-0 !bg-transparent !p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-primary)] !shadow-none placeholder:text-[var(--fg-tertiary)] focus:!ring-0",
+  inputCodex: "vui-components-conversationview inputCodex min-h-[56px] max-h-[240px] w-full resize-none overflow-y-auto !border-0 !bg-transparent !p-0 [font-size:var(--vui-type-chat-size)] font-[var(--vui-weight-regular)] leading-[var(--vui-type-chat-line)] text-[var(--fg-primary)] !shadow-none placeholder:text-[var(--fg-tertiary)] focus:!ring-0",
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:
@@ -1081,7 +1084,7 @@ const styles: Record<string, string> = {
   thoughtTextBlock:
     "vui-components-conversationview thoughtTextBlock min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timeline:
-    "vui-components-conversationview timeline min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1rem,3vw,3rem)] py-4 [scrollbar-gutter:stable]",
+    "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1rem,3vw,3rem)] py-4 [scrollbar-gutter:stable]",
   timelineContent:
     "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-[10px]",
   timelineVirtualSpacer:

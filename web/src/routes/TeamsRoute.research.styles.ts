@@ -175,9 +175,9 @@ const styles = {
   researchStageCardDone:
     "researchStageCardDone min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,var(--vui-border-subtle))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-row)),var(--vui-surface-row)_55%)]",
   researchExperimentMethodReadonly:
-    "researchExperimentMethodReadonly min-w-0 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1.5 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&>strong]:font-[820] [&>strong]:text-[var(--fg-primary)]",
+    "researchExperimentMethodReadonly min-w-0 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1.5 [font-size:var(--vui-type-caption-size)] text-[var(--fg-secondary)] [&>strong]:font-[820] [&>strong]:text-[var(--fg-primary)]",
   researchStageViewLink:
-    "researchStageViewLink inline-flex items-center gap-1 rounded-[var(--radius-control)] border border-transparent bg-transparent px-2.5 py-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--fg-secondary)]",
+    "researchStageViewLink inline-flex items-center gap-1 rounded-[var(--radius-control)] border border-transparent bg-transparent px-2.5 py-1.5 [font-size:var(--vui-type-caption-size)] font-semibold text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--fg-secondary)]",
   researchStageCardHead:
     "researchStageCardHead min-w-0 !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 [&>small]:inline-flex [&>small]:h-7 [&>small]:w-7 [&>small]:items-center [&>small]:justify-center [&>small]:rounded-full [&>small]:bg-[var(--vui-control-muted)] [&>small]:font-[820] [&>small]:text-[var(--fg-muted)] [&>div]:grid [&>div]:gap-1",
   researchStageCardMetrics:

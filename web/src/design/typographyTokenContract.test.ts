@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
  * Font tokens must use `[font-size:var(--vui-font-*)]` (or `text-[length:...]`).
  */
 const FORBIDDEN_FONT_AS_COLOR =
-  /(?<!\[font-size:)(?<!\[length:)(?<!font-size:)(?<!length:)!?(?:text-\[var\(--vui-font-(?:xs|sm|md|title|chat)\)\])/g;
+  /(?<!\[font-size:)(?<!\[length:)(?<!font-size:)(?<!length:)!?(?:text-\[var\(--vui-(?:font-(?:2xs|xs|sm|md|lg|xl|title|chat)|type-[a-z]+-size)\)\])/g;
 
 /** claim-1ded3aed8d30 owns ConversationView.styles until released. */
 const DEFERRED_BASENAMES = new Set<string>([]);
