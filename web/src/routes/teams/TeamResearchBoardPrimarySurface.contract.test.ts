@@ -51,11 +51,11 @@ describe("TeamResearchBoardPrimarySurface extraction contract", () => {
     expect(routeSource).toContain('nextParams.set("researchView", view)');
   });
 
-  it("uses the Challenge Cup operation workspace for its experiment and iteration routes", () => {
+  it("keeps the Challenge Cup operation workspace behind the explicit progress surface", () => {
     const shellPhaseSource = readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8");
 
     expect(shellPhaseSource).toMatch(
-      /if\s*\(challengeCupResearchTeamSelected\)\s*\{\s*return renderResearchStageLauncher\("interactive"\);/,
+      /if\s*\(challengeCupResearchTeamSelected\s*&&\s*challengeTeamSurface\s*===\s*"progress"\)\s*\{\s*return renderResearchStageLauncher\("interactive"\);/,
     );
   });
 

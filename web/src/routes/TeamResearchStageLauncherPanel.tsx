@@ -155,7 +155,11 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     teamId: workflowTeamId,
     enabled: challengeCupResearchTeamSelected,
   });
-  const challengeProgramSurfaceSelected = challengeCupResearchTeamSelected;
+  // The historical Challenge Cup projection is an explicit progress surface.
+  // The default workspace must render the active research-project workflow so
+  // reset progress and historical sample records cannot appear in one view.
+  const challengeProgramSurfaceSelected =
+    challengeCupResearchTeamSelected && challengeTeamSurface === "progress";
   const requestedResearchStage = parseResearchWorkspaceView(searchParams.get("researchView"));
   const challengeInitialStage: ResearchStageWorkspaceView = requestedResearchStage === "experiment"
     || requestedResearchStage === "iteration"
