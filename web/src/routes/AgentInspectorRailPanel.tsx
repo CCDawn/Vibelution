@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 import { type ComponentProps, type ReactNode } from "react";
 
 import { AgentWorkspacePanel } from "../components/vui/product/agent-management";
-import { VIconButton, VStateSurface } from "../components/vui";
+import { VIconButton, VPanelHeader, VStateSurface } from "../components/vui";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentOverviewResourcesPanel } from "./AgentOverviewResourcesPanel";
 import styles from "./AgentInspectorRailPanel.styles";
@@ -41,21 +41,23 @@ export function AgentInspectorRailPanel({
       ariaLabel={ariaLabel}
       className={styles.rail}
     >
-      <header className={styles.railHeader}>
-        <div>
-          <p>{title}</p>
-          {subtitle ? <strong>{subtitle}</strong> : null}
-        </div>
-        {onClose ? (
-          <VIconButton
-            type="button"
-            className={styles.closeButton}
-            label={closeLabel || title}
-            icon={<X size={15} />}
-            onPress={onClose}
-          />
-        ) : null}
-      </header>
+      <VPanelHeader
+        className={styles.railHeader}
+        headingLevel={null}
+        eyebrow={title}
+        title={subtitle || title}
+        actions={
+          onClose ? (
+            <VIconButton
+              type="button"
+              className={styles.closeButton}
+              label={closeLabel || title}
+              icon={<X size={15} />}
+              onPress={onClose}
+            />
+          ) : undefined
+        }
+      />
       <div className={styles.railBody}>
         {hasContent ? (
           <>

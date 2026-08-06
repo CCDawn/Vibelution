@@ -2,7 +2,8 @@ import { vuiFlatPanelClass, vuiOpaqueRowClass } from "../design/vuiSurfaceRecipe
 
 const styles = {
   configurationPanel: `grid min-w-0 [align-content:start] [gap:8px] [padding:10px] ${vuiFlatPanelClass}`,
-  panelHeader: "grid min-w-0 [grid-template-columns:minmax(0,1fr)_auto] [align-items:start] [gap:8px] [&_div]:min-w-0 [&_h3]:m-0 [&_h3]:text-[var(--fg-primary)] [&_h3]:[font-size:var(--vui-font-md)] [&_p]:m-0 [&_p]:mt-1 [&_p]:text-[var(--fg-tertiary)] [&_p]:[font-size:var(--vui-font-sm)] [&_p]:leading-[1.45] max-[640px]:[grid-template-columns:1fr]",
+  panelHeader: "grid min-w-0 [grid-template-columns:minmax(0,1fr)_auto] [align-items:start] [gap:8px] max-[640px]:[grid-template-columns:1fr]",
+  panelDescription: "m-0 text-[var(--fg-tertiary)] [font-size:var(--vui-font-sm)] leading-[1.45]",
   sourceSummary: `grid min-w-0 [grid-template-columns:auto_minmax(0,1fr)] [align-items:center] [gap:7px] [padding:7px_8px] ${vuiOpaqueRowClass} [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)]`,
   sourceSummaryLabel: "inline-flex [align-items:center] [justify-content:center] [min-height:20px] [padding:0_6px] [border-radius:999px] [background:color-mix(in_srgb,var(--accent-cool)_10%,transparent)] [color:var(--accent-cool)] [font-size:var(--vui-font-xs)] [font-weight:760]",
   configurationTable: "grid min-w-0 overflow-hidden [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] [border-radius:var(--radius-control)] [background:var(--vui-surface-row)] max-[860px]:[overflow:visible]",

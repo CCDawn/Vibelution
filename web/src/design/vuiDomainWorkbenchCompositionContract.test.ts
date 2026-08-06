@@ -28,14 +28,23 @@ describe("Wave 6B Agents management workbench composition", () => {
 });
 
 describe("Wave 6B Teams organization workbench composition", () => {
-  it("marks Teams dense-ops domain recipe, workspace recipe, and canvas/inspector regions", () => {
-    const routeSource = readFileSync(resolve(routesRoot, "TeamsRoute.tsx"), "utf8");
-    expect(routeSource).toContain('data-vui-domain-recipe="teams-organization-workbench"');
-    expect(routeSource).toContain('data-vui-recipe="teams-organization-workbench"');
-    expect(routeSource).toContain("WORKBENCH_LAYOUT_IDS.teams");
-    expect(routeSource).toContain("data-vui-layout-id");
-    expect(routeSource).toContain('data-vui-region="teams-canvas"');
-    expect(routeSource).toContain('data-vui-region="teams-inspector"');
+  it("marks Teams board/canvas composers with domain recipe, layout id, and regions", () => {
+    // TeamsRoute.tsx is a thin re-export; composition lives in workbench composers.
+    const entry = readFileSync(resolve(routesRoot, "TeamsRoute.tsx"), "utf8");
+    const board = readFileSync(resolve(routesRoot, "teams/renderTeamsWorkbenchBoardPage.tsx"), "utf8");
+    const canvas = readFileSync(resolve(routesRoot, "teams/TeamsCanvasComposer.tsx"), "utf8");
+    const chrome = readFileSync(resolve(routesRoot, "teams/teamsWorkbenchChrome.ts"), "utf8");
+    const canvasSurface = readFileSync(resolve(routesRoot, "teams/TeamOrganizationCanvasSurface.tsx"), "utf8");
+    expect(entry).toContain("TeamsRouteWorkbench");
+    expect(board).toContain('domainRecipe="teams-organization-workbench"');
+    expect(board).toContain("TEAMS_LAYOUT_ID");
+    expect(board).toContain("VBoardWorkbenchPage");
+    expect(board).toContain('data-vui-region="teams-inspector"');
+    expect(canvas).toContain('domainRecipe="teams-organization-workbench"');
+    expect(canvas).toContain("VCanvasWorkbenchPage");
+    expect(canvas).toContain('data-vui-region="teams-inspector"');
+    expect(canvasSurface).toContain('data-vui-region="teams-canvas"');
+    expect(chrome).toContain("WORKBENCH_LAYOUT_IDS.teams");
   });
 });
 

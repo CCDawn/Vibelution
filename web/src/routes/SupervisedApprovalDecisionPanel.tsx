@@ -10,6 +10,7 @@ import type { SupervisedWorktreeRun } from "../api/types";
 import {
   VButton,
   VChip,
+  VPanelHeader,
 } from "../components/vui";
 import {
   buildSupervisedApprovalDecision,
@@ -93,13 +94,13 @@ export function SupervisedApprovalDecisionPanel({
       className={styles.panel}
       data-vui-recipe="supervised-approval-decision"
     >
-      <header className={styles.header}>
-        <div>
-          <p>{lang === "zh" ? `${model.approvalMode.label} · 最终决策` : `${model.approvalMode.label} · Final decision`}</p>
-          <h3>{lang === "zh" ? "是否授权后端受控合入" : "Authorize backend controlled merge?"}</h3>
-        </div>
-        <VChip tone={TONE_MAP[model.tone]}>{model.statusLabel}</VChip>
-      </header>
+      <VPanelHeader
+        className={styles.header}
+        headingLevel={3}
+        eyebrow={lang === "zh" ? `${model.approvalMode.label} · 最终决策` : `${model.approvalMode.label} · Final decision`}
+        title={lang === "zh" ? "是否授权后端受控合入" : "Authorize backend controlled merge?"}
+        actions={<VChip tone={TONE_MAP[model.tone]}>{model.statusLabel}</VChip>}
+      />
 
       <section className={styles.decisionBanner} data-tone={model.tone}>
         <div className={styles.decisionCopy}>
