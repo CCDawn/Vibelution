@@ -4,7 +4,7 @@
  * Prefer editing modules under web/src/routes/chat/ over growing this file.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Apple,
   ArrowUpRight,
@@ -33,6 +33,9 @@ import { listPendingSessionToolApprovals } from "../../api/chat";
 import { fetchJson } from "../../api/client";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
+import {
+  listProjectAgentBusTimeline,
+} from "../../api/projectAgentBus";
 import { queryKeys } from "../../api/queryKeys";
 import {
   AgentInstance,
@@ -71,8 +74,9 @@ import { isAgentInboxMessage } from "../../components/conversation/conversationM
 import { VButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
-import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
+import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
 import type { TranslationKey } from "../../i18n/dictionary";
+import { PaneCollapseHandle } from "../../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
 import {
@@ -83,13 +87,19 @@ import {
 } from "../chatSessionState";
 import {
   reconcileAgentSessionDetailCache,
+  SESSION_INDEX_PAGE_SIZE,
   updateSessionSummaryCaches,
+  useSessionIndexQuery,
 } from "../chatSessionIndexQuery";
+import { filterOutTombstonedConversations } from "../sessionDeleteTombstone";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import {
+  shouldEnableSessionIndexQuery,
   shouldShowConversationIndexLoading,
 } from "../chatSessionStartupGate";
 import {
+  ACTIVE_BACKGROUND_SYNC_POLL_MS,
+  ACTIVE_INDEX_POLL_MS,
   resolveChatLiveQueryPolicy,
 } from "../chatLiveQueryPolicy";
 import { resolveChatSecondaryPollPolicy } from "../chatSecondaryPollPolicy";
@@ -119,8 +129,9 @@ import {
   participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "../agentDisplay";
-import { type CliAgentRunTab } from "../AgentSessionTabStrip";
+import { AgentSessionTabStrip, type CliAgentRunTab } from "../AgentSessionTabStrip";
 import {
+  AgentConversationDirectory,
   visibleDirectoryAgents,
 } from "../AgentConversationDirectory";
 import {
@@ -128,6 +139,7 @@ import {
   sessionActivityStamp,
 } from "../sessionActivityIndicator";
 import type { AgentContextMenuState } from "../AgentContextMenu";
+import { ConversationIndexTree } from "../ConversationIndexTree";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
@@ -135,6 +147,7 @@ import {
   conversationGroupLabel,
   hasInvalidChildSessionLink,
   isRepresentedInAgentSessionTabs,
+  isVisibleDirectSession,
   rootSessionIdFor,
   sessionToConversationSummary,
   useConversationIndexModel,
@@ -149,6 +162,7 @@ import {
 } from "../chatActiveTurnLayer";
 import {
   isChildSession,
+  isAgentRootSession,
 } from "../DirectSessionIndexItem";
 import { agentCenterConfigRoute } from "../agentCenterRoutes";
 import {
@@ -158,6 +172,8 @@ import {
 import {
   buildConversationComposerBridgeState,
 } from "./ChatConversationComposerBridge";
+import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
+import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
 import {
   chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
@@ -171,32 +187,16 @@ import {
   runtimeMatchesSelectedChatSession,
   shouldSuppressComposerErrorForTurnError,
 } from "./chatCodingRouteViewModel";
-import { ChatWorkbenchCenterTabStrip } from "./ChatWorkbenchCenterTabStrip";
-import {
-  ChatWorkbenchLeftResizeHandle,
-  ChatWorkbenchRightResizeHandle,
-} from "./ChatWorkbenchPaneResizeHandles";
+import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
+import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
+import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
-import { ChatWorkbenchConversationIndexPanel } from "./ChatWorkbenchConversationIndexPanel";
-import { ChatWorkbenchCenterSessionSurface } from "./ChatWorkbenchCenterSessionSurface";
-import { ChatWorkbenchConversationIndexRailHost } from "./ChatWorkbenchConversationIndexRailHost";
-import {
-  ChatWorkbenchOverlayBackdrop,
-  ChatWorkbenchSecondaryDialogs,
-} from "./ChatWorkbenchSecondarySurfaces";
-import { ChatWorkbenchStatusRailHost } from "./ChatWorkbenchStatusRailHost";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
 import {
   useChatLocaleFormatters,
   useChatReturnNavigation,
 } from "./useChatWorkbenchPresentation";
-import {
-  resolveAgentContextMenuArchivePending,
-  resolveSessionContextMenuPendingFlags,
-} from "./chatContextMenuPending";
-import { eventInsideContextMenuSurface } from "./chatContextMenuDismiss";
-import { resolveSessionIndexProgressModel } from "./chatSessionIndexProgress";
 import {
   useChatComposerSubmitActions,
   useChatComposerTurnMutations,
@@ -215,24 +215,17 @@ import { useChatSessionSelection } from "./useChatSessionSelection";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
+import { eventInsideContextMenuSurface } from "./chatContextMenuDismiss";
+import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
 import {
   useChatSessionRenameMenu,
   type SessionContextMenuState,
 } from "./useChatSessionRenameMenu";
 import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
-import { useChatAgentMutations } from "./useChatAgentMutations";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
-import { useChatWorkbenchDirectoryQueries } from "./useChatWorkbenchDirectoryQueries";
-import { useChatWorkbenchSessionQueries } from "./useChatWorkbenchSessionQueries";
-import {
-  buildSessionsByIdMap,
-  collectRuntimeRunningSessionIds,
-  filterSessionsForSelectedAgent,
-  mergeVisibleDirectSessions,
-  resolveActiveSessionAgentId,
-} from "./chatWorkbenchSessionDirectoryModel";
+import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { buildChatTokenStatusViewModel } from "./chatTokenStatusModel";
 import {
   buildAgentSessionTabs,
@@ -271,6 +264,7 @@ import {
   mergeSessionDetailIntoConversations,
   resolveActiveSessionDetailForUi,
   resolveNeighborSessionIdsForPrefetch,
+  resolveSessionDetailPlaceholder,
   sessionDetailSnapshotKey,
   isStaleLedgerUpdate,
   latestMentalSnapshot,
@@ -323,6 +317,49 @@ const CliAgentRunTerminalPanel = lazy(() =>
   })),
 );
 
+/** Secondary-lazy: open only when creating an Agent (keeps wizard graph out of Chat shell). */
+const AgentCreateWizardDialog = lazy(() =>
+  import("../agent-create/AgentCreateWizardDialog").then((module) => ({
+    default: module.AgentCreateWizardDialog,
+  })),
+);
+
+/** Secondary-lazy: cache donut dialog opens from status rail action. */
+const CacheDetailDialog = lazy(() =>
+  import("./CacheDetailDialog").then((module) => ({
+    default: module.CacheDetailDialog,
+  })),
+);
+
+/** Secondary-lazy: session row context menu. */
+const SessionContextMenu = lazy(() =>
+  import("../SessionContextMenu").then((module) => ({
+    default: module.SessionContextMenu,
+  })),
+);
+
+/** Secondary-lazy: Agent directory row context menu. */
+const AgentRenameDialog = lazy(() =>
+  import("../AgentRenameDialog").then((module) => ({
+    default: module.AgentRenameDialog,
+  })),
+);
+const AgentContextMenu = lazy(() =>
+  import("../AgentContextMenu").then((module) => ({
+    default: module.AgentContextMenu,
+  })),
+);
+
+/** S2: not required for first paint of direct chat center. */
+const ChatStatusRail = lazy(() =>
+  import("./ChatStatusRail").then((module) => ({ default: module.ChatStatusRail })),
+);
+const ChatGroupCenterSurface = lazy(() =>
+  import("./ChatGroupCenterSurface").then((module) => ({ default: module.ChatGroupCenterSurface })),
+);
+const ChatFileWorkspaceTabs = lazy(() =>
+  import("./ChatFileWorkspaceTabs").then((module) => ({ default: module.ChatFileWorkspaceTabs })),
+);
 
 type SessionDetailWithActiveSkill = SessionDetail & {
   activeSkillContract?: ActiveSkillContract | null;
@@ -702,50 +739,167 @@ export function ChatCodingRoute() {
     }
   }, [standardGroupRoomActive, rightIndexPanel]);
 
+  const runtimeQuery = useQuery({
+    queryKey: queryKeys.runtimeSummary(),
+    queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
+    enabled: secondaryChatDataEnabled,
+    refetchInterval: chatSecondaryPollPolicy.runtimeRefetchInterval,
+    refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
+  });
+  const petQuery = useQuery({
+    queryKey: queryKeys.petSummary(),
+    queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
+    enabled: secondaryChatDataEnabled,
+    refetchInterval: chatSecondaryPollPolicy.petRefetchInterval,
+    refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
+  });
+  const configSummaryQuery = useQuery({
+    queryKey: queryKeys.configPublic(),
+    queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    staleTime: 30_000,
+  });
   const [selectedAgentId, setSelectedAgentId] = useState("");
-  const {
-    runtimeQuery,
-    petQuery,
-    configSummaryQuery,
-    activeSessionBootstrapQuery,
-    sessionIndexQueryEnabled,
-    modelLabelsById,
-    modelImageInputSupportById,
-    resolveModelLabel,
-    rawSessionsQuery,
-    sessionsQuery,
-    conversationsQuery,
-    teamsQuery,
-    agentsQuery,
-    agentPermissionPresetMutation,
-    skillsQuery,
-    slashCommandSuggestions,
-    chatRoomModesQuery,
-    chatRoomPurposesQuery,
-    activeGroupRoomQuery,
-    projectAgentBusQuery,
-    expandedGroupAgentDetailQueries,
-  } = useChatWorkbenchDirectoryQueries({
+  const activeSessionBootstrapQuery = useQuery({
+    queryKey: ["sessions", "active-bootstrap"],
+    queryFn: ({ signal }) => fetchJson<{ activeSessionId: string }>("/api/sessions/active", { signal }),
+    staleTime: 5_000,
+  });
+  // Prefer URL targets immediately. If the bootstrap is cancelled or fails, let
+  // the canonical session index recover instead of leaving the directory gated.
+  const sessionIndexQueryEnabled = shouldEnableSessionIndexQuery({
+    hasRouteTarget: Boolean(requestedSessionId || requestedRoomId),
+    bootstrapIsFetched: activeSessionBootstrapQuery.isFetched,
+    bootstrapIsError: activeSessionBootstrapQuery.isError,
+    bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus,
+  });
+  const modelLabelsById = useMemo(
+    () => new Map(Object.entries(configSummaryQuery.data?.modelLabels ?? {})),
+    [configSummaryQuery.data?.modelLabels],
+  );
+  const modelImageInputSupportById = useMemo(
+    () => new Map(Object.entries(configSummaryQuery.data?.modelImageInputSupport ?? {})),
+    [configSummaryQuery.data?.modelImageInputSupport],
+  );
+  const resolveModelLabel = useCallback(
+    (modelId: string) => modelLabelsById.get(modelId),
+    [modelLabelsById],
+  );
+  const rawSessionsQuery = useSessionIndexQuery({
     queryClient,
-    secondaryChatDataEnabled,
-    chatSecondaryPollPolicy,
-    chatLiveQueryPolicy,
-    sessionQueryText,
-    requestedSessionId,
-    requestedRoomId,
-    groupComposerOpen,
-    standardGroupRoomActive,
-    projectBusActive,
-    activeSessionId: activeSessionId || "",
-    activeGroupRoomId,
-    expandedGroupAgentSessionIds,
-    chatPollingVisible,
-    groupStreamConnected,
-    groupBackgroundSyncActive,
-    chatStartupWarmupActive,
-    lang,
-    describeError,
-    setSessionComposerErrors,
+    queryText: sessionQueryText,
+    enabled: sessionIndexQueryEnabled,
+    refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
+    refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
+  });
+  const visibleSessionsData = useMemo(
+    () => rawSessionsQuery.data?.filter(isVisibleDirectSession),
+    [rawSessionsQuery.data],
+  );
+  const sessionsQuery = useMemo(
+    () => ({
+      ...rawSessionsQuery,
+      data: visibleSessionsData,
+    }),
+    [rawSessionsQuery, visibleSessionsData],
+  );
+  const conversationsQueryRaw = useQuery({
+    queryKey: queryKeys.conversations(),
+    queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),
+    enabled: secondaryChatDataEnabled,
+    refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval,
+    refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground,
+  });
+  const conversationsQuery = useMemo(() => {
+    const data = filterOutTombstonedConversations(conversationsQueryRaw.data);
+    return {
+      ...conversationsQueryRaw,
+      data,
+    };
+  }, [conversationsQueryRaw]);
+  const teamsQuery = useQuery({
+    queryKey: queryKeys.teams(),
+    queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
+    // Must load whenever the left-rail agent directory is active — not only when the
+    // group-room picker is open. With teams=[], research/evolution members all dump into
+    // 「特殊 Agent」and team rooms fall into 未归属.
+    enabled: secondaryChatDataEnabled,
+    refetchInterval: chatSecondaryPollPolicy.teamsRefetchInterval,
+    refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
+  });
+  const agentsQuery = useQuery({
+    queryKey: queryKeys.agents(),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
+    enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive,
+  });
+  const agentPermissionPresetMutation = useAgentPermissionPresetMutation({
+    onSuccess: (_agent, input) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [input.sessionId]: "",
+      }));
+    },
+    onError: (error, input) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [input.sessionId]: describeError(
+          error,
+          lang === "zh" ? "Agent 权限更新失败" : "Failed to update Agent permissions",
+        ),
+      }));
+    },
+  });
+  const skillsQuery = useQuery({
+    queryKey: queryKeys.skills(),
+    queryFn: () => fetchJson<SkillLibraryPayload>("/api/skills"),
+    enabled: secondaryChatDataEnabled && Boolean(activeSessionId),
+    staleTime: 60_000,
+  });
+  const slashCommandSuggestions = skillsQuery.data?.skills ?? [];
+  const chatRoomModesQuery = useQuery({
+    queryKey: queryKeys.chatRoomModes(),
+    queryFn: () => fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes"),
+    enabled: groupComposerOpen || standardGroupRoomActive,
+  });
+  const chatRoomPurposesQuery = useQuery({
+    queryKey: queryKeys.chatRoomPurposes(),
+    queryFn: () => fetchJson<ChatRoomPurpose[]>("/api/chat-rooms/purposes"),
+    enabled: groupComposerOpen || standardGroupRoomActive,
+  });
+  const activeGroupRoomQuery = useQuery({
+    queryKey: queryKeys.chatRoom(activeGroupRoomId || "none"),
+    queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeGroupRoomId}`),
+    enabled: standardGroupRoomActive,
+    refetchInterval: standardGroupRoomActive
+      ? resolvePollingInterval(
+          chatPollingVisible,
+          groupStreamConnected ? false : 3_000,
+          { backgroundMs: groupBackgroundSyncActive && !groupStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
+        )
+      : false,
+    refetchIntervalInBackground: chatStartupWarmupActive || groupBackgroundSyncActive,
+  });
+  const projectAgentBusQuery = useQuery({
+    queryKey: queryKeys.projectAgentBus(),
+    queryFn: ({ signal }) => listProjectAgentBusTimeline(undefined, { signal }),
+    enabled: projectBusActive,
+    refetchInterval: chatSecondaryPollPolicy.projectBusRefetchInterval,
+    refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
+  });
+  const expandedGroupAgentDetailQueries = useQueries({
+    queries: expandedGroupAgentSessionIds.map((sessionId) => ({
+      queryKey: queryKeys.session(sessionId || "none"),
+      queryFn: () => fetchSessionDetailWindow(sessionId, { messageLimit: 20 }),
+      enabled: standardGroupRoomActive && Boolean(sessionId),
+      // Match group room detail: only poll while SSE is not open (F2).
+      refetchInterval: standardGroupRoomActive && sessionId
+        ? resolvePollingInterval(
+            chatPollingVisible,
+            groupStreamConnected ? false : 3_000,
+            { backgroundMs: groupBackgroundSyncActive && !groupStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
+          )
+        : false,
+      refetchIntervalInBackground: chatStartupWarmupActive || groupBackgroundSyncActive,
+    })),
   });
   const clearSessionTransientUiState = useCallback(
     (sessionId: string) => {
@@ -849,21 +1003,33 @@ export function ChatCodingRoute() {
       return { ...current, [activeId]: "" };
     });
   }, [activeSessionId]);
-  const {
-    sessionDetailQuery,
-    sessionLlmOptionsQuery,
-    activeRootSessionId,
-    childSessionsQuery,
-  } = useChatWorkbenchSessionQueries({
-    queryClient,
-    activeSessionId: activeSessionId || "",
-    secondaryChatDataEnabled,
-    directSessionPanelActive,
-    startupDetailSettledSessionId,
-    chatLiveQueryPolicy,
-    chatLiveQueryPolicyInput,
-    sessions: sessionsQuery.data,
-    directSessionActiveSummary,
+  const sessionDetailQuery = useQuery<SessionDetail>({
+    queryKey: queryKeys.session(activeSessionId ?? "none"),
+    // Temp create shells are local-only; never GET/stream them until rebased.
+    enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
+    queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {
+      signal,
+      // When SSE owns live transcript, skip expensive secondary lists on poll/refetch.
+      // First paint still hydrates fully until stream ownership is true.
+      includeSecondary: !chatLiveQueryPolicy.directSessionStreamOwnsLiveQueries,
+    }),
+    // Select + GET often race on switch; brief freshness avoids immediate double rebuild
+    // when /select already wrote a windowed detail into the same query key.
+    staleTime: 1_500,
+    structuralSharing: (previous, next) =>
+      mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
+    placeholderData: () =>
+      resolveSessionDetailPlaceholder({
+        activeSessionId,
+        cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
+        summary: activeSessionId
+          ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
+          : undefined,
+      }),
+    refetchInterval: startupDetailSettledSessionId === activeSessionId
+      ? chatLiveQueryPolicy.sessionDetailRefetchInterval
+      : false,
+    refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
   useEffect(() => {
     if (!activeSessionId) {
@@ -879,6 +1045,14 @@ export function ChatCodingRoute() {
     }
     setStartupDetailSettledSessionId((current) => current === activeSessionId ? current : activeSessionId);
   }, [activeSessionId, sessionDetailQuery.data, sessionDetailQuery.isFetching]);
+  const sessionLlmOptionsQuery = useQuery({
+    queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
+    enabled: secondaryChatDataEnabled && Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
+    queryFn: () => fetchJson<SessionLlmOptions>(
+      `/api/sessions/${encodeURIComponent(activeSessionId ?? "")}/llm-options`,
+    ),
+    staleTime: 30_000,
+  });
   useEffect(() => {
     if (
       !activeSessionId
@@ -938,6 +1112,18 @@ export function ChatCodingRoute() {
     sessionsQuery.data,
     setActiveSession,
   ]);
+  const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary);
+  const childSessionLiveQueryPolicy = resolveChatLiveQueryPolicy({
+    ...chatLiveQueryPolicyInput,
+    activeRootSessionId: activeRootSessionId || "",
+  });
+  const childSessionsQuery = useQuery({
+    queryKey: queryKeys.sessionChildSessions(activeRootSessionId || "none"),
+    queryFn: () => fetchJson<SessionSummary[]>(`/api/sessions/${activeRootSessionId}/child-sessions`),
+    enabled: secondaryChatDataEnabled && Boolean(activeRootSessionId) && directSessionPanelActive,
+    refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval,
+    refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground,
+  });
   useEffect(() => {
     const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessionsQuery.data);
     const groupReady = !standardGroupRoomActive || Boolean(activeGroupRoomQuery.data);
@@ -1065,22 +1251,109 @@ export function ChatCodingRoute() {
     suppressRenameBlurUntilRef,
   });
 
-  const {
-    renameAgentMutation,
-    archiveAgentMutation,
-  } = useChatAgentMutations({
-    queryClient,
-    chatWorkspaceCache,
-    t,
-    describeError,
-    activeSessionId,
-    selectedAgentId,
-    sessions: sessionsQuery.data,
-    sessionDetailAgentId: sessionDetailQuery.data?.agentId,
-    setActiveSession,
-    setSelectedAgentId,
-    setAgentContextMenu,
-    setSessionComposerErrors,
+  const renameAgentMutation = useMutation({
+    mutationFn: (payload: { agentId: string; displayName: string }) =>
+      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName: payload.displayName }),
+      }),
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
+      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
+        current?.map((agent) => agent.agentId === payload.agentId
+          ? { ...agent, displayName: payload.displayName }
+          : agent),
+      );
+      return { previousAgents };
+    },
+    onSuccess: (updatedAgent) => {
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
+        current?.map((agent) => agent.agentId === updatedAgent.agentId ? updatedAgent : agent),
+      );
+      setSessionComposerErrors((current) => ({ ...current, __sessions__: "" }));
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previousAgents) {
+        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: describeError(error, t("loadFailed")),
+      }));
+    },
+  });
+
+  const archiveAgentMutation = useMutation({
+    mutationFn: (payload: { agentId: string }) =>
+      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+        method: "DELETE",
+      }),
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
+      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
+      const previousSelectedAgentId = selectedAgentId;
+      const previousActiveSessionId = activeSessionId;
+      const remainingAgents = (previousAgents ?? []).filter((agent) => agent.agentId !== payload.agentId);
+      const remainingAgentIds = new Set(remainingAgents.map((agent) => agent.agentId));
+      const currentActiveSession = (sessionsQuery.data ?? []).find((session) => session.id === activeSessionId);
+      const fallbackSession = (
+        currentActiveSession
+        && remainingAgentIds.has(String(currentActiveSession.agentId || "").trim())
+      )
+        ? currentActiveSession
+        : (sessionsQuery.data ?? []).find(
+          (session) => remainingAgentIds.has(String(session.agentId || "").trim()),
+        );
+      const activeSessionAgentId = String(
+        sessionDetailQuery.data?.agentId
+        || currentActiveSession?.agentId
+        || "",
+      ).trim();
+      const fallbackAgentId = String(
+        fallbackSession?.agentId
+        || remainingAgents.find((agent) => String(agent.status || "").trim() !== "archived")?.agentId
+        || "",
+      ).trim();
+
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents);
+      setAgentContextMenu(null);
+      setSelectedAgentId((current) => current === payload.agentId ? fallbackAgentId : current);
+      if (activeSessionAgentId === payload.agentId) {
+        setActiveSession(fallbackSession?.id || "");
+      }
+      return {
+        previousActiveSessionId,
+        previousAgents,
+        previousSelectedAgentId,
+      };
+    },
+    onSuccess: (agent) => {
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
+        current?.filter((item) => item.agentId !== agent.agentId),
+      );
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: "",
+      }));
+      void chatWorkspaceCache.afterAgentArchived();
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previousAgents) {
+        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
+      }
+      setSelectedAgentId(context?.previousSelectedAgentId ?? "");
+      if (context?.previousActiveSessionId) {
+        setActiveSession(context.previousActiveSessionId);
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: describeError(error, t("loadFailed")),
+      }));
+      void chatWorkspaceCache.afterAgentArchived();
+    },
   });
 
   const {
@@ -1616,13 +1889,14 @@ export function ChatCodingRoute() {
     ),
     [activeSessionId, pendingSessionToolApproval, pendingToolGovernanceApproval],
   );
-  const runtimeRunningSessionIds = useMemo(
-    () => collectRuntimeRunningSessionIds({
-      activeChatTurnSessionId: runtime?.workRuns?.active?.chat_turn?.sessionId,
-      activeChatTurnItems: runtime?.workRuns?.activeItems?.chat_turn,
-    }),
-    [runtime?.workRuns?.active?.chat_turn, runtime?.workRuns?.activeItems?.chat_turn],
-  );
+  const runtimeRunningSessionIds = useMemo(() => {
+    return [
+      ...(runtime?.workRuns?.activeItems?.chat_turn ?? []),
+      runtime?.workRuns?.active?.chat_turn,
+    ]
+      .map((run) => String(run?.sessionId ?? "").trim())
+      .filter(Boolean);
+  }, [runtime?.workRuns?.active?.chat_turn, runtime?.workRuns?.activeItems?.chat_turn]);
   const pendingToolApprovalLabels = useMemo(
     () => pendingSessionToolApproval
       ? [{
@@ -2118,15 +2392,16 @@ export function ChatCodingRoute() {
     return buildChatMentionTargets(agentsQuery.data ?? []);
   }, [agentsQuery.data]);
 
-  const allVisibleSessions = useMemo(
-    () => mergeVisibleDirectSessions(sessionsQuery.data, childSessionsQuery.data),
-    [childSessionsQuery.data, sessionsQuery.data],
-  );
+  const allVisibleSessions = useMemo(() => {
+    const merged = [...(sessionsQuery.data ?? []), ...(childSessionsQuery.data ?? [])];
+    return merged
+      .filter(isVisibleDirectSession)
+      .filter((session, index, sessions) => sessions.findIndex((item) => item.id === session.id) === index);
+  }, [childSessionsQuery.data, sessionsQuery.data]);
 
-  const sessionsById = useMemo(
-    () => buildSessionsByIdMap(allVisibleSessions),
-    [allVisibleSessions],
-  );
+  const sessionsById = useMemo(() => {
+    return new Map(allVisibleSessions.map((session) => [session.id, session]));
+  }, [allVisibleSessions]);
 
   // Mark completed/unread activity as seen when the operator opens the session.
   // Blue dots clear after read; a later stamp (new turn) can show them again.
@@ -2161,15 +2436,14 @@ export function ChatCodingRoute() {
   const visibleChatAgents = useMemo(() => {
     return visibleDirectoryAgents(agentsQuery.data ?? [], allVisibleSessions);
   }, [agentsQuery.data, allVisibleSessions]);
-  const activeSessionAgentId = useMemo(
-    () => resolveActiveSessionAgentId({
-      detailAgentId: sessionDetailQuery.data?.agentId,
-      summaryAgentId: directSessionActiveSummary?.agentId,
-      activeSessionId: activeSessionId || "",
-      sessionsById,
-    }),
-    [activeSessionId, directSessionActiveSummary?.agentId, sessionDetailQuery.data?.agentId, sessionsById],
-  );
+  const activeSessionAgentId = useMemo(() => {
+    return String(
+      sessionDetailQuery.data?.agentId
+      || directSessionActiveSummary?.agentId
+      || sessionsById.get(activeSessionId || "")?.agentId
+      || "",
+    ).trim();
+  }, [activeSessionId, directSessionActiveSummary?.agentId, sessionDetailQuery.data?.agentId, sessionsById]);
   useEffect(() => {
     if (!activeSessionAgentId) {
       return;
@@ -2201,10 +2475,11 @@ export function ChatCodingRoute() {
     return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session));
   }, [allVisibleSessions]);
 
-  const selectedAgentVisibleSessions = useMemo(
-    () => filterSessionsForSelectedAgent(allVisibleSessions, selectedChatAgentId),
-    [allVisibleSessions, selectedChatAgentId],
-  );
+  const selectedAgentVisibleSessions = useMemo(() => {
+    return allVisibleSessions.filter(
+      (session) => String(session.agentId || "").trim() === selectedChatAgentId,
+    );
+  }, [allVisibleSessions, selectedChatAgentId]);
 
   const agentSessionTabs = useMemo(
     () => buildAgentSessionTabs({
@@ -2312,20 +2587,18 @@ export function ChatCodingRoute() {
     () => groupedGroupConversations.reduce((count, group) => count + group.items.length, 0),
     [groupedGroupConversations],
   );
-  const {
-    sessionIndexHasMore,
-    sessionIndexLoadMoreLabel,
-    sessionIndexFullyLoadedLabel,
-    sessionIndexProgressLabel,
-    sessionIndexProgressVisible,
-  } = resolveSessionIndexProgressModel({
-    lang,
-    loadedCount: rawSessionsQuery.loadedCount,
-    totalEstimate: rawSessionsQuery.totalEstimate,
-    hasMore: rawSessionsQuery.hasMore,
-    isLoadingMore: rawSessionsQuery.isLoadingMore,
-    numberFormatter,
-  });
+  const sessionIndexLoadedCount = rawSessionsQuery.loadedCount;
+  const sessionIndexTotalEstimate = rawSessionsQuery.totalEstimate;
+  const sessionIndexHasMore = rawSessionsQuery.hasMore;
+  const sessionIndexLoadMoreLabel = rawSessionsQuery.isLoadingMore
+    ? (lang === "zh" ? "加载中" : "Loading")
+    : (lang === "zh" ? "加载更多会话" : "Load more chats");
+  const sessionIndexFullyLoadedLabel = lang === "zh" ? "已加载全部会话" : "All chats loaded";
+  const sessionIndexProgressLabel =
+    sessionIndexTotalEstimate > sessionIndexLoadedCount
+      ? `${numberFormatter.format(sessionIndexLoadedCount)} / ${numberFormatter.format(sessionIndexTotalEstimate)}`
+      : numberFormatter.format(sessionIndexLoadedCount);
+  const sessionIndexProgressVisible = sessionIndexHasMore || sessionIndexTotalEstimate > SESSION_INDEX_PAGE_SIZE;
 
   function toggleConversationGroup(groupKey: ConversationIndexDynamicGroupKey) {
     setCollapsedConversationGroups((current) => ({
@@ -2475,29 +2748,28 @@ export function ChatCodingRoute() {
     }));
   }, []);
 
-  const {
-    contextMenuDeletePending,
-    contextMenuAddToReviewPending,
-    contextMenuClearHistoryPending,
-    contextMenuClearHistoryVisible,
-    contextMenuDeleteDisabled,
-    contextMenuAddToReviewDisabled,
-    contextMenuClearHistoryDisabled,
-  } = resolveSessionContextMenuPendingFlags({
-    contextMenuSession,
-    deleteSession: {
-      isPending: deleteSessionMutation.isPending,
-      sessionId: String(deleteSessionMutation.variables?.sessionId || "").trim() || undefined,
-    },
-    addToReview: {
-      isPending: addSessionToReviewMutation.isPending,
-      sessionId: String(addSessionToReviewMutation.variables?.sessionId || "").trim() || undefined,
-    },
-    clearHistory: {
-      isPending: clearSessionHistoryMutation.isPending,
-      sessionId: String(clearSessionHistoryMutation.variables?.sessionId || "").trim() || undefined,
-    },
-  });
+  const contextMenuSessionIsBusy = contextMenuSession
+    ? isBusyPhase(contextMenuSession.currentPhase || contextMenuSession.status)
+    : false;
+  const contextMenuDeletePending = Boolean(
+    contextMenuSession
+    && deleteSessionMutation.isPending
+    && deleteSessionMutation.variables?.sessionId === contextMenuSession.id,
+  );
+  const contextMenuAddToReviewPending = Boolean(
+    contextMenuSession
+    && addSessionToReviewMutation.isPending
+    && addSessionToReviewMutation.variables?.sessionId === contextMenuSession.id,
+  );
+  const contextMenuClearHistoryPending = Boolean(
+    contextMenuSession
+    && clearSessionHistoryMutation.isPending
+    && clearSessionHistoryMutation.variables?.sessionId === contextMenuSession.id
+  );
+  const contextMenuClearHistoryVisible = Boolean(
+    contextMenuSession?.agentId
+    && isAgentRootSession(contextMenuSession)
+  );
   const conversationIndexLoading = shouldShowConversationIndexLoading({
     bootstrapIsLoading: activeSessionBootstrapQuery.isLoading,
     conversationsHasData: Boolean(conversationsQuery.data),
@@ -2505,15 +2777,16 @@ export function ChatCodingRoute() {
     sessionsHasData: Boolean(sessionsQuery.data),
     sessionsIsLoading: sessionsQuery.isLoading,
   });
-  const contextMenuAgentArchivePending = resolveAgentContextMenuArchivePending({
-    agentContextMenu,
-    archiveAgent: {
-      isPending: archiveAgentMutation.isPending,
-      agentId: String(archiveAgentMutation.variables?.agentId || "").trim() || undefined,
-    },
-  });
+  const contextMenuAgentArchivePending = Boolean(
+    agentContextMenu
+    && archiveAgentMutation.isPending
+    && archiveAgentMutation.variables?.agentId === agentContextMenu.agent.agentId
+  );
+  const contextMenuDeleteDisabled = contextMenuDeletePending || contextMenuSessionIsBusy;
+  const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionIsBusy;
+  const contextMenuClearHistoryDisabled = contextMenuClearHistoryPending || contextMenuSessionIsBusy;
   const conversationIndexPanel = (
-    <ChatWorkbenchConversationIndexPanel
+    <ChatConversationIndexPanelContent
       styles={styles}
       loadingLabel={t("loadingSession")}
       emptyTitle={sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
@@ -2528,103 +2801,151 @@ export function ChatCodingRoute() {
         && filteredTeams.length === 0
         && filteredStandaloneGroupConversations.length === 0
       }
-      selectedChatAgentId={selectedChatAgentId}
-      activeSessionId={activeSessionId}
-      activeGroupRoomId={activeGroupRoomId}
-      agents={agentsQuery.data ?? []}
-      avatarInitials={avatarInitials}
-      filterText={sessionFilter}
-      formatConversationIndexTime={formatConversationIndexTime}
-      lang={lang}
-      resolveModelLabel={resolveModelLabel}
-      runtimeRunningSessionIds={runtimeRunningSessionIds}
-      allVisibleSessions={allVisibleSessions}
-      sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-      statusLabel={statusLabel}
-      teams={teams}
-      onOpenAgentContextMenu={openAgentContextMenu}
-      onOpenAgentFromDirectory={(agent, latestSession) => {
-        const agentId = String(agent.agentId || "").trim();
-        if (agentId) {
-          setSelectedAgentId(agentId);
-        }
-        if (latestSession?.id) {
-          handleOpenDirectSession(latestSession.id);
-          return;
-        }
-        if (agent.directSessionId) {
-          handleOpenAgent(agent);
-          return;
-        }
-        handleCreateAgentSession(agent);
-      }}
-      onOpenGroupRoom={handleOpenGroupRoom}
-      agentContextMenu={agentContextMenu}
-      contextMenuAgentArchivePending={contextMenuAgentArchivePending}
-      createSessionPending={createSessionMutation.isPending}
-      renameAgentPending={renameAgentMutation.isPending}
-      onArchiveAgent={handleArchiveAgent}
-      onCreateAgentSession={handleCreateAgentSession}
-      onOpenAgentConfig={handleOpenAgentConfig}
-      onOpenAgentLatestSession={handleOpenAgentLatestSession}
-      onRenameAgent={handleRenameAgent}
-      onDismissAgentContextMenu={() => setAgentContextMenu(null)}
-      agentRenameDraft={agentRenameDraft}
-      onCancelAgentRename={cancelAgentRename}
-      onChangeAgentRenameDraft={setAgentRenameDraftName}
-      onSubmitAgentRename={submitAgentRename}
-      addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
-      agentsById={agentsById}
-      avatarImageUrlFrom={avatarImageUrlFrom}
-      buildSessionReferencePayload={buildSessionReferencePayload}
-      collapsedConversationGroups={collapsedConversationGroups}
-      contextMenuSessionId={contextMenuSessionId}
-      conversationGroupLabel={conversationGroupLabel}
-      deleteBusyLabel={t("deleteSessionBusy")}
-      editingSessionId={editingSessionId}
-      editingSessionTitle={editingSessionTitle}
-      groupedGroupConversationCount={groupedGroupConversationCount}
-      filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
-      filteredTeams={filteredTeams}
-      groupPanelActive={groupPanelActive}
-      groupedGroupConversations={groupedGroupConversations}
-      isBusyPhase={isBusyPhase}
-      renameSessionPending={renameSessionMutation.isPending}
-      renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-      searchHasTerm={searchHasTerm}
-      sessionComposerErrors={sessionComposerErrors}
-      sessionsById={sessionsById}
-      t={t}
-      onCancelRenameSession={cancelRenameSession}
-      onOpenSessionContextMenu={openSessionContextMenu}
-      onDragSessionReference={startSessionReferenceDrag}
-      onOpenDirectSession={handleOpenDirectSession}
-      onPrefetchDirectSession={handlePrefetchDirectSession}
-      onRenameTitleChange={setEditingSessionTitle}
-      onSubmitRenameSession={submitRenameSession}
-      onToggleConversationGroup={toggleConversationGroup}
-      sessionIndexHasMore={sessionIndexHasMore}
-      sessionIndexProgressVisible={sessionIndexProgressVisible}
-      sessionIndexLoadMoreLabel={sessionIndexLoadMoreLabel}
-      sessionIndexFullyLoadedLabel={sessionIndexFullyLoadedLabel}
-      sessionIndexProgressLabel={sessionIndexProgressLabel}
-      sessionIndexLoadingMore={rawSessionsQuery.isLoadingMore}
-      onLoadMoreSessions={() => rawSessionsQuery.loadMore()}
-      sessionContextMenu={sessionContextMenu}
-      contextMenuSession={contextMenuSession}
-      contextMenuAddToReviewDisabled={contextMenuAddToReviewDisabled}
-      contextMenuAddToReviewPending={contextMenuAddToReviewPending}
-      contextMenuClearHistoryDisabled={contextMenuClearHistoryDisabled}
-      contextMenuClearHistoryPending={contextMenuClearHistoryPending}
-      contextMenuClearHistoryVisible={contextMenuClearHistoryVisible}
-      contextMenuDeleteDisabled={contextMenuDeleteDisabled}
-      onAddSessionToReview={handleAddSessionToReview}
-      onClearSessionHistory={handleClearSessionHistory}
-      onDeleteSession={handleDeleteSession}
-      onOpenSessionAgentConfig={openSessionAgentConfig}
-      onBeginRenameSession={beginRenameSession}
-      onDismissSessionContextMenu={() => setSessionContextMenu(null)}
-    />
+    >
+          <AgentConversationDirectory
+            activeAgentId={selectedChatAgentId}
+            activeSessionId={activeSessionId}
+            activeGroupRoomId={activeGroupRoomId}
+            agents={agentsQuery.data ?? []}
+            avatarInitials={avatarInitials}
+            filterText={sessionFilter}
+            formatTime={formatConversationIndexTime}
+            lang={lang}
+            resolveModelLabel={resolveModelLabel}
+            runtimeRunningSessionIds={runtimeRunningSessionIds}
+            sessions={allVisibleSessions}
+            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+            statusLabel={statusLabel}
+            teams={teams}
+            onContextMenu={openAgentContextMenu}
+            onOpenAgent={(agent, latestSession) => {
+              const agentId = String(agent.agentId || "").trim();
+              if (agentId) {
+                setSelectedAgentId(agentId);
+              }
+              if (latestSession?.id) {
+                handleOpenDirectSession(latestSession.id);
+                return;
+              }
+              if (agent.directSessionId) {
+                handleOpenAgent(agent);
+                return;
+              }
+              handleCreateAgentSession(agent);
+            }}
+            onOpenGroupRoom={handleOpenGroupRoom}
+          />
+          {agentContextMenu ? (
+            <Suspense fallback={null}>
+              <AgentContextMenu
+                archivePending={contextMenuAgentArchivePending}
+                createPending={createSessionMutation.isPending}
+                renamePending={renameAgentMutation.isPending}
+                lang={lang}
+                state={agentContextMenu}
+                onArchive={handleArchiveAgent}
+                onCreateSession={handleCreateAgentSession}
+                onOpenConfig={handleOpenAgentConfig}
+                onOpenLatest={handleOpenAgentLatestSession}
+                onRename={handleRenameAgent}
+                onDismiss={() => setAgentContextMenu(null)}
+              />
+            </Suspense>
+          ) : null}
+          {agentRenameDraft ? (
+            <Suspense fallback={null}>
+              <AgentRenameDialog
+                draft={agentRenameDraft}
+                lang={lang}
+                pending={renameAgentMutation.isPending}
+                onCancel={cancelAgentRename}
+                onChange={setAgentRenameDraftName}
+                onSubmit={submitAgentRename}
+              />
+            </Suspense>
+          ) : null}
+          <ConversationIndexTree
+            activeGroupRoomId={activeGroupRoomId}
+            activeSessionId={activeSessionId}
+            addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
+            agentsById={agentsById}
+            avatarImageUrlFrom={avatarImageUrlFrom}
+            avatarInitials={avatarInitials}
+            buildSessionReferencePayload={buildSessionReferencePayload}
+            collapsedConversationGroups={collapsedConversationGroups}
+            contextMenuSessionId={contextMenuSessionId}
+            conversationGroupLabel={conversationGroupLabel}
+            deleteBusyLabel={t("deleteSessionBusy")}
+            editingSessionId={editingSessionId}
+            editingSessionTitle={editingSessionTitle}
+            filteredConversationsCount={groupedGroupConversationCount}
+            filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
+            filteredTeams={filteredTeams}
+            formatTime={formatConversationIndexTime}
+            groupPanelActive={groupPanelActive}
+            groupedConversations={groupedGroupConversations}
+            isBusyPhase={isBusyPhase}
+            lang={lang}
+            renamePending={renameSessionMutation.isPending}
+            renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+            resolveModelLabel={resolveModelLabel}
+            runtimeRunningSessionIds={runtimeRunningSessionIds}
+            searchHasTerm={searchHasTerm}
+            sessionComposerErrors={sessionComposerErrors}
+            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+            sessionsById={sessionsById}
+            statusLabel={statusLabel}
+            t={t}
+            onCancelRename={cancelRenameSession}
+            onContextMenu={openSessionContextMenu}
+            onDragReference={startSessionReferenceDrag}
+            onOpenDirectSession={handleOpenDirectSession}
+            onPrefetchDirectSession={handlePrefetchDirectSession}
+            onOpenGroupRoom={handleOpenGroupRoom}
+            onRenameTitleChange={setEditingSessionTitle}
+            onSubmitRename={submitRenameSession}
+            onToggleConversationGroup={toggleConversationGroup}
+          />
+          {sessionIndexHasMore ? (
+            <VButton
+              type="button"
+              className={styles.sessionLoadMoreButton}
+              onClick={() => rawSessionsQuery.loadMore()}
+              isDisabled={rawSessionsQuery.isLoadingMore}
+              aria-label={sessionIndexLoadMoreLabel}
+            >
+              <span>{sessionIndexLoadMoreLabel}</span>
+              <strong>{sessionIndexProgressLabel}</strong>
+            </VButton>
+          ) : sessionIndexProgressVisible ? (
+            <div className={styles.sessionLoadMoreStatus} role="status">
+              <span>{sessionIndexFullyLoadedLabel}</span>
+              <strong>{sessionIndexProgressLabel}</strong>
+            </div>
+          ) : null}
+          {sessionContextMenu && contextMenuSession ? (
+            <Suspense fallback={null}>
+              <SessionContextMenu
+                addToReviewDisabled={contextMenuAddToReviewDisabled}
+                addToReviewPending={contextMenuAddToReviewPending}
+                clearHistoryDisabled={contextMenuClearHistoryDisabled}
+                clearHistoryPending={contextMenuClearHistoryPending}
+                clearHistoryVisible={contextMenuClearHistoryVisible}
+                deleteDisabled={contextMenuDeleteDisabled}
+                lang={lang}
+                position={sessionContextMenu}
+                session={contextMenuSession}
+                t={t}
+                onAddToReview={handleAddSessionToReview}
+                onClearHistory={handleClearSessionHistory}
+                onDelete={handleDeleteSession}
+                onOpenAgentConfig={openSessionAgentConfig}
+                onRename={beginRenameSession}
+                onDismiss={() => setSessionContextMenu(null)}
+              />
+            </Suspense>
+          ) : null}
+    </ChatConversationIndexPanelContent>
   );
 
   return (
@@ -2634,206 +2955,308 @@ export function ChatCodingRoute() {
       style={layoutStyle}
       responsiveMode={responsiveLayout.mode}
       statusRailCollapsed={statusRailCollapsed}
-      overlay={(
-        <ChatWorkbenchOverlayBackdrop
-          open={responsiveOverlayOpen}
+      overlay={
+      responsiveOverlayOpen ? (
+        <VButton
+          type="button"
           className={styles.overlayBackdrop}
-          closeLabel={lang === "zh" ? "关闭侧栏" : "Close side panel"}
-          onClose={closeResponsiveOverlayPane}
-        />
-      )}
+          aria-label={lang === "zh" ? "关闭侧栏" : "Close side panel"}
+          onClick={closeResponsiveOverlayPane}
+        >
+          <span className="sr-only">{lang === "zh" ? "关闭侧栏" : "Close side panel"}</span>
+        </VButton>
+      ) : null
+      }
       statusRail={(
-      <ChatWorkbenchStatusRailHost
-        chrome={{
-          statusRailClassName, statusRailCollapsed, statusRailOverlayOpen, standardGroupRoomActive, lang, t, numberFormatter, statusLabel, formatTime, activeSessionId, resolveModelLabel, renderAgentAvatar, avatarInitials, agentRoleClass, avatarImageUrlFrom, agentsById,
-          sessions: sessionsQuery.data, onOpenDirectSession: handleOpenDirectSession, onPrefetchDirectSession: handlePrefetchDirectSession,
-        }}
-        group={{
-          activeGroupRoom, activeGroupTeamOwned, activeGroupTeam, availableGroupParticipantCount, groupManageChanged, groupManageDisabled, groupDeleteDisabled, groupResetDisabled, groupRoundActive, groupRoundRunning, groupRoomActionError, setGroupRoomActionError, groupManageTitleDraft, setGroupManageTitleDraft, groupManageModeDraft, setGroupManageModeDraft, groupManagePurposeDraft, setGroupManagePurposeDraft, readyChatRoomModes, availableChatRoomPurposes, chatRoomModeLabel, chatRoomPurposeLabel, groupManageSessionIds, groupManageSessionSet,
-          updateGroupRoomPending: updateGroupRoomMutation.isPending, deleteGroupRoomPending: deleteGroupRoomMutation.isPending, resetGroupRoomPending: resetGroupRoomMutation.isPending,
-          onOpenTeam: (teamId) => navigate(teamWorkspaceRoute(teamId)), onApplyGroupRoomManagement: handleApplyGroupRoomManagement, onDeleteActiveGroupRoom: handleDeleteActiveGroupRoom, onResetActiveGroupRoom: handleResetActiveGroupRoom, onToggleGroupManageSession: handleToggleGroupManageSession,
-        }}
-        session={{ activeSurfaceTitle, sessionStateValue, sessionStateLabel, sessionStateLine, compactSessionStateLine, agentDirectSessionMismatch, agentPrimaryDirectSessionId, sessionBindingMismatchLine, sessionCompactRows }}
-        skill={{ activeSkillSummary: hasActiveSkill, activeSkillStatusStyle, activeSkillTitle, activeSkillName, activeSkillCommand, activeSkillStatusLabel, activeSkillShortHash }}
-        prefs={{ mentalModelEnabledForNextTurn, runtimeStatusEnabledForNextTurn, onMentalModelEnabledChange: handleMentalModelEnabledChange, onRuntimeStatusEnabledChange: handleRuntimeStatusEnabledChange, featurePresetState, onToggleFeaturePreset: toggleFeaturePreset }}
-        tokens={{ cacheDetailAvailable, cacheDetailOpen, cacheDetailOpenLabel, tokenStatusMetrics, onOpenCacheDetail: openCacheDetail, promptSnapshot: detail?.agentPromptSnapshot, promptAssembly: detail?.lastPromptAssembly, lastLlmPayloadTrace }}
-        mental={{ mentalCompactLine, mentalSourceLabel, mentalCognitiveStateValue, mentalStateLabel, mentalSummary, mentalWhisper, mentalCognitiveStateLabel, mentalConfidence, mentalRelativeTime, mental }}
-        pet={{ pet, petPresetLabel, petCompactLine, petAvatarSkinStyle, petAvatarSymbol, petVitals, petInteractionLabels, petActionPending: petActionMutation.isPending, petActionFeedback, onPetInteraction: handlePetInteraction }}
+      <Suspense fallback={null}>
+      <ChatStatusRail
+        statusRailClassName={statusRailClassName}
+        statusRailCollapsed={statusRailCollapsed}
+        statusRailOverlayOpen={statusRailOverlayOpen}
+        standardGroupRoomActive={standardGroupRoomActive}
+        lang={lang}
+        t={t}
+        numberFormatter={numberFormatter}
+        activeGroupRoom={activeGroupRoom}
+        activeGroupTeamOwned={activeGroupTeamOwned}
+        activeGroupTeam={activeGroupTeam}
+        availableGroupParticipantCount={availableGroupParticipantCount}
+        statusLabel={statusLabel}
+        groupManageChanged={groupManageChanged}
+        groupManageDisabled={groupManageDisabled}
+        groupDeleteDisabled={groupDeleteDisabled}
+        groupResetDisabled={groupResetDisabled}
+        groupRoundActive={groupRoundActive}
+        groupRoundRunning={groupRoundRunning}
+        groupRoomActionError={groupRoomActionError}
+        setGroupRoomActionError={setGroupRoomActionError}
+        groupManageTitleDraft={groupManageTitleDraft}
+        setGroupManageTitleDraft={setGroupManageTitleDraft}
+        groupManageModeDraft={groupManageModeDraft}
+        setGroupManageModeDraft={setGroupManageModeDraft}
+        groupManagePurposeDraft={groupManagePurposeDraft}
+        setGroupManagePurposeDraft={setGroupManagePurposeDraft}
+        readyChatRoomModes={readyChatRoomModes}
+        availableChatRoomPurposes={availableChatRoomPurposes}
+        chatRoomModeLabel={chatRoomModeLabel}
+        chatRoomPurposeLabel={chatRoomPurposeLabel}
+        groupManageSessionIds={groupManageSessionIds}
+        groupManageSessionSet={groupManageSessionSet}
+        sessions={sessionsQuery.data}
+        agentsById={agentsById}
+        resolveModelLabel={resolveModelLabel}
+        renderAgentAvatar={renderAgentAvatar}
+        avatarInitials={avatarInitials}
+        agentRoleClass={agentRoleClass}
+        avatarImageUrlFrom={avatarImageUrlFrom}
+        updateGroupRoomPending={updateGroupRoomMutation.isPending}
+        deleteGroupRoomPending={deleteGroupRoomMutation.isPending}
+        resetGroupRoomPending={resetGroupRoomMutation.isPending}
+        onOpenTeam={(teamId) => navigate(teamWorkspaceRoute(teamId))}
+        onApplyGroupRoomManagement={handleApplyGroupRoomManagement}
+        onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}
+        onResetActiveGroupRoom={handleResetActiveGroupRoom}
+        onToggleGroupManageSession={handleToggleGroupManageSession}
+        activeSurfaceTitle={activeSurfaceTitle}
+        sessionStateValue={sessionStateValue}
+        sessionStateLabel={sessionStateLabel}
+        sessionStateLine={sessionStateLine}
+        compactSessionStateLine={compactSessionStateLine}
+        agentDirectSessionMismatch={agentDirectSessionMismatch}
+        agentPrimaryDirectSessionId={agentPrimaryDirectSessionId}
+        sessionBindingMismatchLine={sessionBindingMismatchLine}
+        onOpenDirectSession={handleOpenDirectSession}
+        onPrefetchDirectSession={handlePrefetchDirectSession}
+        sessionCompactRows={sessionCompactRows}
+        activeSkillSummary={hasActiveSkill}
+        activeSkillStatusStyle={activeSkillStatusStyle}
+        activeSkillTitle={activeSkillTitle}
+        activeSkillName={activeSkillName}
+        activeSkillCommand={activeSkillCommand}
+        activeSkillStatusLabel={activeSkillStatusLabel}
+        activeSkillShortHash={activeSkillShortHash}
+        mentalModelEnabledForNextTurn={mentalModelEnabledForNextTurn}
+        runtimeStatusEnabledForNextTurn={runtimeStatusEnabledForNextTurn}
+        activeSessionId={activeSessionId}
+        onMentalModelEnabledChange={handleMentalModelEnabledChange}
+        onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+        featurePresetState={featurePresetState}
+        onToggleFeaturePreset={toggleFeaturePreset}
+        cacheDetailAvailable={cacheDetailAvailable}
+        cacheDetailOpen={cacheDetailOpen}
+        cacheDetailOpenLabel={cacheDetailOpenLabel}
+        tokenStatusMetrics={tokenStatusMetrics}
+        onOpenCacheDetail={openCacheDetail}
+        promptSnapshot={detail?.agentPromptSnapshot}
+        promptAssembly={detail?.lastPromptAssembly}
+        lastLlmPayloadTrace={lastLlmPayloadTrace}
+        mentalCompactLine={mentalCompactLine}
+        mentalSourceLabel={mentalSourceLabel}
+        mentalCognitiveStateValue={mentalCognitiveStateValue}
+        mentalStateLabel={mentalStateLabel}
+        mentalSummary={mentalSummary}
+        mentalWhisper={mentalWhisper}
+        mentalCognitiveStateLabel={mentalCognitiveStateLabel}
+        mentalConfidence={mentalConfidence}
+        mentalRelativeTime={mentalRelativeTime}
+        formatTime={formatTime}
+        mental={mental}
+        pet={pet}
+        petPresetLabel={petPresetLabel}
+        petCompactLine={petCompactLine}
+        petAvatarSkinStyle={petAvatarSkinStyle}
+        petAvatarSymbol={petAvatarSymbol}
+        petVitals={petVitals}
+        petInteractionLabels={petInteractionLabels}
+        petActionPending={petActionMutation.isPending}
+        petActionFeedback={petActionFeedback}
+        onPetInteraction={handlePetInteraction}
       />
+      </Suspense>
       )}
-      leftResizeHandle={(
-        <ChatWorkbenchLeftResizeHandle
-          leftVisible={responsiveLayout.leftVisible}
-          conversationIndexCollapsed={conversationIndexCollapsed}
-          leftActive={dragState?.side === "left"}
-          leftWidth={leftPanelWidth}
-          leftMin={MIN_LEFT_PANEL_WIDTH}
-          leftMax={MAX_LEFT_PANEL_WIDTH}
-          leftClassName={styles.resizeHandleLeft}
-          resizeLeftLabel={t("resizeLeftPanel")}
-          collapseLeftLabel={lang === "zh" ? "收起会话列" : "Collapse conversation column"}
-          expandLeftLabel={lang === "zh" ? "展开会话列" : "Expand conversation column"}
-          onToggleLeft={() => setLeftRailCollapsed((current) => !current)}
-          onLeftPointerDown={(event) => handleResizeStart("left", event)}
-          onLeftKeyDown={(event) => handleResizeKeyDown("left", event)}
-        />
-      )}
+      leftResizeHandle={
+      responsiveLayout.leftVisible ? <PaneCollapseHandle
+        side="left"
+        collapsed={conversationIndexCollapsed}
+        separatorLabel={t("resizeLeftPanel")}
+        collapseLabel={lang === "zh" ? "收起会话列" : "Collapse conversation column"}
+        expandLabel={lang === "zh" ? "展开会话列" : "Expand conversation column"}
+        className={styles.resizeHandleLeft}
+        active={dragState?.side === "left"}
+        valueNow={leftPanelWidth}
+        valueMin={MIN_LEFT_PANEL_WIDTH}
+        valueMax={MAX_LEFT_PANEL_WIDTH}
+        onToggle={() => setLeftRailCollapsed((current) => !current)}
+        onPointerDown={(event) => handleResizeStart("left", event)}
+        onKeyDown={(event) => handleResizeKeyDown("left", event)}
+      /> : null
+      }
       center={(
       <ChatWorkbenchCenterColumn
         className={centerPaneClassName}
         surfaceClassName={styles.centerSurface}
         tabStrip={(
-          <ChatWorkbenchCenterTabStrip
-            strip={{
-              styles,
-              lang,
-              agentSessionLabel: t("agentSession"),
-              chatReturnTarget,
-              chatReturnLabel,
-              groupPanelActive,
-              projectBusActive,
-              showSessionTabs: Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0),
-              showAgentFallbackTab: true,
-              workspaceActiveTab: workspace.activeTab,
-              leftOverlayVisible: responsiveLayout.leftVisible,
-              rightOverlayVisible: responsiveLayout.rightVisible,
-              conversationIndexOverlayOpen,
-              statusRailOverlayOpen,
-              onActivateAgentFallbackTab: () => {
-                activeSessionId && setActiveTab(activeSessionId, "agent");
-              },
-              onToggleLeftOverlay: () => setResponsiveOverlayPane((current) => current === "left" ? null : "left"),
-              onToggleRightOverlay: () => setResponsiveOverlayPane((current) => current === "right" ? null : "right"),
+          <ChatCenterTabStrip
+            styles={styles}
+            lang={lang}
+            agentSessionLabel={t("agentSession")}
+            chatReturnTarget={chatReturnTarget}
+            chatReturnLabel={chatReturnLabel}
+            groupPanelActive={groupPanelActive}
+            projectBusActive={projectBusActive}
+            showSessionTabs={Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
+            showAgentFallbackTab
+            workspaceActiveTab={workspace.activeTab}
+            leftOverlayVisible={responsiveLayout.leftVisible}
+            rightOverlayVisible={responsiveLayout.rightVisible}
+            conversationIndexOverlayOpen={conversationIndexOverlayOpen}
+            statusRailOverlayOpen={statusRailOverlayOpen}
+            onActivateAgentFallbackTab={() => {
+              activeSessionId && setActiveTab(activeSessionId, "agent");
             }}
-            sessionTabs={{
-              activeSessionId: activeSessionId,
-              activeCliAgentRunId: activeCliAgentRunId,
-              agentsById: agentsById,
-              buildSessionReferencePayload: buildSessionReferencePayload,
-              contextMenuSessionId: contextMenuSessionId,
-              cliAgentRuns: cliAgentRunTabs,
-              createPending: createSessionMutation.isPending,
-              createDisabled: !selectedChatAgentId,
-              deletePendingSessionId:
+            onToggleLeftOverlay={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
+            onToggleRightOverlay={() => setResponsiveOverlayPane((current) => current === "right" ? null : "right")}
+            sessionTabs={(
+              <AgentSessionTabStrip
+                activeSessionId={activeSessionId}
+                activeCliAgentRunId={activeCliAgentRunId}
+                agentsById={agentsById}
+                buildSessionReferencePayload={buildSessionReferencePayload}
+                contextMenuSessionId={contextMenuSessionId}
+                cliAgentRuns={cliAgentRunTabs}
+                createPending={createSessionMutation.isPending}
+                createDisabled={!selectedChatAgentId}
+                deletePendingSessionId={
                   deleteSessionMutation.isPending
                     ? String(deleteSessionMutation.variables?.sessionId || "").trim()
-                    : "",
-              editingSessionId: editingSessionId,
-              editingSessionTitle: editingSessionTitle,
-              lang: lang,
-              renamePending: renameSessionMutation.isPending,
-              renameSessionId: renameSessionMutation.variables?.sessionId ?? "",
-              resolveModelLabel: resolveModelLabel,
-              sessions: agentSessionTabs,
-              runtimeRunningSessionIds: runtimeRunningSessionIds,
-              sessionIdsNeedingApproval: sessionIdsNeedingApproval,
-              statusLabel: statusLabel,
-              t: t,
-              workspaceActiveTab: workspace.activeTab,
-              onCancelRename: cancelRenameSession,
-              onContextMenu: openSessionContextMenu,
-              onDragReference: startSessionReferenceDrag,
-              onOpenCliAgentRun: (runId) => {
+                    : ""
+                }
+                editingSessionId={editingSessionId}
+                editingSessionTitle={editingSessionTitle}
+                lang={lang}
+                renamePending={renameSessionMutation.isPending}
+                renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+                resolveModelLabel={resolveModelLabel}
+                sessions={agentSessionTabs}
+                runtimeRunningSessionIds={runtimeRunningSessionIds}
+                sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+                statusLabel={statusLabel}
+                t={t}
+                workspaceActiveTab={workspace.activeTab}
+                onCancelRename={cancelRenameSession}
+                onContextMenu={openSessionContextMenu}
+                onDragReference={startSessionReferenceDrag}
+                onOpenCliAgentRun={(runId) => {
                   if (activeSessionId) {
                     setActiveTab(activeSessionId, cliAgentRunTabId(runId));
                   }
-                },
-              onCloseCliAgentRun: (runId) => {
+                }}
+                onCloseCliAgentRun={(runId) => {
                   const run = cliAgentRunTabs.find((item) => item.id === runId);
                   if (run) {
                     void closeCliAgentRun(run);
                   }
-                },
-              onCreateSession: handleCreateSession,
-              onDeleteSession: handleDeleteSession,
-              onOpenDirectSession: handleOpenDirectSession,
-              onPrefetchDirectSession: handlePrefetchDirectSession,
-              onRenameTitleChange: setEditingSessionTitle,
-              onSetActiveTab: setActiveTab,
-              onSubmitRename: submitRenameSession,
-            }}
-            fileTabs={{
-              activeTab: workspace.activeTab,
-              closePreviewTabLabel: t("closePreviewTab"),
-              hidden: groupPanelActive,
-              openTabs: workspace.openTabs,
-              onCloseTab: (tabPath) => {
+                }}
+                onCreateSession={handleCreateSession}
+                onDeleteSession={handleDeleteSession}
+                onOpenDirectSession={handleOpenDirectSession}
+                onPrefetchDirectSession={handlePrefetchDirectSession}
+                onRenameTitleChange={setEditingSessionTitle}
+                onSetActiveTab={setActiveTab}
+                onSubmitRename={submitRenameSession}
+              />
+            )}
+            fileTabs={(
+              <ChatFileWorkspaceTabs
+                activeTab={workspace.activeTab}
+                closePreviewTabLabel={t("closePreviewTab")}
+                hidden={groupPanelActive}
+                openTabs={workspace.openTabs}
+                onCloseTab={(tabPath) => {
                   activeSessionId && closePreviewTab(activeSessionId, tabPath);
-                },
-              onOpenTab: (tabPath) => {
+                }}
+                onOpenTab={(tabPath) => {
                   activeSessionId && setActiveTab(activeSessionId, tabPath);
-                },
-            }}
+                }}
+              />
+            )}
           />
         )}
         surface={(
-          <ChatWorkbenchCenterSessionSurface
+          <ChatCenterSessionSurface
+            terminal={(
+              <ChatCliAgentTerminalStack
+                runs={mountedCliAgentRuns}
+                activeCliAgentRunId={activeCliAgentRunId}
+                activeSessionId={activeSessionId}
+                groupPanelActive={groupPanelActive}
+                lang={lang}
+                TerminalPanel={CliAgentRunTerminalPanel}
+                onTerminalSessionChange={handleCliAgentTerminalSessionChange}
+              />
+            )}
             groupPanelActive={groupPanelActive}
-            terminal={{
-              runs: mountedCliAgentRuns,
-              activeCliAgentRunId,
-              activeSessionId,
-              lang,
-              TerminalPanel: CliAgentRunTerminalPanel,
-              onTerminalSessionChange: handleCliAgentTerminalSessionChange,
-            }}
-            group={{
-            lang: lang,
-            projectBusActive: projectBusActive,
-            standardGroupRoomActive: standardGroupRoomActive,
-            activeGroupRoom: activeGroupRoom,
-            activeGroupRoomId: activeGroupRoomId,
-            availableGroupParticipantCount: availableGroupParticipantCount,
-            activeGroupParticipantById: activeGroupParticipantById,
-            projectBusTimeline: projectBusTimeline,
-            projectBusEvents: projectBusEvents,
-            projectBusDraft: projectBusDraft,
-            projectBusInterruptTargets: projectBusInterruptTargets,
-            groupTopicDraft: groupTopicDraft,
-            groupRoomActionError: groupRoomActionError,
-            groupRoundActive: groupRoundActive,
-            groupRoundStopping: groupRoundStopping,
-            groupStopDisabled: groupStopDisabled,
-            expandedGroupMessageIds: expandedGroupMessageIds,
-            chatMentionTargets: chatMentionTargets,
-            userDisplayName: runtime?.userName || (lang === "zh" ? "我" : "Me"),
-            projectBusRefreshing: projectAgentBusQuery.isFetching,
-            projectBusRefreshError: projectAgentBusQuery.isError ? describeError(projectAgentBusQuery.error, t("loadFailed")) : "",
-            projectBusSendPending: sendProjectBusMessageMutation.isPending,
-            projectBusRevokePending: revokeProjectBusMessageMutation.isPending,
-            groupRoomRefreshing: activeGroupRoomQuery.isFetching,
-            groupRoomRefreshError: activeGroupRoomQuery.isError ? describeError(activeGroupRoomQuery.error, t("loadFailed")) : "",
-            startGroupRoundPending: startGroupRoundMutation.isPending,
-            stopGroupRoundPending: stopGroupRoundMutation.isPending,
-            formatTime: formatTime,
-            statusLabel: statusLabel,
-            groupParticipantIdentity: groupParticipantIdentity,
-            renderAgentAvatar: renderAgentAvatar,
-            avatarInitials: avatarInitials,
-            onProjectBusDraftChange: setProjectBusDraft,
-            onProjectBusInterruptTargetsChange: setProjectBusInterruptTargets,
-            onGroupTopicDraftChange: setGroupTopicDraft,
-            onRefreshProjectBus: () => { void projectAgentBusQuery.refetch(); },
-            onRefreshGroupRoom: () => { if (activeGroupRoomId) void activeGroupRoomQuery.refetch(); },
-            onSendProjectBusMessage: handleSendProjectBusMessage,
-            onRevokeProjectBusMessage: handleRevokeProjectBusMessage,
-            onStartGroupRound: handleStartGroupRound,
-            onStopGroupRound: handleStopGroupRound,
-            onOpenMentionTarget: handleOpenMentionTarget,
-            onToggleExpandedGroupMessage: (messageId) =>
+            groupSurface={(
+            <ChatGroupCenterSurface
+              lang={lang}
+              projectBusActive={projectBusActive}
+              standardGroupRoomActive={standardGroupRoomActive}
+              activeGroupRoom={activeGroupRoom}
+              activeGroupRoomId={activeGroupRoomId}
+              availableGroupParticipantCount={availableGroupParticipantCount}
+              activeGroupParticipantById={activeGroupParticipantById}
+              projectBusTimeline={projectBusTimeline}
+              projectBusEvents={projectBusEvents}
+              projectBusDraft={projectBusDraft}
+              projectBusInterruptTargets={projectBusInterruptTargets}
+              groupTopicDraft={groupTopicDraft}
+              groupRoomActionError={groupRoomActionError}
+              groupRoundActive={groupRoundActive}
+              groupRoundStopping={groupRoundStopping}
+              groupStopDisabled={groupStopDisabled}
+              expandedGroupMessageIds={expandedGroupMessageIds}
+              chatMentionTargets={chatMentionTargets}
+              userDisplayName={runtime?.userName || (lang === "zh" ? "我" : "Me")}
+              projectBusRefreshing={projectAgentBusQuery.isFetching}
+              projectBusRefreshError={projectAgentBusQuery.isError ? describeError(projectAgentBusQuery.error, t("loadFailed")) : ""}
+              projectBusSendPending={sendProjectBusMessageMutation.isPending}
+              projectBusRevokePending={revokeProjectBusMessageMutation.isPending}
+              groupRoomRefreshing={activeGroupRoomQuery.isFetching}
+              groupRoomRefreshError={activeGroupRoomQuery.isError ? describeError(activeGroupRoomQuery.error, t("loadFailed")) : ""}
+              startGroupRoundPending={startGroupRoundMutation.isPending}
+              stopGroupRoundPending={stopGroupRoundMutation.isPending}
+              formatTime={formatTime}
+              statusLabel={statusLabel}
+              groupParticipantIdentity={groupParticipantIdentity}
+              renderAgentAvatar={renderAgentAvatar}
+              avatarInitials={avatarInitials}
+              onProjectBusDraftChange={setProjectBusDraft}
+              onProjectBusInterruptTargetsChange={setProjectBusInterruptTargets}
+              onGroupTopicDraftChange={setGroupTopicDraft}
+              onRefreshProjectBus={() => { void projectAgentBusQuery.refetch(); }}
+              onRefreshGroupRoom={() => { if (activeGroupRoomId) void activeGroupRoomQuery.refetch(); }}
+              onSendProjectBusMessage={handleSendProjectBusMessage}
+              onRevokeProjectBusMessage={handleRevokeProjectBusMessage}
+              onStartGroupRound={handleStartGroupRound}
+              onStopGroupRound={handleStopGroupRound}
+              onOpenMentionTarget={handleOpenMentionTarget}
+              onToggleExpandedGroupMessage={(messageId) =>
                 setExpandedGroupMessageIds((current) =>
                   current.includes(messageId)
                     ? current.filter((id) => id !== messageId)
                     : [...current, messageId],
-                ),
-            }}
-            session={{
-            activeCliAgentRunAvailable: Boolean(activeCliAgentRun),
-            activeCliAgentRunId: activeCliAgentRunId,
-            activeSessionId: activeSessionId,
-            blockingErrorMessage: sessionDetailErrorMessage,
-            cliAgentRunEmptyLabel: lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display.",
-            conversation: detail ? {
+                )
+              }
+            />
+            )}
+            sessionWorkspace={(
+            <ChatSessionWorkspacePanel
+              activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
+              activeCliAgentRunId={activeCliAgentRunId}
+              activeSessionId={activeSessionId}
+              blockingErrorMessage={sessionDetailErrorMessage}
+              cliAgentRunEmptyLabel={lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
+              conversation={detail ? {
                 sessionId: activeSessionId ?? detail.id,
                 title: detail.title,
                 phase: detail.currentPhase,
@@ -2912,24 +3335,24 @@ export function ChatCodingRoute() {
                 onStop: handleStopTurn,
                 onSafeGuidance: () => handleSubmitGuidance("safe"),
                 onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
-              } : null,
-            conversationFocused: statusRailCollapsed,
-            filePreview: {
+              } : null}
+              conversationFocused={statusRailCollapsed}
+              filePreview={{
                 changed: fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false,
                 errorMessage: fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : "",
                 file: fileContentQuery.data,
                 loadingLabel: t("loadingFilePreview"),
                 sourceLabel: detail?.title ?? t("currentSession"),
-              },
-            hasBlockingError: sessionDetailErrorState.blockingError,
-            hasTransientError: sessionDetailErrorState.transientError,
-            invalidChildSessionLinkMessage: invalidChildSessionLinkMessage,
-            lang: lang,
-            loadingSessionLabel: t("loadingSession"),
-            noSessionsLabel: t("noSessionsYet"),
-            notices: activeRuntimeNotices,
-            sessionsPending: sessionsQuery.isPending,
-            toolApproval: pendingSessionToolApproval || pendingToolGovernanceApproval ? {
+              }}
+              hasBlockingError={sessionDetailErrorState.blockingError}
+              hasTransientError={sessionDetailErrorState.transientError}
+              invalidChildSessionLinkMessage={invalidChildSessionLinkMessage}
+              lang={lang}
+              loadingSessionLabel={t("loadingSession")}
+              noSessionsLabel={t("noSessionsYet")}
+              notices={activeRuntimeNotices}
+              sessionsPending={sessionsQuery.isPending}
+              toolApproval={pendingSessionToolApproval || pendingToolGovernanceApproval ? {
                 pending: pendingToolApprovalPending,
                 rawTitle: pendingToolApprovalRawTitle,
                 riskLabel: pendingToolApprovalRisk,
@@ -2938,10 +3361,10 @@ export function ChatCodingRoute() {
                 actionPreview: pendingToolApprovalActionPreview,
                 sessionGrantScope: pendingSessionToolApproval?.sessionGrantScope,
                 toolName: pendingSessionToolApproval?.toolName || pendingToolApprovalLabels[0]?.id,
-              } : null,
-            transientErrorMessage: sessionDetailErrorMessage,
-            workspaceActiveTab: workspace.activeTab,
-            onApproveToolApproval: () => {
+              } : null}
+              transientErrorMessage={sessionDetailErrorMessage}
+              workspaceActiveTab={workspace.activeTab}
+              onApproveToolApproval={() => {
                 if (pendingSessionToolApproval) {
                   resolveSessionToolApprovalMutation.mutate({
                     request: pendingSessionToolApproval,
@@ -2953,8 +3376,8 @@ export function ChatCodingRoute() {
                   return;
                 }
                 resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "approve" });
-              },
-            onApproveToolForSession:
+              }}
+              onApproveToolForSession={
                 pendingSessionToolApproval
                 && pendingSessionToolApproval.approval !== "always"
                 && (
@@ -2970,8 +3393,8 @@ export function ChatCodingRoute() {
                     decision,
                   });
                 }
-                : undefined,
-            onRejectToolApproval: () => {
+                : undefined}
+              onRejectToolApproval={() => {
                 if (pendingSessionToolApproval) {
                   resolveSessionToolApprovalMutation.mutate({
                     request: pendingSessionToolApproval,
@@ -2983,31 +3406,32 @@ export function ChatCodingRoute() {
                   return;
                 }
                 resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "reject" });
-              },
-            }}
+              }}
+            />
+            )}
           />
         )}
       />
       )}
-      rightResizeHandle={(
-        <ChatWorkbenchRightResizeHandle
-          rightVisible={responsiveLayout.rightVisible}
-          statusRailCollapsed={statusRailCollapsed}
-          rightActive={dragState?.side === "right"}
-          rightWidth={rightPanelWidth}
-          rightMin={MIN_RIGHT_PANEL_WIDTH}
-          rightMax={MAX_RIGHT_PANEL_WIDTH}
-          rightClassName={styles.resizeHandleRight}
-          resizeRightLabel={t("resizeRightPanel")}
-          collapseRightLabel={lang === "zh" ? "收起状态栏" : "Collapse status rail"}
-          expandRightLabel={lang === "zh" ? "展开状态栏" : "Expand status rail"}
-          onToggleRight={() => setRightPaneCollapsed((current) => !current)}
-          onRightPointerDown={(event) => handleResizeStart("right", event)}
-          onRightKeyDown={(event) => handleResizeKeyDown("right", event)}
-        />
-      )}
+      rightResizeHandle={
+      responsiveLayout.rightVisible ? <PaneCollapseHandle
+        side="right"
+        collapsed={statusRailCollapsed}
+        separatorLabel={t("resizeRightPanel")}
+        collapseLabel={lang === "zh" ? "收起状态栏" : "Collapse status rail"}
+        expandLabel={lang === "zh" ? "展开状态栏" : "Expand status rail"}
+        className={styles.resizeHandleRight}
+        active={dragState?.side === "right"}
+        valueNow={rightPanelWidth}
+        valueMin={MIN_RIGHT_PANEL_WIDTH}
+        valueMax={MAX_RIGHT_PANEL_WIDTH}
+        onToggle={() => setRightPaneCollapsed((current) => !current)}
+        onPointerDown={(event) => handleResizeStart("right", event)}
+        onKeyDown={(event) => handleResizeKeyDown("right", event)}
+      /> : null
+      }
       conversationIndex={(
-      <ChatWorkbenchConversationIndexRailHost
+      <ChatConversationIndexRail
         conversationIndexPaneClassName={conversationIndexPaneClassName}
         conversationIndexCollapsed={conversationIndexCollapsed}
         conversationIndexOverlayOpen={conversationIndexOverlayOpen}
@@ -3068,59 +3492,60 @@ export function ChatCodingRoute() {
       />
       )}
     >
-      <ChatWorkbenchSecondaryDialogs
-        cacheDetail={
-          cacheDetailOpen
-            ? {
-                available: cacheDetailAvailable,
-                averageCacheObservedTurnCount,
-                cacheCompositionAverageLabel,
-                cacheCompositionAverageValue,
-                cacheCompositionPercent,
-                cacheCompositionTitle,
-                cacheCompositionUpperBoundLabel,
-                cacheComputedOverestimatedInputTokens,
-                cacheDetailDialogTitle,
-                cachePromptCompositionTotalTokens,
-                cachePromptDonutSegments,
-                cacheProviderExtraCachedInputTokens,
-                cacheCalibrationReason,
-                cacheCalibrationSummaryText,
-                closeLabel: lang === "zh" ? "关闭缓存详情" : "Close cache details",
-                lang,
-                missingSegmentLabel: cacheCompositionSegmentLabel("missing", "missing", t),
-                numberFormatter,
-                onClose: closeCacheDetail,
-                previousCacheHitLabel: t("previousCacheHit"),
-                providerCachedInputTokens,
-                providerCacheInputTokens,
-                trueCacheDonutSegments,
-                upperBoundCachedInputTokens,
-                upperBoundCacheCompositionPercent,
-                upperBoundCacheInputTokens,
-              }
-            : null
-        }
-        agentCreate={{
-          open: agentCreateWizardOpen,
-          triggerRef: agentCreateTriggerRef,
-          triggerId: "chat-agent-create-trigger",
-          onClose: () => setAgentCreateWizardOpen(false),
-          onCreated: (agent) => {
-            setSelectedAgentId(agent.agentId);
-            setRightIndexPanel("conversations");
-          },
-          onStartConversation: async (agent) => {
-            if (!agent.directSessionId) return false;
-            handleOpenAgent(agent);
-            return true;
-          },
-          onOpenAdvancedConfig: (agent) => {
-            setAgentCreateWizardOpen(false);
-            navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config&returnTo=${encodeURIComponent("/chat")}`);
-          },
-        }}
-      />
+      {cacheDetailOpen && cacheDetailAvailable ? (
+        <Suspense fallback={null}>
+          <CacheDetailDialog
+            averageCacheObservedTurnCount={averageCacheObservedTurnCount}
+            cacheCompositionAverageLabel={cacheCompositionAverageLabel}
+            cacheCompositionAverageValue={cacheCompositionAverageValue}
+            cacheCompositionPercent={cacheCompositionPercent}
+            cacheCompositionTitle={cacheCompositionTitle}
+            cacheCompositionUpperBoundLabel={cacheCompositionUpperBoundLabel}
+            cacheComputedOverestimatedInputTokens={cacheComputedOverestimatedInputTokens}
+            cacheDetailDialogTitle={cacheDetailDialogTitle}
+            cachePromptCompositionTotalTokens={cachePromptCompositionTotalTokens}
+            cachePromptDonutSegments={cachePromptDonutSegments}
+            cacheProviderExtraCachedInputTokens={cacheProviderExtraCachedInputTokens}
+            cacheCalibrationReason={cacheCalibrationReason}
+            cacheCalibrationSummaryText={cacheCalibrationSummaryText}
+            closeLabel={lang === "zh" ? "关闭缓存详情" : "Close cache details"}
+            lang={lang}
+            missingSegmentLabel={cacheCompositionSegmentLabel("missing", "missing", t)}
+            numberFormatter={numberFormatter}
+            onClose={closeCacheDetail}
+            previousCacheHitLabel={t("previousCacheHit")}
+            providerCachedInputTokens={providerCachedInputTokens}
+            providerCacheInputTokens={providerCacheInputTokens}
+            trueCacheDonutSegments={trueCacheDonutSegments}
+            upperBoundCachedInputTokens={upperBoundCachedInputTokens}
+            upperBoundCacheCompositionPercent={upperBoundCacheCompositionPercent}
+            upperBoundCacheInputTokens={upperBoundCacheInputTokens}
+          />
+        </Suspense>
+      ) : null}
+      {agentCreateWizardOpen ? (
+        <Suspense fallback={null}>
+          <AgentCreateWizardDialog
+            open={agentCreateWizardOpen}
+            triggerRef={agentCreateTriggerRef}
+            triggerId="chat-agent-create-trigger"
+            onClose={() => setAgentCreateWizardOpen(false)}
+            onCreated={(agent) => {
+              setSelectedAgentId(agent.agentId);
+              setRightIndexPanel("conversations");
+            }}
+            onStartConversation={async (agent) => {
+              if (!agent.directSessionId) return false;
+              handleOpenAgent(agent);
+              return true;
+            }}
+            onOpenAdvancedConfig={(agent) => {
+              setAgentCreateWizardOpen(false);
+              navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config&returnTo=${encodeURIComponent("/chat")}`);
+            }}
+          />
+        </Suspense>
+      ) : null}
     </ChatSessionWorkbenchShell>
   );
 }
