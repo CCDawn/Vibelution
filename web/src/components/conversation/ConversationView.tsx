@@ -1908,7 +1908,8 @@ export function ConversationView({
             messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
           >
-            {renderTimelineNodes(processCells, { attachToolApproval: true })}
+            {/* Approvals stay composer-adjacent only (toolApprovalFallback); never re-attach into process rows. */}
+            {renderTimelineNodes(processCells, { attachToolApproval: false })}
           </ConversationProcessDisclosure>
         ) : null}
         {finalCells.length > 0 ? (
@@ -4084,9 +4085,15 @@ export function ConversationView({
                   ) : null}
                   {contextNode}
 
-                  {codexTranscriptNode}
-                  {compactActiveTurnPlaceholderNode}
+                  {/*
+                    Codex-aligned order: process / tools first, then final answer surface.
+                    - renderCodexTranscriptCells already does processCells → finalCells inside.
+                    - When tools only exist on feedback/timeline (alongside), processNode must
+                      still precede codexTranscriptNode so the answer is not above the tools.
+                  */}
                   {processNode}
+                  {compactActiveTurnPlaceholderNode}
+                  {codexTranscriptNode}
                   {turnStatusNode}
                   {shouldRenderLegacyTurnError ? (
                     <div className={styles.turnErrorNotice} role="status" aria-live="polite">

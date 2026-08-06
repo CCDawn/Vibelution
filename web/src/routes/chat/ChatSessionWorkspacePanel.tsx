@@ -109,25 +109,32 @@ export function ChatSessionWorkspacePanel({
       return conversationLoadingFallback;
     }
 
-    // Sticky host above the transcript (main chat column), not nested under left-aligned
-    // tool rows inside process disclosure — that made approvals sit on the left and look broken.
-    const approvalDialog = toolApproval ? (
-      <ChatToolApprovalDialog
-        lang={lang}
-        pending={toolApproval.pending}
-        rawTitle={toolApproval.rawTitle}
-        riskLabel={toolApproval.riskLabel}
-        scopeLabel={toolApproval.scopeLabel}
-        toolLabels={toolApproval.toolLabels}
-        actionPreview={toolApproval.actionPreview}
-        sessionGrantScope={toolApproval.sessionGrantScope}
-        toolName={toolApproval.toolName}
-        variant="banner"
-        onApprove={onApproveToolApproval}
-        onApproveForSession={onApproveToolForSession}
-        onReject={onRejectToolApproval}
-      />
-    ) : null;
+    // Composer-adjacent only: ConversationView mounts the card just above the input
+    // (toolApprovalFallback). Do not stick to the column top or re-attach into process rows.
+    const approvalSurface = toolApproval
+      ? {
+          toolName: toolApproval.toolName,
+          content: (
+            <div data-chat-tool-approval-host="composer">
+              <ChatToolApprovalDialog
+                lang={lang}
+                pending={toolApproval.pending}
+                rawTitle={toolApproval.rawTitle}
+                riskLabel={toolApproval.riskLabel}
+                scopeLabel={toolApproval.scopeLabel}
+                toolLabels={toolApproval.toolLabels}
+                actionPreview={toolApproval.actionPreview}
+                sessionGrantScope={toolApproval.sessionGrantScope}
+                toolName={toolApproval.toolName}
+                variant="banner"
+                onApprove={onApproveToolApproval}
+                onApproveForSession={onApproveToolForSession}
+                onReject={onRejectToolApproval}
+              />
+            </div>
+          ),
+        }
+      : null;
 
     return (
       <div className={conversationFocused ? `${styles.conversationShell} ${styles.conversationFrameFocus}` : styles.conversationShell}>
@@ -135,11 +142,6 @@ export function ChatSessionWorkspacePanel({
           {hasTransientError ? (
             <div className={styles.inlineNotice} role="status">
               {transientErrorMessage}
-            </div>
-          ) : null}
-          {approvalDialog ? (
-            <div className={styles.toolApprovalHost} data-chat-tool-approval-host="sticky">
-              {approvalDialog}
             </div>
           ) : null}
           <ChatRuntimeNoticeStack lang={lang} notices={notices} />
@@ -155,7 +157,7 @@ export function ChatSessionWorkspacePanel({
             >
               <ChatConversationComposerBridge
                 {...conversation}
-                toolApproval={null}
+                toolApproval={approvalSurface}
                 composer={conversation.composer}
                 fallback={conversationLoadingFallback}
               />

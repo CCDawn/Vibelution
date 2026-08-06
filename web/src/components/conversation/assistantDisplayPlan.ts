@@ -232,8 +232,9 @@ export function resolveAssistantDisplayPlan(input: {
     suppressProjectedProcess,
     suppressProjectedTurnStatus: Boolean(surface?.suppressProjectedTurnStatus),
     suppressProjectedError,
-    // In package_cells mode process lives in cells when surface suppresses process;
-    // otherwise allow process timeline alongside answer cells.
+    // Codex-like: process timeline may sit *before* final answer cells when the
+    // surface only owns the answer and tools live on feedback/timeline.
+    // Never alongside when cells already render process (would reverse/dupe tools).
     shouldRenderNativeProcessAlongsideAnswer: (
       (packageOwnsFinalAnswer || nativeOwnsFinalAnswer)
       && Boolean(input.hasAgentMessageTimeline)

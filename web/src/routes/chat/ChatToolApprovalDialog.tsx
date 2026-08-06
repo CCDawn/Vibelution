@@ -27,7 +27,7 @@ type ChatToolApprovalDialogProps = {
   actionPreview?: string;
   sessionGrantScope?: Record<string, unknown>;
   toolName?: string;
-  /** banner: sticky host; inline: under tool activity in transcript. */
+  /** banner: composer-adjacent bar; inline: under tool activity in transcript. */
   variant?: "banner" | "inline";
   onApprove: () => void;
   onApproveForSession?: () => void;
@@ -35,10 +35,10 @@ type ChatToolApprovalDialogProps = {
 };
 
 /**
- * Codex-aligned approval surface:
+ * Compact Codex-aligned approval surface (composer-adjacent by default):
  * - Title: Allow this action? / 允许执行？
- * - Body: concrete command or tool preview
- * - Actions: Yes · Always (session) · No
+ * - Body: one-line command preview
+ * - Actions: Yes · Always · No
  * - Hotkeys: y / a / n (when not pending)
  */
 export function ChatToolApprovalDialog({
@@ -69,6 +69,10 @@ export function ChatToolApprovalDialog({
   const primaryToolName = toolName || toolLabels[0]?.id || "";
   const displayName = toolApprovalDisplayName(primaryToolName, lang);
   const preview = String(actionPreview || toolApprovalActionPreview(undefined, primaryToolName) || rawTitle || "").trim();
+  const grantText = toolApprovalSessionGrantDescription(sessionGrantScope, lang).trim();
+  const showGrant = Boolean(grantText) && onApproveForSession;
+  const riskText = String(riskLabel || "").trim();
+  const scopeText = String(scopeLabel || "").trim();
   const visibleLabels = toolLabels.slice(0, 4);
   const extraCount = Math.max(0, toolLabels.length - visibleLabels.length);
 
@@ -120,27 +124,29 @@ export function ChatToolApprovalDialog({
         aria-busy={pending}
       >
         <div className={styles.icon} aria-hidden="true">
-          <ShieldAlert size={18} />
+          <ShieldAlert size={16} />
         </div>
         <div className={styles.body}>
           <div className={styles.header}>
             <strong id={titleId} className={styles.headerTitle}>{toolApprovalCodexTitle(lang)}</strong>
-            <span id={riskId} className={styles.scopeBadge}>{riskLabel}</span>
-            <span className={styles.scopeBadge} id={scopeId}>{scopeLabel}</span>
-            <span className={styles.scopeBadge}>{displayName}</span>
+            {riskText ? <span id={riskId} className={styles.scopeBadge}>{riskText}</span> : <span id={riskId} className="sr-only" />}
+            {scopeText ? <span className={styles.scopeBadge} id={scopeId}>{scopeText}</span> : <span id={scopeId} className="sr-only" />}
+            {displayName ? <span className={styles.scopeBadge}>{displayName}</span> : null}
           </div>
           <p id={descriptionId} className={styles.lead}>
             {lang === "zh"
-              ? "「是」仅本次 · 「始终」按下列范围 · 「否」拒绝"
-              : "Yes = once · Always = scope below · No = decline"}
+              ? "是=本次 · 始终=下列范围 · 否=拒绝"
+              : "Yes=once · Always=scope · No=decline"}
           </p>
           <pre id={previewId} className={styles.commandPreview} title={preview}>
             {preview || (lang === "zh" ? "（无命令预览）" : "(no command preview)")}
           </pre>
-          <p id={grantId} className={styles.grantDescription}>
-            {toolApprovalSessionGrantDescription(sessionGrantScope, lang)}
-          </p>
-          {/* Keep labels for a11y without visual chip clutter that pulled focus left. */}
+          {showGrant ? (
+            <p id={grantId} className={styles.grantDescription}>{grantText}</p>
+          ) : (
+            <span id={grantId} className="sr-only" />
+          )}
+          {/* Keep labels for a11y without visual chip clutter. */}
           <div id={toolListId} className={styles.toolList} title={rawTitle} role="list">
             {visibleLabels.length
               ? visibleLabels.map((item) => (
