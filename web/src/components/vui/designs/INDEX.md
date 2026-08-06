@@ -48,6 +48,7 @@
 | `VBoardWorkbenchPage` | [layout/pages.md](./layout/pages.md#vboardworkbenchpage) |
 | `VCanvasWorkbenchPage` | [layout/pages.md](./layout/pages.md#vcanvasworkbenchpage) |
 | `VTrackWorkbenchPage` | [layout/pages.md](./layout/pages.md#vtrackworkbenchpage) |
+| `VSessionWorkbenchPage` | [layout/pages.md](./layout/pages.md#vsessionworkbenchpage) |
 | `VSplitWorkspace` | [layout/pages.md](./layout/pages.md#vsplitworkspace) |
 
 ## Layout — chrome & structure
@@ -125,5 +126,4 @@
 
 | 候选 | 聚类 | 为何不立刻建 | 设计占位 |
 | --- | --- | --- | --- |
-| `VSessionWorkbenchPage` | Chat 双轨 | 先验证能否用 list-detail + domain 槽 | [layout/planned.md](./layout/planned.md#vsessionworkbenchpage) |
 | `VFilterListDetailPage` | Agents 筛选+列表+详情 | 先塞进 ListDetail 的 list 槽 | [layout/planned.md](./layout/planned.md#vfilterlistdetailpage) |

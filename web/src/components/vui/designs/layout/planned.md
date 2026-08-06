@@ -5,47 +5,20 @@
 
 ## VSessionWorkbenchPage
 
+> **已实现** — 设计专节见 [pages.md#vsessionworkbenchpage](./pages.md#vsessionworkbenchpage)。
+
 ### 功能
-Chat 会话工作台：状态轨 + 主会话 + 可选工具轨；响应式 overlay。
+（见 pages.md）会话工作台 recipe。
 
 ### 适用范围
-- **适用**：Chat 双轨会话壳（确认 list-detail + domain 槽不够之后）。
-- **不适用**：通用主从页 → `VListDetailPage`；运维表 → `VDenseOpsPage`。
-
-| 场景 | 选择 |
-| --- | --- |
-| Chat 会话工作台 | 本组件（拟） |
-| Skills 主从 | `VListDetailPage` |
+（见 pages.md）
 
 ### 使用方式
-```tsx
-// 拟 API（实现前可调）
-<VSessionWorkbenchPage
-  ariaLabel="会话"
-  statusRail={...}
-  session={...}
-  toolRail={...}
-  domainRecipe="chat-session-workbench"
-/>
-```
+（见 pages.md）
 
-| Prop / 槽位 | 说明 | 设计注意 |
-| --- | --- | --- |
-| statusRail / session / toolRail | 三区 | 宽度走 chat layoutId |
-| 响应式 overlay | 小屏侧栏 | 勿再手写第二套 shell |
-
-### 非职责
-- 不替代通用 list-detail。
-
-### 为何暂缓（2026-08 复核）
-- Chat 已有 `data-vui-recipe="chat-session-workbench"` + `WORKBENCH_LAYOUT_IDS.chat`。
-- **已完成几何 host 抽取**：`chat/ChatSessionWorkbenchShell.tsx`（recipe 标记 + layoutRef 根）+ `useChatWorkbenchLayout`（双写宽度 / 响应式）。
-- 双写宽度（`shellStore` ↔ `pane-layouts.v1`）与响应式 overlay 仍是 domain 例外；`VListDetailPage` / `VTrackWorkbenchPage` **不能**直接替换。
-- **下一实现门槛**：把 workbench 子树拆成 shell 槽（`statusRail | center | conversationIndex` + resize），再让 `VSessionWorkbenchPage` 只包槽位；禁止在 ChatCodingRouteWorkbench 继续堆顶层几何。
-
-### 反冗余
-- 落地后 Chat 禁止再手写顶层 shell。
-- 在门槛未达成前，禁止平行 `VChatPage` / 第三种 session shell。
+### 迁移备注
+- Chat 经 `ChatSessionWorkbenchShell` 适配槽位名（`center` → `session`，`conversationIndex` → `indexRail`）。
+- 双写宽度 / 响应式仍属 `useChatWorkbenchLayout`。
 
 ---
 

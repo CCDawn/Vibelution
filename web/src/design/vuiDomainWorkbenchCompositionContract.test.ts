@@ -70,22 +70,29 @@ describe("Wave 6B Memory knowledge workbench composition", () => {
 });
 
 describe("Chat session workbench composition", () => {
-  it("marks Chat dual-pane shell recipe and registry layout id on the geometry host", () => {
+  it("routes Chat dual-pane through VSessionWorkbenchPage slots", () => {
     // ChatCodingRoute.tsx is a thin re-export; geometry host is ChatSessionWorkbenchShell.
     const entry = readFileSync(resolve(routesRoot, "ChatCodingRoute.tsx"), "utf8");
     const workbench = readFileSync(resolve(routesRoot, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
     const shell = readFileSync(resolve(routesRoot, "chat/ChatSessionWorkbenchShell.tsx"), "utf8");
+    const recipe = readFileSync(
+      resolve(routesRoot, "../components/vui/layout/VSessionWorkbenchPage.tsx"),
+      "utf8",
+    );
     expect(entry).toContain("ChatCodingRouteWorkbench");
     expect(workbench).toContain("ChatSessionWorkbenchShell");
     expect(workbench).toContain("useChatWorkbenchLayout");
-    expect(shell).toContain('data-vui-recipe="chat-session-workbench"');
-    expect(shell).toContain('data-vui-domain-recipe="chat-dual-pane"');
+    expect(workbench).toContain("statusRail={");
+    expect(workbench).toContain("center={");
+    expect(workbench).toContain("conversationIndex={");
+    expect(shell).toContain("VSessionWorkbenchPage");
+    expect(shell).toContain('domainRecipe="chat-session-workbench"');
     expect(shell).toContain("WORKBENCH_LAYOUT_IDS.chat");
-    expect(shell).toContain("data-vui-layout-id");
-    expect(shell).toContain('data-vui="chat-session-workbench-shell"');
-    // Full VSessionWorkbenchPage stays planned until slot migration finishes.
-    expect(workbench).not.toContain("VSessionWorkbenchPage");
-    expect(shell).not.toContain("VSessionWorkbenchPage");
+    expect(shell).toContain("session={center}");
+    expect(shell).toContain("indexRail={conversationIndex}");
+    expect(recipe).toContain('data-vui-recipe="session-workbench-page"');
+    expect(recipe).toContain("indexRail");
+    expect(recipe).toContain("statusRail");
   });
 });
 
