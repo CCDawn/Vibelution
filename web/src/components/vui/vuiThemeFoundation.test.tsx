@@ -163,7 +163,7 @@ describe("VUI dual-theme foundation", () => {
   });
 
   it("keeps the app readable without relying on browser zoom", () => {
-    expect(baseSource).toContain("font-size: 16px");
+    expect(baseSource).toContain("font-size: var(--vui-type-body-size)");
     expect(baseSource).not.toContain("font-size: 14px");
     expect(baseSource).not.toContain("font-size: 15px");
   });
@@ -258,7 +258,12 @@ describe("VUI dual-theme foundation", () => {
       "--vui-font-sm",
       "--vui-font-md",
       "--vui-font-chat",
+      "--vui-font-lg",
+      "--vui-font-xl",
+      "--vui-type-body-size",
+      "--vui-type-chat-size",
       "--vui-line-readable",
+      "--vui-weight-semibold",
       "--vui-control-height-compact",
       "--vui-control-height-comfortable",
     ]) {
@@ -270,7 +275,7 @@ describe("VUI dual-theme foundation", () => {
     expect(tokensSource).toContain("--vui-font-md: 1rem;");
     expect(tokensSource).toContain("--vui-font-chat: 1.0625rem;");
     expect(tokensSource).toContain("--vui-font-title: 1.1875rem;");
-    expect(baseSource).toContain("font-size: 16px");
+    expect(baseSource).toContain("font-size: var(--vui-type-body-size)");
     expect(tailwindSource).toContain(":where(small)");
     expect(tailwindSource).toContain(".text-xs");
     expect(tailwindSource).toContain("font-size: var(--vui-font-xs)");

@@ -87,8 +87,8 @@ export function VTabs({
               "data-[state=active]:shadow-none data-[state=active]:border data-[state=active]:border-[var(--vui-border-subtle)]",
               "disabled:pointer-events-none disabled:opacity-45",
               dense
-                ? "min-h-[calc(var(--vui-control-height-sm)-2px)] text-[var(--vui-font-xs)]"
-                : "min-h-[calc(var(--vui-control-height-md)-2px)] text-[var(--vui-font-sm)]",
+                ? "min-h-[calc(var(--vui-control-height-sm)-2px)] [font-size:var(--vui-type-caption-size)]"
+                : "min-h-[calc(var(--vui-control-height-md)-2px)] [font-size:var(--vui-type-control-size)]",
               triggerClassName,
             )}
             data-slot="tabs-trigger"
