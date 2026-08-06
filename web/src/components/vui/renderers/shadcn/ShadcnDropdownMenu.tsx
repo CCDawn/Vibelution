@@ -53,7 +53,7 @@ const contentBaseClass = [
 
 const itemBaseClass = [
   "relative flex w-full min-w-0 cursor-default select-none items-center gap-2",
-  "rounded-[calc(var(--radius-control)-2px)] px-2 py-1.5 text-left text-[var(--vui-font-sm)] font-semibold",
+  "rounded-[calc(var(--radius-control)-2px)] px-2 py-1.5 text-left [font-size:var(--vui-type-control-size)] font-semibold",
   "text-[var(--fg-secondary)] outline-none",
   "data-[highlighted]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)]",
   "data-[highlighted]:text-[var(--fg-primary)]",

@@ -127,17 +127,70 @@
   --border-strong: rgba(226, 232, 240, 0.16);
   --border-hairline: rgba(226, 232, 240, 0.07);
 
-  --font-display: "Segoe UI Variable Display", "Segoe UI", sans-serif;
-  --font-body: "Segoe UI Variable Text", "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
-  --vui-font-xs: 0.875rem;
-  --vui-font-sm: 0.9375rem;
-  --vui-font-md: 1rem;
-  --vui-font-chat: 1.0625rem;
-  --vui-font-title: 1.1875rem;
+  /*
+   * Typography system (feat/typography-unify)
+   * References: Material Type Scale, Apple HIG, Radix Themes, shadcn/Tailwind.
+   * Workbench stays dense: no viewport-scaled hero type; prefer semantic roles
+   * over one-off rem literals. Usage: [font-size:var(--vui-font-*)], never
+   * text-[var(--vui-font-*)] (Tailwind maps that to color).
+   */
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, monospace;
+
+  /* Primitive size ladder (rem @ 16px root) */
+  --vui-font-2xs: 0.75rem; /* 12 — dense meta, rare */
+  --vui-font-xs: 0.875rem; /* 14 — caption / chip / toolbar */
+  --vui-font-sm: 0.9375rem; /* 15 — control / list secondary */
+  --vui-font-md: 1rem; /* 16 — body default */
+  --vui-font-chat: 1.0625rem; /* 17 — conversation readable */
+  --vui-font-lg: 1.125rem; /* 18 — emphasis body / empty states */
+  --vui-font-title: 1.1875rem; /* 19 — section / route title */
+  --vui-font-xl: 1.375rem; /* 22 — page title (rare) */
+
+  /* Line-height pairs */
+  --vui-line-none: 1;
   --vui-line-tight: 1.25;
+  --vui-line-snug: 1.375;
+  --vui-line-normal: 1.5;
   --vui-line-readable: 1.58;
-  --font-size-micro: var(--vui-font-xs);
+  --vui-line-relaxed: 1.65;
+
+  /* Weight ladder */
+  --vui-weight-regular: 400;
+  --vui-weight-medium: 500;
+  --vui-weight-semibold: 600;
+  --vui-weight-bold: 700;
+
+  /* Tracking (labels / micro UI) */
+  --vui-tracking-tight: -0.01em;
+  --vui-tracking-normal: 0;
+  --vui-tracking-wide: 0.02em;
+  --vui-tracking-label: 0.04em;
+
+  /*
+   * Semantic roles → size + line-height (+ optional weight via recipes).
+   * Prefer these in new UI; keep --vui-font-* for fine control.
+   */
+  --vui-type-caption-size: var(--vui-font-xs);
+  --vui-type-caption-line: var(--vui-line-tight);
+  --vui-type-label-size: var(--vui-font-xs);
+  --vui-type-label-line: var(--vui-line-tight);
+  --vui-type-control-size: var(--vui-font-sm);
+  --vui-type-control-line: var(--vui-line-tight);
+  --vui-type-body-size: var(--vui-font-md);
+  --vui-type-body-line: var(--vui-line-readable);
+  --vui-type-chat-size: var(--vui-font-chat);
+  --vui-type-chat-line: var(--vui-line-readable);
+  --vui-type-emphasis-size: var(--vui-font-lg);
+  --vui-type-emphasis-line: var(--vui-line-snug);
+  --vui-type-title-size: var(--vui-font-title);
+  --vui-type-title-line: var(--vui-line-tight);
+  --vui-type-display-size: var(--vui-font-xl);
+  --vui-type-display-line: var(--vui-line-tight);
+
+  /* Legacy semantic aliases (keep stable for existing consumers) */
+  --font-size-micro: var(--vui-font-2xs);
   --font-size-caption: var(--vui-font-xs);
   --font-size-small: var(--vui-font-sm);
   --font-size-body: var(--vui-font-md);

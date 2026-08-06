@@ -13,6 +13,7 @@
 @source "./vuiSurfaceRecipes.ts";
 @source "./vuiSurfaceAlphaPolicy.ts";
 @source "./vuiChromeRecipes.ts";
+@source "./typographyRecipes.ts";
 
 /*
  * Chat is the primary workbench surface and is kept in the shell CSS entry
