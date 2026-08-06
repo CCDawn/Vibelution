@@ -2262,7 +2262,8 @@ describe("AgentsRoute layout contract", () => {
   it("renders every Agent as a person name plus colored functional role tag", () => {
     expect(routeSource).toContain("agentDisplayInfo(agent, lang)");
     expect(routeSource).toContain("roleTone: display.tone");
-    expect(denseListSource).toContain("function roleToneClass");
+    expect(denseListSource).toContain("data-tone={row.roleTone}");
+    expect(denseListSource).toContain("ROLE_TAG_BASE");
     expect(routeSource).toContain("display.functionLabel");
   });
 

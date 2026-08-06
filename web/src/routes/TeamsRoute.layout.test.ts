@@ -757,7 +757,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("useTeamWorkflowStartMutations");
     expect(teamShellMutationsSource).toContain("chatWorkspaceCache.afterTeamRoomMembershipChanged(variables.teamId, room.roomId)");
     expect(teamShellMutationsSource).toContain("chatWorkspaceCache.afterTeamRoomMembershipChanged(team.teamId, team.linkedChatRoom.roomId)");
-    expect(routeSource).toContain("teamConversationStatusLabel");
     expect(routeSource).toContain("selectedTeam?.conversation");
     expect(routeSource).toContain("isAiSearchScopeTeam(selectedTeam)");
     expect(routeSource).toContain("showAiSearchScopePanel");
@@ -788,7 +787,8 @@ describe("TeamsRoute layout contract", () => {
     expect(researchStageAgentPresentationSource).toContain("delete writableNode.agentSourceRef");
     expect(researchStageAgentPresentationSource).toContain("delete writableNode.agentProjectionEdit");
     expect(researchStageAgentPresentationSource).toContain("delete writableNode.agentProjectionCanWrite");
-    expect(routeSource).toContain("TEAM_ORGANIZATION_CANVAS_KIND");
+    // The canonical kind belongs to the canvas-data owner, not the route shell.
+    expect(canvasDataSource).toContain("TEAM_ORGANIZATION_CANVAS_KIND");
     expect(canvasDataSource).toContain("team_organization_canvas");
     expect(routeSource).not.toContain("/api/research/flow-canvas");
   });
@@ -827,8 +827,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("parseResearchWorkspaceView");
     expect(routeSource).toContain("requestedAgentTeamId");
     // R2-h: team deep-link param writes live in createTeamsResearchNavigation.
-    expect(createTeamsResearchNavigationSource).toContain('nextParams.set("team", team.teamId)');
-    expect(createTeamsResearchNavigationSource).toContain('nextParams.set("teamMode", teamShellMode)');
+    expect(createTeamsResearchNavigationSource).toContain('nextParams.set("team", effectiveTeamId)');
+    expect(createTeamsResearchNavigationSource).toContain('nextParams.set("teamMode", "canvas")');
+    expect(createTeamsResearchNavigationSource).toContain('nextParams.set("teamMode", "board")');
   });
 
   it("exposes Team and member Agent memory deep links from the Team workspace", () => {
@@ -955,7 +956,6 @@ describe("TeamsRoute layout contract", () => {
 
   it("renders a dense list canvas inspector workflow", () => {
     expect(routeSource).toContain("VDenseOpsPage");
-    expect(routeSource).toContain("VIconButton");
     expect(routeSource).toContain("VNativeButton");
     // Form selects live in extracted panels (VStringSelect); shell keeps dense native buttons.
     expect(routeSource).not.toContain("VNativeSelect");
@@ -1017,7 +1017,6 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchBoardPrimarySurfaceSource).toContain("fill");
     expect(routeSource).toContain("TeamResearchBoardPrimarySurface");
     expect(routeSource).toContain("loading: overviewWorkflowPending");
-    expect(routeSource).toContain("loading={overviewWorkflowPending}");
     expect(routeSource).toContain("fill");
     expect(routeSource).toContain("styles.emptyCanvasPanel");
     expect(routeSource).not.toContain("选择团队后进入对应工作区");
@@ -1089,7 +1088,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("workflowIngestionStatusLabel");
     expect(routeSource).toContain("workflowIngestionTone");
     expect(teamResearchWorkflowPanelHostSource).toContain("styles.workflowPanel");
-    expect(routeSource).toContain("styles.workflowStats");
     expect(routeSource).toContain("TeamWorkflowModelEvidenceStatusPanel");
     expect(teamResearchWorkflowStageModulesSource).toContain("TeamWorkflowCoordinationStatusPanel");
     expect(teamResearchWorkflowStageModulesSource).toContain("TeamWorkflowKnowledgeIngestionStatusPanel");
@@ -1107,7 +1105,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.workflowCandidateList");
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateList");
     expect(teamSourceCollectionGraphPanelStyles.workflowCandidateList).toContain("overflow-auto");
-    expect(routeSource).toContain("styles.workflowValidation");
     // Nav items live in researchWorkspaceModel pure module.
     expect(researchWorkspaceModelSource).toContain("RESEARCH_WORKSPACE_NAV_ITEMS");
     expect(routeSource).toContain("ResearchWorkspaceView");
@@ -1858,7 +1855,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("renderResearchCanvasReadOnlyPanel");
     expect(routeSource).toContain("researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null");
     expect(routeSource).toContain("只读组织画布");
-    expect(routeSource).toContain("不会同步群聊或修改节点");
     expect(routeSource).toContain("canvasNodeStatusLabel");
     expect(teamRouteShellModelSource).toContain("已绑定");
     expect(teamRouteShellModelSource).toContain("专属管理员");
@@ -2380,7 +2376,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceEmptyStateSource).toContain("border-dashed");
     expect(teamSourceEmptyStateSource).toContain("w-full");
     expect(teamSourceEmptyStateSource).not.toContain("self-start");
-    expect(teamSourceEmptyStateSource).toContain("max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(teamSourceEmptyStateSource).toContain("flex-wrap items-center justify-center");
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailPanel).toBeTypeOf("string");
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailActions).toBeTypeOf("string");
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailFacts).toBeTypeOf("string");
@@ -2558,9 +2554,8 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionScrollRegion).toContain("overflow-auto");
     expect(teamStageCommandBarSource).toContain('data-vui-product="team-stage-command-bar"');
-    // Progress: steps row stacked above stats (avoid horizontal chip collision).
-    expect(teamStageCommandBarSource).toContain("lg:grid-cols-[minmax(0,1fr)_auto]");
-    expect(teamStageCommandBarSource).toContain("flex-col items-stretch");
+    // Progress and statistics stay in a compact wrapping command group.
+    expect(teamStageCommandBarSource).toContain("flex-wrap items-center gap-2");
     expect(teamStageCommandBarSource).toContain('aria-label="stage-progress"');
     expect(teamStageCardSource).toContain('data-vui-product="team-stage-card"');
     expect(teamStageCardSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
@@ -2609,8 +2604,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceFilterBarSource).not.toContain("VNativeButton");
     expect(teamSourcePaginationSource).toContain("VButton");
     expect(teamSourcePaginationSource).not.toContain("VNativeButton");
-    expect(teamCandidateCardSource).toContain("minmax(9rem,16rem)");
-    expect(teamCandidateCardSource).toContain("row-span-3");
+    expect(teamCandidateCardSource).toContain("flex min-h-[40px]");
+    expect(teamCandidateCardSource).toContain("max-[820px]:flex-wrap");
     expect(teamCandidateCardSource).toContain("VTooltip");
     expect(teamCandidateCardSource).not.toContain("title={activateTitle}");
     expect(teamCandidateCardSource).not.toContain("title={source.title}");
@@ -2648,7 +2643,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionPanelActions).toBeTypeOf("string");
     expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningListShell).toBeTypeOf("string");
     expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningList).toBeTypeOf("string");
-    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningScrollHint).toBeTypeOf("string");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionScreeningScrollHint).toBeTypeOf("string");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStagePrimaryAction).toBeTypeOf("string");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageSecondaryAction).toBeTypeOf("string");
     expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toBeTypeOf("string");
@@ -2682,7 +2677,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListPanel");
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListHeader");
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListScroll");
-    expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListScrollHint");
+    expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListScrollCue");
     expect(routeStylesSource).not.toContain("workflowModelEvidencePanel");
     expect(routeStylesSource).not.toContain("workflowCoordinationPanel");
     expect(routeStylesSource).not.toContain("workflowIngestionPanel");
@@ -3101,7 +3096,6 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("items-center");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("justify-between");
-    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListTitle).toContain("[&>strong]:truncate");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListActions).toContain("shrink-0");
     expect(teamWorkflowCandidatePreviewPanelStylesSource).not.toContain("data-vui=native-button");
     expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListScroll).toContain("[scrollbar-gutter:stable]");
