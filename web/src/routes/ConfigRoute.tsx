@@ -1370,7 +1370,7 @@ function ConfigSectionEditor({
                 <ImageIcon size={16} />
               </span>
             )}
-            <input
+            <VInput
               type="file"
               accept="image/png,image/jpeg,image/webp"
               disabled={disabled || imageUploading}
@@ -1391,7 +1391,7 @@ function ConfigSectionEditor({
               <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
                 <Upload size={14} />
                 {imageUploading ? copy.themeBackgroundImageUploading : copy.uploadThemeBackgroundImage}
-                <input
+                <VInput
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
                   disabled={disabled || imageUploading}
@@ -1552,7 +1552,7 @@ function ConfigSectionEditor({
               <span className={styles.avatarImageUploadCue}>
                 <Upload size={12} />
               </span>
-              <input
+              <VInput
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 disabled={disabled || imageUploading}
@@ -1671,7 +1671,7 @@ function ConfigSectionEditor({
             <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
               <Upload size={14} />
               {cropDraft ? copy.uploadAvatarImage : imageUploading ? copy.avatarImageUploading : copy.uploadAvatarImage}
-              <input
+              <VInput
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 disabled={disabled || imageUploading}

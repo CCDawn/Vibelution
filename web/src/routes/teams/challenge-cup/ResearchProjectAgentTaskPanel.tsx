@@ -4,7 +4,7 @@ import type {
   ResearchProjectAgentTaskKind,
   TeamResearchProjectAgentTask,
 } from "../../../api/types";
-import { VButton, VStatusChip, type VStatusTone } from "../../../components/vui";
+import { VButton, VPanelHeader, VStatusChip, type VStatusTone } from "../../../components/vui";
 import styles from "./ResearchProjectAgentTaskPanel.styles";
 
 type Stage = "experiment" | "iteration";
@@ -94,15 +94,17 @@ export function ResearchProjectAgentTaskPanel(props: {
       aria-label={props.stage === "experiment" ? "实验设计 Agent 任务" : "执行迭代 Agent 任务"}
       data-testid={`research-project-agent-tasks-${props.stage}`}
     >
-      <header className={styles.header}>
-        <div>
-          <span>Agent sessions</span>
-          <h3>按职责进入平级实验会话</h3>
-        </div>
-        <span className={styles.count}>
-          {props.isLoading ? "同步中" : `${TASKS_BY_STAGE[props.stage].length} 个职责`}
-        </span>
-      </header>
+      <VPanelHeader
+        className={styles.header}
+        headingLevel={3}
+        eyebrow="Agent sessions"
+        title="按职责进入平级实验会话"
+        actions={(
+          <span className={styles.count}>
+            {props.isLoading ? "同步中" : `${TASKS_BY_STAGE[props.stage].length} 个职责`}
+          </span>
+        )}
+      />
       {projectMissing ? (
         <p className={styles.projectWarning}>
           <AlertCircle size={15} aria-hidden="true" />

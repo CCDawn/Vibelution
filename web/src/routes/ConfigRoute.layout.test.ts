@@ -1048,7 +1048,10 @@ describe("ConfigRoute layout contract", () => {
     expect(configSources).not.toContain("<VNativeSelect");
     expect(configSources).not.toContain("<VNativeTextarea");
     expect(configSources).not.toContain("<VNativeButton");
+    // File upload slots go through VInput type=file (hidden by label chrome CSS).
+    expect(routeSource).toContain('<VInput');
     expect(routeSource).toContain('type="file"');
+    expect(routeSource).not.toMatch(/<input\b/);
     expect(configSources).not.toMatch(/<button\b/);
     expect(configSources).not.toMatch(/<select\b/);
     expect(configSources).not.toMatch(/<textarea\b/);

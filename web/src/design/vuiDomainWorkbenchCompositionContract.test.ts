@@ -69,6 +69,21 @@ describe("Wave 6B Memory knowledge workbench composition", () => {
   });
 });
 
+describe("Chat session workbench composition", () => {
+  it("marks Chat dual-pane shell recipe and registry layout id on the workbench composer", () => {
+    // ChatCodingRoute.tsx is a thin re-export; composition lives in the workbench host.
+    const entry = readFileSync(resolve(routesRoot, "ChatCodingRoute.tsx"), "utf8");
+    const workbench = readFileSync(resolve(routesRoot, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
+    expect(entry).toContain("ChatCodingRouteWorkbench");
+    expect(workbench).toContain('data-vui-recipe="chat-session-workbench"');
+    expect(workbench).toContain('data-vui-domain-recipe="chat-dual-pane"');
+    expect(workbench).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(workbench).toContain("data-vui-layout-id");
+    // Session page recipe stays planned until dual-pane geometry is extracted.
+    expect(workbench).not.toContain("VSessionWorkbenchPage");
+  });
+});
+
 describe("Wave 7A remaining workbench domain recipes", () => {
   const cases: Array<{ file: string; recipe: string; layoutToken: string }> = [
     { file: "LogsRoute.tsx", recipe: "logs-workbench", layoutToken: "WORKBENCH_LAYOUT_IDS.logs" },

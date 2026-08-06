@@ -1,5 +1,6 @@
 import { type ComponentProps } from "react";
 
+import { VPanelHeader } from "../components/vui";
 import { AgentArchiveZonePanel } from "./AgentArchiveZonePanel";
 import { AgentCoreConfigPanel } from "./AgentCoreConfigPanel";
 import { AgentDebugResetPanel } from "./AgentDebugResetPanel";
@@ -56,12 +57,12 @@ export function AgentConfigPrimaryPanePanel({
           className={styles.opsZone}
           aria-label={`${opsTitle} · ${opsHint}`}
         >
-          <header className={styles.opsHeader}>
-            <p className={styles.opsTitle}>
-              {opsTitle}
-            </p>
-            <p className={styles.opsHint}>{opsHint}</p>
-          </header>
+          <VPanelHeader
+            className={styles.opsHeader}
+            headingLevel={null}
+            title={opsTitle}
+            eyebrow={opsHint}
+          />
           <AgentHealthMaintenancePanel {...healthMaintenance} />
           <AgentArchiveZonePanel {...archiveZone} />
           {debugReset ? <AgentDebugResetPanel {...debugReset} /> : null}
