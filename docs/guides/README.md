@@ -51,6 +51,7 @@
 
 | 主题 | 路径 |
 | --- | --- |
+| **Windows 最终用户安装**（人类，非 Agent 路由） | [install-windows.md](install-windows.md) |
 | 配置 | `docs/ops/config/INDEX.md` |
 | **全部 web services** | `core/web/services/README.md` |
 | **便利度改造排期** | `docs/guides/agent-dev-roi-backlog.md` |
