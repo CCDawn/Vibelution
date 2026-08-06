@@ -177,11 +177,11 @@ def _listening_pid_for_port(port: int) -> int:
         result = subprocess.run(
             ["netstat", "-ano", "-p", "tcp"],
             capture_output=True,
-            text=True,
             timeout=3,
             check=False,
             creationflags=_windows_creation_flags(),
             startupinfo=_hidden_startup_info(),
+            **_subprocess_text_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return 0
@@ -201,9 +201,9 @@ def _posix_listening_pid_for_port(port: int) -> int:
             ["ss", "-ltnp", f"sport = :{int(port)}"],
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            text=True,
             timeout=3,
             check=False,
+            **_subprocess_text_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return 0
@@ -435,11 +435,11 @@ def _run_checked(args: list[str], *, cwd: Path, label: str) -> None:
         cwd=str(cwd),
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        text=True,
         # Waitable + no console: never DETACHED, never npm.cmd shell.
         creationflags=_windows_creation_flags(detach=False),
         startupinfo=_hidden_startup_info(),
         check=False,
+        **_subprocess_text_kwargs(),
     )
     if result.returncode != 0:
         _append_frontend_build_log(
@@ -491,12 +491,12 @@ def _run_capture(args: list[str], *, cwd: Path, label: str, timeout: float = 15.
         cwd=str(cwd),
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env,
         creationflags=_windows_creation_flags(),
         startupinfo=_hidden_startup_info(),
         check=False,
+        **_subprocess_text_kwargs(),
     )
     if result.returncode != 0:
         detail = _process_output_tail(result.stderr or result.stdout, max_lines=8, max_chars=1200)
@@ -505,6 +505,92 @@ def _run_capture(args: list[str], *, cwd: Path, label: str, timeout: float = 15.
 
 
 ALLOW_DIRTY_LAUNCH_ENV = "VIBELUTION_ALLOW_DIRTY_LAUNCH"
+ALLOW_NON_MAIN_LAUNCH_ENV = "VIBELUTION_ALLOW_NON_MAIN_LAUNCH"
+
+
+def _subprocess_text_kwargs() -> dict[str, object]:
+    """Decode child stdout/stderr without crashing the reader thread on Windows.
+
+    Hidden console processes often emit locale bytes (e.g. GBK/cp936). Using
+    strict utf-8 with text=True raises UnicodeDecodeError inside
+    subprocess._readerthread; errors=replace keeps the launcher stable.
+    """
+
+    return {
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+
+
+def _allow_non_main_launch() -> bool:
+    raw = str(os.environ.get(ALLOW_NON_MAIN_LAUNCH_ENV) or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _path_looks_like_task_worktree(root: Path) -> bool:
+    """True when project path is under the fixed task-worktree roots."""
+
+    parts = [part.lower() for part in Path(root).resolve().parts]
+    for index, part in enumerate(parts):
+        if part in {"vibelution-worktrees", ".claude"} and index + 1 < len(parts):
+            if part == "vibelution-worktrees":
+                return True
+            if part == ".claude" and parts[index + 1] == "worktrees":
+                return True
+    return False
+
+
+def _is_linked_git_worktree(cwd: Path, git_command: str) -> bool:
+    """True when cwd is a secondary git worktree (git-dir != common-dir)."""
+
+    try:
+        git_dir = _run_capture(
+            [git_command, "rev-parse", "--git-dir"],
+            cwd=cwd,
+            label="git dir identity",
+            timeout=8.0,
+        )
+        common_dir = _run_capture(
+            [git_command, "rev-parse", "--git-common-dir"],
+            cwd=cwd,
+            label="git common-dir identity",
+            timeout=8.0,
+        )
+    except RuntimeError:
+        return False
+    try:
+        git_path = Path(git_dir)
+        common_path = Path(common_dir)
+        if not git_path.is_absolute():
+            git_path = (cwd / git_path).resolve()
+        else:
+            git_path = git_path.resolve()
+        if not common_path.is_absolute():
+            common_path = (cwd / common_path).resolve()
+        else:
+            common_path = common_path.resolve()
+        return git_path != common_path
+    except OSError:
+        return False
+
+
+def _assert_launcher_branch_allowed(branch: str, *, resolved_root: Path, git_command: str) -> None:
+    """Integration root must stay on main; task worktrees may use task branches."""
+
+    if branch == "main":
+        return
+    if _allow_non_main_launch():
+        return
+    if _path_looks_like_task_worktree(resolved_root) or _is_linked_git_worktree(resolved_root, git_command):
+        return
+    raise RuntimeError(
+        "Launcher start/restart requires the integration checkout on local main, "
+        f"but current branch is {branch or '<detached>'}. "
+        "Restore root with `git checkout main`, or launch a task worktree via "
+        "`--project <...\\Vibelution-worktrees\\<slug>>`. "
+        f"Emergency override: set {ALLOW_NON_MAIN_LAUNCH_ENV}=1."
+    )
 
 
 def _allow_dirty_launch() -> bool:
@@ -550,8 +636,7 @@ def _runtime_source_identity(*, allow_dirty: bool | None = None) -> dict[str, ob
         cwd=PROJECT_ROOT,
         label="git branch identity",
     )
-    if branch != "main":
-        raise RuntimeError(f"Launcher restart requires local main, but current branch is {branch or '<detached>'}.")
+    _assert_launcher_branch_allowed(branch, resolved_root=resolved_root, git_command=git_command)
 
     commit = _run_capture(
         [git_command, "rev-parse", "HEAD"],
@@ -1265,11 +1350,11 @@ def _probe_python_imports(python_executable: str, modules: list[str], *, timeout
             cwd=str(PROJECT_ROOT),
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            text=True,
             timeout=timeout,
             creationflags=_windows_creation_flags(),
             startupinfo=_hidden_startup_info(),
             check=False,
+            **_subprocess_text_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -1325,10 +1410,10 @@ def _create_project_virtualenv() -> None:
         cwd=str(PROJECT_ROOT),
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        text=True,
         creationflags=_windows_creation_flags(),
         startupinfo=_hidden_startup_info(),
         check=False,
+        **_subprocess_text_kwargs(),
     )
     if result.returncode != 0 or not _venv_python_executable().exists():
         detail = _process_output_tail(result.stderr or result.stdout, max_lines=15, max_chars=2000)
@@ -1352,10 +1437,10 @@ def _install_project_dependencies(python_executable: str) -> None:
         cwd=str(PROJECT_ROOT),
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        text=True,
         creationflags=_windows_creation_flags(),
         startupinfo=_hidden_startup_info(),
         check=False,
+        **_subprocess_text_kwargs(),
     )
     if result.returncode != 0:
         detail = _process_output_tail(result.stderr or result.stdout, max_lines=15, max_chars=2000)
