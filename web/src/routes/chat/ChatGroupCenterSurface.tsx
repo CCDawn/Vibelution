@@ -15,6 +15,7 @@ import { VButton, VContextualHint, VNativeInput } from "../../components/vui";
 import type { ChatMentionTarget } from "../chatMentionTokens";
 import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
+import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
 
 export type GroupParticipantIdentity = {
   name: string;
@@ -168,10 +169,14 @@ function GroupRoundsTimeline({
                       avatarInitials(message.speakerCode, speakerIdentity.name, "AI"),
                     )}
                     <div className={styles.groupBubble}>
-                      <header className={styles.groupBubbleHeader}>
-                        <strong title={speakerIdentity.fullIdentityLabel}>{speakerIdentity.identityLabel}</strong>
-                        {message.status !== "completed" ? <span>{statusLabel(message.status)}</span> : null}
-                      </header>
+                      <ChatMessageChromeHeader
+                        className={styles.groupBubbleHeader}
+                        density="bubble"
+                        title={(
+                          <strong title={speakerIdentity.fullIdentityLabel}>{speakerIdentity.identityLabel}</strong>
+                        )}
+                        trailing={message.status !== "completed" ? <span>{statusLabel(message.status)}</span> : null}
+                      />
                       <ChatGroupMessageBody
                         message={message}
                         identityName={speakerIdentity.name}
@@ -198,10 +203,14 @@ function GroupRoundsTimeline({
                           avatarInitials(nextParticipant.agentCode, nextIdentity.name, "AI"),
                         )}
                         <div className={styles.groupBubble}>
-                          <header className={styles.groupBubbleHeader}>
-                            <strong title={nextIdentity.fullIdentityLabel}>{nextIdentity.identityLabel}</strong>
-                            <span>{lang === "zh" ? "正在输入" : "typing"}</span>
-                          </header>
+                          <ChatMessageChromeHeader
+                            className={styles.groupBubbleHeader}
+                            density="bubble"
+                            title={(
+                              <strong title={nextIdentity.fullIdentityLabel}>{nextIdentity.identityLabel}</strong>
+                            )}
+                            trailing={<span>{lang === "zh" ? "正在输入" : "typing"}</span>}
+                          />
                           <div className={styles.groupTypingDots} aria-label={lang === "zh" ? "正在输入" : "Typing"}>
                             <span />
                             <span />
@@ -273,14 +282,19 @@ export function ChatGroupCenterSurface({
     const rounds = activeGroupRoom?.rounds ?? [];
     return (
       <div className={styles.groupConversationFrame}>
-        <header className={styles.groupConversationHeader}>
-          <div>
+        <ChatMessageChromeHeader
+          className={styles.groupConversationHeader}
+          density="surface"
+          titleRowClassName={styles.groupConversationTitleRow}
+          eyebrow={(
             <p>
               {activeGroupRoom?.mode ?? "round_robin"}
               {" · "}
               {activeGroupRoom?.purpose ?? "discussion"}
             </p>
-            <div className={styles.groupConversationTitleRow}>
+          )}
+          title={(
+            <>
               <h2>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</h2>
               <VContextualHint
                 content={lang === "zh"
@@ -289,22 +303,26 @@ export function ChatGroupCenterSurface({
                 label={lang === "zh" ? "助手通知流说明" : "Agent notice stream details"}
                 width="wide"
               />
-            </div>
+            </>
+          )}
+          meta={(
             <span>
               {projectBusTimeline?.activeAgentCount ?? availableGroupParticipantCount} {lang === "zh" ? "位 active Agent" : "active agents"}
               {" · "}
               {lang === "zh" ? "全局广播与投递观察" : "broadcasts and delivery observation"}
             </span>
-          </div>
-          <VButton
-            type="button"
-            className={styles.groupRefreshButton}
-            onClick={onRefreshProjectBus}
-            isDisabled={projectBusRefreshing}
-          >
-            {lang === "zh" ? "刷新" : "Refresh"}
-          </VButton>
-        </header>
+          )}
+          trailing={(
+            <VButton
+              type="button"
+              className={styles.groupRefreshButton}
+              onClick={onRefreshProjectBus}
+              isDisabled={projectBusRefreshing}
+            >
+              {lang === "zh" ? "刷新" : "Refresh"}
+            </VButton>
+          )}
+        />
         {projectBusRefreshError ? (
           <div className={styles.inlineNotice}>{projectBusRefreshError}</div>
         ) : null}
@@ -328,24 +346,30 @@ export function ChatGroupCenterSurface({
                 : "";
               return (
                 <article key={event.eventId} className={revoked ? `${styles.projectBusEvent} ${styles.projectBusEventRevoked}` : styles.projectBusEvent}>
-                  <header className={styles.projectBusEventHeader}>
-                    <div>
-                      <strong>{event.createdBy === "user" ? userDisplayName : event.createdBy}</strong>
-                      <span>{targetLabel}</span>
-                    </div>
-                    <div className={styles.projectBusEventActions}>
-                      <time>{formatTime(event.createdAt)}</time>
-                      {event.createdBy === "user" && !revoked ? (
-                        <VButton
-                          type="button"
-                          onClick={() => onRevokeProjectBusMessage(event.eventId)}
-                          isDisabled={projectBusRevokePending}
-                        >
-                          {lang === "zh" ? "撤回" : "Recall"}
-                        </VButton>
-                      ) : null}
-                    </div>
-                  </header>
+                  <ChatMessageChromeHeader
+                    className={styles.projectBusEventHeader}
+                    density="surface"
+                    title={(
+                      <>
+                        <strong>{event.createdBy === "user" ? userDisplayName : event.createdBy}</strong>
+                        <span>{targetLabel}</span>
+                      </>
+                    )}
+                    trailing={(
+                      <div className={styles.projectBusEventActions}>
+                        <time>{formatTime(event.createdAt)}</time>
+                        {event.createdBy === "user" && !revoked ? (
+                          <VButton
+                            type="button"
+                            onClick={() => onRevokeProjectBusMessage(event.eventId)}
+                            isDisabled={projectBusRevokePending}
+                          >
+                            {lang === "zh" ? "撤回" : "Recall"}
+                          </VButton>
+                        ) : null}
+                      </div>
+                    )}
+                  />
                   <p className={styles.projectBusEventBody}>
                     {revoked
                       ? (lang === "zh" ? "这条消息已撤回，相关 Agent 已请求停止。" : "This message was recalled. Target agents were asked to stop.")
@@ -440,29 +464,35 @@ export function ChatGroupCenterSurface({
   const rounds = activeGroupRoom?.rounds ?? [];
   return (
     <div className={styles.groupConversationFrame}>
-      <header className={styles.groupConversationHeader}>
-        <div>
+      <ChatMessageChromeHeader
+        className={styles.groupConversationHeader}
+        density="surface"
+        eyebrow={(
           <p>
             {activeGroupRoom?.mode ?? "round_robin"}
             {" · "}
             {activeGroupRoom?.purpose ?? "discussion"}
           </p>
-          <h2>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h2>
+        )}
+        title={<h2>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h2>}
+        meta={(
           <span>
             {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
             {" · "}
             {statusLabel(activeGroupRoom?.status ?? "ready")}
           </span>
-        </div>
-        <VButton
-          type="button"
-          className={styles.groupRefreshButton}
-          onClick={onRefreshGroupRoom}
-          isDisabled={groupRoomRefreshing}
-        >
-          {lang === "zh" ? "刷新" : "Refresh"}
-        </VButton>
-      </header>
+        )}
+        trailing={(
+          <VButton
+            type="button"
+            className={styles.groupRefreshButton}
+            onClick={onRefreshGroupRoom}
+            isDisabled={groupRoomRefreshing}
+          >
+            {lang === "zh" ? "刷新" : "Refresh"}
+          </VButton>
+        )}
+      />
       {groupRoomRefreshError ? (
         <div className={styles.inlineNotice}>{groupRoomRefreshError}</div>
       ) : null}

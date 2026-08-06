@@ -79,12 +79,16 @@ export function AgentConfigChangeHistoryPanel({
 
       {draft ? (
         <section className={styles.draftCard} aria-label="当前草稿">
-          <header className={styles.draftHeader}>
-            <h4>当前草稿</h4>
-            <span className={`${styles.draftStatus} ${draft.stale ? styles.draftStale : ""}`}>
-              {draft.stale ? "基线已变化，需重新审阅" : "可前往配置发布"}
-            </span>
-          </header>
+          <VPanelHeader
+            className={styles.draftHeader}
+            headingLevel={4}
+            title="当前草稿"
+            actions={(
+              <span className={`${styles.draftStatus} ${draft.stale ? styles.draftStale : ""}`}>
+                {draft.stale ? "基线已变化，需重新审阅" : "可前往配置发布"}
+              </span>
+            )}
+          />
           {draft.summary ? <p className={styles.draftSummary}>{draft.summary}</p> : null}
           <ul className={styles.changedFields} aria-label="草稿变更字段">
             {fieldsLabel(draft.changedFields).map((field) => <li key={field} className={styles.changedField}>{field}</li>)}
@@ -108,16 +112,20 @@ export function AgentConfigChangeHistoryPanel({
 
       {revisions.length ? (
         <section className={styles.revisionList} aria-label="已发布版本">
-          <header className={styles.revisionHeader}>
-            <h4>已发布版本</h4>
-            <span>{revisions.length} 条</span>
-          </header>
+          <VPanelHeader
+            className={styles.revisionHeader}
+            headingLevel={4}
+            title="已发布版本"
+            actions={<span>{revisions.length} 条</span>}
+          />
           {revisions.map((revision) => (
             <article key={revision.revisionId} className={styles.revisionRow}>
-              <div className={styles.revisionHeader}>
-                <h4>v{revision.revisionNumber}</h4>
-                <span>{timestampLabel(revision.publishedAt)}</span>
-              </div>
+              <VPanelHeader
+                className={styles.revisionHeader}
+                headingLevel={4}
+                title={`v${revision.revisionNumber}`}
+                actions={<span>{timestampLabel(revision.publishedAt)}</span>}
+              />
               <ul className={styles.changedFields} aria-label={`v${revision.revisionNumber} 变更字段`}>
                 {fieldsLabel(revision.changedFields).map((field) => <li key={field} className={styles.changedField}>{field}</li>)}
               </ul>

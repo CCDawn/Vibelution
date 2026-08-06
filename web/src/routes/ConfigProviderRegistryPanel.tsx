@@ -318,19 +318,21 @@ function ConnectionTab({
       </div>
 
       <section className={styles.connectionCard} aria-label="API Key">
-        <header className={styles.connectionCardHeader}>
-          <div>
-            <p className={styles.connectionCardEyebrow}>1 · API Key</p>
-            <h3 className={styles.connectionCardTitle}>全站共用凭据</h3>
-          </div>
-          <VStatusChip tone={keyReady ? "success" : "warning"}>
-            {provider.credentialState === "not_required"
-              ? "无需 Key"
-              : provider.credentialState === "configured"
-                ? "已配置"
-                : "未配置"}
-          </VStatusChip>
-        </header>
+        <VPanelHeader
+          className={styles.connectionCardHeader}
+          headingLevel={3}
+          eyebrow="1 · API Key"
+          title="全站共用凭据"
+          actions={(
+            <VStatusChip tone={keyReady ? "success" : "warning"}>
+              {provider.credentialState === "not_required"
+                ? "无需 Key"
+                : provider.credentialState === "configured"
+                  ? "已配置"
+                  : "未配置"}
+            </VStatusChip>
+          )}
+        />
         {needsKey ? (
           credentialActive ? (
             <div className={styles.inlineCredential}>
@@ -377,15 +379,17 @@ function ConnectionTab({
       </section>
 
       <section className={styles.connectionCard} aria-label="上下文窗口">
-        <header className={styles.connectionCardHeader}>
-          <div>
-            <p className={styles.connectionCardEyebrow}>2 · 上下文窗口</p>
-            <h3 className={styles.connectionCardTitle}>context_window（token）</h3>
-          </div>
-          <VStatusChip tone={provider.contextWindow ? "success" : "warning"}>
-            {provider.contextWindow ? `${provider.contextWindow}` : "未配置"}
-          </VStatusChip>
-        </header>
+        <VPanelHeader
+          className={styles.connectionCardHeader}
+          headingLevel={3}
+          eyebrow="2 · 上下文窗口"
+          title="context_window（token）"
+          actions={(
+            <VStatusChip tone={provider.contextWindow ? "success" : "warning"}>
+              {provider.contextWindow ? `${provider.contextWindow}` : "未配置"}
+            </VStatusChip>
+          )}
+        />
         <div className={styles.connectionCardBody}>
           <p className={styles.muted}>
             填中转站/模型真实上限，例如 32000、128000。一个 Provider 共用此兜底值；保存草稿后记得顶部「保存到外部配置」。

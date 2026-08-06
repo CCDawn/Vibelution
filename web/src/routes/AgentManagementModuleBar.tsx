@@ -8,14 +8,25 @@ type AgentManagementModuleBarProps = {
   actions?: ReactNode;
 };
 
+/**
+ * Agents module strip: section nav + optional actions.
+ * Intentionally **not** VPanelHeader — this is navigation chrome (tabs/links), not a panel title band.
+ * Landmark stays a nav region with product data attribute for layout contracts.
+ */
 export function AgentManagementModuleBar({
   active,
   actions,
 }: AgentManagementModuleBarProps) {
   return (
-    <header className={styles.moduleBar} data-agent-management="module-bar">
+    <div
+      className={styles.moduleBar}
+      data-agent-management="module-bar"
+      data-vui="agent-management-module-bar"
+      role="navigation"
+      aria-label="Agent management modules"
+    >
       <AgentManagementNav active={active} className={styles.managementNav} />
       {actions ? <div className={styles.moduleActions}>{actions}</div> : null}
-    </header>
+    </div>
   );
 }
