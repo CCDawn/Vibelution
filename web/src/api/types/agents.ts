@@ -609,6 +609,7 @@ export type AgentAvatarOptionsPayload = {
   directory: string;
   options: AgentAvatarOption[];
   count: number;
+  modelDefault: AgentAvatarOption | null;
 };
 
 export type AgentAvatarUploadResponse = {

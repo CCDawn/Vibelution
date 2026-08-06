@@ -104,7 +104,7 @@ class AgentCreatePayload(BaseModel):
     personaProfile: dict[str, Any] = Field(default_factory=dict)
     taskProfile: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    # Optional library path (workspace/avatars/...). Empty => role default.
+    # Optional library path (workspace/avatars/...). Empty => model default.
     avatarImagePath: str = ""
 
 
@@ -458,8 +458,8 @@ def agent_avatar_image(filename: str) -> FileResponse:
 
 
 @router.get("/agents/avatar-options")
-def agent_avatar_options() -> dict:
-    return list_agent_avatar_options()
+def agent_avatar_options(modelId: str = "") -> dict:
+    return list_agent_avatar_options(model_id=modelId)
 
 
 @router.get("/agents/config-workspace")

@@ -23,6 +23,7 @@ from ..agent_config_authority import (
     materialize_agent_config_identity,
     normalize_permission_preset,
 )
+from .avatar_model_defaults import model_default_avatar_filename
 
 # Local default for signature evaluation (facade remains SSOT).
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
@@ -600,6 +601,7 @@ def replace_agent_llm_bindings_if_current(
         if str(agent.get("updatedAt") or "").strip() != expected_revision:
             raise s.AgentStateConflictError("Agent changed during model promotion.")
         agent["llmBindings"] = s.normalize_agent_llm_bindings(llm_bindings)
+        s._ensure_agent_default_avatar(agent)
         agent["updatedAt"] = s.utc_now_iso()
         # Project before persisting so a projection failure cannot leave a write
         # whose revision the transaction participant never received.
@@ -622,6 +624,9 @@ def _default_agent_avatar_filename(
         available = s._available_agent_avatar_filenames()
     if not available:
         return ""
+    model_default = model_default_avatar_filename(s.agent_dialogue_model_id(agent))
+    if model_default in available:
+        return model_default
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     # Exact field values beat substring table order for product fixed roles.
     exact_candidates = [
@@ -800,11 +805,12 @@ def resolve_agent_avatar_path_for_projection(
     *,
     available_avatar_filenames: list[str] | None = None,
 ) -> str:
-    """Path for API projection: stored metadata, else role default (read-only)."""
+    """Path for API projection: custom selection, else configured model logo."""
     s = _service()
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     current_path = s._agent_avatar_path_from_metadata(metadata if isinstance(metadata, dict) else {})
-    if current_path:
+    current_source = str(metadata.get("avatarImageSource") or metadata.get("agentAvatarImageSource") or "").strip()
+    if current_path and current_source != "default":
         return current_path
     return s._default_agent_avatar_path(
         agent,
@@ -860,7 +866,7 @@ def _record_agent_avatar_updated_event(agent: dict[str, Any]) -> None:
         return
 
 
-def list_agent_avatar_options() -> dict[str, Any]:
+def list_agent_avatar_options(model_id: str = "") -> dict[str, Any]:
     s = _service()
     options: list[dict[str, Any]] = []
     for filename in s._available_agent_avatar_filenames():
@@ -875,10 +881,15 @@ def list_agent_avatar_options() -> dict[str, Any]:
                 "sizeBytes": file_path.stat().st_size if file_path.exists() else 0,
             }
         )
+    model_default_path = s._default_agent_avatar_path(
+        {"llmBindings": {s.DEFAULT_AGENT_LLM_SLOT: {"modelId": str(model_id or "").strip()}}}
+    )
+    model_default = next((option for option in options if option["path"] == model_default_path), None)
     return {
         "directory": str(s.AGENT_AVATAR_RELATIVE_DIR),
         "options": options,
         "count": len(options),
+        "modelDefault": model_default,
     }
 
 
@@ -959,7 +970,10 @@ def agent_avatar_filename(avatar_image_path: object) -> str:
     filename = path.name
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", filename):
         return ""
-    if Path(filename).suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".svg" and filename in s.AGENT_AVATAR_MODEL_FILENAMES:
+        return filename
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
         return ""
     return filename
 
@@ -1008,20 +1022,27 @@ def _agent_custom_avatar_file(filename: str) -> Path:
     return path
 
 
-def _agent_avatar_storage_dirs() -> tuple[tuple[str, Path], ...]:
+def _agent_avatar_storage_dirs(filename: str = "") -> tuple[tuple[str, Path], ...]:
     s = _service()
+    custom = ("custom", _agent_custom_avatar_dir())
+    bundled = (
+        "bundled",
+        Path(s.PROJECT_ROOT).resolve() / "assets" / s.AGENT_AVATAR_ASSET_DIR_NAME,
+    )
+    legacy = ("legacy", s._workspace_path("avatars", seed=False).resolve())
+    # Product-owned model marks are immutable defaults: only the bundled asset
+    # may represent a configured model, never a same-named custom file.
+    if filename in s.AGENT_AVATAR_MODEL_FILENAMES:
+        return (bundled,)
     return (
-        ("custom", _agent_custom_avatar_dir()),
-        (
-            "bundled",
-            Path(s.PROJECT_ROOT).resolve() / "assets" / s.AGENT_AVATAR_ASSET_DIR_NAME,
-        ),
-        ("legacy", s._workspace_path("avatars", seed=False).resolve()),
+        custom,
+        bundled,
+        legacy,
     )
 
 
 def _agent_avatar_source(filename: str) -> str:
-    for source, avatar_dir in _agent_avatar_storage_dirs():
+    for source, avatar_dir in _agent_avatar_storage_dirs(filename):
         resolved_dir = avatar_dir.resolve()
         path = (resolved_dir / filename).resolve()
         if resolved_dir == path.parent and path.exists() and path.is_file():
@@ -1032,13 +1053,15 @@ def _agent_avatar_source(filename: str) -> str:
 def _available_agent_avatar_filenames() -> list[str]:
     s = _service()
     existing: set[str] = set()
-    for _source, avatar_dir in _agent_avatar_storage_dirs():
+    for source, avatar_dir in _agent_avatar_storage_dirs():
         if not avatar_dir.exists() or not avatar_dir.is_dir():
             continue
         existing.update(
             item.name
             for item in avatar_dir.iterdir()
-            if item.is_file() and s.agent_avatar_filename(str(s.AGENT_AVATAR_RELATIVE_DIR / item.name))
+            if item.is_file()
+            and not (source != "bundled" and item.name in s.AGENT_AVATAR_MODEL_FILENAMES)
+            and s.agent_avatar_filename(str(s.AGENT_AVATAR_RELATIVE_DIR / item.name))
         )
     ordered = [filename for filename in s.AGENT_AVATAR_FILENAMES if filename in existing]
     extra = sorted(existing.difference(ordered))
@@ -1076,7 +1099,7 @@ def resolve_agent_avatar_file(filename: str) -> Path:
     safe_filename = s.agent_avatar_filename(str(s.AGENT_AVATAR_RELATIVE_DIR / str(filename or "")))
     if not safe_filename:
         raise FileNotFoundError("invalid Agent avatar image path")
-    storage_dirs = _agent_avatar_storage_dirs()
+    storage_dirs = _agent_avatar_storage_dirs(safe_filename)
     for _source, avatar_dir in storage_dirs:
         resolved_dir = avatar_dir.resolve()
         path = (resolved_dir / safe_filename).resolve()

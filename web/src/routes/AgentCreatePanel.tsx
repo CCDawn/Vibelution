@@ -248,15 +248,14 @@ export function AgentCreatePanel({
                 <small>
                   {draft.avatarImagePath
                     ? (lang === "zh" ? "图库指定" : "Library pick")
-                    : (copy.createAgentAvatarDefault || (lang === "zh" ? "职责默认" : "Role default"))}
+                    : (copy.createAgentAvatarDefault || (lang === "zh" ? "模型默认" : "Model default"))}
                 </small>
               </div>
               <div className={styles.avatarPreviewRow}>
                 <span className={styles.avatarPreview} aria-hidden="true">
                   {(() => {
                     const selected = (avatarOptions?.options ?? []).find((item) => item.path === draft.avatarImagePath);
-                    const fallbackSession = (avatarOptions?.options ?? []).find((item) => item.filename.startsWith("01-session") || item.filename.includes("session-agent"));
-                    const previewUrl = selected?.url || (!draft.avatarImagePath ? fallbackSession?.url : "") || "";
+                    const previewUrl = selected?.url || (!draft.avatarImagePath ? avatarOptions?.modelDefault?.url : "") || "";
                     return previewUrl
                       ? <img src={previewUrl} alt="" />
                       : (draft.displayName.trim().slice(0, 2) || "AI");
@@ -265,8 +264,8 @@ export function AgentCreatePanel({
                 <p className={styles.avatarHint}>
                   {copy.createAgentAvatarHint
                     || (lang === "zh"
-                      ? "默认随职责选择头像；也可从图库指定。创建后仍可在 Agent 详情中修改。"
-                      : "A role default is used unless you pick from the library. You can still change it later.")}
+                      ? "默认按所选模型使用 Logo；也可从图库指定。创建后仍可在 Agent 详情中修改。"
+                      : "The selected model logo is used unless you pick from the library. You can still change it later.")}
                 </p>
                 <VButton
                   type="button"
@@ -274,7 +273,7 @@ export function AgentCreatePanel({
                   isDisabled={pending || !draft.avatarImagePath}
                   onPress={() => onDraftChange({ avatarImagePath: "" })}
                 >
-                  {copy.createAgentAvatarDefault || (lang === "zh" ? "使用职责默认" : "Use role default")}
+                  {copy.createAgentAvatarDefault || (lang === "zh" ? "使用模型默认" : "Use model default")}
                 </VButton>
               </div>
               <div className={styles.avatarHeader}>
@@ -309,7 +308,7 @@ export function AgentCreatePanel({
                   })}
                 </div>
               ) : (
-                <p className={styles.availabilitySummary}>{copy.createAgentAvatarEmpty || (lang === "zh" ? "暂无可用头像文件，将使用职责默认。" : "No avatar files available; the role default will be used.")}</p>
+                <p className={styles.availabilitySummary}>{copy.createAgentAvatarEmpty || (lang === "zh" ? "暂无可用头像文件，将使用模型默认。" : "No avatar files available; the model default will be used.")}</p>
               )}
             </div>
             <VFieldRow label={copy.modeMembership} className="col-span-full">
