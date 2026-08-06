@@ -126,6 +126,7 @@ export type TeamResearchStageLauncherPanelProps = {
     searchParams: URLSearchParams;
   };
   renderResearchStageAgentSummary: (stageType: ResearchStageType) => ReactNode;
+  renderChallengeCupStageAgentConfiguration: (stageType: ResearchStageType) => ReactNode;
 };
 
 /** Flat locals used inside the legacy panel body (stable names for minimal churn). */
@@ -188,6 +189,7 @@ export type TeamResearchStageLauncherFlatBindings = {
   sourceCollectionDisplayedCandidateCountText: string;
   sourceCollectionQueryCountText: string;
   renderResearchStageAgentSummary: (stageType: ResearchStageType) => ReactNode;
+  renderChallengeCupStageAgentConfiguration: (stageType: ResearchStageType) => ReactNode;
   runKnowledgeCollectionLoopAction: () => void;
   sourceCollectionLoopActionDisabled: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -260,6 +262,7 @@ export function flattenResearchStageLauncherProps(
     sourceCollectionDisplayedCandidateCountText: sourceCollection.displayedCandidateCountText,
     sourceCollectionQueryCountText: sourceCollection.queryCountText,
     renderResearchStageAgentSummary: props.renderResearchStageAgentSummary,
+    renderChallengeCupStageAgentConfiguration: props.renderChallengeCupStageAgentConfiguration,
     runKnowledgeCollectionLoopAction: sourceCollection.runLoopAction,
     sourceCollectionLoopActionDisabled: sourceCollection.loopActionDisabled,
     sourceCollectionActionDisabledTitle: sourceCollection.actionDisabledTitle,

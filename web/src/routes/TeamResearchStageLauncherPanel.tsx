@@ -15,7 +15,6 @@ import type {
   ResearchProjectAgentTaskKind,
 } from "../api/types";
 import { VNativeButton, VNativeInput, VPanelHeader, VStringSelect } from "../components/vui";
-import type { ChallengeCupWorkspaceAgent } from "./teams/challenge-cup/ChallengeCupOperationsWorkspace";
 import {
   researchIterationLifecycleStatusLabel,
   researchKnowledgeLifecycleStatusLabel,
@@ -24,6 +23,7 @@ import { isChallengeCupResearchWorkflowTeam } from "./teams/teamKindModel";
 import { RESEARCH_TEAM_ID } from "./TeamsRoute.canvasData";
 import {
   challengeQuestionDetailRoute,
+  parseResearchWorkspaceView,
   RESEARCH_WORKSPACE_NAV_ITEMS,
   researchCanvasRoute,
   researchSourceCollectionRoute,
@@ -123,6 +123,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     sourceCollectionDisplayedCandidateCountText,
     sourceCollectionQueryCountText,
     renderResearchStageAgentSummary,
+    renderChallengeCupStageAgentConfiguration,
     runKnowledgeCollectionLoopAction,
     sourceCollectionLoopActionDisabled,
     sourceCollectionActionDisabledTitle,
@@ -154,8 +155,13 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     teamId: workflowTeamId,
     enabled: challengeCupResearchTeamSelected,
   });
-  const challengeProgramSurfaceSelected = challengeCupResearchTeamSelected
-    && (Boolean(selectedChallengeQuestionId) || challengeTeamSurface === "progress");
+  const challengeProgramSurfaceSelected = challengeCupResearchTeamSelected;
+  const requestedResearchStage = parseResearchWorkspaceView(searchParams.get("researchView"));
+  const challengeInitialStage: ResearchStageWorkspaceView = requestedResearchStage === "experiment"
+    || requestedResearchStage === "iteration"
+    || requestedResearchStage === "knowledge_collection"
+    ? requestedResearchStage
+    : "knowledge_collection";
 
   const startResearchProjectAgentTask = async (
     taskKind: ResearchProjectAgentTaskKind,
@@ -201,36 +207,12 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
           </Suspense>
         );
       }
-      const challengeAgents: ChallengeCupWorkspaceAgent[] = selectedTeamMemoryMembers.map((member) => {
-        const normalizedRole = member.roleLabel.toLowerCase();
-        const workspace = normalizedRole.includes("source") || normalizedRole.includes("资料")
-          ? "证据链"
-          : normalizedRole.includes("knowledge") || normalizedRole.includes("知识")
-            ? "知识库"
-            : normalizedRole.includes("experiment") || normalizedRole.includes("实验")
-              ? "题目与结果"
-              : normalizedRole.includes("iteration") || normalizedRole.includes("版本")
-                ? "深研迭代"
-                : "全局";
-        return {
-          agentId: member.id,
-          name: member.agentName,
-          code: member.agentCode,
-          role: member.roleLabel,
-          workspace,
-          model: member.statusTitle,
-          status: member.statusLabel,
-          tone: member.statusTone === "ready" ? "ready" : member.statusTone === "blocked" ? "blocked" : "warning",
-          configHref: member.configRoute,
-        };
-      });
       return (
         <Suspense fallback={<div className={styles.panel} aria-busy="true">Loading challenge workspace…</div>}>
         <ChallengeCupOperationsWorkspace
           projection={challengeProjection}
-          agents={challengeAgents}
           graphHref={researchCanvasRoute(challengeTeamId)}
-          projectSwitcher={challengeTeamSurface === "workspace" ? ((context) => (
+          projectSwitcher={(context) => (
             <ResearchProjectSwitcher
               teamId={challengeTeamId}
               lang={lang}
@@ -246,15 +228,16 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                 setPreferredExperimentMethod(project.experimentMethod || "");
               }}
             />
-          )) : null}
+          )}
           researchTopic={sourceCollectionDraft.topic}
-          surface={challengeTeamSurface}
+          initialStage={challengeInitialStage}
           stageHrefs={{
             knowledge_collection: researchSourceCollectionRoute(challengeTeamId),
             experiment: researchWorkspaceStageRoute(challengeTeamId, "experiment"),
             iteration: researchWorkspaceStageRoute(challengeTeamId, "iteration"),
           }}
           questionHref={(questionId) => challengeQuestionDetailRoute(challengeTeamId, questionId)}
+          agentConfiguration={renderChallengeCupStageAgentConfiguration}
           activeResearchProjectId={researchProjectAgentTasks.activeProjectId}
           researchProjectAgentTasks={researchProjectAgentTasks.tasks}
           researchProjectAgentTasksLoading={researchProjectAgentTasks.isLoading}

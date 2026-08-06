@@ -17,6 +17,26 @@ const componentStyles = readFileSync(
   new URL("./ChallengeCupOperationsWorkspace.module.css", import.meta.url),
   "utf8",
 );
+const stageRailSource = readFileSync(
+  new URL("./ChallengeCupStageRail.tsx", import.meta.url),
+  "utf8",
+);
+const experimentStageSource = readFileSync(
+  new URL("./ChallengeCupExperimentStage.tsx", import.meta.url),
+  "utf8",
+);
+const experimentProtocolSource = readFileSync(
+  new URL("./ChallengeCupExperimentProtocol.tsx", import.meta.url),
+  "utf8",
+);
+const iterationStageSource = readFileSync(
+  new URL("./ChallengeCupIterationStage.tsx", import.meta.url),
+  "utf8",
+);
+const iterationResultPackageSource = readFileSync(
+  new URL("./ChallengeCupIterationResultPackage.tsx", import.meta.url),
+  "utf8",
+);
 
 type ChallengeProjection = NonNullable<ExperimentPlanningStatusPayload["challengeProgramProjection"]>;
 
@@ -132,17 +152,6 @@ function projection(): ChallengeProjection {
 function props(overrides: Partial<ChallengeCupOperationsWorkspaceProps> = {}): ChallengeCupOperationsWorkspaceProps {
   return {
     projection: projection(),
-    agents: [{
-      agentId: "agent-source-finder",
-      name: "白书遥",
-      code: "A033",
-      role: "资料寻找",
-      workspace: "证据链",
-      model: "gpt-5.6-terra",
-      status: "可用",
-      tone: "ready",
-      configHref: "/agents/agent-source-finder",
-    }],
     graphHref: "/teams?team=research-team&researchView=canvas",
     questionHref: (questionId) => `/teams?team=research-team&challengeQuestion=${questionId}`,
     researchTopic: "神经预测编码中的层级反馈与可塑性学习机制",
@@ -163,22 +172,17 @@ function renderWorkspace(overrides: Partial<ChallengeCupOperationsWorkspaceProps
 }
 
 describe("ChallengeCupOperationsWorkspace", () => {
-  it("keeps machine validation separate from human revision requirements", () => {
+  it("keeps machine validation and human revision requirements in the compact knowledge stage", () => {
     const markup = renderWorkspace();
 
-    expect(markup).toContain("XH-202619");
     expect(markup).toContain("面向前沿科学问题的 AI 假设生成与研究计划设计平台");
-    expect(markup).toContain("机器验证");
-    expect(markup).toContain("<strong>4 / 4</strong>");
-    expect(markup).toContain("人工审核");
-    expect(markup).toContain("<strong>1 / 4</strong>");
-    expect(markup).toContain("3 题需修订");
-    expect(markup).toContain("修订 3 题证据与计划");
-    expect(markup).toContain("1 个黄金样例 + 3 个试运行题（共 4 题）");
-    expect(markup).toContain("模型调用证据");
-    expect(markup).toContain("125 题批处理与 3 个代表性深研案例");
-    expect(markup).toContain("FashionMNIST 仅为工程案例");
-    expect(markup).toContain("白书遥");
+    expect(markup).toContain("资料与证据");
+    expect(markup).toContain("SCI-096");
+    expect(markup).toContain("SCI-031");
+    expect(markup).toContain("通过");
+    expect(markup).toContain("需修订");
+    expect(markup).toContain("qwen-plus");
+    expect(markup).not.toContain("3 项待人工");
   });
 
   it("renders the approved universal research platform from the live projection without preview claims", () => {
@@ -188,7 +192,6 @@ describe("ChallengeCupOperationsWorkspace", () => {
           项目切换器 · {context.statusLabel} · {context.primaryActionLabel}
         </div>
       ),
-      surface: "workspace",
       stageHrefs: {
         knowledge_collection: "/teams/research-team/source-collection",
         experiment: "/teams/research-team/experiment",
@@ -200,23 +203,21 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(markup).toContain("知识搜集");
     expect(markup).toContain("实验设计");
     expect(markup).toContain("执行与迭代");
-    expect(markup).toContain("资料工作表");
+    expect(markup).toContain("资料与证据");
     expect(markup).toContain("项目切换器");
     expect(markup).toContain("继续知识搜集");
-    expect(markup).toContain("当前对象");
     expect(markup).toContain("神经预测编码中的层级反馈与可塑性学习机制");
-    expect(markup).toContain("Claim Map 0");
-    expect(markup).toContain("当前投影未提供正式 Claim Map 时保持为 0");
+    expect(markup).not.toContain("Claim Map");
+    expect(markup).not.toContain("从真实题目、模型调用证据与人工门禁判断");
     expect(markup).toContain("SCI-096");
     expect(markup).toContain("challengeQuestion=SCI-096");
     expect(markup).toContain("challengeQuestion=SCI-031");
-    expect(markup).toContain("模型调用证据");
+    expect(markup).toContain("qwen-plus");
     expect(markup).not.toContain("weight=0.875");
   });
 
   it("routes each challenge question action to its own immutable artifact", () => {
     const markup = renderWorkspace({
-      surface: "workspace",
       stageHrefs: {
         knowledge_collection: "/teams?team=research-team&researchView=knowledge_collection",
       },
@@ -226,22 +227,59 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(markup).toContain("challengeQuestion=SCI-031");
     expect(markup).toContain("challengeQuestion=SCI-097");
     expect(markup).toContain("challengeQuestion=SCI-118");
-    expect(componentSource).toContain("to={item.href}");
+    expect(stageRailSource).toContain("to={item.href}");
     expect(componentSource).toContain("resolveQuestionHref(question.id)");
   });
 
   it("wires Stage 2 and Stage 3 to fixed flat-session Agent responsibilities", () => {
-    expect(componentSource).toContain("<ResearchProjectAgentTaskPanel");
-    expect(componentSource).toContain('stage="experiment"');
-    expect(componentSource).toContain('stage="iteration"');
+    expect(componentSource).toContain("<ChallengeCupExperimentStage");
+    expect(componentSource).toContain("<ChallengeCupIterationStage");
+    expect(experimentStageSource).toContain("<ResearchProjectAgentTaskPanel");
+    expect(experimentStageSource).toContain('stage="experiment"');
+    expect(iterationStageSource).toContain("<ResearchProjectAgentTaskPanel");
+    expect(iterationStageSource).toContain('stage="iteration"');
     expect(componentSource).toContain("onStartResearchProjectAgentTask");
     expect(componentSource).toContain("onOpenResearchProjectAgentTask");
+  });
+
+  it("keeps the experiment protocol compact and removes the redundant intra-stage open action", () => {
+    const markup = renderWorkspace({ initialStage: "experiment" });
+
+    expect(markup).toContain("实验协议");
+    expect(markup).toContain("研究计划");
+    expect(markup).toContain("评审门");
+    expect(markup).toContain("账本");
+    expect(experimentStageSource).toContain("<ChallengeCupExperimentProtocol");
+    expect(experimentStageSource).not.toContain("VRouteLinkButton");
+    expect(experimentProtocolSource).toContain("VTooltip");
+    expect(experimentProtocolSource).not.toContain('tone="success"');
+  });
+
+  it("keeps iteration results compact and moves result detail to hover", () => {
+    const markup = renderWorkspace({ initialStage: "iteration" });
+
+    expect(markup).toContain("研究结果");
+    expect(markup).toContain("FashionMNIST 预测编码");
+    expect(iterationStageSource).toContain("<ChallengeCupIterationResultPackage");
+    expect(iterationResultPackageSource).toContain("VTooltip");
+    expect(iterationResultPackageSource).not.toContain('tone="success"');
+  });
+
+  it("places the current stage Agent configuration cards beside the operation surface", () => {
+    const markup = renderWorkspace({
+      initialStage: "experiment",
+      agentConfiguration: (stage) => <div data-testid="challenge-agent-slot">{stage} Agent 配置</div>,
+    });
+
+    expect(markup).toContain('data-testid="challenge-agent-slot"');
+    expect(markup).toContain("experiment Agent 配置");
+    expect(componentSource).toContain("platform-stage-agent-configuration");
+    expect(componentSource).toContain("agentConfiguration(activeStage)");
   });
 
   it("routes challenge status chrome through VUI while preserving the approved workspace layout", () => {
     expect(componentSource).toContain("VStatusChip");
     expect(componentSource).toContain("VRouteLinkButton");
-    expect(componentSource).toContain("VEmptyState");
     expect(componentSource).toContain("vuiStatusTone");
     expect(componentSource).not.toContain('<Link className={cx("button"');
     expect(componentSource).not.toContain('<Link className={cx("text-button")');
@@ -257,19 +295,24 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(componentStyles).not.toContain(".badge.success");
   });
 
-  it("keeps the approved identity visible during loading and unavailable states", () => {
+  it("uses compact VUI states while loading or unavailable", () => {
     const loadingMarkup = renderWorkspace({ projection: undefined, isLoading: true });
     const unavailableMarkup = renderWorkspace({ projection: undefined, isUnavailable: true });
 
-    expect(loadingMarkup).toContain("XH-202619");
-    expect(loadingMarkup).toContain("正在读取挑战杯 MVP 状态");
-    expect(unavailableMarkup).toContain("XH-202619");
-    expect(unavailableMarkup).toContain("无法读取 MVP 投影");
+    expect(loadingMarkup).toContain('data-testid="challenge-cup-platform-loading"');
+    expect(loadingMarkup).toContain("skeleton-panel");
+    expect(unavailableMarkup).toContain("科研工作台数据暂不可用");
     expect(unavailableMarkup).not.toContain("实验设计");
   });
 
+  it("removes the retired progress-screen contract instead of retaining a hidden fallback", () => {
+    expect(componentSource).not.toContain('surface?: "workspace" | "progress"');
+    expect(componentSource).not.toContain("挑战杯 MVP 总览");
+    expect(componentSource).not.toContain("125 题批处理与 3 个代表性深研案例");
+  });
+
   it("keeps production styling responsive, theme-aware, and scoped to the workspace", () => {
-    expect(componentSource).toContain('data-testid="challenge-cup-operations-workspace"');
+    expect(componentSource).toContain('data-testid="challenge-cup-platform-workspace"');
     expect(componentStyles).toContain(".workspace");
     expect(componentStyles).toContain("min-width: 0");
     expect(componentStyles).not.toContain("color-scheme: light");
@@ -282,13 +325,14 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(componentStyles).toContain("@container challenge-workspace (max-width: 760px)");
     expect(componentStyles).toContain("@container challenge-workspace (min-width: 1600px)");
     expect(componentStyles).toContain(".platform-console");
-    expect(componentStyles).toContain("grid-template-columns: 220px minmax(620px, 1fr) clamp(280px, 19vw, 340px)");
-    expect(componentStyles).toContain(".platform-stage-rail");
-    expect(componentStyles).toContain("position: sticky");
-    expect(componentStyles).toContain(".platform-grid");
-    expect(componentStyles).toContain("display: contents");
+    expect(componentStyles).toContain("grid-template-columns: 220px minmax(0, 1fr)");
+    expect(componentStyles).toContain(".platform-project-header");
+    expect(componentStyles).toContain(".platform-canvas");
     expect(componentStyles).toContain("width: 100%");
     expect(componentStyles).toContain("max-width: none");
+    expect(componentStyles).not.toContain(".platform-grid");
+    expect(componentStyles).not.toContain(".platform-inspector");
+    expect(componentStyles).not.toContain(".program-header");
     expect(componentStyles).not.toContain("@media (max-width: 760px)");
     expect(componentStyles).not.toContain("@media (max-width: 430px)");
   });

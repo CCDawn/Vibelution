@@ -1,0 +1,155 @@
+.stage {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: 9px;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  font-weight: 650;
+  background: var(--vui-surface-row);
+}
+
+.step[data-complete="true"] {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--vui-border-subtle));
+  color: var(--accent-cool);
+}
+
+.stepIndex {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.step[data-complete="true"] .stepIndex {
+  color: var(--accent-cool);
+}
+
+.focusCard,
+.dataSurface {
+  min-width: 0;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-soft);
+  background: var(--vui-surface-panel);
+  box-shadow: var(--vui-shadow-hairline);
+}
+
+.focusCard {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+}
+
+.focusTitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.98rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focusMeta {
+  flex: 0 0 auto;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.dataHeader {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--vui-border-subtle);
+}
+
+.dataHeader h3 {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+  line-height: 1.2;
+}
+
+.evidenceCount {
+  flex: 0 0 auto;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  height: 48px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--vui-border-subtle);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table tr:last-child td {
+  border-bottom: 0;
+}
+
+.table th {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.table td {
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+}
+
+.questionLink {
+  min-height: 30px;
+  padding: 0 6px;
+  color: var(--fg-primary);
+  font-weight: 700;
+}
+
+@container challenge-workspace (max-width: 760px) {
+  .focusCard,
+  .dataHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

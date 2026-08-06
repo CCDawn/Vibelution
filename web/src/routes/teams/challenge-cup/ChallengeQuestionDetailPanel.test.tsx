@@ -167,15 +167,14 @@ describe("ChallengeQuestionDetailPanel", () => {
     );
 
     expect(markup).toContain("SCI-096");
-    expect(markup).toContain("题目级“接单 Agent”身份尚未写入正式工件");
-    expect(markup).toContain("登记的证据事实（非原文摘录）");
-    expect(markup).toContain("原文逐字摘录与页码/段落锚点未登记");
+    expect(markup).toContain("证据事实");
+    expect(markup).toContain("证据锚点未登记");
     expect(markup).toContain("Hypothesis one");
     expect(markup).toContain("Hypothesis two");
-    expect(markup).toContain("各维度独立呈现，不汇总成单一总分");
     expect(markup).toContain("收窄论断边界");
     expect(markup).toContain("stage1-sci-096-v3.json");
     expect(markup).not.toContain("SCI-098");
+    expect(markup).not.toContain("各维度独立呈现，不汇总成单一总分");
   });
 
   it("fails closed when the requested question artifact is unavailable", () => {
@@ -189,6 +188,8 @@ describe("ChallengeQuestionDetailPanel", () => {
     );
 
     expect(markup).toContain("SCI-999");
-    expect(markup).toContain("不会回退到当前研究项目或其他题目的资料");
+    expect(markup).toContain("审核工件不可用");
+    expect(markup).toContain("返回题目列表");
+    expect(markup).not.toContain("当前研究项目或其他题目的资料");
   });
 });

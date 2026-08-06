@@ -240,19 +240,18 @@ describe("research project workspace", () => {
     expect(experimentActionSource).not.toContain('teamId: selectedTeam?.teamId || ""');
   });
 
-  it("keeps active research projects out of the Challenge Program progress surface", () => {
+  it("mounts the Challenge Program workspace for every Challenge Cup research view", () => {
     expect(teamResearchStageLauncherPanelSource).toContain(
       "const challengeProgramSurfaceSelected =",
     );
     expect(teamResearchStageLauncherPanelSource).toContain(
-      'Boolean(selectedChallengeQuestionId) || challengeTeamSurface === "progress"',
+      "const challengeProgramSurfaceSelected = challengeCupResearchTeamSelected;",
     );
     expect(teamResearchStageLauncherPanelSource).toContain(
       "if (challengeProgramSurfaceSelected) {",
     );
-    expect(teamResearchStageLauncherPanelSource).not.toContain(
-      "if (challengeCupResearchTeamSelected) {",
-    );
+    expect(teamResearchStageLauncherPanelSource).toContain("initialStage={challengeInitialStage}");
+    expect(teamResearchStageLauncherPanelSource).not.toContain('surface="workspace"');
   });
 
   it("mounts persistent project switching above the three-stage workspace", () => {
