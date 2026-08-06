@@ -22,6 +22,7 @@ import {
   VSplitWorkspace,
   VStateSurface,
   VStatusStrip,
+  VSessionWorkbenchPage,
   VTrackWorkbenchPage,
   VUI_PAGE_FILL_CLASS,
   VWorkbenchPage,
@@ -264,6 +265,35 @@ describe("VUI workbench layout templates", () => {
     expect(canvasMarkup).toContain('data-vui="canvas-workbench-inspector"');
     expect(canvasMarkup).toContain("Graph");
     expect(canvasMarkup).toContain("Node");
+  });
+
+  it("renders the session workbench page recipe with dual-pane slots", () => {
+    const markup = renderToStaticMarkup(
+      <VSessionWorkbenchPage
+        ariaLabel="Chat session"
+        domainRecipe="chat-session-workbench"
+        layoutId="chat"
+        hostAsRoot
+        className="chat-grid"
+        overlay={<div>Backdrop</div>}
+        statusRail={<aside>Status</aside>}
+        session={<main>Conversation</main>}
+        indexRail={<nav>Index</nav>}
+        leftResizeHandle={<div>L</div>}
+        rightResizeHandle={<div>R</div>}
+      >
+        <dialog>Modal</dialog>
+      </VSessionWorkbenchPage>,
+    );
+    expect(markup).toContain('data-vui-recipe="session-workbench-page"');
+    expect(markup).toContain('data-vui-domain-recipe="chat-session-workbench"');
+    expect(markup).toContain('data-vui-layout-id="chat"');
+    expect(markup).toContain("chat-grid");
+    expect(markup).toContain("Backdrop");
+    expect(markup).toContain("Status");
+    expect(markup).toContain("Conversation");
+    expect(markup).toContain("Index");
+    expect(markup).toContain("Modal");
   });
 
   it("renders the track workbench page recipe with optional header and body fill", () => {

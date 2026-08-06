@@ -78,12 +78,16 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(chatLayout).toContain("getResizeBounds");
     // Coupled dual-pane math stays Chat-owned (doc may mention the generic hook by name).
     expect(chatLayout).not.toMatch(/import\s*\{[^}]*usePersistedPaneResize/);
-    expect(chatRoute).toContain("WORKBENCH_LAYOUT_IDS.chat");
-    expect(chatRoute).toContain("data-vui-layout-id");
-    expect(chatRoute).toContain('data-vui-recipe="chat-session-workbench"');
-    expect(chatRoute).toContain('data-vui-domain-recipe="chat-dual-pane"');
+    expect(chatRoute).toContain("ChatSessionWorkbenchShell");
     expect(chatRoute).toContain('data-vui-region="chat-conversation-center"');
     expect(chatRoute).toContain("PaneCollapseHandle");
+    expect(chatRoute).toContain("statusRail={");
+    expect(chatRoute).toContain("conversationIndex={");
+    const chatShell = readFileSync(resolve(webSrc, "routes/chat/ChatSessionWorkbenchShell.tsx"), "utf-8");
+    expect(chatShell).toContain("VSessionWorkbenchPage");
+    expect(chatShell).toContain('domainRecipe="chat-session-workbench"');
+    expect(chatShell).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(chatShell).toContain('data-chat-geometry="dual-pane"');
     expect(statusRail).toContain('data-vui-region="chat-status-rail"');
     expect(indexRail).toContain('data-vui-region="chat-session-index"');
     // Soft cool active tab — not full ink slab fill.

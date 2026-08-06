@@ -97,6 +97,11 @@ export {
   type VTrackWorkbenchHeader,
   type VTrackWorkbenchPageProps,
 } from "./layout/VTrackWorkbenchPage";
+export {
+  VSessionWorkbenchPage,
+  type VSessionWorkbenchHeader,
+  type VSessionWorkbenchPageProps,
+} from "./layout/VSessionWorkbenchPage";
 export { VPage, type VPageProps } from "./layout/VPage";
 export {
   VUI_BOARD_CONTENT_PAD_CLASS,
