@@ -901,8 +901,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps the embedded composer compact inside the workbench frame", () => {
     expect(conversationStyles.composer).toContain("items-center");
     expect(conversationStyles.composer).not.toContain("items-end");
-    expect(conversationStyles.composerField).toContain("[&_textarea]:min-h-[48px]");
-    expect(conversationStyles.composerField).toContain("[&_textarea]:max-h-[112px]");
+    expect(conversationStyles.composerField).toContain("[&_textarea]:min-h-[72px]");
+    expect(conversationStyles.composerField).toContain("[&_textarea]:max-h-[220px]");
     expect(conversationStyles.composerField).not.toContain("[&_textarea]:min-h-20");
     expect(conversationStyles.surfaceCompact).toContain("[&_.composer]:pt-1.5");
     expect(conversationStyles.surfaceCompact).toContain("[&_.composer]:pb-2");
