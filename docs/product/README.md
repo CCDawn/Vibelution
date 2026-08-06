@@ -43,6 +43,7 @@ Vibelution 是**本地优先**的 AI Agent 工作台，面向工程协作、仓�
 
 | 主题 | 文档 |
 | --- | --- |
+| Windows 最终用户安装（Phase 1） | [2026-08-06-windows-end-user-install.md](2026-08-06-windows-end-user-install.md) · [../guides/install-windows.md](../guides/install-windows.md) |
 | 产品 UI 注册表 / 视觉禁令 | [design-register.md](design-register.md) |
 | 领域词汇 | [../agents/domain.md](../agents/domain.md) |
 | Gym 产品意图 | [../prds/README.md](../prds/README.md) |
