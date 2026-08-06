@@ -1171,7 +1171,7 @@ const styles: Record<string, string> = {
   turnEditing:
     "vui-components-conversationview turnEditing min-w-0 [&_.userMessageBody]:border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] [&_.userMessageBody]:bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-panel))] [&_.userMessageBody]:ring-1 [&_.userMessageBody]:ring-inset [&_.userMessageBody]:ring-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)]",
   toolApprovalFallback:
-    "toolApprovalFallback min-w-0 w-full max-w-[min(42rem,100%)] justify-self-center px-2 pb-2",
+    "toolApprovalFallback z-[6] min-w-0 w-full max-w-[min(44rem,100%)] shrink-0 justify-self-center px-2 pb-1.5 pt-0.5",
   turnError:
     "vui-components-conversationview turnError mx-auto grid w-[min(100%,760px)] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_5%,var(--vui-surface-row))] px-3 py-2.5 text-[var(--state-error)] shadow-none",
   turnErrorDiagnostics:

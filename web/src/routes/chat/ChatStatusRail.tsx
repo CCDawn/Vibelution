@@ -45,6 +45,7 @@ import {
 } from "./chatListHeights";
 import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./TokenCoreStatusPanel";
+import { TurnStatusTailPanel } from "./TurnStatusTailPanel";
 import routeStyles from "../ChatCodingRoute.styles";
 import styles from "./ChatStatusRail.styles";
 
@@ -626,6 +627,12 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
             })}
           </div>
         </section>
+
+        <TurnStatusTailPanel
+          activeSessionId={String(activeSessionId || "")}
+          injectMasterEnabled={runtimeStatusEnabledForNextTurn}
+          lang={lang}
+        />
 
         <TokenCoreStatusPanel
           cacheDetailAvailable={cacheDetailAvailable}
