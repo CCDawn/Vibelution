@@ -174,6 +174,7 @@ Every primary workbench shell should expose a stable domain marker for contracts
 | --- | --- |
 | Logs / Git / Tools | `data-vui-domain-recipe` on `VDenseOpsPage` + `data-vui-recipe` on resizable workspace |
 | Evolution | `VTrackWorkbenchPage` + `data-vui-recipe="evolution-workbench"` / `domainRecipe="evolution-multi-rail"` |
+| Chat | `VSessionWorkbenchPage` via `ChatSessionWorkbenchShell` + `useChatWorkbenchLayout` dual-pane math |
 | Self-evolution track | `data-vui-recipe="evolution-self-workbench"` on workspace layout |
 | Launcher | `data-vui-recipe="launcher-workbench"` on route + workspace |
 | Supervised review | `data-vui-recipe="supervised-review-workbench"` on page + workspace |
@@ -185,7 +186,7 @@ Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test
 
 | Surface | Contract |
 | --- | --- |
-| Chat session workbench | Domain recipe `chat-session-workbench`; **not** `VListDetailPage`. Width dual-writes `shellStore.setChatPanelWidths` → `pane-layouts.v1[chat]`. Coupled dual-pane bounds stay Chat-owned. |
+| Chat session workbench | Page recipe `session-workbench-page` + domain `chat-session-workbench` via `VSessionWorkbenchPage` / `ChatSessionWorkbenchShell`. Width dual-writes `shellStore.setChatPanelWidths` → `pane-layouts.v1[chat]`. Coupled dual-pane bounds stay Chat-owned. |
 | Memory project memory queue | `memory` / `project-memory-queue` via `usePersistedPaneHeight` (replaces fixed `max-h-[min(220px,28vh)]`) |
 
 **Chat prefer / avoid**

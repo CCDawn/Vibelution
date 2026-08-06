@@ -1,18 +1,11 @@
 /**
- * Chat session workbench geometry host.
- *
- * Owns recipe markers + the three-pane grid host element used by
- * `useChatWorkbenchLayout` (layoutRef / dual-write widths / responsive attrs).
- * Domain dual-pane math stays in the layout hook; this shell only hosts the
- * workbench root so a future session page recipe can wrap the same contract.
- *
- * Prefer explicit slots (`statusRail` / `center` / `conversationIndex`) when
- * composing; `children` is for host-level dialogs and transitional full-body
- * content during migration.
+ * Chat dual-pane geometry host — thin adapter over VSessionWorkbenchPage.
+ * Keeps Chat-specific data attributes and slot names used by the workbench.
  */
 import type { CSSProperties, ReactNode, RefObject } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
+import { VSessionWorkbenchPage } from "../../components/vui";
 
 export type ChatSessionWorkbenchShellProps = {
   layoutRef: RefObject<HTMLDivElement | null>;
@@ -20,17 +13,12 @@ export type ChatSessionWorkbenchShellProps = {
   style?: CSSProperties;
   responsiveMode: string;
   statusRailCollapsed: boolean;
-  /** Full-screen backdrop when a responsive overlay pane is open. */
   overlay?: ReactNode;
-  /** Right status rail (or overlay). */
   statusRail?: ReactNode;
   leftResizeHandle?: ReactNode;
-  /** Center conversation / workspace column. */
   center?: ReactNode;
   rightResizeHandle?: ReactNode;
-  /** Left conversation index / directory rail. */
   conversationIndex?: ReactNode;
-  /** Dialogs and transitional full-body content under the layout root. */
   children?: ReactNode;
 };
 
@@ -49,24 +37,26 @@ export function ChatSessionWorkbenchShell({
   children = null,
 }: ChatSessionWorkbenchShellProps) {
   return (
-    <div
-      ref={layoutRef}
+    <VSessionWorkbenchPage
+      layoutRef={layoutRef}
+      hostAsRoot
+      fill
       className={className}
-      style={style}
+      hostStyle={style}
+      domainRecipe="chat-session-workbench"
+      layoutId={WORKBENCH_LAYOUT_IDS.chat}
       data-vui="chat-session-workbench-shell"
-      data-vui-recipe="chat-session-workbench"
-      data-vui-domain-recipe="chat-dual-pane"
-      data-vui-layout-id={WORKBENCH_LAYOUT_IDS.chat}
       data-chat-responsive-mode={responsiveMode}
       data-chat-status-rail={statusRailCollapsed ? "collapsed" : "visible"}
+      data-chat-geometry="dual-pane"
+      overlay={overlay}
+      statusRail={statusRail}
+      leftResizeHandle={leftResizeHandle}
+      session={center}
+      rightResizeHandle={rightResizeHandle}
+      indexRail={conversationIndex}
     >
-      {overlay}
-      {statusRail}
-      {leftResizeHandle}
-      {center}
-      {rightResizeHandle}
-      {conversationIndex}
       {children}
-    </div>
+    </VSessionWorkbenchPage>
   );
 }

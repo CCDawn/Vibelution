@@ -16,12 +16,11 @@
 | --- | --- | --- |
 | `TeamsRoute.tsx` | Thick orchestrator; shell recipes + SC/canvas extracts in progress (other owner). | keep recipes; continue module extract |
 | Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | optional inspector UX polish |
-| Chat coding | Dual-pane domain math (OK); `chat-dual-pane` + layoutId + height panes; soft cool session tabs | Keep domain layout exception |
+| Chat coding | **`VSessionWorkbenchPage` + `ChatSessionWorkbenchShell` + `useChatWorkbenchLayout`**; dual-pane math in hook | Done for page recipe + slots; keep dual-write domain math |
 | Memory | Outer `VDenseOpsPage` + layoutId; sources/knowledge/agent-memory → `VSplitWorkspace` | Done for three-pane shells |
 | Config settings | **Migrated** nav/main + model-assets to `VSplitWorkspace` layoutIds | Done for shell width ownership |
 | Research flow canvas | **Migrated** `VCanvasWorkbenchPage` + **`WORKBENCH_LAYOUT_IDS.researchFlow`** inspector resize | Done for inspector width memory |
 | Evolution queues | Outer **`VTrackWorkbenchPage`** + multi-rail domain recipe; panels extracted incl. **case-trace / conversation evidence** | Done for page host; keep multi-rail resize exception |
-| Chat coding | **`ChatSessionWorkbenchShell` + `useChatWorkbenchLayout`**; dual-pane math; **`VSessionWorkbenchPage` planned** until slot migration | Host extracted; next: fill shell slots from workbench |
 | Panel titles residual | Challenge-cup mega shell + chat bubble headers still use domain `<header>` | Prefer `VPanelHeader` when title+actions; leave message chrome domain |
 | Git / Tools / Logs / Launcher | Shared `usePersistedPaneResize` + **`PaneCollapseHandle`** (collapse-to-zero; not VSplit) | Keep hook+collapse pattern; gate documents exception |
 
