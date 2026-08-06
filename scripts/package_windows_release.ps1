@@ -4,14 +4,17 @@
 
 .DESCRIPTION
   Produces dist/release/windows/Vibelution-<version>/ with:
-    - install_windows.ps1 entry
+    - Install-Windows.ps1 entry wrapper
     - launcher scripts
-    - README-安装.txt
-    - optional copy of prebuilt web/dist and selected project files for portable layout
+    - START_HERE.txt
+    - filtered project snapshot (optional prebuilt web/dist)
 
-  Phase 1 does NOT yet embed Python/Node. The package is a "ready repo snapshot"
+  Phase 1 does NOT embed Python/Node. The package is a ready repo snapshot
   plus one-click install for machines that already have those runtimes.
   Phase 2 will add embeddable Python and omit Node from user machines.
+
+  Keep this script ASCII-only so Windows PowerShell 5.1 parses it without
+  depending on UTF-8 BOM.
 #>
 [CmdletBinding()]
 param(
@@ -68,8 +71,14 @@ if ($IncludeFullRepo) {
         $ProjectDir, $StageDir, "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/nc", "/ns", "/np"
     )
     foreach ($d in $excludeDirs) {
+        # /XD expects directory names (or relative path segments), not absolute paths
         $robocopyArgs += "/XD"
-        $robocopyArgs += (Join-Path $ProjectDir $d)
+        $robocopyArgs += $d
+    }
+    # Windows reserved device names break Compress-Archive / some extractors
+    foreach ($xf in @("nul", "con", "prn", "aux")) {
+        $robocopyArgs += "/XF"
+        $robocopyArgs += $xf
     }
     & robocopy @robocopyArgs | Out-Null
     # robocopy exit 0-7 success
@@ -80,33 +89,45 @@ if ($IncludeFullRepo) {
     throw "IncludeFullRepo:`$false is reserved for Phase 2 slim layout"
 }
 
-# Always ensure install entry + Chinese readme at package root
-$installSrc = Join-Path $ProjectDir "scripts\install_windows.ps1"
-$installDst = Join-Path $StageDir "安装-Windows.ps1"
-Copy-Item -LiteralPath $installSrc -Destination $installDst -Force
+# Root entry: thin wrapper -> scripts\install_windows.ps1 (correct ProjectDir).
+$installWrapper = @'
+# Vibelution Windows install entry (release package root)
+$ErrorActionPreference = "Stop"
+$here = $PSScriptRoot
+$inner = Join-Path $here "scripts\install_windows.ps1"
+if (-not (Test-Path -LiteralPath $inner)) {
+    throw "Missing scripts\install_windows.ps1 under $here"
+}
+& powershell -NoProfile -ExecutionPolicy Bypass -File $inner @args
+exit $LASTEXITCODE
+'@
+Set-Content -LiteralPath (Join-Path $StageDir "Install-Windows.ps1") -Value $installWrapper -Encoding UTF8
 
-$readmeZh = @"
-Vibelution $Version — Windows 包（Phase 1）
-========================================
-
-这是「可安装的项目快照」，不是完全离线绿色免环境包。
-
-安装（需本机已有 Python 3.11+ 与 Node 18+）：
-  1. 右键「安装-Windows.ps1」→ 使用 PowerShell 运行
-     或在本目录打开 PowerShell 执行：
-       powershell -ExecutionPolicy Bypass -File .\安装-Windows.ps1
-  2. 按脚本提示配置
-       %USERPROFILE%\Documents\Vibelution\config\config.toml
-  3. 双击桌面 Vibelution Launcher，或：
-       powershell -ExecutionPolicy Bypass -File .\scripts\vibelution_launcher.ps1 -Action start
-
-说明文档：
-  docs\guides\install-windows.md
-  docs\product\2026-08-06-windows-end-user-install.md
-
-Phase 2 将提供内嵌 Python、无需本机 Node 的便携包。
-"@
-Set-Content -LiteralPath (Join-Path $StageDir "请先阅读-安装说明.txt") -Value $readmeZh -Encoding UTF8
+$startHere = @(
+    "Vibelution $Version - Windows package (Phase 1)",
+    "========================================",
+    "",
+    "This is an installable project snapshot, NOT a fully offline portable runtime.",
+    "You still need Python 3.11+ and Node.js 18+ on the machine.",
+    "",
+    "Install:",
+    "  1. In this folder, run PowerShell:",
+    "       powershell -ExecutionPolicy Bypass -File .\Install-Windows.ps1",
+    "     Optional auto-start:",
+    "       powershell -ExecutionPolicy Bypass -File .\Install-Windows.ps1 -Start",
+    "  2. Configure models/keys:",
+    "       %USERPROFILE%\Documents\Vibelution\config\config.toml",
+    "  3. Start Desktop shortcut Vibelution Launcher, or:",
+    "       powershell -ExecutionPolicy Bypass -File .\scripts\vibelution_launcher.ps1 -Action start",
+    "",
+    "Chinese end-user guide:",
+    "  docs\guides\install-windows.md",
+    "Product plan:",
+    "  docs\product\2026-08-06-windows-end-user-install.md",
+    "",
+    "Phase 2 will embed Python and avoid requiring Node on user machines."
+) -join [Environment]::NewLine
+Set-Content -LiteralPath (Join-Path $StageDir "START_HERE.txt") -Value $startHere -Encoding UTF8
 
 # Zip
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
@@ -115,7 +136,22 @@ if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force
 }
 Write-Host "Compressing $zipPath ..."
-Compress-Archive -Path $StageDir -DestinationPath $zipPath -CompressionLevel Optimal
+# Prefer tar: Compress-Archive fails on Windows reserved names (e.g. accidental "nul" files).
+$tar = Get-Command tar -ErrorAction SilentlyContinue
+if ($tar) {
+    # tar -C parent so zip root is the stage folder name
+    $parent = Split-Path -Parent $StageDir
+    $leaf = Split-Path -Leaf $StageDir
+    Push-Location $parent
+    try {
+        & tar -a -cf $zipPath $leaf
+        if ($LASTEXITCODE -ne 0) { throw "tar failed with exit $LASTEXITCODE" }
+    } finally {
+        Pop-Location
+    }
+} else {
+    Compress-Archive -Path $StageDir -DestinationPath $zipPath -CompressionLevel Optimal
+}
 
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green
