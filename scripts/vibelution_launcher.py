@@ -1619,10 +1619,18 @@ def _ensure_frontend_build(source_identity: dict[str, object] | None = None) -> 
     previous_tree = str(previous_provenance.get("frontendTree") or "")
     identity_tree = str(identity.get("frontendTree") or "")
     tree_matches = bool(previous_provenance) and previous_tree == identity_tree
-    # Missing provenance alone must not force a second production build when dist is
-    # already fresher than sources (runtime-manager preflight often builds first and
-    # historically left provenance empty → open_workbench rebuilt again).
-    tree_mismatch = bool(previous_provenance) and previous_tree != identity_tree
+    # Provenance ``frontendTree`` is the tree that *produced* dist. Mismatch means
+    # main moved (even when git commit did not bump file mtimes). Missing stamp with
+    # a live identity tree requires one rebuild so skip-stamps stay honest.
+    tree_mismatch = bool(identity_tree) and (
+        (bool(previous_provenance) and previous_tree != identity_tree)
+        or (not previous_provenance and bool(identity_tree) and dist_index.exists())
+    )
+    # Exception: empty previous provenance + dist fresher than sources was allowed
+    # to avoid double-build after preflight. Keep that only when identity tree is
+    # empty (no git). When git identity is available, require a stamped tree match.
+    if (not previous_provenance) and dist_index.exists() and (not sources_newer) and (not identity_tree):
+        tree_mismatch = False
     needs_build = (not dist_index.exists()) or sources_newer or tree_mismatch
     _append_frontend_build_log(
         {
@@ -1633,6 +1641,8 @@ def _ensure_frontend_build(source_identity: dict[str, object] | None = None) -> 
             "sourceCommit": identity.get("commit"),
             "frontendTree": identity.get("frontendTree"),
             "previousFrontendTree": previous_provenance.get("frontendTree"),
+            "sourcesNewer": sources_newer,
+            "treeMismatch": tree_mismatch,
         }
     )
     if needs_install:
@@ -1645,16 +1655,25 @@ def _ensure_frontend_build(source_identity: dict[str, object] | None = None) -> 
         for build_command, build_label in _frontend_build_commands(package_manager, web_dir):
             _run_checked(build_command, cwd=web_dir, label=build_label)
     _assert_runtime_source_identity(identity)
+    if needs_build:
+        artifact_tree = identity.get("frontendTree")
+        built_from = identity.get("commit")
+        reused_from: object = ""
+    else:
+        # Never rewrite artifact identity to HEAD on a skip — that blocked rebuilds.
+        artifact_tree = previous_provenance.get("frontendTree") or identity.get("frontendTree")
+        built_from = previous_provenance.get("builtFromCommit") or identity.get("commit")
+        reused_from = previous_provenance.get("builtFromCommit") or built_from
     provenance: dict[str, object] = {
         "schemaVersion": 1,
         "projectRoot": identity.get("projectRoot"),
         "sourceBranch": identity.get("branch"),
         "sourceCommit": identity.get("commit"),
-        "frontendTree": identity.get("frontendTree"),
-        "builtFromCommit": identity.get("commit"),
-        "reusedArtifactFromCommit": (
-            "" if needs_build else previous_provenance.get("builtFromCommit")
-        ),
+        "frontendTree": artifact_tree,
+        "builtFromCommit": built_from,
+        "reusedArtifactFromCommit": reused_from,
+        "lastValidatedCommit": identity.get("commit"),
+        "lastValidatedFrontendTree": identity.get("frontendTree"),
         "rebuilt": needs_build,
         "validatedAt": _now_iso(),
     }

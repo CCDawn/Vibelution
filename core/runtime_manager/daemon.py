@@ -1982,7 +1982,23 @@ def _latest_mtime(paths: list[Path]) -> float:
     return latest
 
 
+def _read_frontend_build_provenance() -> dict[str, Any]:
+    path = _frontend_build_provenance_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _frontend_build_current() -> tuple[bool, str, dict[str, Any]]:
+    """Return whether dist is safe to reuse for the current frontend sources.
+
+    Freshness is **not** mtime-only: git commit does not bump file mtimes, and a
+    skipped preflight must not stamp ``HEAD:web`` onto an older dist. Prefer the
+    provenance ``frontendTree`` (tree that actually produced dist) vs ``HEAD:web``,
+    then fall back to mtime for dirty uncommitted edits.
+    """
     web_dir = PROJECT_ROOT / "web"
     dist_index = web_dir / "dist" / "index.html"
     if not dist_index.is_file():
@@ -2004,13 +2020,40 @@ def _frontend_build_current() -> tuple[bool, str, dict[str, Any]]:
     except OSError:
         return False, "web/dist/index.html is unreadable", {"distIndex": str(dist_index), "distMtime": 0.0, "inputMtime": 0.0}
     input_mtime = _latest_mtime(input_paths)
+    freshness: dict[str, Any] = {
+        "distIndex": str(dist_index),
+        "distMtime": dist_mtime,
+        "inputMtime": input_mtime,
+    }
+
+    current_tree = _capture_git_text(["rev-parse", "HEAD:web"], label="frontend tree identity")
+    provenance = _read_frontend_build_provenance()
+    stamped_tree = str(provenance.get("frontendTree") or "").strip()
+    freshness["frontendTree"] = current_tree
+    freshness["stampedFrontendTree"] = stamped_tree
+    freshness["stampedBuiltFromCommit"] = str(provenance.get("builtFromCommit") or "").strip()
+
+    if current_tree and stamped_tree and current_tree != stamped_tree:
+        return (
+            False,
+            "frontend tree differs from dist provenance",
+            freshness,
+        )
     if input_mtime > dist_mtime:
         return (
             False,
             "frontend sources changed",
-            {"distIndex": str(dist_index), "distMtime": dist_mtime, "inputMtime": input_mtime},
+            freshness,
         )
-    return True, "frontend build is current", {"distIndex": str(dist_index), "distMtime": dist_mtime, "inputMtime": input_mtime}
+    # No usable provenance: mtime said fresh, but we cannot prove which tree built
+    # dist. Require one rebuild so later skips are trustworthy.
+    if current_tree and not stamped_tree:
+        return (
+            False,
+            "frontend dist provenance missing",
+            freshness,
+        )
+    return True, "frontend build is current", freshness
 
 
 def _frontend_build_provenance_path() -> Path:
@@ -2036,20 +2079,39 @@ def _write_frontend_build_provenance_after_preflight(
     force_requested: bool,
     skipped: bool,
 ) -> dict[str, Any]:
-    """Stamp dist provenance so open_workbench/_ensure_frontend_build will not rebuild again."""
+    """Stamp dist provenance so open_workbench/_ensure_frontend_build will not rebuild again.
+
+    When the preflight **skips** a rebuild, never rewrite ``frontendTree`` /
+    ``builtFromCommit`` to the current HEAD — that falsely attests that dist was
+    produced from the latest main and blocks later real rebuilds.
+    """
 
     provenance_path = _frontend_build_provenance_path()
+    previous = _read_frontend_build_provenance()
     commit = _capture_git_text(["rev-parse", "HEAD"], label="preflight commit identity")
     branch = _capture_git_text(["branch", "--show-current"], label="preflight branch identity")
     frontend_tree = _capture_git_text(["rev-parse", "HEAD:web"], label="preflight frontend tree identity")
+
+    if rebuilt:
+        artifact_tree = frontend_tree
+        built_from = commit
+        reused_from = ""
+    else:
+        # Reuse: keep the tree/commit that actually produced the on-disk dist.
+        artifact_tree = str(previous.get("frontendTree") or "").strip() or frontend_tree
+        built_from = str(previous.get("builtFromCommit") or "").strip() or commit
+        reused_from = built_from
+
     payload: dict[str, Any] = {
         "schemaVersion": 1,
         "projectRoot": str(PROJECT_ROOT),
         "sourceBranch": branch,
         "sourceCommit": commit,
-        "frontendTree": frontend_tree,
-        "builtFromCommit": commit,
-        "reusedArtifactFromCommit": "" if rebuilt else commit,
+        "frontendTree": artifact_tree,
+        "builtFromCommit": built_from,
+        "reusedArtifactFromCommit": reused_from,
+        "lastValidatedCommit": commit,
+        "lastValidatedFrontendTree": frontend_tree,
         "rebuilt": bool(rebuilt),
         "validatedAt": now_iso(),
         "source": "runtime_manager_build_preflight",
