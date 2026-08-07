@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .atomic_fs import CorruptWorkflowStoreError, atomic_write_text
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -32,6 +34,21 @@ class WorkflowRunStore:
     def _run_path(self, run_id: str) -> Path:
         return self.root / f"{run_id}.json"
 
+    def _write_record(self, path: Path, record: dict[str, Any]) -> None:
+        atomic_write_text(path, json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+
+    def _read_record(self, path: Path) -> dict[str, Any]:
+        try:
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise CorruptWorkflowStoreError(path, "corrupt workflow run JSON", cause=exc) from exc
+        except OSError as exc:
+            raise CorruptWorkflowStoreError(path, "unreadable workflow run file", cause=exc) from exc
+        if not isinstance(data, dict):
+            raise CorruptWorkflowStoreError(path, "workflow run JSON must be an object")
+        return data
+
     def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             run_id = str(payload.get("runId") or f"run-{uuid.uuid4().hex[:12]}")
@@ -42,14 +59,14 @@ class WorkflowRunStore:
                 "updatedAt": _utc_now(),
             }
             path = self._run_path(run_id)
-            path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            self._write_record(path, record)
             return record
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         path = self._run_path(run_id)
         if not path.exists():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        return self._read_record(path)
 
     def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -57,18 +74,16 @@ class WorkflowRunStore:
             if current is None:
                 raise KeyError(run_id)
             next_record = {**current, **patch, "runId": run_id, "updatedAt": _utc_now()}
-            self._run_path(run_id).write_text(
-                json.dumps(next_record, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            self._write_record(self._run_path(run_id), next_record)
             return next_record
 
     def list_runs(self, workflow_id: str | None = None) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for path in sorted(self.root.glob("run-*.json")):
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
+                data = self._read_record(path)
+            except CorruptWorkflowStoreError:
+                # Surface corruption on direct get; skip only for list enumeration noise.
                 continue
             if workflow_id and data.get("workflowId") != workflow_id:
                 continue
