@@ -34,4 +34,7 @@ import { VWorkflowCanvas, type WorkflowLayoutInput } from "@/components/vui";
 - selected：outline
 - runtime current：ring
 - blocked / waiting_human 等 run 状态由调用方标题与 inspector 展示，画布不把 blocked 误映射为 failed
-- loading/empty：由调用方 VStateSurface 处理
+- loading/empty：由调用方 `VStateSurface` / `VEmptyState` 处理
+- **页面壳**：必须用 `VCanvasWorkbenchPage`（或等价 fill recipe），`layoutId` 用 `WORKBENCH_LAYOUT_IDS.researchFlow`
+- **禁止**在工作区手写 `height={440}` + 下方 `flex-1` 空面板（会产生大片空白）
+- 画布宿主默认 `height="100%"` + 父级 `min-h-0 flex-1`；Inspector 走 recipe 的 `aside`，未选节点用 `VEmptyState`

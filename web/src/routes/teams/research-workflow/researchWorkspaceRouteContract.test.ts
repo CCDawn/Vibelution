@@ -38,6 +38,14 @@ describe("researchWorkspaceRouteContract", () => {
     expect(workspaceSource).not.toContain("ChallengeCupStageRail");
   });
 
+  it("workspace uses VCanvasWorkbenchPage fill recipe (no fixed-height dead space)", () => {
+    expect(workspaceSource).toContain("VCanvasWorkbenchPage");
+    expect(workspaceSource).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");
+    expect(workspaceSource).toContain('height="100%"');
+    expect(workspaceSource).not.toContain("height={440}");
+    expect(workspaceSource).not.toContain("height={420}");
+  });
+
   it("selection is URL node only and does not claim runtime write", () => {
     expect(workspaceSource).toContain("Selection is UI-only");
     expect(workspaceSource).toContain("runtimeCurrentNodeIds");

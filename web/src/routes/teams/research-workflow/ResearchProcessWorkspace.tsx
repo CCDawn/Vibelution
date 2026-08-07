@@ -1,16 +1,22 @@
 /**
  * Canonical single-canvas research process workspace.
  * One stage-navigation surface: VWorkflowCanvas. Selection is UI-only.
+ *
+ * Layout: VCanvasWorkbenchPage (shadcn/recipe fill) — canvas fills remaining height,
+ * inspector is the right rail. Do not stack fixed-height canvas + flex-1 empty panels.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { fetchResearchWorkflowNodeDetail, listResearchWorkflowRuns } from "../../../api/researchWorkflow";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
+import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import {
   VButton,
-  VPanelHeader,
+  VCanvasWorkbenchPage,
+  VEmptyState,
   VSelect,
+  VStateSurface,
   VSurface,
   VWorkflowCanvas,
 } from "../../../components/vui";
@@ -172,136 +178,172 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
 
   const displayError = localError || error;
 
-  return (
-    <VSurface tone="workspace" className="flex min-h-0 flex-1 flex-col gap-3 p-3" data-vui="research-process-workspace">
-      <VPanelHeader
-        title="科研流程"
-        eyebrow={
-          runId
-            ? `${runId} · ${run?.status || projection?.run.status || ""}`
-            : "创建运行后由工作流引擎驱动"
-        }
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {runOptions.length > 0 ? (
-              <VSelect
-                density="compact"
-                className="min-w-[12rem]"
-                aria-label="运行切换"
-                placeholder="选择运行"
-                selectedKey={runId || null}
-                options={[
-                  { id: "", label: "选择运行" },
-                  ...runOptions.map((item) => ({
-                    id: item.runId,
-                    label: `${item.runId} · ${item.status}`,
-                  })),
-                ]}
-                onSelectionChange={(key) => {
-                  const nextId = key == null ? "" : String(key);
-                  replaceParams({ runId: nextId || null });
-                  if (nextId) void refresh();
-                }}
-              />
-            ) : null}
-            <VButton type="button" variant="ghost" onClick={() => replaceParams({ panel: "agents" })}>
-              Agent
-            </VButton>
-            <VButton type="button" variant="ghost" onClick={() => replaceParams({ panel: "timeline" })}>
-              时间线
-            </VButton>
-            <VButton type="button" variant="ghost" onClick={() => replaceParams({ panel: "team" })}>
-              团队
-            </VButton>
-            {projection?.run.runtimeCurrentNodeIds?.length ? (
-              <VButton type="button" variant="ghost" onClick={jumpToRuntime}>
-                当前节点
-              </VButton>
-            ) : null}
-            {!runId ? (
-              <VButton type="button" onClick={onCreateRun} isDisabled={busy}>
-                创建运行
-              </VButton>
-            ) : null}
-          </div>
-        }
-      />
+  const headerActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      {runOptions.length > 0 ? (
+        <VSelect
+          density="compact"
+          className="min-w-[12rem]"
+          aria-label="运行切换"
+          placeholder="选择运行"
+          selectedKey={runId || null}
+          options={[
+            { id: "", label: "选择运行" },
+            ...runOptions.map((item) => ({
+              id: item.runId,
+              label: `${item.runId} · ${item.status}`,
+            })),
+          ]}
+          onSelectionChange={(key) => {
+            const nextId = key == null ? "" : String(key);
+            replaceParams({ runId: nextId || null });
+            if (nextId) void refresh();
+          }}
+        />
+      ) : null}
+      <VButton
+        type="button"
+        variant={panel === "agents" ? "secondary" : "ghost"}
+        onClick={() => replaceParams({ panel: "agents" })}
+      >
+        Agent
+      </VButton>
+      <VButton
+        type="button"
+        variant={panel === "timeline" ? "secondary" : "ghost"}
+        onClick={() => replaceParams({ panel: "timeline" })}
+      >
+        时间线
+      </VButton>
+      <VButton
+        type="button"
+        variant={panel === "team" ? "secondary" : "ghost"}
+        onClick={() => replaceParams({ panel: "team" })}
+      >
+        团队
+      </VButton>
+      {projection?.run.runtimeCurrentNodeIds?.length ? (
+        <VButton type="button" variant="ghost" onClick={jumpToRuntime}>
+          当前节点
+        </VButton>
+      ) : null}
+      {!runId ? (
+        <VButton type="button" onClick={onCreateRun} isDisabled={busy}>
+          创建运行
+        </VButton>
+      ) : null}
+    </div>
+  );
 
+  const canvasBody = graph ? (
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
       {displayError ? (
-        <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2 text-sm" role="alert">
+        <div
+          className="shrink-0 border-b border-[var(--vui-border-subtle)] px-3 py-2 text-sm text-[var(--fg-primary)]"
+          role="alert"
+        >
           {displayError}
         </div>
       ) : null}
-
-      {graph ? (
+      <div className="min-h-0 min-w-0 flex-1">
         <VWorkflowCanvas
           graph={graph}
           selectedNodeId={selectedNodeId}
           runtimeCurrentNodeIds={projection?.run.runtimeCurrentNodeIds || []}
           onSelectNode={onSelectNode}
-          height={440}
+          height="100%"
+          className="h-full min-h-0 border-0"
         />
-      ) : (
-        <div className="flex h-[440px] items-center justify-center rounded-xl border border-[var(--border-subtle)] text-sm">
-          加载流程定义…
-        </div>
-      )}
-
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div data-panel={panel}>
-          {panel === "agents" ? (
-            <VSurface tone="panel" className="min-h-[200px] space-y-2 p-3 text-sm">
-              <strong>Agent 分工</strong>
-              <ul className="m-0 list-none space-y-1 p-0">
-                {(run?.bindingSnapshots || []).map((snap) => (
-                  <li key={String(snap.snapshotId || snap.nodeId)} className="rounded border border-[var(--border-subtle)] px-2 py-1">
-                    <span className="font-medium">{String(snap.nodeId)}</span>
-                    {" · "}
-                    {String(snap.agentId || "未绑定")}
-                  </li>
-                ))}
-                {(run?.bindingSnapshots || []).length === 0 ? (
-                  <li className="text-[var(--fg-secondary)]">暂无绑定快照</li>
-                ) : null}
-              </ul>
-            </VSurface>
-          ) : panel === "timeline" ? (
-            <VSurface tone="panel" className="min-h-[200px] space-y-2 p-3 text-sm">
-              <strong>运行事件</strong>
-              <ul className="m-0 list-none space-y-1 p-0">
-                {(run?.events || []).map((evt) => (
-                  <li key={String(evt.eventId || evt.sequence)} className="rounded border border-[var(--border-subtle)] px-2 py-1">
-                    #{String(evt.sequence)} {String(evt.type)} {String(evt.nodeId || "")}
-                  </li>
-                ))}
-                {(run?.events || []).length === 0 ? (
-                  <li className="text-[var(--fg-secondary)]">暂无事件</li>
-                ) : null}
-              </ul>
-            </VSurface>
-          ) : panel === "team" ? (
-            <VSurface tone="panel" className="min-h-[200px] space-y-2 p-3 text-sm">
-              <strong>团队</strong>
-              <p className="m-0 text-[var(--fg-secondary)]">团队组织与讨论在此面板打开；流程执行仍以画布为准。</p>
-              <p className="m-0">团队 ID：{teamId || "—"}</p>
-              <p className="m-0">运行：{runId || "未创建"}</p>
-            </VSurface>
-          ) : (
-            <ResearchProcessNodeInspector
-              nodeId={selectedNodeId}
-              runtimeCurrent={runtimeCurrent || Boolean(nodeDetail?.runtimeCurrent)}
-              actorKind={String(nodeDetail?.actorKind || "")}
-              sessionAnchorDegraded={Boolean(nodeDetail?.sessionAnchorDegraded)}
-              chatDeepLink={(nodeDetail?.chatDeepLink as string) || null}
-              bindingLabel={String((nodeDetail?.bindingSnapshot as { agentId?: string } | undefined)?.agentId || "")}
-              handoffPending={Boolean((run?.humanTasks || []).some((t) => String(t.status) === "pending"))}
-              busy={busy}
-              ops={nodeOps}
-              onCommand={onInspectorCommand}
-            />
-          )}
-        </div>
       </div>
-    </VSurface>
+    </div>
+  ) : (
+    <VStateSurface tone="loading" title="加载流程定义" fill />
+  );
+
+  const inspectorBody =
+    panel === "agents" ? (
+      <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
+        <strong>Agent 分工</strong>
+        <ul className="m-0 list-none space-y-1 p-0">
+          {(run?.bindingSnapshots || []).map((snap) => (
+            <li
+              key={String(snap.snapshotId || snap.nodeId)}
+              className="rounded border border-[var(--border-subtle)] px-2 py-1"
+            >
+              <span className="font-medium">{String(snap.nodeId)}</span>
+              {" · "}
+              {String(snap.agentId || "未绑定")}
+            </li>
+          ))}
+          {(run?.bindingSnapshots || []).length === 0 ? (
+            <li className="text-[var(--fg-secondary)]">暂无绑定快照</li>
+          ) : null}
+        </ul>
+      </VSurface>
+    ) : panel === "timeline" ? (
+      <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
+        <strong>运行事件</strong>
+        <ul className="m-0 list-none space-y-1 p-0">
+          {(run?.events || []).map((evt) => (
+            <li
+              key={String(evt.eventId || evt.sequence)}
+              className="rounded border border-[var(--border-subtle)] px-2 py-1"
+            >
+              #{String(evt.sequence)} {String(evt.type)} {String(evt.nodeId || "")}
+            </li>
+          ))}
+          {(run?.events || []).length === 0 ? (
+            <li className="text-[var(--fg-secondary)]">暂无事件</li>
+          ) : null}
+        </ul>
+      </VSurface>
+    ) : panel === "team" ? (
+      <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
+        <strong>团队</strong>
+        <p className="m-0 text-[var(--fg-secondary)]">团队组织与讨论在此面板打开；流程执行仍以画布为准。</p>
+        <p className="m-0">团队 ID：{teamId || "—"}</p>
+        <p className="m-0">运行：{runId || "未创建"}</p>
+      </VSurface>
+    ) : (
+      <ResearchProcessNodeInspector
+        nodeId={selectedNodeId}
+        runtimeCurrent={runtimeCurrent || Boolean(nodeDetail?.runtimeCurrent)}
+        actorKind={String(nodeDetail?.actorKind || "")}
+        sessionAnchorDegraded={Boolean(nodeDetail?.sessionAnchorDegraded)}
+        chatDeepLink={(nodeDetail?.chatDeepLink as string) || null}
+        bindingLabel={String((nodeDetail?.bindingSnapshot as { agentId?: string } | undefined)?.agentId || "")}
+        handoffPending={Boolean((run?.humanTasks || []).some((t) => String(t.status) === "pending"))}
+        busy={busy}
+        ops={nodeOps}
+        onCommand={onInspectorCommand}
+      />
+    );
+
+  return (
+    <VCanvasWorkbenchPage
+      data-vui="research-process-workspace"
+      domainRecipe="research-process-workflow"
+      ariaLabel="科研流程工作区"
+      eyebrow={
+        runId
+          ? `${runId} · ${run?.status || projection?.run.status || ""}`
+          : "创建运行后由工作流引擎驱动"
+      }
+      title="科研流程"
+      actions={headerActions}
+      layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
+      resize={{
+        aside: {
+          defaultWidth: 320,
+          minWidth: 260,
+          maxWidth: 480,
+        },
+      }}
+      canvas={canvasBody}
+      inspector={inspectorBody}
+      canvasClassName="min-h-0 p-0"
+      inspectorClassName="min-h-0"
+      className="h-full min-h-0"
+    />
   );
 }

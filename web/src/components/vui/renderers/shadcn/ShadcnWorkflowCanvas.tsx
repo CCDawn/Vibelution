@@ -27,6 +27,10 @@ export type ShadcnWorkflowCanvasProps = {
   runtimeCurrentNodeIds?: string[];
   onSelectNode?: (nodeId: string | null) => void;
   className?: string;
+  /**
+   * Canvas host size. Prefer `"100%"` inside a filled recipe cell (min-h-0 + h-full).
+   * Avoid fixed px heights in page shells — that leaves dead space below the graph.
+   */
   height?: number | string;
 };
 
@@ -79,7 +83,7 @@ export function ShadcnWorkflowCanvas({
   runtimeCurrentNodeIds = [],
   onSelectNode,
   className,
-  height = 420,
+  height = "100%",
 }: ShadcnWorkflowCanvasProps) {
   const layout = useMemo(() => layoutWorkflowCanvas(graph), [graph]);
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
@@ -130,7 +134,10 @@ export function ShadcnWorkflowCanvas({
 
   return (
     <div
-      className={cn("w-full overflow-hidden rounded-xl border border-vui-border bg-vui-surface-workspace", className)}
+      className={cn(
+        "h-full min-h-0 w-full overflow-hidden rounded-xl border border-vui-border bg-vui-surface-workspace",
+        className,
+      )}
       style={{ height }}
       data-vui="workflow-canvas"
     >

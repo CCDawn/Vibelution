@@ -1,8 +1,9 @@
 /**
  * Task 6: Node inspector — adapter slots + runtime commands.
  * Does not embed full legacy stage pages as nested workbenches.
+ * Empty selection uses VEmptyState (recipe/shadcn empty), not a sparse full-height panel.
  */
-import { VButton, VSurface } from "../../../components/vui";
+import { VButton, VEmptyState, VSurface } from "../../../components/vui";
 import {
   commandLabel,
   getNodeAdapter,
@@ -40,14 +41,26 @@ export function ResearchProcessNodeInspector({
 
   if (!adapter) {
     return (
-      <VSurface tone="panel" className="min-h-[200px] p-3" data-vui="node-inspector-empty">
-        <p className="m-0 text-sm text-[var(--fg-secondary)]">选择流程节点</p>
-      </VSurface>
+      <div
+        className="flex h-full min-h-0 flex-col items-stretch justify-center p-3"
+        data-vui="node-inspector-empty"
+      >
+        <VEmptyState
+          title="选择流程节点"
+          className="h-auto w-full border-0 bg-transparent"
+        >
+          在画布上点击任务节点，查看绑定、交接与运行命令。
+        </VEmptyState>
+      </div>
     );
   }
 
   return (
-    <VSurface tone="panel" className="flex min-h-[200px] flex-col gap-3 p-3" data-vui="node-inspector">
+    <VSurface
+      tone="panel"
+      className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3"
+      data-vui="node-inspector"
+    >
       <header className="flex items-start justify-between gap-2">
         <div>
           <div className="text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]">
