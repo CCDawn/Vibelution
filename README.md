@@ -14,7 +14,7 @@
 
 ## 界面预览
 
-![对话工作台](docs/assets/readme/web-workbench-chat.png)
+![Agent 管理](docs/assets/readme/web-workbench-chat.png)
 
 ![团队科研流程](docs/assets/readme/web-workbench-teams.png)
 
