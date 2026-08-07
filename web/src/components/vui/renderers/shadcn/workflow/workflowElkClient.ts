@@ -14,7 +14,7 @@ import ElkWorker from "elkjs/lib/elk-worker.min.js?worker";
 import type { ElkNode } from "elkjs/lib/elk-api";
 
 /**
- * Minimal layout-engine seam shared by the bundled (tests/probe) and the
+ * Minimal layout-engine seam shared by the bundled (tests) and the
  * Worker (production) implementations.
  */
 export type WorkflowLayoutEngine = {

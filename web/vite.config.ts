@@ -128,18 +128,6 @@ const frontendPort = coercePort(
   readWorkbenchPort("frontend_port", DEFAULT_FRONTEND_PORT),
 );
 
-/**
- * T1 TEST-ONLY probe build (``VIBELUTION_PROBE_BUILD=1``) adds the
- * workflow-elk-handshake entry; the plain ``npm run build`` stays clean and
- * ships no probe page. The probe entry is the only product tree module that
- * reaches the ``?worker`` engine factory before T4 wires the canvas to
- * `workflowElkClient`, so it also produces the ELK worker asset used by the
- * Browser handshake check (`npm run check:elk-worker-handshake`). Once T4
- * product code imports `workflowElkClient`, the normal build emits the worker
- * asset naturally and this probe build can be dropped.
- */
-const PROBE_BUILD = process.env.VIBELUTION_PROBE_BUILD === "1";
-
 export default defineConfig({
   define: {
     __VIBELUTION_BUILD_ID__: JSON.stringify(buildStamp),
@@ -162,19 +150,6 @@ export default defineConfig({
         // Main app entry keeps its historical `index-*` output name so the
         // existing budget rules stay valid.
         index: fileURLToPath(new URL("./index.html", import.meta.url)),
-        // T1 TEST entry: only included by the dedicated probe build
-        // (`VIBELUTION_PROBE_BUILD=1`, see PROBE_BUILD above). The plain
-        // `npm run build` never ships this page. It mounts no React and is
-        // not part of the product UI; it proves the real worker asset loads
-        // in a browser and that terminate() releases the worker. Must never
-        // ship in a release; T5 removes it once T4 wires the product canvas.
-        ...(PROBE_BUILD
-          ? {
-              "workflow-elk-handshake": fileURLToPath(
-                new URL("./probes/workflow-elk-handshake.html", import.meta.url),
-              ),
-            }
-          : {}),
       },
       output: {
         /**
