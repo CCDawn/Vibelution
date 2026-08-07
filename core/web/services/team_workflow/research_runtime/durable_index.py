@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .atomic_fs import CorruptWorkflowStoreError, atomic_write_text
+
 
 class DurableWorkflowIndex:
     """Persists idempotency keys outside process memory."""
@@ -22,12 +24,20 @@ class DurableWorkflowIndex:
             return {}
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
+        except json.JSONDecodeError as exc:
+            raise CorruptWorkflowStoreError(
+                self._path, "corrupt idempotency index JSON", cause=exc
+            ) from exc
+        except OSError as exc:
+            raise CorruptWorkflowStoreError(
+                self._path, "unreadable idempotency index", cause=exc
+            ) from exc
+        if not isinstance(data, dict):
+            raise CorruptWorkflowStoreError(self._path, "idempotency index must be a JSON object")
+        return data
 
     def _save(self, data: dict[str, Any]) -> None:
-        self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(self._path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
     def get_run_id(self, key: str) -> str | None:
         if not key:
