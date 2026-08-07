@@ -17,6 +17,11 @@ litellm>=1.51.0
 openai[realtime]>=2.38.0
 socksio>=1.0.0             # httpx SOCKS proxy support for LiteLLM when ALL_PROXY is set
 
+# Research workflow runtime (ADR 0006) — direct deps, not transitive-only
+langgraph>=0.2.0
+langgraph-checkpoint-sqlite>=2.0.0
+
+
 # 配置管理 (Pydantic v2)
 pydantic>=2.0.0
 fastapi>=0.111.0
