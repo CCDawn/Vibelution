@@ -79,9 +79,17 @@ export {
 } from "./product/workflow/VWorkflowCanvas";
 export {
   layoutWorkflowCanvas,
+  type WorkflowCanvasEdgeInput,
+  type WorkflowCanvasNodeInput,
+  type WorkflowCanvasRunMeta,
+  type WorkflowCanvasStageInput,
+  type WorkflowEdgePathState,
+  type WorkflowEdgeSemanticKind,
   type WorkflowLayoutEdge,
   type WorkflowLayoutInput,
   type WorkflowLayoutNode,
+  type WorkflowNodeRunStatus,
+  type WorkflowNodeVisualKind,
 } from "./product/workflow/workflowLayoutTypes";
 export {
   VStateSurface,
