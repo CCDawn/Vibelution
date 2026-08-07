@@ -95,7 +95,9 @@ export function buildCodexTranscriptCells(
       tone: "running",
     });
   }
-  return settleCodexTranscriptActiveStatuses(cells);
+  return settleCodexTranscriptActiveStatuses(cells, {
+    turnStreaming: Boolean(message.streaming),
+  });
 }
 
 function userTranscriptCells(message: AgentMessage): CodexTranscriptCell[] {
@@ -897,19 +899,120 @@ export function dedupeThoughtLikeTranscriptCells(
   return cells.filter((_, index) => !drop.has(index));
 }
 
+function toolCellIdentity(cell: CodexTranscriptCell) {
+  const fromLifecycle = cell.toolLifecycleModel?.toolCalls
+    ?.map((toolCall) => String(toolCall.toolCallId || toolCall.rawOperationId || "").trim())
+    .find(Boolean);
+  if (fromLifecycle) {
+    return `call:${fromLifecycle}`;
+  }
+  const source = String(cell.sourceItemId || cell.id || "").trim();
+  return source ? `src:${source}` : "";
+}
+
 /**
- * Keep only the latest in-flight process row as running/pending.
- * Native transcripts and projected cells often leave earlier reasoning/tool rows
- * marked running, which makes the whole transcript look like it is spinning.
+ * Collapse duplicate tool rows that restate the same callId / source item
+ * (common when live overlay + committed cells both carry the same tool).
  */
-export function settleCodexTranscriptActiveStatuses(cells: CodexTranscriptCell[]): CodexTranscriptCell[] {
+export function dedupeToolTranscriptCells(
+  cells: readonly CodexTranscriptCell[],
+): CodexTranscriptCell[] {
+  if (cells.length < 2) {
+    return [...cells];
+  }
+  const bestByIdentity = new Map<string, number>();
+  const drop = new Set<number>();
+  cells.forEach((cell, index) => {
+    if (cell.kind !== "tool_call") {
+      return;
+    }
+    const identity = toolCellIdentity(cell);
+    if (!identity) {
+      return;
+    }
+    const existing = bestByIdentity.get(identity);
+    if (existing === undefined) {
+      bestByIdentity.set(identity, index);
+      return;
+    }
+    const previous = cells[existing];
+    const keepCurrent = thoughtLikeCellRank({
+      ...cell,
+      text: cell.summary || cell.text,
+    } as CodexTranscriptCell) >= thoughtLikeCellRank({
+      ...previous,
+      text: previous.summary || previous.text,
+    } as CodexTranscriptCell);
+    // Prefer completed over pending for the same identity when ranks tie on liveBoost.
+    const previousDone = previous.status === "completed" || previous.status === "failed" || previous.status === "degraded";
+    const currentDone = cell.status === "completed" || cell.status === "failed" || cell.status === "degraded";
+    if (keepCurrent || (currentDone && !previousDone)) {
+      drop.add(existing);
+      bestByIdentity.set(identity, index);
+    } else {
+      drop.add(index);
+    }
+  });
+  if (drop.size === 0) {
+    return [...cells];
+  }
+  return cells.filter((_, index) => !drop.has(index));
+}
+
+/** Apply thought + tool identity dedupe for a single transcript cell list. */
+export function dedupeCodexTranscriptCellsForDisplay(
+  cells: readonly CodexTranscriptCell[],
+): CodexTranscriptCell[] {
+  return dedupeToolTranscriptCells(dedupeThoughtLikeTranscriptCells(cells));
+}
+
+function settleActiveCellToCompleted(cell: CodexTranscriptCell): CodexTranscriptCell {
+  if (cell.status !== "running" && cell.status !== "pending") {
+    return cell;
+  }
+  return {
+    ...cell,
+    status: "completed" as const,
+    tone: cell.tone === "running" ? "neutral" as const : cell.tone,
+  };
+}
+
+/**
+ * Keep only the latest in-flight process row as running/pending while the turn
+ * streams. When the turn has stopped (user cancel / terminal result), force every
+ * active process/thought row closed so the rail cannot stay "处理中" with spinners.
+ */
+export function settleCodexTranscriptActiveStatuses(
+  cells: CodexTranscriptCell[],
+  options?: { turnStreaming?: boolean },
+): CodexTranscriptCell[] {
   if (cells.length === 0) {
     return cells;
+  }
+  // Turn finished: close spinning process/thought rows (including commentary).
+  // Keep `pending` (e.g. ready/awaiting approval) so approval cards still attach.
+  if (options?.turnStreaming === false) {
+    let changed = false;
+    const next = cells.map((cell) => {
+      if (cell.kind === "user") {
+        return cell;
+      }
+      if (cell.status !== "running") {
+        return cell;
+      }
+      changed = true;
+      return settleActiveCellToCompleted(cell);
+    });
+    return changed ? next : cells;
   }
   let latestActiveIndex = -1;
   for (let index = cells.length - 1; index >= 0; index -= 1) {
     const cell = cells[index];
-    if (!cell || cell.kind === "user" || cell.kind === "assistant_markdown") {
+    // Commentary is process-trail thought; include it so dual spinning boxes settle.
+    if (!cell || cell.kind === "user") {
+      continue;
+    }
+    if (cell.kind === "assistant_markdown" && String(cell.phase || "").trim().toLowerCase() !== "commentary") {
       continue;
     }
     if (cell.status === "running" || cell.status === "pending") {
@@ -928,15 +1031,14 @@ export function settleCodexTranscriptActiveStatuses(cells: CodexTranscriptCell[]
     if (cell.status !== "running" && cell.status !== "pending") {
       return cell;
     }
-    if (cell.kind === "user" || cell.kind === "assistant_markdown") {
+    if (cell.kind === "user") {
+      return cell;
+    }
+    if (cell.kind === "assistant_markdown" && String(cell.phase || "").trim().toLowerCase() !== "commentary") {
       return cell;
     }
     changed = true;
-    return {
-      ...cell,
-      status: "completed" as const,
-      tone: cell.tone === "running" ? "neutral" as const : cell.tone,
-    };
+    return settleActiveCellToCompleted(cell);
   });
   return changed ? next : cells;
 }

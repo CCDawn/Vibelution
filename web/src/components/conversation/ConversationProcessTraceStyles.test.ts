@@ -84,11 +84,16 @@ describe("conversation process trace styles", () => {
   });
 
   it("separates narrative body color from process/tool rail color like Codex", () => {
-    expect(styles.codexTranscriptCommentaryCell).toContain("text-[var(--fg-primary)]");
+    // Commentary/reasoning share thoughtScrollBody; final answer stays primary.
+    expect(styles.thoughtScrollBody).toContain("max-h-[12rem]");
+    expect(styles.thoughtScrollBody).toContain("overflow-y-auto");
+    expect(styles.codexTranscriptReasoningText).toContain("text-[var(--fg-secondary)]");
     expect(styles.codexTranscriptFinalCell).toContain("text-[var(--fg-primary)]");
     expect(styles.codexTranscriptProcessCell).toContain("text-[var(--fg-tertiary)]");
     expect(styles.codexTranscriptCellTitle).toContain("text-[var(--fg-tertiary)]");
     expect(styles.codexTranscriptCellTitle).toContain("font-normal");
+    expect(styles).not.toHaveProperty("codexTranscriptCommentaryCell");
+    expect(styles).not.toHaveProperty("codexTranscriptReasoningInlinePreview");
   });
 
   it("keeps compact chat surface readable over the page background", () => {
@@ -103,10 +108,11 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCellPreview).not.toContain("[font-size:var(--vui-font-xs)]");
   });
 
-  it("keeps progress commentary readable while completed tool summaries remain quiet", () => {
-    expect(styles.codexTranscriptCommentaryCell).toContain("text-[var(--fg-primary)]");
-    expect(styles.codexTranscriptCommentaryCell).not.toContain("text-[var(--fg-secondary)]");
-    expect(styles.codexTranscriptCommentaryCell).toContain("bg-transparent");
+  it("keeps thought scroll body and final answer readable while tools stay quiet", () => {
+    expect(styles.thoughtScrollBody).toContain("max-h-[12rem]");
+    expect(styles.thoughtScrollBody).toContain("overflow-y-auto");
+    expect(styles.codexTranscriptReasoningHeader).toContain("grid-cols-[20px_minmax(0,1fr)]");
+    expect(styles.codexTranscriptReasoningHeader).not.toContain("24px");
     expect(styles.codexTranscriptFinalCell).toContain("leading-[var(--vui-line-readable)]");
     expect(styles.codexTranscriptFinalCell).toContain("text-[var(--fg-primary)]");
     expect(styles.codexTranscriptFinalCell).not.toContain("bg-[var(--state-error)]");

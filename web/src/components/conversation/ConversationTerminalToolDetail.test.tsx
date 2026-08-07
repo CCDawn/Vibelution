@@ -105,4 +105,53 @@ describe("ConversationTerminalToolDetail", () => {
       error: "",
     });
   });
+
+  it("keeps the shell command line literal even when the tool row failed", () => {
+    const cell: CodexTranscriptCell = {
+      id: "terminal-failed-cmd",
+      kind: "tool_call",
+      messageId: "message-1",
+      status: "failed",
+      tone: "error",
+      title: "cli_tool",
+      operationIds: ["terminal-failed"],
+      toolLifecycleModel: {
+        toolCalls: [
+          {
+            toolCallId: "tool-failed",
+            rawOperationId: "terminal-failed",
+            terminalOperationId: "terminal-failed",
+            status: "failed",
+            title: "cli_tool",
+            rawToolName: "cli_tool",
+            runtimeKind: "terminal",
+            error: "exit 1",
+          },
+        ],
+        terminalOperations: [
+          {
+            operationId: "terminal-failed",
+            rawOperationId: "terminal-failed",
+            toolCallId: "tool-failed",
+            terminalId: "terminal-session",
+            kind: "ExecCommand",
+            status: "failed",
+            request: { displayCommand: "git status --short" },
+            result: {
+              formattedOutput: "M web/src/components/conversation/ConversationView.tsx",
+              stderr: "exit 1",
+            },
+          },
+        ],
+        terminalSessions: [],
+        modelObservations: [],
+      },
+    };
+
+    expect(buildConversationTerminalToolDetail(cell, "zh")).toEqual({
+      command: "git status --short",
+      output: "M web/src/components/conversation/ConversationView.tsx",
+      error: "exit 1",
+    });
+  });
 });

@@ -263,6 +263,24 @@ describe("conversation tool presentation", () => {
     expect(detail).toContain("rg: command not found");
   });
 
+  it("keeps plain cli command/stdout literal instead of collapsing to 执行失败", () => {
+    expect(conversationToolDetailPresentation({
+      value: "git status --short",
+      toolName: "cli_tool",
+      language: "zh",
+    })).toBe("git status --short");
+    expect(conversationToolDetailPresentation({
+      value: "M web/src/components/conversation/ConversationView.tsx",
+      toolName: "exec_command",
+      language: "zh",
+    })).toBe("M web/src/components/conversation/ConversationView.tsx");
+    expect(conversationToolDetailPresentation({
+      value: "python -c \"print(1)\"",
+      toolName: "run_terminal_command",
+      language: "zh",
+    })).not.toContain("执行失败");
+  });
+
   it("turns a code-symbol payload into one semantic activity summary", () => {
     expect(
       completedToolPresentationSummary({

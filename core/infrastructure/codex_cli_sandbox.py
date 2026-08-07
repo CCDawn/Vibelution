@@ -589,6 +589,19 @@ def start_codex_sandbox_terminal_session(
         environment.setdefault("PYTHONUTF8", "1")
         if is_native_windows_command:
             environment[command_env_name] = route.command
+        if str(getattr(route, "route", "") or "") == "no_console_git":
+            try:
+                from core.infrastructure.no_console_git import (
+                    apply_no_console_git_env,
+                    resolve_git_executable,
+                )
+
+                environment = apply_no_console_git_env(
+                    environment,
+                    git_exe=resolve_git_executable(),
+                )
+            except Exception:
+                pass
         process = subprocess.Popen(
             argv,
             shell=False,
@@ -784,6 +797,19 @@ def execute_codex_sandbox_command(
         environment.setdefault("PYTHONUTF8", "1")
         if is_native_windows_command:
             environment[command_env_name] = route.command
+        if str(getattr(route, "route", "") or "") == "no_console_git":
+            try:
+                from core.infrastructure.no_console_git import (
+                    apply_no_console_git_env,
+                    resolve_git_executable,
+                )
+
+                environment = apply_no_console_git_env(
+                    environment,
+                    git_exe=resolve_git_executable(),
+                )
+            except Exception:
+                pass
         process = subprocess.Popen(
             argv,
             shell=False,

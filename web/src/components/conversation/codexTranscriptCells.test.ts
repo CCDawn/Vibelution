@@ -7,7 +7,9 @@ import codexTranscriptCellsSource from "./codexTranscriptCells.ts?raw";
 import {
   buildCodexTranscriptCells,
   compactCodexTranscriptCellsAcrossMessages,
+  dedupeCodexTranscriptCellsForDisplay,
   dedupeThoughtLikeTranscriptCells,
+  dedupeToolTranscriptCells,
   settleCodexTranscriptActiveStatuses,
   type CodexTranscriptCell,
   type CodexTranscriptCellKind,
@@ -51,6 +53,86 @@ describe("codexTranscriptCells", () => {
     expect(deduped).toHaveLength(1);
     expect(deduped[0].id).toBe("thought-running");
     expect(deduped[0].status).toBe("running");
+  });
+
+  it("dedupes duplicate tool rows that share the same call id", () => {
+    const cells: CodexTranscriptCell[] = [
+      {
+        id: "tool-live",
+        kind: "tool_call",
+        messageId: "m1",
+        status: "running",
+        tone: "running",
+        title: "cli_tool",
+        summary: "git status",
+        sourceItemId: "item-tool-1",
+        toolLifecycleModel: {
+          toolCalls: [
+            {
+              toolCallId: "call-1",
+              rawOperationId: "op-1",
+              status: "running",
+              title: "cli_tool",
+              rawToolName: "cli_tool",
+              runtimeKind: "terminal",
+            },
+          ],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+      {
+        id: "tool-committed",
+        kind: "tool_call",
+        messageId: "m1",
+        status: "completed",
+        tone: "neutral",
+        title: "cli_tool",
+        summary: "git status · ok",
+        sourceItemId: "item-tool-1",
+        toolLifecycleModel: {
+          toolCalls: [
+            {
+              toolCallId: "call-1",
+              rawOperationId: "op-1",
+              status: "completed",
+              title: "cli_tool",
+              rawToolName: "cli_tool",
+              runtimeKind: "terminal",
+            },
+          ],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+    ];
+    const byCall = dedupeToolTranscriptCells(cells);
+    expect(byCall).toHaveLength(1);
+    expect(byCall[0].id).toBe("tool-committed");
+    expect(byCall[0].status).toBe("completed");
+
+    const display = dedupeCodexTranscriptCellsForDisplay([
+      {
+        id: "thought-done",
+        kind: "reasoning_summary",
+        messageId: "m1",
+        status: "completed",
+        tone: "neutral",
+        text: "短思考",
+      },
+      {
+        id: "thought-run",
+        kind: "reasoning_summary",
+        messageId: "m1",
+        status: "running",
+        tone: "running",
+        text: "短思考，继续。",
+      },
+      ...cells,
+    ]);
+    expect(display.map((cell) => cell.id)).toEqual(["thought-run", "tool-committed"]);
   });
 
   it("keeps journal ready/waiting tool cells pending instead of completed", () => {
@@ -150,6 +232,50 @@ describe("codexTranscriptCells", () => {
 
     expect(cells.map((cell) => cell.status)).toEqual(["completed", "completed", "running"]);
     expect(cells.map((cell) => cell.tone)).toEqual(["neutral", "neutral", "running"]);
+  });
+
+  it("force-settles running thought/tool rows when the turn is no longer streaming", () => {
+    const cells = settleCodexTranscriptActiveStatuses([
+      {
+        id: "c1",
+        kind: "assistant_markdown",
+        messageId: "m1",
+        status: "running",
+        tone: "running",
+        phase: "commentary",
+        text: "我来审查项目工作区",
+      },
+      {
+        id: "c2",
+        kind: "assistant_markdown",
+        messageId: "m1",
+        status: "running",
+        tone: "running",
+        phase: "commentary",
+        text: "继续深入审查",
+      },
+      {
+        id: "t1",
+        kind: "tool_call",
+        messageId: "m1",
+        status: "running",
+        tone: "running",
+        title: "cli_tool",
+        summary: "git status",
+      },
+      {
+        id: "t-pending",
+        kind: "tool_call",
+        messageId: "m1",
+        status: "pending",
+        tone: "running",
+        title: "cli_tool",
+        summary: "awaiting approval",
+      },
+    ], { turnStreaming: false });
+
+    expect(cells.filter((cell) => cell.id !== "t-pending").every((cell) => cell.status === "completed")).toBe(true);
+    expect(cells.find((cell) => cell.id === "t-pending")?.status).toBe("pending");
   });
 
   it("maps assistant answers and reasoning summaries from timeline items", () => {

@@ -192,6 +192,32 @@ class TestShellCommandClassifier:
         assert route.reason == "windows_default_cmd"
         assert route.final_command == "cmd /c dir"
 
+    def test_plain_git_routes_to_no_console_git_on_windows(self, monkeypatch):
+        """cli_tool `git …` must not flash via Git Bash / cmd trampolines."""
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+
+        for cmd in (
+            "git status --short",
+            "git log --oneline -n 5",
+            "git rev-parse --abbrev-ref HEAD",
+        ):
+            route = shell_tools.classify_shell_command(cmd)
+            assert route.route == "no_console_git", cmd
+            assert route.reason == "windows_no_console_git", cmd
+            assert route.final_command == cmd
+            assert shell_tools.parse_simple_git_argv(cmd) is not None
+
+    def test_git_with_pipe_does_not_use_no_console_git_route(self, monkeypatch):
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+        # Pipes need a shell; parse_simple_git_argv rejects them.
+        assert shell_tools.parse_simple_git_argv("git status | findstr main") is None
+
+    def test_powershell_route_uses_windowstyle_hidden(self, monkeypatch):
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+        route = shell_tools.classify_shell_command("Get-ChildItem tools")
+        assert route.route == "powershell"
+        assert "-WindowStyle Hidden" in route.final_command
+
     def test_shell_failure_cooldown_blocks_second_identical_intent(self):
         shell_tools.reset_shell_failure_cooldown()
         cmd = 'rg -n "pattern|other" path'

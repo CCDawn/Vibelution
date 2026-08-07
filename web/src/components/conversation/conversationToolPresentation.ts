@@ -967,13 +967,18 @@ export function conversationToolDetailPresentation({
     || lowerTool === "run_terminal_command"
     || lowerTool === "shell_tool"
   ) {
-    const summary = terminalSandboxPresentationSummary(normalized, language)
-      || completedToolPresentationSummary({
-        toolSummary: normalized,
-        toolName: lowerTool,
-        status: "failed",
-        language,
-      });
+    // Plain command lines / stdout must stay literal. Never force the failed-summary
+    // path (it collapses "git status --short" into "执行失败").
+    const looksLikeProtocolJson = normalized.startsWith("{")
+      || normalized.startsWith("[")
+      || normalized.includes("terminalSessionId")
+      || normalized.includes("\"status\"");
+    if (!looksLikeProtocolJson) {
+      return normalized.length > 1600
+        ? `${normalized.slice(0, 1600).trimEnd()}…`
+        : normalized;
+    }
+    const summary = terminalSandboxPresentationSummary(normalized, language);
     if (summary) {
       return summary;
     }

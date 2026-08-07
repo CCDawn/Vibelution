@@ -92,21 +92,26 @@ export function buildConversationTerminalToolDetail(
 
   const primaryToolCall = toolCalls[0];
   const toolName = primaryToolCall?.rawToolName || primaryToolCall?.title || cell.title;
-  const present = (value: string) => boundedTerminalDetailText(
+  /** Output/error may be protocol JSON — present; plain stdout stays literal. */
+  const presentResult = (value: string) => boundedTerminalDetailText(
     conversationToolDetailPresentation({
       value,
       toolName,
       language,
-    }),
+    }) || value,
     language,
   );
-  const command = firstNonEmptyText(
-    ...terminalOperations
-      .filter((operation) => String(operation.kind).toLowerCase() !== "writestdin")
-      .flatMap((operation) => [
-        operation.request?.displayCommand,
-        operation.request?.command?.join(" "),
-      ]),
+  // Command must stay the real shell line; never run through failed-summary presentation.
+  const command = boundedTerminalDetailText(
+    firstNonEmptyText(
+      ...terminalOperations
+        .filter((operation) => String(operation.kind).toLowerCase() !== "writestdin")
+        .flatMap((operation) => [
+          operation.request?.displayCommand,
+          operation.request?.command?.join(" "),
+        ]),
+    ),
+    language,
   );
   const outputs: string[] = [];
   const errors: string[] = [];
@@ -133,9 +138,9 @@ export function buildConversationTerminalToolDetail(
   }
 
   const detail = {
-    command: present(command),
-    output: present(joinUniqueText(outputs)),
-    error: present(joinUniqueText(errors)),
+    command,
+    output: presentResult(joinUniqueText(outputs)),
+    error: presentResult(joinUniqueText(errors)),
   };
   return detail.command || detail.output || detail.error ? detail : null;
 }

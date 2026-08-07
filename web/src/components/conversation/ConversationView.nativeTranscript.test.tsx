@@ -605,6 +605,60 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain("thoughtScrollBody");
   });
 
+  it("settles running thought cells when the turn is stopped so the rail is not 处理中", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-stopped-thoughts",
+        role: "assistant",
+        content: "本轮已按请求停止。",
+        streaming: false,
+        timestamp: "2026-08-08T03:28:46Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-stopped-thoughts",
+          cells: [
+            {
+              id: "thought-1",
+              kind: "assistant_markdown",
+              messageId: "assistant-stopped-thoughts",
+              status: "running",
+              tone: "running",
+              phase: "commentary",
+              channel: "commentary",
+              text: "我来审查项目工作区，先了解当前 Git 状态。",
+            },
+            {
+              id: "thought-2",
+              kind: "assistant_markdown",
+              messageId: "assistant-stopped-thoughts",
+              status: "running",
+              tone: "running",
+              phase: "commentary",
+              channel: "commentary",
+              text: "工作区 Git 状态干净。继续深入审查。",
+            },
+            {
+              id: "tool-1",
+              kind: "tool_call",
+              messageId: "assistant-stopped-thoughts",
+              status: "completed",
+              tone: "neutral",
+              title: "cli_tool",
+              summary: "git status --short",
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(html).toContain("本轮已按请求停止。");
+    expect(html).toContain("已处理");
+    expect(html).not.toContain("处理中");
+    expect(html).not.toContain("statusSpinner");
+    expect(html).toContain('data-codex-transcript-cell-status="completed"');
+  });
+
   it("keeps completed reasoning_summary fully visible inside a height-capped scroll body", () => {
     const reasoning = "确认了：当前cli_tool环境是bash，不是PowerShell。这是关键证据，需要据此修正后续命令。";
     const html = renderConversation([
