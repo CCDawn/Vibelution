@@ -1,19 +1,11 @@
 /**
- * Canonical single-canvas research process workspace (Task 5).
+ * Canonical single-canvas research process workspace.
  * One stage-navigation surface: VWorkflowCanvas. Selection is UI-only.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import {
-  createResearchWorkflowRun,
-  fetchResearchWorkflowCanvas,
-  fetchResearchWorkflowDefinition,
-  fetchResearchWorkflowNodeDetail,
-  resolveResearchWorkflowHumanTask,
-  type WorkflowRunRecord,
-} from "../../../api/researchWorkflow";
-import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
+import { fetchResearchWorkflowNodeDetail, listResearchWorkflowRuns } from "../../../api/researchWorkflow";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   VButton,
@@ -22,10 +14,10 @@ import {
   VWorkflowCanvas,
 } from "../../../components/vui";
 import { definitionToCanvasGraph, projectionToCanvasGraph } from "./researchProcessGraphModel";
-import { buildCanonicalWorkflowSearch } from "./researchLegacyRouteResolver";
 import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import type { NodeAdapterSpec } from "./nodeAdapterModel";
 import { projectNodeOps } from "./nodeOpsProjection";
+import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
 
 type PanelKind = "node" | "agents" | "team" | "timeline";
 
@@ -39,11 +31,10 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
   const selectedNodeId = searchParams.get("node") || null;
   const panel = (searchParams.get("panel") as PanelKind | null) || "node";
 
-  const [projection, setProjection] = useState<WorkflowCanvasProjection | null>(null);
-  const [run, setRun] = useState<WorkflowRunRecord | null>(null);
+  const { projection, run, error, busy, createRun, resolveHuman, refresh } = useResearchWorkflowRun(runId);
   const [nodeDetail, setNodeDetail] = useState<Record<string, unknown> | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [runOptions, setRunOptions] = useState<Array<{ runId: string; status: string }>>([]);
 
   const replaceParams = useCallback(
     (patch: Record<string, string | null | undefined>) => {
@@ -59,52 +50,6 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
     },
     [searchParams, setSearchParams, teamId],
   );
-
-  const loadDefinitionOnly = useCallback(async () => {
-    const def = await fetchResearchWorkflowDefinition();
-    setProjection({
-      definition: def.definition,
-      run: {
-        runId: null,
-        status: null,
-        runtimeCurrentNodeIds: [],
-        nodeRuns: {},
-        pendingHumanTasks: [],
-      },
-    });
-  }, []);
-
-  const refreshRun = useCallback(async (id: string) => {
-    const canvas = await fetchResearchWorkflowCanvas(id);
-    setProjection(canvas);
-    setRun({
-      runId: id,
-      workflowId: canvas.definition.workflowId,
-      workflowVersionId: "",
-      status: canvas.run.status || "",
-      runtimeCurrentNodeIds: canvas.run.runtimeCurrentNodeIds,
-      humanTasks: canvas.run.pendingHumanTasks as unknown as Array<Record<string, unknown>>,
-    });
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setError(null);
-        if (runId) {
-          await refreshRun(runId);
-        } else {
-          await loadDefinitionOnly();
-        }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [runId, refreshRun, loadDefinitionOnly]);
 
   useEffect(() => {
     if (!runId || !selectedNodeId) {
@@ -122,7 +67,25 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
     return () => {
       cancelled = true;
     };
-  }, [runId, selectedNodeId]);
+  }, [runId, selectedNodeId, run?.status, run?.humanTasks]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listResearchWorkflowRuns(CHALLENGE_CUP_WORKFLOW_ID)
+      .then((payload) => {
+        if (cancelled) return;
+        setRunOptions(
+          (payload.runs || []).map((item) => ({
+            runId: item.runId,
+            status: item.status,
+          })),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, run?.status]);
 
   const graph = useMemo(() => {
     if (!projection) return null;
@@ -137,43 +100,39 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
   );
 
   const onCreateRun = useCallback(async () => {
-    setBusy(true);
-    setError(null);
+    setLocalError(null);
     try {
-      const created = await createResearchWorkflowRun({
-        teamId,
-        idempotencyKey: `ui-${teamId || "default"}-${Date.now()}`,
-      });
+      const created = await createRun(teamId);
       replaceParams({
         runId: created.runId,
         node: created.runtimeCurrentNodeIds?.[0] || "knowledge_handoff",
       });
-      setRun(created);
-      await refreshRun(created.runId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
+      setLocalError(err instanceof Error ? err.message : String(err));
     }
-  }, [teamId, replaceParams, refreshRun]);
+  }, [teamId, replaceParams, createRun]);
 
   const onResolveHuman = useCallback(
     async (accept: boolean) => {
       if (!runId || !run?.humanTasks?.length) return;
-      const taskId = String(run.humanTasks[0].taskId || "");
-      if (!taskId) return;
-      setBusy(true);
+      const pending = (run.humanTasks || []).find((t) => String(t.status) === "pending");
+      const taskId = String(pending?.taskId || "");
+      if (!taskId) {
+        setLocalError("没有待处理的人工任务");
+        return;
+      }
+      setLocalError(null);
       try {
-        const next = await resolveResearchWorkflowHumanTask(runId, taskId, { accept });
-        setRun(next);
-        await refreshRun(runId);
+        const next = await resolveHuman(taskId, accept);
+        const nextPending = (next.humanTasks || []).find((t) => String(t.status) === "pending");
+        if (nextPending?.nodeId) {
+          replaceParams({ node: String(nextPending.nodeId), panel: "node" });
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
+        setLocalError(err instanceof Error ? err.message : String(err));
       }
     },
-    [runId, run, refreshRun],
+    [runId, run, resolveHuman, replaceParams],
   );
 
   const jumpToRuntime = useCallback(() => {
@@ -191,8 +150,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
         void onResolveHuman(false);
         return;
       }
-      // Other commands are adapter-declared slots; stage services wire in later Task 6 mounts.
-      setError(null);
+      setLocalError(`命令「${command}」尚未接入业务服务`);
     },
     [onResolveHuman],
   );
@@ -211,22 +169,46 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
     [selectedNodeId, run, projection?.run.runtimeCurrentNodeIds],
   );
 
+  const displayError = localError || error;
+
   return (
     <VSurface tone="workspace" className="flex min-h-0 flex-1 flex-col gap-3 p-3" data-vui="research-process-workspace">
       <VPanelHeader
         title="科研流程"
         eyebrow={
           runId
-            ? `Run ${runId} · ${run?.status || projection?.run.status || ""}`
-            : "固定模板 · 创建运行后由 LangGraph 驱动"
+            ? `${runId} · ${run?.status || projection?.run.status || ""}`
+            : "创建运行后由工作流引擎驱动"
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {runOptions.length > 0 ? (
+              <select
+                className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1 text-xs"
+                aria-label="运行切换"
+                value={runId}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  replaceParams({ runId: nextId || null });
+                  if (nextId) void refresh();
+                }}
+              >
+                <option value="">选择运行</option>
+                {runOptions.map((item) => (
+                  <option key={item.runId} value={item.runId}>
+                    {item.runId} · {item.status}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <VButton type="button" variant="ghost" onClick={() => replaceParams({ panel: "agents" })}>
               Agent
             </VButton>
             <VButton type="button" variant="ghost" onClick={() => replaceParams({ panel: "timeline" })}>
               时间线
+            </VButton>
+            <VButton type="button" variant="ghost" onClick={() => replaceParams({ panel: "team" })}>
+              团队
             </VButton>
             {projection?.run.runtimeCurrentNodeIds?.length ? (
               <VButton type="button" variant="ghost" onClick={jumpToRuntime}>
@@ -242,9 +224,9 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
         }
       />
 
-      {error ? (
-        <div className="rounded-lg border border-vui-border bg-vui-surface-inset px-3 py-2 text-sm text-vui-fg" role="alert">
-          {error}
+      {displayError ? (
+        <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2 text-sm" role="alert">
+          {displayError}
         </div>
       ) : null}
 
@@ -257,7 +239,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
           height={440}
         />
       ) : (
-        <div className="flex h-[440px] items-center justify-center rounded-xl border border-vui-border text-sm text-vui-muted">
+        <div className="flex h-[440px] items-center justify-center rounded-xl border border-[var(--border-subtle)] text-sm">
           加载流程定义…
         </div>
       )}
@@ -267,17 +249,17 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
           {panel === "agents" ? (
             <VSurface tone="panel" className="min-h-[200px] space-y-2 p-3 text-sm">
               <strong>Agent 分工</strong>
-              <p className="m-0 text-[var(--fg-secondary)]">绑定来自 run snapshot，不维护第二份数据。</p>
               <ul className="m-0 list-none space-y-1 p-0">
                 {(run?.bindingSnapshots || []).map((snap) => (
                   <li key={String(snap.snapshotId || snap.nodeId)} className="rounded border border-[var(--border-subtle)] px-2 py-1">
                     <span className="font-medium">{String(snap.nodeId)}</span>
                     {" · "}
                     {String(snap.agentId || "未绑定")}
-                    {" · "}
-                    {String(snap.resolvedFrom || "")}
                   </li>
                 ))}
+                {(run?.bindingSnapshots || []).length === 0 ? (
+                  <li className="text-[var(--fg-secondary)]">暂无绑定快照</li>
+                ) : null}
               </ul>
             </VSurface>
           ) : panel === "timeline" ? (
@@ -289,7 +271,17 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
                     #{String(evt.sequence)} {String(evt.type)} {String(evt.nodeId || "")}
                   </li>
                 ))}
+                {(run?.events || []).length === 0 ? (
+                  <li className="text-[var(--fg-secondary)]">暂无事件</li>
+                ) : null}
               </ul>
+            </VSurface>
+          ) : panel === "team" ? (
+            <VSurface tone="panel" className="min-h-[200px] space-y-2 p-3 text-sm">
+              <strong>团队</strong>
+              <p className="m-0 text-[var(--fg-secondary)]">团队组织与讨论在此面板打开；流程执行仍以画布为准。</p>
+              <p className="m-0">团队 ID：{teamId || "—"}</p>
+              <p className="m-0">运行：{runId || "未创建"}</p>
             </VSurface>
           ) : (
             <ResearchProcessNodeInspector
@@ -299,25 +291,13 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
               sessionAnchorDegraded={Boolean(nodeDetail?.sessionAnchorDegraded)}
               chatDeepLink={(nodeDetail?.chatDeepLink as string) || null}
               bindingLabel={String((nodeDetail?.bindingSnapshot as { agentId?: string } | undefined)?.agentId || "")}
-              handoffPending={run?.status === "waiting_human"}
+              handoffPending={Boolean((run?.humanTasks || []).some((t) => String(t.status) === "pending"))}
               busy={busy}
               ops={nodeOps}
               onCommand={onInspectorCommand}
             />
           )}
         </div>
-
-        <VSurface tone="inset" className="p-3 text-xs text-vui-muted">
-          <div>canonical</div>
-          <code className="mt-1 block break-all text-[11px] text-vui-fg">
-            {buildCanonicalWorkflowSearch({
-              teamId,
-              runId: runId || undefined,
-              node: selectedNodeId || undefined,
-              panel: panel !== "node" ? panel : undefined,
-            })}
-          </code>
-        </VSurface>
       </div>
     </VSurface>
   );

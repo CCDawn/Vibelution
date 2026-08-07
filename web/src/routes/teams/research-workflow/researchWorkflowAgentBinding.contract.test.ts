@@ -43,6 +43,6 @@ describe("researchWorkflowAgentBinding.contract", () => {
 
   it("workspace agents panel reads run snapshot not a second config table", () => {
     expect(workspaceSource).toContain("bindingSnapshots");
-    expect(workspaceSource).toContain("不维护第二份");
+    expect(workspaceSource).toContain("useResearchWorkflowRun");
   });
 });

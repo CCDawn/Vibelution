@@ -11,6 +11,7 @@ describe("researchWorkflowNoDuplicateSurface", () => {
   it("workspace uses VWorkflowCanvas and does not mount stage rail", () => {
     expect(workspaceSource).toContain("VWorkflowCanvas");
     expect(workspaceSource).toContain("ResearchProcessNodeInspector");
+    expect(workspaceSource).toContain("useResearchWorkflowRun");
     expect(workspaceSource).not.toContain("ChallengeCupStageRail");
     expect(workspaceSource).not.toContain("ResearchStageNav");
     expect(workspaceSource).not.toContain("TeamKnowledgeCollectionCompletionFlowPanel");
@@ -21,5 +22,7 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(workspaceSource).toContain("Selection is UI-only");
     expect(workspaceSource).toContain("runtimeCurrentNodeIds");
     expect(workspaceSource).toContain("onSelectNode");
+    expect(workspaceSource).not.toContain("canonical");
+    expect(workspaceSource).not.toContain("不维护第二份");
   });
 });
