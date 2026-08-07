@@ -371,8 +371,6 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptCellTitle min-w-0 whitespace-normal [font-size:var(--vui-font-xs)] font-normal leading-[1.4] text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   codexTranscriptCellTitleRow:
     "vui-components-conversationview codexTranscriptCellTitleRow min-w-0 inline-flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5",
-  codexTranscriptCommentaryCell:
-    "vui-components-conversationview codexTranscriptCommentaryCell max-w-full border-0 bg-transparent py-1.5 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-primary)] [&_.markdownBody]:text-[var(--fg-primary)] [&_p]:text-[var(--fg-primary)]",
   codexTranscriptErrorCell:
     "vui-components-conversationview codexTranscriptErrorCell border-0 border-l-2 border-l-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2",
   codexTranscriptFinalCell:
@@ -389,14 +387,13 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-0 bg-transparent py-[0.2rem] [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)]",
   codexTranscriptReasoningCell:
     "vui-components-conversationview codexTranscriptReasoningCell min-w-0 grid min-h-0 content-start gap-1 border-0 bg-transparent py-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
+  // Native thought header: icon + title only (no collapse chevron column).
   codexTranscriptReasoningHeader:
-    "vui-components-conversationview codexTranscriptReasoningHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)_24px] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview codexTranscriptReasoningHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   codexTranscriptReasoningHeaderBody:
     "vui-components-conversationview codexTranscriptReasoningHeaderBody min-w-0 overflow-hidden text-left",
   codexTranscriptReasoningTitleRow:
     "vui-components-conversationview codexTranscriptReasoningTitleRow inline-flex min-w-0 max-w-full flex-nowrap items-center gap-x-2 overflow-hidden",
-  codexTranscriptReasoningInlinePreview:
-    "vui-components-conversationview codexTranscriptReasoningInlinePreview min-w-0 flex-1 truncate [font-size:var(--vui-font-sm)] font-normal leading-[1.42] text-[var(--fg-tertiary)]",
   codexTranscriptReasoningText:
     "vui-components-conversationview codexTranscriptReasoningText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   /** Shared thought body: max ~8–10 lines, scroll inside the box when longer. */

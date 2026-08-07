@@ -350,9 +350,10 @@ export function ConversationToolActivity({
   const digest = buildConversationToolActivityDigestPresentation(activity.cells, language);
   const railRef = useRef<HTMLDivElement | null>(null);
   const isRunning = digest.state === "running";
-  // Codex: multi-tool completed groups collapse under a one-line summary title.
+  // Codex: multi-tool completed groups can collapse under a one-line summary,
+  // but default open so the chrono tool trail stays visible after stop/settle.
   const collapsibleGroup = digest.count >= 3 && digest.state !== "running";
-  const groupDetails = useStaggeredDetails(isRunning || digest.state === "attention");
+  const groupDetails = useStaggeredDetails(true);
 
   useEffect(() => {
     if (!isRunning || !railRef.current) {

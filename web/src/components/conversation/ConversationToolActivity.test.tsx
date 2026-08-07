@@ -230,9 +230,11 @@ describe("ConversationToolActivity", () => {
 
     expect(html).toContain('data-codex-tool-activity="items"');
     expect(html).toContain('data-codex-tool-activity-rail="true"');
-    // 3+ completed tools collapse under a Codex-style group summary.
+    // 3+ completed tools can use a Codex-style group summary, but stay open by default
+    // so the chrono tool trail remains visible after the turn settles/stops.
     expect(html).toContain('data-codex-tool-activity-group="true"');
     expect(html).toContain("运行了 3 个工具");
+    expect(html).toMatch(/open(?:="")?/);
     expect(html).toContain('data-codex-tool-activity-batch="true"');
     expect(html).toContain('data-codex-tool-activity-count="3"');
     expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);

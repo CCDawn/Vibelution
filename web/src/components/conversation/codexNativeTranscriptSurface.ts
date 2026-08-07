@@ -101,7 +101,9 @@ export function resolveCodexTranscriptSurface(
 ): CodexTranscriptSurface {
   if (hasUsableNativeCodexTranscript(message)) {
     const transcript = message.codexTranscript as CodexTranscriptProjection;
-    const cells = codexNativeTranscriptToCells(transcript);
+    const cells = codexNativeTranscriptToCells(transcript, {
+      turnStreaming: Boolean(message.streaming),
+    });
     const hasAssistantMarkdown = cells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim()));
     const projectedAnswer = String(answerProjectionContent(message) ?? "").trim();
     const nativeFinalAnswer = visibleNativeFinalAnswerText(transcript);
@@ -163,6 +165,7 @@ export function resolveCodexTranscriptSurface(
 
 export function codexNativeTranscriptToCells(
   transcript: CodexTranscriptProjection,
+  options?: { turnStreaming?: boolean },
 ): CodexTranscriptCell[] {
   const lifecycleModel = normalizeNativeToolLifecycleModel(transcript);
   const rolloutEvents = transcript.rolloutEvents ?? [];
@@ -211,6 +214,7 @@ export function codexNativeTranscriptToCells(
         };
       })
       .filter(shouldDisplayTranscriptCell)),
+    { turnStreaming: options?.turnStreaming },
   );
 }
 

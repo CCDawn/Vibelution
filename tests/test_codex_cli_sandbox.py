@@ -517,6 +517,32 @@ def test_sandbox_uses_cmd_for_single_native_windows_command(monkeypatch):
     ]
 
 
+def test_sandbox_uses_mingw_git_for_no_console_git_route(monkeypatch):
+    """cli_tool plain git must not fall through to cmd /c after classify no_console_git."""
+    from tools import shell_tools
+
+    mingw_git = r"C:\Program Files\Git\mingw64\bin\git.exe"
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+    monkeypatch.setattr(
+        "core.infrastructure.no_console_git.resolve_git_executable",
+        lambda: mingw_git,
+    )
+    route = shell_tools.classify_shell_command("git status --short")
+    assert route.route == "no_console_git"
+
+    argv = codex_cli_sandbox._sandbox_argv(
+        r"C:\Codex\codex.exe",
+        route,
+        git_bash_executable=r"C:\Program Files\Git\bin\bash.exe",
+        sandbox_mode=codex_cli_sandbox._DANGER_FULL_ACCESS_SANDBOX_MODE,
+    )
+
+    assert argv == [mingw_git, "status", "--short"]
+    assert "cmd.exe" not in " ".join(argv).lower()
+    assert "bash.exe" not in " ".join(argv).lower()
+
+
 def test_windows_offline_execute_blocks_native_chain_before_environment(monkeypatch, tmp_path):
     command = 'git status --short && rg -n "candidate" .'
     native_commands = {

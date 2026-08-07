@@ -36,6 +36,7 @@ check_python_syntax("agent.py")
 import subprocess
 import os
 import shutil
+import shlex
 import ast
 import traceback
 import json
@@ -261,6 +262,33 @@ def _is_linux_command(command: str) -> bool:
     return base in LINUX_COMMANDS
 
 
+def parse_simple_git_argv(command: str) -> Optional[List[str]]:
+    """Parse a simple ``git …`` invocation into argv (without the git binary).
+
+    Returns ``None`` when the command is not a plain git call (pipes, redirects,
+    shell chaining, or a different binary). Used to route agent ``cli_tool`` git
+    commands through ``no_console_git`` so Windows never flashes bash/cmd consoles.
+    """
+    text = str(command or "").strip()
+    if not text:
+        return None
+    # Reject shell composition that must stay on bash/cmd.
+    if re.search(r"[|><&\n;]", text):
+        return None
+    try:
+        parts = shlex.split(text, posix=not IS_WINDOWS)
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    base = parts[0].strip("\"'").lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    if base != "git" and not base.endswith("/git") and not base.endswith("\\git"):
+        return None
+    return parts[1:]
+
+
 def _is_powershell_command(command: str) -> bool:
     """检测命令是否为 PowerShell 语法（cmdlet Verb-Noun 或 PowerShell 专属语法）。
 
@@ -457,8 +485,16 @@ def classify_shell_command(command: str) -> ShellCommandRoute:
         if stripped_command.lower() == "pwd":
             return ShellCommandRoute(
                 route="powershell",
-                final_command='powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Location).Path"',
+                final_command='powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command "(Get-Location).Path"',
                 reason="windows_pwd_alias",
+                command=rewritten_command,
+            )
+        # Plain `git …` must never go through Git Bash / cmd trampolines — they flash consoles.
+        if parse_simple_git_argv(stripped_command) is not None:
+            return ShellCommandRoute(
+                route="no_console_git",
+                final_command=stripped_command,
+                reason="windows_no_console_git",
                 command=rewritten_command,
             )
         if _is_explicit_bash_invocation(stripped_command):
@@ -502,7 +538,10 @@ def classify_shell_command(command: str) -> ShellCommandRoute:
         if _is_powershell_command(rewritten_command):
             return ShellCommandRoute(
                 route="powershell",
-                final_command=f'powershell -NoProfile -ExecutionPolicy Bypass -Command {json.dumps(rewritten_command)}',
+                final_command=(
+                    "powershell -NoProfile -WindowStyle Hidden "
+                    f"-ExecutionPolicy Bypass -Command {json.dumps(rewritten_command)}"
+                ),
                 reason="powershell_cmdlet",
                 command=rewritten_command,
             )
@@ -1117,6 +1156,47 @@ def execute_shell_command(
             timeout_int = 60
 
         started_at = time.monotonic()
+        # Pure git on Windows: never shell=True / bash trampoline (console flash root cause).
+        if route.route == "no_console_git":
+            from core.infrastructure.no_console_git import run_git
+
+            git_args = parse_simple_git_argv(str(command or "").strip())
+            if git_args is None:
+                git_args = parse_simple_git_argv(final_command) or []
+            if callable(_cancel_checker):
+                try:
+                    cancelled_early = str(_cancel_checker() or "").strip()
+                except Exception:
+                    cancelled_early = ""
+                if cancelled_early:
+                    return f"[取消] 命令已因停止请求终止：{cancelled_early} (0ms)"
+            try:
+                result = run_git(git_args, cwd=cwd, timeout=float(timeout_int))
+            except subprocess.TimeoutExpired:
+                return f"[超时] 命令执行超过 {timeout} 秒被强制终止。\n请检查命令是否陷入死循环。"
+            stdout = str(result.stdout or "").strip()
+            stderr = str(result.stderr or "").strip()
+            output_parts = []
+            if stdout:
+                output_parts.append(stdout)
+            if stderr:
+                output_parts.append(f"[STDERR]\n{stderr}")
+            if not output_parts:
+                output_parts.append("[命令执行完成，无输出]")
+            output = "\n\n".join(output_parts)
+            if int(result.returncode or 0) != 0:
+                has_error_keywords = any(
+                    kw in output.lower()
+                    for kw in [
+                        "error", "exception", "failed", "fail",
+                        "traceback", "syntaxerror", "indentationerror",
+                    ]
+                )
+                if has_error_keywords:
+                    return f"[EXEC FAILURE | Exit Code: {result.returncode}]\n{output}"
+                return f"[WARNING | Exit Code: {result.returncode}]\n{output}"
+            return output
+
         process_env = os.environ.copy()
         git_safe_directory = get_git_safe_directory_override()
         if git_safe_directory is not None:
@@ -1130,6 +1210,14 @@ def execute_shell_command(
                     ),
                 }
             )
+        # When agent still hits git via bash/cmd (complex pipes), still apply no-console git env.
+        if re.match(r"^\s*git(?:\.exe)?\b", str(command or ""), flags=re.IGNORECASE):
+            try:
+                from core.infrastructure.no_console_git import apply_no_console_git_env, resolve_git_executable
+
+                process_env = apply_no_console_git_env(process_env, git_exe=resolve_git_executable())
+            except Exception:
+                pass
         process = subprocess.Popen(
             final_command,
             shell=True,
@@ -1228,7 +1316,9 @@ run_cmd = execute_shell_command
 
 def run_powershell(command: str, timeout: int = DEFAULT_TIMEOUT, cwd: Optional[str] = None) -> str:
     """通过 PowerShell 执行命令"""
-    ps_command = f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{command}"'
+    ps_command = (
+        f'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command "{command}"'
+    )
     return execute_shell_command(ps_command, timeout=timeout, cwd=cwd, check_safety=True)
 
 

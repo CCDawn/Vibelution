@@ -151,6 +151,22 @@ def _direct_executable_argv(command: str) -> list[str]:
     return tokens
 
 
+def _no_console_git_argv(command: str) -> list[str]:
+    """Build argv for classify route ``no_console_git`` using mingw git.exe."""
+    try:
+        from tools.shell_tools import parse_simple_git_argv
+        from core.infrastructure.no_console_git import resolve_git_executable
+    except Exception:
+        return []
+    git_args = parse_simple_git_argv(command)
+    if git_args is None:
+        return []
+    git_exe = str(resolve_git_executable() or "").strip()
+    if not git_exe:
+        return []
+    return [git_exe, *git_args]
+
+
 def _strip_matching_outer_quotes(token: str) -> str:
     text = str(token or "")
     if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
@@ -437,6 +453,12 @@ class ShellAdapter:
         )
         if explicit_powershell_argv:
             return prefix + explicit_powershell_argv
+        # Plain `git …` from classify_shell_command: never cmd/git-bash trampolines
+        # (Git\\cmd\\git.exe and bash.exe both flash console hosts on Windows).
+        if route_name == "no_console_git":
+            no_console_argv = _no_console_git_argv(command)
+            if no_console_argv:
+                return prefix + no_console_argv
         if route_name == "git_bash" and _is_native_windows_command(
             command,
             which=self._which,
@@ -454,6 +476,8 @@ class ShellAdapter:
             return prefix + [
                 self._powershell_executable_fn(),
                 "-NoProfile",
+                "-WindowStyle",
+                "Hidden",
                 "-ExecutionPolicy",
                 "Bypass",
                 "-Command",

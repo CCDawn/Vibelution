@@ -6,7 +6,10 @@ import {
   hasNativeProcessCells,
   resolveCodexTranscriptSurface,
 } from "./codexNativeTranscriptSurface";
-import { dedupeThoughtLikeTranscriptCells } from "./codexTranscriptCells";
+import {
+  dedupeCodexTranscriptCellsForDisplay,
+  dedupeThoughtLikeTranscriptCells,
+} from "./codexTranscriptCells";
 import { shouldRenderCompactActiveTurnPlaceholder } from "./conversationOperationPresentation";
 
 function message(patch: Partial<ConversationMessage>): ConversationMessage {
@@ -134,5 +137,72 @@ describe("projection dual-paint contracts", () => {
       },
     ]);
     expect(deduped.map((cell) => cell.id)).toEqual(["run"]);
+  });
+
+  it("display dedupe collapses duplicate tool identities after thought dedupe", () => {
+    const display = dedupeCodexTranscriptCellsForDisplay([
+      {
+        id: "thought-a",
+        kind: "assistant_markdown",
+        messageId: "m",
+        status: "completed",
+        tone: "neutral",
+        phase: "commentary",
+        text: "先看状态",
+      },
+      {
+        id: "thought-b",
+        kind: "reasoning_summary",
+        messageId: "m",
+        status: "running",
+        tone: "running",
+        text: "先看状态，再决定下一步",
+      },
+      {
+        id: "tool-a",
+        kind: "tool_call",
+        messageId: "m",
+        status: "running",
+        tone: "running",
+        title: "cli_tool",
+        sourceItemId: "src-1",
+        toolLifecycleModel: {
+          toolCalls: [{
+            toolCallId: "call-x",
+            rawOperationId: "op-x",
+            status: "running",
+            title: "cli_tool",
+            rawToolName: "cli_tool",
+            runtimeKind: "terminal",
+          }],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+      {
+        id: "tool-b",
+        kind: "tool_call",
+        messageId: "m",
+        status: "completed",
+        tone: "neutral",
+        title: "cli_tool",
+        sourceItemId: "src-1",
+        toolLifecycleModel: {
+          toolCalls: [{
+            toolCallId: "call-x",
+            rawOperationId: "op-x",
+            status: "completed",
+            title: "cli_tool",
+            rawToolName: "cli_tool",
+            runtimeKind: "terminal",
+          }],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+    ]);
+    expect(display.map((cell) => cell.id)).toEqual(["thought-b", "tool-b"]);
   });
 });
