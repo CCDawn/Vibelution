@@ -25,6 +25,12 @@ def build_canvas_projection(
     runtime_current_node_ids: list[str] | None = None,
     node_runs: dict[str, dict[str, Any]] | None = None,
     pending_human_tasks: list[dict[str, Any]] | None = None,
+    parent_run_id: str | None = None,
+    child_run_ids: list[str] | None = None,
+    completion_kind: str | None = None,
+    official_candidate_ref: str | None = None,
+    blocked_reason: str | None = None,
+    iteration_budget_max: int | None = None,
 ) -> dict[str, Any]:
     """Return definition + run overlay. Never includes selectedNodeId."""
     definition = build_challenge_cup_workflow_definition()
@@ -36,6 +42,12 @@ def build_canvas_projection(
         "runtimeCurrentNodeIds": list(runtime_current_node_ids or []),
         "nodeRuns": node_runs or {},
         "pendingHumanTasks": pending_human_tasks or [],
+        "parentRunId": parent_run_id,
+        "childRunIds": list(child_run_ids or []),
+        "completionKind": completion_kind or None,
+        "officialCandidateRef": official_candidate_ref or None,
+        "blockedReason": blocked_reason or None,
+        "iterationBudgetMax": iteration_budget_max,
     }
     return {"definition": payload, "run": run}
 
