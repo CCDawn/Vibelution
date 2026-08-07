@@ -34,6 +34,12 @@ from core.web.services import (
 from core.ui.chat_state import save_chat_state
 
 
+@pytest.fixture(autouse=True)
+def _enable_legacy_flow_canvas_execute_for_theme_discovery_characterization(monkeypatch: pytest.MonkeyPatch):
+    """Historical flow-canvas execute tests require rollback flag (Task 8 sole-writer gate)."""
+    monkeypatch.setenv("VIBELUTION_LEGACY_FLOW_CANVAS_EXECUTE", "1")
+
+
 def _explicit_research_worker_flow_canvas():
     return {
         "schemaVersion": 1,
