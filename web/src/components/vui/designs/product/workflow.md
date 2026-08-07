@@ -69,8 +69,8 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 ### 布局与 fit 协议（T4）
 
-- 布局：`useWorkflowAutoLayout(graph, createWorkflowLayoutEngine, { fitAll })`；结构 hash 缓存避免重复 ELK 调用。
-- fit：`initialFitRevision` 首次布局提交后**仅 fit 一次**，`acknowledgeInitialFit()` 后 status-only 更新不再 fit；`WorkflowCanvasControls`「适应全部」经 `onFitAll` 走同一 fit 路径。
+- 布局：`useWorkflowAutoLayout(graph, createWorkflowLayoutEngine)`；结构 hash 缓存避免重复 ELK 调用。
+- fit：`useWorkflowInitialFit` 编排——`initialFitRevision` 首次布局提交后**仅 fit 一次**，且必须等待节点进入 React Flow 内部（`useNodesInitialized`）并在下一帧执行；`acknowledgeInitialFit()` 后 status-only 更新不再 fit；拓扑切换取消 pending fit（stale 不落地）。`<ReactFlow>` 不设隐式 `fitView`/`fitViewOptions`；`WorkflowCanvasControls`「适应全部」经 `onFitAll` 走显式 fit 路径。
 
 ### 阶段分区
 

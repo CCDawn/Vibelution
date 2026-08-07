@@ -11,6 +11,7 @@ import {
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  useNodesInitialized,
   useReactFlow,
   type Edge,
   type Node,
@@ -19,7 +20,7 @@ import {
   type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 import { cn } from "../../../lib/cn";
 import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
@@ -34,6 +35,7 @@ import { WorkflowSemanticEdge } from "./WorkflowSemanticEdge";
 import { WorkflowStageRegionNode } from "./WorkflowStageRegionNode";
 import { WorkflowStartEndNode } from "./WorkflowStartEndNode";
 import { WorkflowSystemTaskNode } from "./WorkflowSystemTaskNode";
+import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
 
 export type ShadcnWorkflowCanvasProps = {
   graph: WorkflowLayoutInput;
@@ -94,18 +96,22 @@ function WorkflowCanvasInner({
     void rf.fitView({ padding: 0.1, duration: 200 });
   }, [rf]);
 
-  const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine, { fitAll });
+  const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine);
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
+  const nodesInitialized = useNodesInitialized();
 
-  // Fit protocol: fit exactly once when the first layout commits, then
-  // acknowledge so runtime-only updates never re-fit.
-  useEffect(() => {
-    if (layout.initialFitRevision == null) {
-      return;
-    }
-    void rf.fitView({ padding: 0.08 });
-    layout.acknowledgeInitialFit();
-  }, [layout.initialFitRevision, layout.acknowledgeInitialFit, rf]);
+  // Fit protocol: fit exactly once when the first layout commits AND the committed
+  // nodes have entered React Flow internals. Never re-fit for runtime-only updates
+  // (status/selection/run events). `fitAll` from controls stays explicit.
+  useWorkflowInitialFit({
+    initialFitRevision: layout.initialFitRevision,
+    layoutRevision: layout.layoutRevision,
+    nodesInitialized,
+    fit: () => {
+      void rf.fitView({ padding: 0.08 });
+    },
+    acknowledgeInitialFit: layout.acknowledgeInitialFit,
+  });
 
   const stageIndexById = useMemo(() => {
     const map = new Map<string, number>();
@@ -235,8 +241,6 @@ function WorkflowCanvasInner({
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.08, minZoom: 0.45, maxZoom: 1.35 }}
           minZoom={0.35}
           maxZoom={1.6}
           nodesDraggable={false}
