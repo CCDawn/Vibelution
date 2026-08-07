@@ -10,9 +10,11 @@ const workspaceSource = readFileSync(
 describe("researchWorkflowNoDuplicateSurface", () => {
   it("workspace uses VWorkflowCanvas and does not mount stage rail", () => {
     expect(workspaceSource).toContain("VWorkflowCanvas");
+    expect(workspaceSource).toContain("ResearchProcessNodeInspector");
     expect(workspaceSource).not.toContain("ChallengeCupStageRail");
     expect(workspaceSource).not.toContain("ResearchStageNav");
     expect(workspaceSource).not.toContain("TeamKnowledgeCollectionCompletionFlowPanel");
+    expect(workspaceSource).not.toContain("ChallengeCupOperationsWorkspace");
   });
 
   it("selection updates URL node without claiming runtime authority in comments/code", () => {

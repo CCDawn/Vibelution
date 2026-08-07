@@ -97,20 +97,19 @@ describe("Task0 research legacy surface inventory", () => {
     expect(typeof hasWorkflowView).toBe("boolean");
   });
 
-  it("returnTo deep-link helper exists but focusTask/focusTurn are not standard chat anchors yet", () => {
-    const nav = readFileSync(resolve(webSrc, "app/navigationReturn.ts"), "utf8");
-    expect(nav).toContain("returnTo");
-    expect(nav).toContain("safeReturnToPath");
-    // Task 7 will add focusTask/focusTurn; baseline should not silently claim they exist.
-    const chatSources = [
-      resolve(webSrc, "app/navigationReturn.ts"),
-      resolve(webSrc, "api/researchProjectAgentTasks.ts"),
-    ];
-    const joined = chatSources
-      .filter((p) => existsSync(p))
-      .map((p) => readFileSync(p, "utf8"))
-      .join("\n");
-    // Characterization only: record whether anchors exist.
-    expect(joined.includes("returnTo")).toBe(true);
+  it("workflow chat session anchors support focusTask/focusTurn", () => {
+    const anchor = readFileSync(
+      resolve(routesRoot, "teams/research-workflow/chatSessionAnchor.ts"),
+      "utf8",
+    );
+    expect(anchor).toContain("focusTask");
+    expect(anchor).toContain("focusTurn");
+    expect(anchor).toContain("buildChatSessionDeepLink");
+    const chatWorkbench = readFileSync(
+      resolve(webSrc, "routes/chat/ChatCodingRouteWorkbench.tsx"),
+      "utf8",
+    );
+    expect(chatWorkbench).toContain("focusTask");
+    expect(chatWorkbench).toContain("focusTurn");
   });
 });

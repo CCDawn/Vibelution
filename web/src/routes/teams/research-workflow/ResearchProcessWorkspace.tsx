@@ -23,6 +23,8 @@ import {
 } from "../../../components/vui";
 import { definitionToCanvasGraph, projectionToCanvasGraph } from "./researchProcessGraphModel";
 import { buildCanonicalWorkflowSearch } from "./researchLegacyRouteResolver";
+import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
+import type { NodeAdapterSpec } from "./nodeAdapterModel";
 
 type PanelKind = "node" | "agents" | "team" | "timeline";
 
@@ -178,6 +180,26 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
     if (current) replaceParams({ node: current, panel: "node" });
   }, [projection, replaceParams]);
 
+  const onInspectorCommand = useCallback(
+    (command: string, _adapter: NodeAdapterSpec) => {
+      if (command === "accept_handoff") {
+        void onResolveHuman(true);
+        return;
+      }
+      if (command === "reject_handoff" || command === "revise") {
+        void onResolveHuman(false);
+        return;
+      }
+      // Other commands are adapter-declared slots; stage services wire in later Task 6 mounts.
+      setError(null);
+    },
+    [onResolveHuman],
+  );
+
+  const runtimeCurrent = Boolean(
+    selectedNodeId && projection?.run.runtimeCurrentNodeIds?.includes(selectedNodeId),
+  );
+
   return (
     <VSurface tone="workspace" className="flex min-h-0 flex-1 flex-col gap-3 p-3" data-vui="research-process-workspace">
       <VPanelHeader
@@ -230,14 +252,14 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
       )}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <VSurface tone="panel" className="min-h-[200px] p-3" data-panel={panel}>
+        <div data-panel={panel}>
           {panel === "agents" ? (
-            <div className="space-y-2 text-sm">
+            <VSurface tone="panel" className="min-h-[200px] space-y-2 p-3 text-sm">
               <strong>Agent 分工</strong>
-              <p className="text-vui-muted">绑定解析来自 run snapshot，不维护第二份配置表。</p>
-              <ul className="space-y-1">
+              <p className="m-0 text-[var(--fg-secondary)]">绑定来自 run snapshot，不维护第二份数据。</p>
+              <ul className="m-0 list-none space-y-1 p-0">
                 {(run?.bindingSnapshots || []).map((snap) => (
-                  <li key={String(snap.snapshotId || snap.nodeId)} className="rounded border border-vui-border px-2 py-1">
+                  <li key={String(snap.snapshotId || snap.nodeId)} className="rounded border border-[var(--border-subtle)] px-2 py-1">
                     <span className="font-medium">{String(snap.nodeId)}</span>
                     {" · "}
                     {String(snap.agentId || "未绑定")}
@@ -246,50 +268,32 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
                   </li>
                 ))}
               </ul>
-            </div>
+            </VSurface>
           ) : panel === "timeline" ? (
-            <div className="space-y-2 text-sm">
+            <VSurface tone="panel" className="min-h-[200px] space-y-2 p-3 text-sm">
               <strong>运行事件</strong>
-              <ul className="space-y-1">
+              <ul className="m-0 list-none space-y-1 p-0">
                 {(run?.events || []).map((evt) => (
-                  <li key={String(evt.eventId || evt.sequence)} className="rounded border border-vui-border px-2 py-1">
+                  <li key={String(evt.eventId || evt.sequence)} className="rounded border border-[var(--border-subtle)] px-2 py-1">
                     #{String(evt.sequence)} {String(evt.type)} {String(evt.nodeId || "")}
                   </li>
                 ))}
               </ul>
-            </div>
+            </VSurface>
           ) : (
-            <div className="space-y-3 text-sm">
-              <strong>{selectedNodeId || "未选中节点"}</strong>
-              {nodeDetail ? (
-                <dl className="grid grid-cols-[100px_1fr] gap-1">
-                  <dt className="text-vui-muted">actor</dt>
-                  <dd>{String(nodeDetail.actorKind || "")}</dd>
-                  <dt className="text-vui-muted">runtime</dt>
-                  <dd>{nodeDetail.runtimeCurrent ? "当前" : "非当前"}</dd>
-                  <dt className="text-vui-muted">会话锚点</dt>
-                  <dd>
-                    {nodeDetail.sessionAnchorDegraded
-                      ? "不可用（degraded）"
-                      : String((nodeDetail.chatDeepLink as string) || "—")}
-                  </dd>
-                </dl>
-              ) : (
-                <p className="text-vui-muted">选择节点查看检查器。</p>
-              )}
-              {run?.status === "waiting_human" && run.humanTasks?.length ? (
-                <div className="flex gap-2">
-                  <VButton type="button" size="sm" onClick={() => onResolveHuman(true)} disabled={busy}>
-                    接受交接
-                  </VButton>
-                  <VButton type="button" size="sm" variant="ghost" onClick={() => onResolveHuman(false)} disabled={busy}>
-                    拒绝
-                  </VButton>
-                </div>
-              ) : null}
-            </div>
+            <ResearchProcessNodeInspector
+              nodeId={selectedNodeId}
+              runtimeCurrent={runtimeCurrent || Boolean(nodeDetail?.runtimeCurrent)}
+              actorKind={String(nodeDetail?.actorKind || "")}
+              sessionAnchorDegraded={Boolean(nodeDetail?.sessionAnchorDegraded)}
+              chatDeepLink={(nodeDetail?.chatDeepLink as string) || null}
+              bindingLabel={String((nodeDetail?.bindingSnapshot as { agentId?: string } | undefined)?.agentId || "")}
+              handoffPending={run?.status === "waiting_human"}
+              busy={busy}
+              onCommand={onInspectorCommand}
+            />
           )}
-        </VSurface>
+        </div>
 
         <VSurface tone="inset" className="p-3 text-xs text-vui-muted">
           <div>canonical</div>
