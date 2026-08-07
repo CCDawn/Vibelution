@@ -52,15 +52,15 @@ import {
 import researchStyles from "./TeamsRoute.research.styles";
 import shellStyles from "./TeamsRoute.styles";
 
-/** Keep challenge-cup ops out of the eager TeamsRoute graph (~50KB source). */
-const ChallengeCupOperationsWorkspace = lazy(() =>
-  import("./teams/challenge-cup/ChallengeCupOperationsWorkspace").then((module) => ({
-    default: module.ChallengeCupOperationsWorkspace,
-  })),
-);
+/** Challenge question detail only — main Challenge Cup surface is ResearchProcessWorkspace. */
 const ChallengeQuestionDetailPanel = lazy(() =>
   import("./teams/challenge-cup/ChallengeQuestionDetailPanel").then((module) => ({
     default: module.ChallengeQuestionDetailPanel,
+  })),
+);
+const ResearchProcessWorkspace = lazy(() =>
+  import("./teams/research-workflow/ResearchProcessWorkspace").then((module) => ({
+    default: module.ResearchProcessWorkspace,
   })),
 );
 
@@ -160,12 +160,6 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
   // reset progress and historical sample records cannot appear in one view.
   const challengeProgramSurfaceSelected =
     challengeCupResearchTeamSelected && challengeTeamSurface === "progress";
-  const requestedResearchStage = parseResearchWorkspaceView(searchParams.get("researchView"));
-  const challengeInitialStage: ResearchStageWorkspaceView = requestedResearchStage === "experiment"
-    || requestedResearchStage === "iteration"
-    || requestedResearchStage === "knowledge_collection"
-    ? requestedResearchStage
-    : "knowledge_collection";
 
   const startResearchProjectAgentTask = async (
     taskKind: ResearchProjectAgentTaskKind,
@@ -211,54 +205,10 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
           </Suspense>
         );
       }
+      // Task 9/10: single process canvas only (no parallel stage-rail operations shell).
       return (
         <Suspense fallback={<div className={styles.panel} aria-busy="true">Loading challenge workspace…</div>}>
-        <ChallengeCupOperationsWorkspace
-          projection={challengeProjection}
-          graphHref={researchCanvasRoute(challengeTeamId)}
-          projectSwitcher={(context) => (
-            <ResearchProjectSwitcher
-              teamId={challengeTeamId}
-              lang={lang}
-              currentTopic={sourceCollectionDraft.topic}
-              currentExperimentMethod={preferredExperimentMethod as ExperimentMethodId | ""}
-              variant="hero"
-              statusLabel={context.statusLabel}
-              statusTone={context.statusTone}
-              primaryActionHref={context.primaryActionHref}
-              primaryActionLabel={context.primaryActionLabel}
-              onProjectActivated={(project) => {
-                setSourceCollectionDraft((current) => ({ ...current, topic: project.topic }));
-                setPreferredExperimentMethod(project.experimentMethod || "");
-              }}
-            />
-          )}
-          researchTopic={sourceCollectionDraft.topic}
-          initialStage={challengeInitialStage}
-          stageHrefs={{
-            knowledge_collection: researchSourceCollectionRoute(challengeTeamId),
-            experiment: researchWorkspaceStageRoute(challengeTeamId, "experiment"),
-            iteration: researchWorkspaceStageRoute(challengeTeamId, "iteration"),
-          }}
-          questionHref={(questionId) => challengeQuestionDetailRoute(challengeTeamId, questionId)}
-          agentConfiguration={renderChallengeCupStageAgentConfiguration}
-          activeResearchProjectId={researchProjectAgentTasks.activeProjectId}
-          researchProjectAgentTasks={researchProjectAgentTasks.tasks}
-          researchProjectAgentTasksLoading={researchProjectAgentTasks.isLoading}
-          researchProjectAgentTaskStarting={researchProjectAgentTasks.isStarting}
-          researchProjectAgentTaskStartingKind={researchProjectAgentTasks.startingTaskKind}
-          researchProjectAgentTaskError={researchProjectAgentTasks.error ? "task_request_failed" : ""}
-          onStartResearchProjectAgentTask={startResearchProjectAgentTask}
-          onOpenResearchProjectAgentTask={(task) => {
-            if (task.chatRoute) {
-              navigate(task.chatRoute);
-            }
-          }}
-          isLoading={!challengeProjection && experimentPlanningStatusQuery.isPending}
-          isUnavailable={!challengeProjection && !experimentPlanningStatusQuery.isPending}
-          isRefreshing={experimentPlanningStatusQuery.isFetching}
-          onRefresh={() => void experimentPlanningStatusQuery.refetch()}
-        />
+          <ResearchProcessWorkspace teamId={challengeTeamId} />
         </Suspense>
       );
     }

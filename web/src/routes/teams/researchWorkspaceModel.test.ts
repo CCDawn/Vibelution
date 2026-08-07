@@ -15,23 +15,25 @@ describe("researchWorkspaceModel", () => {
   it("maps legacy source_collection deep links onto knowledge collection", () => {
     expect(parseResearchWorkspaceView("source_collection")).toBe("knowledge_collection");
     expect(parseResearchWorkspaceView("experiment")).toBe("experiment");
-    // canvas is not a separate page — maps to overview home.
-    expect(parseResearchWorkspaceView("canvas")).toBe("overview");
+    // canvas is not a separate page — maps to workflow shell.
+    expect(parseResearchWorkspaceView("canvas")).toBe("workflow");
+    expect(parseResearchWorkspaceView("workflow")).toBe("workflow");
     expect(parseResearchWorkspaceView("not-a-view")).toBeNull();
   });
 
-  it("builds stable Teams deep-link routes", () => {
+  it("builds stable Teams deep-link routes onto workflow canvas", () => {
     const home = teamWorkspaceRoute(RESEARCH_TEAM_ID);
     expect(home).toContain(`team=${encodeURIComponent(RESEARCH_TEAM_ID)}`);
-    // Canonical end-user home = overview + canvas (flow strip + org graph).
-    expect(home).toContain("researchView=overview");
-    expect(home).toContain("teamMode=canvas");
-    expect(researchSourceCollectionRoute(RESEARCH_TEAM_ID)).toContain("researchView=knowledge_collection");
-    expect(researchSourceCollectionRoute(RESEARCH_TEAM_ID)).toContain("teamMode=board");
-    expect(researchWorkspaceStageRoute(RESEARCH_TEAM_ID, "iteration")).toContain("researchView=iteration");
-    expect(researchWorkspaceStageRoute(RESEARCH_TEAM_ID, "iteration")).toContain("teamMode=board");
-    // canvas route is an alias of home — not a second competing page.
-    expect(researchCanvasRoute(RESEARCH_TEAM_ID)).toBe(home);
+    expect(home).toContain("researchView=workflow");
+    expect(home).toContain("workflowId=challenge-cup-research");
+    expect(researchSourceCollectionRoute(RESEARCH_TEAM_ID)).toContain("researchView=workflow");
+    expect(researchSourceCollectionRoute(RESEARCH_TEAM_ID)).toContain("node=source_finding");
+    expect(researchWorkspaceStageRoute(RESEARCH_TEAM_ID, "iteration")).toContain("researchView=workflow");
+    expect(researchWorkspaceStageRoute(RESEARCH_TEAM_ID, "iteration")).toContain("node=controlled_run");
+    expect(researchWorkspaceStageRoute(RESEARCH_TEAM_ID, "experiment")).toContain("node=hypothesis_design");
+    // canvas route opens agents panel on the same workflow shell.
+    expect(researchCanvasRoute(RESEARCH_TEAM_ID)).toContain("researchView=workflow");
+    expect(researchCanvasRoute(RESEARCH_TEAM_ID)).toContain("panel=agents");
   });
 
   it("builds an explicit challenge question route without opening the active project workspace", () => {

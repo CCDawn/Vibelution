@@ -107,11 +107,23 @@ export function parseResearchWorkspaceView(value: string | null): ResearchWorksp
   return value in RESEARCH_WORKSPACE_LABELS ? (value as ResearchWorkspaceView) : null;
 }
 
+/** Map stage workspace views onto fixed workflow node ids (ADR 0006). */
+export function researchStageViewToNodeId(view: ResearchStageWorkspaceView): string {
+  if (view === "experiment") return "hypothesis_design";
+  if (view === "iteration") return "controlled_run";
+  return "source_finding";
+}
+
+/**
+ * Canonical stage deep link: single workflow canvas + focused node.
+ * Legacy researchView=stage values still resolve via compatibility layer.
+ */
 export function researchWorkspaceStageRoute(
   teamId = RESEARCH_TEAM_ID,
   view: ResearchStageWorkspaceView = "knowledge_collection",
 ) {
-  return `/teams?team=${encodeURIComponent(teamId)}&researchView=${encodeURIComponent(view)}&teamMode=board`;
+  const node = researchStageViewToNodeId(view);
+  return `/teams?team=${encodeURIComponent(teamId)}&researchView=workflow&workflowId=challenge-cup-research&node=${encodeURIComponent(node)}`;
 }
 
 export function researchSourceCollectionRoute(teamId = RESEARCH_TEAM_ID) {
@@ -131,19 +143,17 @@ export function challengeQuestionDetailRoute(
 }
 
 /**
- * Canonical research / team home for end users:
- * flow strip (stage + next step) + organization canvas.
- * All "返回团队页面" / overview back links should use this — not a bare `?team=` URL
- * and not a separate canvas-only view.
+ * Canonical research / team home for end users: single-canvas workflow workspace.
+ * All "返回团队页面" / overview back links should use this — not a bare `?team=` URL.
  */
 export function teamWorkspaceRoute(teamId = RESEARCH_TEAM_ID) {
-  return `/teams?team=${encodeURIComponent(teamId)}&researchView=overview&teamMode=canvas`;
+  return `/teams?team=${encodeURIComponent(teamId)}&researchView=workflow&workflowId=challenge-cup-research`;
 }
 
 /**
- * Historical name for the org-canvas home. Same destination as {@link teamWorkspaceRoute}
- * so overview and canvas are not two competing pages.
+ * Historical name for the org-canvas home. Now agents panel on the workflow shell
+ * (ADR 0006: organization graph is secondary to process workflow).
  */
 export function researchCanvasRoute(teamId = RESEARCH_TEAM_ID) {
-  return teamWorkspaceRoute(teamId);
+  return `${teamWorkspaceRoute(teamId)}&panel=agents`;
 }

@@ -14,14 +14,23 @@ Date: 2026-08-07
 | LangGraph full topology | **15 nodes** + human interrupts |
 | Challenge Cup primary surface | `ResearchProcessWorkspace` + `VWorkflowCanvas` |
 
+## Closed in later commits
+
+| Item | Status |
+| --- | --- |
+| Full `npx tsc -b` | **green** |
+| Canonical internal links (`teamWorkspaceRoute` / stage routes) | **workflow + node** |
+| Challenge progress surface | mounts `ResearchProcessWorkspace` only |
+| URL matrix (pure resolver) | `researchWorkflowUrlMatrix.test.ts` |
+
 ## Not yet closed
 
 | Item | Status |
 | --- | --- |
-| Full `npx tsc -b` / `npm run build` | run in this session if green, else note |
-| Desktop browser full URL matrix | **not run** |
+| `npm run build` | see latest CI/local run |
+| Desktop browser full URL matrix | **not run** (resolver matrix automated) |
 | Launcher restart + real HITL + SSE reconnect | **not run** |
-| Delete remaining ChallengeCupOperationsWorkspace / StageRail sources | **kept** as embed sources / generic paths |
+| Physical delete of ChallengeCupOperationsWorkspace sources | **kept** (no longer mounted as primary) |
 | Merge to main | **not authorized** |
 
 ## Rollback
