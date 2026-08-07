@@ -499,6 +499,28 @@ def test_python_launcher_requirements_declarations_map_to_import_modules(monkeyp
     assert launcher._requirements_runtime_modules() == [name for name in expected_windows if name != "winpty"]
 
 
+def test_python_launcher_maps_langgraph_checkpoint_sqlite_import(monkeypatch, tmp_path):
+    """langgraph-checkpoint-sqlite has no top-level module; probe must use nested import."""
+    launcher = _load_python_launcher()
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    requirements = project_dir / "requirements.txt"
+    requirements.write_text(
+        "\n".join(
+            [
+                "langgraph>=0.2.0",
+                "langgraph-checkpoint-sqlite>=2.0.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", requirements)
+    modules = launcher._requirements_runtime_modules()
+    assert modules == ["langgraph", "langgraph.checkpoint.sqlite"]
+    assert "langgraph_checkpoint_sqlite" not in modules
+
+
 def test_python_launcher_start_launches_backend_with_project_venv_python(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     project_dir = tmp_path / "project"

@@ -42,6 +42,11 @@ REQUIREMENTS_PATH = PROJECT_ROOT / "requirements.txt"
 REQUIREMENT_IMPORT_NAME_OVERRIDES = {
     "pytest-xdist": "xdist",
     "pywinpty": "winpty",
+    # Package installs under langgraph.checkpoint.sqlite (no top-level module).
+    "langgraph-checkpoint-sqlite": "langgraph.checkpoint.sqlite",
+    "langgraph-checkpoint": "langgraph.checkpoint",
+    "langgraph-prebuilt": "langgraph.prebuilt",
+    "langgraph-sdk": "langgraph_sdk",
 }
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
@@ -1294,7 +1299,12 @@ def _requirements_runtime_modules() -> list[str]:
             continue
         name = re.split(r"[<>=!\[~ ]", name_part, maxsplit=1)[0].strip()
         module = REQUIREMENT_IMPORT_NAME_OVERRIDES.get(name.lower(), name.replace("-", "_"))
-        if module and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", module) and module not in modules:
+        # Allow dotted import paths (e.g. langgraph.checkpoint.sqlite).
+        if (
+            module
+            and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*", module)
+            and module not in modules
+        ):
             modules.append(module)
     return modules
 
