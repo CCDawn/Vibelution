@@ -223,6 +223,8 @@ function WorkflowCanvasInner({
             description: node.description,
             primaryRoleKey: node.primaryRoleKey,
             portSides: node.portSides,
+            sourceHandleIds: node.sourceHandleIds,
+            decisionOutcomeIds: node.decisionOutcomeIds,
           },
           style: { width: node.width, height: node.height },
           selectable: true,
@@ -241,6 +243,7 @@ function WorkflowCanvasInner({
         source: edge.source,
         target: edge.target,
         sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
         type: "workflowSemantic",
         animated: edge.pathState === "active" || edge.pathState === "attention",
         markerEnd: {

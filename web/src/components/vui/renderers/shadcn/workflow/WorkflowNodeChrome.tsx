@@ -137,8 +137,14 @@ export function WorkflowNodeChrome({
 
   const targetSide = firstSideOf(portSides?.target) ?? "WEST";
   const singleSourceSide = firstSideOf(portSides?.source) ?? "EAST";
-  const sideOfHandle = (id: string): WorkflowPortSide =>
+  const sideOfSourceHandle = (id: string): WorkflowPortSide =>
     portSides?.source[id] ?? "EAST";
+  const sideOfTargetHandle = (id: string): WorkflowPortSide =>
+    portSides?.target[id] ?? targetSide;
+  // Real ELK target ports, keyed by short name (e.g. "feedback:in"); the
+  // renderer mirrors every one so multi-entry nodes keep edge endpoints
+  // visually aligned with the engine (P1-4).
+  const targetHandleIds = portSides?.target ? Object.keys(portSides.target) : [];
 
   return (
     <div
@@ -164,11 +170,23 @@ export function WorkflowNodeChrome({
       title={title}
     >
       {showTargetHandle ? (
-        <Handle
-          type="target"
-          position={sideToPosition(targetSide)}
-          className="!h-2 !w-2 !border-0 !bg-[var(--fg-tertiary)]"
-        />
+        targetHandleIds.length > 0 ? (
+          targetHandleIds.map((id) => (
+            <Handle
+              key={id}
+              id={id}
+              type="target"
+              position={sideToPosition(sideOfTargetHandle(id))}
+              className="!h-2 !w-2 !border-0 !bg-[var(--fg-tertiary)]"
+            />
+          ))
+        ) : (
+          <Handle
+            type="target"
+            position={sideToPosition(targetSide)}
+            className="!h-2 !w-2 !border-0 !bg-[var(--fg-tertiary)]"
+          />
+        )
       ) : null}
 
       <div className="flex min-w-0 items-start justify-between gap-1.5">
@@ -203,13 +221,13 @@ export function WorkflowNodeChrome({
               key={h.id}
               id={h.id}
               type="source"
-              position={sideToPosition(sideOfHandle(h.id))}
+              position={sideToPosition(sideOfSourceHandle(h.id))}
               className="!relative !right-0 !top-0 !h-2 !w-2 !translate-y-0 !border-0 !bg-[var(--accent-cool,#2563eb)]"
               style={{ position: "relative", transform: "none", right: -4 }}
             />
           ))}
         </div>
-      ) : showSourceHandle ? (
+      ) : decisionLayout ? null : showSourceHandle ? (
         <Handle
           type="source"
           position={sideToPosition(singleSourceSide)}

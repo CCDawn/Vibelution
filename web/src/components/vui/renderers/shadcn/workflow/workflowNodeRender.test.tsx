@@ -45,7 +45,9 @@ function renderNode(
 }
 
 function countHandles(markup: string, id?: string): number {
-  const pattern = id ? new RegExp(`data-handle="(?:source|target):(?:left|right)"[^>]*data-handle-id="${id}"`, "g") : /data-handle="(source|target):(left|right)"/g;
+  const pattern = id
+    ? new RegExp(`data-handle="(?:source|target):(?:left|right|top|bottom)"[^>]*data-handle-id="${id}"`, "g")
+    : /data-handle="(source|target):(left|right|top|bottom)"/g;
   const matches = markup.match(pattern);
   return matches ? matches.length : 0;
 }
@@ -107,10 +109,11 @@ describe("WorkflowHumanGateNode render (P1-4)", () => {
 });
 
 describe("WorkflowDecisionNode render (P1-4)", () => {
-  it("exposes the four fixed outcome handles (rerun/promote/rollback/stop)", () => {
+  it("exposes the real outgoing outcome handles from sourceHandleIds", () => {
     const markup = renderNode(WorkflowDecisionNode, {
       label: "结果判定",
       status: "running",
+      sourceHandleIds: ["rerun", "promote", "rollback", "stop"],
     });
     expect(markup).toContain('data-visual-kind="decision"');
     expect(markup).toContain("条件分支");
@@ -122,10 +125,20 @@ describe("WorkflowDecisionNode render (P1-4)", () => {
     expect(countHandles(markup)).toBe(5);
   });
 
+  it("renders no source handles when the run has no current-run decision edges", () => {
+    const markup = renderNode(WorkflowDecisionNode, {
+      label: "结果判定",
+      status: "running",
+      sourceHandleIds: [],
+    });
+    expect(countHandles(markup)).toBe(1);
+  });
+
   it("places decision handles on the ELK port sides (P1-4)", () => {
     const markup = renderNode(WorkflowDecisionNode, {
       label: "结果判定",
       status: "running",
+      sourceHandleIds: ["rerun", "promote", "rollback", "stop"],
       portSides: {
         source: {
           rerun: "WEST",
@@ -152,6 +165,26 @@ describe("WorkflowDecisionNode render (P1-4)", () => {
     });
     expect(markup).toContain('data-handle="target:left"');
     expect(markup).toContain('data-handle="source:right"');
+  });
+
+  it("mirrors every real ELK target port as an id-bearing handle (P1-4)", () => {
+    const markup = renderNode(WorkflowHumanGateNode, {
+      label: "门禁",
+      status: "ready",
+      portSides: {
+        source: {},
+        target: {
+          "in:north": "NORTH",
+          "in:promote": "NORTH",
+          "feedback:in": "EAST",
+        },
+      },
+    });
+    expect(countHandles(markup, "in:north")).toBe(1);
+    expect(countHandles(markup, "in:promote")).toBe(1);
+    expect(countHandles(markup, "feedback:in")).toBe(1);
+    expect(markup).toContain('data-handle="target:top"');
+    expect(markup).toContain('data-handle="target:right"');
   });
 });
 

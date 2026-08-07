@@ -21,6 +21,8 @@ type BaseEdgeStub = {
   style?: Record<string, unknown>;
   className?: string;
   interactionWidth?: number;
+  "data-section-fault"?: string;
+  "data-label-fault"?: string;
 };
 
 const baseEdgeCalls: BaseEdgeStub[] = vi.hoisted(() => []);
@@ -47,16 +49,16 @@ const sections: WorkflowEdgeSection[] = [
     start: { x: 10, y: 20 },
     end: { x: 60, y: 20 },
     bendPoints: [],
-    incomingSections: [],
-    outgoingSections: [],
+    incomingSectionIds: [],
+    outgoingSectionIds: ["s2"],
   },
   {
     id: "s2",
     start: { x: 60, y: 20 },
     end: { x: 120, y: 90 },
     bendPoints: [{ x: 90, y: 90 }],
-    incomingSections: [],
-    outgoingSections: [],
+    incomingSectionIds: ["s1"],
+    outgoingSectionIds: [],
   },
 ];
 
@@ -86,7 +88,7 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
     renderEdge({ sections });
     const call = baseEdgeCalls[0];
     expect(call).toBeDefined();
-    expect(call.path).toBe("M 10 20 L 60 20 M 60 20 L 90 90 L 120 90");
+    expect(call.path).toBe("M 10 20 L 60 20 L 90 90 L 120 90");
     expect(call.id).toBe("e1");
     expect(call.interactionWidth).toBe(20);
   });
@@ -148,5 +150,32 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
     });
     expect(markup).not.toContain('data-vui="workflow-edge-label"');
     expect(markup).not.toContain("无锚点");
+  });
+
+  it("flags a missing engine label bounds on the DOM (P1-5)", () => {
+    renderEdge({
+      sections,
+      label: "无锚点",
+      labelBounds: undefined,
+      labelAlwaysVisible: true,
+      pathState: "active",
+      semanticKind: "main",
+    });
+    expect(baseEdgeCalls[0]?.["data-label-fault"]).toBe("true");
+  });
+
+  it("flags a broken section chain on the DOM (P1-3)", () => {
+    const broken: WorkflowEdgeSection[] = [
+      { id: "s1", start: { x: 0, y: 0 }, end: { x: 30, y: 0 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: ["s2"] },
+      { id: "s2", start: { x: 31, y: 5 }, end: { x: 60, y: 5 }, bendPoints: [], incomingSectionIds: ["s1"], outgoingSectionIds: [] },
+    ];
+    renderEdge({ sections: broken, label: "", semanticKind: "main", pathState: "idle" });
+    expect(baseEdgeCalls[0]?.["data-section-fault"]).toBe("true");
+  });
+
+  it("stays clean on well-formed engine sections (P1-3)", () => {
+    renderEdge({ sections, label: "", semanticKind: "main", pathState: "idle" });
+    expect(baseEdgeCalls[0]?.["data-section-fault"]).toBeUndefined();
+    expect(baseEdgeCalls[0]?.["data-label-fault"]).toBeUndefined();
   });
 });

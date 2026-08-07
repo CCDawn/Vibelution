@@ -178,6 +178,8 @@ export type WorkflowLayoutEdge = {
   pathState: WorkflowEdgePathState;
   labelAlwaysVisible: boolean;
   sourceHandle?: string;
+  /** Short-name id of the ELK target port (e.g. "feedback:in"); matches a node target handle. */
+  targetHandle?: string;
   gateKind?: string;
   requiresHumanAccept?: boolean;
 };

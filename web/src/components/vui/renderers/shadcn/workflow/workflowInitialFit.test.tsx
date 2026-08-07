@@ -195,6 +195,39 @@ describe("useWorkflowInitialFit (P1-1)", () => {
     expect(acknowledge).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the pending fit when size calibration advances the layout revision (P1-5)", async () => {
+    const fit = vi.fn();
+    const acknowledge = vi.fn();
+    const { rerender, unmount } = await mountProbe({
+      initialFitRevision: 1,
+      layoutRevision: 1,
+      nodesInitialized: false,
+      fit,
+      acknowledgeInitialFit: acknowledge,
+      onState: () => {},
+    });
+
+    // Size calibration bumps layoutRevision to 2 while initialFitRevision is
+    // still un-acknowledged (armed). The pending fit must survive the bump and
+    // fire once the measured nodes initialize.
+    await rerender({
+      initialFitRevision: 1,
+      layoutRevision: 2,
+      nodesInitialized: true,
+      fit,
+      acknowledgeInitialFit: acknowledge,
+      onState: () => {},
+    });
+    expect(fit).not.toHaveBeenCalled();
+    await act(async () => {
+      flushRafs();
+    });
+    await unmount();
+
+    expect(fit).toHaveBeenCalledTimes(1);
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+  });
+
   it("cancels the pending fit when the run switches topology before the frame", async () => {
     const fit = vi.fn();
     const acknowledge = vi.fn();

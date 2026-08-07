@@ -38,20 +38,23 @@ function segmentInBounds(
   const top = bounds.y;
   const right = bounds.x + bounds.width;
   const bottom = bounds.y + bounds.height;
+  // Fast reject: segment bbox disjoint from the rect.
   const segMinX = Math.min(a.x, b.x);
   const segMaxX = Math.max(a.x, b.x);
   const segMinY = Math.min(a.y, b.y);
   const segMaxY = Math.max(a.y, b.y);
-  if (segMaxX < left || segMinX > right || segMaxY < top || segMinY > bottom) {
+  if (segMaxX <= left || segMinX >= right || segMaxY <= top || segMinY >= bottom) {
     return false;
   }
+  // Axis-aligned segments (the engine emits ORTHOGONAL routes): inside check.
   if (a.x === b.x) {
-    return true;
+    return a.x > left && a.x < right && segMinY < bottom && segMaxY > top;
   }
   if (a.y === b.y) {
-    return true;
+    return a.y > top && a.y < bottom && segMinX < right && segMaxX > left;
   }
-  return true;
+  // Diagonal fallback: treat the segment bbox as the overlap region.
+  return segMinX < right && segMaxX > left && segMinY < bottom && segMaxY > top;
 }
 
 /* ------------------------------------------------------------------ */
@@ -626,7 +629,7 @@ describe("probe · geometry invariants (engine results)", () => {
 
     // feedback target arrives on the EAST side of the receiving node.
     const controlled = result.nodes.find((n) => n.id === "controlled_run")!;
-    expect(controlled.portSides?.target["feedback:in:controlled_run"]).toBe("EAST");
+    expect(controlled.portSides?.target["feedback:in"]).toBe("EAST");
 
     // cross-stage handoff: source EAST, target WEST.
     const handoff = result.edges.find((e) => e.id === "e_handoff")!;
@@ -634,7 +637,11 @@ describe("probe · geometry invariants (engine results)", () => {
     const targetNode = result.nodes.find((n) => n.id === handoff.target)!;
     const handoffAssignment = resolveElkPorts({ nodes: input.nodes, edges: input.edges }).byEdgeId.get("e_handoff")!;
     expect(sourceNode.portSides?.source[handoffAssignment.sourcePortId]).toBe("EAST");
-    expect(targetNode.portSides?.target[handoffAssignment.targetPortId]).toBe("WEST");
+    // target port short name (strip ":<nodeId>" suffix) keys the target handle.
+    const targetPortId = handoffAssignment.targetPortId;
+    const shortName = targetPortId.slice(0, targetPortId.lastIndexOf(":"));
+    expect(targetNode.portSides?.target[shortName]).toBe("WEST");
+    expect(handoff.targetHandle).toBe(shortName);
   });
 
   it("keeps every visible task node bounds pairwise disjoint (T3 §10.1)", async () => {
@@ -676,6 +683,11 @@ describe("probe · geometry invariants (engine results)", () => {
         bottom: n.y + n.height,
       }));
     for (const edge of result.edges) {
+      // Every edge WITH a label must carry engine labelBounds — a missing
+      // anchor is a real engine fault, not a skippable assertion hole.
+      if (edge.label.length > 0) {
+        expect(edge.labelBounds, `edge "${edge.id}" has a label but no engine bounds`).toBeDefined();
+      }
       const lb = edge.labelBounds;
       if (!lb) continue;
       const labelRect = {
@@ -688,6 +700,69 @@ describe("probe · geometry invariants (engine results)", () => {
         const overlapX = labelRect.left < node.right && node.left < labelRect.right;
         const overlapY = labelRect.top < node.bottom && node.top < labelRect.bottom;
         expect(overlapX && overlapY, `label of ${edge.id} overlaps node ${node.id}`).toBe(false);
+      }
+    }
+  });
+
+  it("keeps every edge segment clear of non-endpoint node bounds (T3 §10.1)", async () => {
+    const input = challengeCupDefinition();
+    const out = await elk.layout(toElkGraph(input).root);
+    const result = fromElkLayout(out, input);
+
+    const nodeRects = result.nodes
+      .filter((n) => n.kind === "task")
+      .map((n) => ({
+        id: n.id,
+        left: n.x,
+        top: n.y,
+        right: n.x + n.width,
+        bottom: n.y + n.height,
+      }));
+    for (const edge of result.edges) {
+      for (const section of edge.sections) {
+        const polyline = [section.start, ...section.bendPoints, section.end];
+        for (let i = 0; i + 1 < polyline.length; i += 1) {
+          const a = polyline[i]!;
+          const b = polyline[i + 1]!;
+          for (const node of nodeRects) {
+            if (node.id === edge.source || node.id === edge.target) continue;
+            expect(
+              segmentInBounds(a, b, node),
+              `segment of ${edge.id} crosses non-endpoint node ${node.id}`,
+            ).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
+  it("keeps every edge segment clear of stage title reserved bands (T3 §10.1)", async () => {
+    const input = challengeCupDefinition();
+    const out = await elk.layout(toElkGraph(input).root);
+    const result = fromElkLayout(out, input);
+
+    const stages = result.nodes.filter((n) => n.kind === "stage");
+    for (const edge of result.edges) {
+      for (const section of edge.sections) {
+        const polyline = [section.start, ...section.bendPoints, section.end];
+        for (let i = 0; i + 1 < polyline.length; i += 1) {
+          const a = polyline[i]!;
+          const b = polyline[i + 1]!;
+          for (const stage of stages) {
+            const titleBand = {
+              left: stage.x,
+              top: stage.y,
+              right: stage.x + stage.width,
+              bottom: stage.y + WORKFLOW_STAGE_TITLE_HEIGHT,
+            };
+            const crosses = (p: { x: number; y: number }) =>
+              p.x >= titleBand.left && p.x <= titleBand.right &&
+              p.y >= titleBand.top && p.y <= titleBand.bottom;
+            // Only flag when a section fully travels inside the band between
+            // its own start/end (interior routing); endpoints may sit on it.
+            expect(crosses(a) && crosses(b), `segment of ${edge.id} runs inside title band of ${stage.id}`).toBe(false);
+          }
+        }
       }
     }
   });
