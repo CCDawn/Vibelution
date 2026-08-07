@@ -48,4 +48,38 @@ describe("researchWorkflow TS domain contract (Task 1)", () => {
     expect(typeSource).toContain("RunAgentBindingSnapshot");
     expect(typeSource).toContain("runtimeCurrentNodeIds");
   });
+
+  it("aligns WorkflowRunStatus with blocked for rejected human gates", () => {
+    // Contract: server may project run.status = "blocked"; TS must accept it.
+    const statuses: Array<import("./researchWorkflow").WorkflowRunStatus> = [
+      "queued",
+      "running",
+      "waiting_human",
+      "blocked",
+      "succeeded",
+      "failed",
+      "cancelled",
+    ];
+    expect(statuses).toContain("blocked");
+    expect(typeSource).toMatch(/WorkflowRunStatus[\s\S]*?\| "blocked"/);
+    const sample: WorkflowCanvasProjection = {
+      definition: {
+        workflowId: CHALLENGE_CUP_WORKFLOW_ID,
+        schemaVersion: "1.0.0",
+        label: "挑战杯科研流程",
+        structureHash: "x",
+        stages: [],
+        nodes: [],
+        edges: [],
+      },
+      run: {
+        runId: "run-blocked",
+        status: "blocked",
+        runtimeCurrentNodeIds: ["knowledge_handoff"],
+        nodeRuns: {},
+        pendingHumanTasks: [],
+      },
+    };
+    expect(sample.run.status).toBe("blocked");
+  });
 });
