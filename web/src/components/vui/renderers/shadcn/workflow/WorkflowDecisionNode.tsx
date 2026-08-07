@@ -8,6 +8,15 @@ import type {
 import { workflowNodeTooltip } from "./workflowCanvasAccessibility";
 import { WorkflowNodeChrome } from "./WorkflowNodeChrome";
 
+/** Outcome label map for decision source handles (definition contract). */
+export const DECISION_OUTCOME_LABELS: Record<string, string> = {
+  rerun: "重跑",
+  revise: "修正",
+  promote: "晋升",
+  rollback: "回滚",
+  stop: "停止",
+};
+
 export function WorkflowDecisionNode(props: NodeProps) {
   const label = String(props.data.label ?? "");
   const status = (props.data.status as WorkflowNodeRunStatus) || "pending";
@@ -15,6 +24,16 @@ export function WorkflowDecisionNode(props: NodeProps) {
   const portSides = props.data.portSides as
     | { source: Record<string, WorkflowPortSide>; target: Record<string, WorkflowPortSide> }
     | undefined;
+  // Real current-run outgoing handles (definition edge list), never a
+  // hardcoded capability list. `revise` has no current-run edge and therefore
+  // no handle here; it stays a declared outcome only (P1-4).
+  const sourceHandleIds = Array.isArray(props.data.sourceHandleIds)
+    ? (props.data.sourceHandleIds as string[])
+    : [];
+  const sourceHandles = sourceHandleIds.map((id) => ({
+    id,
+    label: DECISION_OUTCOME_LABELS[id] ?? id,
+  }));
   return (
     <WorkflowNodeChrome
       label={label}
@@ -25,12 +44,7 @@ export function WorkflowDecisionNode(props: NodeProps) {
       attempt={attempt}
       subtitle="条件分支"
       decisionLayout
-      sourceHandles={[
-        { id: "rerun", label: "重跑" },
-        { id: "promote", label: "晋升" },
-        { id: "rollback", label: "回滚" },
-        { id: "stop", label: "停止" },
-      ]}
+      sourceHandles={sourceHandles}
       portSides={portSides}
       title={workflowNodeTooltip({ label, status, attempt })}
       badge={

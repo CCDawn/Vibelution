@@ -85,7 +85,7 @@ async function layoutedSections(
 describe("workflowElkEdgePath (T3)", () => {
   it("builds a path only from section start/bend/end vertices", () => {
     const sections: WorkflowEdgeSection[] = [
-      { id: "s1", start: { x: 0, y: 0 }, end: { x: 0, y: 40 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: [] },
+      { id: "s1", start: { x: 0, y: 0 }, end: { x: 0, y: 40 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: ["s2"] },
       { id: "s2", start: { x: 0, y: 40 }, end: { x: 120, y: 40 }, bendPoints: [{ x: 60, y: 40 }], incomingSectionIds: ["s1"], outgoingSectionIds: [] },
     ];
     const path = sectionsToSvgPath(sections);
@@ -94,7 +94,9 @@ describe("workflowElkEdgePath (T3)", () => {
     expect(hasVertex(vertices, { x: 0, y: 40 })).toBe(true);
     expect(hasVertex(vertices, { x: 60, y: 40 })).toBe(true);
     expect(hasVertex(vertices, { x: 120, y: 40 })).toBe(true);
-    expect(vertices.length).toBe(5);
+    // Directed chain is ONE subpath: M 0,0 L 0,40 L 60,40 L 120,40.
+    expect(vertices.length).toBe(4);
+    expect(path.match(/M /g)?.length).toBe(1);
   });
 
   it("joins disconnected sections with a move, never a fake connector line", () => {
@@ -154,7 +156,51 @@ describe("workflowElkEdgePath (T3)", () => {
     for (const [edgeId, sections] of Object.entries(byEdge)) {
       const result = analyzeEdgeSections(sections);
       expect(result.continuous, `${edgeId}: ${result.diagnostics.join(" | ")}`).toBe(true);
+      expect(result.wellFormed, `${edgeId}: ${result.diagnostics.join(" | ")}`).toBe(true);
     }
+  });
+
+  it("flags a directed cycle in the section chain (P1-3)", () => {
+    const sections: WorkflowEdgeSection[] = [
+      { id: "s1", start: { x: 0, y: 0 }, end: { x: 10, y: 0 }, bendPoints: [], incomingSectionIds: ["s2"], outgoingSectionIds: ["s2"] },
+      { id: "s2", start: { x: 10, y: 0 }, end: { x: 0, y: 0 }, bendPoints: [], incomingSectionIds: ["s1"], outgoingSectionIds: ["s1"] },
+    ];
+    const result = analyzeEdgeSections(sections);
+    expect(result.wellFormed).toBe(false);
+    expect(result.diagnostics.join("\n")).toContain("cycle");
+  });
+
+  it("flags a branching (non-linear) chain (P1-3)", () => {
+    const sections: WorkflowEdgeSection[] = [
+      { id: "s1", start: { x: 0, y: 0 }, end: { x: 10, y: 0 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: ["s2", "s3"] },
+      { id: "s2", start: { x: 10, y: 0 }, end: { x: 20, y: 0 }, bendPoints: [], incomingSectionIds: ["s1"], outgoingSectionIds: [] },
+      { id: "s3", start: { x: 10, y: 5 }, end: { x: 20, y: 5 }, bendPoints: [], incomingSectionIds: ["s1"], outgoingSectionIds: [] },
+    ];
+    const result = analyzeEdgeSections(sections);
+    expect(result.wellFormed).toBe(false);
+    expect(result.diagnostics.join("\n")).toContain("branches");
+  });
+
+  it("flags an orphaned section unreachable from any entry point (P1-3)", () => {
+    const sections: WorkflowEdgeSection[] = [
+      { id: "s1", start: { x: 0, y: 0 }, end: { x: 10, y: 0 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: [] },
+      // orphan claims s1 as incoming but s1 has no outgoing link to it.
+      { id: "orphan", start: { x: 50, y: 50 }, end: { x: 60, y: 50 }, bendPoints: [], incomingSectionIds: ["s1"], outgoingSectionIds: [] },
+    ];
+    const result = analyzeEdgeSections(sections);
+    expect(result.wellFormed).toBe(false);
+    expect(result.diagnostics.join("\n")).toContain("orphaned");
+  });
+
+  it("emits one subpath per directed chain so the arrow lands on the final section only (P1-3)", () => {
+    const sections: WorkflowEdgeSection[] = [
+      { id: "s1", start: { x: 0, y: 0 }, end: { x: 0, y: 40 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: ["s2"] },
+      { id: "s2", start: { x: 0, y: 40 }, end: { x: 120, y: 40 }, bendPoints: [{ x: 60, y: 40 }], incomingSectionIds: ["s1"], outgoingSectionIds: [] },
+    ];
+    const path = sectionsToSvgPath(sections);
+    // One M only; the last emitted point is the true final section end.
+    expect(path.match(/M /g)?.length).toBe(1);
+    expect(path.trimEnd().endsWith("L 120 40")).toBe(true);
   });
 
   it("emits valid absolute paths for the real ELK graph", async () => {

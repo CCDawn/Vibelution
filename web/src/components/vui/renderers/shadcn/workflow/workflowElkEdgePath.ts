@@ -24,17 +24,64 @@ import type {
   WorkflowLabelBounds,
 } from "../../../product/workflow/workflowCanvasTypes";
 
+/**
+ * Emits a plain SVG path string from the engine sections.
+ *
+ * Walks the DIRECTED chain: starts at every section with no incoming links
+ * and follows `outgoingSectionIds`. Geometrically joined sections (A.end ==
+ * B.start) continue the same subpath with `L`; a chain break starts a new `M`
+ * subpath so the renderer never draws a line the engine did not produce. The
+ * result is ONE subpath per directed chain, so an arrow marker can only land
+ * on the true final section of each chain, never mid-chain.
+ */
 export function sectionsToSvgPath(sections: WorkflowEdgeSection[]): string {
   if (sections.length === 0) {
     return "";
   }
+  const byId = new Map(sections.map((s) => [s.id, s] as const));
+  const visited = new Set<string>();
   const parts: string[] = [];
-  for (const section of sections) {
-    parts.push(`M ${section.start.x} ${section.start.y}`);
-    for (const bend of section.bendPoints) {
-      parts.push(`L ${bend.x} ${bend.y}`);
+
+  // Emits one subpath starting at `start.id` and following the directed chain.
+  // Joined sections continue with `L`; declared-but-broken links start a new
+  // subpath at the next section (never a fabricated connector).
+  const walkChain = (start: WorkflowEdgeSection) => {
+    let current = start;
+    let subpathOpen = false;
+    while (current && !visited.has(current.id)) {
+      if (!subpathOpen) {
+        visited.add(current.id);
+        parts.push(`M ${current.start.x} ${current.start.y}`);
+        subpathOpen = true;
+      }
+      for (const bend of current.bendPoints) {
+        parts.push(`L ${bend.x} ${bend.y}`);
+      }
+      parts.push(`L ${current.end.x} ${current.end.y}`);
+      visited.add(current.id);
+      const nextId = current.outgoingSectionIds.find(
+        (id) => byId.has(id) && !visited.has(id),
+      );
+      if (!nextId) {
+        break;
+      }
+      const next = byId.get(nextId)!;
+      if (Math.abs(current.end.x - next.start.x) > GEOMETRY_TOLERANCE ||
+          Math.abs(current.end.y - next.start.y) > GEOMETRY_TOLERANCE) {
+        // Declared link but geometric break: close this subpath, open a new
+        // one at the next section without inventing a connector.
+        current = next;
+        subpathOpen = false;
+        continue;
+      }
+      current = next;
     }
-    parts.push(`L ${section.end.x} ${section.end.y}`);
+  };
+
+  // Entry points: sections without incoming links, in definition order.
+  const starts = sections.filter((s) => s.incomingSectionIds.length === 0);
+  for (const start of starts.length > 0 ? starts : sections) {
+    walkChain(start);
   }
   return parts.join(" ");
 }
@@ -44,6 +91,8 @@ export type WorkflowEdgeLabelAnchor = { x: number; y: number };
 export type EdgeSectionDiagnostic = {
   /** True when every directed relation (A.end == B.start) is geometrically held. */
   continuous: boolean;
+  /** True when the chain is a single path with no cycle/branch/orphan faults. */
+  wellFormed: boolean;
   /** Human-readable diagnostics for any violated directed link. */
   diagnostics: string[];
 };
@@ -60,12 +109,15 @@ const GEOMETRY_TOLERANCE = 1e-3;
  * not something `sectionsToSvgPath` should silently absorb. The renderer keeps
  * rendering engine geometry as-is; this analysis exists so tests and tooling
  * can fail fast on broken chains.
+ *
+ * P1-3: also flags structural faults — cycles (a section reachable again),
+ * branches (a section with >1 outgoing), and orphans (a section unreachable
+ * from any entry point) — so a multi-section edge is verifiably a chain.
  */
 export function analyzeEdgeSections(sections: WorkflowEdgeSection[]): EdgeSectionDiagnostic {
   const diagnostics: string[] = [];
   const byId = new Map(sections.map((s) => [s.id, s] as const));
 
-  const pointKey = (p: { x: number; y: number }) => `${p.x},${p.y}`;
   const pointsEqual = (a: { x: number; y: number }, b: { x: number; y: number }) =>
     Math.abs(a.x - b.x) <= GEOMETRY_TOLERANCE && Math.abs(a.y - b.y) <= GEOMETRY_TOLERANCE;
 
@@ -117,7 +169,78 @@ export function analyzeEdgeSections(sections: WorkflowEdgeSection[]): EdgeSectio
     }
   }
 
-  return { continuous: diagnostics.length === 0, diagnostics };
+  // 4. Structural faults: branches, cycles, orphans.
+  const entryIds = new Set(
+    sections.filter((s) => s.incomingSectionIds.length === 0).map((s) => s.id),
+  );
+  for (const section of sections) {
+    if (section.outgoingSectionIds.length > 1) {
+      diagnostics.push(
+        `section "${section.id}" branches into ${section.outgoingSectionIds.length} outgoing sections ` +
+          `(${section.outgoingSectionIds.join(", ")}) — a chain must be linear`,
+      );
+    }
+    if (section.incomingSectionIds.length > 1) {
+      diagnostics.push(
+        `section "${section.id}" merges ${section.incomingSectionIds.length} incoming sections — ` +
+          `a chain must be linear`,
+      );
+    }
+  }
+
+  // Cycle detection: DFS with recursion stack on the directed links.
+  {
+    const state = new Map<string, "visiting" | "done">();
+    const visiting: string[] = [];
+    const hasCycle = (id: string): boolean => {
+      const current = state.get(id);
+      if (current === "done") return false;
+      if (current === "visiting") return true;
+      state.set(id, "visiting");
+      visiting.push(id);
+      const section = byId.get(id);
+      for (const nextId of section?.outgoingSectionIds ?? []) {
+        if (byId.has(nextId) && hasCycle(nextId)) return true;
+      }
+      state.set(id, "done");
+      return false;
+    };
+    for (const section of sections) {
+      if (hasCycle(section.id)) {
+        diagnostics.push(`section chain contains a cycle at "${section.id}"`);
+        break;
+      }
+    }
+  }
+
+  // Orphans: sections unreachable from any entry point (excluding chains that
+  // form their own cycle — already reported).
+  if (sections.length > 0) {
+    const reachable = new Set<string>();
+    const stack = [...entryIds];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      if (reachable.has(id)) continue;
+      reachable.add(id);
+      const section = byId.get(id);
+      for (const nextId of section?.outgoingSectionIds ?? []) {
+        if (byId.has(nextId)) stack.push(nextId);
+      }
+    }
+    for (const section of sections) {
+      if (!reachable.has(section.id)) {
+        diagnostics.push(
+          `section "${section.id}" is orphaned (unreachable from any entry point)`,
+        );
+      }
+    }
+  }
+
+  return {
+    continuous: diagnostics.every((d) => !/joins at|unknown section/.test(d)),
+    wellFormed: diagnostics.length === 0,
+    diagnostics,
+  };
 }
 
 /**

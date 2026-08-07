@@ -2,14 +2,17 @@
  * P1-1 initial-fit lifecycle for the workflow canvas.
  *
  * Arms on the layout hook's `initialFitRevision` and fires the fit only when:
- *  - the committed layout revision matches the armed revision (a newer run
- *    superseding the armed one cancels the pending fit);
+ *  - the layout hook still holds an un-acknowledged initial-fit revision
+ *    (layout revision may advance past it due to size calibration — P1-5 —
+ *    without cancelling the pending fit, because layoutRevision only bumps on
+ *    a successful commit and stale runs are already dropped upstream by the
+ *    layout token);
  *  - the committed nodes have entered React Flow internals (`nodesInitialized`);
  *  - one animation frame has elapsed after that.
  *
  * `acknowledgeInitialFit` is called only after the fit has been scheduled in
  * the frame callback, so runtime-only updates (status/selection/run events) can
- * never re-trigger the initial fit, and a stale run cannot fit the canvas.
+ * never re-trigger the initial fit.
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -45,14 +48,15 @@ export function useWorkflowInitialFit({
   const fireRef = useRef({ fit, acknowledgeInitialFit });
   fireRef.current = { fit, acknowledgeInitialFit };
 
-  // Arm/cancel: only the layout revision that matches the armed initial-fit
-  // revision may fit. A run switch (layoutRevision !== armed) cancels any
-  // pending fit so a stale run can never touch the viewport.
+  // Arm/cancel: any un-acknowledged initial-fit revision may fit, even when
+  // layoutRevision has advanced past it (size-calibration relayouts bump the
+  // revision without meaning the initial fit should be cancelled). Stale runs
+  // are already dropped in useWorkflowAutoLayout via the layout token; the
+  // hook only guards against re-firing the SAME armed revision twice.
   useEffect(() => {
     const armed =
       initialFitRevision !== null &&
-      handledRevisionRef.current !== initialFitRevision &&
-      layoutRevision === initialFitRevision;
+      handledRevisionRef.current !== initialFitRevision;
     setPendingInitialFit(armed);
   }, [initialFitRevision, layoutRevision]);
 

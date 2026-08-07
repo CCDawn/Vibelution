@@ -2,6 +2,11 @@
  * Workflow edge: renders the engine-owned ORTHOGONAL section geometry
  * (data.sections) with path-state colors and label bounds. It never re-routes
  * the edge itself; a smooth-step approximation is forbidden in production.
+ *
+ * Diagnostics (P1-3/P1-5): a section chain that is not well-formed (cycles,
+ * branches, orphans, geometrically broken links) or a label without engine
+ * labelBounds surfaces `data-section-fault` / `data-label-fault` on the DOM
+ * and a console warning instead of silently rendering a broken edge.
  */
 import {
   BaseEdge,
@@ -18,7 +23,11 @@ import type {
   WorkflowLabelBounds,
 } from "../../../product/workflow/workflowCanvasTypes";
 import { resolveEdgeStroke } from "./workflowCanvasState";
-import { resolveEdgeLabelAnchor, sectionsToSvgPath } from "./workflowElkEdgePath";
+import {
+  analyzeEdgeSections,
+  resolveEdgeLabelAnchor,
+  sectionsToSvgPath,
+} from "./workflowElkEdgePath";
 
 export type WorkflowSemanticEdgeData = {
   label?: string;
@@ -27,7 +36,7 @@ export type WorkflowSemanticEdgeData = {
   labelAlwaysVisible?: boolean;
   /** Engine-owned ORTHOGONAL route. Absent only on legacy/defensive fixtures. */
   sections?: WorkflowEdgeSection[];
-  /** Engine-owned label anchor; falls back to a section midpoint. */
+  /** Engine-owned label anchor; without it the label is not rendered. */
   labelBounds?: WorkflowLabelBounds;
 };
 
@@ -42,12 +51,24 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
 
   const sections = edgeData?.sections;
   const edgePath = useMemo(() => sectionsToSvgPath(sections ?? []), [sections]);
+  const sectionFault = useMemo(
+    () => (sections && sections.length > 0 ? !analyzeEdgeSections(sections).wellFormed : false),
+    [sections],
+  );
   const labelAnchor = useMemo(
     () => resolveEdgeLabelAnchor(edgeData?.labelBounds),
     [edgeData?.labelBounds],
   );
+  const labelFault = Boolean(label) && !edgeData?.labelBounds;
 
   const showLabel = Boolean(label) && (always || hovered || pathState === "active" || pathState === "attention") && labelAnchor !== null;
+
+  if ((sectionFault || labelFault) && import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `workflow edge "${id}" diagnostic:${sectionFault ? " section-chain fault" : ""}${labelFault ? " label without engine bounds" : ""}`,
+    );
+  }
 
   return (
     <>
@@ -55,6 +76,8 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
+        data-section-fault={sectionFault ? "true" : undefined}
+        data-label-fault={labelFault ? "true" : undefined}
         style={{
           ...style,
           stroke: stroke.stroke,

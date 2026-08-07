@@ -22,7 +22,7 @@ import type {
   WorkflowLayoutInput,
 } from "../../../product/workflow/workflowCanvasTypes";
 import type { WorkflowLayoutEngine } from "./workflowElkClient";
-import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
+import { layoutDiagnostic, useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
 
 function makeNode(overrides: Partial<WorkflowCanvasNodeInput>): WorkflowCanvasNodeInput {
   return {
@@ -572,5 +572,80 @@ describe("useWorkflowAutoLayout behavior", () => {
     // Only the real current-run edge exists; revise has no edge.
     expect(latest?.edges).toHaveLength(1);
     expect(latest?.edges[0].sourceHandle).toBe("rerun");
+  });
+
+  it("flags a label without engine bounds as degraded (P1-5)", () => {
+    const result = {
+      nodes: [],
+      edges: [
+        {
+          id: "e1",
+          source: "a",
+          target: "b",
+          label: "交接",
+          semanticKind: "main" as const,
+          pathState: "idle" as const,
+          labelAlwaysVisible: false,
+          sections: [],
+          labelBounds: undefined,
+        },
+      ],
+      width: 0,
+      height: 0,
+    };
+    const diagnostic = layoutDiagnostic(result);
+    expect(diagnostic).not.toBeNull();
+    expect(diagnostic?.reason).toContain('edge "e1" has a label but the engine did not place label bounds');
+  });
+
+  it("flags a non-well-formed section chain as degraded (P1-5)", () => {
+    const result = {
+      nodes: [],
+      edges: [
+        {
+          id: "e2",
+          source: "a",
+          target: "b",
+          label: "回路",
+          semanticKind: "rerun" as const,
+          pathState: "idle" as const,
+          labelAlwaysVisible: true,
+          sections: [
+            { id: "s1", start: { x: 0, y: 0 }, end: { x: 10, y: 0 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: ["s2"] },
+            { id: "s2", start: { x: 11, y: 5 }, end: { x: 20, y: 5 }, bendPoints: [], incomingSectionIds: ["s1"], outgoingSectionIds: [] },
+          ],
+          labelBounds: { x: 0, y: 0, width: 10, height: 10 },
+        },
+      ],
+      width: 0,
+      height: 0,
+    };
+    const diagnostic = layoutDiagnostic(result);
+    expect(diagnostic).not.toBeNull();
+    expect(diagnostic?.reason).toContain('edge "e2" section chain is not well-formed');
+  });
+
+  it("stays clean when every label has bounds and chains are well-formed (P1-5)", () => {
+    const result = {
+      nodes: [],
+      edges: [
+        {
+          id: "e3",
+          source: "a",
+          target: "b",
+          label: "主流程",
+          semanticKind: "main" as const,
+          pathState: "idle" as const,
+          labelAlwaysVisible: false,
+          sections: [
+            { id: "s1", start: { x: 0, y: 0 }, end: { x: 10, y: 0 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: [] },
+          ],
+          labelBounds: { x: 0, y: 0, width: 10, height: 10 },
+        },
+      ],
+      width: 0,
+      height: 0,
+    };
+    expect(layoutDiagnostic(result)).toBeNull();
   });
 });
