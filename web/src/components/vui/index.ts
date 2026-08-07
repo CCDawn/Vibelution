@@ -74,6 +74,10 @@ export {
 } from "./aesthetic";
 export { VEmptyState, type VEmptyStateProps } from "./layout/VEmptyState";
 export {
+  VWorkflowCanvas,
+  type VWorkflowCanvasProps,
+} from "./product/workflow/VWorkflowCanvas";
+export {
   VStateSurface,
   type VStateSurfaceFact,
   type VStateSurfaceDensity,
