@@ -9,6 +9,7 @@
 | [0003](0003-operator-config-lives-outside-repo.md) | 活跃 operator config 在用户 Documents，不在仓库根 | Accepted |
 | [0004](0004-product-ui-uses-vui-shadcn-only.md) | 产品 UI 强制 VUI + shadcn/Radix，禁止并行设计系统 | Accepted |
 | [0005](0005-docs-authority-and-archive-policy.md) | 文档权威层与 archive 策略 | Accepted |
+| [0006](0006-challenge-cup-workflow-runtime-and-single-canvas.md) | 挑战杯科研流程使用 LangGraph 运行权威与单画布三阶段投影 | Accepted |
 
 ## 写法
 
