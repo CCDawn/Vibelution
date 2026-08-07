@@ -79,6 +79,8 @@ export function VCanvasWorkbenchPage({
       data-vui-recipe="canvas-workbench-page"
       data-vui-domain-recipe={domainRecipe}
       fill
+      // hideHeader → single body child; must use stack or body collapses to content height.
+      fillLayout={hideHeader ? "stack" : "header-body"}
       className={className}
       {...props}
     >
@@ -91,7 +93,7 @@ export function VCanvasWorkbenchPage({
           actions={actions}
         />
       )}
-      <div data-vui="canvas-workbench-body" className={VUI_PAGE_BODY_FILL_CLASS}>
+      <div data-vui="canvas-workbench-body" className={cn(VUI_PAGE_BODY_FILL_CLASS, "min-h-0 flex-1")}>
         {toolbar ? (
           <div
             data-vui="canvas-workbench-toolbar"

@@ -87,6 +87,7 @@ export function VBoardWorkbenchPage({
       data-vui-recipe="board-workbench-page"
       data-vui-domain-recipe={domainRecipe}
       fill
+      fillLayout={hideHeader ? "stack" : "header-body"}
       className={className}
       {...props}
     >
@@ -99,7 +100,7 @@ export function VBoardWorkbenchPage({
           actions={actions}
         />
       )}
-      <div data-vui="board-workbench-body" className={VUI_PAGE_BODY_FILL_CLASS}>
+      <div data-vui="board-workbench-body" className={cn(VUI_PAGE_BODY_FILL_CLASS, "min-h-0 flex-1")}>
         <VSplitWorkspace
           className={cn("h-full min-h-0", workspaceClassName)}
           data-testid={shellTestId}
