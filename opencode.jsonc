@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Vibelution 本机开发默认走 OpenCode Go（需环境变量 OPENCODE_API_KEY）
+  // 出站经系统/用户 HTTP(S)_PROXY=http://127.0.0.1:7890（FlClash VPN 代理）
+  "model": "opencode-go/deepseek-v4-flash",
+  "small_model": "opencode-go/deepseek-v4-flash",
+  "enabled_providers": ["opencode-go"],
+  "provider": {
+    "opencode-go": {
+      "options": {
+        "apiKey": "{env:OPENCODE_API_KEY}",
+        "timeout": 180000
+      }
+    }
+  },
+  "autoupdate": false
+}
