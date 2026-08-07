@@ -681,11 +681,12 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   }
 
   // Right inspector column: stage tools / workflow (not stacked under primary → empty floor).
-  // Hide on pure overview so the kanban can use full main width; show for stage/launcher/KC.
+  // Hide on process workflow / overview so ResearchProcessWorkspace (VCanvasWorkbenchPage)
+  // owns the full main column + its own node inspector — avoids double aside + dead space.
   const showBoardInspectorAside =
     researchWorkflowTeamSelected
     && !researchCanvasVisible
-    && researchWorkspaceView !== "overview";
+    && !isProcessWorkflowView;
 
   // Legacy experiment/iteration query is normalized at TeamsLegacyResearchBoundary
   // to workflow + node before this shell phase. Do not mount ResearchStageStandalonePage

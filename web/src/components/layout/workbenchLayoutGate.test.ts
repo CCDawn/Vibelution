@@ -175,6 +175,8 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(research).toContain("Navigate");
     expect(research).toContain("researchView=workflow");
     expect(workspace).toContain("VWorkflowCanvas");
+    expect(workspace).toContain("VCanvasWorkbenchPage");
+    expect(workspace).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");
   });
 
   it("keeps Teams source-collection list shells on shared height API (Wave 6E)", () => {
