@@ -1812,13 +1812,6 @@ function memoryMutationEndpoint(sectionId: string, itemId: string, suffix = "") 
   return `/api/memory/items/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}${suffix}`;
 }
 
-function agentProjectMemoryUpdatesEndpoint(status: MemoryProposalStatusFilter, limit = 100) {
-  const params = new URLSearchParams();
-  params.set("status", status);
-  params.set("limit", String(limit));
-  return `/api/agents/project-memory-updates?${params.toString()}`;
-}
-
 function projectMemoryProposalResolveEndpoint(proposal: AgentProjectMemoryUpdateProposal) {
   return `/api/agents/${encodeURIComponent(proposal.agentId)}/project-memory-updates/${encodeURIComponent(proposal.proposalId)}`;
 }
