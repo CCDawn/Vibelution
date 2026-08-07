@@ -28,8 +28,12 @@ from .durable_index import DurableWorkflowIndex
 from .handoff_builder import (
     artifact_kind_for_gate,
     build_handoff_record,
-    edges_between_completed,
     successor_node,
+)
+from .handoff_lineage import (
+    build_auto_handoffs_for_completed,
+    existing_active_edge_ids,
+    handoff_edge_id,
 )
 from .store import WorkflowRunStore
 
@@ -123,24 +127,17 @@ class ResearchWorkflowRuntimeService:
         artifacts: dict[str, Any],
         existing_edge_ids: set[str],
     ) -> list[dict[str, Any]]:
-        created: list[dict[str, Any]] = []
-        for from_id, to_id in edges_between_completed(completed):
-            edge_key = f"{from_id}->{to_id}"
-            if edge_key in existing_edge_ids:
-                continue
-            record = build_handoff_record(
-                run_id=run_id,
-                workflow_id=workflow_id,
-                workflow_version_id=workflow_version_id,
-                from_node_id=from_id,
-                to_node_id=to_id,
-                status="accepted",
-                artifacts=artifacts,
-            )
+        """Append auto handoffs using definition edgeId identity (no human dupes)."""
+        created = build_auto_handoffs_for_completed(
+            run_id=run_id,
+            workflow_id=workflow_id,
+            workflow_version_id=workflow_version_id,
+            completed=completed,
+            artifacts=artifacts,
+            existing_edge_ids=existing_edge_ids,
+        )
+        for record in created:
             self._store.append_handoff(run_id, record)
-            existing_edge_ids.add(edge_key)
-            existing_edge_ids.add(str(record.get("edgeId") or ""))
-            created.append(record)
         return created
 
     def create_run(
@@ -358,10 +355,8 @@ class ResearchWorkflowRuntimeService:
             workflow_version_id = str(record.get("workflowVersionId") or "")
             previous_completed = list((record.get("langGraph") or {}).get("completedNodeIds") or [])
             existing_handoffs = list(record.get("handoffs") or [])
-            existing_edge_ids = {
-                str(h.get("edgeId") or f"{h.get('fromNodeId')}->{h.get('toNodeId')}")
-                for h in existing_handoffs
-            }
+            # Uniqueness is definition edgeId only (never mix with from->to keys).
+            existing_edge_ids = existing_active_edge_ids(existing_handoffs)
 
             runtime_nodes: list[str] = []
             lg_snapshot = dict(record.get("langGraph") or {})
@@ -397,7 +392,7 @@ class ResearchWorkflowRuntimeService:
             }
             self._store.upsert_human_task(run_id, resolved_task)
 
-            # Handoff for this gate (adjacent definition edge)
+            # Handoff for this gate (adjacent definition edge) — human lineage first.
             handoff_status = "accepted" if accept else "rejected"
             handoff = build_handoff_record(
                 run_id=run_id,
@@ -411,10 +406,14 @@ class ResearchWorkflowRuntimeService:
                 rejection_reason="" if accept else "rejected_by_human",
                 human_task_id=task_id,
             )
+            handoff.setdefault("nodeAttempt", 1)
             self._store.append_handoff(run_id, handoff)
-            existing_edge_ids.add(str(handoff.get("edgeId") or ""))
+            human_edge_id = handoff_edge_id(handoff)
+            if human_edge_id:
+                existing_edge_ids.add(human_edge_id)
 
-            # Auto handoffs for newly completed agent nodes after this resume
+            # Auto handoffs for newly completed agent nodes after this resume.
+            # Must not re-append the human gate edge (same definition edgeId).
             if accept:
                 self._append_auto_handoffs(
                     run_id=run_id,

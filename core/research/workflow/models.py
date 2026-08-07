@@ -26,6 +26,7 @@ class WorkflowRunStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     WAITING_HUMAN = "waiting_human"
+    BLOCKED = "blocked"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"

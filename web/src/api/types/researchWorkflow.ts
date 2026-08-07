@@ -15,6 +15,7 @@ export type WorkflowRunStatus =
   | "queued"
   | "running"
   | "waiting_human"
+  | "blocked"
   | "succeeded"
   | "failed"
   | "cancelled";
