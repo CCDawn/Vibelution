@@ -82,4 +82,52 @@ describe("researchWorkflow TS domain contract (Task 1)", () => {
     };
     expect(sample.run.status).toBe("blocked");
   });
+
+  it("exposes five iteration decision kinds and fork/completion fields", () => {
+    const kinds: Array<import("./researchWorkflow").IterationDecisionKind> = [
+      "rerun_same_protocol",
+      "revise_protocol",
+      "promote_candidate",
+      "rollback_candidate",
+      "stop",
+    ];
+    expect(kinds).toHaveLength(5);
+    expect(typeSource).toContain("IterationDecisionKind");
+    expect(typeSource).toContain("branched_revision");
+    expect(typeSource).toContain("PromotionOperation");
+    expect(typeSource).toContain("parentRunId");
+    expect(typeSource).toContain("childRunIds");
+    const sample: WorkflowCanvasProjection = {
+      definition: {
+        workflowId: CHALLENGE_CUP_WORKFLOW_ID,
+        schemaVersion: "1.0.0",
+        label: "挑战杯科研流程",
+        structureHash: "x",
+        stages: [],
+        nodes: [],
+        edges: [],
+      },
+      run: {
+        runId: "run-parent",
+        status: "succeeded",
+        runtimeCurrentNodeIds: [],
+        nodeRuns: {
+          controlled_run: {
+            nodeId: "controlled_run",
+            status: "succeeded",
+            attempt: 2,
+            nodeRunId: "nr-controlled_run-a2",
+          },
+        },
+        pendingHumanTasks: [],
+        completionKind: "branched_revision",
+        childRunIds: ["run-child"],
+        blockedReason: null,
+        iterationBudgetMax: 3,
+      },
+    };
+    expect(sample.run.completionKind).toBe("branched_revision");
+    expect(sample.run.childRunIds).toEqual(["run-child"]);
+    expect(sample.run.nodeRuns.controlled_run.attempt).toBe(2);
+  });
 });

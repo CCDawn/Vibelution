@@ -49,6 +49,58 @@ export type GateKind =
   | "smoke"
   | "promotion";
 
+/** Five structured iteration decisions only — never free-form routing strings. */
+export type IterationDecisionKind =
+  | "rerun_same_protocol"
+  | "revise_protocol"
+  | "promote_candidate"
+  | "rollback_candidate"
+  | "stop";
+
+export type CompletionKind =
+  | ""
+  | "branched_revision"
+  | "stopped"
+  | "promoted"
+  | "rolled_back"
+  | "failed";
+
+export type PromotionOperation = "promote" | "rollback";
+
+export type IterationDecisionRecord = {
+  decisionId: string;
+  decisionKind: IterationDecisionKind;
+  runId: string;
+  nodeRunId: string;
+  iterationAttempt: number;
+  selectedCandidateRef?: string;
+  baselineRef?: string;
+  frozenProtocolRef?: string;
+  evaluationReportRef?: string;
+  reason?: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  idempotencyKey?: string;
+  parentDecisionId?: string;
+  supersedesDecisionId?: string;
+  terminalReason?: string;
+  promotionOperation?: PromotionOperation | "";
+  budgetMax?: number;
+};
+
+export type PromotionProposalRef = {
+  proposalId: string;
+  runId: string;
+  operation: PromotionOperation;
+  decisionId?: string;
+  targetCandidateRef?: string;
+  selectedCandidateRef?: string;
+  baselineRef?: string;
+  status: string;
+  reason?: string;
+  createdAt?: string;
+};
+
 export type ArtifactRef = {
   artifactId: string;
   kind: string;
@@ -122,6 +174,13 @@ export type WorkflowCanvasProjection = {
     runtimeCurrentNodeIds: string[];
     nodeRuns: Record<string, WorkflowNodeRunProjection>;
     pendingHumanTasks: HumanTaskSummary[];
+    /** Parent/child revision fork links (optional). */
+    parentRunId?: string | null;
+    childRunIds?: string[];
+    completionKind?: CompletionKind | null;
+    officialCandidateRef?: string | null;
+    blockedReason?: string | null;
+    iterationBudgetMax?: number | null;
   };
 };
 
