@@ -1,7 +1,9 @@
 import json
 import http.client
+import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -6972,6 +6974,81 @@ def test_restart_build_preflight_skips_when_frontend_build_is_current(monkeypatc
             },
         )
     ]
+
+
+def test_frontend_build_current_detects_tree_mismatch_even_when_mtime_is_fresh(monkeypatch, tmp_path):
+    web_dir = tmp_path / "web"
+    dist_index = web_dir / "dist" / "index.html"
+    source = web_dir / "src" / "App.tsx"
+    provenance_path = web_dir / "dist" / ".vibelution-build.json"
+    source.parent.mkdir(parents=True)
+    dist_index.parent.mkdir(parents=True)
+    source.write_text("export {};", encoding="utf-8")
+    dist_index.write_text("<html></html>", encoding="utf-8")
+    provenance_path.write_text(
+        json.dumps({"frontendTree": "tree-old", "builtFromCommit": "1" * 40}),
+        encoding="utf-8",
+    )
+    now = time.time()
+    os.utime(source, (now - 30, now - 30))
+    os.utime(dist_index, (now - 10, now - 10))
+
+    monkeypatch.setattr(daemon, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        daemon,
+        "_capture_git_text",
+        lambda args, label="": "tree-new" if args[-1] == "HEAD:web" else "c" * 40,
+    )
+
+    current, reason, freshness = daemon._frontend_build_current()
+
+    assert current is False
+    assert "tree differs" in reason
+    assert freshness["frontendTree"] == "tree-new"
+    assert freshness["stampedFrontendTree"] == "tree-old"
+
+
+def test_write_frontend_provenance_skip_does_not_rewrite_artifact_tree(monkeypatch, tmp_path):
+    web_dir = tmp_path / "web"
+    provenance_path = web_dir / "dist" / ".vibelution-build.json"
+    provenance_path.parent.mkdir(parents=True)
+    provenance_path.write_text(
+        json.dumps(
+            {
+                "frontendTree": "tree-artifact",
+                "builtFromCommit": "1" * 40,
+                "sourceCommit": "1" * 40,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(daemon, "PROJECT_ROOT", tmp_path)
+
+    def fake_git(args, label=""):
+        if args == ["rev-parse", "HEAD"]:
+            return "2" * 40
+        if args == ["rev-parse", "HEAD:web"]:
+            return "tree-new-head"
+        if args == ["branch", "--show-current"]:
+            return "main"
+        return ""
+
+    monkeypatch.setattr(daemon, "_capture_git_text", fake_git)
+
+    payload = daemon._write_frontend_build_provenance_after_preflight(
+        rebuilt=False,
+        force_requested=False,
+        skipped=True,
+    )
+
+    assert payload["frontendTree"] == "tree-artifact"
+    assert payload["builtFromCommit"] == "1" * 40
+    assert payload["sourceCommit"] == "2" * 40
+    assert payload["lastValidatedFrontendTree"] == "tree-new-head"
+    assert payload["skipped"] is True
+    stamped = json.loads(provenance_path.read_text(encoding="utf-8"))
+    assert stamped["frontendTree"] == "tree-artifact"
+    assert stamped["builtFromCommit"] == "1" * 40
 
 
 def test_restart_build_preflight_force_skips_when_frontend_build_is_already_current(monkeypatch):
