@@ -70,8 +70,11 @@ export function decisionSourceHandle(semanticKind: WorkflowEdgeSemanticKind, edg
   if (edgeId.toLowerCase().includes("promo") || semanticKind === "promote") return "promote";
   if (edgeId.toLowerCase().includes("rollback") || semanticKind === "rollback") return "rollback";
   if (edgeId.toLowerCase().includes("stop") || semanticKind === "stop") return "stop";
-  if (semanticKind === "decision_branch" || semanticKind === "revise") return "branch";
-  return undefined;
+  // revise is a real capability outcome with its own handle; it only maps to
+  // a current-run edge when the service emits a real child-run lineage edge.
+  if (semanticKind === "revise") return "revise";
+  // Any other decision_branch style edge keeps the generic branch handle.
+  return "branch";
 }
 
 export function resolveEdgePathState(options: {

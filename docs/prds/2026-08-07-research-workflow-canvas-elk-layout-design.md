@@ -1,6 +1,6 @@
 # 实现技术方案 · 科研工作流画布 ELK 自动布局
 
-Status: **Ready for implementation**（P0/P1 技术缺口已修订并完成一致性复审；layoutOptions 与实际 Worker 产物名按 T1 探针冻结）
+Status: **T1 冻结完成（2026-08-07）**——layoutOptions、真实 ELK Worker 资产名与 Browser Worker handshake 均已通过 T1 实测（bundled 探针 / Browser probe / 生产构建三类证据见 §4.2）
 
 Date: 2026-08-07
 
@@ -155,6 +155,20 @@ edges: 所有 WorkflowLayoutEdge → ElkExtendedEdge
 ```
 
 探针清单（T1 第一步，见 §9.1）：algorithm/direction/hierarchyHandling/edgeRouting 四键被接受且方向符合预期；FIXED_ORDER 端口顺序确定；edge label 输出 `x/y`；跨层级边 section 坐标的坐标系（根绝对坐标 or 所属父坐标——决定 §5.2 换算）；feedback 边是否绕行阶段内容区。
+
+**T1 实测探针结论（elkjs 0.12.0，2026-08-07）**：
+
+- 短名 key（`elk.algorithm` 等）是长名的官方别名：`knownLayoutOptions()` 只列长名（`org.eclipse.elk.algorithm`），但用短名跑 `elk.layout` 正常生效，因此 options 常量保留短名。
+- compound 定向：**无跨阶段边的独立 stage 被 ELK 竖直堆叠**（`elk.priority` / `elk.position` / `considerModelOrder` 对无连接 compound 排序均无效，已实测）；**存在跨阶段边时三 stage 沿 `RIGHT` 正确水平排**。三阶段正向交接（knowledge → experiment → execution）是真实拓扑的固有边，保证生产路径排序；adapter 中以注释记录该事实，不伪造排序边。
+- `FIXED_ORDER` 端口按声明顺序输出；边端点用 port id 填入 `sources[]/targets[]`（`ElkExtendedEdge`），layout 可解析且输出 sections。
+- 边 label：`elk.edgeLabels.placement=CENTER` 下 ELK 输出 label 坐标，`fromElkLayout` 直接消费 `labels[0].x/y`，不做 50% 估算。
+- 输入输出确定性：相同 `WorkflowLayoutInput` → 相同 ELK graph 与相同布局（已有单测锁定）。
+
+**T1 验证证据（三类区分，2026-08-07 实测）**：
+
+- bundled 算法探针：`workflowElkLayout.test.ts` 25 用例全绿（elkjs 0.12 API 事实、compound/ORTHOGONAL/FIXED_ORDER/label 坐标/坐标归一/multi-section 链/feedback 通道、三阶段真实拓扑、ports/endpoint 契约、`fromElkLayout` 几何消费）。
+- Browser Worker 探针：`web/probes/workflow-elk-handshake.html` + `workflow-elk-handshake.ts`，由 **test-only probe build**（`VIBELUTION_PROBE_BUILD=1 vite build --outDir dist-probe`，`npm run build:probe`）纳入构建，普通 `npm run build` 不包含；`npm run check:elk-worker-handshake` 一键完成 probe 构建 → 预算断言 → Edge headless 实机验证 `ok: true`（页面完成后 POST 回写结果，避免 dump-dom 无法等待 Worker 异步的时序问题）：Worker 资产真实加载且仅构造一次、URL 命中 `elk-worker.min-*.js`、`terminate()` 确被调用、终止后未再新建 Worker、无 bundled 回退、最小 compound layout 返回节点坐标与 edge sections（terminate 后再次 layout 不再产生新答案，实测 timeout）。
+- 生产构建证据：T1 收尾后普通 `npm run build` **不再**产出 Worker 资产（probe 已移出普通构建，产品代码 T4 才 import `workflowElkClient`）；worker asset 的存在/唯一/预算断言改由 `npm run check:elk-worker-handshake`（对 `dist-probe/assets`，`expectElkWorker: true`）承担，T4 后普通构建自然恢复产出且 `check:bundle` 移回默认门（见 §13 过渡说明）。
 
 ### 4.3 端口模型（`workflowElkPorts.ts`）
 
@@ -314,6 +328,7 @@ hash = stableStringify({
 | `workflowElkEdgePath.ts` | sections → SVG path（纯函数） | 状态 |
 | `useWorkflowAutoLayout.ts` | hash / 单飞 / last-good / fit / 尺寸校准上报 | 几何 |
 | `workflowElkLayout.test.ts` | 探针 + 几何不变量 + 确定性断言 | Browser Worker 验收 |
+| `web/probes/workflow-elk-handshake.html` / `.ts`（T5 移除） | Browser Worker handshake 测试入口；仅 test-only probe build（`VIBELUTION_PROBE_BUILD=1`）构建，不进入普通 `npm run build` 产物 | 产品 UI |
 
 调整：
 
@@ -391,6 +406,7 @@ VUI 红线：不新建第二套画布 API；更新 `designs/product/workflow.md`
 ### T1 · elkjs + 探针 + adapter + ports
 - `npm install --save-exact elkjs@0.12.0`（web/）；同步 `package-lock.json`、`THIRD_PARTY_COMPONENTS.md`（EPL-2.0 OR GPL-3.0-or-later）、`checkBundleBudget.mjs`（D2）。
 - `workflowElkClient.ts` → `workflowElkPorts.ts` → `workflowElkGraphAdapter.ts` → `workflowElkOptions.ts`（探针结论冻结）。
+- 探针测试专用化（T1 收尾）：probe 移出普通 `npm run build`（`VIBELUTION_PROBE_BUILD=1` 控制入口，独立 `dist-probe` 产物）；新增仓库内 `npm run check:elk-worker-handshake` 一键 Browser Worker 验收（构建/预算/实机/退出码）；`check:bundle` 过渡期 flag，T4 恢复默认。
 - 完成证据：bundled 探针与 Browser Worker handshake 全绿；相同输入生成相同 ELK graph；四条当前 run edge endpoints 均连接真实唯一 port；五种 outcome 能力齐全且未伪造 `revise` edge；真实 worker asset 被专用 budget 规则命中。
 
 ### T2 · layout + hook 生命周期
@@ -441,9 +457,13 @@ npm.cmd test -- src/components/vui/vuiShadcnRouteContract.test.ts
 npm.cmd test -- src/components/vui/vuiComponentDesignContract.test.ts
 npx.cmd tsc -b --pretty false
 npm.cmd run build
-node scripts/checkBundleBudget.mjs
+npm.cmd run check:bundle
+npm.cmd run check:elk-worker-handshake
 git diff --check
 ```
+
+- `check:elk-worker-handshake`：T1 收尾新增的仓库内一键 Browser Worker 验收（probe build → worker asset 存在/唯一/预算断言 → Edge headless 实机 handshake → 结果 POST 校验，任一失败非零退出；无任何可见控制台，全部子进程 `windowsHide`/CREATE_NO_WINDOW）。
+- T1–T4 过渡说明：`npm run check:bundle` 带 `--expect-elk-worker=0`（普通 build 无 probe 也无产品 `?worker` 引用，worker asset 由 `check:elk-worker-handshake` 门承担）；T4 产品接入 `workflowElkClient` 后普通 build 自然产出 worker asset，该 flag 移除、`check:bundle` 恢复默认断言。
 
 实机验收（PRD §11）：1440×900 与 1920×1080；无 run / running / waiting_human / blocked / failed / succeeded / 五种 decision outcome 状态；Inspector 开闭、首次全图、聚焦阶段/节点、hover/selected 边、持续状态更新、历史 run 切换。
 
