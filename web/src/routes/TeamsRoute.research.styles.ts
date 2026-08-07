@@ -186,10 +186,9 @@ const styles = {
     "researchOverviewSurface min-w-0 min-h-0 flex-1 grid content-start gap-3 overflow-auto p-3 [scrollbar-gutter:stable]",
   researchOverviewStagesEmbed:
     "researchOverviewStagesEmbed min-w-0 [&_.researchStageLauncher]:border-0 [&_.researchStageLauncher]:bg-transparent [&_.researchStageLauncher]:p-0 [&_.researchStageLauncher]:shadow-none [&_.researchStageLauncherHeader]:mb-0",
-  // overflow-hidden: fill children (process workflow canvas) must stretch, not content-size + scroll floor.
-  // Scrollable overviews own overflow on their inner surface (researchOverviewSurface).
+  // Full-height host for challenge process/overview under board main (no scroll floor).
   challengeWorkspaceBody:
-    "challengeWorkspaceBody min-w-0 w-full flex-1 !flex min-h-0 flex-col !gap-0 !overflow-hidden !p-0",
+    "challengeWorkspaceBody !flex h-full min-h-0 w-full min-w-0 flex-1 flex-col !gap-0 !overflow-hidden !p-0",
   challengeWorkspaceContextHidden:
     "challengeWorkspaceContextHidden hidden !hidden",
   challengeWorkspaceInspector:

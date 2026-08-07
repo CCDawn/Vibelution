@@ -58,9 +58,18 @@ export function TeamResearchBoardPrimarySurface({
     return <>{launcherSlot}</>;
   }
 
-  // overview
+  // overview / process workflow: keep a full-height host so fill children can stretch
+  // (bare fragment cannot establish flex height for nested canvas recipes).
   if (workflowPending || workflowReady) {
-    return <>{overviewSlot}</>;
+    return (
+      <div
+        data-fill="true"
+        data-vui-region="teams-board-primary-fill"
+        className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+      >
+        {overviewSlot}
+      </div>
+    );
   }
 
   return (
