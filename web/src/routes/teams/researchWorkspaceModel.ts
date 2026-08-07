@@ -9,7 +9,11 @@ export type ResearchLegacyWorkspaceView =
   | "candidates"
   | "discussion"
   | "canvas";
-export type ResearchWorkspaceView = "overview" | ResearchStageWorkspaceView | ResearchLegacyWorkspaceView;
+export type ResearchWorkspaceView =
+  | "overview"
+  | "workflow"
+  | ResearchStageWorkspaceView
+  | ResearchLegacyWorkspaceView;
 
 export const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
   view: ResearchStageWorkspaceView;
@@ -51,6 +55,7 @@ export const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
 
 export const RESEARCH_WORKSPACE_LABELS: Record<ResearchWorkspaceView, { zh: string; en: string }> = {
   overview: { zh: "科研总览", en: "Overview" },
+  workflow: { zh: "科研流程", en: "Research workflow" },
   knowledge_collection: { zh: "知识搜集", en: "Knowledge collection" },
   experiment: { zh: "实验设计", en: "Experiment design" },
   iteration: { zh: "执行迭代", en: "Execution & iteration" },
@@ -66,6 +71,7 @@ export const RESEARCH_WORKSPACE_LABELS: Record<ResearchWorkspaceView, { zh: stri
 export function researchWorkspaceAnchorId(view: ResearchWorkspaceView) {
   const ids: Record<ResearchWorkspaceView, string> = {
     overview: "research-workflow-overview",
+    workflow: "research-process-workflow",
     knowledge_collection: "research-workflow-knowledge-collection",
     experiment: "research-workflow-experiment",
     iteration: "research-workflow-iteration",
@@ -94,8 +100,9 @@ export function parseResearchWorkspaceView(value: string | null): ResearchWorksp
     return "knowledge_collection";
   }
   // "canvas" is not a separate page: org canvas is the overview home body.
+  // Challenge Cup migrates canvas/overview defaults toward workflow (ADR 0006).
   if (value === "canvas") {
-    return "overview";
+    return "workflow";
   }
   return value in RESEARCH_WORKSPACE_LABELS ? (value as ResearchWorkspaceView) : null;
 }

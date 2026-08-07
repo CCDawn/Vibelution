@@ -1509,6 +1509,20 @@ def save_research_flow_canvas(
 
 
 def execute_research_flow_canvas_node(session_id: str, node_id: str | None = None) -> dict[str, Any]:
+    """Legacy flow-canvas execute writer.
+
+    ADR 0006 / Task 8: disabled by default so LangGraph runtime is the sole run writer.
+    Set VIBELUTION_LEGACY_FLOW_CANVAS_EXECUTE=1 only for rollback drills.
+    """
+    import os
+
+    if os.environ.get("VIBELUTION_LEGACY_FLOW_CANVAS_EXECUTE", "").strip() not in {"1", "true", "TRUE", "yes"}:
+        raise ValueError(
+            "Legacy /api/research/flow-canvas/execute is disabled. "
+            "Use LangGraph research workflow runtime APIs "
+            "(/api/research/workflows/.../runs). "
+            "Set VIBELUTION_LEGACY_FLOW_CANVAS_EXECUTE=1 only for emergency rollback."
+        )
     normalized_session_id = _safe_text(session_id, max_length=128)
     if not normalized_session_id:
         raise ValueError("Research flow execution requires a session id.")
