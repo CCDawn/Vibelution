@@ -120,13 +120,18 @@ function ResizableSplitWorkspace({
       data-vui="split-workspace"
       data-vui-resizable="true"
       data-vui-layout-id={resize.layoutId}
-      className={["flex min-h-0 min-w-0 gap-0 overflow-hidden", stripGridLayoutClasses(className)].filter(Boolean).join(" ")}
+      className={[
+        "flex h-full min-h-0 min-w-0 items-stretch gap-0 overflow-hidden",
+        stripGridLayoutClasses(className),
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
       {sidebar && sidebarSpec ? (
         <>
           <aside
             data-vui="split-sidebar"
-            className="min-h-0 min-w-0 shrink-0 overflow-hidden"
+            className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
             style={{
               width: sidebarWidth,
               flexBasis: sidebarWidth,
@@ -166,7 +171,7 @@ function ResizableSplitWorkspace({
           />
           <aside
             data-vui="split-aside"
-            className="min-h-0 min-w-0 shrink-0 overflow-hidden"
+            className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
             style={{
               width: asideWidth,
               flexBasis: asideWidth,

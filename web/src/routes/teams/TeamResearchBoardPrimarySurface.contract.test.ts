@@ -51,12 +51,11 @@ describe("TeamResearchBoardPrimarySurface extraction contract", () => {
     expect(routeSource).toContain('nextParams.set("researchView", view)');
   });
 
-  it("keeps the Challenge Cup operation workspace behind the explicit progress surface", () => {
-    const shellPhaseSource = readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8");
-
-    expect(shellPhaseSource).toMatch(
-      /if\s*\(challengeCupResearchTeamSelected\s*&&\s*challengeTeamSurface\s*===\s*"progress"\)\s*\{\s*return renderResearchStageLauncher\("interactive"\);/,
-    );
+  it("challenge process workspace uses full-height board primary host", () => {
+    expect(surfaceSource).toContain("teams-board-primary-fill");
+    expect(surfaceSource).toContain("workflowPending || workflowReady");
+    expect(surfaceSource).toContain("h-full min-h-0 w-full min-w-0 flex-1");
+    expect(surfaceSource).toContain('data-fill="true"');
   });
 
   it("surface progressive-fills overview shell; empty only when settled without workflow", () => {

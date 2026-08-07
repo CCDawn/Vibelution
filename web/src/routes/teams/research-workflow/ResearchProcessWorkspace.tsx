@@ -342,32 +342,41 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
       </div>
     );
 
+  // Absolute fill host: parent board cell is full-height; this pins the recipe
+  // to the cell even if intermediate percentage heights fail. Same idea as
+  // filling a pane in Teams canvas / memory graph hosts.
   return (
-    <VCanvasWorkbenchPage
-      data-vui="research-process-workspace"
-      domainRecipe="research-process-workflow"
-      ariaLabel="科研流程工作区"
-      title="科研流程"
-      // Team shell already owns page chrome; match TeamsCanvasComposer.
-      hideHeader
-      toolbar={toolbar}
-      layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
-      resize={{
-        aside: {
-          id: "inspector",
-          defaultWidth: 320,
-          minWidth: 260,
-          maxWidth: 480,
-        },
-      }}
-      canvas={canvasBody}
-      inspector={inspectorBody}
-      // Match TeamsCanvasComposer surface reset inside board cell.
-      canvasClassName="!border-0 !rounded-none"
-      inspectorClassName="!border-0 !rounded-none"
-      className="h-full min-h-0"
-      shellTestId="research-process-workspace-shell"
-      shellMode="board"
-    />
+    <div
+      data-fill="true"
+      data-vui="research-process-workspace-host"
+      className="relative min-h-0 w-full min-w-0 flex-1 self-stretch overflow-hidden"
+    >
+      <div className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
+        <VCanvasWorkbenchPage
+          data-vui="research-process-workspace"
+          domainRecipe="research-process-workflow"
+          ariaLabel="科研流程工作区"
+          title="科研流程"
+          hideHeader
+          toolbar={toolbar}
+          layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
+          resize={{
+            aside: {
+              id: "inspector",
+              defaultWidth: 320,
+              minWidth: 260,
+              maxWidth: 480,
+            },
+          }}
+          canvas={canvasBody}
+          inspector={inspectorBody}
+          canvasClassName="!border-0 !rounded-none h-full min-h-0"
+          inspectorClassName="!border-0 !rounded-none h-full min-h-0"
+          className="h-full min-h-0 flex-1"
+          shellTestId="research-process-workspace-shell"
+          shellMode="board"
+        />
+      </div>
+    </div>
   );
 }

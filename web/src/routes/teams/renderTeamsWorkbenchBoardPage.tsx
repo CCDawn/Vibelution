@@ -40,14 +40,23 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
       title={p.lang === "zh" ? "团队工作台" : "Team workbench"}
       rail={p.teamShellRail}
       toolbar={p.teamShellToolbar}
-      boardClassName="!gap-0 !overflow-hidden !p-0"
+      // Challenge process canvas must not inherit board padding/scroll floor (content-start + overflow-auto).
+      boardClassName={
+        p.challengeCupResearchTeamSelected
+          ? "!gap-0 !overflow-hidden !p-0 !h-full min-h-0 flex-1"
+          : "!gap-0 !overflow-hidden !p-0"
+      }
       board={(
         <TeamsOverviewComposer
           lang={p.lang}
           boardPrimaryMode={p.boardPrimaryMode as any}
           workflowPending={p.workflowPending}
           workflowReady={p.workflowReady}
-          className={p.styles.teamShellBoardBody}
+          className={
+            p.challengeCupResearchTeamSelected
+              ? "flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0"
+              : p.styles.teamShellBoardBody
+          }
           challengeWorkspaceClassName={p.styles.challengeWorkspaceBody}
           challengeCupResearchTeamSelected={p.challengeCupResearchTeamSelected}
           overviewSlot={p.overviewSlot}
