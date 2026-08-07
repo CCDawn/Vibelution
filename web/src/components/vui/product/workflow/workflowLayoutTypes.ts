@@ -6,6 +6,14 @@ export type {
   WorkflowLayoutEdge,
   WorkflowLayoutInput,
   WorkflowLayoutNode,
-} from "../../renderers/shadcn/workflowCanvasLayout";
+  WorkflowCanvasNodeInput,
+  WorkflowCanvasEdgeInput,
+  WorkflowCanvasStageInput,
+  WorkflowCanvasRunMeta,
+  WorkflowNodeRunStatus,
+  WorkflowNodeVisualKind,
+  WorkflowEdgeSemanticKind,
+  WorkflowEdgePathState,
+} from "./workflowCanvasTypes";
 
-export { layoutWorkflowCanvas } from "../../renderers/shadcn/workflowCanvasLayout";
+export { layoutWorkflowCanvas } from "../../renderers/shadcn/workflow/workflowCanvasLayout";
