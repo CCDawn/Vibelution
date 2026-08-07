@@ -472,6 +472,48 @@ export function ChatCodingRoute() {
   const requestedRoomId = useMemo(() => {
     return new URLSearchParams(location.search).get("room") ?? "";
   }, [location.search]);
+  const workflowSessionAnchor = useMemo(() => {
+    // Task 7: exact node session anchors — never invent agent default DM.
+    try {
+      // Lazy import path kept pure for tests; inline parse avoids circular route deps.
+      const params = new URLSearchParams(location.search);
+      const sessionId = (params.get("session") || "").trim();
+      const focusTask = (params.get("focusTask") || "").trim();
+      const focusTurn = (params.get("focusTurn") || "").trim();
+      if (!sessionId) return null;
+      if (!focusTask || !focusTurn) {
+        return { degraded: true as const, sessionId, reason: !focusTask ? "missing_focus_task" : "missing_focus_turn" };
+      }
+      return { degraded: false as const, sessionId, focusTask, focusTurn };
+    } catch {
+      return null;
+    }
+  }, [location.search]);
+  useEffect(() => {
+    if (!workflowSessionAnchor || workflowSessionAnchor.degraded) {
+      return;
+    }
+    const turn = workflowSessionAnchor.focusTurn;
+    const task = workflowSessionAnchor.focusTask;
+    const tryFocus = () => {
+      const byTurn =
+        document.querySelector(`[data-turn-id="${CSS.escape(turn)}"]`)
+        || document.querySelector(`[data-message-id="${CSS.escape(turn)}"]`);
+      const byTask = document.querySelector(`[data-task-id="${CSS.escape(task)}"]`);
+      const el = (byTurn || byTask) as HTMLElement | null;
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.setAttribute("data-workflow-anchor-focus", "true");
+        return true;
+      }
+      return false;
+    };
+    if (tryFocus()) return;
+    const timer = window.setTimeout(() => {
+      tryFocus();
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [workflowSessionAnchor, activeSessionId]);
   const { chatReturnTarget, chatReturnLabel } = useChatReturnNavigation(location.search, lang);
   useEffect(() => {
     activeTurnLayersBySessionRef.current = activeTurnLayersBySession;
