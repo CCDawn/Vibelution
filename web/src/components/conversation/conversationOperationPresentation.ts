@@ -113,6 +113,8 @@ export function shouldRenderCompactActiveTurnPlaceholder(input: {
   hasFeedbackTimeline: boolean;
   hasActiveProcess: boolean;
   turnErrorMessage: boolean;
+  /** Native/package codex surface already paints process or answer — do not stack a status note. */
+  hasCodexSurface?: boolean;
 }) {
   return Boolean(
     input.role === "assistant"
@@ -120,7 +122,8 @@ export function shouldRenderCompactActiveTurnPlaceholder(input: {
     && !input.showResponseBlock
     && !input.hasFeedbackTimeline
     && !input.hasActiveProcess
-    && !input.turnErrorMessage,
+    && !input.turnErrorMessage
+    && !input.hasCodexSurface,
   );
 }
 

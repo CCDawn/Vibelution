@@ -19,14 +19,23 @@ function message(patch: Partial<ConversationMessage>): ConversationMessage {
 
 function nativeSurface(cells: CodexTranscriptSurface["cells"], patch?: Partial<CodexTranscriptSurface>): CodexTranscriptSurface {
   const hasAssistantMarkdown = cells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim()));
+  const ownsProcess = cells.some((cell) => {
+    if (cell.kind === "user") return false;
+    if (cell.kind === "assistant_markdown") {
+      const phase = String(cell.phase || "").toLowerCase();
+      const channel = String(cell.channel || "").toLowerCase();
+      return phase === "commentary" || phase === "interim" || channel === "commentary";
+    }
+    return true;
+  });
   return {
     mode: "native",
     source: "message.codexTranscript",
     cells,
     hasAssistantMarkdown,
-    suppressProjectedProcess: cells.some((cell) => cell.kind !== "assistant_markdown" && cell.kind !== "user"),
+    suppressProjectedProcess: ownsProcess,
     suppressProjectedResponse: hasAssistantMarkdown,
-    suppressProjectedTurnStatus: hasAssistantMarkdown,
+    suppressProjectedTurnStatus: hasAssistantMarkdown || ownsProcess,
     suppressProjectedError: false,
     ...patch,
   };

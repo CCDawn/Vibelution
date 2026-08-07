@@ -1976,6 +1976,7 @@ export function ConversationView({
       hasFeedbackTimeline: boolean;
       hasActiveProcess: boolean;
       turnErrorMessage: boolean;
+      hasCodexSurface?: boolean;
     },
   ) {
     return resolveShouldRenderCompactActiveTurnPlaceholder({
@@ -1985,6 +1986,7 @@ export function ConversationView({
       hasFeedbackTimeline: options.hasFeedbackTimeline,
       hasActiveProcess: options.hasActiveProcess,
       turnErrorMessage: options.turnErrorMessage,
+      hasCodexSurface: options.hasCodexSurface,
     });
   }
 
@@ -4013,6 +4015,8 @@ export function ConversationView({
               hasFeedbackTimeline,
               hasActiveProcess,
               turnErrorMessage,
+              // Avoid "状态" placeholder stacking above an already-visible codex process trail.
+              hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
             }) ? (
               <ConversationActiveTurnStatusNote
                 message={message}
