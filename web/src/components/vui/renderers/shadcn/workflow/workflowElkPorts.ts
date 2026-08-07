@@ -17,9 +17,10 @@
 import type {
   WorkflowCanvasEdgeInput,
   WorkflowCanvasNodeInput,
+  WorkflowPortSide,
 } from "../../../product/workflow/workflowCanvasTypes";
 
-export type EdgePortSide = "NORTH" | "EAST" | "SOUTH" | "WEST";
+export type EdgePortSide = WorkflowPortSide;
 
 export type ElkPortSpec = { id: string; side: EdgePortSide };
 

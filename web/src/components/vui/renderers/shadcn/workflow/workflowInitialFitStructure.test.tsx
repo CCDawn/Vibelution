@@ -43,7 +43,7 @@ import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
 import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
 
 vi.mock("./useWorkflowAutoLayout", () => ({
-  useWorkflowAutoLayout: () => ({
+  useWorkflowAutoLayout: vi.fn(() => ({
     nodes: [],
     edges: [],
     layoutRevision: 1,
@@ -52,7 +52,7 @@ vi.mock("./useWorkflowAutoLayout", () => ({
     acknowledgeInitialFit: vi.fn(),
     fitAll: vi.fn(),
     reportMeasuredSize: vi.fn(),
-  }),
+  })),
 }));
 
 vi.mock("./useWorkflowInitialFit", () => ({
@@ -124,6 +124,45 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       expect(props.fitView).toBeUndefined();
       expect(props.fitViewOptions).toBeUndefined();
     }
+  });
+
+  it("shows a degraded banner when the layout hook reports a failure (P1-5)", async () => {
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue({
+      nodes: [],
+      edges: [],
+      layoutRevision: 1,
+      degraded: { reason: "layout engine crashed" },
+      initialFitRevision: null,
+      acknowledgeInitialFit: vi.fn(),
+      fitAll: vi.fn(),
+      reportMeasuredSize: vi.fn(),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={emptyGraph()} />);
+    });
+
+    const banner = container.querySelector('[data-vui="workflow-degraded"]');
+    expect(banner).toBeTruthy();
+    expect(banner?.textContent).toContain("布局降级");
+    expect(banner?.textContent).toContain("layout engine crashed");
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue({
+      nodes: [],
+      edges: [],
+      layoutRevision: 1,
+      degraded: null,
+      initialFitRevision: null,
+      acknowledgeInitialFit: vi.fn(),
+      fitAll: vi.fn(),
+      reportMeasuredSize: vi.fn(),
+    });
   });
 });
 

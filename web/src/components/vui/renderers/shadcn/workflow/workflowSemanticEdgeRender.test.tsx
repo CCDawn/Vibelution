@@ -115,6 +115,7 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
     const markup = renderEdge({
       sections,
       label: "交接",
+      labelBounds: { x: 40, y: 10, width: 40, height: 12 },
       pathState: "active",
       semanticKind: "main",
     });
@@ -128,10 +129,24 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
       sections,
       label: "人工确认",
       labelAlwaysVisible: true,
+      labelBounds: { x: 40, y: 10, width: 40, height: 12 },
       pathState: "idle",
       semanticKind: "human_gate",
     });
     expect(markup).toContain('data-vui="workflow-edge-label"');
     expect(markup).toContain("人工确认");
+  });
+
+  it("never renders a label when the engine did not place labelBounds (P1-2)", () => {
+    const markup = renderEdge({
+      sections,
+      label: "无锚点",
+      labelBounds: undefined,
+      labelAlwaysVisible: true,
+      pathState: "active",
+      semanticKind: "main",
+    });
+    expect(markup).not.toContain('data-vui="workflow-edge-label"');
+    expect(markup).not.toContain("无锚点");
   });
 });

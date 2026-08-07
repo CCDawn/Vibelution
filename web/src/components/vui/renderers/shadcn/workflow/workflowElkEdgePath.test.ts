@@ -5,7 +5,7 @@
  *  - paths are built only from section start/bend/end vertices;
  *  - disconnected sections are joined with a move, never a fake connector;
  *  - promote/rollback parallel edges stay distinguishable through their paths;
- *  - label anchors come from engine bounds or a geometry-derived fallback.
+ *  - label anchors come from engine bounds only, never geometry estimation.
  */
 import ELK from "elkjs/lib/elk.bundled.js";
 import { readFileSync } from "node:fs";
@@ -19,6 +19,7 @@ import type {
 import { toElkGraph } from "./workflowElkGraphAdapter";
 import { fromElkLayout } from "./workflowElkLayout";
 import {
+  analyzeEdgeSections,
   resolveEdgeLabelAnchor,
   sectionsToSvgPath,
   type WorkflowEdgeLabelAnchor,
@@ -106,23 +107,54 @@ describe("workflowElkEdgePath (T3)", () => {
   });
 
   it("uses engine labelBounds center as the anchor when present", () => {
-    const sections: WorkflowEdgeSection[] = [
-      { id: "s1", start: { x: 10, y: 10 }, end: { x: 100, y: 10 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: [] },
-    ];
-    const anchor = resolveEdgeLabelAnchor(sections, { x: 40, y: 6, width: 40, height: 12 });
+    const anchor = resolveEdgeLabelAnchor({ x: 40, y: 6, width: 40, height: 12 });
     expect(anchor).toEqual({ x: 60, y: 12 });
   });
 
-  it("falls back to a geometry-derived midpoint anchor without engine bounds", () => {
-    const sections: WorkflowEdgeSection[] = [
-      { id: "s1", start: { x: 10, y: 10 }, end: { x: 100, y: 10 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: [] },
-    ];
-    const anchor = resolveEdgeLabelAnchor(sections, undefined);
-    expect(anchor).toEqual({ x: 55, y: 10 });
+  it("returns null without engine labelBounds — never estimates from geometry", () => {
+    expect(resolveEdgeLabelAnchor(undefined)).toBeNull();
   });
 
-  it("returns null anchor when there is no geometry at all", () => {
-    expect(resolveEdgeLabelAnchor([], undefined)).toBeNull();
+  it("accepts a geometrically continuous directed chain (P1-3)", () => {
+    const sections: WorkflowEdgeSection[] = [
+      { id: "s1", start: { x: 0, y: 0 }, end: { x: 0, y: 40 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: ["s2"] },
+      { id: "s2", start: { x: 0, y: 40 }, end: { x: 120, y: 40 }, bendPoints: [], incomingSectionIds: ["s1"], outgoingSectionIds: [] },
+    ];
+    const result = analyzeEdgeSections(sections);
+    expect(result.continuous).toBe(true);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("flags a claimed join that does not hold geometrically (P1-3)", () => {
+    const sections: WorkflowEdgeSection[] = [
+      { id: "s1", start: { x: 0, y: 0 }, end: { x: 30, y: 0 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: ["s2"] },
+      { id: "s2", start: { x: 31, y: 5 }, end: { x: 60, y: 5 }, bendPoints: [], incomingSectionIds: ["s1"], outgoingSectionIds: [] },
+    ];
+    const result = analyzeEdgeSections(sections);
+    expect(result.continuous).toBe(false);
+    expect(result.diagnostics.length).toBeGreaterThan(0);
+    expect(result.diagnostics.join("\n")).toContain('"s1"');
+    expect(result.diagnostics.join("\n")).toContain('"s2"');
+  });
+
+  it("flags unknown section ids and asymmetric declarations (P1-3)", () => {
+    const sections: WorkflowEdgeSection[] = [
+      { id: "s1", start: { x: 0, y: 0 }, end: { x: 10, y: 0 }, bendPoints: [], incomingSectionIds: ["ghost"], outgoingSectionIds: ["s2"] },
+      { id: "s2", start: { x: 10, y: 0 }, end: { x: 20, y: 0 }, bendPoints: [], incomingSectionIds: [], outgoingSectionIds: [] },
+    ];
+    const result = analyzeEdgeSections(sections);
+    expect(result.continuous).toBe(false);
+    const joined = result.diagnostics.join("\n");
+    expect(joined).toContain('references unknown section "ghost"');
+    expect(joined).toContain('does not list "s1" as incoming');
+  });
+
+  it("accepts the real ELK multi-section chains as continuous (P1-3)", async () => {
+    const byEdge = await layoutedSections(fourDecisionEdges());
+    for (const [edgeId, sections] of Object.entries(byEdge)) {
+      const result = analyzeEdgeSections(sections);
+      expect(result.continuous, `${edgeId}: ${result.diagnostics.join(" | ")}`).toBe(true);
+    }
   });
 
   it("emits valid absolute paths for the real ELK graph", async () => {

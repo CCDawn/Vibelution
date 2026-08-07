@@ -18,7 +18,11 @@ import {
 } from "lucide-react";
 
 import { cn } from "../../../lib/cn";
-import type { WorkflowNodeRunStatus, WorkflowNodeVisualKind } from "../../../product/workflow/workflowCanvasTypes";
+import type {
+  WorkflowNodeRunStatus,
+  WorkflowNodeVisualKind,
+  WorkflowPortSide,
+} from "../../../product/workflow/workflowCanvasTypes";
 import { resolveNodeStatusVisual } from "./workflowCanvasState";
 import { workflowNodeAriaLabel } from "./workflowCanvasAccessibility";
 
@@ -39,7 +43,33 @@ export type WorkflowNodeChromeProps = {
   showSourceHandle?: boolean;
   sourceHandles?: Array<{ id: string; label?: string }>;
   decisionLayout?: boolean;
+  /** ELK port sides keyed by handle id; drives Handle placement (P1-4). */
+  portSides?: {
+    source: Record<string, WorkflowPortSide>;
+    target: Record<string, WorkflowPortSide>;
+  };
 };
+
+function sideToPosition(side: WorkflowPortSide): Position {
+  switch (side) {
+    case "WEST":
+      return Position.Left;
+    case "EAST":
+      return Position.Right;
+    case "NORTH":
+      return Position.Top;
+    case "SOUTH":
+      return Position.Bottom;
+  }
+}
+
+function firstSideOf(map: Record<string, WorkflowPortSide> | undefined): WorkflowPortSide | null {
+  if (!map) {
+    return null;
+  }
+  const first = Object.values(map)[0];
+  return first ?? null;
+}
 
 function StatusIcon({ icon }: { icon: ReturnType<typeof resolveNodeStatusVisual>["icon"] }) {
   const cls = "h-3.5 w-3.5 shrink-0";
@@ -93,6 +123,7 @@ export function WorkflowNodeChrome({
   showSourceHandle = true,
   sourceHandles,
   decisionLayout = false,
+  portSides,
 }: WorkflowNodeChromeProps) {
   const visual = resolveNodeStatusVisual(status);
   const aria = workflowNodeAriaLabel({
@@ -103,6 +134,11 @@ export function WorkflowNodeChrome({
     primaryAgentId,
     attempt,
   });
+
+  const targetSide = firstSideOf(portSides?.target) ?? "WEST";
+  const singleSourceSide = firstSideOf(portSides?.source) ?? "EAST";
+  const sideOfHandle = (id: string): WorkflowPortSide =>
+    portSides?.source[id] ?? "EAST";
 
   return (
     <div
@@ -130,7 +166,7 @@ export function WorkflowNodeChrome({
       {showTargetHandle ? (
         <Handle
           type="target"
-          position={Position.Left}
+          position={sideToPosition(targetSide)}
           className="!h-2 !w-2 !border-0 !bg-[var(--fg-tertiary)]"
         />
       ) : null}
@@ -167,7 +203,7 @@ export function WorkflowNodeChrome({
               key={h.id}
               id={h.id}
               type="source"
-              position={Position.Right}
+              position={sideToPosition(sideOfHandle(h.id))}
               className="!relative !right-0 !top-0 !h-2 !w-2 !translate-y-0 !border-0 !bg-[var(--accent-cool,#2563eb)]"
               style={{ position: "relative", transform: "none", right: -4 }}
             />
@@ -176,7 +212,7 @@ export function WorkflowNodeChrome({
       ) : showSourceHandle ? (
         <Handle
           type="source"
-          position={Position.Right}
+          position={sideToPosition(singleSourceSide)}
           className="!h-2 !w-2 !border-0 !bg-[var(--fg-tertiary)]"
         />
       ) : null}

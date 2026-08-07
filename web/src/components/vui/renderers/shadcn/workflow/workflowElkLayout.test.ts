@@ -612,4 +612,102 @@ describe("probe · geometry invariants (engine results)", () => {
     const second = fromElkLayout(await elk.layout(toElkGraph(input).root), input);
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
   });
+
+  it("carries ELK port sides onto nodes so handles can mirror the engine (P1-4)", async () => {
+    const input = fourDecisionEdges();
+    const out = await elk.layout(toElkGraph(input).root);
+    const result = fromElkLayout(out, input);
+
+    const decision = result.nodes.find((n) => n.id === "iteration_decision")!;
+    expect(decision.portSides?.source["rerun"]).toBe("WEST");
+    expect(decision.portSides?.source["promote"]).toBe("SOUTH");
+    expect(decision.portSides?.source["rollback"]).toBe("SOUTH");
+    expect(decision.portSides?.source["stop"]).toBe("SOUTH");
+
+    // feedback target arrives on the EAST side of the receiving node.
+    const controlled = result.nodes.find((n) => n.id === "controlled_run")!;
+    expect(controlled.portSides?.target["feedback:in:controlled_run"]).toBe("EAST");
+
+    // cross-stage handoff: source EAST, target WEST.
+    const handoff = result.edges.find((e) => e.id === "e_handoff")!;
+    const sourceNode = result.nodes.find((n) => n.id === handoff.source)!;
+    const targetNode = result.nodes.find((n) => n.id === handoff.target)!;
+    const handoffAssignment = resolveElkPorts({ nodes: input.nodes, edges: input.edges }).byEdgeId.get("e_handoff")!;
+    expect(sourceNode.portSides?.source[handoffAssignment.sourcePortId]).toBe("EAST");
+    expect(targetNode.portSides?.target[handoffAssignment.targetPortId]).toBe("WEST");
+  });
+
+  it("keeps every visible task node bounds pairwise disjoint (T3 §10.1)", async () => {
+    const input = challengeCupDefinition();
+    const out = await elk.layout(toElkGraph(input).root);
+    const result = fromElkLayout(out, input);
+
+    const tasks = result.nodes.filter((n) => n.kind === "task");
+    const rects = tasks.map((n) => ({
+      id: n.id,
+      left: n.x,
+      top: n.y,
+      right: n.x + n.width,
+      bottom: n.y + n.height,
+    }));
+    for (let i = 0; i < rects.length; i += 1) {
+      for (let j = i + 1; j < rects.length; j += 1) {
+        const a = rects[i]!;
+        const b = rects[j]!;
+        const overlapX = a.left < b.right && b.left < a.right;
+        const overlapY = a.top < b.bottom && b.top < a.bottom;
+        expect(overlapX && overlapY, `${a.id} overlaps ${b.id}`).toBe(false);
+      }
+    }
+  });
+
+  it("keeps edge label bounds disjoint from all node bounds (T3 §10.1)", async () => {
+    const input = challengeCupDefinition();
+    const out = await elk.layout(toElkGraph(input).root);
+    const result = fromElkLayout(out, input);
+
+    const nodeRects = result.nodes
+      .filter((n) => n.kind === "task")
+      .map((n) => ({
+        id: n.id,
+        left: n.x,
+        top: n.y,
+        right: n.x + n.width,
+        bottom: n.y + n.height,
+      }));
+    for (const edge of result.edges) {
+      const lb = edge.labelBounds;
+      if (!lb) continue;
+      const labelRect = {
+        left: lb.x,
+        top: lb.y,
+        right: lb.x + lb.width,
+        bottom: lb.y + lb.height,
+      };
+      for (const node of nodeRects) {
+        const overlapX = labelRect.left < node.right && node.left < labelRect.right;
+        const overlapY = labelRect.top < node.bottom && node.top < labelRect.bottom;
+        expect(overlapX && overlapY, `label of ${edge.id} overlaps node ${node.id}`).toBe(false);
+      }
+    }
+  });
+
+  it("keeps edge label bounds pairwise disjoint (T3 §10.1)", async () => {
+    const input = challengeCupDefinition();
+    const out = await elk.layout(toElkGraph(input).root);
+    const result = fromElkLayout(out, input);
+
+    const labels = result.edges
+      .filter((e) => e.labelBounds)
+      .map((e) => ({ id: e.id, ...(e.labelBounds as { x: number; y: number; width: number; height: number }) }));
+    for (let i = 0; i < labels.length; i += 1) {
+      for (let j = i + 1; j < labels.length; j += 1) {
+        const a = labels[i]!;
+        const b = labels[j]!;
+        const overlapX = a.x < b.x + b.width && b.x < a.x + a.width;
+        const overlapY = a.y < b.y + b.height && b.y < a.y + a.height;
+        expect(overlapX && overlapY, `label ${a.id} overlaps label ${b.id}`).toBe(false);
+      }
+    }
+  });
 });

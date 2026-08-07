@@ -1,7 +1,10 @@
 import type { NodeProps } from "@xyflow/react";
 import { UserCheck } from "lucide-react";
 
-import type { WorkflowNodeRunStatus } from "../../../product/workflow/workflowCanvasTypes";
+import type {
+  WorkflowNodeRunStatus,
+  WorkflowPortSide,
+} from "../../../product/workflow/workflowCanvasTypes";
 import { workflowNodeTooltip } from "./workflowCanvasAccessibility";
 import { WorkflowNodeChrome } from "./WorkflowNodeChrome";
 
@@ -11,6 +14,9 @@ export function WorkflowHumanGateNode(props: NodeProps) {
   const attempt = Number(props.data.attempt ?? 0) || undefined;
   const isCurrent = Boolean(props.data.isRuntimeCurrent);
   const pending = Boolean(props.data.hasPendingHumanTask) || status === "waiting_human";
+  const portSides = props.data.portSides as
+    | { source: Record<string, WorkflowPortSide>; target: Record<string, WorkflowPortSide> }
+    | undefined;
   return (
     <WorkflowNodeChrome
       label={label}
@@ -20,6 +26,7 @@ export function WorkflowHumanGateNode(props: NodeProps) {
       isRuntimeCurrent={isCurrent}
       attempt={attempt}
       subtitle={pending ? "需人工确认" : "人工门禁"}
+      portSides={portSides}
       title={workflowNodeTooltip({
         label,
         status,

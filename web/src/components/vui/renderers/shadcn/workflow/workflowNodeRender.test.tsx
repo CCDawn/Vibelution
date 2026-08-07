@@ -121,6 +121,38 @@ describe("WorkflowDecisionNode render (P1-4)", () => {
     expect(countHandles(markup, "stop")).toBe(1);
     expect(countHandles(markup)).toBe(5);
   });
+
+  it("places decision handles on the ELK port sides (P1-4)", () => {
+    const markup = renderNode(WorkflowDecisionNode, {
+      label: "结果判定",
+      status: "running",
+      portSides: {
+        source: {
+          rerun: "WEST",
+          promote: "SOUTH",
+          rollback: "SOUTH",
+          stop: "SOUTH",
+        },
+        target: {},
+      },
+    });
+    expect(markup).toContain('data-handle="source:left"');
+    // Three of the four outcomes share the SOUTH rail; only rerun sits WEST.
+    expect(markup.match(/data-handle="source:bottom"/g)?.length).toBe(3);
+  });
+
+  it("mirrors ordinary node source/target handles to port sides (P1-4)", () => {
+    const markup = renderNode(WorkflowAgentTaskNode, {
+      label: "执行",
+      status: "pending",
+      portSides: {
+        source: { "out:east:node": "EAST" },
+        target: { "in:west:node": "WEST" },
+      },
+    });
+    expect(markup).toContain('data-handle="target:left"');
+    expect(markup).toContain('data-handle="source:right"');
+  });
 });
 
 describe("WorkflowSystemTaskNode render (P1-4)", () => {

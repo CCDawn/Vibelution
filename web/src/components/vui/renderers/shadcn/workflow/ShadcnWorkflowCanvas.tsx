@@ -15,15 +15,17 @@ import {
   useReactFlow,
   type Edge,
   type Node,
+  type NodeProps,
   type NodeTypes,
   type EdgeTypes,
   type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useMemo } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, type ReactElement, type ReactNode } from "react";
 
 import { cn } from "../../../lib/cn";
 import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
+import type { WorkflowNodeSize } from "./workflowLayoutHash";
 import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
 import { createWorkflowLayoutEngine } from "./workflowElkClient";
 import { WorkflowAgentTaskNode } from "./WorkflowAgentTaskNode";
@@ -52,14 +54,60 @@ export type ShadcnWorkflowCanvasProps = {
   showLegend?: boolean;
 };
 
-const nodeTypes: NodeTypes = {
-  stageRegion: WorkflowStageRegionNode,
-  agentTask: WorkflowAgentTaskNode,
-  humanGate: WorkflowHumanGateNode,
-  systemTask: WorkflowSystemTaskNode,
-  decision: WorkflowDecisionNode,
-  startEnd: WorkflowStartEndNode,
+type MeasuredNodeProps = {
+  id: string;
+  data: Record<string, unknown> & { nodeMeasureKey?: string };
+  children?: ReactNode;
 };
+
+/**
+ * Reports the rendered DOM size of a node to the auto-layout hook (P1-5).
+ * Zero sizes (unmeasured / SSR / hidden) are skipped so calibration never
+ * feeds garbage into the layout hash.
+ *
+ * @internal exported for M-level tests only; not part of the VUI surface.
+ */
+export function NodeMeasureReporter({
+  id,
+  data,
+  onMeasure,
+  children,
+}: MeasuredNodeProps & { onMeasure: (id: string, size: WorkflowNodeSize) => void }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const measureKey = data?.nodeMeasureKey ?? id;
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    if (width <= 0 || height <= 0) return;
+    onMeasure(measureKey, { width, height });
+  });
+  return (
+    <div ref={ref} className="h-full w-full" data-node-measure={measureKey}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Wraps a node renderer so it reports its rendered DOM size back to the
+ * auto-layout hook (P1-5).
+ *
+ * @internal exported for M-level tests only; not part of the VUI surface.
+ */
+export function wrapNodeForMeasurement(
+  Base: (props: NodeProps) => ReactElement,
+  onMeasure: (id: string, size: WorkflowNodeSize) => void,
+): (props: NodeProps) => ReactElement {
+  return function MeasuredNode(props: NodeProps) {
+    return (
+      <NodeMeasureReporter id={props.id} data={(props.data ?? {}) as never} onMeasure={onMeasure}>
+        <Base {...props} />
+      </NodeMeasureReporter>
+    );
+  };
+}
 
 const edgeTypes: EdgeTypes = {
   workflowSemantic: WorkflowSemanticEdge,
@@ -99,6 +147,20 @@ function WorkflowCanvasInner({
   const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine);
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
   const nodesInitialized = useNodesInitialized();
+
+  // P1-5: measured node types report rendered DOM sizes back to the layout
+  // hook so the second pass of the layout uses real geometry.
+  const measuredNodeTypes: NodeTypes = useMemo(
+    () => ({
+      stageRegion: wrapNodeForMeasurement(WorkflowStageRegionNode, layout.reportMeasuredSize),
+      agentTask: wrapNodeForMeasurement(WorkflowAgentTaskNode, layout.reportMeasuredSize),
+      humanGate: wrapNodeForMeasurement(WorkflowHumanGateNode, layout.reportMeasuredSize),
+      systemTask: wrapNodeForMeasurement(WorkflowSystemTaskNode, layout.reportMeasuredSize),
+      decision: wrapNodeForMeasurement(WorkflowDecisionNode, layout.reportMeasuredSize),
+      startEnd: wrapNodeForMeasurement(WorkflowStartEndNode, layout.reportMeasuredSize),
+    }),
+    [layout.reportMeasuredSize],
+  );
 
   // Fit protocol: fit exactly once when the first layout commits AND the committed
   // nodes have entered React Flow internals. Never re-fit for runtime-only updates
@@ -160,6 +222,7 @@ function WorkflowCanvasInner({
             blockedReason: node.blockedReason,
             description: node.description,
             primaryRoleKey: node.primaryRoleKey,
+            portSides: node.portSides,
           },
           style: { width: node.width, height: node.height },
           selectable: true,
@@ -239,7 +302,7 @@ function WorkflowCanvasInner({
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          nodeTypes={nodeTypes}
+          nodeTypes={measuredNodeTypes}
           edgeTypes={edgeTypes}
           minZoom={0.35}
           maxZoom={1.6}
@@ -263,6 +326,18 @@ function WorkflowCanvasInner({
           {showLegend ? <WorkflowCanvasLegend /> : null}
         </ReactFlow>
       </div>
+      {layout.degraded ? (
+        <div
+          className="absolute right-3 top-3 z-20 max-w-[16rem] rounded-md border border-[var(--state-warning,#d97706)]/50 bg-[var(--vui-surface-panel)] px-2.5 py-1.5 text-[11px] leading-snug text-[var(--state-warning,#d97706)] shadow-sm"
+          data-vui="workflow-degraded"
+          role="status"
+        >
+          <span className="font-semibold">布局降级</span>
+          <span className="block truncate text-[var(--fg-secondary)]" title={layout.degraded.reason}>
+            {layout.degraded.reason}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
