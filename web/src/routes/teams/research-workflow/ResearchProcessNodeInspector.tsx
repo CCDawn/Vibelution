@@ -96,7 +96,7 @@ export function ResearchProcessNodeInspector({
           if (command === "open_session" && chatDeepLink && !sessionAnchorDegraded) {
             return (
               <a key={command} href={chatDeepLink} className="inline-flex">
-                <VButton type="button" size="sm" variant="ghost">
+                <VButton type="button" variant="ghost">
                   {commandLabel(command)}
                 </VButton>
               </a>
@@ -106,9 +106,9 @@ export function ResearchProcessNodeInspector({
             <VButton
               key={command}
               type="button"
-              size="sm"
+
               variant={command.startsWith("accept") ? "primary" : "ghost"}
-              disabled={Boolean(busy)}
+              isDisabled={Boolean(busy)}
               onClick={() => onCommand?.(command, adapter)}
             >
               {commandLabel(command)}

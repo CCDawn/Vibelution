@@ -27,6 +27,7 @@ export type WorkflowRunRecord = {
   handoffs?: Array<Record<string, unknown>>;
   bindingSnapshots?: Array<Record<string, unknown>>;
   events?: Array<Record<string, unknown>>;
+  langGraph?: Record<string, unknown>;
 };
 
 export async function fetchResearchWorkflowDefinition(

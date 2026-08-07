@@ -222,19 +222,19 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <VButton type="button" variant="ghost" size="sm" onClick={() => replaceParams({ panel: "agents" })}>
+            <VButton type="button" variant="ghost" onClick={() => replaceParams({ panel: "agents" })}>
               Agent
             </VButton>
-            <VButton type="button" variant="ghost" size="sm" onClick={() => replaceParams({ panel: "timeline" })}>
+            <VButton type="button" variant="ghost" onClick={() => replaceParams({ panel: "timeline" })}>
               时间线
             </VButton>
             {projection?.run.runtimeCurrentNodeIds?.length ? (
-              <VButton type="button" variant="ghost" size="sm" onClick={jumpToRuntime}>
+              <VButton type="button" variant="ghost" onClick={jumpToRuntime}>
                 当前节点
               </VButton>
             ) : null}
             {!runId ? (
-              <VButton type="button" size="sm" onClick={onCreateRun} disabled={busy}>
+              <VButton type="button" onClick={onCreateRun} isDisabled={busy}>
                 创建运行
               </VButton>
             ) : null}
