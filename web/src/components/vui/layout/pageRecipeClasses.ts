@@ -7,7 +7,11 @@
 export const VUI_PAGE_FILL_CLASS =
   "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] content-stretch gap-0 overflow-hidden";
 
-/** Flex column fill when the parent is already a sized flex/grid cell. */
+/**
+ * Full-height workbench when there is NO header row child (hideHeader recipes).
+ * Do not use VUI_PAGE_FILL_CLASS with a single body child — the only child lands
+ * in the `auto` track and collapses to content height (large empty floor below).
+ */
 export const VUI_PAGE_STACK_FILL_CLASS =
   "flex h-full min-h-0 min-w-0 flex-col gap-0 overflow-hidden";
 

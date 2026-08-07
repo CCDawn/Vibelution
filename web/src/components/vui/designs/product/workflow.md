@@ -37,6 +37,7 @@ import { VWorkflowCanvas, type WorkflowLayoutInput } from "@/components/vui";
 - loading/empty：由调用方 `VStateSurface` / `VEmptyState` 处理
 - **页面壳**：必须用 `VCanvasWorkbenchPage`（与 `TeamsCanvasComposer` 同构），`layoutId` 用 `WORKBENCH_LAYOUT_IDS.researchFlow`
 - 嵌入 Teams board 时：`hideHeader`（壳已有团队标题），动作放 `toolbar`；canvas 外包 `flex h-full min-h-0 flex-1` + 内层 `flex-1 overflow-hidden`
+- **`hideHeader` 必须让 `VWorkbenchPage` 用 `fillLayout="stack"`**（recipe 已处理）。禁止在 `grid-rows-[auto_1fr]` 下只有 body 一个子节点——会掉进 `auto` 行，画布塌成内容高
 - 画布默认 `height="100%"`；React Flow 在 fill 模式下用 absolute inset 填满宿主（与固定 px 高度互斥）
 - **禁止** `height={440}` + 下方再 `flex-1` 空面板
 - Inspector 走 recipe `aside`；未选节点用 `VEmptyState`
