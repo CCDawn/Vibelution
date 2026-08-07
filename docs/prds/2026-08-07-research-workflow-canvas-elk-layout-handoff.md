@@ -40,7 +40,7 @@ Related product contract:
 5. 边标签在布局完成后叠加，没有向布局引擎申报尺寸，因此不会预留空间。
 6. 普通边的 z-index 高于节点，交叉时会直接压过节点内容。
 7. 当前布局结果没有 bend points、edge sections、label bounds 和固定端口顺序。
-8. `iteration_decision` 需要 `rerun / revise / promote / rollback / stop` 五个稳定出口；当前类型契约未完整覆盖 `revise`。
+8. `iteration_decision` 有五种 outcome 能力，但后端当前 run 只有四条实际边；现有前端没有明确区分 capability、当前 run edge 与 child-run lineage。
 
 ### 2.2 禁止继续采用的修补方式
 
@@ -69,7 +69,7 @@ Dagre 适合简单有向树，但当前画布存在：
 - 跨层级边；
 - 多出口 decision ports；
 - 人工门禁和跨阶段交接；
-- 回滚、重跑、修改协议等反馈回路；
+- 同协议重跑反馈回路、同源同目标的晋升/回滚并行边，以及修改协议产生的 child-run lineage；
 - 需要边标签参与避让。
 
 React Flow 官方布局说明明确指出 Dagre 对 sub-flow/compound graph 和完整 edge routing 支持有限；ELK 支持动态尺寸、复合图、端口约束和边路由，更符合当前拓扑。
@@ -80,14 +80,14 @@ Eclipse GLSP 等平台可作为成熟产品参考，但引入完整模型服务�
 
 ### 3.4 依赖与授权影响
 
-`elkjs` 使用 EPL-2.0。开发 Agent 在新增依赖时必须同步：
+`elkjs@0.12.0` 的 npm license expression 为 `EPL-2.0 OR GPL-3.0-or-later`。开发 Agent 在新增依赖时必须同步：
 
 - `web/package.json`
 - `web/package-lock.json`
 - `THIRD_PARTY_COMPONENTS.md`
 - ADR 0006 的布局决策
 
-不得把 EPL-2.0 错写成 MIT，也不得只改 lockfile 而遗漏第三方组件登记。
+不得误写成 MIT，也不得只改 lockfile 而遗漏第三方组件登记。依赖必须精确 pin `0.12.0`，避免布局算法随 patch 更新漂移。
 
 ## 4. 成熟项目研究基线
 
@@ -158,7 +158,7 @@ org.eclipse.elk.portConstraints = FIXED_ORDER
 - 运行状态、颜色、进度或时间变化不得改变节点尺寸。
 - 文案变化可能改变尺寸时，要截断或固定内容层级；不要让频繁 runtime 文案触发重排。
 
-### 6.3 固定端口
+### 6.3 固定端口与决策拓扑
 
 端口必须有稳定、可测试的语义 id。
 
@@ -166,10 +166,12 @@ org.eclipse.elk.portConstraints = FIXED_ORDER
 | --- | --- | --- |
 | 阶段内正向流 | `out:south` | `in:north` |
 | 跨阶段交接 | `out:east` | `in:west` |
-| 普通反馈边 | 专用 feedback port | 对应节点专用 feedback input |
-| 决策分支 | `decision:<outcome>` | 目标节点语义 input |
+| `rerun` 反馈边 | `decision:rerun` | `controlled_run` 专用 feedback input |
+| `promote` / `rollback` 并行边 | 独立 `decision:<outcome>` | `candidate_promotion` 独立 inputs |
+| `stop` 正向边 | `decision:stop` | `result_package` input |
+| `revise` child-run | 当前 run 不创建 edge port | 仅消费真实 lineage 投影 |
 
-`iteration_decision` 必须完整包含：
+`iteration_decision` 的能力契约必须完整包含：
 
 - `decision:rerun`
 - `decision:revise`
@@ -177,12 +179,19 @@ org.eclipse.elk.portConstraints = FIXED_ORDER
 - `decision:rollback`
 - `decision:stop`
 
-端口顺序必须确定，不能依赖对象遍历偶然顺序。
+端口顺序必须确定，不能依赖对象遍历偶然顺序。但 ELK graph 只能包含服务端当前投影中真实存在的 edge：
+
+- 当前 run 中 `rerun` 是唯一反馈边；
+- `promote` 与 `rollback` 是同源同目标的正向并行边；
+- `stop` 是到 `result_package` 的正向边；
+- `revise` 创建 child `WorkflowRun`，不得伪造当前 run 内回边。
+
+Extended edge 必须将全局唯一 port id 直接写入 `sources[]/targets[]`。不得给 `ElkExtendedEdge` 增加不会被消费的 `sourcePort/targetPort` 兼容字段。
 
 ### 6.4 Edge sections 与标签
 
 - ELK 输出的 `startPoint / bendPoints / endPoint` 是渲染唯一事实。
-- 多 section 边必须按 section 顺序拼接。
+- 多 section 边必须按 `incomingSections/outgoingSections` 构造连续链；不连续链重新输出 `M` subpath，禁止虚构 section 之间的连接线。
 - 边标签尺寸必须在布局输入中申报。
 - 标签位置使用 ELK 输出坐标，不做 `50% path` 估算。
 - 反馈回路必须位于阶段内容区之外的预留通道，不能穿过阶段标题、节点或人工门禁。
@@ -203,7 +212,7 @@ org.eclipse.elk.portConstraints = FIXED_ORDER
 9. 只有用户点击“查看全局”或结构变化后明确请求时再次 fit。
 10. 布局失败时保留最后有效布局，并进入可诊断 degraded state；禁止静默退回当前已知会遮盖的固定布局。
 
-当前约 15 个节点，首轮可使用 `elk.layout()` 的主线程异步 API。只有在浏览器测量显示布局阻塞超过 16ms 或图规模明显增长时，再单独评估 Web Worker；不要提前增加 worker 生命周期复杂度。
+由于 `elkjs/lib/elk.bundled.js` 约 1.61 MB，会超过现有主 entry/feature chunk 预算，生产实现固定使用 `elk-api.js` + `elk-worker.min.js?worker` + `workerFactory`。Worker 必须由独立 client 管理稳定实例和 `terminateWorker()`；bundled 版本只用于算法单测。真实 Browser Worker handshake 是交付门禁，不能由 bundled 单测替代。
 
 ## 8. 文件边界
 
@@ -211,6 +220,7 @@ org.eclipse.elk.portConstraints = FIXED_ORDER
 
 ```text
 web/src/components/vui/renderers/shadcn/workflow/
+├── workflowElkClient.ts
 ├── workflowElkGraphAdapter.ts
 ├── workflowElkOptions.ts
 ├── workflowElkPorts.ts
@@ -248,7 +258,7 @@ Depends on: none
 
 动作：
 
-- 更新 ADR 0006 第 11 节：由“v1 不引入 ELK”改为“由于动态 compound/feedback 图已出现真实遮盖，采用 ELK Layered”。
+- 更新 ADR 0006 第 11 节：由“v1 不引入 ELK”改为“由于动态 compound、反馈边和并行分支出现真实遮盖，采用 ELK Layered”。
 - 在 ADR 保留单画布、固定拓扑和 VUI renderer 边界不变。
 - 新增遮盖/端口/确定性测试，先证明当前实现失败。
 - 记录当前截图所代表的失败类别，不用像素快照代替几何断言。
@@ -266,16 +276,19 @@ Depends on: T0
 
 动作：
 
-- 新增 `elkjs` 依赖和授权登记。
+- 使用 `npm install --save-exact elkjs@0.12.0`，完成授权登记与独立 Worker 预算登记。
+- 建立 `?worker` + `workerFactory` client，覆盖 StrictMode 与 terminate 生命周期。
 - 建立三阶段 compound graph adapter。
 - 输入真实节点尺寸、stage padding、labels 和固定 ports。
-- 完整实现五个 decision ports。
+- 完整实现五种 decision outcome 能力，并只为四条当前 run edges 创建 ports。
 
 完成证据：
 
 - 三阶段顺序与节点归属确定。
 - 相同输入生成相同 ELK graph。
-- 所有 edge source/target port 均存在且唯一。
+- 所有真实 edge source/target port 均存在且唯一。
+- `revise` 无真实 lineage 投影时不创建当前 run edge。
+- Worker 真实构建产物被专用 budget 规则命中，Browser handshake 可 layout 并终止。
 
 ### T2 · 异步布局与缓存生命周期
 
@@ -365,12 +378,15 @@ Depends on: T4
 
 ### 10.2 行为测试
 
-- `iteration_decision` 有五个唯一 source ports。
-- `revise` 不得缺失或复用其他 branch handle。
+- `iteration_decision` 有五种唯一 outcome 能力，但当前 run edge ports 只对应 definition 中真实四条边。
+- `revise` 有独立 outcome id；无 child-run lineage 投影时不得创建 edge。
+- `promote` / `rollback` 同源同目标并行边使用独立 ports，路径和标签可区分。
 - status-only update 不触发 relayout。
 - topology/size update 触发 relayout。
 - run 切换时旧 layout promise 不覆盖当前 run。
+- Worker 在 StrictMode 重挂载后不泄漏，unmount 调用 `terminateWorker()`。
 - 初次 layout fit 一次；普通状态更新不 fit。
+- 初次 fit 必须发生在当前 layoutRevision 的 nodes 进入 React Flow store 之后。
 - “查看全局”可显式恢复全图。
 - layout error 保留 last-good layout 并可诊断。
 - 生产 `WorkflowSemanticEdge.tsx` 不再使用 `getSmoothStepPath`。
@@ -381,6 +397,7 @@ Depends on: T4
 
 ```powershell
 npm.cmd test -- src/components/vui/renderers/shadcn/workflow/workflowElkLayout.test.ts
+npm.cmd test -- bundleBudget.test.ts
 npm.cmd test -- src/components/vui/vuiShadcnRouteContract.test.ts
 npm.cmd test -- src/components/vui/vuiComponentDesignContract.test.ts
 npx.cmd tsc -b --pretty false
@@ -413,7 +430,7 @@ git diff --check
 - failed；
 - succeeded；
 - decision: rerun；
-- decision: revise；
+- decision: revise（验收 child-run lineage，不伪造当前 run edge）；
 - decision: promote；
 - decision: rollback；
 - decision: stop。
@@ -431,7 +448,7 @@ git diff --check
 验收标准：
 
 - 节点、边、标签、阶段标题零遮盖；
-- 反馈边方向可读，不形成无法辨认的并行线束；
+- 反馈边方向可读；`promote` / `rollback` 并行线不形成无法辨认的线束；
 - 三阶段在同一画布中明显分区；
 - Agent 节点仍能进入对应配置/会话点；
 - 不出现页面级横向滚动；
@@ -453,7 +470,9 @@ Launcher refresh 决策：
 - 任何 runtime 状态更新导致 layout 反复执行或 viewport 跳动；
 - 仍有边穿过非端点节点、阶段标题或人工门禁；
 - 仍有边标签覆盖节点；
-- `revise` 分支没有独立 port；
+- 五种 outcome 能力与当前 run edge 被混为一谈，或为 `revise` 伪造当前 run edge；
+- `promote` / `rollback` 并行边无法区分；
+- Worker 未通过真实 Browser handshake、未终止或逃逸现有 bundle 预算门；
 - Route 直接导入 ELK、React Flow 或 shadcn renderer；
 - 为修复遮盖新增另一套业务画布或旧页面入口；
 - `tsc -b`、VUI contract、build 任一未通过；
