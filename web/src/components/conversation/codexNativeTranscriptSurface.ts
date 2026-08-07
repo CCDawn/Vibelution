@@ -244,7 +244,12 @@ function nativeCellCommandSource(operationIds: string[], model: CodexToolLifecyc
     .map((operation) => operation.request);
 }
 
-function hasNativeProcessCells(cells: CodexTranscriptCell[]) {
+/**
+ * Whether native transcript cells already own the process rail
+ * (tools, reasoning, commentary, errors, status, stream tail…).
+ * Exported for display-plan dual-paint guards and tests.
+ */
+export function hasNativeProcessCells(cells: readonly CodexTranscriptCell[]) {
   // Process trail includes tools/reasoning/status AND commentary intermediate text.
   // Treating all assistant_markdown as "not process" left commentary-only turns with
   // suppressProjectedProcess=false, so feedback "thought" + native commentary both painted.

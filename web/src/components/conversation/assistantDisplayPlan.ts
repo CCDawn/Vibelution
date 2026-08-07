@@ -17,6 +17,7 @@ import {
   answerProjectionContent,
   timelineAssistantTextCoversFinalAnswer,
 } from "./conversationInternalStatus";
+import { hasNativeProcessCells } from "./codexNativeTranscriptSurface";
 import { shouldRenderCodexTranscriptSurface } from "./conversationOperationPresentation";
 
 export type AssistantAnswerOwner =
@@ -204,18 +205,27 @@ export function resolveAssistantDisplayPlan(input: {
     answerOwner = "response_section";
   }
 
+  const shouldRenderCodexSurface = shouldRenderCodexTranscriptSurface(surface)
+    || (hasTurnItemPackage && Boolean(surface?.cells?.length));
+
+  // Re-derive process ownership from cells so callers cannot pass a stale surface flag
+  // and accidentally paint feedback timeline tools/thoughts next to native cells.
+  const surfaceOwnsProcess = Boolean(surface?.suppressProjectedProcess)
+    || (surface?.mode === "native" && hasNativeProcessCells(surface.cells ?? []));
   const suppressProjectedError = Boolean(surface?.suppressProjectedError);
-  const suppressProjectedProcess = Boolean(surface?.suppressProjectedProcess);
+  const suppressProjectedProcess = surfaceOwnsProcess;
   // Package/native/timeline final ownership suppresses the dedicated response body.
   const suppressProjectedResponse = suppressProjectedError
     || packageOwnsFinalAnswer
     || nativeOwnsFinalAnswer
     || timelineOwnsFinalAnswer
     // Package mode with cells: prefer single cells track even if final text still streaming empty.
-    || (hasTurnItemPackage && shouldRenderCodexTranscriptSurface(surface) && !projectedAnswer);
+    || (hasTurnItemPackage && shouldRenderCodexSurface && !projectedAnswer);
 
-  const shouldRenderCodexSurface = shouldRenderCodexTranscriptSurface(surface)
-    || (hasTurnItemPackage && Boolean(surface?.cells?.length));
+  // When native process is on-screen, also drop turn-status notes that restate stream stage.
+  const suppressProjectedTurnStatus = Boolean(surface?.suppressProjectedTurnStatus)
+    || suppressProjectedProcess
+    || suppressProjectedResponse;
 
   return {
     protocol: protocolSurface.protocol,
@@ -230,7 +240,7 @@ export function resolveAssistantDisplayPlan(input: {
     stripTimelineAssistantText,
     suppressProjectedResponse,
     suppressProjectedProcess,
-    suppressProjectedTurnStatus: Boolean(surface?.suppressProjectedTurnStatus),
+    suppressProjectedTurnStatus,
     suppressProjectedError,
     // Codex-like: process timeline may sit *before* final answer cells when the
     // surface only owns the answer and tools live on feedback/timeline.
