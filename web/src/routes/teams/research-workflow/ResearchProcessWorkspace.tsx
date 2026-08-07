@@ -25,6 +25,7 @@ import { definitionToCanvasGraph, projectionToCanvasGraph } from "./researchProc
 import { buildCanonicalWorkflowSearch } from "./researchLegacyRouteResolver";
 import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import type { NodeAdapterSpec } from "./nodeAdapterModel";
+import { projectNodeOps } from "./nodeOpsProjection";
 
 type PanelKind = "node" | "agents" | "team" | "timeline";
 
@@ -200,6 +201,16 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
     selectedNodeId && projection?.run.runtimeCurrentNodeIds?.includes(selectedNodeId),
   );
 
+  const nodeOps = useMemo(
+    () =>
+      projectNodeOps({
+        nodeId: selectedNodeId,
+        run,
+        runtimeCurrentNodeIds: projection?.run.runtimeCurrentNodeIds,
+      }),
+    [selectedNodeId, run, projection?.run.runtimeCurrentNodeIds],
+  );
+
   return (
     <VSurface tone="workspace" className="flex min-h-0 flex-1 flex-col gap-3 p-3" data-vui="research-process-workspace">
       <VPanelHeader
@@ -290,6 +301,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
               bindingLabel={String((nodeDetail?.bindingSnapshot as { agentId?: string } | undefined)?.agentId || "")}
               handoffPending={run?.status === "waiting_human"}
               busy={busy}
+              ops={nodeOps}
               onCommand={onInspectorCommand}
             />
           )}

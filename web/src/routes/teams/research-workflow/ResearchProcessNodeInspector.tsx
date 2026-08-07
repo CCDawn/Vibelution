@@ -9,6 +9,8 @@ import {
   type NodeAdapterSpec,
 } from "./nodeAdapterModel";
 
+import type { NodeOpsProjection } from "./nodeOpsProjection";
+
 export type ResearchProcessNodeInspectorProps = {
   nodeId: string | null;
   runtimeCurrent: boolean;
@@ -18,6 +20,7 @@ export type ResearchProcessNodeInspectorProps = {
   bindingLabel?: string;
   handoffPending?: boolean;
   busy?: boolean;
+  ops?: NodeOpsProjection | null;
   onCommand?: (command: string, adapter: NodeAdapterSpec) => void;
 };
 
@@ -30,6 +33,7 @@ export function ResearchProcessNodeInspector({
   bindingLabel,
   handoffPending,
   busy,
+  ops,
   onCommand,
 }: ResearchProcessNodeInspectorProps) {
   const adapter = getNodeAdapter(nodeId);
@@ -58,6 +62,12 @@ export function ResearchProcessNodeInspector({
         </div>
       </header>
 
+      {ops?.blockedReason ? (
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]" role="status">
+          {ops.blockedReason}
+        </div>
+      ) : null}
+
       <dl className="m-0 grid grid-cols-[88px_1fr] gap-x-2 gap-y-1 text-xs">
         <dt className="text-[var(--fg-tertiary)]">插槽</dt>
         <dd className="m-0 text-[var(--fg-primary)]">{adapter.slot}</dd>
@@ -73,6 +83,12 @@ export function ResearchProcessNodeInspector({
         </dd>
         <dt className="text-[var(--fg-tertiary)]">交接</dt>
         <dd className="m-0 text-[var(--fg-primary)]">{handoffPending ? "等待人工" : "—"}</dd>
+        {(ops?.facts || []).map((fact) => (
+          <div key={fact.label} className="contents">
+            <dt className="text-[var(--fg-tertiary)]">{fact.label}</dt>
+            <dd className="m-0 text-[var(--fg-primary)]">{fact.value}</dd>
+          </div>
+        ))}
       </dl>
 
       <div className="flex flex-wrap gap-2">
