@@ -63,11 +63,15 @@ export async function layoutStages(
   layouts: StageLayoutInput[],
   engine: { layout: (graph: ElkNode) => Promise<ElkNode> },
 ): Promise<StageLocalLayout[]> {
-  // All stage subgraphs are independent: issue the engine calls in parallel
-  // so a slow stage never delays the others, and so the round's promises are
-  // all outstanding before any of them resolves.
-  const laidOut = await Promise.all(layouts.map((input) => engine.layout(input.root)));
-  return laidOut.map((result, index) => consumeStageLayout(layouts[index]!, result));
+  // Serial execution: elkjs instances are not safe for concurrent layout()
+  // calls, and the outer ELK layout follows immediately — interleaving would
+  // corrupt sections. Three stages are cheap enough to serialize.
+  const results: StageLocalLayout[] = [];
+  for (const input of layouts) {
+    const laidOut = await engine.layout(input.root);
+    results.push(consumeStageLayout(input, laidOut));
+  }
+  return results;
 }
 
 export function consumeStageLayout(
