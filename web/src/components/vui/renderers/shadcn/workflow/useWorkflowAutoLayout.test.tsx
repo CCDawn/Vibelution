@@ -51,7 +51,7 @@ function makeEdge(overrides: Partial<WorkflowCanvasEdgeInput>): WorkflowCanvasEd
   };
 }
 
-function makeGraph(stageIds: string[], overrides: Partial<WorkflowLayoutInput> = {}): WorkflowLayoutInput {
+export function makeGraph(stageIds: string[], overrides: Partial<WorkflowLayoutInput> = {}): WorkflowLayoutInput {
   const stages: WorkflowCanvasStageInput[] = stageIds.map((stageId, index) => ({
     stageId,
     label: `stage-${index}`,
@@ -66,13 +66,15 @@ function makeGraph(stageIds: string[], overrides: Partial<WorkflowLayoutInput> =
 }
 
 /**
- * Fake layout for the TWO-LEVEL pipeline: each engine call receives a stage
- * subgraph (id "stage:*", children = tasks), laid out as a vertical column;
- * stage edges get fake sections + label coordinates. The meta row is computed
- * deterministically by the orchestrator and never reaches the engine.
+ * Fake layout for the TWO-LEVEL pipeline:
+ *  - stage subgraphs (id "stage:*", children = tasks) -> vertical column;
+ *  - outer meta graph (id "workflow:root:outer", children = stage meta nodes
+ *    + label spacers) -> simple RIGHT row with a fixed gap; every edge gets
+ *    one fake section so the two-leg recombination still works.
  */
-function fakeLayout(graph: ElkNode): ElkNode {
+export function fakeLayout(graph: ElkNode): ElkNode {
   const isStageSubgraph = String(graph.id).startsWith("stage:");
+  const isOuterGraph = String(graph.id).startsWith("workflow:root:outer");
   const taskNodes = (graph.children ?? []).map((task, ti) => ({
     ...task,
     x: 12,
@@ -88,22 +90,62 @@ function fakeLayout(graph: ElkNode): ElkNode {
         height: label.height ?? 20,
       })) ?? [],
   }));
-  const stageEdges = (graph.edges ?? []).map((edge, ei) => ({
-    ...edge,
-    sections: [
-      {
-        id: `s-${edge.id}`,
-        startPoint: { x: 0, y: 0 },
-        endPoint: { x: 100, y: 100 },
-        bendPoints: [],
-        incomingSections: [],
-        outgoingSections: [],
-      },
-    ],
-    labels: edge.labels?.map((label) => ({ ...label, x: 50, y: 50 })) ?? [],
-  }));
+  const sectionedEdges = (edges: ElkNode["edges"]) =>
+    (edges ?? []).map((edge, ei) => ({
+      ...edge,
+      sections: [
+        {
+          id: `s-${edge.id}`,
+          startPoint: { x: 0, y: 0 },
+          endPoint: { x: 100, y: 100 },
+          bendPoints: [],
+          incomingSections: [],
+          outgoingSections: [],
+        },
+      ],
+      labels: edge.labels?.map((label) => ({ ...label, x: 50, y: 50 })) ?? [],
+    }));
   if (isStageSubgraph) {
-    return { ...graph, children: taskNodes, edges: stageEdges };
+    return { ...graph, children: taskNodes, edges: sectionedEdges(graph.edges) };
+  }
+  if (isOuterGraph) {
+    // Simple RIGHT row: stages and spacers placed by width with a fixed gap.
+    let cursor = 12;
+    const children = (graph.children ?? []).map((node) => {
+      const placed = { ...node, x: cursor, y: 12 };
+      cursor += (node.width ?? 0) + 40;
+      return placed;
+    });
+    // Horizontal, orthogonal, continuous leg sections so the well-formed
+    // chain diagnostic passes (leg1 end == leg2 start across the boundary).
+    let legCursor = 0;
+    const edges = (graph.edges ?? []).map((edge) => {
+      const startX = legCursor;
+      legCursor += 80;
+      return {
+        ...edge,
+        sections: [
+          {
+            id: `s-${edge.id}`,
+            startPoint: { x: startX, y: 40 },
+            endPoint: { x: startX + 40, y: 40 },
+            bendPoints: [],
+            incomingSections: [],
+            outgoingSections: [`s-${edge.id}-next`],
+          },
+          {
+            id: `s-${edge.id}-next`,
+            startPoint: { x: startX + 40, y: 40 },
+            endPoint: { x: startX + 80, y: 40 },
+            bendPoints: [],
+            incomingSections: [`s-${edge.id}`],
+            outgoingSections: [],
+          },
+        ],
+        labels: edge.labels?.map((label) => ({ ...label, x: 50, y: 40 })) ?? [],
+      };
+    });
+    return { ...graph, children, edges };
   }
   // Legacy compound shape (used by tests that still call toElkGraph): map
   // every stage to an absolute column; encode stage count into y.
@@ -236,9 +278,10 @@ describe("useWorkflowAutoLayout behavior", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    // The two-level pipeline awaits one engine call per stage subgraph, so
-    // flush enough microtasks for the whole round to commit.
-    for (let i = 0; i < 8; i += 1) {
+    // The two-level pipeline awaits one engine call per stage subgraph plus
+    // one outer ELK call, serially; flush enough microtasks for the whole
+    // round to commit.
+    for (let i = 0; i < 20; i += 1) {
       await act(async () => {
         await Promise.resolve();
       });
@@ -251,7 +294,7 @@ describe("useWorkflowAutoLayout behavior", () => {
 
     // Two-level layout: one engine call per stage subgraph (meta row is
     // deterministic and engine-free).
-    expect(engine.layout).toHaveBeenCalledTimes(2);
+    expect(engine.layout).toHaveBeenCalledTimes(3);
     expect(latest?.layoutRevision).toBe(1);
     expect(latest?.nodes).toHaveLength(4);
     expect(latest?.nodes.filter((node) => node.kind === "stage")).toHaveLength(2);
@@ -264,7 +307,7 @@ describe("useWorkflowAutoLayout behavior", () => {
     const engine = makeEngine();
     const graph = makeGraph(["knowledge_collection", "experiment_design"]);
     await renderWith(graph, engine);
-    expect(engine.layout).toHaveBeenCalledTimes(2);
+    expect(engine.layout).toHaveBeenCalledTimes(3);
 
     const statusOnly: WorkflowLayoutInput = {
       ...graph,
@@ -277,7 +320,7 @@ describe("useWorkflowAutoLayout behavior", () => {
     };
     await renderWith(statusOnly, engine);
 
-    expect(engine.layout).toHaveBeenCalledTimes(2);
+    expect(engine.layout).toHaveBeenCalledTimes(3);
     expect(latest?.layoutRevision).toBe(1);
     // Nodes keep their geometry from the first layout (no re-run) but carry
     // the refreshed runtime fields.
@@ -291,14 +334,14 @@ describe("useWorkflowAutoLayout behavior", () => {
   it("re-runs ELK when topology changes and bumps layoutRevision", async () => {
     const engine = makeEngine();
     await renderWith(makeGraph(["knowledge_collection", "experiment_design"]), engine);
-    expect(engine.layout).toHaveBeenCalledTimes(2);
+    expect(engine.layout).toHaveBeenCalledTimes(3);
 
     await renderWith(
       makeGraph(["knowledge_collection", "experiment_design", "execution_iteration"]),
       engine,
     );
     // 2 stage subgraphs on the first round + 3 on the second.
-    expect(engine.layout).toHaveBeenCalledTimes(5);
+    expect(engine.layout).toHaveBeenCalledTimes(7);
     expect(latest?.layoutRevision).toBe(2);
     expect(latest?.nodes).toHaveLength(6);
     expect(latest?.nodes.filter((node) => node.kind === "stage")).toHaveLength(3);
@@ -307,7 +350,7 @@ describe("useWorkflowAutoLayout behavior", () => {
   it("re-runs ELK at most once for measured size calibration, then converges", async () => {
     const engine = makeEngine();
     await renderWith(makeGraph(["knowledge_collection", "experiment_design"]), engine);
-    expect(engine.layout).toHaveBeenCalledTimes(2);
+    expect(engine.layout).toHaveBeenCalledTimes(3);
     const firstRevision = latest?.layoutRevision;
 
     // Canvas measures real rendered nodes and reports bigger sizes.
@@ -317,7 +360,7 @@ describe("useWorkflowAutoLayout behavior", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(engine.layout).toHaveBeenCalledTimes(4);
+    expect(engine.layout).toHaveBeenCalledTimes(6);
     expect(latest?.layoutRevision).toBe((firstRevision ?? 0) + 1);
 
     // Second measurement reports the same size -> hash unchanged, no re-run.
@@ -327,58 +370,55 @@ describe("useWorkflowAutoLayout behavior", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(engine.layout).toHaveBeenCalledTimes(4);
+    expect(engine.layout).toHaveBeenCalledTimes(6);
   });
 
   it("drops stale promises so a slow old run cannot overwrite a newer run", async () => {
     const engine = makeEngine();
-    // Each two-level round issues one engine call per stage subgraph. The
-    // mock groups calls by CALL INDEX (round 1 = the first 2 stage calls of a
-    // 2-stage graph; round 2 = the 3 calls of a 3-stage graph), so the old
-    // round's promises can be resolved after the new round was requested.
-    const rounds: Array<Array<{ graph: ElkNode; resolve: (value: ElkNode) => void }>> = [];
-    let totalCalls = 0;
+    // Serial pipeline: the first stage call of each round is issued first and
+    // BLOCKS the rest of the round until resolved. Resolving an old round's
+    // first promise after a new round was requested must be dropped (token).
+    const pendingCalls: Array<{ graph: ElkNode; resolve: (value: ElkNode) => void }> = [];
+    let awaiting = false;
     engine.layout.mockImplementation(
       (graph: ElkNode) =>
         new Promise<ElkNode>((resolve) => {
-          const round = totalCalls < 2 ? 0 : 1;
-          if (!rounds[round]) {
-            rounds[round] = [];
+          if (!awaiting) {
+            awaiting = true;
+            pendingCalls.push({ graph, resolve });
+          } else {
+            resolve(fakeLayout(graph));
           }
-          rounds[round]!.push({ graph, resolve });
-          totalCalls += 1;
         }),
     );
 
     await renderWith(makeGraph(["knowledge_collection", "experiment_design"]), engine);
-    expect(rounds[0]).toHaveLength(2);
+    // First round is blocked on its first stage promise; nothing committed.
+    expect(pendingCalls).toHaveLength(1);
+    expect(latest?.layoutRevision).toBe(0);
 
+    // A new round is requested while the old one is still pending.
+    awaiting = false;
     await renderWith(
       makeGraph(["knowledge_collection", "experiment_design", "execution_iteration"]),
       engine,
     );
-    expect(rounds).toHaveLength(2);
-    expect(rounds[1]).toHaveLength(3);
+    expect(pendingCalls).toHaveLength(2);
 
-    // Resolve the OLD round's promises after the new round was requested: the
-    // round token must drop them; nothing commits.
-    for (const call of rounds[0]!) {
-      call.resolve(fakeLayout(call.graph));
-    }
+    // The old round's first promise resolves now — it must be dropped.
     await act(async () => {
+      pendingCalls[0]!.resolve(fakeLayout(pendingCalls[0]!.graph));
       await Promise.resolve();
     });
     expect(latest?.layoutRevision).toBe(0);
 
-    // Resolve the NEW round's promises with full stage layouts so every node
-    // exists and every label edge carries bounds: exactly one commit.
-    for (const call of rounds[1]!) {
-      call.resolve(fakeLayout(call.graph));
-    }
+    // The new round's first promise resolves: the whole round commits once.
     await act(async () => {
+      pendingCalls[1]!.resolve(fakeLayout(pendingCalls[1]!.graph));
       await Promise.resolve();
     });
     expect(latest?.layoutRevision).toBe(1);
+    expect(latest?.nodes.filter((node) => node.kind === "stage")).toHaveLength(3);
   });
 
   it("terminates the engine on unmount", async () => {
