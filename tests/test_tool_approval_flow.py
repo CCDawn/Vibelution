@@ -260,6 +260,61 @@ def test_auto_review_runs_contained_workspace_command_without_prompt(monkeypatch
     assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
 
 
+def test_request_approval_auto_approves_safe_readonly_git_cli(monkeypatch):
+    """Models often call git via cli_tool; pure reads should not force a popup."""
+    _runtime(monkeypatch, permission_preset="request_approval")
+    _install(("exec_command", "on_request", "execute"))
+    calls = []
+    executor = ToolExecutor()
+    executor.register_tool("exec_command", lambda **kwargs: calls.append(kwargs) or "main")
+
+    result, action = executor.execute(
+        "exec_command",
+        {"cmd": "git branch -a", "cwd": "."},
+        tool_call_id="call-git-branch",
+    )
+
+    assert result == "main"
+    assert action is None
+    assert calls == [{"cmd": "git branch -a", "cwd": "."}]
+    assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
+
+
+def test_request_approval_still_prompts_for_mutating_git_cli(monkeypatch):
+    _runtime(monkeypatch, permission_preset="request_approval")
+    _install(("exec_command", "on_request", "execute"))
+    calls = []
+    executor = ToolExecutor()
+    executor.register_tool("exec_command", lambda **kwargs: calls.append(kwargs) or "ok")
+    result_box = {}
+
+    worker = threading.Thread(
+        target=lambda: (
+            _install(("exec_command", "on_request", "execute")),
+            result_box.setdefault(
+                "value",
+                executor.execute(
+                    "exec_command",
+                    {"cmd": "git commit -m ok", "cwd": "."},
+                    tool_call_id="call-git-commit",
+                ),
+            ),
+        )
+    )
+    worker.start()
+    request = _wait_for_pending()
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        request["requestId"],
+        decision="accept",
+    )
+    worker.join(timeout=2)
+
+    assert result_box["value"] == ("ok", None)
+    assert calls == [{"cmd": "git commit -m ok", "cwd": "."}]
+    assert request["toolName"] == "exec_command"
+
+
 def test_full_access_runs_network_and_always_approval_tools_without_prompt(monkeypatch):
     _runtime(monkeypatch, permission_preset="full_access")
     _install(

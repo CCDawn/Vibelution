@@ -45,6 +45,8 @@ type ChatSessionWorkspacePanelProps = {
   onRejectToolApproval: () => void;
   sessionsPending: boolean;
   toolApproval: {
+    /** Stable identity for the pending request — keeps the dialog from remount-flashing. */
+    requestId?: string;
     pending: boolean;
     rawTitle: string;
     riskLabel: string;
@@ -111,11 +113,16 @@ export function ChatSessionWorkspacePanel({
 
     // Composer-adjacent only: ConversationView mounts the card just above the input
     // (toolApprovalFallback). Do not stick to the column top or re-attach into process rows.
+    // Key by requestId so SSE/poll re-renders update props instead of remounting the dialog.
     const approvalSurface = toolApproval
       ? {
           toolName: toolApproval.toolName,
           content: (
-            <div data-chat-tool-approval-host="composer">
+            <div
+              key={toolApproval.requestId || toolApproval.toolName || "tool-approval"}
+              data-chat-tool-approval-host="composer"
+              data-chat-tool-approval-request={toolApproval.requestId || undefined}
+            >
               <ChatToolApprovalDialog
                 lang={lang}
                 pending={toolApproval.pending}

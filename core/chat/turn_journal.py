@@ -877,20 +877,59 @@ def session_turn_items_from_events(
     *,
     turn_id: str = "",
 ) -> list[dict[str, Any]]:
-    """Project safe, deterministic SessionTurnItem v2 records from canonical commits."""
+    """Project safe, deterministic SessionTurnItem v2 records from canonical commits.
+
+    Tool items are first committed as ``status=ready`` (pre-execution identity).
+    Later ``tool_result`` / CLI result events must upgrade those rows so the live
+    transcript does not freeze every tool as ready/pending and flash the UI.
+    """
 
     normalized_turn_id = str(turn_id or "").strip()
+    event_list = sorted(list(events or []), key=lambda item: (item.sequence, item.event_id))
+    tool_outcomes: dict[str, str] = {}
+    tool_summaries: dict[str, str] = {}
+    for event in event_list:
+        if event.event_type not in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}:
+            continue
+        if normalized_turn_id and event.turn_id != normalized_turn_id:
+            continue
+        call_id = _event_tool_call_id(event)
+        if not call_id:
+            continue
+        payload = dict(event.payload or {})
+        tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or {})
+        outcome = _ui_tool_status_from_journal(_tool_status_from_event(event, tool_call))
+        tool_outcomes[call_id] = outcome
+        summary = str(
+            tool_call.get("summary")
+            or tool_call.get("resultPreview")
+            or tool_call.get("result_preview")
+            or tool_call.get("result")
+            or ""
+        ).strip()
+        if summary:
+            tool_summaries[call_id] = summary[:500]
+
     items: list[dict[str, Any]] = []
-    for event in sorted(list(events or []), key=lambda item: (item.sequence, item.event_id)):
+    for event in event_list:
         if event.event_type != EVENT_ASSISTANT_ITEM_COMMITTED:
             continue
         if normalized_turn_id and event.turn_id != normalized_turn_id:
             continue
         payload = dict(event.payload or {})
+        kind = str(payload.get("kind") or "assistant_message")
+        status = str(payload.get("status") or event.status or "").strip().lower()
+        call_id = str(payload.get("callId") or "").strip()
+        if kind == "tool_call" or call_id:
+            if call_id and call_id in tool_outcomes:
+                status = tool_outcomes[call_id]
+            elif status in {"", "ready", "queued"}:
+                # Still open: never leave bare "ready" for the renderer (maps poorly).
+                status = "pending"
         item = {
             "version": 2,
             "id": f"{payload.get('itemId') or event.event_id}:{int(payload.get('revision') or 0)}",
-            "type": str(payload.get("kind") or "assistant_message"),
+            "type": kind,
             "sessionId": str(payload.get("sessionId") or event.session_id),
             "turnId": str(payload.get("turnId") or event.turn_id),
             "invocationId": str(payload.get("invocationId") or ""),
@@ -898,19 +937,21 @@ def session_turn_items_from_events(
             "itemId": str(payload.get("itemId") or ""),
             "revision": max(0, int(payload.get("revision") or 0)),
             "sequence": max(0, int(event.sequence or 0)),
-            "kind": str(payload.get("kind") or "assistant_message"),
+            "kind": kind,
             "channel": str(payload.get("channel") or ""),
             "phase": str(payload.get("phase") or ""),
-            "status": str(payload.get("status") or event.status),
+            "status": status,
             "protocol": str(payload.get("protocol") or "canonical"),
             "provisional": bool(payload.get("provisional")),
             "terminal": bool(payload.get("terminal")),
             "text": str(payload.get("text") or ""),
         }
-        if str(payload.get("callId") or ""):
-            item["callId"] = str(payload.get("callId"))
+        if call_id:
+            item["callId"] = call_id
         if str(payload.get("toolName") or ""):
             item["toolName"] = str(payload.get("toolName"))
+        if call_id and tool_summaries.get(call_id) and not str(item.get("summary") or "").strip():
+            item["summary"] = tool_summaries[call_id]
         diagnostic_summary = dict(payload.get("diagnosticSummary") or {})
         if diagnostic_summary:
             item["diagnosticSummary"] = diagnostic_summary
@@ -919,6 +960,25 @@ def session_turn_items_from_events(
             item["protocolSequence"] = protocol_sequence
         items.append(item)
     return items
+
+
+def _ui_tool_status_from_journal(status: str) -> str:
+    """Map journal tool terminal statuses onto transcript cell statuses."""
+
+    normalized = str(status or "").strip().lower()
+    if normalized in {"done", "success", "succeeded", "completed", "finished", "observed"}:
+        return "completed"
+    if normalized in {"failed", "failure", "error"}:
+        return "failed"
+    if normalized in {"timeout", "timed_out"}:
+        return "failed"
+    if normalized in {"degraded", "fallback", "partial"}:
+        return "degraded"
+    if normalized in {"blocked", "cancelled", "canceled", "no_result", "interrupted"}:
+        return "failed"
+    if normalized in {"running", "pending", "queued", "ready"}:
+        return "pending" if normalized in {"queued", "ready", "pending"} else "running"
+    return normalized or "completed"
 
 
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:

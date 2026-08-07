@@ -689,8 +689,16 @@ function normalizeOperationDisplay(operation: AgentMessageOperation): AgentMessa
 
 function normalizeDisplayStatus(status: string) {
   const normalized = String(status || "").trim().toLowerCase();
-  if (["done", "success", "completed", "succeeded", "finished", "ready", "observed"].includes(normalized)) {
+  if (["done", "success", "completed", "succeeded", "finished", "observed"].includes(normalized)) {
     return "done";
+  }
+  // "ready" is pre-execution (often waiting on tool approval), not a terminal success.
+  if (
+    ["ready", "queued", "pending", "waiting", "awaiting_approval", "approval_required", "blocked"].includes(
+      normalized,
+    )
+  ) {
+    return "running";
   }
   if (["degraded", "fallback", "partial", "recovered", "unavailable"].includes(normalized)) {
     return normalized;
