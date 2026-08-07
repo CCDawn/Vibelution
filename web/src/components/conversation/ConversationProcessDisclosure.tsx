@@ -24,6 +24,12 @@ type ConversationProcessDisclosureProps = {
   children: ReactNode;
   messageOrder?: ReadonlyMap<string, number>;
   onUserToggle?: ConversationProcessUserToggle;
+  /**
+   * True while the owning assistant turn is still streaming. Multi-step agents
+   * often finish every current tool before the next model step; without this
+   * the process rail collapses to "已处理" mid-turn and hides the trail.
+   */
+  turnStreaming?: boolean;
 };
 
 const PROCESS_ROW_STAGGER_MS = 28;
@@ -87,39 +93,6 @@ function unrecoveredFailedCells(
   });
 }
 
-export function processState(
-  cells: readonly CodexTranscriptCell[],
-  messageOrder?: ReadonlyMap<string, number>,
-) {
-  // Prefer unrecovered failures over stale "running" so timeout/fail settle the summary.
-  if (unrecoveredFailedCells(cells, messageOrder).length > 0) {
-    const stillRunning = cells.some((cell) => {
-      if (cell.status !== "running" && cell.status !== "pending") {
-        return false;
-      }
-      // Timed-out rows may briefly keep a running status while summary already says 超时.
-      const haystack = `${cell.summary || ""} ${cell.title || ""}`;
-      return !/超时|timed?\s*out/i.test(haystack);
-    });
-    if (!stillRunning) {
-      return "failed";
-    }
-  }
-  if (cells.some((cell) => {
-    if (cell.status !== "running" && cell.status !== "pending") {
-      return false;
-    }
-    const haystack = `${cell.summary || ""} ${cell.title || ""}`;
-    return !/超时|timed?\s*out/i.test(haystack);
-  })) {
-    return "running";
-  }
-  if (unrecoveredFailedCells(cells, messageOrder).length > 0) {
-    return "failed";
-  }
-  return "completed";
-}
-
 function processDuration(cells: readonly CodexTranscriptCell[]) {
   const durations = cells
     .map(codexTranscriptToolDurationSeconds)
@@ -147,8 +120,9 @@ export function processLabel(
   cells: readonly CodexTranscriptCell[],
   language: "zh" | "en",
   messageOrder?: ReadonlyMap<string, number>,
+  turnStreaming = false,
 ) {
-  const state = processState(cells, messageOrder);
+  const state = processState(cells, messageOrder, turnStreaming);
   const labels = language === "zh"
     ? { completed: "已处理", failed: "工具失败", running: "处理中" }
     : { completed: "Processed", failed: "Tool failed", running: "Processing" };
@@ -165,11 +139,53 @@ export function processLabel(
     } else {
       parts.push(language === "zh" ? "· 展开查看原因" : "· expand for details");
     }
-  } else if (state === "completed" && cells.length >= 3) {
-    // Hint that the disclosure holds a multi-step tool trail.
+  } else if (cells.length >= 3) {
+    // Hint that the disclosure holds a multi-step tool trail (including mid-turn).
     parts.push(language === "zh" ? `· ${cells.length} 步` : `· ${cells.length} steps`);
   }
   return parts.filter(Boolean).join(" ");
+}
+
+/**
+ * Process rail state for the disclosure summary.
+ * When the turn is still streaming, keep "running" even if every current tool
+ * cell already settled — otherwise multi-step agents collapse the trail between batches.
+ */
+export function processState(
+  cells: readonly CodexTranscriptCell[],
+  messageOrder?: ReadonlyMap<string, number>,
+  turnStreaming = false,
+) {
+  // Prefer unrecovered failures over stale "running" so timeout/fail settle the summary.
+  if (unrecoveredFailedCells(cells, messageOrder).length > 0) {
+    const stillRunning = cells.some((cell) => {
+      if (cell.status !== "running" && cell.status !== "pending") {
+        return false;
+      }
+      // Timed-out rows may briefly keep a running status while summary already says 超时.
+      const haystack = `${cell.summary || ""} ${cell.title || ""}`;
+      return !/超时|timed?\s*out/i.test(haystack);
+    });
+    if (!stillRunning && !turnStreaming) {
+      return "failed";
+    }
+  }
+  if (turnStreaming) {
+    return "running";
+  }
+  if (cells.some((cell) => {
+    if (cell.status !== "running" && cell.status !== "pending") {
+      return false;
+    }
+    const haystack = `${cell.summary || ""} ${cell.title || ""}`;
+    return !/超时|timed?\s*out/i.test(haystack);
+  })) {
+    return "running";
+  }
+  if (unrecoveredFailedCells(cells, messageOrder).length > 0) {
+    return "failed";
+  }
+  return "completed";
 }
 
 export function ConversationProcessDisclosure({
@@ -178,8 +194,9 @@ export function ConversationProcessDisclosure({
   children,
   messageOrder,
   onUserToggle,
+  turnStreaming = false,
 }: ConversationProcessDisclosureProps) {
-  const state = processState(cells, messageOrder);
+  const state = processState(cells, messageOrder, turnStreaming);
   const running = state === "running";
   const {
     expanded,
@@ -188,14 +205,13 @@ export function ConversationProcessDisclosure({
     mounted,
   } = useConversationProcessDisclosureMotion(running, onUserToggle);
   const contentId = useId();
-  const label = processLabel(cells, language, messageOrder);
+  const label = processLabel(cells, language, messageOrder, turnStreaming);
   const toggleLabel = language === "zh"
     ? "展开或收起处理记录"
     : "Expand or collapse process details";
-  // Static transcript audits run through server rendering, while the product is
-  // a client-only Vite surface. Keep SSR evidence complete without retaining
-  // the collapsed tool subtree in the interactive browser.
-  const shouldRenderContent = mounted || typeof window === "undefined";
+  // Keep the trail mounted while the turn streams so the full multi-step flow
+  // stays visible; after settle, unmount when collapsed (Codex-style compact summary).
+  const shouldRenderContent = mounted || turnStreaming || typeof window === "undefined";
   const rows = shouldRenderContent ? Children.toArray(children) : [];
 
   return (
@@ -204,8 +220,9 @@ export function ConversationProcessDisclosure({
       data-codex-process-disclosure="true"
       data-codex-process-state={state}
       data-codex-process-expanded={expanded ? "true" : "false"}
+      data-codex-process-turn-streaming={turnStreaming ? "true" : undefined}
       aria-live={running ? "polite" : undefined}
-      open={mounted}
+      open={mounted || turnStreaming}
     >
       <summary
         className={styles.summary}

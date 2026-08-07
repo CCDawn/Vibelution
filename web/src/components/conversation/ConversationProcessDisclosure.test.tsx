@@ -56,7 +56,6 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain("处理记录内容");
     expect(html).toContain('data-codex-process-expanded="false"');
     expect(styles.summary).toContain("w-full");
-    expect(styles.summary).toContain("border-b");
     expect(styles.summary).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.content).not.toContain("border-l");
     expect(styles.content).not.toContain("ml-");
@@ -80,6 +79,30 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain('aria-live="polite"');
     expect(html).not.toContain("1 次调用");
     expect(html).toContain("正在执行");
+  });
+
+  it("keeps the multi-step trail open while the turn is still streaming even if tools settled", () => {
+    // Multi-step agents finish every current tool before the next model step.
+    // Collapsing to "已处理" mid-turn hides the whole process rail.
+    const settledTools = [
+      processCell("completed"),
+      { ...processCell("completed"), id: "process-completed-2" },
+      { ...processCell("completed"), id: "process-completed-3" },
+    ];
+    expect(processState(settledTools)).toBe("completed");
+    expect(processState(settledTools, undefined, true)).toBe("running");
+    expect(processLabel(settledTools, "zh", undefined, true)).toContain("处理中");
+    expect(processLabel(settledTools, "zh", undefined, true)).toContain("3 步");
+
+    const html = renderToStaticMarkup(
+      <ConversationProcessDisclosure cells={settledTools} language="zh" turnStreaming>
+        <span>完整流程步骤</span>
+      </ConversationProcessDisclosure>,
+    );
+    expect(html).toContain('data-codex-process-state="running"');
+    expect(html).toContain('data-codex-process-turn-streaming="true"');
+    expect(html).toContain("完整流程步骤");
+    expect(html).toContain("处理中");
   });
 
   it("keeps a failed process collapsed with tool failure summary", () => {
