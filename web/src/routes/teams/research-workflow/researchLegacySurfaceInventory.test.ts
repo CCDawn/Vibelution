@@ -40,10 +40,10 @@ const COLLECTION_STAGE_ALIASES = [
 ] as const;
 
 describe("Task0 research legacy surface inventory", () => {
-  it("router still mounts /research/flow-canvas as a live lazy page", () => {
+  it("router mounts /research/flow-canvas as redirect (no lazy ResearchFlowCanvasRoute)", () => {
     expect(routerSource).toContain('path: "research/flow-canvas"');
-    expect(routerSource).toContain("ResearchFlowCanvasRoute");
-    expect(routerSource).toMatch(/import\("\.\.\/routes\/ResearchFlowCanvasRoute"\)/);
+    expect(routerSource).toContain("ResearchFlowCanvasRedirect");
+    expect(routerSource).not.toMatch(/import\("\.\.\/routes\/ResearchFlowCanvasRoute"\)/);
   });
 
   it("router redirects /research via LegacyTeamsRedirect (not ResearchRoute)", () => {

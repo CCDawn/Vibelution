@@ -81,6 +81,14 @@ def test_rebind_node_updates_snapshot_not_silent(runtime_service) -> None:
     assert snap["resolvedFrom"] == "rebind"
 
 
+def test_legacy_flow_canvas_execute_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.web.services import research_service
+
+    monkeypatch.delenv("VIBELUTION_LEGACY_FLOW_CANVAS_EXECUTE", raising=False)
+    with pytest.raises(ValueError, match="Legacy /api/research/flow-canvas/execute is disabled"):
+        research_service.execute_research_flow_canvas_node("session-x", node_id="broad_search")
+
+
 def test_http_definition_and_create_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = WorkflowRunStore(tmp_path / "runs")
     ckpt = str(tmp_path / "ckpt.sqlite")

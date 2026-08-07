@@ -12,6 +12,7 @@ import {
 import { createExperimentController } from "./createExperimentController";
 import { workflowStateLabel } from "./workflowPresentation";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
+import { ResearchProcessWorkspace } from "./research-workflow/ResearchProcessWorkspace";
 
 /** Loose context bag from TeamsRoute. */
 export type ResearchPrimarySurfaceRenderContext = {
@@ -209,10 +210,25 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
     );
   }
 
+  function renderResearchProcessWorkflowSurface() {
+    return (
+      <ResearchProcessWorkspace
+        teamId={String(selectedTeam?.teamId || selectedTeam?.id || ctx.effectiveTeamId || "")}
+      />
+    );
+  }
+
   function renderResearchOverviewSurface(options?: {
     trailingActions?: ReactNode;
     sideSlot?: ReactNode;
   }) {
+    // Challenge Cup / research workflow team: canonical single-canvas workspace.
+    if (
+      researchWorkspaceView === "workflow"
+      || (challengeCupResearchTeamSelected && researchWorkspaceView === "overview")
+    ) {
+      return renderResearchProcessWorkflowSurface();
+    }
     // Progressive fill: mount the stable overview IA immediately.
     // Primary CTA keeps fixed geometry; metrics skeleton in place until queries settle.
     const overviewWorkflowPending = teamWorkflowQuery.isPending;

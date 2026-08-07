@@ -214,13 +214,13 @@ def test_task0_legacy_flow_canvas_default_is_organization_agents_not_stage_pipel
     assert canvas["projectBinding"]["source"] == "team"
 
 
-def test_task0_no_third_flow_execute_writer_in_research_routes() -> None:
-    """Router surface: only research.py exposes flow-canvas execute endpoint."""
+def test_task0_legacy_flow_execute_still_only_on_research_route() -> None:
+    """Legacy dual-SSOT writer remains only on research.py until Task 8/9 cutover."""
     route_path = Path(__file__).resolve().parents[1] / "core" / "web" / "routes" / "research.py"
     text = route_path.read_text(encoding="utf-8")
     assert '@router.post("/research/flow-canvas/execute")' in text
     assert "execute_research_flow_canvas_node" in text
-    # No LangGraph runtime route yet (Task 2/3 introduce it).
+    # New LangGraph runtime is a separate writer domain (not a third flow-canvas clone).
     runtime_route = (
         Path(__file__).resolve().parents[1]
         / "core"
@@ -229,4 +229,7 @@ def test_task0_no_third_flow_execute_writer_in_research_routes() -> None:
         / "team_workflows"
         / "research_runtime.py"
     )
-    assert not runtime_route.exists()
+    assert runtime_route.exists()
+    runtime_text = runtime_route.read_text(encoding="utf-8")
+    assert "flow-canvas/execute" not in runtime_text
+    assert "/research/workflow-runs/" in runtime_text
