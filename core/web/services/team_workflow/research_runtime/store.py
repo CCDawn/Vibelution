@@ -93,3 +93,55 @@ class WorkflowRunStore:
             if len(events) > 500:
                 events = events[-500:]
             return self.update_run(run_id, {"events": events})
+
+    def append_handoff(self, run_id: str, handoff: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            current = self.get_run(run_id)
+            if current is None:
+                raise KeyError(run_id)
+            handoffs = list(current.get("handoffs") or [])
+            handoffs.append(handoff)
+            return self.update_run(run_id, {"handoffs": handoffs})
+
+    def upsert_human_task(self, run_id: str, task: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            current = self.get_run(run_id)
+            if current is None:
+                raise KeyError(run_id)
+            tasks = list(current.get("humanTasks") or [])
+            task_id = str(task.get("taskId") or "")
+            replaced = False
+            for index, existing in enumerate(tasks):
+                if str(existing.get("taskId") or "") == task_id:
+                    tasks[index] = {**existing, **task}
+                    replaced = True
+                    break
+            if not replaced:
+                tasks.append(task)
+            return self.update_run(run_id, {"humanTasks": tasks})
+
+    def put_session_binding(self, run_id: str, node_id: str, binding: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            current = self.get_run(run_id)
+            if current is None:
+                raise KeyError(run_id)
+            bindings = dict(current.get("sessionBindings") or {})
+            bindings[node_id] = binding
+            return self.update_run(run_id, {"sessionBindings": bindings})
+
+    def get_session_binding(self, run_id: str, node_id: str) -> dict[str, Any] | None:
+        current = self.get_run(run_id)
+        if not current:
+            return None
+        bindings = current.get("sessionBindings") or {}
+        value = bindings.get(node_id)
+        return value if isinstance(value, dict) else None
+
+    def find_human_task(self, run_id: str, task_id: str) -> dict[str, Any] | None:
+        current = self.get_run(run_id)
+        if not current:
+            return None
+        for task in current.get("humanTasks") or []:
+            if str(task.get("taskId") or "") == task_id:
+                return dict(task)
+        return None
