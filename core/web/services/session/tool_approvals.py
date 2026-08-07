@@ -797,6 +797,106 @@ def _update_agent_tool_policy(
     )
 
 
+# Read-only git subcommands that observe the workspace without mutating it.
+# Used under request_approval so shell-backed `git status|branch|log|…` does not
+# force a user prompt when dedicated git tools would not.
+_SAFE_READONLY_GIT_SUBCOMMANDS = frozenset(
+    {
+        "status",
+        "branch",
+        "log",
+        "show",
+        "diff",
+        "rev-parse",
+        "rev-list",
+        "ls-files",
+        "ls-tree",
+        "describe",
+        "tag",
+        "remote",
+        "stash",
+        "blame",
+        "shortlog",
+        "whatchanged",
+        "name-rev",
+        "cat-file",
+        "config",
+        "version",
+        "help",
+    }
+)
+_SAFE_READONLY_GIT_STASH_ACTIONS = frozenset({"list", "show"})
+_SAFE_READONLY_GIT_REMOTE_ACTIONS = frozenset({"", "-v", "--verbose", "show", "get-url"})
+_SAFE_READONLY_GIT_CONFIG_ACTIONS = frozenset({"--get", "--get-all", "--list", "-l", "--get-regexp"})
+_UNSAFE_GIT_FLAG_TOKENS = frozenset(
+    {
+        "--exec",
+        "--upload-pack",
+        "--receive-pack",
+        "-c",
+    }
+)
+
+
+def _cli_command_text(tool_args: Mapping[str, Any]) -> str:
+    return str(tool_args.get("cmd") or tool_args.get("command") or "").strip()
+
+
+def _is_safe_readonly_git_cli(tool_args: Mapping[str, Any]) -> bool:
+    """True for single-shot read-only git observation commands (no shell chaining)."""
+
+    command = _cli_command_text(tool_args)
+    if not command:
+        return False
+    # Reject shell metacharacters that can chain/write beyond a pure git read.
+    if re.search(r"[|;&><`$]|&&|\|\|", command):
+        return False
+    try:
+        parts = [part for part in re.split(r"\s+", command) if part]
+    except Exception:
+        return False
+    if len(parts) < 2:
+        return False
+    head = parts[0].strip().lower().replace("\\", "/")
+    executable = head.rsplit("/", 1)[-1]
+    if executable not in {"git", "git.exe"}:
+        return False
+    # Drop global git options before the subcommand: git -C . status
+    index = 1
+    while index < len(parts):
+        token = parts[index]
+        lowered = token.lower()
+        if lowered in _UNSAFE_GIT_FLAG_TOKENS:
+            return False
+        if lowered in {"-c", "-C"}:
+            index += 2
+            continue
+        if lowered.startswith("-"):
+            # Other global flags (e.g. --no-pager) are observational.
+            index += 1
+            continue
+        break
+    if index >= len(parts):
+        return False
+    subcommand = parts[index].strip().lower()
+    if subcommand not in _SAFE_READONLY_GIT_SUBCOMMANDS:
+        return False
+    rest = [part.lower() for part in parts[index + 1 :]]
+    if subcommand == "stash":
+        action = rest[0] if rest else "list"
+        return action in _SAFE_READONLY_GIT_STASH_ACTIONS
+    if subcommand == "remote":
+        action = rest[0] if rest else ""
+        return action in _SAFE_READONLY_GIT_REMOTE_ACTIONS
+    if subcommand == "config":
+        if not rest:
+            return False
+        return rest[0] in _SAFE_READONLY_GIT_CONFIG_ACTIONS
+    if subcommand == "tag" and any(token in {"-d", "--delete", "-a", "-m", "-f", "--force"} for token in rest):
+        return False
+    return True
+
+
 def _can_auto_approve(
     *,
     permission_preset: str,
@@ -805,12 +905,15 @@ def _can_auto_approve(
     approval: str,
     risk: str,
 ) -> bool:
-    if permission_preset == "request_approval":
-        return False
     if permission_preset == "full_access":
         return True
     if approval == "always" or risk in {"network", "destructive"}:
         return False
+    # request_approval still prompts for general shell/execute work, but pure
+    # read-only git observation matches the preset copy ("ask for high-risk")
+    # and avoids regressing dedicated git-tool workflows when models use cli_tool.
+    if permission_preset == "request_approval":
+        return tool_name in {"cli_tool", "exec_command"} and _is_safe_readonly_git_cli(tool_args)
     if tool_name in _SANDBOX_CONTAINED_TOOLS:
         return True
     if tool_name in _WORKSPACE_PATH_TOOLS:

@@ -3395,6 +3395,9 @@ export function ChatCodingRoute() {
               notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}
               toolApproval={pendingSessionToolApproval || pendingToolGovernanceApproval ? {
+                requestId: pendingSessionToolApproval?.requestId
+                  || pendingToolGovernanceApproval?.requestId
+                  || "",
                 pending: pendingToolApprovalPending,
                 rawTitle: pendingToolApprovalRawTitle,
                 riskLabel: pendingToolApprovalRisk,

@@ -814,7 +814,13 @@ function normalizeCellStatus(status: string | undefined): CodexTranscriptCellSta
   if (["degraded", "fallback", "partial", "recovered", "unavailable"].includes(normalized)) {
     return "degraded";
   }
-  if (["queued", "pending"].includes(normalized)) {
+  // Journal pre-commits tool items as "ready" while approval/execution is still open.
+  // Mapping those to completed causes process-rail flicker and duplicate "done" rows.
+  if (
+    ["queued", "pending", "ready", "waiting", "awaiting_approval", "approval_required", "blocked"].includes(
+      normalized,
+    )
+  ) {
     return "pending";
   }
   if (["running", "thinking", "tooling", "answering", "streaming"].includes(normalized)) {

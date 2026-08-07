@@ -24,12 +24,26 @@ def _build_codex_transcript_from_turn_items(
     if not normalized_message_id or not items:
         return None
     cells: list[dict[str, Any]] = []
+    last_commentary_text = ""
     for item in items:
         text = str(item.get("text") or item.get("summary") or item.get("title") or "").strip()
         kind = str(item.get("kind") or item.get("type") or "").strip().lower()
         phase = str(item.get("phase") or "").strip().lower()
-        status = str(item.get("status") or ("running" if streaming else "completed")).strip() or "completed"
-        tone = "error" if status == "failed" else ("running" if status in {"running", "in_progress", "pending"} else "neutral")
+        status = str(item.get("status") or ("running" if streaming else "completed")).strip().lower() or "completed"
+        # Canonical tool commits use status=ready before execution; never paint those
+        # as completed, or the process rail flashes dozens of "done" rows mid-turn.
+        is_tool_row = kind in {"tool_call", "tool", "command"} or phase == "tool_call"
+        if is_tool_row and status in {"ready", "queued", ""}:
+            status = "pending"
+        tone = (
+            "error"
+            if status == "failed"
+            else (
+                "running"
+                if status in {"running", "in_progress", "pending", "ready", "queued"}
+                else "neutral"
+            )
+        )
         render_id = str(
             item.get("callId")
             or item.get("itemId")
@@ -55,20 +69,36 @@ def _build_codex_transcript_from_turn_items(
         }:
             if not text:
                 continue
+            cell_channel = item.get("channel") or (
+                "commentary" if phase in {"commentary", "interim"} or kind == "commentary" else "answer"
+            )
+            cell_phase = item.get("phase") or ("commentary" if kind == "commentary" else "final_answer")
+            # Drop consecutive identical commentary re-emits (stream stutter / model repeat).
+            if (
+                str(cell_channel).strip().lower() == "commentary"
+                or str(cell_phase).strip().lower() in {"commentary", "interim"}
+            ) and text == last_commentary_text:
+                continue
+            if str(cell_channel).strip().lower() == "commentary" or str(cell_phase).strip().lower() in {
+                "commentary",
+                "interim",
+            }:
+                last_commentary_text = text
+            else:
+                last_commentary_text = ""
             cells.append(
                 s._compact_codex_record(
                     {
                         **cell_base,
                         "kind": "assistant_markdown",
                         "text": text,
-                        "channel": item.get("channel")
-                        or ("commentary" if phase in {"commentary", "interim"} or kind == "commentary" else "answer"),
-                        "phase": item.get("phase")
-                        or ("commentary" if kind == "commentary" else "final_answer"),
+                        "channel": cell_channel,
+                        "phase": cell_phase,
                     }
                 )
             )
             continue
+        last_commentary_text = ""
         if kind in {"reasoning", "analysis"} or phase == "reasoning":
             if not text:
                 continue
@@ -83,7 +113,7 @@ def _build_codex_transcript_from_turn_items(
                 )
             )
             continue
-        if kind in {"tool_call", "tool", "command"} or phase == "tool_call":
+        if is_tool_row:
             cells.append(
                 s._compact_codex_record(
                     {

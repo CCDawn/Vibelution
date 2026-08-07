@@ -25,6 +25,29 @@ function message(overrides: Partial<AgentMessage>): AgentMessage {
 }
 
 describe("codexTranscriptCells", () => {
+  it("keeps journal ready/waiting tool cells pending instead of completed", () => {
+    // Live overlays often pre-commit tools as status=ready while approval waits.
+    // Those must stay active so the process rail does not flash completed→running.
+    const operations: AgentMessageOperation[] = [
+      {
+        id: "op-ready",
+        kind: "tool",
+        label: "cli_tool",
+        status: "ready",
+        summary: "git branch -a",
+        durationSeconds: null,
+      },
+    ];
+    const cells = buildCodexTranscriptCells(message({ id: "awaiting-approval" }), { operations });
+    expect(cells).toHaveLength(1);
+    expect(cells[0]).toMatchObject({
+      kind: "tool_call",
+      status: "pending",
+      tone: "running",
+    });
+    expect(codexTranscriptCellsSource).toContain("awaiting_approval");
+  });
+
   it("exports the Codex-like transcript cell contract", () => {
     const kind: CodexTranscriptCellKind = "assistant_markdown";
     const cell: CodexTranscriptCell = {

@@ -122,9 +122,26 @@ IS_UNIX = CURRENT_SYSTEM in ("linux", "darwin")
 
 
 def _subprocess_no_window_kwargs() -> dict:
-    """Hide transient console windows for background tool commands on Windows."""
+    """Hide transient console windows for background tool commands on Windows.
+
+    CREATE_NO_WINDOW alone is not always enough when ``shell=True`` spawns
+    cmd.exe; also force STARTF_USESHOWWINDOW + SW_HIDE so agent cli_tool bursts
+    do not flash visible consoles during long turns.
+    """
+    if not IS_WINDOWS:
+        return {}
+    kwargs: dict = {}
     flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return {"creationflags": flags} if flags else {}
+    if flags:
+        kwargs["creationflags"] = flags
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0x1))
+        startupinfo.wShowWindow = 0  # SW_HIDE
+        kwargs["startupinfo"] = startupinfo
+    except Exception:
+        pass
+    return kwargs
 
 
 def _terminate_shell_process(process: subprocess.Popen) -> None:

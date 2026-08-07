@@ -554,3 +554,56 @@ def test_repeated_canonical_outcome_commits_one_final_item(tmp_path):
         turn_id="turn-canonical",
     )
     assert len([item for item in items if item.get("itemId") == "answer-a"]) == 1
+
+
+def test_session_turn_items_upgrade_ready_tools_after_tool_result(tmp_path):
+    """Ready tool commits must not freeze the live process rail after execution."""
+    append_turn_event(tmp_path, "session-a", "turn-tools", EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-tools",
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="ready",
+        payload={
+            "kind": "tool_call",
+            "phase": "tool_call",
+            "channel": "commentary",
+            "status": "ready",
+            "itemId": "tool-item-1",
+            "callId": "call-grep-1",
+            "toolName": "grep_search_tool",
+            "sessionId": "session-a",
+            "turnId": "turn-tools",
+            "revision": 0,
+        },
+    )
+    before = session_turn_items_from_events(
+        load_turn_events(tmp_path, "session-a"),
+        turn_id="turn-tools",
+    )
+    assert before[0]["status"] == "pending"
+
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-tools",
+        EVENT_TOOL_RESULT,
+        status="done",
+        tool_call_id="call-grep-1",
+        payload={
+            "toolCall": {
+                "id": "call-grep-1",
+                "toolCallId": "call-grep-1",
+                "name": "grep_search_tool",
+                "status": "done",
+                "summary": "3 matches",
+            }
+        },
+    )
+    after = session_turn_items_from_events(
+        load_turn_events(tmp_path, "session-a"),
+        turn_id="turn-tools",
+    )
+    assert after[0]["status"] == "completed"
+    assert after[0]["summary"] == "3 matches"
