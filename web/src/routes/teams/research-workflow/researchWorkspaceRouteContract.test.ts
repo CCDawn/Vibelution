@@ -43,8 +43,9 @@ describe("researchWorkspaceRouteContract", () => {
     expect(workspaceSource).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");
     expect(workspaceSource).toContain("hideHeader");
     expect(workspaceSource).toContain("research-process-workspace-host");
-    expect(workspaceSource).toContain("absolute inset-0");
+    expect(workspaceSource).toContain("h-full min-h-0 w-full min-w-0 flex-1");
     expect(workspaceSource).toContain('height="100%"');
+    expect(workspaceSource).toContain("!absolute !inset-0");
     expect(workspaceSource).not.toContain("height={440}");
     expect(workspaceSource).not.toContain("height={420}");
   });

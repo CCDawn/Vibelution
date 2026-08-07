@@ -181,10 +181,10 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
 
   const displayError = localError || error;
 
-  // Same stacking pattern as TeamsCanvasComposer: outer fill column, flex-1 canvas cell.
+  // Canvas cell: flex column fill; React Flow absolute-fills the remaining host.
   const canvasBody = (
     <div
-      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
       data-testid="research-process-canvas-host"
       data-composer="research-process-canvas"
     >
@@ -196,7 +196,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
           {displayError}
         </div>
       ) : null}
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         {graph ? (
           <VWorkflowCanvas
             graph={graph}
@@ -204,10 +204,10 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
             runtimeCurrentNodeIds={projection?.run.runtimeCurrentNodeIds || []}
             onSelectNode={onSelectNode}
             height="100%"
-            className="h-full min-h-0 !rounded-none !border-0"
+            className="!absolute !inset-0 h-full min-h-0 !rounded-none !border-0"
           />
         ) : (
-          <VStateSurface tone="loading" title="加载流程定义" fill />
+          <VStateSurface tone="loading" title="加载流程定义" fill className="h-full min-h-0" />
         )}
       </div>
     </div>
@@ -342,41 +342,38 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
       </div>
     );
 
-  // Absolute fill host: parent board cell is full-height; this pins the recipe
-  // to the cell even if intermediate percentage heights fail. Same idea as
-  // filling a pane in Teams canvas / memory graph hosts.
+  // Fill the board primary cell end-to-end (parent already absolute-pins overview).
+  // VCanvasWorkbenchPage owns toolbar + canvas/inspector split; no second outer grid.
   return (
     <div
       data-fill="true"
       data-vui="research-process-workspace-host"
-      className="relative min-h-0 w-full min-w-0 flex-1 self-stretch overflow-hidden"
+      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
     >
-      <div className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
-        <VCanvasWorkbenchPage
-          data-vui="research-process-workspace"
-          domainRecipe="research-process-workflow"
-          ariaLabel="科研流程工作区"
-          title="科研流程"
-          hideHeader
-          toolbar={toolbar}
-          layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
-          resize={{
-            aside: {
-              id: "inspector",
-              defaultWidth: 320,
-              minWidth: 260,
-              maxWidth: 480,
-            },
-          }}
-          canvas={canvasBody}
-          inspector={inspectorBody}
-          canvasClassName="!border-0 !rounded-none h-full min-h-0"
-          inspectorClassName="!border-0 !rounded-none h-full min-h-0"
-          className="h-full min-h-0 flex-1"
-          shellTestId="research-process-workspace-shell"
-          shellMode="board"
-        />
-      </div>
+      <VCanvasWorkbenchPage
+        data-vui="research-process-workspace"
+        domainRecipe="research-process-workflow"
+        ariaLabel="科研流程工作区"
+        title="科研流程"
+        hideHeader
+        toolbar={toolbar}
+        layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
+        resize={{
+          aside: {
+            id: "inspector",
+            defaultWidth: 320,
+            minWidth: 260,
+            maxWidth: 480,
+          },
+        }}
+        canvas={canvasBody}
+        inspector={inspectorBody}
+        canvasClassName="!border-0 !rounded-none !h-full min-h-0"
+        inspectorClassName="!border-0 !rounded-none !h-full min-h-0"
+        className="h-full min-h-0 w-full flex-1"
+        shellTestId="research-process-workspace-shell"
+        shellMode="board"
+      />
     </div>
   );
 }

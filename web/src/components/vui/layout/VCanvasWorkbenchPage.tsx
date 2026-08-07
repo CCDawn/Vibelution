@@ -97,13 +97,17 @@ export function VCanvasWorkbenchPage({
         {toolbar ? (
           <div
             data-vui="canvas-workbench-toolbar"
-            className={cn(VUI_PAGE_TOOLBAR_STRIP_CLASS, toolbarClassName)}
+            className={cn(VUI_PAGE_TOOLBAR_STRIP_CLASS, "shrink-0", toolbarClassName)}
           >
             {toolbar}
           </div>
         ) : null}
+        {/*
+          Do not pair h-full with a toolbar sibling: height 100% of body overflows the
+          toolbar strip and clips the canvas. flex-1 min-h-0 fills the remainder.
+        */}
         <VSplitWorkspace
-          className={cn("h-full min-h-0 flex-1", workspaceClassName)}
+          className={cn("min-h-0 min-w-0 flex-1 overflow-hidden", workspaceClassName)}
           data-testid={shellTestId}
           data-team-shell-mode={shellMode}
           data-vui-layout-id={layoutId}
@@ -126,7 +130,7 @@ export function VCanvasWorkbenchPage({
               className={cn(
                 VUI_CANVAS_SURFACE_CLASS,
                 // Match VBoardWorkbenchPage main: stretch inside split-main.
-                "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+                "relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
                 canvasClassName,
               )}
             >

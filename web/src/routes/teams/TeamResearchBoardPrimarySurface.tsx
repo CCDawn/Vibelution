@@ -51,23 +51,34 @@ export function TeamResearchBoardPrimarySurface({
   }
 
   if (boardPrimaryMode === "stage") {
-    return <>{stageSlot}</>;
+    return (
+      <div
+        data-fill="true"
+        data-vui-region="teams-board-primary-fill"
+        className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+      >
+        {stageSlot}
+      </div>
+    );
   }
 
   if (boardPrimaryMode === "launcher") {
     return <>{launcherSlot}</>;
   }
 
-  // overview / process workflow: keep a full-height host so fill children can stretch
-  // (bare fragment cannot establish flex height for nested canvas recipes).
+  // overview / process workflow: full-height host (not a bare fragment).
+  // Absolute pin guarantees nested VCanvasWorkbenchPage fills the board cell even when
+  // intermediate % heights fail.
   if (workflowPending || workflowReady) {
     return (
       <div
         data-fill="true"
         data-vui-region="teams-board-primary-fill"
-        className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+        className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
       >
-        {overviewSlot}
+        <div className="absolute inset-0 flex min-h-0 flex-col overflow-hidden">
+          {overviewSlot}
+        </div>
       </div>
     );
   }
