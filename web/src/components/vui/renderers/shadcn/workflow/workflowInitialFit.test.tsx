@@ -60,6 +60,7 @@ afterEach(() => {
 type ProbeProps = {
   initialFitRevision: number | null;
   layoutRevision: number;
+  structureKey?: string;
   nodesInitialized: boolean;
   fit: () => void;
   acknowledgeInitialFit: () => void;
@@ -69,6 +70,7 @@ type ProbeProps = {
 function FitProbe({
   initialFitRevision,
   layoutRevision,
+  structureKey = "struct:A",
   nodesInitialized,
   fit,
   acknowledgeInitialFit,
@@ -77,6 +79,7 @@ function FitProbe({
   const state = useWorkflowInitialFit({
     initialFitRevision,
     layoutRevision,
+    structureKey,
     nodesInitialized,
     fit,
     acknowledgeInitialFit,
@@ -228,23 +231,27 @@ describe("useWorkflowInitialFit (P1-1)", () => {
     expect(acknowledge).toHaveBeenCalledTimes(1);
   });
 
-  it("cancels the pending fit when the run switches topology before the frame", async () => {
+  it("cancels the pending fit when the topology switches before the frame (P1-1 race)", async () => {
     const fit = vi.fn();
     const acknowledge = vi.fn();
     const { rerender, unmount } = await mountProbe({
       initialFitRevision: 1,
       layoutRevision: 1,
+      structureKey: "struct:A",
       nodesInitialized: true,
       fit,
       acknowledgeInitialFit: acknowledge,
       onState: () => {},
     });
 
-    // Pending fit scheduled for revision 1, then the run switches to
-    // revision 2 before the frame fires: the pending fit must be cancelled.
+    // Pending fit scheduled for structure A, then a REAL topology/run switch
+    // commits structure B BEFORE the frame fires (initialFitRevision stays
+    // un-acknowledged, as in production — the layout hook does not null it).
+    // The stale fit for A must not fire.
     await rerender({
-      initialFitRevision: null,
+      initialFitRevision: 1,
       layoutRevision: 2,
+      structureKey: "struct:B",
       nodesInitialized: true,
       fit,
       acknowledgeInitialFit: acknowledge,
@@ -256,8 +263,43 @@ describe("useWorkflowInitialFit (P1-1)", () => {
     });
     await unmount();
 
+    // The hook re-armed to structure B: exactly one fit for the new topology.
+    expect(fit).toHaveBeenCalledTimes(1);
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-arms and fits the NEW topology after a switch when nodes initialize (P1-1 race)", async () => {
+    const fit = vi.fn();
+    const acknowledge = vi.fn();
+    const { rerender, unmount } = await mountProbe({
+      initialFitRevision: 1,
+      layoutRevision: 1,
+      structureKey: "struct:A",
+      nodesInitialized: false,
+      fit,
+      acknowledgeInitialFit: acknowledge,
+      onState: () => {},
+    });
+
+    // Switch to structure B before nodes initialize: the pending fit for A is
+    // dropped; when B's nodes enter the store, the first fit fires for B.
+    await rerender({
+      initialFitRevision: 1,
+      layoutRevision: 2,
+      structureKey: "struct:B",
+      nodesInitialized: true,
+      fit,
+      acknowledgeInitialFit: acknowledge,
+      onState: () => {},
+    });
     expect(fit).not.toHaveBeenCalled();
-    expect(acknowledge).not.toHaveBeenCalled();
+    await act(async () => {
+      flushRafs();
+    });
+    await unmount();
+
+    expect(fit).toHaveBeenCalledTimes(1);
+    expect(acknowledge).toHaveBeenCalledTimes(1);
   });
 
   it("cancels the pending fit when nodes never initialize (empty/degraded canvas)", async () => {

@@ -62,8 +62,14 @@ type MeasuredNodeProps = {
 
 /**
  * Reports the rendered DOM size of a node to the auto-layout hook (P1-5).
- * Zero sizes (unmeasured / SSR / hidden) are skipped so calibration never
- * feeds garbage into the layout hash.
+ *
+ * The outer React Flow node is styled with the ELK-committed size, so
+ * `offsetWidth/Height` would just echo that forced size back. We instead
+ * measure the CONTENT's natural size via `scrollWidth/scrollHeight` with
+ * `overflow: visible`: when the label/badge grows beyond the committed box,
+ * the scroll extent reflects the real minimum size the node needs, and
+ * calibration can relayout with it. Zero sizes (unmeasured / SSR / hidden)
+ * are skipped so calibration never feeds garbage into the layout hash.
  *
  * @internal exported for M-level tests only; not part of the VUI surface.
  */
@@ -78,13 +84,15 @@ export function NodeMeasureReporter({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const width = el.offsetWidth;
-    const height = el.offsetHeight;
+    // Natural content size (may exceed the ELK-committed box), floor at the
+    // committed box so calibration never shrinks a node below what ELK placed.
+    const width = Math.max(el.offsetWidth, el.scrollWidth);
+    const height = Math.max(el.offsetHeight, el.scrollHeight);
     if (width <= 0 || height <= 0) return;
     onMeasure(measureKey, { width, height });
   });
   return (
-    <div ref={ref} className="h-full w-full" data-node-measure={measureKey}>
+    <div ref={ref} className="h-full w-full overflow-visible" data-node-measure={measureKey}>
       {children}
     </div>
   );
@@ -168,6 +176,7 @@ function WorkflowCanvasInner({
   useWorkflowInitialFit({
     initialFitRevision: layout.initialFitRevision,
     layoutRevision: layout.layoutRevision,
+    structureKey: layout.structureKey,
     nodesInitialized,
     fit: () => {
       void rf.fitView({ padding: 0.08 });

@@ -23,6 +23,7 @@ import type {
 } from "../../../product/workflow/workflowCanvasTypes";
 import type { WorkflowLayoutEngine } from "./workflowElkClient";
 import { layoutDiagnostic, useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
+import { toElkGraph } from "./workflowElkGraphAdapter";
 
 function makeNode(overrides: Partial<WorkflowCanvasNodeInput>): WorkflowCanvasNodeInput {
   return {
@@ -320,32 +321,11 @@ describe("useWorkflowAutoLayout behavior", () => {
     });
     expect(latest?.layoutRevision).toBe(0);
 
-    const freshGraph = fakeLayout({
-      id: "workflow:root",
-      children: [
-        {
-          id: "stage:knowledge_collection",
-          width: 400,
-          height: 400,
-          children: [],
-          layoutOptions: {},
-        },
-        {
-          id: "stage:experiment_design",
-          width: 400,
-          height: 400,
-          children: [],
-          layoutOptions: {},
-        },
-        {
-          id: "stage:execution_iteration",
-          width: 400,
-          height: 400,
-          children: [],
-          layoutOptions: {},
-        },
-      ],
-    });
+    // New run's layout: generated through the real engine adapter so it carries
+    // edges with sections + label bounds (a bare graph would trip the label
+    // diagnostic and be treated as degraded, which is not this test's concern).
+    const freshInput = makeGraph(["knowledge_collection", "experiment_design", "execution_iteration"]);
+    const freshGraph = fakeLayout(toElkGraph(freshInput).root);
     await act(async () => {
       resolvers[1](freshGraph);
       await Promise.resolve();
