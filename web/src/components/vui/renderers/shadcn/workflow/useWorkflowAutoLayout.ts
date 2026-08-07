@@ -24,6 +24,7 @@ import type {
 } from "../../../product/workflow/workflowCanvasTypes";
 import { fromElkLayout } from "./workflowElkLayout";
 import { toElkGraph } from "./workflowElkGraphAdapter";
+import { analyzeEdgeSections } from "./workflowElkEdgePath";
 import { DECISION_OUTCOME_IDS } from "./workflowElkPorts";
 import type { WorkflowLayoutEngine } from "./workflowElkClient";
 import {
@@ -41,6 +42,13 @@ export type UseWorkflowAutoLayoutResult = {
   degraded: { reason: string } | null;
   /** Set once to the first committed revision; consumed by the canvas. */
   initialFitRevision: number | null;
+  /**
+   * Structural identity (topology hash). Unchanged by runtime-only updates
+   * and by size calibration; changes when the run topology switches. Used by
+   * the initial-fit hook to tell "same structure, calibration bump" apart
+   * from "new topology committed" (P1-1 race).
+   */
+  structureKey: string;
   acknowledgeInitialFit: () => void;
   /** Explicit fit-all action for WorkflowCanvasControls. */
   fitAll: () => void;
@@ -118,9 +126,22 @@ export function useWorkflowAutoLayout(
     const token = ++tokenRef.current;
     let cancelled = false;
     const input = graphRef.current;
-    runLayout(input, engine)
+    // Measured DOM sizes (P1-5) feed the ELK graph so the calibration pass
+    // lays out with real geometry, not the design-contract defaults again.
+    runLayout(input, engine, sizesRef.current)
       .then((result) => {
         if (cancelled || token !== tokenRef.current) {
+          return;
+        }
+        // Diagnose BEFORE committing anything: a faulty layout (label without
+        // bounds, broken section chain) must NOT overwrite the last-good
+        // revision/cache/display — only the degraded flag changes.
+        const diagnostic = layoutDiagnostic(result);
+        if (diagnostic) {
+          setDegraded(diagnostic);
+          if (cache) {
+            setDisplay(mergeRuntimeFields(cache, graph));
+          }
           return;
         }
         const previousRevision = revisionRef.current;
@@ -176,6 +197,7 @@ export function useWorkflowAutoLayout(
     layoutRevision,
     degraded,
     initialFitRevision,
+    structureKey: hash.structure,
     acknowledgeInitialFit,
     fitAll,
     reportMeasuredSize,
@@ -185,10 +207,35 @@ export function useWorkflowAutoLayout(
 async function runLayout(
   input: WorkflowLayoutInput,
   engine: WorkflowLayoutEngine,
+  sizes?: ReadonlyMap<string, WorkflowNodeSize>,
 ): Promise<WorkflowLayoutResult> {
-  const { root } = toElkGraph(input);
+  const { root } = toElkGraph(input, sizes);
   const layouted = await engine.layout(root);
   return fromElkLayout(layouted, input);
+}
+
+/**
+ * P1-5: engine-output diagnostics that must NOT be silently absorbed. A label
+ * without engine labelBounds, or a section chain that is not well-formed
+ * (cycle/branch/orphan/broken link), degrades the canvas with a reason while
+ * the last-good layout keeps rendering.
+ *
+ * @internal exported for tests; not part of the hook's public surface.
+ */
+export function layoutDiagnostic(result: WorkflowLayoutResult): { reason: string } | null {
+  for (const edge of result.edges) {
+    if (edge.label.length > 0 && !edge.labelBounds) {
+      return {
+        reason: `edge "${edge.id}" has a label but the engine did not place label bounds`,
+      };
+    }
+    if (edge.sections.length > 0 && !analyzeEdgeSections(edge.sections).wellFormed) {
+      return {
+        reason: `edge "${edge.id}" section chain is not well-formed`,
+      };
+    }
+  }
+  return null;
 }
 
 /**

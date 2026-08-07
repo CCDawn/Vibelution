@@ -46,7 +46,7 @@ const isolatedDesignReferenceArtifacts = new Set([
   "design/challenge-cup-platform-home-preview-tooltips.tsx",
 ]);
 // VWorkflowCanvas is the sanctioned product facade for the React Flow canvas renderer;
-// workflowLayoutTypes re-exports its layout entrypoint. They are the only product files
+// workflowLayoutTypes re-exports the layout graph types. They are the only product files
 // allowed to touch the shadcn workflow renderer directly.
 const vuiWorkflowCanvasFacadeFiles = new Set([
   "components/vui/product/workflow/VWorkflowCanvas.tsx",

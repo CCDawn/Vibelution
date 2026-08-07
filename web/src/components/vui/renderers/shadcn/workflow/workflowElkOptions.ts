@@ -2,8 +2,8 @@
  * ELK layout options for the workflow compound graph.
  *
  * Key names and value formats are pinned against `elkjs` 0.12 `knownLayoutOptions`
- * by the probe tests in `workflowElkLayout.test.ts`; do not edit a value here
- * without re-running the probe.
+ * by the option-keys tests in `workflowElkLayout.test.ts`; do not edit a value
+ * here without re-running those tests.
  */
 
 /** Design-contract sizes used when the node reports no measured height yet. */

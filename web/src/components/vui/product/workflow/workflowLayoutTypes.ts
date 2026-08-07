@@ -15,5 +15,3 @@ export type {
   WorkflowEdgeSemanticKind,
   WorkflowEdgePathState,
 } from "./workflowCanvasTypes";
-
-export { layoutWorkflowCanvas } from "../../renderers/shadcn/workflow/workflowCanvasLayout";

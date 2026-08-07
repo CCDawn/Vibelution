@@ -18,7 +18,11 @@ import {
 } from "lucide-react";
 
 import { cn } from "../../../lib/cn";
-import type { WorkflowNodeRunStatus, WorkflowNodeVisualKind } from "../../../product/workflow/workflowCanvasTypes";
+import type {
+  WorkflowNodeRunStatus,
+  WorkflowNodeVisualKind,
+  WorkflowPortSide,
+} from "../../../product/workflow/workflowCanvasTypes";
 import { resolveNodeStatusVisual } from "./workflowCanvasState";
 import { workflowNodeAriaLabel } from "./workflowCanvasAccessibility";
 
@@ -39,7 +43,47 @@ export type WorkflowNodeChromeProps = {
   showSourceHandle?: boolean;
   sourceHandles?: Array<{ id: string; label?: string }>;
   decisionLayout?: boolean;
+  /** ELK port sides keyed by handle id; drives Handle placement (P1-4). */
+  portSides?: {
+    source: Record<string, WorkflowPortSide>;
+    target: Record<string, WorkflowPortSide>;
+  };
 };
+
+function sideToPosition(side: WorkflowPortSide): Position {
+  switch (side) {
+    case "WEST":
+      return Position.Left;
+    case "EAST":
+      return Position.Right;
+    case "NORTH":
+      return Position.Top;
+    case "SOUTH":
+      return Position.Bottom;
+  }
+}
+
+function firstSideOf(map: Record<string, WorkflowPortSide> | undefined): WorkflowPortSide | null {
+  if (!map) {
+    return null;
+  }
+  const first = Object.values(map)[0];
+  return first ?? null;
+}
+
+/**
+ * Distributes N handles along the axis perpendicular to their side so same-side
+ * handles never stack on the node midpoint (P1-4). Left/right handles spread
+ * vertically; top/bottom handles spread horizontally.
+ */
+function sideOffset(index: number, total: number, side: WorkflowPortSide): Record<string, number> {
+  if (total <= 1) {
+    return {};
+  }
+  const t = total > 1 ? index / (total - 1) : 0.5;
+  const percent = 12 + t * 76; // keep inside the node's visible band
+  return side === "WEST" || side === "EAST" ? { top: percent } : { left: percent };
+}
 
 function StatusIcon({ icon }: { icon: ReturnType<typeof resolveNodeStatusVisual>["icon"] }) {
   const cls = "h-3.5 w-3.5 shrink-0";
@@ -93,6 +137,7 @@ export function WorkflowNodeChrome({
   showSourceHandle = true,
   sourceHandles,
   decisionLayout = false,
+  portSides,
 }: WorkflowNodeChromeProps) {
   const visual = resolveNodeStatusVisual(status);
   const aria = workflowNodeAriaLabel({
@@ -103,6 +148,17 @@ export function WorkflowNodeChrome({
     primaryAgentId,
     attempt,
   });
+
+  const targetSide = firstSideOf(portSides?.target) ?? "WEST";
+  const singleSourceSide = firstSideOf(portSides?.source) ?? "EAST";
+  const sideOfSourceHandle = (id: string): WorkflowPortSide =>
+    portSides?.source[id] ?? "EAST";
+  const sideOfTargetHandle = (id: string): WorkflowPortSide =>
+    portSides?.target[id] ?? targetSide;
+  // Real ELK target ports, keyed by short name (e.g. "feedback:in"); the
+  // renderer mirrors every one so multi-entry nodes keep edge endpoints
+  // visually aligned with the engine (P1-4).
+  const targetHandleIds = portSides?.target ? Object.keys(portSides.target) : [];
 
   return (
     <div
@@ -128,11 +184,27 @@ export function WorkflowNodeChrome({
       title={title}
     >
       {showTargetHandle ? (
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!h-2 !w-2 !border-0 !bg-[var(--fg-tertiary)]"
-        />
+        targetHandleIds.length > 0 ? (
+          targetHandleIds.map((id, index) => {
+            const side = sideOfTargetHandle(id);
+            return (
+              <Handle
+                key={id}
+                id={id}
+                type="target"
+                position={sideToPosition(side)}
+                style={sideOffset(index, targetHandleIds.length, side)}
+                className="!h-2 !w-2 !border-0 !bg-[var(--fg-tertiary)]"
+              />
+            );
+          })
+        ) : (
+          <Handle
+            type="target"
+            position={sideToPosition(targetSide)}
+            className="!h-2 !w-2 !border-0 !bg-[var(--fg-tertiary)]"
+          />
+        )
       ) : null}
 
       <div className="flex min-w-0 items-start justify-between gap-1.5">
@@ -161,22 +233,41 @@ export function WorkflowNodeChrome({
       )}
 
       {decisionLayout && sourceHandles?.length ? (
-        <div className="pointer-events-none absolute inset-y-0 right-0 flex flex-col justify-evenly py-2">
-          {sourceHandles.map((h) => (
-            <Handle
-              key={h.id}
-              id={h.id}
-              type="source"
-              position={Position.Right}
-              className="!relative !right-0 !top-0 !h-2 !w-2 !translate-y-0 !border-0 !bg-[var(--accent-cool,#2563eb)]"
-              style={{ position: "relative", transform: "none", right: -4 }}
-            />
-          ))}
-        </div>
-      ) : showSourceHandle ? (
+        <>
+          {(["WEST", "EAST", "NORTH", "SOUTH"] as const).map((side) => {
+            const handles = sourceHandles.filter((h) => sideOfSourceHandle(h.id) === side);
+            if (handles.length === 0) {
+              return null;
+            }
+            const vertical = side === "WEST" || side === "EAST";
+            return (
+              <div
+                key={side}
+                className="pointer-events-none absolute flex justify-evenly"
+                style={
+                  vertical
+                    ? { top: 0, bottom: 0, [side === "WEST" ? "left" : "right"]: 0, flexDirection: "column", paddingBlock: 12 }
+                    : { left: 0, right: 0, [side === "NORTH" ? "top" : "bottom"]: 0, flexDirection: "row", paddingInline: 12 }
+                }
+              >
+                {handles.map((h, index) => (
+                  <Handle
+                    key={h.id}
+                    id={h.id}
+                    type="source"
+                    position={sideToPosition(side)}
+                    style={sideOffset(index, handles.length, side)}
+                    className="!h-2 !w-2 !border-0 !bg-[var(--accent-cool,#2563eb)]"
+                  />
+                ))}
+              </div>
+            );
+          })}
+        </>
+      ) : decisionLayout ? null : showSourceHandle ? (
         <Handle
           type="source"
-          position={Position.Right}
+          position={sideToPosition(singleSourceSide)}
           className="!h-2 !w-2 !border-0 !bg-[var(--fg-tertiary)]"
         />
       ) : null}

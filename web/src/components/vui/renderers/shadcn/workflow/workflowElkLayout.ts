@@ -15,8 +15,9 @@ import type {
   WorkflowLayoutResult,
   WorkflowEdgeSection,
   WorkflowLabelBounds,
+  WorkflowPortSide,
 } from "../../../product/workflow/workflowCanvasTypes";
-import { DECISION_OUTCOME_IDS } from "./workflowElkPorts";
+import { DECISION_OUTCOME_IDS, resolveElkPorts } from "./workflowElkPorts";
 
 import type { WorkflowLayoutEngine } from "./workflowElkClient";
 
@@ -53,6 +54,53 @@ export function fromElkLayout(layouted: ElkNode, input: WorkflowLayoutInput): Wo
     input.stages.map((s) => [stageElkId(s.stageId), s.stageId] as const),
   );
   const stageOffsetOfElkId = new Map<string, WorkflowLayoutPoint>();
+
+  const { byEdgeId, byNodeId } = resolveElkPorts({ nodes: input.nodes, edges: input.edges });
+
+  // Role (source/target) is derived from the real port assignments, never from
+  // id string heuristics.
+  const roleOfPort = new Map<string, "source" | "target">();
+  for (const assignment of byEdgeId.values()) {
+    roleOfPort.set(assignment.sourcePortId, "source");
+    roleOfPort.set(assignment.targetPortId, "target");
+  }
+
+  // ELK port ids are globally unique (e.g. "decision:rerun:iteration_decision");
+  // the canvas Handle ids are the edge sourceHandles (e.g. "rerun"). Map the
+  // source ports to their Handle id so the renderer can look sides up by handle.
+  const handleIdOfSourcePort = new Map<string, string>();
+  for (const edge of input.edges) {
+    const assignment = byEdgeId.get(edge.edgeId);
+    if (assignment && edge.sourceHandle) {
+      handleIdOfSourcePort.set(assignment.sourcePortId, edge.sourceHandle);
+    }
+  }
+
+  // Short name for a target port: strip the ":<nodeId>" suffix (e.g.
+  // "feedback:in:controlled_run" -> "feedback:in", "in:north:result_package" ->
+  // "in:north"). Node target handles and edge targetHandle use these ids.
+  const shortNameOfTargetPort = (elkPortId: string): string => {
+    const lastColon = elkPortId.lastIndexOf(":");
+    return lastColon > 0 ? elkPortId.slice(0, lastColon) : elkPortId;
+  };
+
+  const portSidesOf = (nodeId: string): WorkflowLayoutNode["portSides"] => {
+    const specs = byNodeId.get(nodeId);
+    if (!specs || specs.length === 0) {
+      return undefined;
+    }
+    const source: Record<string, WorkflowPortSide> = {};
+    const target: Record<string, WorkflowPortSide> = {};
+    for (const spec of specs) {
+      const role = roleOfPort.get(spec.id) ?? "source";
+      if (role === "source") {
+        source[handleIdOfSourcePort.get(spec.id) ?? spec.id] = spec.side;
+      } else {
+        target[shortNameOfTargetPort(spec.id)] = spec.side;
+      }
+    }
+    return { source, target };
+  };
 
   const nodes: WorkflowLayoutNode[] = [];
   let maxRight = 0;
@@ -120,6 +168,7 @@ export function fromElkLayout(layouted: ElkNode, input: WorkflowLayoutInput): Wo
         primaryRoleKey: metaNode.primaryRoleKey,
         sourceHandleIds: uniqueHandles.length > 0 ? uniqueHandles : undefined,
         decisionOutcomeIds: metaNode.visualKind === "decision" ? [...DECISION_OUTCOME_IDS] : undefined,
+        portSides: portSidesOf(taskNode.id),
       });
     }
   }
@@ -153,6 +202,7 @@ export function fromElkLayout(layouted: ElkNode, input: WorkflowLayoutInput): Wo
 
   const edges: WorkflowLayoutResult["edges"] = input.edges.map((inputEdge) => {
     const ctx = edgeById.get(inputEdge.edgeId);
+    const assignment = byEdgeId.get(inputEdge.edgeId);
     return {
       id: inputEdge.edgeId,
       source: inputEdge.fromNodeId,
@@ -162,6 +212,7 @@ export function fromElkLayout(layouted: ElkNode, input: WorkflowLayoutInput): Wo
       pathState: inputEdge.pathState,
       labelAlwaysVisible: inputEdge.labelAlwaysVisible,
       sourceHandle: inputEdge.sourceHandle,
+      targetHandle: assignment ? shortNameOfTargetPort(assignment.targetPortId) : undefined,
       gateKind: inputEdge.gateKind,
       requiresHumanAccept: inputEdge.requiresHumanAccept,
       sections: ctx?.sections ?? [],

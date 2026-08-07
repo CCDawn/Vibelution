@@ -139,7 +139,19 @@ export type WorkflowLayoutNode = {
    * (e.g. `revise`, which executes a child run lineage).
    */
   decisionOutcomeIds?: string[];
+  /**
+   * ELK port sides for this node's handles (source/target), keyed by handle
+   * id, so the renderer can place React Flow Handles on the same side the
+   * engine routes the edge from/to (P1-4). Absent when the node has no ports.
+   */
+  portSides?: {
+    source: Record<string, WorkflowPortSide>;
+    target: Record<string, WorkflowPortSide>;
+  };
 };
+
+/** Edge-port side used by the layout engine and mirroring on canvas handles. */
+export type WorkflowPortSide = "NORTH" | "EAST" | "SOUTH" | "WEST";
 
 /** Plain geometry point produced by the layout engine (not ELK-owned type). */
 export type WorkflowLayoutPoint = { x: number; y: number };
@@ -166,6 +178,8 @@ export type WorkflowLayoutEdge = {
   pathState: WorkflowEdgePathState;
   labelAlwaysVisible: boolean;
   sourceHandle?: string;
+  /** Short-name id of the ELK target port (e.g. "feedback:in"); matches a node target handle. */
+  targetHandle?: string;
   gateKind?: string;
   requiresHumanAccept?: boolean;
 };

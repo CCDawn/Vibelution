@@ -1,24 +1,33 @@
 /**
  * @xyflow/react composition for VWorkflowCanvas.
  * Node/edge/layout/state live in sibling modules — this file only wires them.
+ *
+ * Layout ownership: the auto-layout hook (production worker engine) drives
+ * geometry; this component renders hook output and honors the fit protocol
+ * (`initialFitRevision` once, explicit `fitAll` from controls).
  */
 import {
   Background,
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  useNodesInitialized,
+  useReactFlow,
   type Edge,
   type Node,
+  type NodeProps,
   type NodeTypes,
   type EdgeTypes,
   type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, type ReactElement, type ReactNode } from "react";
 
 import { cn } from "../../../lib/cn";
 import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
-import { layoutWorkflowCanvas } from "./workflowCanvasLayout";
+import type { WorkflowNodeSize } from "./workflowLayoutHash";
+import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
+import { createWorkflowLayoutEngine } from "./workflowElkClient";
 import { WorkflowAgentTaskNode } from "./WorkflowAgentTaskNode";
 import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
 import { WorkflowCanvasLegend } from "./WorkflowCanvasLegend";
@@ -28,6 +37,7 @@ import { WorkflowSemanticEdge } from "./WorkflowSemanticEdge";
 import { WorkflowStageRegionNode } from "./WorkflowStageRegionNode";
 import { WorkflowStartEndNode } from "./WorkflowStartEndNode";
 import { WorkflowSystemTaskNode } from "./WorkflowSystemTaskNode";
+import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
 
 export type ShadcnWorkflowCanvasProps = {
   graph: WorkflowLayoutInput;
@@ -44,14 +54,68 @@ export type ShadcnWorkflowCanvasProps = {
   showLegend?: boolean;
 };
 
-const nodeTypes: NodeTypes = {
-  stageRegion: WorkflowStageRegionNode,
-  agentTask: WorkflowAgentTaskNode,
-  humanGate: WorkflowHumanGateNode,
-  systemTask: WorkflowSystemTaskNode,
-  decision: WorkflowDecisionNode,
-  startEnd: WorkflowStartEndNode,
+type MeasuredNodeProps = {
+  id: string;
+  data: Record<string, unknown> & { nodeMeasureKey?: string };
+  children?: ReactNode;
 };
+
+/**
+ * Reports the rendered DOM size of a node to the auto-layout hook (P1-5).
+ *
+ * The outer React Flow node is styled with the ELK-committed size, so
+ * `offsetWidth/Height` would just echo that forced size back. We instead
+ * measure the CONTENT's natural size via `scrollWidth/scrollHeight` with
+ * `overflow: visible`: when the label/badge grows beyond the committed box,
+ * the scroll extent reflects the real minimum size the node needs, and
+ * calibration can relayout with it. Zero sizes (unmeasured / SSR / hidden)
+ * are skipped so calibration never feeds garbage into the layout hash.
+ *
+ * @internal exported for M-level tests only; not part of the VUI surface.
+ */
+export function NodeMeasureReporter({
+  id,
+  data,
+  onMeasure,
+  children,
+}: MeasuredNodeProps & { onMeasure: (id: string, size: WorkflowNodeSize) => void }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const measureKey = data?.nodeMeasureKey ?? id;
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Natural content size (may exceed the ELK-committed box), floor at the
+    // committed box so calibration never shrinks a node below what ELK placed.
+    const width = Math.max(el.offsetWidth, el.scrollWidth);
+    const height = Math.max(el.offsetHeight, el.scrollHeight);
+    if (width <= 0 || height <= 0) return;
+    onMeasure(measureKey, { width, height });
+  });
+  return (
+    <div ref={ref} className="h-full w-full overflow-visible" data-node-measure={measureKey}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Wraps a node renderer so it reports its rendered DOM size back to the
+ * auto-layout hook (P1-5).
+ *
+ * @internal exported for M-level tests only; not part of the VUI surface.
+ */
+export function wrapNodeForMeasurement(
+  Base: (props: NodeProps) => ReactElement,
+  onMeasure: (id: string, size: WorkflowNodeSize) => void,
+): (props: NodeProps) => ReactElement {
+  return function MeasuredNode(props: NodeProps) {
+    return (
+      <NodeMeasureReporter id={props.id} data={(props.data ?? {}) as never} onMeasure={onMeasure}>
+        <Base {...props} />
+      </NodeMeasureReporter>
+    );
+  };
+}
 
 const edgeTypes: EdgeTypes = {
   workflowSemantic: WorkflowSemanticEdge,
@@ -83,9 +147,42 @@ function WorkflowCanvasInner({
   height = "100%",
   showLegend = true,
 }: ShadcnWorkflowCanvasProps) {
-  const layout = useMemo(() => layoutWorkflowCanvas(graph), [graph]);
+  const rf = useReactFlow();
+  const fitAll = useCallback(() => {
+    void rf.fitView({ padding: 0.1, duration: 200 });
+  }, [rf]);
+
+  const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine);
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
-  const fitOnceRef = useRef(false);
+  const nodesInitialized = useNodesInitialized();
+
+  // P1-5: measured node types report rendered DOM sizes back to the layout
+  // hook so the second pass of the layout uses real geometry.
+  const measuredNodeTypes: NodeTypes = useMemo(
+    () => ({
+      stageRegion: wrapNodeForMeasurement(WorkflowStageRegionNode, layout.reportMeasuredSize),
+      agentTask: wrapNodeForMeasurement(WorkflowAgentTaskNode, layout.reportMeasuredSize),
+      humanGate: wrapNodeForMeasurement(WorkflowHumanGateNode, layout.reportMeasuredSize),
+      systemTask: wrapNodeForMeasurement(WorkflowSystemTaskNode, layout.reportMeasuredSize),
+      decision: wrapNodeForMeasurement(WorkflowDecisionNode, layout.reportMeasuredSize),
+      startEnd: wrapNodeForMeasurement(WorkflowStartEndNode, layout.reportMeasuredSize),
+    }),
+    [layout.reportMeasuredSize],
+  );
+
+  // Fit protocol: fit exactly once when the first layout commits AND the committed
+  // nodes have entered React Flow internals. Never re-fit for runtime-only updates
+  // (status/selection/run events). `fitAll` from controls stays explicit.
+  useWorkflowInitialFit({
+    initialFitRevision: layout.initialFitRevision,
+    layoutRevision: layout.layoutRevision,
+    structureKey: layout.structureKey,
+    nodesInitialized,
+    fit: () => {
+      void rf.fitView({ padding: 0.08 });
+    },
+    acknowledgeInitialFit: layout.acknowledgeInitialFit,
+  });
 
   const stageIndexById = useMemo(() => {
     const map = new Map<string, number>();
@@ -134,12 +231,15 @@ function WorkflowCanvasInner({
             blockedReason: node.blockedReason,
             description: node.description,
             primaryRoleKey: node.primaryRoleKey,
+            portSides: node.portSides,
+            sourceHandleIds: node.sourceHandleIds,
+            decisionOutcomeIds: node.decisionOutcomeIds,
           },
           style: { width: node.width, height: node.height },
           selectable: true,
           draggable: false,
           selected: node.id === selectedNodeId,
-          zIndex: 1,
+          zIndex: 2,
         } satisfies Node;
       }),
     [layout.nodes, currentSet, selectedNodeId, stageIndexById],
@@ -152,6 +252,7 @@ function WorkflowCanvasInner({
         source: edge.source,
         target: edge.target,
         sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
         type: "workflowSemantic",
         animated: edge.pathState === "active" || edge.pathState === "attention",
         markerEnd: {
@@ -174,8 +275,10 @@ function WorkflowCanvasInner({
           semanticKind: edge.semanticKind,
           pathState: edge.pathState,
           labelAlwaysVisible: edge.labelAlwaysVisible,
+          sections: edge.sections,
+          labelBounds: edge.labelBounds,
         },
-        zIndex: 2,
+        zIndex: 1,
       })),
     [layout.edges],
   );
@@ -211,10 +314,8 @@ function WorkflowCanvasInner({
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          nodeTypes={nodeTypes}
+          nodeTypes={measuredNodeTypes}
           edgeTypes={edgeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.08, minZoom: 0.45, maxZoom: 1.35 }}
           minZoom={0.35}
           maxZoom={1.6}
           nodesDraggable={false}
@@ -228,18 +329,27 @@ function WorkflowCanvasInner({
           style={{ width: "100%", height: "100%" }}
           className={fillHost ? "h-full w-full" : undefined}
           defaultEdgeOptions={{ type: "workflowSemantic" }}
-          onInit={(instance) => {
-            if (!fitOnceRef.current) {
-              fitOnceRef.current = true;
-              void instance.fitView({ padding: 0.08 });
-            }
-          }}
         >
           <Background gap={20} size={1} color="var(--vui-border, #e4e4e7)" />
-          <WorkflowCanvasControls runtimeCurrentNodeIds={runtimeCurrentNodeIds} />
+          <WorkflowCanvasControls
+            runtimeCurrentNodeIds={runtimeCurrentNodeIds}
+            onFitAll={fitAll}
+          />
           {showLegend ? <WorkflowCanvasLegend /> : null}
         </ReactFlow>
       </div>
+      {layout.degraded ? (
+        <div
+          className="absolute right-3 top-3 z-20 max-w-[16rem] rounded-md border border-[var(--state-warning,#d97706)]/50 bg-[var(--vui-surface-panel)] px-2.5 py-1.5 text-[11px] leading-snug text-[var(--state-warning,#d97706)] shadow-sm"
+          data-vui="workflow-degraded"
+          role="status"
+        >
+          <span className="font-semibold">布局降级</span>
+          <span className="block truncate text-[var(--fg-secondary)]" title={layout.degraded.reason}>
+            {layout.degraded.reason}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
