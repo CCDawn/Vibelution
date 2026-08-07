@@ -1,13 +1,14 @@
 /**
- * Two-level layout orchestrator.
+ * Two-level layout orchestrator (spacer-node outer ELK architecture).
  *
  *   phase A: stage-internal ELK DOWN layouts (independent per stage)
- *   phase B: stage meta-graph ELK RIGHT layout (three meta nodes)
- *   composition: task absolute = meta + local; internal edge sections offset
- *   cross-stage router: gateway orthogonal channels for inter-stage edges
+ *   phase B: OUTER ELK graph — three stage meta nodes + virtual label spacer
+ *            nodes; cross-stage edges become two layout legs through the
+ *            spacer; ELK owns stage positions, gaps, routes and label space
+ *   composition: task absolute = stage meta position + internal local
  *
- * Produces the same public `WorkflowLayoutResult` shape as the previous
- * single-compound pipeline so the canvas/edge consumers stay unchanged.
+ * No fixed channel gap, no hand-written cross-stage router, no hand-computed
+ * label bounds in the production path — ELK is the single geometry authority.
  */
 import type { ElkNode } from "elkjs/lib/elk-api";
 
@@ -20,10 +21,10 @@ import type {
 import { resolveElkPorts } from "./workflowElkPorts";
 import { buildStageSubgraphs } from "./workflowStageSubgraphAdapter";
 import { consumeStageLayout, layoutStages } from "./workflowStageLayout";
-import { buildStageMetaGraph } from "./workflowStageMetaGraphAdapter";
-import { composeLayout } from "./workflowStageComposition";
-import { portPoint, routeCrossStageEdge } from "./workflowCrossStageRouter";
-import { rectOf } from "./workflowLayoutGeometry";
+import { buildOuterElkGraph, type OuterEdgeSpec } from "./workflowOuterElkGraphAdapter";
+import { layoutOuter } from "./workflowOuterElkLayout";
+import { composeFinalLayout } from "./workflowLayoutComposer";
+import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 import type { WorkflowNodeSize } from "./workflowLayoutHash";
 
 export type TwoLevelLayoutEngine = {
@@ -35,7 +36,7 @@ export async function layoutTwoLevel(
   engine: TwoLevelLayoutEngine,
   sizes?: ReadonlyMap<string, WorkflowNodeSize>,
 ): Promise<WorkflowLayoutResult> {
-  // Phase A: per-stage subgraphs + DOWN layouts.
+  // Phase A: per-stage subgraphs + DOWN layouts (parallel).
   const bundle = buildStageSubgraphs(input, sizes);
   const stageLayouts = await layoutStages(
     bundle.subgraphs.map((s) => ({ stageId: s.stageId, root: s.root, nodeIds: s.nodeIds })),
@@ -45,131 +46,62 @@ export async function layoutTwoLevel(
   for (const local of stageLayouts) {
     localLayouts.set(local.stageId, local);
   }
-
-  // Phase B: deterministic stage meta row (RIGHT, definition order, channel
-  // gap). ELK cannot order unconnected compounds, so the meta placement is a
-  // pure function of the phase-A boxes — no engine call needed.
   const stageBoxes = new Map(stageLayouts.map((s) => [s.stageId, s.box] as const));
-  const meta = buildStageMetaGraph(input, stageBoxes).positions;
 
-  // Composition: absolute node positions + internal edge sections/labels.
-  const composed = composeLayout({ input, localLayouts, meta, stageBoxes });
-  const nodes: WorkflowLayoutNode[] = composed.nodes.map((node) =>
-    node.kind === "task" ? { ...node, portSides: portSidesOf(node.id, input, bundle) } : node,
-  );
-
-  // Edges.
-  const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
-  const stageById = new Map(
-    nodes.filter((n) => n.kind === "stage").map((n) => [n.stageId, n] as const),
-  );
+  // Outer edge specs: cross-stage edges only, with label geometry + gateway
+  // anchors from the internal task centers.
   const stageOf = new Map(input.nodes.map((n) => [n.nodeId, n.stageId] as const));
-
-  const edges: WorkflowLayoutResult["edges"] = input.edges.map((edge) => {
-    const internalSections = composed.internalSections.get(edge.edgeId);
-    const assignment = bundle.byEdgeId.get(edge.edgeId);
-    const sourceStageId = stageOf.get(edge.fromNodeId);
-    const targetStageId = stageOf.get(edge.toNodeId);
-    const targetHandle = assignment
-      ? shortNameOfTargetPort(assignment.targetPortId)
-      : undefined;
-
-    if (internalSections) {
-      return {
-        id: edge.edgeId,
-        source: edge.fromNodeId,
-        target: edge.toNodeId,
-        label: edge.label,
-        semanticKind: edge.semanticKind,
-        pathState: edge.pathState,
-        labelAlwaysVisible: edge.labelAlwaysVisible,
-        sourceHandle: edge.sourceHandle,
-        targetHandle,
-        gateKind: edge.gateKind,
-        requiresHumanAccept: edge.requiresHumanAccept,
-        sections: internalSections,
-        labelBounds: composed.internalLabels.get(edge.edgeId),
-      };
+  const edgeSpecs: OuterEdgeSpec[] = [];
+  for (const edge of input.edges) {
+    const fromStage = stageOf.get(edge.fromNodeId);
+    const toStage = stageOf.get(edge.toNodeId);
+    if (!fromStage || !toStage || fromStage === toStage) {
+      continue;
     }
-
-    // Cross-stage edge: gateway channel route.
-    const sourceNode = nodeById.get(edge.fromNodeId);
-    const targetNode = nodeById.get(edge.toNodeId);
-    const sourceStage = stageById.get(sourceStageId ?? "");
-    const targetStage = stageById.get(targetStageId ?? "");
-    if (!assignment || !sourceNode || !targetNode || !sourceStage || !targetStage) {
-      return {
-        id: edge.edgeId,
-        source: edge.fromNodeId,
-        target: edge.toNodeId,
-        label: edge.label,
-        semanticKind: edge.semanticKind,
-        pathState: edge.pathState,
-        labelAlwaysVisible: edge.labelAlwaysVisible,
-        sourceHandle: edge.sourceHandle,
-        targetHandle,
-        gateKind: edge.gateKind,
-        requiresHumanAccept: edge.requiresHumanAccept,
-        sections: [],
-        labelBounds: undefined,
-      };
+    const sourceLocal = localLayouts.get(fromStage);
+    const targetLocal = localLayouts.get(toStage);
+    const sourceTask = sourceLocal?.tasks.find((t) => t.id === edge.fromNodeId);
+    const targetTask = targetLocal?.tasks.find((t) => t.id === edge.toNodeId);
+    if (!sourceTask || !targetTask) {
+      continue;
     }
-    const sourceSpec = bundle.byNodeId.get(edge.fromNodeId)?.find((p) => p.id === assignment.sourcePortId);
-    const targetSpec = bundle.byNodeId.get(edge.toNodeId)?.find((p) => p.id === assignment.targetPortId);
-    const sourceSide = sourceSpec?.side ?? "EAST";
-    const targetSide = targetSpec?.side ?? "WEST";
-    const sections = routeCrossStageEdge({
+    edgeSpecs.push({
       edge,
-      source: {
-        taskId: edge.fromNodeId,
-        portId: assignment.sourcePortId,
-        side: sourceSide,
-        point: portPoint(rectOf(sourceNode), sourceSide),
-      },
-      target: {
-        taskId: edge.toNodeId,
-        portId: assignment.targetPortId,
-        side: targetSide,
-        point: portPoint(rectOf(targetNode), targetSide),
-      },
-      sourceStage: rectOf(sourceStage),
-      targetStage: rectOf(targetStage),
+      labelSpec: resolveEdgeLabelSpec(edge.label),
+      sourceAnchorY: sourceTask.y + sourceTask.height / 2,
+      targetAnchorY: targetTask.y + targetTask.height / 2,
     });
-    return {
-      id: edge.edgeId,
-      source: edge.fromNodeId,
-      target: edge.toNodeId,
-      label: edge.label,
-      semanticKind: edge.semanticKind,
-      pathState: edge.pathState,
-      labelAlwaysVisible: edge.labelAlwaysVisible,
-      sourceHandle: edge.sourceHandle,
-      targetHandle,
-      gateKind: edge.gateKind,
-      requiresHumanAccept: edge.requiresHumanAccept,
-      sections,
-      labelBounds: crossStageLabelBounds(
-        sections,
-        edge.edgeId,
-        (targetStage.x - (sourceStage.x + sourceStage.width)),
-        sourceStage.x + sourceStage.width,
-        targetStage.x,
-      ),
-    };
-  });
+  }
 
-  return { nodes, edges, width: composed.size.width, height: composed.size.height };
+  // Phase B: real outer ELK layout (spacer-node architecture).
+  const outerGraph = buildOuterElkGraph(input, stageBoxes, edgeSpecs);
+  const outer = await layoutOuter(outerGraph, engine);
+
+  // Port sides / target handles (same semantics as before).
+  const portSidesByNode = buildPortSides(input, bundle);
+  const targetHandleByEdge = new Map<string, string>();
+  for (const edge of input.edges) {
+    const assignment = bundle.byEdgeId.get(edge.edgeId);
+    if (assignment) {
+      targetHandleByEdge.set(edge.edgeId, shortNameOfTargetPort(assignment.targetPortId));
+    }
+  }
+
+  // Final projection.
+  return composeFinalLayout({
+    input,
+    localLayouts,
+    outer,
+    stageBoxes,
+    portSidesByNode,
+    targetHandleByEdge,
+  });
 }
 
-function portSidesOf(
-  nodeId: string,
+function buildPortSides(
   input: WorkflowLayoutInput,
   bundle: ReturnType<typeof buildStageSubgraphs>,
-): WorkflowLayoutNode["portSides"] {
-  const specs = bundle.byNodeId.get(nodeId);
-  if (!specs || specs.length === 0) {
-    return undefined;
-  }
+): Map<string, WorkflowLayoutNode["portSides"]> {
   const roleOfPort = new Map<string, "source" | "target">();
   for (const assignment of bundle.byEdgeId.values()) {
     roleOfPort.set(assignment.sourcePortId, "source");
@@ -182,49 +114,26 @@ function portSidesOf(
       handleIdOfSourcePort.set(assignment.sourcePortId, edge.sourceHandle);
     }
   }
-  const source: Record<string, WorkflowPortSide> = {};
-  const target: Record<string, WorkflowPortSide> = {};
-  for (const spec of specs) {
-    const role = roleOfPort.get(spec.id) ?? "source";
-    if (role === "source") {
-      source[handleIdOfSourcePort.get(spec.id) ?? spec.id] = spec.side;
-    } else {
-      target[shortNameOfTargetPort(spec.id)] = spec.side;
+  const map = new Map<string, WorkflowLayoutNode["portSides"]>();
+  for (const nodeId of bundle.byNodeId.keys()) {
+    const specs = bundle.byNodeId.get(nodeId);
+    if (!specs || specs.length === 0) continue;
+    const source: Record<string, WorkflowPortSide> = {};
+    const target: Record<string, WorkflowPortSide> = {};
+    for (const spec of specs) {
+      const role = roleOfPort.get(spec.id) ?? "source";
+      if (role === "source") {
+        source[handleIdOfSourcePort.get(spec.id) ?? spec.id] = spec.side;
+      } else {
+        target[shortNameOfTargetPort(spec.id)] = spec.side;
+      }
     }
+    map.set(nodeId, { source, target });
   }
-  return { source, target };
+  return map;
 }
 
 function shortNameOfTargetPort(elkPortId: string): string {
   const lastColon = elkPortId.lastIndexOf(":");
   return lastColon > 0 ? elkPortId.slice(0, lastColon) : elkPortId;
 }
-
-/** Cross-stage label anchor: centered in the gap on the horizontal channel
- * leg that actually spans the gap, sized to fit it so the label never
- * overlaps a stage body. */
-function crossStageLabelBounds(
-  sections: WorkflowLayoutResult["edges"][number]["sections"],
-  edgeId: string,
-  channelGap: number,
-  gapLeft: number,
-  gapRight: number,
-): WorkflowLayoutResult["edges"][number]["labelBounds"] {
-  void edgeId;
-  const channel = sections.find(
-    (s) =>
-      Math.abs(s.start.y - s.end.y) < 1e-6 &&
-      s.start.x >= gapLeft - 1e-3 &&
-      s.end.x <= gapRight + 1e-3 &&
-      s.end.x - s.start.x >= 32,
-  );
-  if (!channel) {
-    return undefined;
-  }
-  const cx = (channel.start.x + channel.end.x) / 2;
-  const cy = channel.start.y;
-  const width = Math.max(80, Math.min(152, channelGap - 12));
-  return { x: cx - width / 2, y: cy - 13, width, height: 26 };
-}
-
-export type { WorkflowLayoutResult };

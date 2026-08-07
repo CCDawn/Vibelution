@@ -23,6 +23,7 @@ import type {
   WorkflowLabelBounds,
 } from "../../../product/workflow/workflowCanvasTypes";
 import { resolveEdgeStroke } from "./workflowCanvasState";
+import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 import {
   analyzeEdgeSections,
   resolveEdgeLabelAnchor,
@@ -60,6 +61,10 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
     [edgeData?.labelBounds],
   );
   const labelFault = Boolean(label) && !edgeData?.labelBounds;
+  // Shared label geometry contract: the rendered box is exactly the box the
+  // layout claimed (spacer size), and long text is truncated the same way in
+  // layout and render.
+  const labelSpec = useMemo(() => resolveEdgeLabelSpec(label), [label]);
 
   const showLabel = Boolean(label) && (always || hovered || pathState === "active" || pathState === "attention") && labelAnchor !== null;
 
@@ -103,9 +108,12 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
               position: "absolute",
               transform: `translate(-50%, -50%) translate(${labelAnchor.x}px,${labelAnchor.y}px)`,
               pointerEvents: "all",
+              width: labelSpec.width,
+              height: labelSpec.height,
             }}
             className={cn(
-              "max-w-[9.5rem] truncate rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-tight shadow-sm",
+              "truncate rounded-md border text-center text-[11px] font-medium leading-tight shadow-sm",
+              "flex items-center justify-center px-1.5",
               "border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] text-[var(--fg-secondary)]",
               pathState === "active" ? "border-[color-mix(in_srgb,var(--accent-cool)_40%,var(--vui-border-subtle))] text-[var(--accent-cool)]" : "",
               pathState === "attention" ? "border-[color-mix(in_srgb,var(--state-warning)_40%,var(--vui-border-subtle))] text-[var(--state-warning)]" : "",
@@ -114,10 +122,11 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
             data-vui="workflow-edge-label"
             data-semantic={semanticKind}
             data-path-state={pathState}
+            title={labelFault ? undefined : label}
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => setHovered(false)}
           >
-            {label}
+            {labelFault ? label : labelSpec.displayText}
           </div>
         </EdgeLabelRenderer>
       ) : null}
