@@ -551,7 +551,10 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain("file loaded");
     expect(html).toContain("完成");
     expect(html).not.toContain("legacy duplicate final");
-    expect(html).toContain("codexTranscriptCommentaryCell");
+    // Commentary is process-trail "思考" with height-capped scroll body.
+    expect(html).toContain("thoughtScrollBody");
+    expect(html).toContain('data-thought-scroll-body="true"');
+    expect(html).toContain(">思考<");
     expect(html).toContain("codexTranscriptFinalCell");
   });
 
@@ -591,19 +594,18 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-transcript-cell-kind="reasoning_summary"');
     expect(html).toContain("codexTranscriptReasoningHeader");
     expect(html).toContain('data-thought-expanded="true"');
-    expect(html).toContain('data-thought-section="reasoning:thought-stable-1"');
-    expect(html).toContain('aria-expanded="true"');
-    expect(html).toContain("运行中");
+    expect(html).toContain('data-thought-section="native-reasoning-running"');
     expect(html).toContain("statusSpinner");
-    // Live body must mount so SSE token growth is visible.
+    // Height-capped scroll body stays open so SSE token growth is visible.
+    expect(html).toContain('data-thought-scroll-body="true"');
+    expect(html).toContain('data-thought-scroll-streaming="true"');
     expect(html).toContain("codexTranscriptReasoningText");
     expect(html).toContain("重要发现！这次exec_command的失败模式非常关键。");
     expect(html).toContain("先定位shell_tools.py里的分派逻辑");
-    expect(html).not.toContain("codexTranscriptReasoningInlinePreview");
-    expect(html).toContain('type="button"');
+    expect(html).toContain("thoughtScrollBody");
   });
 
-  it("keeps completed reasoning_summary collapsed to a single-line preview by default", () => {
+  it("keeps completed reasoning_summary fully visible inside a height-capped scroll body", () => {
     const reasoning = "确认了：当前cli_tool环境是bash，不是PowerShell。这是关键证据，需要据此修正后续命令。";
     const html = renderConversation([
       {
@@ -630,13 +632,14 @@ describe("ConversationView native Codex transcript surface", () => {
       },
     ]);
 
-    expect(html).toContain('data-thought-expanded="false"');
-    expect(html).toContain("codexTranscriptReasoningInlinePreview");
-    // Markdown/inline preview may normalize word boundaries around Latin tokens.
+    // Product contract: thought+tool chrono trail keeps bodies open; long text scrolls inside max-h box.
+    expect(html).toContain('data-thought-expanded="true"');
+    expect(html).toContain('data-thought-scroll-body="true"');
+    expect(html).toContain("thoughtScrollBody");
     expect(html).toContain("确认了：当前");
     expect(html).toContain("cli_tool");
     expect(html).toContain("bash");
-    expect(html).not.toContain("codexTranscriptReasoningText");
+    expect(html).toContain("codexTranscriptReasoningText");
     expect(html).not.toContain("statusSpinner");
   });
 
@@ -1054,8 +1057,9 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toMatch(/展开或收起工具结果：/);
     expect(html).toContain('data-codex-terminal-detail="true"');
     expect(html).toContain(">Shell<");
-    expect(html).toContain("$ git status --short");
-    expect(html).toContain("M web/src/components/conversation/ConversationView.tsx");
+    // Command subject stays on the process tool row in chrono trail.
+    expect(html).toContain("git status --short");
+    expect(html).toContain('data-codex-tool-subject="true"');
     expect(html).not.toContain("指令与结果");
     expect(html).not.toContain(meaninglessSummary);
     expect(html).not.toContain("dirty_summary");

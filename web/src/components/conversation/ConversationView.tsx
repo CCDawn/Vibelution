@@ -304,6 +304,39 @@ const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
 
+/** Height-capped thought body; sticks to bottom while streaming. */
+function ThoughtScrollBody({
+  text,
+  streaming,
+  className,
+}: {
+  text: string;
+  streaming: boolean;
+  className?: string;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!streaming) {
+      return;
+    }
+    const node = scrollRef.current;
+    if (!node) {
+      return;
+    }
+    node.scrollTop = node.scrollHeight;
+  }, [streaming, text]);
+  return (
+    <div
+      ref={scrollRef}
+      className={[styles.thoughtScrollBody, className].filter(Boolean).join(" ")}
+      data-thought-scroll-body="true"
+      data-thought-scroll-streaming={streaming ? "true" : undefined}
+    >
+      <pre className={styles.codexTranscriptReasoningText}>{text}</pre>
+    </div>
+  );
+}
+
 const ConversationTurnRow = React.memo(function ConversationTurnRow({
   renderTurn,
 }: ConversationTurnRowProps) {
@@ -1962,13 +1995,22 @@ export function ConversationView({
       if (!text || isNoFinalAnswerStatusContent(text) || isStreamingStatusPlaceholderContent(text)) {
         return null;
       }
-      const assistantPhaseClassName = cell.phase === "commentary"
-        ? styles.codexTranscriptCommentaryCell
-        : styles.codexTranscriptFinalCell;
+      // Commentary is process-trail "思考": same chronological lane as tools, capped body.
+      if (cell.phase === "commentary") {
+        return renderCodexThoughtScrollCell(message, {
+          cellId: cell.id,
+          text,
+          status: cell.status,
+          tone: cell.tone,
+          title: lang === "zh" ? "思考" : "Thinking",
+          phase: "commentary",
+          channel: cell.channel,
+        });
+      }
       return (
         <section
           key={cell.id}
-          className={[styles.codexTranscriptCell, styles.codexTranscriptAssistantCell, assistantPhaseClassName].filter(Boolean).join(" ")}
+          className={[styles.codexTranscriptCell, styles.codexTranscriptAssistantCell, styles.codexTranscriptFinalCell].filter(Boolean).join(" ")}
           data-codex-transcript-cell-kind={cell.kind}
           data-codex-transcript-cell-status={cell.status}
           data-codex-transcript-cell-tone={cell.tone}
@@ -2167,6 +2209,67 @@ export function ConversationView({
     );
   }
 
+  /**
+   * Process-trail thought box (reasoning + commentary): always shown in chrono order
+   * with tools; body is height-capped and scrolls when long.
+   */
+  function renderCodexThoughtScrollCell(
+    message: ConversationMessage,
+    input: {
+      cellId: string;
+      text: string;
+      status: CodexTranscriptCell["status"];
+      tone: CodexTranscriptCell["tone"];
+      title: string;
+      phase?: string;
+      channel?: string;
+      kind?: CodexTranscriptCell["kind"];
+      meta?: string;
+    },
+  ) {
+    const fullText = String(input.text || "").trim();
+    if (!fullText) {
+      return null;
+    }
+    const isLive = input.status === "running" || input.status === "pending" || Boolean(message.streaming);
+    const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
+    return (
+      <section
+        key={input.cellId}
+        className={[
+          styles.codexTranscriptCell,
+          styles.codexTranscriptReasoningCell,
+          toneClassName,
+        ].filter(Boolean).join(" ")}
+        data-codex-transcript-cell-kind={input.kind || "assistant_markdown"}
+        data-codex-transcript-cell-status={input.status}
+        data-codex-transcript-cell-tone={input.tone}
+        data-codex-transcript-cell-channel={input.channel || undefined}
+        data-codex-transcript-cell-phase={input.phase ?? ""}
+        data-conversation-part-key={input.cellId}
+        data-thought-section={input.cellId}
+        data-thought-expanded="true"
+        role={isLive ? "status" : undefined}
+        aria-live={isLive ? "polite" : undefined}
+      >
+        <div className={styles.codexTranscriptReasoningHeader} aria-hidden={false}>
+          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+            {isLive
+              ? <LoaderCircle className={styles.statusSpinner} size={14} />
+              : <BrainCircuit size={14} />}
+          </span>
+          <span className={styles.codexTranscriptReasoningHeaderBody}>
+            <span className={styles.codexTranscriptReasoningTitleRow}>
+              <span className={styles.codexTranscriptCellTitle}>{input.title}</span>
+              {input.meta ? <span className={styles.codexTranscriptCellMeta}>{input.meta}</span> : null}
+            </span>
+          </span>
+        </div>
+        <ThoughtScrollBody text={fullText} streaming={isLive} />
+      </section>
+    );
+  }
+
   function renderCodexReasoningSummaryCell(
     message: ConversationMessage,
     cell: CodexTranscriptCell,
@@ -2175,84 +2278,17 @@ export function ConversationView({
     if (!fullText) {
       return null;
     }
-    // Live SSE: expand while the model is still thinking so tokens stream in the body.
-    // When the cell settles, default flips false and expansion defaults auto-collapse
-    // (unless the user explicitly toggled the section open/closed).
-    const defaultExpanded = cell.status === "running" || cell.status === "pending";
-    const sectionId = reasoningExpansionSectionId(cell);
-    const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
-    const inlinePreview = humanizeReasoningPreview(fullText);
-    const title = codexTranscriptCellTitle(cell);
-    const meta = codexTranscriptCellMeta(cell);
-    const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
-    const toggleLabel = expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden");
-    const toggleReasoning = (event?: { stopPropagation?: () => void }) => {
-      event?.stopPropagation?.();
-      toggleSection(message.id, sectionId, defaultExpanded);
-    };
-    return (
-      <section
-        key={cell.id}
-        className={[
-          styles.codexTranscriptCell,
-          styles.codexTranscriptReasoningCell,
-          toneClassName,
-        ].filter(Boolean).join(" ")}
-        data-codex-transcript-cell-kind={cell.kind}
-        data-codex-transcript-cell-status={cell.status}
-        data-codex-transcript-cell-tone={cell.tone}
-        data-conversation-part-key={cell.id}
-        data-thought-section={sectionId}
-        data-thought-expanded={expanded ? "true" : "false"}
-        role={cell.status === "running" || cell.status === "pending" ? "status" : undefined}
-        aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
-      >
-        <VButton
-          type="button"
-          contentLayout="plain"
-          className={styles.codexTranscriptReasoningHeader}
-          aria-expanded={expanded}
-          aria-label={toggleLabel}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleReasoning();
-          }}
-        >
-          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
-            {cell.status === "running" || cell.status === "pending"
-              ? <LoaderCircle className={styles.statusSpinner} size={14} />
-              : <BrainCircuit size={14} />}
-          </span>
-          <span className={styles.codexTranscriptReasoningHeaderBody}>
-            <span className={styles.codexTranscriptReasoningTitleRow}>
-              <span className={styles.codexTranscriptCellTitle}>{title}</span>
-              {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
-              {!expanded && inlinePreview ? (
-                <>
-                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-                  <span className={styles.codexTranscriptReasoningInlinePreview}>{inlinePreview}</span>
-                </>
-              ) : null}
-            </span>
-          </span>
-          {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
-        </VButton>
-        {expanded ? (
-          <VButton
-            type="button"
-            contentLayout="plain"
-            className={styles.codexTranscriptReasoningTextButton}
-            aria-label={toggleLabel}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleReasoning();
-            }}
-          >
-            <pre className={styles.codexTranscriptReasoningText}>{fullText}</pre>
-          </VButton>
-        ) : null}
-      </section>
-    );
+    return renderCodexThoughtScrollCell(message, {
+      cellId: cell.id,
+      text: fullText,
+      status: cell.status,
+      tone: cell.tone,
+      title: codexTranscriptCellTitle(cell) || (lang === "zh" ? "思考" : "Thinking"),
+      phase: cell.phase,
+      channel: cell.channel,
+      kind: cell.kind,
+      meta: codexTranscriptCellMeta(cell) || undefined,
+    });
   }
 
   function codexTranscriptVisibleSummary(cell: CodexTranscriptCell) {
@@ -2630,18 +2666,12 @@ export function ConversationView({
           {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
         </VButton>
         {expanded ? (
-          <VButton
-            type="button"
-            contentLayout="plain"
-            className={styles.timelineThoughtTextButton}
-            aria-label={toggleLabel}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleSection(message.id, sectionId, defaultExpanded);
-            }}
-          >
-            <pre className={styles.timelineThoughtText}>{item.text}</pre>
-          </VButton>
+          <div className={styles.codexTranscriptReasoningTextButton}>
+            <ThoughtScrollBody
+              text={item.text}
+              streaming={item.status === "running" || item.status === "pending" || Boolean(message.streaming)}
+            />
+          </div>
         ) : null}
       </section>
     );

@@ -105,6 +105,25 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain("处理中");
   });
 
+  it("settles to a clickable collapsed summary after the turn finishes streaming", () => {
+    const settledTools = [
+      processCell("completed"),
+      { ...processCell("completed"), id: "process-completed-2" },
+      { ...processCell("completed"), id: "process-completed-3" },
+    ];
+    const html = renderToStaticMarkup(
+      <ConversationProcessDisclosure cells={settledTools} language="zh" turnStreaming={false}>
+        <span>完整流程步骤</span>
+      </ConversationProcessDisclosure>,
+    );
+    expect(html).toContain('data-codex-process-state="completed"');
+    expect(html).toContain("已处理");
+    expect(html).toContain("3 步");
+    expect(html).toContain('data-codex-process-expanded="false"');
+    // SSR keeps content inspectable; client remounts on click-expand with animation.
+    expect(html).toContain("完整流程步骤");
+  });
+
   it("keeps a failed process collapsed with tool failure summary", () => {
     const html = renderToStaticMarkup(
       <ConversationProcessDisclosure cells={[processCell("failed")]} language="en">
