@@ -43,8 +43,8 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
   const sections = edgeData?.sections;
   const edgePath = useMemo(() => sectionsToSvgPath(sections ?? []), [sections]);
   const labelAnchor = useMemo(
-    () => resolveEdgeLabelAnchor(sections ?? [], edgeData?.labelBounds),
-    [sections, edgeData?.labelBounds],
+    () => resolveEdgeLabelAnchor(edgeData?.labelBounds),
+    [edgeData?.labelBounds],
   );
 
   const showLabel = Boolean(label) && (always || hovered || pathState === "active" || pathState === "attention") && labelAnchor !== null;
