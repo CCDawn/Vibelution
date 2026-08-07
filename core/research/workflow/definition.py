@@ -215,6 +215,16 @@ def _edges() -> tuple[WorkflowEdgeSpec, ...]:
         # Iteration pipeline
         WorkflowEdgeSpec("e_run_eval", "controlled_run", "result_evaluation", "运行产物", auto, ("run_artifacts",)),
         WorkflowEdgeSpec("e_eval_decision", "result_evaluation", "iteration_decision", "评价报告", auto, ("evaluation_report",)),
+        # Conditional routes from iteration_decision (must match LangGraph conditional edges).
+        # revise_protocol forks a child WorkflowRun — no in-run edge.
+        WorkflowEdgeSpec(
+            "e_decision_rerun",
+            "iteration_decision",
+            "controlled_run",
+            "同协议重跑",
+            auto,
+            ("iteration_decision", "frozen_protocol"),
+        ),
         WorkflowEdgeSpec(
             "e_decision_promo",
             "iteration_decision",
@@ -225,10 +235,27 @@ def _edges() -> tuple[WorkflowEdgeSpec, ...]:
             requiresHumanAccept=True,
         ),
         WorkflowEdgeSpec(
+            "e_decision_rollback",
+            "iteration_decision",
+            "candidate_promotion",
+            "回滚提案",
+            GateKind.PROMOTION,
+            ("iteration_decision",),
+            requiresHumanAccept=True,
+        ),
+        WorkflowEdgeSpec(
+            "e_decision_stop",
+            "iteration_decision",
+            "result_package",
+            "停止并打包",
+            auto,
+            ("iteration_decision",),
+        ),
+        WorkflowEdgeSpec(
             "e_promo_package",
             "candidate_promotion",
             "result_package",
-            "确认晋升",
+            "确认晋升/回滚",
             GateKind.HUMAN,
             ("promotion_proposal",),
             requiresHumanAccept=True,
