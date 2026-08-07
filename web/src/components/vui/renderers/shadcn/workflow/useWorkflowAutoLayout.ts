@@ -42,6 +42,13 @@ export type UseWorkflowAutoLayoutResult = {
   degraded: { reason: string } | null;
   /** Set once to the first committed revision; consumed by the canvas. */
   initialFitRevision: number | null;
+  /**
+   * Structural identity (topology hash). Unchanged by runtime-only updates
+   * and by size calibration; changes when the run topology switches. Used by
+   * the initial-fit hook to tell "same structure, calibration bump" apart
+   * from "new topology committed" (P1-1 race).
+   */
+  structureKey: string;
   acknowledgeInitialFit: () => void;
   /** Explicit fit-all action for WorkflowCanvasControls. */
   fitAll: () => void;
@@ -126,6 +133,17 @@ export function useWorkflowAutoLayout(
         if (cancelled || token !== tokenRef.current) {
           return;
         }
+        // Diagnose BEFORE committing anything: a faulty layout (label without
+        // bounds, broken section chain) must NOT overwrite the last-good
+        // revision/cache/display — only the degraded flag changes.
+        const diagnostic = layoutDiagnostic(result);
+        if (diagnostic) {
+          setDegraded(diagnostic);
+          if (cache) {
+            setDisplay(mergeRuntimeFields(cache, graph));
+          }
+          return;
+        }
         const previousRevision = revisionRef.current;
         const nextRevision = previousRevision + 1;
         revisionRef.current = nextRevision;
@@ -139,7 +157,7 @@ export function useWorkflowAutoLayout(
           nodes: result.nodes,
           edges: result.edges,
         };
-        setDegraded(layoutDiagnostic(result));
+        setDegraded(null);
         setDisplay(mergeRuntimeFields(cacheRef.current, input));
       })
       .catch((error: unknown) => {
@@ -179,6 +197,7 @@ export function useWorkflowAutoLayout(
     layoutRevision,
     degraded,
     initialFitRevision,
+    structureKey: hash.structure,
     acknowledgeInitialFit,
     fitAll,
     reportMeasuredSize,
