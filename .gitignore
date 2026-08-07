@@ -72,6 +72,7 @@ htmlcov/
 
 # --- Web workbench generated outputs ---
 /web/dist/
+/web/dist-probe/
 /web/.codex-temp/
 /web/*.tsbuildinfo
 /web/vite.config.js

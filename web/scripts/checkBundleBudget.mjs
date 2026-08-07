@@ -1,8 +1,14 @@
 import { readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 export const DEFAULT_ASSETS_DIR = fileURLToPath(new URL("../dist/assets/", import.meta.url));
+
+// The production ELK worker chunk name is derived from the real Vite build
+// output (`elkjs/lib/elk-worker.min.js` -> `elk-worker.min-<hash>.js`).
+// It is asserted on the real `dist` (presence + uniqueness + budget), not
+// guessed from fixtures.
+export const ELK_WORKER_ASSET_PATTERN = /^elk-worker(?:\.min)?-[\w-]+\.js$/;
 
 export const BUNDLE_BUDGETS = [
   {
@@ -39,6 +45,15 @@ export const BUNDLE_BUDGETS = [
     name: "known Teams SC phase residual",
     pattern: /^TeamsWorkbenchWithScPhase-[\w-]+\.js$/,
     maxBytes: 320 * 1024,
+  },
+  {
+    // ELK layout engine worker asset (elkjs lib/elk-worker.min.js), emitted
+    // by Vite as a separate worker chunk. Loaded on demand only when the
+    // workflow canvas first runs a layout. Must stay before the generic
+    // "route or feature chunks" rule because budget matching is first-match.
+    name: "known ELK worker chunk",
+    pattern: /^elk-worker(?:\.min)?-[\w-]+\.js$/,
+    maxBytes: 1800 * 1024,
   },
   {
     name: "route or feature chunks",
@@ -81,21 +96,68 @@ export function collectBundleBudgetEntries(assetsDir = DEFAULT_ASSETS_DIR) {
     .sort((left, right) => right.bytes - left.bytes);
 }
 
-export function checkBundleBudget(assetsDir = DEFAULT_ASSETS_DIR) {
+export function checkBundleBudget(assetsDir = DEFAULT_ASSETS_DIR, options = {}) {
+  // Production runs expect the ELK worker asset to exist (T1 wired it into
+  // the build). A missing or duplicated worker asset is a failure, not a
+  // green "no match". Tests can opt out for non-ELK fixture scenarios.
+  const expectElkWorker = options.expectElkWorker !== false;
   const entries = collectBundleBudgetEntries(assetsDir);
+  const failures = entries.filter((entry) => !entry.ok);
+
+  const workerEntries = entries.filter((entry) => ELK_WORKER_ASSET_PATTERN.test(entry.name));
+  if (expectElkWorker) {
+    if (workerEntries.length === 0) {
+      failures.push({
+        name: "<missing> expected ELK worker asset (dist/assets/elk-worker.min-*.js)",
+        bytes: 0,
+        maxBytes: ELK_WORKER_BUDGET_MAX_BYTES,
+        budgetName: "known ELK worker chunk",
+        ok: false,
+      });
+    } else if (workerEntries.length > 1) {
+      for (const extra of workerEntries.slice(1)) {
+        failures.push({
+          name: `${extra.name} (duplicate ELK worker asset)`,
+          bytes: extra.bytes,
+          maxBytes: ELK_WORKER_BUDGET_MAX_BYTES,
+          budgetName: "known ELK worker chunk",
+          ok: false,
+        });
+      }
+    }
+  }
+
   return {
     entries,
-    failures: entries.filter((entry) => !entry.ok),
+    failures,
+    elkWorker: {
+      present: workerEntries.length === 1,
+      assets: workerEntries.map((entry) => entry.name),
+    },
   };
 }
+
+const ELK_WORKER_BUDGET_MAX_BYTES =
+  BUNDLE_BUDGETS.find((budget) => budget.name === "known ELK worker chunk")?.maxBytes ?? 0;
 
 function formatBytes(bytes) {
   return `${(bytes / 1024).toFixed(1)} KiB`;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const assetsDir = process.argv[2] || DEFAULT_ASSETS_DIR;
-  const result = checkBundleBudget(assetsDir);
+if (
+  typeof process.argv[1] === "string" &&
+  import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, "/")}`).href
+) {
+  const expectElkWorker = process.argv.includes("--expect-elk-worker=0") === false;
+  const assetsDir =
+    process.argv.slice(2).find((arg) => !arg.startsWith("--")) || DEFAULT_ASSETS_DIR;
+  // T1–T4 transition: the plain `npm run build` no longer ships the probe
+  // page, and the product does not import `workflowElkClient` until T4, so no
+  // worker asset is emitted there yet. `--expect-elk-worker=0` records that
+  // state; the ELK worker asset presence/budget gate lives in
+  // `check:elk-worker-handshake` (which builds the probe dist). Once T4 wires
+  // the canvas, the normal build emits the asset and the flag is dropped.
+  const result = checkBundleBudget(assetsDir, { expectElkWorker });
   if (result.failures.length > 0) {
     console.error("Bundle budget exceeded:");
     for (const failure of result.failures) {
