@@ -671,7 +671,9 @@ def test_python_launcher_internal_focus_is_non_destructive(monkeypatch, capsys):
     monkeypatch.setattr(launcher, "_start_backend", lambda *_args, **_kwargs: calls.append("start") or {})
     monkeypatch.setattr(launcher, "_stop_backend", lambda: calls.append("stop") or {})
 
-    exit_code = launcher.main(["--action", "internal-focus"])
+    exit_code = launcher.main(
+        ["--action", "internal-focus", "--host", "127.0.0.1", "--port", "8000"],
+    )
 
     captured = capsys.readouterr()
     assert exit_code == 0
