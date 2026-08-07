@@ -1,7 +1,7 @@
 # VUI — product design system
 
 > **VUI is the stable product API.**
-> **shadcn-style + Radix is the required implementation backend for all product frontend.**
+> **shadcn-style + Radix is the preferred implementation backend for all product frontend.**
 > Routes and product pages **must not** import `@heroui/react` or `renderers/shadcn/*` directly.
 > Prefer page recipes (`VListDetailPage` / `VSplitWorkspace` / `VDenseOpsPage`) over hand-rolled shells.
 > **All elements** (not only recipes) need design specs under [`designs/`](./designs/README.md); catalog: [`designs/INDEX.md`](./designs/INDEX.md).
