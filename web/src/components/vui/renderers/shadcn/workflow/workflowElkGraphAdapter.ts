@@ -9,6 +9,7 @@
 import type { ElkNode } from "elkjs/lib/elk-api";
 
 import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
+import type { WorkflowNodeSize } from "./workflowLayoutHash";
 import { resolveElkPorts } from "./workflowElkPorts";
 import {
   WORKFLOW_DECISION_DESIGN_HEIGHT,
@@ -33,7 +34,15 @@ export type WorkflowElkGraph = {
   stageElkIds: Map<string, string>;
 };
 
-export function toElkGraph(input: WorkflowLayoutInput): WorkflowElkGraph {
+/**
+ * Builds the ELK compound graph. `sizes` (measured DOM sizes from the canvas,
+ * P1-5) override the design-contract defaults per node so a second layout pass
+ * uses real geometry; absent entries keep the design sizes.
+ */
+export function toElkGraph(
+  input: WorkflowLayoutInput,
+  sizes?: ReadonlyMap<string, WorkflowNodeSize>,
+): WorkflowElkGraph {
   const { byEdgeId, byNodeId } = resolveElkPorts({ nodes: input.nodes, edges: input.edges });
 
   const nodeById = new Map(input.nodes.map((n) => [n.nodeId, n] as const));
@@ -47,6 +56,16 @@ export function toElkGraph(input: WorkflowLayoutInput): WorkflowElkGraph {
     layoutOptions: { ...WORKFLOW_ELK_ROOT_OPTIONS },
     children: [],
     edges: [],
+  };
+
+  const nodeSizeOf = (nodeId: string): { width: number; height: number } => {
+    const measured = sizes?.get(nodeId);
+    if (measured && measured.width > 0 && measured.height > 0) {
+      return measured;
+    }
+    const node = nodeById.get(nodeId);
+    const height = node?.visualKind === "decision" ? WORKFLOW_DECISION_DESIGN_HEIGHT : WORKFLOW_NODE_DESIGN_HEIGHT;
+    return { width: WORKFLOW_NODE_DESIGN_WIDTH, height };
   };
 
   for (const stage of input.stages) {
@@ -63,10 +82,10 @@ export function toElkGraph(input: WorkflowLayoutInput): WorkflowElkGraph {
         id: p.id,
         layoutOptions: { [PORT_SIDE_OPTION]: p.side },
       }));
-      const height = node.visualKind === "decision" ? WORKFLOW_DECISION_DESIGN_HEIGHT : WORKFLOW_NODE_DESIGN_HEIGHT;
+      const { width, height } = nodeSizeOf(nodeId);
       children.push({
         id: nodeId,
-        width: WORKFLOW_NODE_DESIGN_WIDTH,
+        width,
         height,
         labels: [
           {

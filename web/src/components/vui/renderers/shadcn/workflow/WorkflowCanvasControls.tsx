@@ -15,8 +15,11 @@ export function WorkflowCanvasControls({
   const { zoomIn, zoomOut, fitView, setCenter, getNode } = useReactFlow();
 
   const fitAll = () => {
+    if (onFitAll) {
+      onFitAll();
+      return;
+    }
     void fitView({ padding: 0.1, duration: 200 });
-    onFitAll?.();
   };
 
   const focusCurrent = () => {

@@ -78,7 +78,6 @@ export {
   type VWorkflowCanvasProps,
 } from "./product/workflow/VWorkflowCanvas";
 export {
-  layoutWorkflowCanvas,
   type WorkflowCanvasEdgeInput,
   type WorkflowCanvasNodeInput,
   type WorkflowCanvasRunMeta,
