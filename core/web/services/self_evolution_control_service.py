@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from core.logging import debug as _debug_logger
 from core.evaluation import DEFAULT_SELF_EVOLUTION_GOAL, build_self_evolution_run_prompt
 from core.evaluation.self_evolution_experience_repository import (
     record_terminal_self_evolution_experience,
@@ -639,8 +640,8 @@ def _record_self_scene_event(
             child_log_payload=child_log_payload,
             lifecycle=lifecycle,
         )
-    except Exception:
-        return
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record self-evolution scene event ({phase}/{event_code}): {exc}")
 
 
 def _self_child_log_path(run_id: str) -> str:
@@ -812,8 +813,8 @@ def _record_self_evolution_binding_failure(role: str, *, agent_id: str, reason: 
             },
             lifecycle=True,
         )
-    except Exception:
-        return
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record self-evolution binding failure scene event: {exc}")
 
 
 def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
@@ -895,8 +896,8 @@ def _self_evolution_role_slot_excluded(role: str) -> bool:
         mode = (payload.get("modes") or {}).get("self_evolution") or {}
         excluded_slots = {str(item or "").strip() for item in list(mode.get("excludedSlots") or [])}
         return normalized in excluded_slots
-    except Exception:
-        return False
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to resolve self-evolution role slot exclusion: {exc}")
 
 
 def _record_self_evolution_agent_sync_skipped(role: str, *, agent_id: str, reason: str) -> None:
@@ -915,8 +916,8 @@ def _record_self_evolution_agent_sync_skipped(role: str, *, agent_id: str, reaso
             },
             lifecycle=True,
         )
-    except Exception:
-        return
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record self-evolution agent sync skipped scene event: {exc}")
 
 
 def _find_agent_by_self_evolution_role(role: str) -> dict[str, Any] | None:
@@ -3446,8 +3447,8 @@ def execute_self_observation_action(run_id: str, action: str) -> dict[str, Any]:
     if conversation_session_id:
         try:
             request_stop_session_turn(conversation_session_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to stop session turn for self-observation: {exc}")
     return updated
 
 

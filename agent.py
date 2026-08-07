@@ -461,8 +461,8 @@ def _record_agent_scene_event(
             outcome=outcome,
             fields=fields or {},
         )
-    except Exception:
-        return
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record agent scene event ({phase}/{event_code}): {exc}")
 
 
 def _can_reuse_system_prompt(
@@ -1659,8 +1659,8 @@ class SelfEvolvingAgent:
                 self.prompt_manager.update_state_memory(self._last_runtime_state_memory, persist=True)
             else:
                 self.prompt_manager.clear_state_memory(persist=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to refresh retrospective state memory: {exc}")
 
     def _record_language_drift(self, raw_text: str):
         """语言偏好只由提示词表达，运行时不再强制纠偏。"""

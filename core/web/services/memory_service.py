@@ -15,6 +15,7 @@ from threading import Lock
 from typing import Any
 
 from core.infrastructure import developer_sandbox, git_process
+from core.logging import debug as _debug_logger
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONTENT_LIMIT = 8000
@@ -2453,8 +2454,8 @@ def _record_memory_management_event(action: str, section_id: str, item_id: str, 
             },
             lifecycle=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record memory scene event (_record_memory_management_event): {exc}")
 
 
 def _append_memory_overview_phase_timing(
@@ -2582,8 +2583,8 @@ def _record_memory_overview_perf_event(
             },
             lifecycle=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record memory scene event (_record_memory_overview_perf_event): {exc}")
 
 
 def _record_memory_overview_prewarm_event(
@@ -2624,8 +2625,8 @@ def _record_memory_overview_prewarm_event(
             },
             lifecycle=False,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record memory scene event (_record_memory_overview_prewarm_event): {exc}")
 
 
 def _record_memory_contract_viewed_event(contract: dict[str, Any], *, cache_hit: bool, duration_ms: float) -> None:
@@ -2652,8 +2653,8 @@ def _record_memory_contract_viewed_event(contract: dict[str, Any], *, cache_hit:
             },
             lifecycle=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record memory scene event (_record_memory_contract_viewed_event): {exc}")
 
 
 def _json_text(value: Any) -> str:

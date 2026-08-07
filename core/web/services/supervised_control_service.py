@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from core.infrastructure import developer_sandbox
 from core.infrastructure.feature_gate import FeatureDecision, resolve_feature_decision
+from core.logging import debug as _debug_logger
 from core.evaluation import (
     SupervisedEvolutionCancelled,
     build_workbench_state,
@@ -197,8 +198,8 @@ def _record_supervised_scene_event(
             child_log_payload=child_log_payload,
             lifecycle=lifecycle,
         )
-    except Exception:
-        return
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record supervised scene event ({phase}/{event_code}): {exc}")
 
 
 def _supervised_child_log_path(run_id: str) -> str:

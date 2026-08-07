@@ -16,6 +16,8 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
+from core.logging import debug as _debug_logger
+
 # Local default for signature evaluation (facade remains SSOT).
 RUNTIME_SCENE_RETENTION_LIMIT = 30
 
@@ -218,8 +220,8 @@ def _record_runtime_scene_retention_pruned(
             lifecycle=True,
             allow_recent_completed=False,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record runtime scene retention pruned event: {exc}")
 
 
 def _remember_runtime_scene_prompt_index_cache(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from core.logging import debug as _debug_logger
 import json
 import os
 import shutil
@@ -125,8 +126,8 @@ def _record_reset_scene_event(
             fields=fields or {},
             lifecycle=lifecycle,
         )
-    except Exception:
-        return
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record reset scene event: {exc}")
 
 
 def record_runtime_scene_event(

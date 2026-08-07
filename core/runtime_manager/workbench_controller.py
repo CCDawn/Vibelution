@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from core.logging import debug as _debug_logger
 import locale
 import os
 import socket
@@ -1234,8 +1235,8 @@ def _record_launcher_action_event(
         payload["message"] = truncate_event_text(message, limit=400)
     try:
         append_runtime_manager_file_event(event_type, payload, suppress_io_errors=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record launcher action scene event: {exc}")
 
 
 def open_workbench(
