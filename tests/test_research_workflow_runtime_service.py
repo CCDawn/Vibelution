@@ -30,11 +30,14 @@ def test_create_run_waiting_human_and_resolve(runtime_service) -> None:
     task_id = run["humanTasks"][0]["taskId"]
 
     after = runtime_service.resolve_human_task(run["runId"], task_id, accept=True, resolved_by="tester")
-    assert after["handoffs"][0]["status"] == "accepted"
-    assert after["handoffs"][0]["outputArtifactRefs"][0]["kind"] == "knowledge_package"
+    kh = [h for h in after["handoffs"] if h["fromNodeId"] == "knowledge_handoff"]
+    assert kh and kh[-1]["status"] == "accepted"
+    assert kh[-1]["toNodeId"] == "hypothesis_design"
+    assert kh[-1]["outputArtifactRefs"][0]["kind"] == "knowledge_package"
     assert after["langGraph"].get("knowledgePackageAccepted") is True
     # Full topology continues to later human gates after knowledge handoff.
-    assert after["status"] in {"waiting_human", "running", "succeeded"}
+    assert after["status"] in {"waiting_human", "running", "succeeded", "blocked"}
+    assert any(t["status"] == "pending" and t["nodeId"] == "protocol_freeze" for t in after["humanTasks"])
 
 
 def test_command_idempotency(runtime_service) -> None:
