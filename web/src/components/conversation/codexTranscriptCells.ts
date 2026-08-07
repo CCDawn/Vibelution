@@ -829,6 +829,74 @@ function normalizeCellStatus(status: string | undefined): CodexTranscriptCellSta
   return "completed";
 }
 
+function isThoughtLikeTranscriptCell(cell: CodexTranscriptCell) {
+  if (cell.kind === "reasoning_summary") {
+    return true;
+  }
+  if (cell.kind !== "assistant_markdown") {
+    return false;
+  }
+  const phase = String(cell.phase || "").trim().toLowerCase();
+  const channel = String(cell.channel || "").trim().toLowerCase();
+  return phase === "commentary" || phase === "interim" || channel === "commentary";
+}
+
+function thoughtLikeCellText(cell: CodexTranscriptCell) {
+  return String(cell.text || cell.summary || "").replace(/\s+/g, " ").trim();
+}
+
+function thoughtLikeCellRank(cell: CodexTranscriptCell) {
+  const textLen = thoughtLikeCellText(cell).length;
+  const liveBoost = cell.status === "running" || cell.status === "pending" ? 1_000_000 : 0;
+  return liveBoost + textLen;
+}
+
+/**
+ * Drop overlapping thought/commentary cells that restate the same stream
+ * (completed snapshot + running longer copy, or exact duplicates).
+ */
+export function dedupeThoughtLikeTranscriptCells(
+  cells: readonly CodexTranscriptCell[],
+): CodexTranscriptCell[] {
+  if (cells.length < 2) {
+    return [...cells];
+  }
+  const drop = new Set<number>();
+  for (let i = 0; i < cells.length; i += 1) {
+    if (drop.has(i) || !isThoughtLikeTranscriptCell(cells[i])) {
+      continue;
+    }
+    const leftText = thoughtLikeCellText(cells[i]);
+    if (!leftText) {
+      continue;
+    }
+    for (let j = i + 1; j < cells.length; j += 1) {
+      if (drop.has(j) || !isThoughtLikeTranscriptCell(cells[j])) {
+        continue;
+      }
+      const rightText = thoughtLikeCellText(cells[j]);
+      if (!rightText) {
+        continue;
+      }
+      const overlaps = leftText === rightText
+        || rightText.startsWith(leftText)
+        || leftText.startsWith(rightText);
+      if (!overlaps) {
+        continue;
+      }
+      if (thoughtLikeCellRank(cells[j]) >= thoughtLikeCellRank(cells[i])) {
+        drop.add(i);
+        break;
+      }
+      drop.add(j);
+    }
+  }
+  if (drop.size === 0) {
+    return [...cells];
+  }
+  return cells.filter((_, index) => !drop.has(index));
+}
+
 /**
  * Keep only the latest in-flight process row as running/pending.
  * Native transcripts and projected cells often leave earlier reasoning/tool rows

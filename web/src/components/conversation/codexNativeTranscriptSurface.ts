@@ -245,7 +245,21 @@ function nativeCellCommandSource(operationIds: string[], model: CodexToolLifecyc
 }
 
 function hasNativeProcessCells(cells: CodexTranscriptCell[]) {
-  return cells.some((cell) => cell.kind !== "assistant_markdown" && cell.kind !== "user");
+  // Process trail includes tools/reasoning/status AND commentary intermediate text.
+  // Treating all assistant_markdown as "not process" left commentary-only turns with
+  // suppressProjectedProcess=false, so feedback "thought" + native commentary both painted.
+  return cells.some((cell) => {
+    if (cell.kind === "user") {
+      return false;
+    }
+    if (cell.kind === "assistant_markdown") {
+      const phase = String(cell.phase || "").trim().toLowerCase();
+      const channel = String(cell.channel || "").trim().toLowerCase();
+      return phase === "commentary" || phase === "interim" || channel === "commentary";
+    }
+    // tool_call, reasoning_summary, error_notice, status, stream_tail, …
+    return true;
+  });
 }
 
 function hasNativeLifecycleProjection(transcript: CodexTranscriptProjection) {

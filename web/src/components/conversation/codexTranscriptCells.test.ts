@@ -7,6 +7,7 @@ import codexTranscriptCellsSource from "./codexTranscriptCells.ts?raw";
 import {
   buildCodexTranscriptCells,
   compactCodexTranscriptCellsAcrossMessages,
+  dedupeThoughtLikeTranscriptCells,
   settleCodexTranscriptActiveStatuses,
   type CodexTranscriptCell,
   type CodexTranscriptCellKind,
@@ -25,6 +26,33 @@ function message(overrides: Partial<AgentMessage>): AgentMessage {
 }
 
 describe("codexTranscriptCells", () => {
+  it("dedupes overlapping thought and commentary cells into one live box", () => {
+    const cells: CodexTranscriptCell[] = [
+      {
+        id: "thought-done",
+        kind: "assistant_markdown",
+        messageId: "m1",
+        status: "completed",
+        tone: "neutral",
+        phase: "commentary",
+        channel: "commentary",
+        text: "我先了解一下当前工作区状态和项目结构。",
+      },
+      {
+        id: "thought-running",
+        kind: "reasoning_summary",
+        messageId: "m1",
+        status: "running",
+        tone: "running",
+        text: "我先了解一下当前工作区状态和项目结构。然后结合前端链路做审查。",
+      },
+    ];
+    const deduped = dedupeThoughtLikeTranscriptCells(cells);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].id).toBe("thought-running");
+    expect(deduped[0].status).toBe("running");
+  });
+
   it("keeps journal ready/waiting tool cells pending instead of completed", () => {
     // Live overlays often pre-commit tools as status=ready while approval waits.
     // Those must stay active so the process rail does not flash completed→running.
