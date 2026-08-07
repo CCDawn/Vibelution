@@ -1864,9 +1864,14 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     elif desired_state == "closed" and observed_state != "closed" and phase != "failed":
         phase = "closing"
     failure_message = str(state_workbench.get("failureMessage") or "").strip()
+    # A non-empty failureMessage must win the status line. Dirty-main / start
+    # failures previously left observedState=open + status "running" while the
+    # tray showed no error, so users kept staring at a dead Edge window.
+    if failure_message and phase != "failed":
+        phase = "failed"
     if frontend_orphaned:
         status_line = failure_message or "前端窗口仍在，但后端服务已经离线。"
-    elif phase == "failed":
+    elif phase == "failed" or failure_message:
         status_line = failure_message or "工作台生命周期遇到了错误。"
     elif desired_state == "closed" and observed_state != "closed":
         status_line = "正在关闭工作台。"
