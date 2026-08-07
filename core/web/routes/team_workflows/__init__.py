@@ -8,4 +8,5 @@ from . import stage_rounds as _stage_rounds  # noqa: F401
 from . import experiment as _experiment  # noqa: F401
 from . import knowledge as _knowledge  # noqa: F401
 from . import research_ops as _research_ops  # noqa: F401
+from . import research_runtime as _research_runtime  # noqa: F401
 __all__ = ["router"]
