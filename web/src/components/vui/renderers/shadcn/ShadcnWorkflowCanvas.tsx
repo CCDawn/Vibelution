@@ -122,7 +122,7 @@ export function ShadcnWorkflowCanvas({
 
   const onSelectionChange = useCallback(
     (params: OnSelectionChangeParams) => {
-      const task = params.nodes.find((n) => n.type === "taskNode");
+      const task = params.nodes.find((n: Node) => n.type === "taskNode");
       onSelectNode?.(task?.id ?? null);
     },
     [onSelectNode],
