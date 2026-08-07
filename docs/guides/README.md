@@ -8,13 +8,16 @@
 
 | 序 | 文件 | 何时 |
 | --- | --- | --- |
-| 0 | `AGENTS.md` | 每任务；红线 |
+| 0 | `AGENTS.md` | 每任务；红线（含 §3.0 默认 BRT） |
+| **0b** | **`ccdawn-brt` skill**（`~/.grok/skills/ccdawn-brt/SKILL.md` 或本机已安装路径） | **每次开发 / 修复 / 规划 / 会改代码或行为的任务：默认先读并执行路由**；用户无需 `/brt`；声称最新 skill 前重读磁盘 `SKILL.md` |
 | 1 | **本文件** | 选子文档 |
 | 2 | `route.md` | 任务类型 → 打开路径 |
 | 3 | `ownership.md` | 写入前定 owning surface |
 | 4 | `loop.md` | 分级 / 验证 / 完成字段 |
 | 5 | `playbook.md` | 架构约束摘要（仍不够再下钻） |
 | 6 | 下表「权威」列 | 细则；**禁止**用 archive 当规则 |
+
+**默认规划门：** 未完成 0b 的 BRT 意图/分级/owner 选择前，不得广扫全仓、加载无关 process skill、或开始实现写入。`FAST_PATCH` 可 silent/micro，仍服从 BRT 最小门。
 
 ## 子文档
 

@@ -27,18 +27,34 @@
 
 ## 3. Start And Routing
 
+### 3.0 默认规划：每次开发先读 BRT 路由技能（强制）
+
+**凡进入开发、修复、规划、审查或会改代码/行为/验证边界的任务，默认先加载并遵循 `ccdawn-brt` 路由技能**，再选下游 owner / 打开业务文档。用户不必输入 `/brt` 或 `/ccdawn-brt`。
+
+| 项 | 约定 |
+| --- | --- |
+| 技能入口 | 本机 `~/.grok/skills/ccdawn-brt/SKILL.md`（或当前 Agent 已安装的同名 skill 路径）；声称“已按最新 skill”前必须重读磁盘上的 `SKILL.md` |
+| 默认动作 | 每条相关用户消息、在首个广扫 / 下游 skill / 写入前：内部 BRT 门（意图、范围、权限、成功证据、流程重量）→ 再 `route` / `ownership` / 实现 |
+| 可静默 | 唯一合理行为的 `FAST_PATCH` 可 silent/micro，**仍按 BRT 最小门**，不整段跳过技能纪律 |
+| 必须 ALIGN | 意图不清、多义、改 owning surface / 交互 / 数据 / 兼容 / 验收时：先窄 probe，仍不够则一轮对齐问题，禁止带着高影响假设写入 |
+| 禁止 | 不读 BRT 就广扫全仓、叠 process 框架（superpowers / 无请求 TDD 等）、或跳过路由直接改代码 |
+
+细则与分级仍见 [development-standard.md §2](docs/standards/development-standard.md)；加载序见 [docs/guides/README.md](docs/guides/README.md)。
+
 开始非简单任务前：
 
-1. 非平凡任务按 [Agent 开发路由](docs/guides/README.md)：`route.md` 定 READ/EDIT/TEST → `ownership.md` 定落点 → `loop.md` 验证与完成块；细则只下钻 [规范索引](docs/standards/README.md) 相关条。
-2. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务读取 `.docs/project-memory/INDEX.md` 与 `profile.json`；仅在会改变答案时继续读取具体 lane/registry。
-3. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。
-4. Bug、回归、卡住、运行不一致或异常命令先检查最新 `logs/runtime_scenes/`。
-5. 非平凡行为、状态、权限、迁移、Prompt、Agent 或运行时变更先完成 BRT 对齐。
+1. **先 BRT**（本 §3.0）：加载 `ccdawn-brt`，完成意图/分级/owner 选择。
+2. 非平凡任务按 [Agent 开发路由](docs/guides/README.md)：`route.md` 定 READ/EDIT/TEST → `ownership.md` 定落点 → `loop.md` 验证与完成块；细则只下钻 [规范索引](docs/standards/README.md) 相关条。
+3. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务读取 `.docs/project-memory/INDEX.md` 与 `profile.json`；仅在会改变答案时继续读取具体 lane/registry。
+4. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。
+5. Bug、回归、卡住、运行不一致或异常命令先检查最新 `logs/runtime_scenes/`。
+6. 非平凡行为、状态、权限、迁移、Prompt、Agent 或运行时变更：BRT 对齐未闭合前不得实现。
 
 按任务读取：
 
 | 任务 | 文档 |
 | --- | --- |
+| **默认规划 / BRT 路由（每任务）** | 本机 `ccdawn-brt` skill · [development-standard §2](docs/standards/development-standard.md) · [guides 加载序](docs/guides/README.md) |
 | **Agent 开发路由（任务→路径/命令）** | [guides/README](docs/guides/README.md) · [route](docs/guides/route.md) · [ownership](docs/guides/ownership.md) · [loop](docs/guides/loop.md) · [playbook](docs/guides/playbook.md) |
 | 开发分级、架构、前后端、测试、Git、Launcher、发布、完成条件 | [开发标准](docs/standards/development-standard.md) |
 | Windows 无控制台弹窗（cmd/powershell/WT/OpenConsole）红线 | [开发标准 §8.0](docs/standards/development-standard.md)（根红线见本文件 §2） |
