@@ -103,33 +103,36 @@ const elk = new ELK({
 
 ## 3. 数据流
 
-### 3.1 两级布局架构（2026-08-08 修订，取代单次 compound）
+### 3.1 两级布局架构（2026-08-08 修订；2026-08-08b 外层改为真实 ELK + spacer node）
 
 ```text
 WorkflowLayoutInput (public, 无状态字段参与布局 hash)
   → workflowStageSubgraphAdapter.buildStageSubgraphs()
       按 stageId 分组；每阶段子图只含阶段内 edges（跨阶段 edges 明确排除）
   → workflowStageLayout.layoutStages()            // 阶段 A：每阶段独立 ELK DOWN
-      并行发起 N 个阶段布局；输出本地坐标 + 阶段 box（标题区 + padding）
-  → workflowStageMetaGraphAdapter.buildStageMetaGraph()
-      阶段 B：三阶段折叠为 meta 节点，宽度/高度来自阶段 A box；
-      沿 RIGHT 单行确定性排列（ELK 无法排序无连接 compound，探针事实），
-      通道 gap = 40px；不再调用 ELK 做 meta 布局
-  → workflowStageComposition.composeLayout()
-      task 绝对坐标 = meta 位置 + 阶段本地坐标；阶段内边 sections 按 meta 偏移
-  → workflowCrossStageRouter.routeCrossStageEdge()
-      跨阶段边经 gateway 通道：source 端口 → 源阶段右边界 → 通道
-      → 目标阶段左边界 → target 端口；正交确定性路由
-  → workflowTwoLevelLayout.layoutTwoLevel()       // 编排器，产出 WorkflowLayoutResult
-  → 坐标 → React Flow nodes (stage + parented tasks)
+      串行执行（elkjs 非并发安全）；输出本地坐标 + 阶段 box（标题区 + padding）
+  → workflowOuterElkGraphAdapter.buildOuterElkGraph()
+      阶段 B：真实外层 ELK graph——
+        · 三阶段 meta nodes（宽高 = 阶段 A box，FIXED_SIDE gateway ports）
+        · 每条跨阶段边一个虚拟 label spacer node（尺寸 = 共享标签契约）
+        · 跨阶段边 → 两条布局边：stage A port → spacer → stage B port
+  → workflowOuterElkLayout.layoutOuter()          // 外层 ELK RIGHT/ORTHOGONAL
+      ELK 输出：阶段坐标（自动 gap）、spacer 位置、两段边 sections
+  → workflowLayoutComposer.composeFinalLayout()
+      task 绝对坐标 = stage meta 位置 + 阶段本地坐标；内部边偏移；
+      跨阶段边 = 两段 leg 重组；label rect = spacer 位置
   → sections → workflowElkEdgePath.toSvgPath()    // → WorkflowSemanticEdge 直接消费
-  → label 坐标 → EdgeLabelRenderer 定位
 ```
 
-**为什么不是单次 compound**：root `RIGHT` + `INCLUDE_CHILDREN` + stage `DOWN` +
-跨阶段边直连内部节点，会让 ELK 把所有子节点拉进根级 RIGHT 分层，阶段容器被
-拉伸（实测阶段宽 2257px、总宽 7187px），阶段内纵向序被破坏。两级布局把阶段内
-布局与阶段间布局彻底解耦。
+**为什么用 spacer node 而非原生 edge label**（2026-08-08b 探针结论）：elkjs
+0.12 原生 edge label 在 ORTHOGONAL 外层图**不参与 spacing 求解**——80px 与
+180px 标签产生相同 stage gap（20px），标签矩形溢出 stage 边界。虚拟 spacer
+node 作为布局占位对象：标签 80px → gap 120px；180px → 220px（自动扩张）。
+spacer 只承担布局占位，不渲染为用户节点；渲染仍保留一个领域 edgeId 与一个
+可见标签。
+
+**为什么阶段布局串行**：elkjs 实例并发调用 `layout()` 会串扰输出（实测
+leg 边方向错乱）——阶段布局与外层布局串行执行，三阶段规模可接受。
 
 职责边界（= PRD §5）：`product/workflow` 只产公共类型；`renderers/shadcn/workflow` 独享 elkjs 与 @xyflow；Route 只消费 `VWorkflowCanvas`。
 
@@ -153,18 +156,21 @@ stage:knowledge_collection { layoutOptions: { direction DOWN, edgeRouting ORTHOG
   拉伸阶段的根因）；
 - 三阶段布局**并行**发起（`layoutStages` 用 `Promise.all`）。
 
-**阶段 B · 阶段元图**（`workflowStageMetaGraphAdapter`）：
+**阶段 B · 外层真实 ELK**（`workflowOuterElkGraphAdapter` + `workflowOuterElkLayout`）：
 
-- 三阶段折叠为 meta 节点，width/height = 阶段 A 的 box；
-- 沿 `RIGHT` **确定性单行排列**（定义顺序），通道 gap = 40px；
-- 不再调用 ELK 做 meta 布局——ELK 无法对无连接 compound 排序（探针事实），
-  单行排列是纯函数几何权威。
+- 三阶段折叠为 meta nodes（width/height = 阶段 A box）；
+- 每条跨阶段边一个 **label spacer node**（尺寸 = `workflowEdgeLabelGeometry`
+  共享契约）；跨阶段边映射为两条布局边：`stage A EAST port → spacer →
+  stage B WEST port`；
+- gateway ports 用 `FIXED_SIDE`（ELK 自动排 Y）；ELK 输出阶段坐标（gap
+  自动随 spacer 宽度增长）、spacer 位置（label 锚点）、两段边 sections；
+- 阶段顺序由 ELK RIGHT 分层 + 阶段间真实连接边保证。
 
-**坐标合成**（`workflowStageComposition`）：
+**坐标合成**（`workflowLayoutComposer`）：
 
 - `task 绝对坐标 = stage meta 位置 + task 本地坐标`；
-- 阶段内边 sections 按 meta 位置整体偏移；跨阶段边由
-  `workflowCrossStageRouter` 生成。
+- 阶段内边 sections 按 meta 位置整体偏移；跨阶段边 = 两段 leg 重组
+  （leg 边界被 label spacer 覆盖——标签压在边上，语义关联合法）；
 
 ### 4.2 layoutOptions 候选与探针（`workflowElkOptions.ts`）
 
