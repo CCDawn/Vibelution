@@ -36,11 +36,25 @@ def test_run_stops_at_first_human_gate_and_can_progress(tmp_path: Path) -> None:
             "knowledge_ingestion",
         }
 
-        # Drive through interrupts until done or blocked — accept all human gates.
+        # Drive through interrupts until done or blocked — accept all human gates;
+        # at iteration_decision supply a structured stop decision.
         guard = 0
-        while state.next and guard < 20:
+        while state.next and guard < 25:
             guard += 1
-            result = graph.invoke(Command(resume={"accept": True}), cfg)
+            nxt = list(state.next or [])
+            if "iteration_decision" in nxt:
+                result = graph.invoke(
+                    Command(
+                        resume={
+                            "decisionKind": "stop",
+                            "terminalReason": "test_complete",
+                            "decisionId": "dec-test-stop",
+                        }
+                    ),
+                    cfg,
+                )
+            else:
+                result = graph.invoke(Command(resume={"accept": True}), cfg)
             state = graph.get_state(cfg)
 
         assert state.values.get("knowledge_package_accepted") is True
