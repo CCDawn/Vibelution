@@ -5,8 +5,8 @@ import evolutionRouteSource from "../routes/EvolutionRoute.tsx?raw";
 import toolsRouteSource from "../routes/ToolsRoute.tsx?raw";
 import logsRouteSource from "../routes/LogsRoute.tsx?raw";
 import petRouteSource from "../routes/PetRoute.tsx?raw";
-import researchRouteSource from "../routes/ResearchRoute.tsx?raw";
 import conversationViewSource from "../components/conversation/ConversationView.tsx?raw";
+
 import appShellSource from "../app/AppShell.tsx?raw";
 import useAppI18nSource from "./useAppI18n.ts?raw";
 import loadSource from "./loadDictionaryDomains.ts?raw";
@@ -28,7 +28,7 @@ describe("useAppI18n domain wiring (D1 follow-up)", () => {
     expect(toolsRouteSource).toContain('useAppI18n({ domains: ["tools"] })');
     expect(logsRouteSource).toContain('useAppI18n({ domains: ["logs"] })');
     expect(petRouteSource).toContain('useAppI18n({ domains: ["pet"] })');
-    expect(researchRouteSource).toContain('useAppI18n({ domains: ["teams"] })');
+    // Task 9: ResearchRoute retired (redirect shell); teams domain remains via Teams workbench packs.
   });
 
   it("warms chat dictionary packs during AppShell soft chat preload", () => {

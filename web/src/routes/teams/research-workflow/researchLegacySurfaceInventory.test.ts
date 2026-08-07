@@ -53,25 +53,26 @@ describe("Task0 research legacy surface inventory", () => {
     expect(routerSource).not.toContain("ResearchRoute");
   });
 
-  it("ResearchRoute.tsx is an orphan implementation still on disk", () => {
+  it("ResearchRoute.tsx is a redirect shell and not router-mounted", () => {
     const researchRoute = resolve(routesRoot, "ResearchRoute.tsx");
     expect(existsSync(researchRoute)).toBe(true);
     const source = readFileSync(researchRoute, "utf8");
     expect(source).toContain("export function ResearchRoute");
-    // No router import of ResearchRoute module.
+    expect(source).toContain("Navigate");
     expect(routerSource).not.toContain("routes/ResearchRoute");
   });
 
-  it("Challenge Cup multi-surface files still exist as migration sources", () => {
+  it("ResearchFlowCanvasRoute is redirect-only; migration adapters remain on disk", () => {
+    const flow = readFileSync(resolve(routesRoot, "ResearchFlowCanvasRoute.tsx"), "utf8");
+    expect(flow).toContain("Navigate");
+    expect(flow.length).toBeLessThan(2000);
     const expectedPresent = [
       "teams/challenge-cup/ChallengeCupOperationsWorkspace.tsx",
       "teams/challenge-cup/ChallengeCupStageRail.tsx",
       "teams/ResearchOverviewSurface.tsx",
-      "teams/ResearchStageNav.tsx",
-      "TeamKnowledgeCollectionCompletionFlowPanel.tsx",
-      "ResearchFlowCanvasRoute.tsx",
       "teams/researchStageAgentBindings.ts",
       "teams/researchWorkspaceModel.ts",
+      "teams/research-workflow/ResearchProcessWorkspace.tsx",
     ];
     for (const rel of expectedPresent) {
       expect(existsSync(resolve(routesRoot, rel)), rel).toBe(true);

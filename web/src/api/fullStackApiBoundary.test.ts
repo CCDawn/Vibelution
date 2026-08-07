@@ -36,8 +36,6 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/MemoryUserContentPanel.tsx": 6,
   "routes/PetRoute.tsx": 1,
   "routes/PromptTemplatesRoute.tsx": 7,
-  "routes/ResearchFlowCanvasRoute.tsx": 5,
-  "routes/ResearchRoute.tsx": 8,
   "routes/RuntimeScenesPane.tsx": 4,
   "routes/SelfEvolutionTrack.tsx": 3,
   "routes/SkillsRoute.tsx": 2,
@@ -81,9 +79,10 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/teams/useTeamsSecondaryDataQueries.ts": 1,
   "routes/teams/useTeamsSelectedTeamDetail.ts": 1,
   "routes/teams/useTeamsShellCanvasWorkspace.ts": 1,
-  "routes/teams/useTeamsWorkbenchModel.tsx": 1,
+  "routes/teams/useTeamsWorkbenchFoundation.tsx": 1,
 };
-const legacyRouteFetchJsonAggregateBudget = 283;
+// Task 9: retired ResearchFlowCanvasRoute (-5) + ResearchRoute (-8) fetchJson budgets.
+const legacyRouteFetchJsonAggregateBudget = 270;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
