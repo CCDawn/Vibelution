@@ -151,12 +151,6 @@ if (
   const expectElkWorker = process.argv.includes("--expect-elk-worker=0") === false;
   const assetsDir =
     process.argv.slice(2).find((arg) => !arg.startsWith("--")) || DEFAULT_ASSETS_DIR;
-  // T1–T4 transition: the plain `npm run build` no longer ships the probe
-  // page, and the product does not import `workflowElkClient` until T4, so no
-  // worker asset is emitted there yet. `--expect-elk-worker=0` records that
-  // state; the ELK worker asset presence/budget gate lives in
-  // `check:elk-worker-handshake` (which builds the probe dist). Once T4 wires
-  // the canvas, the normal build emits the asset and the flag is dropped.
   const result = checkBundleBudget(assetsDir, { expectElkWorker });
   if (result.failures.length > 0) {
     console.error("Bundle budget exceeded:");

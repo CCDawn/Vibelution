@@ -1,63 +1,53 @@
 /**
- * Semantic workflow edge: arrow markers, path state colors, label surfaces.
+ * Workflow edge: renders the engine-owned ORTHOGONAL section geometry
+ * (data.sections) with path-state colors and label bounds. It never re-routes
+ * the edge itself; a smooth-step approximation is forbidden in production.
  */
 import {
   BaseEdge,
   EdgeLabelRenderer,
-  getSmoothStepPath,
   type EdgeProps,
 } from "@xyflow/react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { cn } from "../../../lib/cn";
-import type { WorkflowEdgePathState, WorkflowEdgeSemanticKind } from "../../../product/workflow/workflowCanvasTypes";
+import type {
+  WorkflowEdgePathState,
+  WorkflowEdgeSemanticKind,
+  WorkflowEdgeSection,
+  WorkflowLabelBounds,
+} from "../../../product/workflow/workflowCanvasTypes";
 import { resolveEdgeStroke } from "./workflowCanvasState";
+import { resolveEdgeLabelAnchor, sectionsToSvgPath } from "./workflowElkEdgePath";
 
 export type WorkflowSemanticEdgeData = {
   label?: string;
   semanticKind?: WorkflowEdgeSemanticKind;
   pathState?: WorkflowEdgePathState;
   labelAlwaysVisible?: boolean;
+  /** Engine-owned ORTHOGONAL route. Absent only on legacy/defensive fixtures. */
+  sections?: WorkflowEdgeSection[];
+  /** Engine-owned label anchor; falls back to a section midpoint. */
+  labelBounds?: WorkflowLabelBounds;
 };
 
-export function WorkflowSemanticEdge({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  data,
-  markerEnd,
-  style,
-}: EdgeProps) {
+export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) {
   const [hovered, setHovered] = useState(false);
-  const semanticKind = (data?.semanticKind as WorkflowEdgeSemanticKind) || "main";
-  const pathState = (data?.pathState as WorkflowEdgePathState) || "idle";
-  const label = String(data?.label ?? "");
-  const always = Boolean(data?.labelAlwaysVisible);
+  const edgeData = data as WorkflowSemanticEdgeData | undefined;
+  const semanticKind = edgeData?.semanticKind ?? "main";
+  const pathState = edgeData?.pathState ?? "idle";
+  const label = String(edgeData?.label ?? "");
+  const always = Boolean(edgeData?.labelAlwaysVisible);
   const stroke = resolveEdgeStroke(pathState, semanticKind);
 
-  // Feedback loops: route outside via larger offset.
-  const isLoop =
-    semanticKind === "rerun"
-    || semanticKind === "revise"
-    || semanticKind === "rollback"
-    || (sourceX > targetX + 40);
+  const sections = edgeData?.sections;
+  const edgePath = useMemo(() => sectionsToSvgPath(sections ?? []), [sections]);
+  const labelAnchor = useMemo(
+    () => resolveEdgeLabelAnchor(sections ?? [], edgeData?.labelBounds),
+    [sections, edgeData?.labelBounds],
+  );
 
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    borderRadius: 12,
-    offset: isLoop ? 36 : 18,
-  });
-
-  const showLabel = Boolean(label) && (always || hovered || pathState === "active" || pathState === "attention");
+  const showLabel = Boolean(label) && (always || hovered || pathState === "active" || pathState === "attention") && labelAnchor !== null;
 
   return (
     <>
@@ -88,7 +78,7 @@ export function WorkflowSemanticEdge({
           <div
             style={{
               position: "absolute",
-              transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+              transform: `translate(-50%, -50%) translate(${labelAnchor.x}px,${labelAnchor.y}px)`,
               pointerEvents: "all",
             }}
             className={cn(
