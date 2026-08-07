@@ -687,18 +687,9 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     && !researchCanvasVisible
     && researchWorkspaceView !== "overview";
 
-  if (
-    researchWorkflowTeamSelected
-    && (researchWorkspaceView === "experiment" || researchWorkspaceView === "iteration")
-  ) {
-    if (challengeCupResearchTeamSelected && challengeTeamSurface === "progress") {
-      return renderResearchStageLauncher("interactive");
-    }
-    return renderResearchStageStandalonePage(
-      researchWorkspaceView === "iteration" ? "iteration" : "experiment",
-      { embeddedInBoard: false },
-    );
-  }
+  // Legacy experiment/iteration query is normalized at TeamsLegacyResearchBoundary
+  // to workflow + node before this shell phase. Do not mount ResearchStageStandalonePage
+  // from the canonical /teams main entry.
 
   return renderTeamsWorkbenchBoardPage({
     lang,
@@ -712,12 +703,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     workflowReady: Boolean(teamWorkflow),
     challengeCupResearchTeamSelected,
     overviewSlot: renderResearchOverviewSurface(),
-    stageSlot: showResearchStageWorkspace
-      ? renderResearchStageStandalonePage(
-          researchWorkspaceView === "iteration" ? "iteration" : "experiment",
-          { embeddedInBoard: true },
-        )
-      : null,
+    stageSlot: null,
     launcherSlot: renderResearchStageLauncher("interactive"),
     showBoardInspectorAside,
     inspectorBody: (

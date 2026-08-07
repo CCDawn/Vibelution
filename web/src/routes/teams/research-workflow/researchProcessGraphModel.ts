@@ -1,7 +1,7 @@
 /** Project workflow definition DTO into VWorkflowCanvas graph input. */
 
 import type { WorkflowCanvasProjection, WorkflowDefinition } from "../../../api/types/researchWorkflow";
-import type { WorkflowLayoutInput } from "../../../components/vui/renderers/shadcn/workflowCanvasLayout";
+import type { WorkflowLayoutInput } from "../../../components/vui";
 
 export function definitionToCanvasGraph(definition: WorkflowDefinition): WorkflowLayoutInput {
   return {

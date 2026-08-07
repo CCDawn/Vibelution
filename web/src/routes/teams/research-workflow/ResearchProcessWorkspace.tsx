@@ -10,6 +10,7 @@ import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   VButton,
   VPanelHeader,
+  VSelect,
   VSurface,
   VWorkflowCanvas,
 } from "../../../components/vui";
@@ -183,23 +184,25 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {runOptions.length > 0 ? (
-              <select
-                className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1 text-xs"
+              <VSelect
+                density="compact"
+                className="min-w-[12rem]"
                 aria-label="运行切换"
-                value={runId}
-                onChange={(event) => {
-                  const nextId = event.target.value;
+                placeholder="选择运行"
+                selectedKey={runId || null}
+                options={[
+                  { id: "", label: "选择运行" },
+                  ...runOptions.map((item) => ({
+                    id: item.runId,
+                    label: `${item.runId} · ${item.status}`,
+                  })),
+                ]}
+                onSelectionChange={(key) => {
+                  const nextId = key == null ? "" : String(key);
                   replaceParams({ runId: nextId || null });
                   if (nextId) void refresh();
                 }}
-              >
-                <option value="">选择运行</option>
-                {runOptions.map((item) => (
-                  <option key={item.runId} value={item.runId}>
-                    {item.runId} · {item.status}
-                  </option>
-                ))}
-              </select>
+              />
             ) : null}
             <VButton type="button" variant="ghost" onClick={() => replaceParams({ panel: "agents" })}>
               Agent
