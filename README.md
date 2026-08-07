@@ -14,21 +14,11 @@
 
 ## 界面预览
 
-本机 workbench 实机截图（1440×900）。不展示密钥；界面会随版本迭代。
-
-**对话** — 多会话编码协作与运行侧栏：
-
 ![对话工作台](docs/assets/readme/web-workbench-chat.png)
 
-**团队 / 科研流程** — 挑战杯三阶段运行态画布（节点类型、状态、条件分支与 Inspector）：
+![团队科研流程](docs/assets/readme/web-workbench-teams.png)
 
-![团队科研流程画布](docs/assets/readme/web-workbench-teams.png)
-
-**Git** — 工作区 diff、选中提交与 AI commit 草稿：
-
-![Git 页](docs/assets/readme/web-workbench-git.png)
-
-**监督进化** — 基线评测 / 提案 / 复跑与用户审批流水线：
+![Git](docs/assets/readme/web-workbench-git.png)
 
 ![监督进化](docs/assets/readme/web-workbench-supervised.png)
 
