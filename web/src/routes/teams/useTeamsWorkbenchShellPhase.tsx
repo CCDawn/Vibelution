@@ -337,28 +337,32 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     ],
   );
   // Overview IA lives in ResearchOverviewSurface; workflow panel still hosts stage-specific modules.
+  const isProcessWorkflowView =
+    researchWorkspaceView === "workflow" || researchWorkspaceView === "overview";
+  // Challenge Cup / research process: single canvas workspace owns the primary surface.
   const showWorkflowPanel =
     !aiSearchScopeTeamSelected
-    && (!researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView !== "discussion" && researchWorkspaceView !== "overview"));
+    && (!researchWorkflowTeamSelected
+      || (!researchCanvasVisible
+        && researchWorkspaceView !== "discussion"
+        && !isProcessWorkflowView));
   const showAiSearchScopePanel = aiSearchScopeTeamSelected;
   const showTeamCommunicationPanel = !researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView === "discussion");
-  const showResearchOverview = researchWorkflowTeamSelected && researchWorkspaceView === "overview";
-  const showResearchStageWorkspace =
-    researchWorkflowTeamSelected
-    && !researchCanvasVisible
-    && (researchWorkspaceView === "experiment" || researchWorkspaceView === "iteration");
-  const showResearchSourceCollection = researchWorkflowTeamSelected && researchWorkspaceView === "source_collection";
+  const showResearchOverview = researchWorkflowTeamSelected && isProcessWorkflowView;
+  // Stage pages collapsed into process workflow; no independent experiment/iteration shells.
+  const showResearchStageWorkspace = false;
+  const showResearchSourceCollection = false;
   const showResearchCoordination = researchWorkflowTeamSelected && researchWorkspaceView === "coordination";
-  const showResearchIngestion = researchWorkflowTeamSelected && researchWorkspaceView === "ingestion";
-  const showResearchGraph = researchWorkflowTeamSelected && researchWorkspaceView === "graph";
-  const showResearchCandidates = researchWorkflowTeamSelected && researchWorkspaceView === "candidates";
+  const showResearchIngestion = false;
+  const showResearchGraph = false;
+  const showResearchCandidates = false;
   const boardPrimaryMode =
     !researchWorkflowTeamSelected || researchCanvasVisible
       ? "hidden" as const
-      : researchWorkspaceView === "overview"
+      : isProcessWorkflowView
         ? "overview" as const
         : researchWorkspaceView === "experiment" || researchWorkspaceView === "iteration"
-          ? "stage" as const
+          ? "overview" as const
           : "launcher" as const;
   const teamWorkflowCandidatePreviewItems = buildTeamWorkflowCandidatePreviewItems({
     lang,

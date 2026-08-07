@@ -117,9 +117,6 @@ export function ResearchProcessNodeInspector({
         })}
       </div>
 
-      <p className="m-0 text-[11px] text-[var(--fg-tertiary)]">
-        取代主入口：{adapter.replaces}
-      </p>
     </VSurface>
   );
 }

@@ -87,14 +87,15 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
   const [showCommunicationEdges, setShowCommunicationEdges] = useState(false);
   const [researchCanvasLayoutMode, setResearchCanvasLayoutMode] = useState<ResearchCanvasLayoutMode>("auto");
   const [researchWorkspaceView, setResearchWorkspaceView] = useState<ResearchWorkspaceView>(
-    forcedResearchWorkspaceView ?? requestedResearchWorkspaceView ?? "overview",
+    // ADR 0006: process workflow is the default research home (not overview/org canvas).
+    forcedResearchWorkspaceView ?? requestedResearchWorkspaceView ?? "workflow",
   );
   const [teamShellMode, setTeamShellMode] = useState<TeamShellMode>(
     () =>
       requestedTeamShellMode
       ?? teamShellModeFromResearchView(forcedResearchWorkspaceView ?? requestedResearchWorkspaceView)
-      // End-user research home is canvas (flow + org graph), not board kanban.
-      ?? "canvas",
+      // End-user research home is board shell hosting the process workspace.
+      ?? "board",
   );
   const [challengeTeamSurface, setChallengeTeamSurface] = useState<"workspace" | "progress">("workspace");
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
@@ -114,17 +115,22 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
       return;
     }
     if (requestedResearchWorkspaceView) {
+      // Legacy aliases still arrive as overview/canvas; normalize to workflow shell.
+      if (requestedResearchWorkspaceView === "overview" || requestedResearchWorkspaceView === "canvas") {
+        setResearchWorkspaceView("workflow");
+        return;
+      }
       setResearchWorkspaceView(requestedResearchWorkspaceView);
     }
   }, [forcedResearchWorkspaceView, requestedResearchWorkspaceView]);
 
-  // End-user home (overview/canvas view) always uses org canvas shell — not board kanban.
+  // Process workflow home uses board shell (primary column = ResearchProcessWorkspace).
   useEffect(() => {
     if (
-      (researchWorkspaceView === "overview" || researchWorkspaceView === "canvas")
-      && teamShellMode !== "canvas"
+      (researchWorkspaceView === "workflow" || researchWorkspaceView === "overview")
+      && teamShellMode !== "board"
     ) {
-      setTeamShellMode("canvas");
+      setTeamShellMode("board");
     }
   }, [researchWorkspaceView, teamShellMode]);
 
