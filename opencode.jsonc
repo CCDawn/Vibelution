@@ -13,5 +13,10 @@
       }
     }
   },
+  // BRT 路由技能默认加载：AGENTS.md §3.0 要求每任务先走 ccdawn-brt 路由门。
+  // 指向本机技能目录，opencode 启动时自动扫描并作为可用 skill 注入。
+  "skills": {
+    "paths": ["~/.grok/skills"]
+  },
   "autoupdate": false
 }
