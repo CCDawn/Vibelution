@@ -4,11 +4,15 @@ Status: **Ready for implementation**
 
 Created: 2026-08-07
 
-Close condition: 新工作流运行事实源、三阶段单画布、兼容迁移和正式验收全部完成后，将本计划保留在 archive 作为历史交付记录。
+Close condition: 新工作流运行事实源、三阶段单画布、节点交接、Agent 精确会话锚点、旧页面收敛、最终清理和正式验收全部完成后，将本计划保留在 archive 作为历史交付记录。
 
 Product contract: `docs/prds/2026-08-07-research-process-flow-single-page-workspace.md`
 
 Architecture authority: `docs/adr/0006-challenge-cup-workflow-runtime-and-single-canvas.md`
+
+Handoff/session authority: `docs/adr/0007-research-workflow-handoff-and-agent-session-binding.md`
+
+Legacy cleanup inventory: `docs/archive/plans/2026-08-07/challenge-cup-legacy-surface-disposition.md`
 
 ## 1. 目标与边界
 
@@ -18,8 +22,11 @@ Architecture authority: `docs/adr/0006-challenge-cup-workflow-runtime-and-single
 - 三个阶段有明确画布内分区；
 - LangGraph 是运行事实源；
 - 支持持久 checkpoint、人工等待、恢复、失败、重试和历史 lineage；
+- 每条运行边有显式 handoff，跨阶段只消费人工接受的不可变 package/protocol；
+- 每个 Agent node run 可定位到准确 session task / turn；
 - 节点操作复用现有科研功能；
 - Agent 配置、证据图和组织图保持次级职责；
+- 旧科研页面和 query 全部有唯一归宿，交付后没有孤儿页、重复主导航或 legacy writer；
 - 不实现自由低代码编辑器；
 - 不处理移动端；
 - 不直接修改或覆盖用户活跃 operator 数据。
@@ -43,6 +50,10 @@ Architecture authority: `docs/adr/0006-challenge-cup-workflow-runtime-and-single
 4. 重新检查 `main`、active claims、`logs/runtime_scenes/` 和现有 Launcher 状态。
 5. 读取：
    - `AGENTS.md`
+   - `docs/prds/2026-08-07-research-process-flow-single-page-workspace.md`
+   - `docs/adr/0006-challenge-cup-workflow-runtime-and-single-canvas.md`
+   - `docs/adr/0007-research-workflow-handoff-and-agent-session-binding.md`
+   - `docs/archive/plans/2026-08-07/challenge-cup-legacy-surface-disposition.md`
    - `docs/guides/{README,route,ownership,loop}.md`
    - `docs/standards/development-standard.md` 相关节
    - `core/web/services/README.md`
@@ -66,6 +77,9 @@ Architecture authority: `docs/adr/0006-challenge-cup-workflow-runtime-and-single
 | Human task | human task service | task API/SSE | 关闭弹窗即视为解决 |
 | Artifact metadata | artifact service | ArtifactRef | 把大 payload 塞节点 |
 | Agent binding | binding service | binding API | 用显示名授权 |
+| Run Agent binding snapshot | workflow runtime | run/node projection | 用当前 Agent 配置改写历史 |
+| Agent session point | session binding service | node detail | 跳到默认直聊或只记 session |
+| Node handoff | handoff service/runtime | handoff projection | 前端因“有进度”自行解锁 |
 | UI selection/viewport | frontend store/URL | local UI state | 回写运行当前节点 |
 
 任何任务无法维持此表时停止实现并重新对齐。
@@ -79,13 +93,14 @@ Task 0 Characterization
   -> Task 3 API + SSE + HITL
   -> Task 5 Single-Canvas Workspace
   -> Task 6 Existing Stage Adapters
+  -> Task 7 Agent / Handoff / Session Integration
   -> Task 8 Migration
-  -> Task 9 Formal Acceptance
+  -> Task 9 Legacy Cleanup
+  -> Task 10 Formal Acceptance
 
 Task 1 -> Task 4 VUI Workflow Canvas
 Task 3 + Task 4 -> Task 5
-Task 3 + Task 6 -> Task 7 Agent / Artifact Integration
-Task 7 -> Task 8
+Task 3 + Task 6 -> Task 7
 ```
 
 一个开发 Agent 执行时按依赖顺序串行推进。若后续授权多人并行，Task 2/3 与 Task 4 可在 Task 1 后分开，但共享 DTO 与 VUI public export 必须由单一 owner 串行合入。
@@ -101,11 +116,15 @@ Task 7 -> Task 8
 - Mode: `BDD_TDD`
 - Deliverable:
   - 测试证明 GET 返回组织派生画布、execute 读取保存流程；
-  - 测试记录旧深链、旧 payload 和现有数据路径；
+  - 测试记录旧深链、旧 payload、现有数据路径和全部科研 router/query 入口，包括挑战杯上下文的 `teamMode=canvas`；
+  - 证明 `ResearchRoute.tsx` 已是 router 不可达的孤儿实现；
+  - 记录现有项目 Agent session 的复用/重试规则，以及 task 中可用的 `sessionId/taskId/turnId`；
+  - 以[旧页面处置表](challenge-cup-legacy-surface-disposition.md)为基线标注 KEEP / EMBED / REDIRECT / REMOVE；
   - 明确哪些行为保留、哪些行为由新域替代。
 - Verification/Stop:
   - 聚焦 pytest 绿；
   - 若发现第三个执行事实源或现有 production writer，停止并修订迁移图；
+  - 若存在处置表未覆盖的科研页面或内部链接，先补表，不进入新 UI；
   - 不在本任务直接修行为。
 
 ### Task 1：工作流领域契约与固定定义
@@ -119,14 +138,19 @@ Task 7 -> Task 8
 - Mode: `BDD_TDD`
 - Deliverable:
   - `WorkflowDefinition/Version/Run/NodeRun/CheckpointRef/HumanTask/ArtifactRef/AgentBinding`；
-  - 三阶段和全部固定节点；
+  - `RunAgentBindingSnapshot/NodeAgentSessionBinding/NodeHandoffRecord`；
+  - 三阶段、全部固定节点和每个节点的 `actorKind` / 主责角色；
   - 状态机和允许的状态转换；
+  - Knowledge Package、Frozen Protocol、smoke 放行和 result package 的输入输出 schema；
+  - rerun / revise protocol / rollback / stop 四类迭代回边语义；
   - 规范化 definition snapshot 和 hash；
   - Canvas projection DTO。
 - Verification/Stop:
   - Python 和 TypeScript contract tests；
   - definition hash 稳定；
   - selected node 不出现在服务端运行模型；
+  - “有资料进度”不能替代 accepted Knowledge Package；
+  - “有实验计划”不能替代 Frozen Protocol + smoke human gate；
   - SSOT 表仍完整。
 
 ### Task 2：LangGraph 最小垂直切片
@@ -140,13 +164,14 @@ Task 7 -> Task 8
 - Deliverable:
   - 声明 LangGraph 和 SQLite checkpointer 直接依赖；
   - 三节点最小图：开始 → 人工门禁 → 完成；
+  - 上游 artifact → handoff → 下游 input snapshot 的最小闭环；
   - persistent `thread_id`；
   - interrupt/resume；
   - restart recovery；
   - fork from checkpoint；
   - idempotency contract。
 - Verification/Stop:
-  - 首次执行、重启恢复、人工提交、失败恢复、fork 测试；
+  - 首次执行、重启恢复、人工提交、handoff 接收/拒绝、失败恢复、fork 测试；
   - InMemorySaver 不得作为交付实现；
   - 不能证明副作用幂等时停止扩展正式节点。
 
@@ -160,14 +185,17 @@ Task 7 -> Task 8
 - Mode: `BDD_TDD`
 - Deliverable:
   - definition、runs、run snapshot、node detail、human task、command API；
+  - effective binding、run binding snapshot、node session binding 和 handoff API；
   - SSE sequence、resume、snapshot + delta；
   - command idempotency；
+  - `rebind_node`、handoff resolve 和 session anchor 的权限/lineage 校验；
   - thin routes、typed response models；
   - bounded/error-safe projection。
 - Verification/Stop:
   - service tests + HTTP contract + SSE reconnect tests；
   - full-stack API boundary 不新增 Route 硬编码 fetch；
   - 不记录 secrets、Prompt 或无界 output；
+  - node detail 缺少 task/turn 时必须显式 degraded，不能回退到默认 Agent 直聊；
   - 未完成断线恢复时不得进入正式 UI。
 
 ### Task 4：VUI 工作流画布能力
@@ -206,16 +234,18 @@ Task 7 -> Task 8
 - Dependency: Task 3 + Task 4。
 - Mode: `BDD_TDD`
 - Deliverable:
-  - header、run switcher、同画布三阶段、NodeInspector、折叠 timeline；
-  - URL `runId` / `node`；
+  - header、run switcher、同画布三阶段、NodeInspector、Agent 分工抽屉、折叠 timeline；
+  - canonical URL `researchView=workflow` + `runId` / `node` / `panel`；
   - `runtimeCurrentNodeIds` 与 `selectedNodeId` 分离；
   - inspector 使用 shared pane persistence；
-  - 旧 stage view 映射到同壳；
+  - 旧 stage/view/query 通过单一 compatibility resolver 映射到同壳；
   - 当前 stage、跨阶段 gate 和 pending human task 可见。
 - Verification/Stop:
   - route/navigation/layout tests；
+  - canonical route 从 Teams 主导航可达；
   - selection 不发运行命令；
   - inspector 开关不重置 viewport；
+  - 页面只挂载一个科研阶段导航语义；
   - 不新增 ad-hoc localStorage key；
   - 不在 UI 显示解释图例、开发组件名或常驻灰色补充文字。
 
@@ -232,31 +262,42 @@ Task 7 -> Task 8
   - 假设、协议、冻结、smoke；
   - 正式 run、评价、迭代决策和 result package；
   - 原操作面板通过 NodeInspector slots 使用；
-  - 原 stage-specific route 成为薄兼容层。
+  - 原 stage-specific route 只进入统一 compatibility resolver；
+  - `ChallengeCupOperationsWorkspace`、stage rail、overview strip 和 completion flow 不再作为并行主表面挂载。
 - Verification/Stop:
   - 原功能 focused tests 保持绿；
   - 每个功能只有一个写路径；
   - 禁止把完整旧页面嵌入检查器形成嵌套工作台；
+  - 每个旧组件的实际处置与[旧页面处置表](challenge-cup-legacy-surface-disposition.md)一致；
   - 发现 route 参数成为隐性 SSOT 时先抽 adapter/model。
 
-### Task 7：Agent、人工任务、证据和 Artifact
+### Task 7：Agent、会话锚点、节点交接、人工任务和 Artifact
 
 - Owner/Boundary:
   - `researchStageAgentBindings` adapter；
-  - Agent 配置入口；
+  - binding / handoff / session binding services；
+  - Chat task / turn anchor；
+  - NodeInspector Agent 区与 Agent 分工抽屉；
   - artifact/evidence projections；
   - 不修改 Agent 身份或权限模型。
 - Dependency: Task 3 + Task 6。
 - Mode: `BDD_TDD`
 - Deliverable:
-  - 节点 Agent 卡片和配置链接；
+  - workflow/stage/node 配置继承与 run binding snapshot；
+  - 节点 Agent 卡片、唯一配置链接和 `rebind_node`；
+  - `sessionId + taskId + turnId + nodeRunId + checkpointId` binding；
+  - “继续会话”定位到具体 task / turn，并返回原 workflow node；
+  - 普通继续复用项目 Agent session；正式重试保留 session attempt lineage；
+  - 每条运行边产生 handoff，跨阶段 handoff 关联 HumanTask；
   - human task form/approve/reject；
   - ArtifactRef 列表；
   - evidence graph 次级打开方式；
   - 历史运行绑定不随当前显示名变化。
 - Verification/Stop:
-  - identity、permission、human resolution 和 artifact lineage tests；
+  - identity、permission、session anchor、handoff、human resolution 和 artifact lineage tests；
   - 无 display-name 授权；
+  - 无默认 Agent 直聊 fallback；
+  - 下游不消费 pending/rejected/superseded handoff；
   - 无大 payload 常驻画布；
   - 组织图不得重新成为执行图。
 
@@ -270,23 +311,49 @@ Task 7 -> Task 8
 - Dependency: Task 6 + Task 7。
 - Mode: `BDD_TDD`
 - Deliverable:
-  - 旧 `researchView` / `collectionStage` 深链映射；
+  - 旧 `/research`、`/research/flow-canvas`、`researchView` / `collectionStage` 深链映射；
   - 新 workspace 默认入口；
   - legacy GET 明确组织/config 语义；
   - legacy execute 停止成为第二写入者；
   - feature gate rollback；
   - migration telemetry / runtime scene。
 - Verification/Stop:
-  - 旧链接、旧数据、新 run、rollback 测试；
+  - 旧页面处置表中的全部 URL、旧数据、新 run、rollback 测试；
+  - 所有内部导航只生成 canonical URL；
+  - `/research/flow-canvas` 不再 lazy import 独立 page；
   - 若仍有两个 writer，停止切换默认入口；
   - 不以静默 fallback 把新运行失败伪装成旧成功。
 
-### Task 9：正式验收与交付
+### Task 9：旧页面、重复入口和兼容残留清理
+
+- Owner/Boundary:
+  - router、legacy resolver、旧科研 route/components/styles/tests；
+  - 旧 API writer、专属 DTO/query/storage keys；
+  - README、VUI design registry 和文档索引；
+  - 不删除用户知识、Agent identity、协议、artifact、checkpoint 或历史运行。
+- Dependency: Task 8 默认入口和 rollback 验收通过。
+- Mode: `BDD_TDD`
+- Deliverable:
+  - 删除 router 不可达的 `ResearchRoute.tsx` 及专属 styles/tests 引用；
+  - 删除 `ResearchFlowCanvasRoute` 独立页面和专属实现，保留必要 redirect；
+  - 删除 Challenge Cup 重复 stage rail、overview strip、completion flow 和独立 stage shell；
+  - 删除无调用 legacy query branch、API helper、DTO、CSS 和 layout/storage key；
+  - 关闭旧 execute writer 和完成后的 feature gate；
+  - 更新 route contract、README、design registry；
+  - 清理任务临时资产、claim 和 worktree 的条件写入交付报告。
+- Verification/Stop:
+  - 执行[旧页面处置表](challenge-cup-legacy-surface-disposition.md)全部删除门；
+  - `rg` 证明没有内部 `/research/flow-canvas` 链接、孤儿 route import 或散落 legacy 判断；
+  - generic Teams 仍需要的组织/绑定能力保持绿；
+  - 任何历史数据不可读取时立即停止删除并恢复 feature gate；
+  - 删除前后各保留一份 route/API characterization evidence。
+
+### Task 10：正式验收与交付
 
 - Owner/Boundary:
   - 全任务 diff review；
   - 不新增产品功能。
-- Dependency: Task 8。
+- Dependency: Task 9。
 - Mode: `SIMPLE`
 - Deliverable:
   - 完整机器门；
@@ -294,6 +361,8 @@ Task 7 -> Task 8
   - 桌面浏览器视觉和导航；
   - checkpoint restart/HITL/retry/fork；
   - migration/rollback；
+  - 无孤儿页、无重复主导航、无 legacy writer；
+  - Agent 精确会话锚点和 handoff lineage；
   - completion report。
 - Verification/Stop:
   - 后端 focused + selected matrix；
@@ -305,6 +374,8 @@ Task 7 -> Task 8
   - `git diff --check`；
   - Launcher steady；
   - browser console 无新增 error/warn；
+  - 从全部 legacy URL 逐一导航并记录 canonical 结果；
+  - Chat 从节点进入指定 task/turn，再返回原 run/node；
   - 任一运行真实性验收失败不得声称 UI 完成。
 
 ## 6. 视觉验收矩阵
@@ -350,7 +421,19 @@ Task 7 -> Task 8
 
 ### E. 兼容深链
 
-旧 knowledge/experiment/iteration 链接 → 同一 workflow 壳 → 聚焦对应 StageRegion/Node → runtime current 保持不变。
+旧 `/research`、`/research/flow-canvas`、全部 `researchView` 和 `collectionStage` 链接 → 同一 workflow 壳 → 聚焦对应 StageRegion/Node/Panel → runtime current 保持不变。
+
+### F. Agent 精确会话
+
+选择 Agent 节点 → “继续会话” → 打开绑定 session → 定位对应 task / turn → 返回原 `runId + node` → 节点选择与 viewport 保持。
+
+普通继续复用 session attempt；正式重试创建新 attempt，原 session/task/turn 仍可追溯。
+
+### G. 交接拒绝与修订
+
+上游产生 artifact → handoff 等待/拒绝 → 下游保持不可运行 → 修订生成新 artifact version 和新 handoff → 人工接受 → 下游只消费 accepted snapshot。
+
+知识阶段没有 accepted Knowledge Package、实验阶段没有 Frozen Protocol + smoke 放行时，跨阶段入口必须不可执行。
 
 ## 8. 回滚
 
@@ -368,6 +451,7 @@ Task 7 -> Task 8
 - schema migration 必须向前兼容已创建 run；
 - dependency rollback 前确认没有活跃新 run；
 - 所有回滚由明确命令和 runtime scene 记录。
+- Task 9 contract 前使用 feature gate 回滚；删除旧实现并关闭 gate 后只能用版本回退，不临时复活部分旧页面。
 
 ## 9. Deferred
 
