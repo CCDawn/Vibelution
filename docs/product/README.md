@@ -47,6 +47,7 @@ Vibelution 是**本地优先**的 AI Agent 工作台，面向工程协作、仓�
 | 产品 UI 注册表 / 视觉禁令 | [design-register.md](design-register.md) |
 | 领域词汇 | [../agents/domain.md](../agents/domain.md) |
 | Gym 产品意图 | [../prds/README.md](../prds/README.md) |
+| 科研流程关系图单页工作台 | [../prds/2026-08-07-research-process-flow-single-page-workspace.md](../prds/2026-08-07-research-process-flow-single-page-workspace.md) · 设计预览 `web/research-process-flow-preview.html` |
 | VUI 实现 | [../../web/src/components/vui/README.md](../../web/src/components/vui/README.md) |
 | 文档地图 | [../README.md](../README.md) |
 | Agent 开发路由 | [../guides/README.md](../guides/README.md) |
