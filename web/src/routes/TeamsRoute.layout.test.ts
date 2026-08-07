@@ -250,16 +250,15 @@ describe("research project workspace", () => {
     expect(teamResearchStageLauncherPanelSource).toContain(
       "if (challengeProgramSurfaceSelected) {",
     );
-    expect(teamResearchStageLauncherPanelSource).toContain("initialStage={challengeInitialStage}");
+    // Task 9/10: progress surface mounts single-canvas workflow, not stage-rail ops shell.
+    expect(teamResearchStageLauncherPanelSource).toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain('surface="workspace"');
   });
 
   it("mounts persistent project switching above the three-stage workspace", () => {
-    // Wave 8H: ResearchProjectSwitcher is mounted from TeamResearchStageLauncherPanel.
+    // Wave 8H: ResearchProjectSwitcher remains for non-challenge stage launcher paths.
     expect(teamResearchStageLauncherPanelSource).toContain("<ResearchProjectSwitcher");
     expect(teamResearchStageLauncherPanelSource).toContain("onProjectActivated");
-    expect(teamResearchStageLauncherPanelSource).toContain('variant="hero"');
-    expect(teamResearchStageLauncherPanelSource).toContain("primaryActionHref={context.primaryActionHref}");
     expect(routeSource).toContain("TeamResearchStageLauncherPanel");
     expect(researchProjectSwitcherSource).toContain("新建研究项目");
   });
@@ -510,7 +509,7 @@ describe("TeamsRoute layout contract", () => {
   it("preserves selected Team deep links from legacy routes", () => {
     expect(resolveLegacyTeamsRedirect("")).toBe("/teams");
     expect(resolveLegacyTeamsRedirect("?team=research-core")).toBe(
-      "/teams?team=research-core&researchView=overview&teamMode=canvas",
+      "/teams?team=research-core&researchView=workflow&workflowId=challenge-cup-research",
     );
   });
 
@@ -1783,7 +1782,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("ExperimentStageComposer");
     // Wave 8H: challengeProgramProjection is read inside TeamResearchStageLauncherPanel.
     expect(teamResearchStageLauncherPanelSource).toContain("challengeProgramProjection");
-    expect(teamResearchStageLauncherPanelSource).toContain("ChallengeCupOperationsWorkspace");
+    expect(teamResearchStageLauncherPanelSource).toContain("ResearchProcessWorkspace");
+    expect(teamResearchStageLauncherPanelSource).not.toContain("ChallengeCupOperationsWorkspace");
     expect(routeSource).toContain("challengeCupResearchTeamSelected");
     expect(routeSource).toContain('useState<"workspace" | "progress">("workspace")');
     expect(routeSource).toContain('challengeTeamSurface === "progress"');
