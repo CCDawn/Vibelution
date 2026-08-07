@@ -29,10 +29,12 @@ def test_create_run_waiting_human_and_resolve(runtime_service) -> None:
     assert run["humanTasks"]
     task_id = run["humanTasks"][0]["taskId"]
 
-    done = runtime_service.resolve_human_task(run["runId"], task_id, accept=True, resolved_by="tester")
-    assert done["status"] == "succeeded"
-    assert done["handoffs"][0]["status"] == "accepted"
-    assert done["handoffs"][0]["outputArtifactRefs"][0]["kind"] == "knowledge_package"
+    after = runtime_service.resolve_human_task(run["runId"], task_id, accept=True, resolved_by="tester")
+    assert after["handoffs"][0]["status"] == "accepted"
+    assert after["handoffs"][0]["outputArtifactRefs"][0]["kind"] == "knowledge_package"
+    assert after["langGraph"].get("knowledgePackageAccepted") is True
+    # Full topology continues to later human gates after knowledge handoff.
+    assert after["status"] in {"waiting_human", "running", "succeeded"}
 
 
 def test_command_idempotency(runtime_service) -> None:
@@ -126,4 +128,6 @@ def test_http_definition_and_create_run(tmp_path: Path, monkeypatch: pytest.Monk
         json={"accept": True, "resolvedBy": "qa"},
     )
     assert resolved.status_code == 200
-    assert resolved.json()["status"] == "succeeded"
+    body = resolved.json()
+    assert body["handoffs"][0]["status"] == "accepted"
+    assert body["langGraph"].get("knowledgePackageAccepted") is True

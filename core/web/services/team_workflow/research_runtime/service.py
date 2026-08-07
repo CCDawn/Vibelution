@@ -14,9 +14,11 @@ from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
 )
+from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
+from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
-from core.research.workflow.runtime import VerticalSliceRuntime
+from langgraph.types import Command
 
 from .store import WorkflowRunStore
 
@@ -121,17 +123,32 @@ class ResearchWorkflowRuntimeService:
                     "handoffs": [],
                 }
             )
-            # Kick vertical-slice engine (HITL gate) for runtime truth.
-            with VerticalSliceRuntime(checkpoint_path=self._checkpoint_path) as rt:
-                lg_result = rt.start(thread_id, idempotency_key=run_id)
-            status = "waiting_human" if lg_result.get("step") == "start" else "running"
+            # Full 15-node Challenge Cup graph (LangGraph is sole run writer).
+            current_node_ids: list[str] = []
+            lg_snapshot: dict[str, Any] = {}
+            with open_sqlite_checkpointer(self._checkpoint_path) as checkpointer:
+                graph = compile_challenge_cup_graph(checkpointer)
+                cfg = {"configurable": {"thread_id": thread_id}}
+                graph.invoke({}, cfg)
+                state = graph.get_state(cfg)
+                current_node_ids = [str(n) for n in (state.next or [])]
+                if not current_node_ids and state.values.get("current_node_id"):
+                    current_node_ids = [str(state.values.get("current_node_id"))]
+                lg_snapshot = {
+                    "engine": "challenge_cup_graph",
+                    "completedNodeIds": list(state.values.get("completed_node_ids") or []),
+                    "knowledgePackageAccepted": bool(state.values.get("knowledge_package_accepted")),
+                    "artifacts": dict(state.values.get("artifacts") or {}),
+                }
+            status = "waiting_human" if current_node_ids else "running"
+            gate_node = current_node_ids[0] if current_node_ids else "knowledge_handoff"
             task_id = f"ht-{uuid.uuid4().hex[:10]}"
             human_task = {
                 "taskId": task_id,
                 "runId": run_id,
-                "nodeId": "knowledge_handoff",
+                "nodeId": gate_node,
                 "status": "pending",
-                "prompt": "Accept upstream handoff?",
+                "prompt": f"Resolve gate at {gate_node}",
                 "checkpointId": "",
                 "createdAt": _utc_now(),
             }
@@ -140,13 +157,9 @@ class ResearchWorkflowRuntimeService:
                 run_id,
                 {
                     "status": status,
-                    "runtimeCurrentNodeIds": ["knowledge_handoff"],
+                    "runtimeCurrentNodeIds": current_node_ids or [gate_node],
                     "humanTasks": [human_task],
-                    "langGraph": {
-                        "lastStep": lg_result.get("step"),
-                        "artifact": lg_result.get("upstream_artifact"),
-                        "inputSnapshotHash": lg_result.get("input_snapshot_hash"),
-                    },
+                    "langGraph": lg_snapshot,
                 },
             )
             self._store.append_event(
@@ -156,7 +169,7 @@ class ResearchWorkflowRuntimeService:
                     "workflowVersionId": meta["workflowVersionId"],
                     "runId": run_id,
                     "threadId": thread_id,
-                    "nodeId": "knowledge_handoff",
+                    "nodeId": gate_node,
                     "type": "node.waiting_human",
                     "summary": {"taskId": task_id},
                 },
@@ -235,8 +248,24 @@ class ResearchWorkflowRuntimeService:
             if task.get("status") != "pending":
                 raise ResearchWorkflowError("Human task already resolved", code="human_task_resolved")
             thread_id = str(record.get("threadId") or "")
-            with VerticalSliceRuntime(checkpoint_path=self._checkpoint_path) as rt:
-                lg_result = rt.resume(thread_id, {"accept": accept})
+            gate_node = str(task.get("nodeId") or "knowledge_handoff")
+            runtime_nodes: list[str] = []
+            lg_snapshot = dict(record.get("langGraph") or {})
+            with open_sqlite_checkpointer(self._checkpoint_path) as checkpointer:
+                graph = compile_challenge_cup_graph(checkpointer)
+                cfg = {"configurable": {"thread_id": thread_id}}
+                graph.invoke(Command(resume={"accept": accept}), cfg)
+                state = graph.get_state(cfg)
+                runtime_nodes = [str(n) for n in (state.next or [])]
+                lg_snapshot = {
+                    **lg_snapshot,
+                    "engine": "challenge_cup_graph",
+                    "completedNodeIds": list(state.values.get("completed_node_ids") or []),
+                    "knowledgePackageAccepted": bool(state.values.get("knowledge_package_accepted")),
+                    "frozenProtocolAccepted": bool(state.values.get("frozen_protocol_accepted")),
+                    "smokeAccepted": bool(state.values.get("smoke_accepted")),
+                    "artifacts": dict(state.values.get("artifacts") or {}),
+                }
             task = {
                 **task,
                 "status": "resolved_accept" if accept else "resolved_reject",
@@ -244,27 +273,30 @@ class ResearchWorkflowRuntimeService:
                 "resolvedAt": _utc_now(),
             }
             self._human_tasks[task_id] = task
+            artifacts = lg_snapshot.get("artifacts") if isinstance(lg_snapshot.get("artifacts"), dict) else {}
             handoff = {
                 "handoffId": f"ho-{uuid.uuid4().hex[:10]}",
-                "fromNodeId": "knowledge_handoff",
-                "toNodeId": "hypothesis_design",
+                "fromNodeId": gate_node,
+                "toNodeId": runtime_nodes[0] if runtime_nodes else "",
                 "status": "accepted" if accept else "rejected",
-                "inputSnapshotHash": (record.get("langGraph") or {}).get("inputSnapshotHash") or "",
+                "inputSnapshotHash": str((artifacts or {}).get("knowledge_package") or ""),
                 "outputArtifactRefs": [
                     {
-                        "artifactId": (record.get("langGraph") or {}).get("artifact") or "",
+                        "artifactId": "knowledge_package",
                         "kind": "knowledge_package",
                         "version": "1",
-                        "contentHash": (record.get("langGraph") or {}).get("inputSnapshotHash") or "",
+                        "contentHash": str((artifacts or {}).get("knowledge_package") or ""),
                     }
                 ]
-                if accept
+                if accept and gate_node == "knowledge_handoff"
                 else [],
             }
-            status = "succeeded" if accept and lg_result.get("step") == "done" else ("failed" if not accept else "running")
-            runtime_nodes = [] if accept else ["knowledge_handoff"]
-            if accept:
-                runtime_nodes = []
+            if not runtime_nodes and accept:
+                status = "succeeded"
+            elif not accept:
+                status = "failed"
+            else:
+                status = "waiting_human" if runtime_nodes else "running"
             record = self._store.update_run(
                 run_id,
                 {
@@ -272,11 +304,7 @@ class ResearchWorkflowRuntimeService:
                     "runtimeCurrentNodeIds": runtime_nodes,
                     "humanTasks": [task],
                     "handoffs": [handoff],
-                    "langGraph": {
-                        **(record.get("langGraph") or {}),
-                        "lastStep": lg_result.get("step"),
-                        "handoffStatus": lg_result.get("handoff_status"),
-                    },
+                    "langGraph": lg_snapshot,
                 },
             )
             self._store.append_event(
