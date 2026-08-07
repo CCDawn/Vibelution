@@ -14,11 +14,21 @@
 
 ## 界面预览
 
-演示数据截图，路径 / 密钥 / 真实聊天内容都已拿掉。
+本机 workbench 实机截图（1440×900）。不展示密钥；界面会随版本迭代。
+
+**对话** — 多会话编码协作与运行侧栏：
 
 ![对话工作台](docs/assets/readme/web-workbench-chat.png)
 
+**团队 / 科研流程** — 挑战杯三阶段运行态画布（节点类型、状态、条件分支与 Inspector）：
+
+![团队科研流程画布](docs/assets/readme/web-workbench-teams.png)
+
+**Git** — 工作区 diff、选中提交与 AI commit 草稿：
+
 ![Git 页](docs/assets/readme/web-workbench-git.png)
+
+**监督进化** — 基线评测 / 提案 / 复跑与用户审批流水线：
 
 ![监督进化](docs/assets/readme/web-workbench-supervised.png)
 
@@ -26,9 +36,10 @@
 
 | 面 | 做什么 |
 | --- | --- |
-| Chat | 多会话编码协作，文件树、只读预览、消息流、停/续、任务状态 |
+| Chat | 多会话编码协作，群聊入口、消息流、停/续、工具与 Prompt 装配侧栏 |
 | Agent | 注册表、提示词、工具与技能边界、模型槽位、权限 |
-| Teams | 组织画布 + 阶段（知识搜集 → 实验设计 → 执行），偏课题 / 挑战杯一类流程 |
+| Teams | 科研团队壳 + **运行态工作流画布**（知识搜集 → 实验设计 → 执行迭代；Agent / 人工门禁 / 系统 / 决策节点；条件分支与 Inspector） |
+| Memory | 知识库、图谱与治理入口 |
 | Git | 顶栏状态、diff、选文件提交、commit message 草稿 |
 | Self Evolution | 有边界的自检 / 自改，带审计和回滚记录 |
 | Supervised Evolution | dataset / bundle 对比、run、提案和建议基线 |
@@ -283,15 +294,19 @@ python agent.py --supervised-dashboard
 
 | 路由 | 作用 |
 | --- | --- |
-| `/chat` | 对话式编码工作台，包含会话列表、文件树、只读预览、消息输入和实时状态。 |
-| `/git` | 仓库局势页，展示变化文件、diff、最近提交、手动提交和 AI commit message 生成。 |
-| `/self-evolution` | 自进化现场，展示 readiness、事务历史、fitness、worktree snapshot、审计尾迹和回滚控制。 |
-| `/supervised-evolution` | 监督进化 live 控制台，启动 dataset / bundle 运行并观察 active run。 |
-| `/supervised-evolution/runs` | 监督运行记录，查看得分、诊断、动作和关联提案。 |
-| `/supervised-evolution/library` | Proposal library 与待推进建议项。 |
-| `/supervised-evolution/review` | 对话样本审核面，把聊天片段转为可控监督样本。 |
-| `/logs` | Runtime scene 和日志文件观察面。 |
-| `/config` | 统一配置工作台，包含模型库、全局运行项、Git 提交说明提示词和高级配置检查。 |
+| `/chat` | 对话式编码工作台：会话列表、消息流、运行侧栏与输入区。 |
+| `/teams` | 团队与科研流程：挑战杯单页运行态画布、人工门禁与 Inspector。 |
+| `/agents` | Agent 管理：注册表、配置、工具与技能边界。 |
+| `/memory` | 知识库与记忆治理入口（含图谱等子视图）。 |
+| `/git` | 仓库局势页：变化文件、diff、最近提交、手动提交和 AI commit message。 |
+| `/self-evolution` | 自进化现场：readiness、事务历史、fitness、审计与回滚。 |
+| `/supervised-evolution` | 监督进化控制台：dataset / bundle 运行与进度。 |
+| `/supervised-evolution/runs` | 监督运行记录。 |
+| `/supervised-evolution/library` | Proposal library 与待推进建议。 |
+| `/supervised-evolution/review` | 对话样本审核面。 |
+| `/logs` | Runtime scene 与日志观察。 |
+| `/config` | 模型库、全局运行项与高级配置检查。 |
+| `/kernel` | Kernel 任务中心。 |
 | `/reset` | 受保护的本地清理入口。 |
 | `/pet` | 长期陪伴体状态入口。 |
 
