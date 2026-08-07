@@ -8,6 +8,12 @@ from .definition import (
     build_challenge_cup_workflow_definition,
     definition_structure_hash,
 )
+from .iteration_decisions import (
+    CompletionKind,
+    IterationDecisionKind,
+    IterationDecisionRecord,
+    PromotionOperation,
+)
 from .models import (
     ActorKind,
     ArtifactRef,
@@ -28,11 +34,15 @@ __all__ = [
     "ActorKind",
     "ArtifactRef",
     "CHALLENGE_CUP_WORKFLOW_ID",
+    "CompletionKind",
     "GateKind",
     "HandoffStatus",
     "HumanTaskStatus",
+    "IterationDecisionKind",
+    "IterationDecisionRecord",
     "NodeHandoffRecord",
     "NodeRunStatus",
+    "PromotionOperation",
     "RunAgentBindingSnapshot",
     "WorkflowDefinition",
     "WorkflowNodeSpec",
