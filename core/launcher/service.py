@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from core.logging import debug as _debug_logger
 import os
 import re
 import time
@@ -2667,8 +2668,8 @@ def _record_launcher_event(
     }
     try:
         append_runtime_manager_file_event(event_code, payload, suppress_io_errors=True)
-    except Exception:
-        return
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record launcher scene event: {exc}")
 
 
 def _truncate(value: str, limit: int) -> str:

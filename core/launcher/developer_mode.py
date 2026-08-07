@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from core.logging import debug as _debug_logger
 import json
 import os
 import shutil
@@ -768,5 +769,5 @@ def _record_event(
             },
             suppress_io_errors=True,
         )
-    except Exception:
-        return
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record developer mode scene event: {exc}")
