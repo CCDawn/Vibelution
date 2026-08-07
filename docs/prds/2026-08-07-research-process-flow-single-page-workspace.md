@@ -10,7 +10,11 @@ Product authority: 本文记录的用户对齐结果；实现与安全边界仍�
 
 Technical decision: [ADR 0006](../adr/0006-challenge-cup-workflow-runtime-and-single-canvas.md)
 
+Handoff and Agent session decision: [ADR 0007](../adr/0007-research-workflow-handoff-and-agent-session-binding.md)
+
 Implementation handoff: [归档任务图](../archive/plans/2026-08-07/challenge-cup-workflow-implementation-plan.md)
+
+Legacy surface disposition: [旧页面与导航处置表](../archive/plans/2026-08-07/challenge-cup-legacy-surface-disposition.md)
 
 ## 1. 决策摘要
 
@@ -186,6 +190,24 @@ ResearchProcessWorkspace
 
 节点目录是 v1 固定模板。Agent、参数、输入数据和运行次数可配置，拓扑不可由终端用户自由改写。
 
+### 6.3 节点执行主体
+
+节点必须明确区分三类执行主体：
+
+- `agent`：由稳定 `agentId` 绑定的 Agent 任务；
+- `system`：由受控 service / runner 执行，不创建伪 Agent；
+- `human`：通过持久 `HumanTask` 等待人工确认。
+
+节点主责：
+
+| 阶段 | Agent 节点 | System / Human 节点 |
+| --- | --- | --- |
+| 知识搜集 | finding、extraction、relations、ingestion | `knowledge_handoff` 为人工 |
+| 实验设计 | hypothesis、protocol design、protocol review | freeze 为人工；smoke 为 system + human |
+| 执行迭代 | evaluation、decision、promotion proposal | controlled run / result package 为 system；promotion 需人工确认 |
+
+科研协调 Agent 作为 workflow-level coordinator 和异常升级对象，不重复占据每个节点的主责位置。
+
 ## 7. 主界面契约
 
 ### 7.1 WorkspaceHeader
@@ -207,10 +229,18 @@ ResearchProcessWorkspace
 
 - 节点名称；
 - 状态图标和短标签；
-- 主要 Agent 头像或数量；
+- 最多一个主责 Agent 头像；有协作者时只追加人数，不横排完整 Agent 卡片；
 - 阻塞数、产物数或待人工数中的必要一项。
 
 补充信息通过 `VTooltip`、检查器或节点详情展示，不常驻灰色说明文字。
+
+Agent 排布遵循以下规则：
+
+- `agent` 节点显示主责 Agent 头像；`system` / `human` 节点显示对应语义图标，不伪装为 Agent；
+- 完整 Agent 卡片只出现在 `NodeInspector` 的 Agent 区和同页 `panel=agents` 抽屉；
+- Agent 抽屉按知识搜集、实验设计、执行迭代三阶段分组，但读取同一套 node-effective binding，不维护第二份配置；
+- 节点卡片、检查器和 Agent 抽屉必须指向同一个 `RunAgentBindingSnapshot`，不得因入口不同显示不同负责人；
+- 调整绑定后明确提示“仅影响新运行”或要求创建新 workflow version，不让历史运行头像和会话发生漂移。
 
 节点状态不得只依赖颜色：
 
@@ -233,7 +263,10 @@ ResearchProcessWorkspace
 - 打开或关闭检查器不得重置画布 viewport；
 - 长输入输出以摘要和 Artifact 链接展示，不把大 payload 全塞进 DOM；
 - 危险命令使用确认浮层；
-- Agent 配置复用现有 Agent 卡片与配置入口。
+- Agent 区显示有效绑定、配置来源、本次运行快照和会话状态；
+- “继续会话”进入本节点对应的 `session + task + turn`；
+- “配置 Agent”进入 Agent Center，并带回当前 `runId + node` 的返回路径；
+- Agent 配置复用现有 Agent 卡片与配置入口，不在检查器复制完整配置表单。
 
 ### 7.4 RunTimeline
 
@@ -259,25 +292,52 @@ ResearchProcessWorkspace
 &workflowId=challenge-cup-research
 &runId=<run-id>
 &node=<node-id>
+&panel=<node|agents|team|timeline>
 ```
 
 规则：
 
 - `node` 只设置选中节点；
 - `runId` 选择运行实例；
+- `panel=agents` 打开同页 Agent 分工抽屉，不创建第二个 Agent 配置页面；
 - 旧 `researchView=knowledge_collection|experiment|iteration` 映射到 workflow 壳并聚焦对应阶段；
 - 旧 `collectionStage` 映射到对应节点；
 - 兼容层不得启动第二套状态写入；
-- 旧 canvas URL 只能进入 Agent 绑定或组织配置，不再作为科研流程主入口。
+- `/research`、旧 overview/canvas 和全部 legacy view 必须有唯一 canonical 结果；
+- 旧 `/research/flow-canvas` 进入 workflow `panel=agents`，不得继续挂载独立科研主页面；
+- 不允许保留未被 router/navigation 使用的孤儿页面；
+- 具体处置与删除门见[旧页面与导航处置表](../archive/plans/2026-08-07/challenge-cup-legacy-surface-disposition.md)。
 
-## 9. Agent、证据与产物边界
+## 9. Agent、交接、证据与产物边界
 
 ### Agent 绑定
 
 - `researchStageAgentBindings` 可作为现有角色绑定投影输入；
 - 节点绑定必须落到稳定 `agentId`，显示名和头像只是展示；
 - 一个节点允许主责 Agent、协作 Agent 和人工 owner；
+- 配置按 workflow default → stage override → node override 解析；
+- 创建 run 时保存 `RunAgentBindingSnapshot`，历史运行不读取当前配置代替快照；
 - Agent 配置改变只影响新运行或显式创建的新 workflow version，不静默改写历史运行。
+- 运行中换绑必须走受控 `rebind_node`，创建新 node attempt 和 lineage。
+
+### Agent 会话点
+
+- 同一研究项目中的同一 Agent 默认复用连续 session；
+- 每个 Agent 节点运行必须保存 `nodeRunId + agentId + sessionId + taskId + turnId + checkpointId`；
+- 节点卡片和检查器不得链接到 Agent 默认直聊，必须打开该节点对应的 task / turn；
+- 普通继续复用当前 session attempt；正式重试创建新 attempt 并保留 `retryOfSessionId`；
+- 历史记录只有 session、没有 task/turn 时可显示 degraded 状态，但不得伪造精确定位。
+
+### 节点交接
+
+- 每条运行边保存 `NodeHandoffRecord`；
+- 上游成功不等于下游已接收，下游只消费 `accepted` handoff；
+- 同阶段交接绑定不可变 input snapshot 和 ArtifactRef；
+- 跨阶段交接必须关联 HumanTask；
+- Knowledge → Experiment 只消费人工接受的 `KnowledgePackageRef`；
+- Experiment → Iteration 只消费冻结协议、smoke artifact 和人工放行；
+- 拒绝/修订创建新 artifact version 和新 handoff，不覆盖原记录；
+- `iteration_decision` 的 rerun、revise、rollback、stop 都必须生成结构化 lineage。
 
 ### 证据关系
 
@@ -326,6 +386,8 @@ ResearchProcessWorkspace
 - [ ] 点选节点只更新同页检查器，不离开 workflow 壳。
 - [ ] 旧阶段深链进入同一 workflow 壳并聚焦正确区域。
 - [ ] Agent 配置、证据图和组织图均作为次级表面进入。
+- [ ] `/research`、`/research/flow-canvas` 和全部 legacy query 都映射到唯一 canonical URL。
+- [ ] router 与产品导航不存在孤儿科研页面或重复阶段主导航。
 
 ### 视觉与布局
 
@@ -344,6 +406,10 @@ ResearchProcessWorkspace
 - [ ] 人工中断在重启后仍为 waiting，提交后从原节点继续。
 - [ ] retry / fork 不覆盖原运行，副作用不重复执行。
 - [ ] 产物可追溯到 workflow version、run、node run 和来源。
+- [ ] 每个 Agent node run 可追溯到准确 `sessionId + taskId + turnId`。
+- [ ] “继续会话”定位到该节点任务并能返回原 `runId + node`。
+- [ ] 下游 NodeRun 只消费 accepted handoff 的不可变 artifact snapshot。
+- [ ] 有资料进度但无 Knowledge Package 时不能进入实验；有计划但无 Frozen Protocol + smoke 放行时不能进入正式执行。
 
 ## 13. 发布与迁移
 
@@ -354,9 +420,15 @@ ResearchProcessWorkspace
 3. 增加 VUI 画布和固定三阶段布局。
 4. 将现有阶段面板挂载到节点检查器。
 5. 新壳成为默认入口，旧深链继续适配。
-6. 观察稳定后删除重复主导航和旧运行写入。
+6. 将 Agent stage binding 迁移为 node-effective binding 和 run snapshot。
+7. 将 Agent 节点任务绑定到具体 session task / turn。
+8. 按处置表重定向全部旧页面和 query。
+9. 停止旧运行写入，删除孤儿页面、重复主导航、重复流程图和专属样式/测试。
+10. 完成无死链、无重复入口、无 legacy writer 的正式验收。
 
 旧 `/api/research/flow-canvas` 在迁移期只能作为 legacy adapter；不得继续同时承担组织图、流程定义和执行状态。
+
+清理不是可选优化。只有[旧页面与导航处置表](../archive/plans/2026-08-07/challenge-cup-legacy-surface-disposition.md)的删除门全部通过，迁移才算完成。
 
 ## 14. 完成定义
 
@@ -364,7 +436,7 @@ ResearchProcessWorkspace
 
 - 产品分叉已锁定；
 - 三阶段同画布契约已锁定；
-- 技术 ADR 和开发任务图已存在；
-- 后续开发 Agent 无需重新猜测流程含义、状态权威、组件边界或验收口径。
+- 运行 ADR、交接/会话 ADR、开发任务图和旧页面处置表已存在；
+- 后续开发 Agent 无需重新猜测流程含义、状态权威、Agent 会话、旧页面归宿、组件边界或验收口径。
 
 它不代表代码已实现、Launcher 已刷新或真实运行已验收。
