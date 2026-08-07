@@ -21,6 +21,10 @@ from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
 )
+from core.research.workflow.iteration_decisions import (
+    DEFAULT_ITERATION_BUDGET,
+    IterationDecisionError,
+)
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
 
@@ -34,6 +38,10 @@ from .handoff_lineage import (
     build_auto_handoffs_for_completed,
     existing_active_edge_ids,
     handoff_edge_id,
+)
+from .iteration_transition import (
+    apply_iteration_decision_side_effects,
+    find_decision_by_idempotency,
 )
 from .store import WorkflowRunStore
 
@@ -194,6 +202,13 @@ class ResearchWorkflowRuntimeService:
                     "humanTasks": [],
                     "handoffs": [],
                     "sessionBindings": {},
+                    "iterationDecisions": [],
+                    "nodeAttempts": {},
+                    "iterationBudgetMax": DEFAULT_ITERATION_BUDGET,
+                    "officialCandidateRef": "",
+                    "baselineCandidateRef": "",
+                    "childRunIds": [],
+                    "completionKind": "",
                     "createIdempotencyKey": idempotency_key,
                 }
             )
@@ -291,11 +306,28 @@ class ResearchWorkflowRuntimeService:
             for t in (record.get("humanTasks") or [])
             if str(t.get("status") or "") == "pending"
         ]
+        node_attempts = dict(record.get("nodeAttempts") or {})
+        node_runs: dict[str, dict[str, Any]] = {}
+        for node_id, attempt in node_attempts.items():
+            node_runs[str(node_id)] = {
+                "nodeId": str(node_id),
+                "status": "succeeded" if int(attempt or 0) > 0 else "pending",
+                "attempt": int(attempt or 0),
+                "nodeRunId": f"nr-{node_id}-a{int(attempt or 0)}",
+            }
         return build_canvas_projection(
             run_id=run_id,
             run_status=status,
             runtime_current_node_ids=list(record.get("runtimeCurrentNodeIds") or []),
+            node_runs=node_runs,
             pending_human_tasks=pending,
+            parent_run_id=str(record.get("parentRunId") or "") or None,
+            child_run_ids=list(record.get("childRunIds") or []),
+            completion_kind=str(record.get("completionKind") or "") or None,
+            official_candidate_ref=str(record.get("officialCandidateRef") or "") or None,
+            blocked_reason=str(record.get("blockedReason") or (record.get("langGraph") or {}).get("blockedReason") or "")
+            or None,
+            iteration_budget_max=int(record.get("iterationBudgetMax") or DEFAULT_ITERATION_BUDGET),
         )
 
     def get_node_detail(self, run_id: str, node_id: str) -> dict[str, Any]:
@@ -424,16 +456,21 @@ class ResearchWorkflowRuntimeService:
                     existing_edge_ids=existing_edge_ids,
                 )
 
-            # Create next pending HumanTask for new interrupt
+            # Create next pending HumanTask only for human-gated nodes
             if accept and runtime_nodes:
                 next_gate = runtime_nodes[0]
+                next_spec = next(
+                    (n for n in build_challenge_cup_workflow_definition().nodes if n.nodeId == next_gate),
+                    None,
+                )
+                is_human_gate = next_spec is not None and next_spec.actorKind is ActorKind.HUMAN
                 # Avoid duplicate pending for same node
                 tasks_now = list((self.get_run(run_id).get("humanTasks") or []))
                 has_pending_next = any(
                     str(t.get("nodeId")) == next_gate and str(t.get("status")) == "pending"
                     for t in tasks_now
                 )
-                if not has_pending_next:
+                if is_human_gate and not has_pending_next:
                     next_task = self._new_human_task(
                         run_id=run_id,
                         node_id=next_gate,
@@ -459,14 +496,51 @@ class ResearchWorkflowRuntimeService:
             else:
                 status = "waiting_human"
 
-            self._store.update_run(
-                run_id,
-                {
-                    "status": status,
-                    "runtimeCurrentNodeIds": runtime_nodes if accept else [gate_node],
-                    "langGraph": lg_snapshot,
-                },
-            )
+            run_patch: dict[str, Any] = {
+                "status": status,
+                "runtimeCurrentNodeIds": runtime_nodes if accept else [gate_node],
+                "langGraph": lg_snapshot,
+            }
+            # Promotion / rollback HumanTask: only on accept update official candidate ref.
+            if gate_node == "candidate_promotion":
+                proposals = list(record.get("promotionProposals") or [])
+                op = str(task.get("promotionOperation") or record.get("promotionOperation") or "promote")
+                proposal_id = str(task.get("proposalId") or "")
+                if accept:
+                    for prop in proposals:
+                        if proposal_id and prop.get("proposalId") == proposal_id:
+                            prop["status"] = "accepted"
+                            target = str(prop.get("targetCandidateRef") or prop.get("selectedCandidateRef") or "")
+                            if op == "promote":
+                                run_patch["officialCandidateRef"] = target or prop.get("selectedCandidateRef") or f"candidate:{proposal_id}"
+                            elif op == "rollback":
+                                run_patch["officialCandidateRef"] = target
+                            break
+                    else:
+                        # No proposal id match — still mark latest
+                        if proposals:
+                            proposals[-1]["status"] = "accepted"
+                            run_patch["officialCandidateRef"] = str(
+                                proposals[-1].get("targetCandidateRef")
+                                or proposals[-1].get("selectedCandidateRef")
+                                or record.get("officialCandidateRef")
+                                or ""
+                            )
+                    run_patch["promotionProposals"] = proposals
+                    if not runtime_nodes:
+                        run_patch["completionKind"] = "promoted" if op == "promote" else "rolled_back"
+                        run_patch["status"] = "succeeded"
+                else:
+                    for prop in proposals:
+                        if proposal_id and prop.get("proposalId") == proposal_id:
+                            prop["status"] = "rejected"
+                    run_patch["promotionProposals"] = proposals
+                    run_patch["status"] = "blocked"
+                    run_patch["blockedReason"] = "promotion_rejected"
+                    # Downstream result_package must remain locked
+                    run_patch["runtimeCurrentNodeIds"] = [gate_node]
+
+            self._store.update_run(run_id, run_patch)
             self._store.append_event(
                 run_id,
                 {
@@ -485,6 +559,200 @@ class ResearchWorkflowRuntimeService:
             )
             return self.get_run(run_id)
 
+    def apply_iteration_decision(
+        self,
+        run_id: str,
+        decision: dict[str, Any],
+        *,
+        idempotency_key: str = "",
+        decided_by: str = "",
+    ) -> dict[str, Any]:
+        """Apply one of the five structured iteration decisions (durable + graph resume)."""
+        with self._lock:
+            record = self.get_run(run_id)
+            key = idempotency_key or str(decision.get("idempotencyKey") or "")
+            if key:
+                prior = find_decision_by_idempotency(record, key)
+                if prior:
+                    return self.get_run(run_id)
+                durable_key = f"iterdec:{run_id}:{key}"
+                if self._index.get_run_id(durable_key):
+                    return self.get_run(run_id)
+
+            payload = dict(decision)
+            if key:
+                payload["idempotencyKey"] = key
+            if decided_by:
+                payload["decidedBy"] = decided_by
+            payload.setdefault("budgetMax", int(record.get("iterationBudgetMax") or DEFAULT_ITERATION_BUDGET))
+
+            thread_id = str(record.get("threadId") or "")
+            workflow_id = str(record.get("workflowId") or CHALLENGE_CUP_WORKFLOW_ID)
+            workflow_version_id = str(record.get("workflowVersionId") or "")
+            checkpoint_id = ""
+            lg_snapshot = dict(record.get("langGraph") or {})
+            runtime_nodes: list[str] = []
+
+            try:
+                with open_sqlite_checkpointer(self._checkpoint_path) as checkpointer:
+                    graph = compile_challenge_cup_graph(checkpointer)
+                    cfg = {"configurable": {"thread_id": thread_id}}
+                    # Resume iteration_decision interrupt with structured decision
+                    graph.invoke(Command(resume=payload), cfg)
+                    state = graph.get_state(cfg)
+                    checkpoint_id = self._checkpoint_id_from_state(state)
+                    runtime_nodes = [str(n) for n in (state.next or [])]
+                    values = dict(state.values or {})
+                    lg_snapshot = {
+                        **lg_snapshot,
+                        "engine": "challenge_cup_graph",
+                        "completedNodeIds": list(values.get("completed_node_ids") or []),
+                        "knowledgePackageAccepted": bool(values.get("knowledge_package_accepted")),
+                        "frozenProtocolAccepted": bool(values.get("frozen_protocol_accepted")),
+                        "smokeAccepted": bool(values.get("smoke_accepted")),
+                        "promotionAccepted": values.get("promotion_accepted"),
+                        "artifacts": dict(values.get("artifacts") or {}),
+                        "checkpointId": checkpoint_id,
+                        "controlledRunAttempt": int(values.get("controlled_run_attempt") or 0),
+                        "iterationDecision": values.get("iteration_decision") or payload,
+                        "nodeAttempts": dict(values.get("node_attempts") or {}),
+                        "officialCandidateRef": values.get("official_candidate_ref")
+                        or record.get("officialCandidateRef")
+                        or "",
+                        "terminalReason": values.get("terminal_reason") or "",
+                        "completionKind": values.get("completion_kind") or "",
+                        "blockedReason": values.get("blocked_reason") or "",
+                        "promotionOperation": values.get("promotion_operation") or "",
+                    }
+            except IterationDecisionError as exc:
+                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+            except Exception as exc:
+                # Graph may raise on unknown kind during routing
+                msg = str(exc)
+                if "Unknown iteration" in msg or "unknown_decision" in msg.lower():
+                    raise ResearchWorkflowError(msg, code="unknown_decision_kind") from exc
+                raise
+
+            def _create_child(skeleton: dict[str, Any]) -> dict[str, Any]:
+                # Persist child run shell; start child graph from protocol_design via empty invoke
+                # with pre-seeded state is complex — store shell and mark start node.
+                child_id = str(skeleton["runId"])
+                if key:
+                    existing_child = self._index.get_run_id(f"fork:{run_id}:{key}")
+                    if existing_child:
+                        existing = self._store.get_run(existing_child)
+                        if existing:
+                            return existing
+                self._store.create_run(skeleton)
+                # Seed child checkpoint by compiling and updating state is optional for shell;
+                # mark runtime at protocol_design for canvas.
+                self._store.update_run(
+                    child_id,
+                    {
+                        "status": "running",
+                        "runtimeCurrentNodeIds": ["protocol_design"],
+                        "langGraph": {
+                            **(skeleton.get("langGraph") or {}),
+                            "startNodeId": "protocol_design",
+                            "engine": "challenge_cup_graph",
+                        },
+                    },
+                )
+                if key:
+                    self._index.put_run_id(f"fork:{run_id}:{key}", child_id)
+                return self.get_run(child_id)
+
+            try:
+                effects = apply_iteration_decision_side_effects(
+                    record=record,
+                    decision_raw=payload,
+                    graph_state={
+                        "artifacts": lg_snapshot.get("artifacts") or {},
+                        "controlled_run_attempt": lg_snapshot.get("controlledRunAttempt") or 0,
+                        "iteration_budget_max": record.get("iterationBudgetMax") or DEFAULT_ITERATION_BUDGET,
+                        "blocked_reason": lg_snapshot.get("blockedReason") or "",
+                    },
+                    checkpoint_id=checkpoint_id,
+                    workflow_id=workflow_id,
+                    workflow_version_id=workflow_version_id,
+                    utc_now=_utc_now,
+                    create_child_run=_create_child,
+                )
+            except IterationDecisionError as exc:
+                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+
+            decision_rec = effects["decision"]
+            decisions = list(record.get("iterationDecisions") or [])
+            decisions.append(decision_rec)
+
+            patch = dict(effects.get("patch") or {})
+            # Merge graph snapshot
+            if "langGraph" in patch:
+                lg_snapshot = {**lg_snapshot, **patch.pop("langGraph")}
+            if effects.get("replace_handoffs") is not None:
+                patch["handoffs"] = effects["replace_handoffs"]
+            if effects.get("error"):
+                patch.setdefault("status", "blocked")
+                patch.setdefault("blockedReason", effects["error"].get("code") or "iteration_error")
+
+            # Prefer graph runtime nodes when not forking/stopping
+            if patch.get("status") not in {"succeeded", "blocked"} and runtime_nodes:
+                patch.setdefault("runtimeCurrentNodeIds", runtime_nodes)
+            if effects.get("controlled_run_attempt"):
+                lg_snapshot["controlledRunAttempt"] = effects["controlled_run_attempt"]
+                na = dict(patch.get("nodeAttempts") or record.get("nodeAttempts") or {})
+                na["controlled_run"] = effects["controlled_run_attempt"]
+                patch["nodeAttempts"] = na
+
+            # Budget block from graph
+            if lg_snapshot.get("blockedReason") == "iteration_budget_exhausted" or (
+                effects.get("error") or {}
+            ).get("code") == "iteration_budget_exhausted":
+                patch["status"] = "blocked"
+                patch["blockedReason"] = "iteration_budget_exhausted"
+                patch["runtimeCurrentNodeIds"] = ["iteration_decision"]
+
+            # Preserve frozen protocol on parent after revise
+            if effects.get("child_run"):
+                # parent patch already from link_parent_after_fork
+                pass
+
+            if effects.get("human_task"):
+                tasks = list(record.get("humanTasks") or [])
+                tasks.append(effects["human_task"])
+                patch["humanTasks"] = tasks
+
+            patch["iterationDecisions"] = decisions
+            patch["langGraph"] = lg_snapshot
+
+            # Official candidate fields
+            if "officialCandidateRef" not in patch and lg_snapshot.get("officialCandidateRef"):
+                patch["officialCandidateRef"] = lg_snapshot["officialCandidateRef"]
+            if lg_snapshot.get("completionKind") and not patch.get("completionKind"):
+                patch["completionKind"] = lg_snapshot["completionKind"]
+            if lg_snapshot.get("terminalReason") and not patch.get("terminalReason"):
+                patch["terminalReason"] = lg_snapshot["terminalReason"]
+
+            self._store.update_run(run_id, patch)
+            self._store.append_event(
+                run_id,
+                {
+                    "workflowId": workflow_id,
+                    "runId": run_id,
+                    "nodeId": "iteration_decision",
+                    "type": "iteration.decision_applied",
+                    "summary": {
+                        "decisionId": decision_rec.get("decisionId"),
+                        "decisionKind": decision_rec.get("decisionKind"),
+                        "childRunId": (effects.get("child_run") or {}).get("runId"),
+                        "error": effects.get("error"),
+                    },
+                },
+            )
+            if key:
+                self._index.put_run_id(f"iterdec:{run_id}:{key}", run_id)
+            return self.get_run(run_id)
+
     def apply_command(
         self,
         run_id: str,
@@ -501,6 +769,13 @@ class ResearchWorkflowRuntimeService:
                 return self.get_run(run_id)
 
         payload = payload or {}
+        if command == "iteration_decision":
+            return self.apply_iteration_decision(
+                run_id,
+                payload,
+                idempotency_key=idempotency_key or str(payload.get("idempotencyKey") or ""),
+                decided_by=str(payload.get("decidedBy") or ""),
+            )
         if command == "cancel":
             record = self._store.update_run(run_id, {"status": "cancelled", "runtimeCurrentNodeIds": []})
         elif command == "retry_node":
