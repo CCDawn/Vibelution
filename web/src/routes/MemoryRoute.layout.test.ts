@@ -1043,7 +1043,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeStewardPanelSource).toContain("styles.stewardRecommendations");
     expect(knowledgeStewardPanelSource).toContain("styles.stewardWorkbench");
     expect(knowledgeStewardPanelSource).toContain("styles.stewardStageGrid");
-    expect(knowledgeStewardPanelSource).toContain('import { VButton, VRouteLinkButton, VTooltip } from "../components/vui"');
+    expect(knowledgeStewardPanelSource).toContain('import { VButton, VRouteLinkButton, VStatusChip, VTooltip } from "../components/vui"');
     expect(knowledgeStewardPanelSource).toContain("<VRouteLinkButton");
     expect(knowledgeStewardPanelSource).not.toContain("<NavLink");
     expect(knowledgeStewardPanelSource).toContain("const recommendationTooltip");

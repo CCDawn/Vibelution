@@ -297,35 +297,36 @@ function getValueAtConfigPath(root: unknown, path: string): unknown {
   return current;
 }
 
-function setValueAtConfigPath<T>(root: T, path: string, nextValue: unknown): T {
+export function setValueAtConfigPath<T>(root: T, path: string, nextValue: unknown): T {
   if (!path) {
     return clonePublicConfig(nextValue as T);
   }
-  const cloned = clonePublicConfig(root);
   const tokens = splitConfigPath(path);
-  let current: unknown = cloned;
-  for (let index = 0; index < tokens.length - 1; index += 1) {
-    const token = tokens[index];
-    if (Array.isArray(current)) {
-      current = current[Number(token)];
-      continue;
-    }
-    if (isRecord(current)) {
-      if (!isRecord(current[token]) && !Array.isArray(current[token])) {
-        current[token] = {};
-      }
-      current = current[token];
-      continue;
-    }
-    throw new Error(`Unknown config path: ${path}`);
-  }
-  const leaf = tokens[tokens.length - 1];
+  return updateNodeAtConfigPath(root, tokens, 0, nextValue) as T;
+}
+
+function updateNodeAtConfigPath(current: unknown, tokens: string[], index: number, nextValue: unknown): unknown {
+  const token = tokens[index];
+  const isLeaf = index === tokens.length - 1;
   if (Array.isArray(current)) {
-    current[Number(leaf)] = clonePublicConfig(nextValue);
-  } else if (isRecord(current)) {
-    current[leaf] = clonePublicConfig(nextValue);
+    const nextArr = current.slice();
+    nextArr[Number(token)] = isLeaf
+      ? clonePublicConfig(nextValue)
+      : updateNodeAtConfigPath(current[Number(token)], tokens, index + 1, nextValue);
+    return nextArr;
   }
-  return cloned;
+  if (isRecord(current)) {
+    const nextObj: Record<string, unknown> = { ...current };
+    if (isLeaf) {
+      nextObj[token] = clonePublicConfig(nextValue);
+    } else {
+      const child = current[token];
+      const prepared = isRecord(child) || Array.isArray(child) ? child : {};
+      nextObj[token] = updateNodeAtConfigPath(prepared, tokens, index + 1, nextValue);
+    }
+    return nextObj;
+  }
+  throw new Error(`Unknown config path: ${tokens.join(".")}`);
 }
 
 export function pickEditableConfigView(

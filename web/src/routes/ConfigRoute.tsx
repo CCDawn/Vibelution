@@ -63,6 +63,7 @@ import {
   resolveImageInputCapabilityStatus,
   shouldBlockConfigLeave,
   selectModelScenarioProviderPresetId,
+  setValueAtConfigPath,
   type ModelScenarioId,
   uniqueModelLibraryId,
   type PublicConfigShape,
@@ -1038,34 +1039,6 @@ function getConfigValueAtPath(root: unknown, path: string): unknown {
   return current;
 }
 
-function setConfigValueAtPath<T>(root: T, path: string, nextValue: unknown): T {
-  if (!path) {
-    return nextValue as T;
-  }
-  const cloned = clonePublicConfig(root);
-  const tokens = splitConfigPath(path);
-  let current: unknown = cloned;
-  for (let index = 0; index < tokens.length - 1; index += 1) {
-    const token = tokens[index];
-    if (Array.isArray(current)) {
-      current = current[Number(token)];
-      continue;
-    }
-    if (isPlainObject(current)) {
-      current = current[token];
-      continue;
-    }
-    throw new Error(`Unknown config path: ${path}`);
-  }
-  const leaf = tokens[tokens.length - 1];
-  if (Array.isArray(current)) {
-    current[Number(leaf)] = nextValue;
-  } else if (isPlainObject(current)) {
-    current[leaf] = nextValue;
-  }
-  return cloned;
-}
-
 function humanizeConfigToken(token: string): string {
   return token
     .split("_")
@@ -1221,7 +1194,7 @@ function ConfigSectionEditor({
   const expandedPaths = uiState.expandedPaths;
   const presentation = configSectionPresentation(section.id, lang);
   const tierCounts = configSectionTierCounts(section.id, section.fieldCount);
-  const draftValue = editing ? clonePublicConfig(uiState.draftValue ?? value) : clonePublicConfig(value);
+  const draftValue = editing ? (uiState.draftValue ?? value) : value;
   const sectionClassName = [
     styles.sectionSurface,
     styles.configEditorSection,
@@ -1245,12 +1218,12 @@ function ConfigSectionEditor({
   function updateSectionDraft(absolutePath: string, nextValue: unknown) {
     const prefix = `${section.path}.`;
     const relativePath = absolutePath === section.path ? "" : absolutePath.startsWith(prefix) ? absolutePath.slice(prefix.length) : absolutePath;
-    const currentDraft = editing ? draftValue : clonePublicConfig(value);
+    const currentDraft = editing ? draftValue : value;
     onUiStateChange(section.id, {
       ...uiState,
       editing: true,
       expanded: true,
-      draftValue: setConfigValueAtPath(currentDraft, relativePath, nextValue),
+      draftValue: setValueAtConfigPath(currentDraft, relativePath, nextValue),
     });
   }
 
@@ -2922,8 +2895,7 @@ export function ConfigRoute() {
 
   async function saveConfigSection(path: string, nextValue: unknown) {
     try {
-      const next = clonePublicConfig(requireDraft());
-      const updated = setConfigValueAtPath(next, path, nextValue);
+      const updated = setValueAtConfigPath(requireDraft(), path, nextValue);
       return await previewDraft(updated, draftMeta, copy.sectionSavePending);
     } catch (error) {
       markError(error);
