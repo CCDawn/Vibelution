@@ -58,6 +58,7 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 | Overview primary CTA UI | `ResearchPrimaryActionBar.tsx` | mutations ownership |
 | Overview advanced disclosure shell | `ResearchOverviewSecondary.tsx` | evidence/path dumps in hero |
 | Design acceptance preview (static) | `web/research-overview-preview-standalone.html` + `design/research-overview-preview.*` | production routes |
+| Process-flow single-page workspace preview (static) | `web/research-process-flow-preview.html` + `design/research-process-flow-preview.*` | production multi-page stage routes as primary nav; board/canvas dual shell as primary IA |
 | Teams shell (left team list + board/canvas mode) | `teamShellModel.ts` + `TeamShellRail.tsx` + `TeamShellModeSwitch.tsx` + `TeamShellToolbar.tsx` + VUI `VBoardWorkbenchPage` / `VCanvasWorkbenchPage` | burying team pick in dense header only |
 | Organization canvas surface | `TeamOrganizationCanvasSurface.tsx` | inlining graph/drag chrome in TeamsRoute |
 | Canvas node binding inspector | `TeamNodeBindingPanel.tsx` | duplicating bind form in board/canvas |
