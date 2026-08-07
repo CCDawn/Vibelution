@@ -11,6 +11,7 @@ import { RecipeCatalog } from "./catalog/RecipeCatalog";
 import { StructureCatalog } from "./catalog/StructureCatalog";
 import { TeamCatalog } from "./catalog/TeamCatalog";
 import { TeamSourceCatalog } from "./catalog/TeamSourceCatalog";
+import { WorkflowCatalog } from "./catalog/WorkflowCatalog";
 import { VuiPreviewHeader } from "./VuiPreviewHeader";
 
 export function VuiComponentPreviewApp() {
@@ -38,6 +39,7 @@ export function VuiComponentPreviewApp() {
         <AgentCatalog />
         <TeamCatalog />
         <TeamSourceCatalog />
+        <WorkflowCatalog />
       </div>
     </main>
   );

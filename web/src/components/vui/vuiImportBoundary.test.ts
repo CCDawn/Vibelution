@@ -45,6 +45,13 @@ const productSharedParentStyleConsumers = [
 const isolatedDesignReferenceArtifacts = new Set([
   "design/challenge-cup-platform-home-preview-tooltips.tsx",
 ]);
+// VWorkflowCanvas is the sanctioned product facade for the React Flow canvas renderer;
+// workflowLayoutTypes re-exports its layout entrypoint. They are the only product files
+// allowed to touch the shadcn workflow renderer directly.
+const vuiWorkflowCanvasFacadeFiles = new Set([
+  "components/vui/product/workflow/VWorkflowCanvas.tsx",
+  "components/vui/product/workflow/workflowLayoutTypes.ts",
+]);
 const designSystemSourceFiles = new Set([
   "design/vuiChromeRecipes.ts",
   "design/vuiSurfaceAlphaPolicy.ts",
@@ -105,7 +112,8 @@ describe("VUI architecture boundary", () => {
       })
       .map(relativeFromSourceRoot)
       .filter((file) => !file.startsWith(vuiRendererRelativeRoot))
-      .filter((file) => file.startsWith(vuiProductRelativeRoot));
+      .filter((file) => file.startsWith(vuiProductRelativeRoot))
+      .filter((file) => !vuiWorkflowCanvasFacadeFiles.has(file));
 
     expect(offenders).toEqual([]);
   });

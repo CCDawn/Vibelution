@@ -18,6 +18,7 @@ import {
   VButton,
   VCanvasWorkbenchPage,
   VEmptyState,
+  VPanelHeader,
   VSelect,
   VStateSurface,
   VSurface,
@@ -280,7 +281,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
   const inspectorBody =
     panel === "agents" ? (
       <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
-        <strong>Agent 分工</strong>
+        <VPanelHeader title="Agent 分工" headingLevel={3} />
         <ul className="m-0 list-none space-y-1 p-0">
           {(run?.bindingSnapshots || []).map((snap) => (
             <li
@@ -299,7 +300,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
       </VSurface>
     ) : panel === "timeline" ? (
       <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
-        <strong>运行事件</strong>
+        <VPanelHeader title="运行事件" headingLevel={3} />
         <ul className="m-0 list-none space-y-1 p-0">
           {(run?.events || []).map((evt) => (
             <li
@@ -316,7 +317,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
       </VSurface>
     ) : panel === "team" ? (
       <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
-        <strong>团队</strong>
+        <VPanelHeader title="团队" headingLevel={3} />
         <p className="m-0 text-[var(--fg-secondary)]">团队组织与讨论在此面板打开；流程执行仍以画布为准。</p>
         <p className="m-0">团队 ID：{teamId || "—"}</p>
         <p className="m-0">运行：{runId || "未创建"}</p>
