@@ -7,6 +7,7 @@ const isolatedReferenceArtifacts = new Set([
   "agent-management-governance-preview.css",
   "challenge-cup-platform-home-preview.css",
   "research-overview-preview.css",
+  "research-process-flow-preview.css",
   "vui-reference-lab.css",
 ]);
 
