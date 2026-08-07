@@ -345,8 +345,11 @@ def _resolve_start_backend_port(preferred: int, host: str) -> tuple[int, str]:
     """
     Resolve a bindable backend port for this project checkout.
 
+    Fresh-start policy: never reuse a live workbench. Callers must retire this
+    project's managed handles before resolve. After retire:
+
     - Free preferred port → use it
-    - Preferred owned by this project's workbench → reuse (already running)
+    - Preferred still owned by this project's workbench → hard error (retire failed)
     - Preferred owned by another process/project → auto-pick a free port and remember it
     """
 
@@ -357,11 +360,9 @@ def _resolve_start_backend_port(preferred: int, host: str) -> tuple[int, str]:
     if owner_pid <= 0:
         return preferred_port, ""
     if _is_project_workbench_pid(owner_pid):
-        if _backend_healthy(preferred_port, host):
-            return preferred_port, "reuse_project_workbench"
         raise RuntimeError(
-            f"Workbench port {preferred_port} is held by this project's unhealthy process "
-            f"pid {owner_pid}; stop it first, then start again."
+            f"Workbench port {preferred_port} is still held by this project's process "
+            f"pid {owner_pid} after instance retire; cannot start a fresh handle-aligned instance."
         )
     free_port = _find_free_backend_port(preferred_port + 1)
     _remember_project_backend_port(
@@ -372,6 +373,63 @@ def _resolve_start_backend_port(preferred: int, host: str) -> tuple[int, str]:
         f"port {preferred_port} occupied by foreign pid {owner_pid}; "
         f"auto-bound this project to {free_port}"
     )
+
+
+def _collect_project_workbench_handles(state: dict, port: int | None = None) -> list[int]:
+    """Collect OS process handles (PIDs) owned by this project's workbench instance."""
+    handles: set[int] = set()
+    for key in (
+        "backendPid",
+        "backendLaunchPid",
+        "browserLaunchPid",
+        "browserWindowPid",
+        "workbenchBrowserLaunchPid",
+        "workbenchBrowserWindowPid",
+    ):
+        pid = int(state.get(key) or 0)
+        if pid > 0:
+            handles.add(pid)
+    resolved_port = int(
+        port
+        if port is not None
+        else (state.get("backendPort") or state.get("port") or 0)
+        or 0
+    )
+    if resolved_port > 0:
+        owner_pid = _listening_pid_for_port(resolved_port)
+        if owner_pid > 0 and _is_project_workbench_pid(owner_pid):
+            handles.add(owner_pid)
+    return sorted(pid for pid in handles if pid > 0)
+
+
+def _retire_project_workbench_instance(state: dict, port: int | None = None) -> list[int]:
+    """Terminate every managed handle for this project's previous workbench instance.
+
+    Returns the retired handle list (PIDs that were targeted). Fresh start must not
+    attach to any of these handles afterwards.
+    """
+    resolved_port = int(
+        port
+        if port is not None
+        else (state.get("backendPort") or state.get("port") or DEFAULT_PORT)
+        or DEFAULT_PORT
+    )
+    handles = _collect_project_workbench_handles(state, resolved_port)
+    for pid in sorted(handles, reverse=True):
+        _terminate_pid(pid)
+    # Port may still be TIME_WAIT or a slow child — wait for this project's listener to leave.
+    if resolved_port > 0:
+        owner = _listening_pid_for_port(resolved_port)
+        if owner > 0 and _is_project_workbench_pid(owner):
+            _terminate_pid(owner)
+            if not _wait_for_port_release(resolved_port):
+                still = _listening_pid_for_port(resolved_port)
+                if still > 0 and _is_project_workbench_pid(still):
+                    raise RuntimeError(
+                        f"Failed to retire previous workbench on port {resolved_port} "
+                        f"(still held by project pid {still})."
+                    )
+    return handles
 
 
 def _wait_for_port_release(port: int, timeout_seconds: float = 8.0) -> bool:
@@ -1711,38 +1769,19 @@ def _frontend_sources_are_newer_than_dist(web_dir: Path, dist_index: Path) -> bo
 
 
 def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
+    """Always start a **fresh** workbench instance for this project.
+
+    Previous project-owned process handles (backend + managed browser) are retired
+    first. Start never attaches to an already-running workbench PID.
+    """
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     previous_state = _read_state()
     preferred_port = int(port or DEFAULT_PORT)
+    # 1) Retire previous instance by handle — never take over old PIDs.
+    retired_handles = _retire_project_workbench_instance(previous_state, preferred_port)
+    # 2) Bind port (foreign occupancy may auto-relocate; project occupancy is an error).
     resolved_port, resolve_note = _resolve_start_backend_port(preferred_port, host)
     port = int(resolved_port)
-    if resolve_note == "reuse_project_workbench":
-        owner_pid = _listening_pid_for_port(port)
-        url = f"http://{host}:{int(port)}"
-        state = {
-            **_preserved_launcher_control_state(previous_state),
-            "schemaVersion": 1,
-            "launcherAdapter": "python_headless",
-            "desiredState": "open",
-            "observedState": "open",
-            "phase": "steady",
-            "sessionRole": "workbench",
-            "backendPid": int(owner_pid),
-            "backendLaunchPid": int(previous_state.get("backendLaunchPid") or owner_pid),
-            "url": url,
-            "host": host,
-            "backendPort": int(port),
-            "port": int(port),
-            "statusLine": "Workbench is running.",
-            "failureMessage": "",
-            "lastReason": "python_launcher_reuse_existing",
-            "lastSource": "python_launcher",
-            "runtimeProjectRoot": str(PROJECT_ROOT),
-            "updatedAt": _now_iso(),
-        }
-        _remember_project_backend_port(port, reason="reuse_project_workbench")
-        _write_state(state)
-        return state
     # Foreign occupancy is resolved by auto-binding another free port (multi-checkout safe).
     open_started = time.monotonic()
     open_timings_ms: dict[str, float] = {}
@@ -1754,7 +1793,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     open_timings_ms["frontendEnsureMs"] = round((time.monotonic() - frontend_started) * 1000.0, 1)
     # Mid-flight checks only need commit/tree drift detection (full porcelain already done).
     _assert_runtime_source_identity(source_identity, light=True)
-    runtime_scene = _start_runtime_scene("python_launcher_start")
+    runtime_scene = _start_runtime_scene("python_launcher_fresh_start")
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
     python_started = time.monotonic()
@@ -1790,6 +1829,13 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     if backend_pid <= 0:
         _terminate_pid(process.pid)
         raise RuntimeError(f"New backend did not own a healthy listener at {_health_url(port, host)}.")
+    retired_set = set(int(pid) for pid in retired_handles)
+    if int(backend_pid) in retired_set or int(process.pid) in retired_set:
+        _terminate_pid(process.pid)
+        raise RuntimeError(
+            "Fresh start produced process handles that collide with the retired instance; "
+            f"retired={sorted(retired_set)} backendPid={backend_pid} launchPid={process.pid}."
+        )
     try:
         _assert_runtime_source_identity(source_identity, light=True)
     except Exception:
@@ -1811,6 +1857,15 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         except Exception:
             _terminate_pid(process.pid)
             raise
+        browser_launch = int(browser_info.get("browserLaunchPid") or 0)
+        browser_window = int(browser_info.get("browserWindowPid") or 0)
+        if browser_launch in retired_set or browser_window in retired_set:
+            _terminate_pid(browser_launch)
+            _terminate_pid(browser_window)
+            _terminate_pid(process.pid)
+            raise RuntimeError(
+                "Fresh start browser handles collide with the retired instance; refusing takeover."
+            )
     try:
         _assert_runtime_source_identity(source_identity, light=True)
     except Exception:
@@ -1818,6 +1873,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         _terminate_pid(process.pid)
         raise
     open_timings_ms["totalOpenMs"] = round((time.monotonic() - open_started) * 1000.0, 1)
+    open_timings_ms["retiredHandleCount"] = float(len(retired_handles))
     _append_frontend_build_log(
         {
             "event": "workbench.open.timings",
@@ -1825,8 +1881,11 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
             "rebuiltFrontend": bool(frontend_provenance.get("rebuilt")),
             "port": int(port),
             "noBrowser": bool(no_browser),
+            "freshStart": True,
+            "retiredHandles": list(retired_handles),
         }
     )
+    previous_generation = int(previous_state.get("instanceGeneration") or 0)
     state = {
         **_preserved_launcher_control_state(previous_state),
         "schemaVersion": 1,
@@ -1836,6 +1895,8 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "phase": "steady",
         "sessionRole": "workbench",
         "sessionId": str(uuid.uuid4()),
+        "instanceGeneration": previous_generation + 1,
+        "previousInstanceHandles": list(retired_handles),
         "runtimeSceneId": str(runtime_scene["runtimeSceneId"]),
         "runtimeSceneDir": str(runtime_scene["runtimeSceneDir"]),
         "runtimeSceneStartedAt": str(runtime_scene["startedAt"]),
@@ -1861,7 +1922,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
             else "Workbench is running."
         ),
         "failureMessage": "",
-        "lastReason": "python_launcher_start",
+        "lastReason": "python_launcher_fresh_start",
         "lastSource": "python_launcher",
         "pythonExecutable": python_command,
         "sourcePythonExecutable": str(python_runtime["sourcePythonExecutable"]),
@@ -1881,7 +1942,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "frontendRebuilt": bool(frontend_provenance.get("rebuilt")),
         "updatedAt": _now_iso(),
     }
-    _remember_project_backend_port(port, reason=resolve_note or "python_launcher_start")
+    _remember_project_backend_port(port, reason=resolve_note or "python_launcher_fresh_start")
     _write_state(state)
     return state
 
@@ -1906,23 +1967,16 @@ def _terminate_pid(pid: int) -> None:
 
 def _stop_backend() -> dict:
     state = _read_state()
-    pid = int(state.get("backendPid") or 0)
     port = int(state.get("backendPort") or state.get("port") or DEFAULT_PORT)
-    browser_pid = int(state.get("browserWindowPid") or state.get("browserLaunchPid") or 0)
-    port_owner_pid = _listening_pid_for_port(port)
-    managed_pids: set[int] = set()
-    if pid > 0:
-        managed_pids.add(pid)
-    if port_owner_pid > 0 and _is_project_workbench_pid(port_owner_pid):
-        managed_pids.add(port_owner_pid)
-    for managed_pid in sorted(managed_pids, reverse=True):
-        _terminate_pid(managed_pid)
-    _terminate_pid(browser_pid)
+    retired = _retire_project_workbench_instance(state, port)
     if _listening_pid_for_port(port) > 0 and not _wait_for_port_release(port):
         owner_pid = _listening_pid_for_port(port)
-        raise RuntimeError(
-            f"Workbench stop left port {port} occupied by pid {owner_pid}; state was preserved for recovery."
-        )
+        # Foreign occupant is fine to leave (multi-checkout); project occupant is not.
+        if _is_project_workbench_pid(owner_pid):
+            raise RuntimeError(
+                f"Workbench stop left port {port} occupied by project pid {owner_pid}; "
+                "state was preserved for recovery."
+            )
     next_state = {
         **state,
         "desiredState": "closed",
@@ -1932,7 +1986,10 @@ def _stop_backend() -> dict:
         "backendLaunchPid": 0,
         "browserLaunchPid": 0,
         "browserWindowPid": 0,
+        "workbenchBrowserLaunchPid": 0,
+        "workbenchBrowserWindowPid": 0,
         "browserManaged": False,
+        "previousInstanceHandles": list(retired),
         "statusLine": "Workbench is closed.",
         "failureMessage": "",
         "lastReason": "python_launcher_stop",
@@ -1999,29 +2056,35 @@ def main(argv: list[str] | None = None) -> int:
         _assert_internal_action_authorized(args.action)
         action = _normalize_action(args.action)
         if action == "start":
-            current = _read_state()
-            current_pid = int(current.get("backendPid") or 0)
-            if current_pid > 0 and _pid_alive(current_pid) and _backend_healthy(args.port, args.host):
-                print("Workbench already running.")
-                return 0
-            _start_backend(args.port, args.host, no_browser=bool(args.no_browser))
-            print("Workbench started.")
+            # Always fresh-start: retire previous project handles, spawn new PIDs.
+            # Never "already running" short-circuit / take over old workbench.
+            state = _start_backend(args.port, args.host, no_browser=bool(args.no_browser))
+            retired = state.get("previousInstanceHandles") or []
+            print(
+                "Workbench started (fresh instance"
+                f"{f', retired handles {retired}' if retired else ''})."
+            )
             return 0
         if action == "stop":
             _stop_backend()
             print("Workbench stopped.")
             return 0
         if action == "focus":
+            # Focus is the only non-destructive attach path (no start takeover).
             _focus_backend(args.port, args.host)
             print("Workbench already running.")
             return 0
         if action == "restart":
+            # restart == stop + fresh start (start itself also retires handles).
             restart_source_identity = _runtime_source_identity()
             _ensure_frontend_build(restart_source_identity)
             _assert_runtime_source_identity(restart_source_identity)
             _stop_backend()
-            _start_backend(args.port, args.host, no_browser=bool(args.no_browser))
-            print("Workbench restarted.")
+            state = _start_backend(args.port, args.host, no_browser=bool(args.no_browser))
+            print(
+                "Workbench restarted (fresh instance"
+                f", generation={state.get('instanceGeneration')})."
+            )
             return 0
         raise RuntimeError(f"Unsupported launcher action: {args.action}")
     except Exception as exc:

@@ -540,10 +540,11 @@ def test_python_launcher_start_launches_backend_with_project_venv_python(monkeyp
     }
     monkeypatch.setattr(launcher, "_read_state", lambda: {})
     monkeypatch.setattr(launcher, "_preserved_launcher_control_state", lambda state: {})
+    monkeypatch.setattr(launcher, "_retire_project_workbench_instance", lambda state, port=None: [])
     monkeypatch.setattr(launcher, "_resolve_start_backend_port", lambda port, host: (8000, ""))
     monkeypatch.setattr(launcher, "_ensure_frontend_build", lambda identity: {})
     monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: source_identity)
-    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity: identity)
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity, light=False: identity)
     monkeypatch.setattr(
         launcher,
         "_start_runtime_scene",
@@ -554,10 +555,31 @@ def test_python_launcher_start_launches_backend_with_project_venv_python(monkeyp
         },
     )
     monkeypatch.setattr(launcher, "_ensure_project_python_runtime", lambda: str(venv_python))
+    monkeypatch.setattr(
+        launcher,
+        "_select_background_python",
+        lambda executable: {
+            "pythonExecutable": str(venv_python),
+            "sourcePythonExecutable": str(venv_python),
+            "noConsolePythonExecutable": str(venv_python),
+            "consoleWindowSuppressed": True,
+            "consoleSuppressionMode": "creation_flags",
+            "consoleFallbackReason": "",
+            "pythonLaunchPolicy": "pythonw",
+            "creationFlagNames": ["CREATE_NO_WINDOW"],
+        },
+    )
     monkeypatch.setattr(launcher, "_wait_for_started_backend", lambda process, port, host: 4242)
     monkeypatch.setattr(launcher, "_remember_project_backend_port", lambda port, *, reason="": None)
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+    monkeypatch.setattr(launcher, "_backend_environment", lambda host: {})
+    monkeypatch.setattr(launcher, "_windows_creation_flags", lambda: 0)
+    monkeypatch.setattr(launcher, "_hidden_startup_info", lambda: None)
     written: list[dict] = []
     monkeypatch.setattr(launcher, "_write_state", lambda state: written.append(state))
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "backend.stdout.log").write_bytes(b"")
+    (runtime_dir / "backend.stderr.log").write_bytes(b"")
 
     popen_args: list[list[str]] = []
 
@@ -580,6 +602,7 @@ def test_python_launcher_start_launches_backend_with_project_venv_python(monkeyp
     assert popen_args[0][0] != sys.executable
     assert state["backendPid"] == 4242
     assert state["pythonExecutable"] == str(venv_python)
+    assert state["lastReason"] == "python_launcher_fresh_start"
     assert written[-1]["pythonExecutable"] == str(venv_python)
 
 
@@ -642,12 +665,12 @@ def test_python_launcher_start_auto_relocates_when_foreign_port_owner_exists(mon
     assert "222" in note
     assert remembered and remembered[-1][0] == 8001
 
-    # Same project's healthy owner → reuse without relocating.
+    # Same project's owner must not be reused — start retires handles first; if still
+    # listening, resolve hard-fails so we never attach to old PIDs.
     monkeypatch.setattr(launcher, "_is_project_workbench_pid", lambda pid: pid == 222)
     monkeypatch.setattr(launcher, "_backend_healthy", lambda port, host: True)
-    port2, note2 = launcher._resolve_start_backend_port(8000, "127.0.0.1")
-    assert port2 == 8000
-    assert note2 == "reuse_project_workbench"
+    with pytest.raises(RuntimeError, match="after instance retire"):
+        launcher._resolve_start_backend_port(8000, "127.0.0.1")
 
 
 def test_python_launcher_project_workbench_pid_requires_this_checkout_path(monkeypatch):
@@ -760,7 +783,7 @@ def test_python_launcher_restart_builds_before_stopping_backend(monkeypatch):
         lambda port, host, *, no_browser: calls.append(
             ("start", {"port": port, "host": host, "noBrowser": no_browser})
         )
-        or {},
+        or {"instanceGeneration": 2, "previousInstanceHandles": [111]},
     )
 
     result = launcher.main(["--action", "restart", "--host", "127.0.0.1", "--port", "8123", "--no-browser"])
@@ -772,6 +795,120 @@ def test_python_launcher_restart_builds_before_stopping_backend(monkeypatch):
         ("stop", None),
         ("start", {"port": 8123, "host": "127.0.0.1", "noBrowser": True}),
     ]
+
+
+def test_python_launcher_start_always_fresh_never_short_circuits_running(monkeypatch, capsys):
+    launcher = _load_python_launcher()
+    calls: list[str] = []
+    monkeypatch.setattr(launcher, "_assert_internal_action_authorized", lambda action: None)
+    monkeypatch.setattr(
+        launcher,
+        "_read_state",
+        lambda: {"backendPid": 999, "backendPort": 8002},
+    )
+    monkeypatch.setattr(launcher, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(launcher, "_backend_healthy", lambda port, host: True)
+    monkeypatch.setattr(
+        launcher,
+        "_start_backend",
+        lambda port, host, *, no_browser: calls.append("start")
+        or {
+            "backendPid": 1001,
+            "backendLaunchPid": 1000,
+            "previousInstanceHandles": [999],
+            "instanceGeneration": 1,
+        },
+    )
+
+    result = launcher.main(["--action", "start", "--host", "127.0.0.1", "--port", "8002", "--no-browser"])
+
+    assert result == 0
+    assert calls == ["start"]
+    out = capsys.readouterr().out
+    assert "fresh instance" in out
+    assert "already running" not in out
+
+
+def test_python_launcher_start_retires_previous_handles_before_spawn(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    terminated: list[int] = []
+    previous = {
+        "backendPid": 111,
+        "backendLaunchPid": 110,
+        "browserWindowPid": 222,
+        "browserLaunchPid": 221,
+        "backendPort": 8000,
+        "instanceGeneration": 3,
+    }
+
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(launcher, "PORTS_PATH", tmp_path / "ports.json")
+    monkeypatch.setattr(launcher, "BACKEND_STDOUT_PATH", tmp_path / "backend.stdout.log")
+    monkeypatch.setattr(launcher, "BACKEND_STDERR_PATH", tmp_path / "backend.stderr.log")
+    monkeypatch.setattr(launcher, "ACTIVE_RUNTIME_SCENE_PATH", tmp_path / "active-runtime-scene.json")
+    monkeypatch.setattr(launcher, "RUNTIME_SCENE_ROOT", tmp_path / "scenes")
+    monkeypatch.setattr(launcher, "_read_state", lambda: dict(previous))
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 111 if port == 8000 and 111 not in terminated else 0)
+    monkeypatch.setattr(launcher, "_is_project_workbench_pid", lambda pid: pid in {111, 110})
+    monkeypatch.setattr(launcher, "_terminate_pid", lambda pid: terminated.append(int(pid)))
+    monkeypatch.setattr(launcher, "_wait_for_port_release", lambda port: True)
+    monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: {
+        "projectRoot": str(tmp_path.resolve()),
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "tree",
+        "trackedClean": True,
+        "allowDirty": False,
+        "ignoredUserSceneEntries": [],
+    })
+    monkeypatch.setattr(launcher, "_ensure_frontend_build", lambda identity: {"rebuilt": False, "sourceCommit": "a" * 40, "frontendTree": "tree", "builtFromCommit": "a" * 40})
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity, light=False: identity)
+    monkeypatch.setattr(launcher, "_start_runtime_scene", lambda trigger: {
+        "runtimeSceneId": "scene",
+        "runtimeSceneDir": str(tmp_path / "scene"),
+        "startedAt": "t0",
+    })
+    monkeypatch.setattr(launcher, "_select_background_python", lambda runtime: {
+        "pythonExecutable": str(tmp_path / "pythonw.exe"),
+        "sourcePythonExecutable": str(tmp_path / "python.exe"),
+        "noConsolePythonExecutable": str(tmp_path / "pythonw.exe"),
+        "consoleWindowSuppressed": True,
+        "consoleSuppressionMode": "creation_flags",
+        "consoleFallbackReason": "",
+        "pythonLaunchPolicy": "pythonw",
+        "creationFlagNames": ["CREATE_NO_WINDOW"],
+    })
+    monkeypatch.setattr(launcher, "_ensure_project_python_runtime", lambda: {})
+    monkeypatch.setattr(launcher, "_backend_environment", lambda host: {})
+    monkeypatch.setattr(launcher, "_windows_creation_flags", lambda: 0)
+    monkeypatch.setattr(launcher, "_hidden_startup_info", lambda: None)
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+    monkeypatch.setattr(launcher, "_remember_project_backend_port", lambda port, *, reason="": None)
+    written: list[dict] = []
+    monkeypatch.setattr(launcher, "_write_state", lambda state: written.append(dict(state)))
+    monkeypatch.setattr(launcher, "_preserved_launcher_control_state", lambda state: {})
+
+    class FakeProc:
+        pid = 5000
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(launcher, "_wait_for_started_backend", lambda process, port, host: 5001)
+
+    (tmp_path / "backend.stdout.log").write_bytes(b"")
+    (tmp_path / "backend.stderr.log").write_bytes(b"")
+
+    state = launcher._start_backend(8000, "127.0.0.1", no_browser=True)
+
+    assert 111 in terminated
+    assert 110 in terminated
+    assert 222 in terminated
+    assert 221 in terminated
+    assert state["backendPid"] == 5001
+    assert state["backendLaunchPid"] == 5000
+    assert state["instanceGeneration"] == 4
+    assert set(state["previousInstanceHandles"]) >= {111, 110, 222, 221}
+    assert state["lastReason"] == "python_launcher_fresh_start"
+    assert state["sessionId"]
 
 
 def test_python_launcher_stop_preserves_state_when_a_foreign_port_owner_remains(monkeypatch):
