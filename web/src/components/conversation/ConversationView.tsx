@@ -122,6 +122,7 @@ import {
 import {
   buildCodexTranscriptCells,
   compactCodexTranscriptCellsAcrossMessages,
+  dedupeThoughtLikeTranscriptCells,
   settleCodexTranscriptActiveStatuses,
   type CodexTranscriptCell,
 } from "./codexTranscriptCells";
@@ -1873,8 +1874,10 @@ export function ConversationView({
     cells: CodexTranscriptCell[],
     rowIdentity: AgentMessageTimelineRowIdentity,
   ) {
-    const visibleCells = settleCodexTranscriptActiveStatuses(
-      cells.filter((cell) => cell.kind !== "user"),
+    const visibleCells = dedupeThoughtLikeTranscriptCells(
+      settleCodexTranscriptActiveStatuses(
+        cells.filter((cell) => cell.kind !== "user"),
+      ),
     );
     if (visibleCells.length === 0) {
       return null;

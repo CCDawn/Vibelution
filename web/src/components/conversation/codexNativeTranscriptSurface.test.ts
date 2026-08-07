@@ -150,6 +150,39 @@ describe("codexNativeTranscriptSurface", () => {
       },
     }), projectedCells);
     expect(withProcessCell.suppressProjectedProcess).toBe(true);
+
+    // Commentary-only native trail must also own process, or feedback "thought"
+    // paints a second identical thinking box next to native commentary.
+    const commentaryOnly = resolveCodexTranscriptSurface(message({
+      content: "",
+      thought: "legacy feedback thought should be suppressed",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "thought",
+          status: "running",
+          summary: "legacy feedback thought should be suppressed",
+        },
+      ],
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "message-1",
+        cells: [
+          {
+            id: "native-commentary",
+            kind: "assistant_markdown",
+            messageId: "message-1",
+            status: "running",
+            tone: "running",
+            text: "我先了解一下当前工作区状态。",
+            phase: "commentary",
+            channel: "commentary",
+          },
+        ],
+      },
+    }), projectedCells);
+    expect(commentaryOnly.suppressProjectedProcess).toBe(true);
   });
 
   it("normalizes legacy markdown and preserves terminal error metadata at the native boundary", () => {
