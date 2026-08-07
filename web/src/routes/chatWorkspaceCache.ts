@@ -98,14 +98,17 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
       ]);
     },
     /**
-     * Config save / model pin: refresh agent config surfaces only.
-     * Must not invalidate sessions/conversations — that freezes chat tab UX.
+     * Config save / model pin: refresh Agent config and directory projections.
+     * Chat directory renders avatarImageUrl from the Agent summary, so it must
+     * observe a model-derived default avatar change without invalidating
+     * sessions/conversations (which freezes the active chat tab).
      */
     afterAgentConfigSaved(agentId?: string) {
       const normalizedAgentId = String(agentId || "").trim();
       return invalidateAll(queryClient, [
         queryKeys.agentConfigWorkspace(),
         queryKeys.agentSummary(true),
+        queryKeys.agents(),
         ...(normalizedAgentId ? [queryKeys.agent(normalizedAgentId)] : []),
       ]);
     },
