@@ -37,6 +37,7 @@ PROVIDER_API_KEY_ENV_MAP: Dict[str, str] = {
     "openai": "OPENAI_API_KEY",
     "relay": "OPENAI_API_KEY",
     "openai_compatible": "OPENAI_API_KEY",
+    "opencode": "OPENCODE_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "aliyun": "DASHSCOPE_API_KEY",

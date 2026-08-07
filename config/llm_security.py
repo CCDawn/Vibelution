@@ -15,6 +15,7 @@ MAX_LLM_LOCAL_NETWORK_PROBE_TIMEOUT_SECONDS = 30
 _API_KEY_ENV_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{2,80}$")
 _ALLOWED_API_KEY_ENV_PREFIXES = (
     "OPENAI_",
+    "OPENCODE_",
     "DEEPSEEK_",
     "ANTHROPIC_",
     "GOOGLE_",
@@ -71,6 +72,7 @@ _REMOTE_PROVIDER_HOSTS = {
     "groq": {"api.groq.com"},
     "minimax": {"api.minimax.io", "api.minimaxi.com"},
     "openai": {"api.openai.com"},
+    "opencode": {"opencode.ai"},
     "relay": {"pixel.try-chatapi.com", "ai-pixel.online"},
     "siliconflow": {"api.siliconflow.cn"},
     "xiaomi": {
