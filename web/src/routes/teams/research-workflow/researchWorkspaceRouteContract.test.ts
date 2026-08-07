@@ -38,9 +38,11 @@ describe("researchWorkspaceRouteContract", () => {
     expect(workspaceSource).not.toContain("ChallengeCupStageRail");
   });
 
-  it("workspace uses VCanvasWorkbenchPage fill recipe (no fixed-height dead space)", () => {
+  it("workspace uses VCanvasWorkbenchPage fill recipe like TeamsCanvasComposer", () => {
     expect(workspaceSource).toContain("VCanvasWorkbenchPage");
     expect(workspaceSource).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");
+    expect(workspaceSource).toContain("hideHeader");
+    expect(workspaceSource).toContain("min-h-0 min-w-0 flex-1 overflow-hidden");
     expect(workspaceSource).toContain('height="100%"');
     expect(workspaceSource).not.toContain("height={440}");
     expect(workspaceSource).not.toContain("height={420}");

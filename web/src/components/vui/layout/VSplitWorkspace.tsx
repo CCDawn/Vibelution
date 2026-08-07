@@ -147,7 +147,10 @@ function ResizableSplitWorkspace({
           />
         </>
       ) : null}
-      <main data-vui="split-main" className="min-h-0 min-w-0 flex-1 overflow-hidden">
+      <main
+        data-vui="split-main"
+        className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      >
         {main}
       </main>
       {aside && asideSpec ? (

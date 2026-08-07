@@ -183,11 +183,13 @@ const styles = {
   researchStageCardMetrics:
     "researchStageCardMetrics min-w-0 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-x-2 gap-y-1 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1.5 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   researchOverviewSurface:
-    "researchOverviewSurface min-w-0 grid content-start gap-3 p-3",
+    "researchOverviewSurface min-w-0 min-h-0 flex-1 grid content-start gap-3 overflow-auto p-3 [scrollbar-gutter:stable]",
   researchOverviewStagesEmbed:
     "researchOverviewStagesEmbed min-w-0 [&_.researchStageLauncher]:border-0 [&_.researchStageLauncher]:bg-transparent [&_.researchStageLauncher]:p-0 [&_.researchStageLauncher]:shadow-none [&_.researchStageLauncherHeader]:mb-0",
+  // overflow-hidden: fill children (process workflow canvas) must stretch, not content-size + scroll floor.
+  // Scrollable overviews own overflow on their inner surface (researchOverviewSurface).
   challengeWorkspaceBody:
-    "challengeWorkspaceBody min-w-0 w-full flex-1 !flex min-h-0 flex-col !gap-0 !overflow-auto !p-0 [scrollbar-gutter:stable]",
+    "challengeWorkspaceBody min-w-0 w-full flex-1 !flex min-h-0 flex-col !gap-0 !overflow-hidden !p-0",
   challengeWorkspaceContextHidden:
     "challengeWorkspaceContextHidden hidden !hidden",
   challengeWorkspaceInspector:
