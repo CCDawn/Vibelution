@@ -78,6 +78,12 @@ export {
   type VWorkflowCanvasProps,
 } from "./product/workflow/VWorkflowCanvas";
 export {
+  layoutWorkflowCanvas,
+  type WorkflowLayoutEdge,
+  type WorkflowLayoutInput,
+  type WorkflowLayoutNode,
+} from "./product/workflow/workflowLayoutTypes";
+export {
   VStateSurface,
   type VStateSurfaceFact,
   type VStateSurfaceDensity,

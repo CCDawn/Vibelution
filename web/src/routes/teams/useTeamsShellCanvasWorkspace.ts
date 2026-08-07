@@ -115,8 +115,18 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
       return;
     }
     if (requestedResearchWorkspaceView) {
-      // Legacy aliases still arrive as overview/canvas; normalize to workflow shell.
-      if (requestedResearchWorkspaceView === "overview" || requestedResearchWorkspaceView === "canvas") {
+      // Legacy aliases / stage views: process workflow is the only primary surface.
+      // URL normalization happens in TeamsLegacyResearchBoundary; keep shell state aligned.
+      if (
+        requestedResearchWorkspaceView === "overview"
+        || requestedResearchWorkspaceView === "canvas"
+        || requestedResearchWorkspaceView === "experiment"
+        || requestedResearchWorkspaceView === "iteration"
+        || requestedResearchWorkspaceView === "knowledge_collection"
+        || requestedResearchWorkspaceView === "source_collection"
+        || requestedResearchWorkspaceView === "coordination"
+        || requestedResearchWorkspaceView === "discussion"
+      ) {
         setResearchWorkspaceView("workflow");
         return;
       }
