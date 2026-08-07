@@ -1,6 +1,6 @@
 # 实现技术方案 · 科研工作流画布 ELK 自动布局
 
-Status: **T1 冻结完成（2026-08-07）**——layoutOptions、真实 ELK Worker 资产名与 Browser Worker handshake 均已通过 T1 实测（bundled 探针 / Browser probe / 生产构建三类证据见 §4.2）
+Status: **T1 冻结完成（2026-08-07）**——layoutOptions、真实 ELK Worker 资产名与 Browser Worker handshake 均已通过 T1 实测（bundled 探针 / Browser probe / 生产构建三类证据见 §4.2）；**两级布局架构返工（2026-08-08）**——单次 compound 图被两级布局取代（阶段内 DOWN + 阶段元图确定性 RIGHT + 跨阶段 gateway 通道），见 §3/§4/§5 修订
 
 Date: 2026-08-07
 
@@ -103,15 +103,33 @@ const elk = new ELK({
 
 ## 3. 数据流
 
+### 3.1 两级布局架构（2026-08-08 修订，取代单次 compound）
+
 ```text
 WorkflowLayoutInput (public, 无状态字段参与布局 hash)
-  → workflowElkGraphAdapter.toElkGraph()       // 公共图 → ELK compound graph
-  → ELK.layout(worker)                          // 异步；单飞 + 过期丢弃
-  → workflowElkLayout.fromElkGraph()            // ELK 输出 → 公共布局结果
+  → workflowStageSubgraphAdapter.buildStageSubgraphs()
+      按 stageId 分组；每阶段子图只含阶段内 edges（跨阶段 edges 明确排除）
+  → workflowStageLayout.layoutStages()            // 阶段 A：每阶段独立 ELK DOWN
+      并行发起 N 个阶段布局；输出本地坐标 + 阶段 box（标题区 + padding）
+  → workflowStageMetaGraphAdapter.buildStageMetaGraph()
+      阶段 B：三阶段折叠为 meta 节点，宽度/高度来自阶段 A box；
+      沿 RIGHT 单行确定性排列（ELK 无法排序无连接 compound，探针事实），
+      通道 gap = 40px；不再调用 ELK 做 meta 布局
+  → workflowStageComposition.composeLayout()
+      task 绝对坐标 = meta 位置 + 阶段本地坐标；阶段内边 sections 按 meta 偏移
+  → workflowCrossStageRouter.routeCrossStageEdge()
+      跨阶段边经 gateway 通道：source 端口 → 源阶段右边界 → 通道
+      → 目标阶段左边界 → target 端口；正交确定性路由
+  → workflowTwoLevelLayout.layoutTwoLevel()       // 编排器，产出 WorkflowLayoutResult
   → 坐标 → React Flow nodes (stage + parented tasks)
-  → sections → workflowElkEdgePath.toSvgPath()  // → WorkflowSemanticEdge 直接消费
+  → sections → workflowElkEdgePath.toSvgPath()    // → WorkflowSemanticEdge 直接消费
   → label 坐标 → EdgeLabelRenderer 定位
 ```
+
+**为什么不是单次 compound**：root `RIGHT` + `INCLUDE_CHILDREN` + stage `DOWN` +
+跨阶段边直连内部节点，会让 ELK 把所有子节点拉进根级 RIGHT 分层，阶段容器被
+拉伸（实测阶段宽 2257px、总宽 7187px），阶段内纵向序被破坏。两级布局把阶段内
+布局与阶段间布局彻底解耦。
 
 职责边界（= PRD §5）：`product/workflow` 只产公共类型；`renderers/shadcn/workflow` 独享 elkjs 与 @xyflow；Route 只消费 `VWorkflowCanvas`。
 
@@ -119,20 +137,34 @@ WorkflowLayoutInput (public, 无状态字段参与布局 hash)
 
 ## 4. ELK 图模型构建
 
-### 4.1 Compound graph（`workflowElkGraphAdapter.ts`）
+### 4.1 图模型：两级（`workflowStageSubgraphAdapter.ts` + `workflowStageMetaGraphAdapter.ts`）
+
+**阶段 A · 阶段内部子图**（每阶段一个，`workflowStageSubgraphAdapter`）：
 
 ```text
-rootElkNode = { id: "workflow:root", layoutOptions: { direction RIGHT ... } }
- ├─ stage:knowledge_collection   { direction DOWN, padding 含标题区 }
- ├─ stage:experiment_design      { direction DOWN }
- └─ stage:execution_iteration    { direction DOWN }
-      └─ (children: 各 task/decision 节点，带显式 ports 与 labels)
-edges: 所有 WorkflowLayoutEdge → ElkExtendedEdge
+stage:knowledge_collection { layoutOptions: { direction DOWN, edgeRouting ORTHOGONAL, ... } }
+  └─ (children: 该阶段全部 task/decision 节点，带显式 ports 与 labels)
+  edges: 只含阶段内部 edges（from/to 均在本阶段）
 ```
 
-- 三 stage 顺序固定：`knowledge_collection` → `experiment_design` → `execution_iteration`。
-- 同层级边（stage 内）挂到对应 stage 的 `edges[]`；跨阶段边与反馈边挂到**根图** `edges[]`（cross-hierarchy，配合 `hierarchyHandling=INCLUDE_CHILDREN`）。
-- 每个 task 节点 = `ElkNode { id, width, height, labels: [节点标题 label], ports: [...] }`。
+- 子图 **不设 padding、不挂阶段标题 label**：padding 与标题区由
+  `workflowStageLayout` 显式计算（标题区保留在顶部，任何边不得穿过）；
+- 跨阶段 edges **明确排除**——它们不参与阶段内 layering（这是单次 compound
+  拉伸阶段的根因）；
+- 三阶段布局**并行**发起（`layoutStages` 用 `Promise.all`）。
+
+**阶段 B · 阶段元图**（`workflowStageMetaGraphAdapter`）：
+
+- 三阶段折叠为 meta 节点，width/height = 阶段 A 的 box；
+- 沿 `RIGHT` **确定性单行排列**（定义顺序），通道 gap = 40px；
+- 不再调用 ELK 做 meta 布局——ELK 无法对无连接 compound 排序（探针事实），
+  单行排列是纯函数几何权威。
+
+**坐标合成**（`workflowStageComposition`）：
+
+- `task 绝对坐标 = stage meta 位置 + task 本地坐标`；
+- 阶段内边 sections 按 meta 位置整体偏移；跨阶段边由
+  `workflowCrossStageRouter` 生成。
 
 ### 4.2 layoutOptions 候选与探针（`workflowElkOptions.ts`）
 
@@ -322,11 +354,18 @@ hash = stableStringify({
 | --- | --- | --- |
 | `workflowElkClient.ts` | `?worker` factory、稳定 engine、terminate 生命周期 | graph 适配 |
 | `workflowElkPorts.ts` | 端口 id 常量表 + 端口分配纯函数 | 布局算法 |
-| `workflowElkGraphAdapter.ts` | `WorkflowLayoutInput` → ELK compound graph（含 ports/labels/尺寸） | 输出消费 |
+| `workflowStageSubgraphAdapter.ts` | 阶段 A：按 stageId 分组 + 阶段内 edges 子图 | 布局执行 |
+| `workflowStageLayout.ts` | 阶段 A：并行 ELK DOWN 布局 + 阶段 box/本地坐标 | 元图 |
+| `workflowStageMetaGraphAdapter.ts` | 阶段 B：meta 节点 + 确定性 RIGHT 单行排列 | 引擎依赖 |
+| `workflowStageComposition.ts` | task 绝对坐标合成 + 阶段内边偏移 | 路由 |
+| `workflowCrossStageRouter.ts` | 跨阶段 gateway 正交通道路由（纯函数） | 布局 |
+| `workflowLayoutGeometry.ts` | bounds/intersection/compactness 纯函数 | 状态 |
+| `workflowLayoutSettling.ts` | design/calibration/settled 状态机纯函数 | 几何 |
+| `workflowTwoLevelLayout.ts` | 两级布局编排器 → `WorkflowLayoutResult` | 渲染 |
 | `workflowElkOptions.ts` | layoutOptions 常量（探针验证后冻结） | 逻辑 |
-| `workflowElkLayout.ts` | `ELK.layout` 调用 + 输出 → `WorkflowLayoutResult` | 渲染 |
+| `workflowElkLayout.ts` | 兼容/单次 compound 输出消费（遗留测试） | 渲染 |
 | `workflowElkEdgePath.ts` | sections → SVG path（纯函数） | 状态 |
-| `useWorkflowAutoLayout.ts` | hash / 单飞 / last-good / fit / 尺寸校准上报 | 几何 |
+| `useWorkflowAutoLayout.ts` | hash / 单飞 / last-good / settling / fit / 尺寸校准上报 | 几何 |
 | `workflowElkLayout.test.ts` | 探针 + 几何不变量 + 确定性断言 | Browser Worker 验收 |
 | `web/probes/workflow-elk-handshake.html` / `.ts`（T5 移除） | Browser Worker handshake 测试入口；仅 test-only probe build（`VIBELUTION_PROBE_BUILD=1`）构建，不进入普通 `npm run build` 产物 | 产品 UI |
 

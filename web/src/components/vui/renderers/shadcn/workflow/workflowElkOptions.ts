@@ -38,3 +38,18 @@ export const WORKFLOW_ELK_STAGE_OPTIONS = {
   "elk.spacing.edgeNode": "24",
   "elk.nodeLabels.placement": "INSIDE V_TOP H_LEFT",
 } as const;
+
+/**
+ * Stage-internal subgraph options (two-level layout, phase A): NO padding —
+ * the stage box and its padding/title band are computed explicitly by
+ * `workflowStageLayout`, so ELK's own padding cannot drift the children from
+ * the box we declare to the meta layout.
+ */
+export const WORKFLOW_ELK_STAGE_INTERNAL_OPTIONS = {
+  "elk.direction": "DOWN",
+  "elk.edgeRouting": "ORTHOGONAL",
+  "elk.spacing.nodeNode": "18",
+  "elk.spacing.edgeNode": "24",
+  "elk.spacing.edgeEdge": "8",
+  "elk.nodeLabels.placement": "INSIDE V_TOP H_LEFT",
+} as const;

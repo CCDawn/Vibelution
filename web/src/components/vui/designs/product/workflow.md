@@ -67,10 +67,11 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - 标签锚点由引擎 `labelBounds`（中心）决定，缺失时回退首 section 中点；三阶段统一 viewport，跨阶段边同坐标空间。
 - z-index 层级固定：stageRegion `0` < edge `1` < task node `2`；**边不浮在节点上方**，选中/hover 不抬升 zIndex，用描边加粗与变色表达。
 
-### 布局与 fit 协议（T4）
+### 布局与 fit 协议（T4 + 两级布局 2026-08-08）
 
-- 布局：`useWorkflowAutoLayout(graph, createWorkflowLayoutEngine)`；结构 hash 缓存避免重复 ELK 调用。
-- fit：`useWorkflowInitialFit` 编排——`initialFitRevision` 首次布局提交后**仅 fit 一次**，且必须等待节点进入 React Flow 内部（`useNodesInitialized`）并在下一帧执行；`acknowledgeInitialFit()` 后 status-only 更新不再 fit；拓扑切换取消 pending fit（stale 不落地）。`<ReactFlow>` 不设隐式 `fitView`/`fitViewOptions`；`WorkflowCanvasControls`「适应全部」经 `onFitAll` 走显式 fit 路径。
+- 布局：`useWorkflowAutoLayout(graph, createWorkflowLayoutEngine)` 内部走**两级布局**（`layoutTwoLevel`）：阶段 A 每阶段独立 ELK DOWN（并行，只含阶段内 edges），阶段 B 三阶段确定性 RIGHT 单行（通道 gap 40px），跨阶段边经 gateway 正交通道（`workflowCrossStageRouter`），任务绝对坐标 = meta 位置 + 阶段本地坐标。结构 hash 缓存避免重复布局。
+- 目标尺寸预算：普通阶段宽 ≤380px、含决策分支阶段 ≤520px；总宽 ≤~1350px；阶段内主链单列（中心偏差 ≤24px）、Y 单调递增；1920 视口首屏应见三阶段。
+- fit：`useWorkflowInitialFit` 编排——`initialFitRevision` 只在 **settled 布局**提交后设置（design/calibration 阶段不 arm fit）；等待节点进入 React Flow 内部（`useNodesInitialized`）并在下一帧执行**仅一次**；校准重排（revision bump）不取消 pending fit，拓扑切换（structureKey 变化）取消并重新武装；`acknowledgeInitialFit()` 后 status-only 更新不再 fit。`<ReactFlow>` 不设隐式 `fitView`/`fitViewOptions`；`WorkflowCanvasControls`「适应全部」经 `onFitAll` 走显式 fit 路径。
 
 ### 阶段分区
 
