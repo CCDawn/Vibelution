@@ -132,34 +132,41 @@ export function ShadcnWorkflowCanvas({
     [onSelectNode],
   );
 
+  // Fill host like other workbench canvases: percentage height only works when
+  // the parent chain has a real height; absolute inset fills the host cell.
+  const fillHost = height === "100%";
   return (
     <div
       className={cn(
-        "h-full min-h-0 w-full overflow-hidden rounded-xl border border-vui-border bg-vui-surface-workspace",
+        "relative min-h-0 w-full overflow-hidden rounded-xl border border-vui-border bg-vui-surface-workspace",
+        fillHost ? "h-full min-h-0 flex-1" : null,
         className,
       )}
-      style={{ height }}
+      style={fillHost ? undefined : { height }}
       data-vui="workflow-canvas"
     >
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.12 }}
-        minZoom={0.35}
-        maxZoom={1.6}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable
-        panOnScroll
-        zoomOnScroll
-        onSelectionChange={onSelectionChange}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background gap={18} size={1} color="var(--vui-border, #e4e4e7)" />
-        <Controls showInteractive={false} />
-      </ReactFlow>
+      <div className={fillHost ? "absolute inset-0" : "h-full w-full"}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={{ padding: 0.12 }}
+          minZoom={0.35}
+          maxZoom={1.6}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable
+          panOnScroll
+          zoomOnScroll
+          onSelectionChange={onSelectionChange}
+          proOptions={{ hideAttribution: true }}
+          style={{ width: "100%", height: "100%" }}
+        >
+          <Background gap={18} size={1} color="var(--vui-border, #e4e4e7)" />
+          <Controls showInteractive={false} />
+        </ReactFlow>
+      </div>
     </div>
   );
 }

@@ -1,9 +1,12 @@
 /**
  * Canonical single-canvas research process workspace.
- * One stage-navigation surface: VWorkflowCanvas. Selection is UI-only.
+ * Selection is UI-only (URL node); runtime current is server-owned.
  *
- * Layout: VCanvasWorkbenchPage (shadcn/recipe fill) — canvas fills remaining height,
- * inspector is the right rail. Do not stack fixed-height canvas + flex-1 empty panels.
+ * Layout follows TeamsCanvasComposer + VCanvasWorkbenchPage (not hand-rolled columns):
+ * - shell already provides team chrome → hideHeader
+ * - actions live in recipe toolbar
+ * - canvas host is flex-1 min-h-0; React Flow fills via absolute inset host
+ * - inspector is recipe aside (WORKBENCH_LAYOUT_IDS.researchFlow)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -178,86 +181,100 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
 
   const displayError = localError || error;
 
-  const headerActions = (
-    <div className="flex flex-wrap items-center gap-2">
-      {runOptions.length > 0 ? (
-        <VSelect
-          density="compact"
-          className="min-w-[12rem]"
-          aria-label="运行切换"
-          placeholder="选择运行"
-          selectedKey={runId || null}
-          options={[
-            { id: "", label: "选择运行" },
-            ...runOptions.map((item) => ({
-              id: item.runId,
-              label: `${item.runId} · ${item.status}`,
-            })),
-          ]}
-          onSelectionChange={(key) => {
-            const nextId = key == null ? "" : String(key);
-            replaceParams({ runId: nextId || null });
-            if (nextId) void refresh();
-          }}
-        />
-      ) : null}
-      <VButton
-        type="button"
-        variant={panel === "agents" ? "secondary" : "ghost"}
-        onClick={() => replaceParams({ panel: "agents" })}
-      >
-        Agent
-      </VButton>
-      <VButton
-        type="button"
-        variant={panel === "timeline" ? "secondary" : "ghost"}
-        onClick={() => replaceParams({ panel: "timeline" })}
-      >
-        时间线
-      </VButton>
-      <VButton
-        type="button"
-        variant={panel === "team" ? "secondary" : "ghost"}
-        onClick={() => replaceParams({ panel: "team" })}
-      >
-        团队
-      </VButton>
-      {projection?.run.runtimeCurrentNodeIds?.length ? (
-        <VButton type="button" variant="ghost" onClick={jumpToRuntime}>
-          当前节点
-        </VButton>
-      ) : null}
-      {!runId ? (
-        <VButton type="button" onClick={onCreateRun} isDisabled={busy}>
-          创建运行
-        </VButton>
-      ) : null}
-    </div>
-  );
-
-  const canvasBody = graph ? (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+  // Same stacking pattern as TeamsCanvasComposer: outer fill column, flex-1 canvas cell.
+  const canvasBody = (
+    <div
+      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+      data-testid="research-process-canvas-host"
+      data-composer="research-process-canvas"
+    >
       {displayError ? (
         <div
-          className="shrink-0 border-b border-[var(--vui-border-subtle)] px-3 py-2 text-sm text-[var(--fg-primary)]"
+          className="shrink-0 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2 text-sm"
           role="alert"
         >
           {displayError}
         </div>
       ) : null}
-      <div className="min-h-0 min-w-0 flex-1">
-        <VWorkflowCanvas
-          graph={graph}
-          selectedNodeId={selectedNodeId}
-          runtimeCurrentNodeIds={projection?.run.runtimeCurrentNodeIds || []}
-          onSelectNode={onSelectNode}
-          height="100%"
-          className="h-full min-h-0 border-0"
-        />
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+        {graph ? (
+          <VWorkflowCanvas
+            graph={graph}
+            selectedNodeId={selectedNodeId}
+            runtimeCurrentNodeIds={projection?.run.runtimeCurrentNodeIds || []}
+            onSelectNode={onSelectNode}
+            height="100%"
+            className="h-full min-h-0 !rounded-none !border-0"
+          />
+        ) : (
+          <VStateSurface tone="loading" title="加载流程定义" fill />
+        )}
       </div>
     </div>
-  ) : (
-    <VStateSurface tone="loading" title="加载流程定义" fill />
+  );
+
+  const toolbar = (
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+      <div className="min-w-0 text-xs text-[var(--fg-secondary)]">
+        {runId
+          ? `${runId} · ${run?.status || projection?.run.status || ""}`
+          : "创建运行后由工作流引擎驱动"}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {runOptions.length > 0 ? (
+          <VSelect
+            density="compact"
+            className="min-w-[12rem]"
+            aria-label="运行切换"
+            placeholder="选择运行"
+            selectedKey={runId || null}
+            options={[
+              { id: "", label: "选择运行" },
+              ...runOptions.map((item) => ({
+                id: item.runId,
+                label: `${item.runId} · ${item.status}`,
+              })),
+            ]}
+            onSelectionChange={(key) => {
+              const nextId = key == null ? "" : String(key);
+              replaceParams({ runId: nextId || null });
+              if (nextId) void refresh();
+            }}
+          />
+        ) : null}
+        <VButton
+          type="button"
+          variant={panel === "agents" ? "secondary" : "ghost"}
+          onClick={() => replaceParams({ panel: "agents" })}
+        >
+          Agent
+        </VButton>
+        <VButton
+          type="button"
+          variant={panel === "timeline" ? "secondary" : "ghost"}
+          onClick={() => replaceParams({ panel: "timeline" })}
+        >
+          时间线
+        </VButton>
+        <VButton
+          type="button"
+          variant={panel === "team" ? "secondary" : "ghost"}
+          onClick={() => replaceParams({ panel: "team" })}
+        >
+          团队
+        </VButton>
+        {projection?.run.runtimeCurrentNodeIds?.length ? (
+          <VButton type="button" variant="ghost" onClick={jumpToRuntime}>
+            当前节点
+          </VButton>
+        ) : null}
+        {!runId ? (
+          <VButton type="button" onClick={onCreateRun} isDisabled={busy}>
+            创建运行
+          </VButton>
+        ) : null}
+      </div>
+    </div>
   );
 
   const inspectorBody =
@@ -304,7 +321,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
         <p className="m-0">团队 ID：{teamId || "—"}</p>
         <p className="m-0">运行：{runId || "未创建"}</p>
       </VSurface>
-    ) : (
+    ) : selectedNodeId ? (
       <ResearchProcessNodeInspector
         nodeId={selectedNodeId}
         runtimeCurrent={runtimeCurrent || Boolean(nodeDetail?.runtimeCurrent)}
@@ -317,6 +334,12 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
         ops={nodeOps}
         onCommand={onInspectorCommand}
       />
+    ) : (
+      <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
+        <VEmptyState title="选择流程节点" className="h-auto w-full border-0 bg-transparent">
+          在画布上点击任务节点，查看绑定、交接与运行命令。
+        </VEmptyState>
+      </div>
     );
 
   return (
@@ -324,16 +347,14 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
       data-vui="research-process-workspace"
       domainRecipe="research-process-workflow"
       ariaLabel="科研流程工作区"
-      eyebrow={
-        runId
-          ? `${runId} · ${run?.status || projection?.run.status || ""}`
-          : "创建运行后由工作流引擎驱动"
-      }
       title="科研流程"
-      actions={headerActions}
+      // Team shell already owns page chrome; match TeamsCanvasComposer.
+      hideHeader
+      toolbar={toolbar}
       layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
       resize={{
         aside: {
+          id: "inspector",
           defaultWidth: 320,
           minWidth: 260,
           maxWidth: 480,
@@ -341,9 +362,12 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
       }}
       canvas={canvasBody}
       inspector={inspectorBody}
-      canvasClassName="min-h-0 p-0"
-      inspectorClassName="min-h-0"
+      // Match TeamsCanvasComposer surface reset inside board cell.
+      canvasClassName="!border-0 !rounded-none"
+      inspectorClassName="!border-0 !rounded-none"
       className="h-full min-h-0"
+      shellTestId="research-process-workspace-shell"
+      shellMode="board"
     />
   );
 }

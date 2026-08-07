@@ -35,6 +35,9 @@ import { VWorkflowCanvas, type WorkflowLayoutInput } from "@/components/vui";
 - runtime current：ring
 - blocked / waiting_human 等 run 状态由调用方标题与 inspector 展示，画布不把 blocked 误映射为 failed
 - loading/empty：由调用方 `VStateSurface` / `VEmptyState` 处理
-- **页面壳**：必须用 `VCanvasWorkbenchPage`（或等价 fill recipe），`layoutId` 用 `WORKBENCH_LAYOUT_IDS.researchFlow`
-- **禁止**在工作区手写 `height={440}` + 下方 `flex-1` 空面板（会产生大片空白）
-- 画布宿主默认 `height="100%"` + 父级 `min-h-0 flex-1`；Inspector 走 recipe 的 `aside`，未选节点用 `VEmptyState`
+- **页面壳**：必须用 `VCanvasWorkbenchPage`（与 `TeamsCanvasComposer` 同构），`layoutId` 用 `WORKBENCH_LAYOUT_IDS.researchFlow`
+- 嵌入 Teams board 时：`hideHeader`（壳已有团队标题），动作放 `toolbar`；canvas 外包 `flex h-full min-h-0 flex-1` + 内层 `flex-1 overflow-hidden`
+- 画布默认 `height="100%"`；React Flow 在 fill 模式下用 absolute inset 填满宿主（与固定 px 高度互斥）
+- **禁止** `height={440}` + 下方再 `flex-1` 空面板
+- Inspector 走 recipe `aside`；未选节点用 `VEmptyState`
+- 外层 `challengeWorkspaceBody` 须 `overflow-hidden`，避免 fill 子项被压成内容高度 + 滚动空白层

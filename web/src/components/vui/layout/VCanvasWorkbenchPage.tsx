@@ -101,7 +101,7 @@ export function VCanvasWorkbenchPage({
           </div>
         ) : null}
         <VSplitWorkspace
-          className={cn("min-h-0 flex-1", workspaceClassName)}
+          className={cn("h-full min-h-0 flex-1", workspaceClassName)}
           data-testid={shellTestId}
           data-team-shell-mode={shellMode}
           data-vui-layout-id={layoutId}
@@ -111,7 +111,7 @@ export function VCanvasWorkbenchPage({
               ? (
                 <div
                   data-vui="canvas-workbench-rail"
-                  className={cn(VUI_RAIL_SURFACE_CLASS, "flex flex-col", railClassName)}
+                  className={cn(VUI_RAIL_SURFACE_CLASS, "flex h-full min-h-0 flex-col", railClassName)}
                 >
                   {rail}
                 </div>
@@ -121,7 +121,12 @@ export function VCanvasWorkbenchPage({
           main={(
             <div
               data-vui="canvas-workbench-canvas"
-              className={cn(VUI_CANVAS_SURFACE_CLASS, "flex flex-col", canvasClassName)}
+              className={cn(
+                VUI_CANVAS_SURFACE_CLASS,
+                // Match VBoardWorkbenchPage main: stretch inside split-main.
+                "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+                canvasClassName,
+              )}
             >
               {canvas}
             </div>
