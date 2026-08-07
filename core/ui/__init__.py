@@ -20,7 +20,6 @@ _EXPORTS = {
     "ui_welcome": ("core.ui.cli_ui", "ui_welcome"),
     "ui_print_welcome": ("core.ui.cli_ui", "ui_print_welcome"),
     "run_interactive_mode": ("core.ui.cli_ui", "run_interactive_mode"),
-    "XuebaInteractiveCLI": ("core.ui.interactive_cli", "XuebaInteractiveCLI"),
     "AgentWorkbenchShell": ("core.ui.workbench", "AgentWorkbenchShell"),
     "LobsterTheme": ("core.ui.theme", "LobsterTheme"),
     "LobsterStyle": ("core.ui.theme", "LobsterStyle"),
