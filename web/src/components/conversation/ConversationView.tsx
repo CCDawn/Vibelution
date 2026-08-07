@@ -1907,6 +1907,7 @@ export function ConversationView({
             language={lang === "en" ? "en" : "zh"}
             messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
+            turnStreaming={Boolean(message.streaming)}
           >
             {/* Approvals stay composer-adjacent only (toolApprovalFallback); never re-attach into process rows. */}
             {renderTimelineNodes(processCells, { attachToolApproval: false })}
