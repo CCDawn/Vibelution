@@ -24,7 +24,6 @@ import {
   VStatusStrip,
   VSessionWorkbenchPage,
   VTrackWorkbenchPage,
-  VUI_PAGE_FILL_CLASS,
   VWorkbenchPage,
 } from "./index";
 
@@ -256,7 +255,9 @@ describe("VUI workbench layout templates", () => {
     expect(boardMarkup).toContain('data-vui="board-workbench-rail"');
     expect(boardMarkup).toContain('data-vui="board-workbench-board"');
     expect(boardMarkup).toContain("Kanban");
-    expect(boardMarkup).toContain(VUI_PAGE_FILL_CLASS.split(" ")[0]);
+    // hideHeader → stack fill (flex column), not header-body grid auto row.
+    expect(boardMarkup).toContain('data-fill-layout="stack"');
+    expect(boardMarkup).toContain("flex h-full min-h-0");
 
     const canvasMarkup = renderToStaticMarkup(
       <VCanvasWorkbenchPage
@@ -273,6 +274,28 @@ describe("VUI workbench layout templates", () => {
     expect(canvasMarkup).toContain('data-vui="canvas-workbench-inspector"');
     expect(canvasMarkup).toContain("Graph");
     expect(canvasMarkup).toContain("Node");
+    expect(canvasMarkup).toContain('data-fill-layout="stack"');
+  });
+
+  it("fill workbench strips route grid geometry that would collapse hideHeader body", () => {
+    const markup = renderToStaticMarkup(
+      <VWorkbenchPage
+        fill
+        fillLayout="stack"
+        className="route grid h-full grid-rows-[auto_minmax(0,1fr)] content-stretch overflow-hidden bg-red-500"
+        ariaLabel="fill-guard"
+      >
+        <div>body-only</div>
+      </VWorkbenchPage>,
+    );
+    expect(markup).toContain('data-fill-layout="stack"');
+    expect(markup).toContain("flex h-full min-h-0");
+    expect(markup).toContain("bg-red-500");
+    // Conflicting display/track utilities must not remain (cn cannot merge them).
+    expect(markup).not.toMatch(/class="[^"]*\bgrid\b/);
+    expect(markup).not.toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(markup).not.toContain("content-stretch");
+    expect(markup).toContain("body-only");
   });
 
   it("renders the session workbench page recipe with dual-pane slots", () => {

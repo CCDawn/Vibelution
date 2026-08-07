@@ -132,7 +132,8 @@ export function VBoardWorkbenchPage({
                 data-vui="board-workbench-board"
                 className={cn(
                   VUI_BOARD_CONTENT_PAD_CLASS,
-                  "min-h-0 flex-1",
+                  // relative: fill children (process canvas host) can absolute-pin to the cell.
+                  "relative min-h-0 flex-1",
                   boardClassName,
                 )}
               >

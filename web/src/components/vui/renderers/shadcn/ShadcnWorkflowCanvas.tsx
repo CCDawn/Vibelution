@@ -132,20 +132,20 @@ export function ShadcnWorkflowCanvas({
     [onSelectNode],
   );
 
-  // Fill host like other workbench canvases: percentage height only works when
-  // the parent chain has a real height; absolute inset fills the host cell.
+  // Fill host: absolute inset when parent establishes a real box (flex-1 / absolute cell).
+  // Prefer absolute over % height so nested board recipes do not collapse to content height.
   const fillHost = height === "100%";
   return (
     <div
       className={cn(
         "relative min-h-0 w-full overflow-hidden rounded-xl border border-vui-border bg-vui-surface-workspace",
-        fillHost ? "h-full min-h-0 flex-1" : null,
+        fillHost ? "h-full min-h-0 w-full flex-1" : null,
         className,
       )}
-      style={fillHost ? undefined : { height }}
+      style={fillHost ? { height: "100%", minHeight: 0 } : { height }}
       data-vui="workflow-canvas"
     >
-      <div className={fillHost ? "absolute inset-0" : "h-full w-full"}>
+      <div className={fillHost ? "absolute inset-0 min-h-0" : "h-full w-full"} style={fillHost ? { width: "100%", height: "100%" } : undefined}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -162,6 +162,7 @@ export function ShadcnWorkflowCanvas({
           onSelectionChange={onSelectionChange}
           proOptions={{ hideAttribution: true }}
           style={{ width: "100%", height: "100%" }}
+          className={fillHost ? "h-full w-full" : undefined}
         >
           <Background gap={18} size={1} color="var(--vui-border, #e4e4e7)" />
           <Controls showInteractive={false} />

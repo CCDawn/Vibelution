@@ -40,10 +40,11 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
       title={p.lang === "zh" ? "团队工作台" : "Team workbench"}
       rail={p.teamShellRail}
       toolbar={p.teamShellToolbar}
-      // Challenge process canvas must not inherit board padding/scroll floor (content-start + overflow-auto).
+      // Process / challenge board: pure fill host (no pad/scroll/content-start floor).
+      // Absolute children (ResearchProcessWorkspace) pin to this cell.
       boardClassName={
-        p.challengeCupResearchTeamSelected
-          ? "!gap-0 !overflow-hidden !p-0 !h-full min-h-0 flex-1"
+        p.challengeCupResearchTeamSelected || p.boardPrimaryMode === "overview"
+          ? "!relative !gap-0 !overflow-hidden !p-0 !h-full min-h-0 flex-1"
           : "!gap-0 !overflow-hidden !p-0"
       }
       board={(
@@ -53,8 +54,8 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
           workflowPending={p.workflowPending}
           workflowReady={p.workflowReady}
           className={
-            p.challengeCupResearchTeamSelected
-              ? "flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0"
+            p.challengeCupResearchTeamSelected || p.boardPrimaryMode === "overview"
+              ? "absolute inset-0 flex min-h-0 w-full min-w-0 flex-col overflow-hidden p-0"
               : p.styles.teamShellBoardBody
           }
           challengeWorkspaceClassName={p.styles.challengeWorkspaceBody}

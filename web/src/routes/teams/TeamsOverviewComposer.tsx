@@ -30,6 +30,11 @@ export function TeamsOverviewComposer({
   challengeWorkspaceClassName = "",
   challengeCupResearchTeamSelected = false,
 }: TeamsOverviewComposerProps) {
+  const fillHost =
+    challengeCupResearchTeamSelected
+    || boardPrimaryMode === "overview"
+    || boardPrimaryMode === "stage";
+
   return (
     <div
       className={[
@@ -39,6 +44,7 @@ export function TeamsOverviewComposer({
       ].filter(Boolean).join(" ")}
       data-vui-region="teams-board-main"
       data-composer="teams-overview"
+      data-fill-host={fillHost ? "true" : "false"}
     >
       <TeamResearchBoardPrimarySurface
         lang={lang}

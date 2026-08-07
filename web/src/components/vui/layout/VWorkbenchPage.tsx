@@ -21,6 +21,57 @@ export type VWorkbenchPageProps = ComponentPropsWithoutRef<"section"> & {
   fillLayout?: VWorkbenchPageFillLayout;
 };
 
+/**
+ * Route shells often pass `styles.route` which still carries legacy
+ * `grid grid-rows-[auto_minmax(0,1fr)]`. `cn` does not de-dupe Tailwind, so those
+ * utilities fight recipe fill and collapse the body to content height (huge empty floor).
+ * Strip display / track geometry so fillLayout always owns the page box.
+ */
+function stripConflictingFillGeometry(className: string | undefined): string {
+  if (!className) {
+    return "";
+  }
+  return className
+    .split(/\s+/)
+    .filter((token) => {
+      if (!token) {
+        return false;
+      }
+      if (
+        token === "grid"
+        || token === "flex"
+        || token === "inline-grid"
+        || token === "inline-flex"
+        || token === "block"
+        || token === "contents"
+      ) {
+        return false;
+      }
+      if (
+        token.startsWith("grid-rows-")
+        || token.startsWith("grid-cols-")
+        || token.startsWith("auto-rows-")
+        || token.startsWith("auto-cols-")
+      ) {
+        return false;
+      }
+      if (
+        token === "content-start"
+        || token === "content-end"
+        || token === "content-center"
+        || token === "content-between"
+        || token === "content-around"
+        || token === "content-evenly"
+        || token === "content-stretch"
+        || token === "content-baseline"
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .join(" ");
+}
+
 export const VWorkbenchPage = forwardRef<HTMLElement, VWorkbenchPageProps>(function VWorkbenchPage(
   {
     ariaLabel,
@@ -38,6 +89,8 @@ export const VWorkbenchPage = forwardRef<HTMLElement, VWorkbenchPageProps>(funct
       ? VUI_PAGE_STACK_FILL_CLASS
       : VUI_PAGE_FILL_CLASS;
 
+  const safeClassName = fill ? stripConflictingFillGeometry(className) : className;
+
   return (
     <section
       {...props}
@@ -49,8 +102,9 @@ export const VWorkbenchPage = forwardRef<HTMLElement, VWorkbenchPageProps>(funct
       className={cn(
         "min-h-0 min-w-0 text-vui-fg-primary",
         "bg-transparent [--vui-workspace-sidebar:320px] [--vui-workspace-aside:320px]",
+        // Safe extras first; recipe fill geometry always last so it owns display/rows.
+        safeClassName,
         fillClass,
-        className,
       )}
     >
       {children}
