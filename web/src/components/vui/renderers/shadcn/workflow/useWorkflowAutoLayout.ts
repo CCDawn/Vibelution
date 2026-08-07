@@ -22,11 +22,11 @@ import type {
   WorkflowLayoutNode,
   WorkflowLayoutResult,
 } from "../../../product/workflow/workflowCanvasTypes";
-import { fromElkLayout } from "./workflowElkLayout";
-import { toElkGraph } from "./workflowElkGraphAdapter";
 import { analyzeEdgeSections } from "./workflowElkEdgePath";
 import { DECISION_OUTCOME_IDS } from "./workflowElkPorts";
 import type { WorkflowLayoutEngine } from "./workflowElkClient";
+import { layoutTwoLevel } from "./workflowTwoLevelLayout";
+import { isLayoutSettled } from "./workflowLayoutSettling";
 import {
   structuralWorkflowLayoutHash,
   type WorkflowLayoutHash,
@@ -85,6 +85,7 @@ export function useWorkflowAutoLayout(
   const calibrationUsedRef = useRef(false);
   const cacheRef = useRef<CacheEntry | null>(null);
   const sizesRef = useRef<Map<string, WorkflowNodeSize>>(new Map());
+  const settlingRef = useRef<"design" | "calibration" | "settled">("design");
   const [sizesTick, setSizesTick] = useState(0);
   const graphRef = useRef(graph);
   graphRef.current = graph;
@@ -148,8 +149,14 @@ export function useWorkflowAutoLayout(
         const nextRevision = previousRevision + 1;
         revisionRef.current = nextRevision;
         setLayoutRevision(nextRevision);
-        if (previousRevision === 0) {
-          setInitialFitRevision(1);
+        // Settling protocol: the initial fit may only arm on the SETTLED
+        // revision. A design/calibration layout that still disagrees with the
+        // measured content sizes must NOT arm the fit — the calibration
+        // relayout that follows may change the viewport bounds.
+        const settled = isLayoutSettled(result.nodes, sizesRef.current, settlingRef.current);
+        settlingRef.current = settled ? "settled" : settlingRef.current === "settled" ? "settled" : "design";
+        if (previousRevision === 0 && settled) {
+          setInitialFitRevision(nextRevision);
         }
         calibrationUsedRef.current = structuralChange ? false : true;
         cacheRef.current = {
@@ -209,9 +216,9 @@ async function runLayout(
   engine: WorkflowLayoutEngine,
   sizes?: ReadonlyMap<string, WorkflowNodeSize>,
 ): Promise<WorkflowLayoutResult> {
-  const { root } = toElkGraph(input, sizes);
-  const layouted = await engine.layout(root);
-  return fromElkLayout(layouted, input);
+  // Two-level layout: per-stage DOWN + deterministic meta row + gateway
+  // cross-stage routing (architecture replaces the single compound graph).
+  return layoutTwoLevel(input, engine, sizes);
 }
 
 /**

@@ -80,7 +80,7 @@ function twoStageInput(): WorkflowLayoutInput {
   };
 }
 
-function fourDecisionEdges(): WorkflowLayoutInput {
+export function fourDecisionEdges(): WorkflowLayoutInput {
   const graph = twoStageInput();
   graph.nodes.push(
     { nodeId: "candidate_promotion", stageId: "execution_iteration", label: "候选晋级", actorKind: "agent", visualKind: "agent_task", status: "pending" },
@@ -104,7 +104,7 @@ function fourDecisionEdges(): WorkflowLayoutInput {
  * decision edges for `iteration_decision` are exactly the four definition
  * edges (rerun/promote/rollback/stop); `revise` never receives one here.
  */
-function challengeCupDefinition(): WorkflowLayoutInput {
+export function challengeCupDefinition(): WorkflowLayoutInput {
   const node = (
     nodeId: string,
     stageId: string,
