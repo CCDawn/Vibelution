@@ -1,20 +1,21 @@
 /**
- * Cross-stage gateway routing (two-level layout, phase B edges).
+ * Cross-stage gateway routing (LEGACY, retired from the production path).
  *
- * A cross-stage edge leaves its source task at the engine-declared port,
- * travels horizontally through the stage gap channel, and enters the target
- * task at its engine-declared port. The route is fully deterministic and
- * engine-owned:
+ * Superseded by the outer ELK spacer-node architecture
+ * (workflowOuterElkGraphAdapter + workflowOuterElkLayout): cross-stage edges
+ * are now real ELK edges through label spacer nodes, and ELK owns the routes.
  *
+ * Retained only for reference and tests of the old deterministic router.
+ * Deletion condition: all remaining tests migrated to the outer-ELK contracts
+ * (workflowOuterElkLayout.test.ts / workflowTwoLevelLayout.test.ts) and no
+ * production import remains (workflowTwoLevelLayout no longer imports it).
+ *
+ * Legacy behavior (kept for the record):
  *   source port (task edge point)
  *     -> horizontal to source stage right boundary
- *     -> horizontal through the gap channel (y = lane of the shared center)
+ *     -> horizontal through the gap channel
  *     -> target stage left boundary
  *     -> horizontal to target port (task edge point)
- *
- * The router NEVER invents verticals inside a stage body and never enters the
- * stage title band (the channel y is the midpoint of the two task centers,
- * which the stage layout keeps inside the content band).
  */
 import type {
   WorkflowCanvasEdgeInput,

@@ -1,12 +1,13 @@
 /**
- * Stage meta-graph construction and layout (phase B of the two-level layout).
+ * Stage meta-graph construction (LEGACY, retired from the production path).
  *
- * Collapses the stages into meta-nodes sized by their phase-A boxes and lays
- * them out along RIGHT. The stage sequence is the definition order; positions
- * are computed DETERMINISTICALLY as a single row with a fixed channel gap:
- * ELK cannot order unconnected compounds (probe fact, design §4.2), so a
- * hand-computed row is the geometry authority here — no ordering edges, no
- * engine dependency for the meta placement.
+ * Superseded by the outer ELK architecture (workflowOuterElkGraphAdapter):
+ * stage positions, gaps and cross-stage routing are now computed by a REAL
+ * outer ELK graph with label spacer nodes — no fixed STAGE_CHANNEL_GAP.
+ *
+ * Retained only for reference and legacy tests. Deletion condition: all
+ * remaining tests migrated to the outer-ELK contracts and no production
+ * import remains (workflowTwoLevelLayout no longer imports this module).
  */
 import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
 import { WORKFLOW_STAGE_TITLE_HEIGHT } from "./workflowElkOptions";
