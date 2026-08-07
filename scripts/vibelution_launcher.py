@@ -1397,6 +1397,56 @@ def _missing_runtime_modules(python_executable: str, modules: list[str]) -> list
     return missing
 
 
+def _ensure_langgraph_checkpoint_sqlite_shim(python_executable: str) -> None:
+    """Write a tiny top-level alias so legacy probes can import the package name.
+
+    Pip package ``langgraph-checkpoint-sqlite`` only exposes
+    ``langgraph.checkpoint.sqlite``. Older stamps / external tools still do
+    ``import langgraph_checkpoint_sqlite``.
+    """
+
+    if not str(python_executable or "").strip():
+        return
+    try:
+        result = subprocess.run(
+            [
+                str(python_executable),
+                "-c",
+                (
+                    "import pathlib, sys\n"
+                    "try:\n"
+                    "    import langgraph_checkpoint_sqlite  # noqa: F401\n"
+                    "    raise SystemExit(0)\n"
+                    "except Exception:\n"
+                    "    pass\n"
+                    "paths = [pathlib.Path(p) for p in sys.path if p and 'site-packages' in p.replace('\\\\','/')]\n"
+                    "if not paths:\n"
+                    "    raise SystemExit(2)\n"
+                    "target = paths[0] / 'langgraph_checkpoint_sqlite.py'\n"
+                    "target.write_text("
+                    "'''Compatibility alias for langgraph-checkpoint-sqlite.\\n"
+                    "from langgraph.checkpoint.sqlite import SqliteSaver\\n"
+                    "from langgraph.checkpoint import sqlite as sqlite\\n"
+                    "__all__ = [\"SqliteSaver\", \"sqlite\"]\\n'''"
+                    ", encoding='utf-8')\n"
+                    "import langgraph_checkpoint_sqlite  # noqa: F401\n"
+                ),
+            ],
+            cwd=str(PROJECT_ROOT),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=20.0,
+            creationflags=_windows_creation_flags(),
+            startupinfo=_hidden_startup_info(),
+            check=False,
+            **_subprocess_text_kwargs(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    if int(result.returncode) != 0:
+        return
+
+
 def _bootstrap_python_executable() -> str:
     """Pick the interpreter used to create the project venv (current interpreter first)."""
 
@@ -1474,6 +1524,9 @@ def _ensure_project_python_runtime() -> str:
     venv_python = str(_venv_python_executable())
     if not _venv_python_executable().exists():
         _create_project_virtualenv()
+        venv_python = str(_venv_python_executable())
+    # Heal known pip-name vs import-name mismatches (safe no-op if already present).
+    _ensure_langgraph_checkpoint_sqlite_shim(venv_python)
     fingerprint = _requirements_fingerprint()
     stored_fingerprint = _read_dependency_stamp()
     # Fast path: stamp already matches requirements.txt → skip heavy full-import probe.
@@ -1490,6 +1543,8 @@ def _ensure_project_python_runtime() -> str:
             f"is missing at {REQUIREMENTS_PATH}; cannot install backend dependencies."
         )
     _install_project_dependencies(venv_python)
+    # After install: heal known package/import name mismatches before probing.
+    _ensure_langgraph_checkpoint_sqlite_shim(venv_python)
     missing = _missing_runtime_modules(venv_python, _requirements_runtime_modules())
     if missing:
         raise RuntimeError(
