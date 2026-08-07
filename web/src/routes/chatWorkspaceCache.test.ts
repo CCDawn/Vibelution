@@ -106,7 +106,7 @@ describe("createChatWorkspaceCache", () => {
     ]);
   });
 
-  it("refreshes only agent config surfaces after config save", async () => {
+  it("refreshes Agent directory and config surfaces after a model-backed config save", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 
     await cache.afterAgentConfigSaved("agent-1");
@@ -114,6 +114,7 @@ describe("createChatWorkspaceCache", () => {
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.agentConfigWorkspace(),
       queryKeys.agentSummary(true),
+      queryKeys.agents(),
       queryKeys.agent("agent-1"),
     ]);
     expect(queryKeysFromCalls()).not.toContain(queryKeys.sessions());
