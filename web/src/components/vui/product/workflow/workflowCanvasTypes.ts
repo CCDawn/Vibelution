@@ -127,8 +127,35 @@ export type WorkflowLayoutNode = {
   description?: string;
   primaryRoleKey?: string;
   stageTone?: WorkflowCanvasStageInput["stageTone"];
+  /**
+   * React Flow source handle ids, derived from the REAL current-run outgoing
+   * edges of this node — never a hardcoded capability list.
+   */
   sourceHandleIds?: string[];
+  /**
+   * Decision capability contract: the five outcomes the decision node can
+   * expose (rerun / revise / promote / rollback / stop). Distinct from
+   * sourceHandleIds: capabilities may exist without a current-run edge
+   * (e.g. `revise`, which executes a child run lineage).
+   */
+  decisionOutcomeIds?: string[];
 };
+
+/** Plain geometry point produced by the layout engine (not ELK-owned type). */
+export type WorkflowLayoutPoint = { x: number; y: number };
+
+/** One routed segment of an edge, from the layout engine. Unique geometry fact. */
+export type WorkflowEdgeSection = {
+  id: string;
+  start: WorkflowLayoutPoint;
+  end: WorkflowLayoutPoint;
+  bendPoints: WorkflowLayoutPoint[];
+  incomingSectionIds: string[];
+  outgoingSectionIds: string[];
+};
+
+/** Layout-engine-owned edge label anchor; never a 50%-of-path estimate. */
+export type WorkflowLabelBounds = { x: number; y: number; width: number; height: number };
 
 export type WorkflowLayoutEdge = {
   id: string;
@@ -141,4 +168,17 @@ export type WorkflowLayoutEdge = {
   sourceHandle?: string;
   gateKind?: string;
   requiresHumanAccept?: boolean;
+};
+
+/** Full layout-engine output; edges carry engine-owned geometry only. */
+export type WorkflowLayoutResult = {
+  nodes: WorkflowLayoutNode[];
+  edges: Array<
+    WorkflowLayoutEdge & {
+      sections: WorkflowEdgeSection[];
+      labelBounds?: WorkflowLabelBounds;
+    }
+  >;
+  width: number;
+  height: number;
 };

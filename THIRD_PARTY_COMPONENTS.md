@@ -6,6 +6,7 @@ This registry covers optional components reviewed for the Vibelution research wo
 |---|---|---|---|---|---|
 | PaperQA2 | `Future-House/paper-qa`; `paper-qa==2026.3.18` | Apache-2.0 | Isolated Python dependency behind a future evidence adapter | Disabled | Forbidden |
 | Agent Skills reference | `agentskills/agentskills@38a2ff82958afee88dadf4831509e6f7e9d8ef4e` | Apache-2.0 | Parser/validator component behind the existing managed skill library | Disabled | Forbidden |
+| ELK (`elkjs`) | npm `elkjs@0.12.0` (exact pin; web-only) | EPL-2.0 OR GPL-3.0-or-later (per package `LICENSE.md`) | Frontend layout engine behind the VUI workflow canvas renderer `web/src/components/vui/renderers/shadcn/workflow/`; loaded as a separate Worker asset; verified via Browser handshake probe `web/probes/workflow-elk-handshake.html` | Probe enabled; product integration pending T4 | None |
 
 ## Governance requirements
 

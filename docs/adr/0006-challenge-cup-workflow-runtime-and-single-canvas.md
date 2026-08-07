@@ -345,8 +345,8 @@ web/src/api/types/researchWorkflow.ts
 - Route 只导入 VUI 产品 API；
 - React Flow node/edge renderer 不进入业务路由；
 - `StageRegion` 使用 React Flow parent/group node 形成三阶段分割；
-- v1 固定模板使用确定性布局，不引入 ELK；
-- 后续只有动态复合图确有需要时才评估 `elkjs`；
+- 三阶段 compound 图、跨层级边、多出口决策端口与反馈回路已出现真实遮盖，布局采用 ELK Layered（`elkjs` 0.12，仅限 shadcn workflow renderer 内部）；决策与约束见「科研工作流画布 ELK 自动布局」开发交接 PRD 与实现设计；
+- 布局输入以 definition 拓扑为唯一当前事实：`iteration_decision` 暴露 `rerun / revise / promote / rollback / stop` 五种能力，但当前 run 只投影真实的四条出边，`revise` 走 child-run lineage，不为视觉拼接伪造本次 run 内的边；
 - selection/viewport 可由前端 store 持有，运行状态必须来自服务端查询/SSE；
 - 每个业务组件和模型文件保持单一职责。
 
