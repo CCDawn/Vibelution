@@ -9,7 +9,8 @@
 
 | 任务类型 | READ（按序） | EDIT（优先） | TEST（最小） | 禁止 |
 | --- | --- | --- | --- | --- |
-| **任意非平凡** | `AGENTS.md`；本 `route.md`；`ownership.md` | — | `tests/select_tests.py --from-git main --commands-only` | 先广扫全仓 |
+| **任意开发（默认）** | `AGENTS.md`§3.0；本机 `ccdawn-brt/SKILL.md`；本 `route.md`；`ownership.md` | — | 按 BRT 分级选最小验证 | 不读 BRT 就广扫/写入；跳过路由叠 process 框架 |
+| **任意非平凡** | `AGENTS.md`；`ccdawn-brt`；本 `route.md`；`ownership.md` | — | `tests/select_tests.py --from-git main --commands-only` | 先广扫全仓 |
 | **Bug/回归/卡住** | 最新 `logs/runtime_scenes/`；对应链路地图 | 根因位点；必要时补日志 | 复现相关 pytest/vitest | 无日志瞎猜；把 fallback 当修完 |
 | **用户可见 UI** | `AGENTS.md`§2 前端；`development-standard`§9.1；`docs/guides/button-selection.md`；`web/src/components/vui/designs/INDEX.md` | `web/src/routes/<domain>/`；`components/vui`；**不**改 renderer 除非扩展交互 | `vuiShadcnRouteContract` + 触及 `*.layout.test` / route contract | `@heroui`；route→`renderers/shadcn`；未登记新 `V*`；通用裸 `<button>` |
 | **前端数据/API 调用** | `web/src/api/` 现有 domain | `web/src/api/<domain>.ts` + `types/` + queryKeys | 相关 vitest；`fullStackApiBoundary` 预算不升 | Route 内新 `fetchJson`/硬编码 path |
@@ -49,8 +50,8 @@
 
 | 分级 | 最多先读 |
 | --- | --- |
-| `FAST_PATCH` | `AGENTS.md` 相关红线 + 本表一行 + 目标文件 |
-| `STANDARD_TASK` | + 1 个模块 README + 1 个标准相关 § + ownership 相关节 |
-| `HIGH_RISK` | + BRT + worktree 文档 + §23 相关 + 测试 README 相关段 |
+| `FAST_PATCH` | `ccdawn-brt`（可 silent/micro）+ `AGENTS.md` 相关红线 + 本表一行 + 目标文件 |
+| `STANDARD_TASK` | `ccdawn-brt` + `AGENTS.md` + 1 个模块 README + 1 个标准相关 § + ownership 相关节 |
+| `HIGH_RISK` | `ccdawn-brt`（ALIGN/FULL 按需）+ worktree 文档 + §23 相关 + 测试 README 相关段 |
 
-**禁止：** 无目标地 `list` 整个 `docs/archive` 或 `docs/superpowers`。
+**禁止：** 无目标地 `list` 整个 `docs/archive` 或 `docs/superpowers`；未加载 `ccdawn-brt` 默认规划门就开写。

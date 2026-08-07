@@ -29,13 +29,16 @@ If a task worktree does not contain `AGENTS.md`, read this file directly before 
 
 ## 2. Task Intake And BRT Gate
 
+**Default planning (mandatory for development):** On every development, fix, planning, review, or any task that may change code/behavior/validation boundaries, **load and follow the local `ccdawn-brt` routing skill before** broad repo scans, downstream skill choice, or write actions. Users do not need to invoke `/brt` or `/ccdawn-brt`. Live skill path:
+
+- Preferred: `%USERPROFILE%\.grok\skills\ccdawn-brt\SKILL.md` (or `$HOME/.grok/skills/ccdawn-brt/SKILL.md`)
+- Fallback: `<codex-skill-root>\ccdawn-brt\SKILL.md` when that is the installed root
+
+Before claiming the conversation uses the latest skill, re-read the on-disk `SKILL.md`. Project load order: root `AGENTS.md` §3.0 → this section → `docs/guides/README.md` step **0b**.
+
 Before choosing tools, worktree shape, validation, or reporting depth, classify the request as `FAST_PATCH`, `STANDARD_TASK`, or `HIGH_RISK`. The tier decides how much process is required; do not run the full ceremony before deciding whether it will add value.
 
-For non-trivial code or behavior changes, use the local BRT skill:
-
-`<codex-skill-root>\ccdawn-brt\SKILL.md`
-
-Use BRT when a request involves expected behavior, defaults, restore/memory behavior, permissions, state transitions, edge cases, completion criteria, safety gates, promotion/apply/rollback workflows, persistence, public API behavior, agent workflow, or runtime lifecycle. For `FAST_PATCH`, BRT may stay internal and use a silent or micro intent lock.
+Use BRT on all development paths. Escalate to full alignment when a request involves expected behavior, defaults, restore/memory behavior, permissions, state transitions, edge cases, completion criteria, safety gates, promotion/apply/rollback workflows, persistence, public API behavior, agent workflow, or runtime lifecycle. For `FAST_PATCH`, BRT may stay internal and use a silent or micro intent lock — **do not skip the skill gate entirely**.
 
 The BRT checkpoint must lock:
 
