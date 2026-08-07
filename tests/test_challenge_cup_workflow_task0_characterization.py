@@ -146,6 +146,8 @@ def test_task0_execute_uses_saved_canvas_node_ids_not_get_display_nodes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """POST /research/flow-canvas/execute SSOT is saved flow_canvas.json."""
+    # Characterization of legacy writer: enable only for this historical path test.
+    monkeypatch.setenv("VIBELUTION_LEGACY_FLOW_CANVAS_EXECUTE", "1")
     workspace = _wire_workspace(tmp_path, monkeypatch)
     workspace.write_research_flow_canvas(_worker_flow_canvas())
 
