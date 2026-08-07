@@ -1,12 +1,17 @@
 /**
  * @xyflow/react composition for VWorkflowCanvas.
  * Node/edge/layout/state live in sibling modules — this file only wires them.
+ *
+ * Layout ownership: the auto-layout hook (production worker engine) drives
+ * geometry; this component renders hook output and honors the fit protocol
+ * (`initialFitRevision` once, explicit `fitAll` from controls).
  */
 import {
   Background,
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  useReactFlow,
   type Edge,
   type Node,
   type NodeTypes,
@@ -14,11 +19,12 @@ import {
   type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 import { cn } from "../../../lib/cn";
 import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
-import { layoutWorkflowCanvas } from "./workflowCanvasLayout";
+import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
+import { createWorkflowLayoutEngine } from "./workflowElkClient";
 import { WorkflowAgentTaskNode } from "./WorkflowAgentTaskNode";
 import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
 import { WorkflowCanvasLegend } from "./WorkflowCanvasLegend";
@@ -83,9 +89,23 @@ function WorkflowCanvasInner({
   height = "100%",
   showLegend = true,
 }: ShadcnWorkflowCanvasProps) {
-  const layout = useMemo(() => layoutWorkflowCanvas(graph), [graph]);
+  const rf = useReactFlow();
+  const fitAll = useCallback(() => {
+    void rf.fitView({ padding: 0.1, duration: 200 });
+  }, [rf]);
+
+  const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine, { fitAll });
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
-  const fitOnceRef = useRef(false);
+
+  // Fit protocol: fit exactly once when the first layout commits, then
+  // acknowledge so runtime-only updates never re-fit.
+  useEffect(() => {
+    if (layout.initialFitRevision == null) {
+      return;
+    }
+    void rf.fitView({ padding: 0.08 });
+    layout.acknowledgeInitialFit();
+  }, [layout.initialFitRevision, layout.acknowledgeInitialFit, rf]);
 
   const stageIndexById = useMemo(() => {
     const map = new Map<string, number>();
@@ -139,7 +159,7 @@ function WorkflowCanvasInner({
           selectable: true,
           draggable: false,
           selected: node.id === selectedNodeId,
-          zIndex: 1,
+          zIndex: 2,
         } satisfies Node;
       }),
     [layout.nodes, currentSet, selectedNodeId, stageIndexById],
@@ -174,8 +194,10 @@ function WorkflowCanvasInner({
           semanticKind: edge.semanticKind,
           pathState: edge.pathState,
           labelAlwaysVisible: edge.labelAlwaysVisible,
+          sections: edge.sections,
+          labelBounds: edge.labelBounds,
         },
-        zIndex: 2,
+        zIndex: 1,
       })),
     [layout.edges],
   );
@@ -228,15 +250,12 @@ function WorkflowCanvasInner({
           style={{ width: "100%", height: "100%" }}
           className={fillHost ? "h-full w-full" : undefined}
           defaultEdgeOptions={{ type: "workflowSemantic" }}
-          onInit={(instance) => {
-            if (!fitOnceRef.current) {
-              fitOnceRef.current = true;
-              void instance.fitView({ padding: 0.08 });
-            }
-          }}
         >
           <Background gap={20} size={1} color="var(--vui-border, #e4e4e7)" />
-          <WorkflowCanvasControls runtimeCurrentNodeIds={runtimeCurrentNodeIds} />
+          <WorkflowCanvasControls
+            runtimeCurrentNodeIds={runtimeCurrentNodeIds}
+            onFitAll={fitAll}
+          />
           {showLegend ? <WorkflowCanvasLegend /> : null}
         </ReactFlow>
       </div>

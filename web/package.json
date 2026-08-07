@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "check:bundle": "node scripts/checkBundleBudget.mjs --expect-elk-worker=0",
+    "check:bundle": "node scripts/checkBundleBudget.mjs",
     "check:elk-worker-handshake": "node scripts/checkElkWorkerHandshake.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "vitest run",
