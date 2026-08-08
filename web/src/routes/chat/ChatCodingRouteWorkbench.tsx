@@ -212,6 +212,7 @@ import {
 import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useChatSessionSelection } from "./useChatSessionSelection";
+import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
@@ -2494,6 +2495,17 @@ export function ChatCodingRoute() {
       current === activeSessionAgentId ? current : activeSessionAgentId
     ));
   }, [activeSessionAgentId]);
+  useChatSelectionPersistence({
+    requestedSessionId,
+    requestedRoomId,
+    activeSessionId,
+    activeSessionAgentId,
+    selectedAgentId,
+    sessions: sessionsQuery.data,
+    setActiveSession,
+    setSelectedAgentId,
+    reselectDirectSession: (sessionId) => reselectDirectSessionRef.current(sessionId),
+  });
   const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
   const selectedAgentSessionsQuery = useQuery({
     queryKey: ["sessions", "agent", selectedChatAgentId],
