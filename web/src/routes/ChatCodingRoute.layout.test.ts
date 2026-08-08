@@ -955,6 +955,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.compressionStatusCard");
     expect(routeSource).not.toContain("styles.compressionStrategyCard");
     expect(routeAndIndexRailSource).toContain("styles.runModeBlock");
+    expect(routeAndIndexRailSource).toContain("styles.mentalRuntimeBlock");
+    expect(routeAndIndexRailSource).toContain("mental-runtime-module");
+    expect(routeAndIndexRailSource).toContain('lang === "zh" ? "心智与运行" : "Mental & runtime"');
     expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
     expect(routeSource).not.toContain("styles.sessionResourceDiagnostics");
     expect(routeAndIndexRailSource).toContain("styles.companionBlock");
@@ -965,7 +968,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("styles.featureChipRow");
     expect(routeAndIndexRailSource).toContain("styles.featureChip");
     expect(routeAndIndexRailSource).toMatch(/styles\.railSectionHeading|routeStyles\.railSectionHeading/);
-    expect(routeAndIndexRailSource).toContain("<em>{enabled ? (lang === \"zh\" ? \"开\" : \"On\") : (lang === \"zh\" ? \"关\" : \"Off\")}</em>");
+    // Preview rail keeps only real next-turn chips (mental + status); reserved presets stay off-rail.
+    expect(routeAndIndexRailSource).not.toContain("CHAT_FEATURE_PRESETS.map");
+    expect(routeAndIndexRailSource).toContain("mentalModelEnabledForNextTurn ? (lang === \"zh\" ? \"开\" : \"On\")");
+    expect(routeAndIndexRailSource).toContain("variant=\"embedded\"");
     expect(routeSource).not.toContain("<section className={styles.petShowcase}");
     expect(routeSource).not.toContain("styles.featurePresetGrid");
 
@@ -1132,8 +1138,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.railSectionHeading).toContain("[font-size:var(--vui-font-xs)]");
     expect(routeStyles.sectionTitle).toContain("[font-size:var(--vui-font-sm)]");
     expect(chatStatusRailSource).toContain('lang === "zh" ? "陪伴" : "Companion"');
+    expect(chatStatusRailSource).toContain('lang === "zh" ? "心智与运行" : "Mental & runtime"');
     expect(chatStatusRailSource).toContain('lang === "zh" ? "下轮关" : "Next off"');
     expect(chatStatusRailSource).toContain("!mentalModelEnabledForNextTurn ? (");
+    expect(chatStatusRailSource).toContain('lang === "zh" ? "心智明细" : "Mental details"');
     expect(chatStatusRailSource).toContain('lang === "zh" ? "明细" : "Details"');
   });
 
