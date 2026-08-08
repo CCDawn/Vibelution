@@ -26,6 +26,7 @@ import type {
 } from "../../../product/workflow/workflowCanvasTypes";
 import { layoutTwoLevel } from "./workflowTwoLevelLayout";
 import { challengeCupDefinition } from "./workflowElkLayout.test";
+import { analyzeEdgeSections } from "./workflowElkEdgePath";
 
 const STAGE_ORDER = ["knowledge_collection", "experiment_design", "execution_iteration"] as const;
 
@@ -245,10 +246,14 @@ describe("two-level layout · cross-stage edges stay in the channel (RED on curr
         }
       }
       // The label rect must cover the leg boundary gap (spacer occupancy).
+      // Leg sections are identified by their id (leg1/leg2 are the layout
+      // edge ids); the composer's gateway stubs sit outside the legs.
       const lb = edge.labelBounds;
-      if (lb && edge.sections.length >= 2) {
-        const leg1End = edge.sections[0]!.end;
-        const leg2Start = edge.sections[1]!.start;
+      const leg1Sections = edge.sections.filter((s) => s.id.includes("leg1"));
+      const leg2Sections = edge.sections.filter((s) => s.id.includes("leg2"));
+      if (lb && leg1Sections.length > 0 && leg2Sections.length > 0) {
+        const leg1End = leg1Sections[leg1Sections.length - 1]!.end;
+        const leg2Start = leg2Sections[0]!.start;
         const covered =
           leg1End.x >= lb.x - 1e-3 && leg2Start.x <= lb.x + lb.width + 1e-3;
         expect(covered, `label of ${edge.id} covers the leg boundary`).toBe(true);
@@ -284,6 +289,26 @@ describe("two-level layout · cross-stage edges stay in the channel (RED on curr
         `label of ${edge.id} centered in the gap between ${sourceStageId} and ${targetStageId}`,
       ).toBeGreaterThanOrEqual(gapLeft);
       expect(labelCenterX).toBeLessThanOrEqual(gapRight);
+    }
+  });
+
+  it("keeps every cross-stage section chain well-formed after spacer reassembly", async () => {
+    const input = challengeCupDefinition();
+    const result = await layoutCurrent();
+    const stageOf = new Map(input.nodes.map((n) => [n.nodeId, n.stageId] as const));
+    const crossEdges = result.edges.filter((e) => {
+      const sourceStage = stageOf.get(e.source);
+      const targetStage = stageOf.get(e.target);
+      return sourceStage && targetStage && sourceStage !== targetStage;
+    });
+
+    expect(crossEdges.length).toBeGreaterThan(0);
+    for (const edge of crossEdges) {
+      const diagnostic = analyzeEdgeSections(edge.sections);
+      expect(
+        diagnostic.wellFormed,
+        `${edge.id}: ${diagnostic.diagnostics.join("; ")}`,
+      ).toBe(true);
     }
   });
 });

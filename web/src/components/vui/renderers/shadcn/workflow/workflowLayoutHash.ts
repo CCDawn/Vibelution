@@ -3,14 +3,20 @@
  *
  * Two keys:
  * - `structure`: topology only (stages + order, node membership + kind,
- *   edges + sourceHandle). Used to decide whether a relayout is mandatory.
+ *   edges + sourceHandle) plus the resolved label geometry of every edge.
+ *   Used to decide whether a relayout is mandatory.
  * - `full`: structure + measured node sizes. Used as the layout cache key.
  *
  * Runtime-only fields never enter the hash: status / pathState / stageTone /
  * attempt / isRuntimeCurrent / primaryAgentId / blockedReason / edge label
- * text (label width is fixed, see layout design §6.1/D3).
+ * TEXT. Label text only enters through its RESOLVED GEOMETRY
+ * (resolveEdgeLabelSpec width/height): the outer spacer node is sized by that
+ * geometry, so a text change that widens/narrows the label MUST relayout
+ * (stage channel grows/shrinks), while a same-geometry text change stays a
+ * runtime-only merge.
  */
 import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
+import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 import {
   WORKFLOW_DECISION_DESIGN_HEIGHT,
   WORKFLOW_NODE_DESIGN_HEIGHT,
@@ -69,12 +75,20 @@ export function structuralWorkflowLayoutHash(
       stageId: node.stageId,
       visualKind: node.visualKind,
     })),
-    edges: input.edges.map((edge) => ({
-      source: edge.fromNodeId,
-      target: edge.toNodeId,
-      sourceHandle: edge.sourceHandle ?? null,
-      semanticKind: edge.semanticKind,
-    })),
+    // Resolved label geometry enters the STRUCTURE hash too: the outer
+    // spacer node is sized by it, so a wider label forces a relayout even
+    // after the calibration budget was spent (the stage channel must grow).
+    edges: input.edges.map((edge) => {
+      const label = resolveEdgeLabelSpec(edge.label);
+      return {
+        source: edge.fromNodeId,
+        target: edge.toNodeId,
+        sourceHandle: edge.sourceHandle ?? null,
+        semanticKind: edge.semanticKind,
+        labelWidth: label.width,
+        labelHeight: label.height,
+      };
+    }),
   };
 
   const full = {

@@ -10,9 +10,9 @@
  *  - spacer nodes are pure layout occupancy: never rendered as workflow nodes,
  *    never user-visible; they force ELK to widen the gap when the label grows.
  *
- * Gateway ports use FIXED_SIDE + explicit anchor Y matching the internal
- * source/target task center, so the routed edge leaves the stage near its real
- * internal origin.
+ * Gateway ports are side-constrained only (FIXED_SIDE). ELK's layered engine
+ * ignores fixed port coordinates, so binding the routed edge to the internal
+ * task center is the composer's job (gateway stubs in workflowLayoutComposer).
  */
 import type { ElkNode } from "elkjs/lib/elk-api";
 
@@ -26,16 +26,11 @@ import type { EdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 export const OUTER_SPACER_PREFIX = "__label_spacer__";
 
 const PORT_SIDE_OPTION = "elk.port.side";
-const PORT_ANCHOR_OPTION = "org.eclipse.elk.port.anchor";
 const PORT_CONSTRAINTS_OPTION = "org.eclipse.elk.portConstraints";
 
 export type OuterEdgeSpec = {
   edge: WorkflowCanvasEdgeInput;
   labelSpec: EdgeLabelSpec;
-  /** Internal (local) center Y of the source task within its stage. */
-  sourceAnchorY: number;
-  /** Internal (local) center Y of the target task within its stage. */
-  targetAnchorY: number;
 };
 
 export type OuterElkGraph = {
@@ -110,14 +105,16 @@ export function buildOuterElkGraph(
       ],
     });
 
-    // Gateway ports on the stage meta nodes: EAST on source (anchor = source
-    // task center), WEST on target (anchor = target task center). Anchors are
-    // relative Y in px from the stage top; the source stage's port is on its
-    // right edge, the target's on its left.
+    // Gateway ports on the stage meta nodes: EAST on source, WEST on target.
+    // The ELK layered engine does NOT honor fixed port coordinates (probed:
+    // FIXED_POS/FIXED_RATIO/anchors are ignored; ports float), so the port is
+    // only side-constrained here — the composer's gateway stubs bridge from
+    // the internal task center to whatever Y the engine chose for the port,
+    // keeping the final polyline node-to-node continuous.
     const sourcePortId = `gate:${spec.edge.edgeId}:src`;
     const targetPortId = `gate:${spec.edge.edgeId}:tgt`;
-    ensurePort(children, sourceStageElkId, sourcePortId, "EAST", spec.sourceAnchorY);
-    ensurePort(children, targetStageElkId, targetPortId, "WEST", spec.targetAnchorY);
+    ensurePort(children, sourceStageElkId, sourcePortId, "EAST");
+    ensurePort(children, targetStageElkId, targetPortId, "WEST");
 
     const leg1 = `__leg1_${spec.edge.edgeId}__`;
     const leg2 = `__leg2_${spec.edge.edgeId}__`;
@@ -162,13 +159,11 @@ function ensurePort(
   stageElkId: string,
   portId: string,
   side: "EAST" | "WEST",
-  anchorY: number,
 ): void {
   const stage = children.find((c) => c.id === stageElkId);
   if (!stage) return;
   const ports = (stage.ports ?? []).slice();
   if (!ports.some((p) => p.id === portId)) {
-    void anchorY;
     ports.push({
       id: portId,
       layoutOptions: {
