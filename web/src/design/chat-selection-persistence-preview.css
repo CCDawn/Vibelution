@@ -55,7 +55,7 @@ h2 { font-size: 20px; }
 .session-selection-row.selection-row-active {
   background: #e1e6eb !important;
   border-color: #b7c3ce !important;
-  box-shadow: inset 3px 0 0 var(--preview-accent), inset 0 0 0 1px rgb(255 255 255 / 38%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 38%);
 }
 .session-selection-row.selection-row-active .session-mark {
   background: #d8e0e7;
