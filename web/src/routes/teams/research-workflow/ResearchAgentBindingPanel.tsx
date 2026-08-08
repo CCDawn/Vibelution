@@ -16,6 +16,7 @@ import {
   type TeamSourceCollectionStageAgentTone,
 } from "../source-collection/ui/TeamSourceCollectionStageAgentsPanel";
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
+import styles from "./ResearchAgentBindingPanel.styles";
 
 type ResearchAgentBindingPanelProps = {
   teamId: string;
@@ -104,8 +105,8 @@ export function ResearchAgentBindingPanel({
 
   if (!effectiveBindings) {
     return (
-      <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
-        <p className="m-0 text-sm text-[var(--fg-secondary)]">
+      <div className={styles.emptyState}>
+        <p className={styles.emptyStateText}>
           {isZh ? "当前团队尚无有效绑定数据" : "No effective bindings for this team"}
         </p>
       </div>

@@ -13,7 +13,6 @@ import routeModelSource from "../useTeamsWorkbenchModel.tsx?raw";
 import launchHandlersSource from "../createResearchStageLaunchHandlers.ts?raw";
 import selectedTeamDetailSource from "../useTeamsSelectedTeamDetail.ts?raw";
 const routeSource = `${routeShellSource}\n${routeModelSource}\n${launchHandlersSource}\n${selectedTeamDetailSource}`;
-import standaloneSource from "../../TeamResearchStageStandalonePagePanel.tsx?raw";
 
 function task(
   taskKind: TeamResearchProjectAgentTask["taskKind"],
@@ -90,8 +89,7 @@ describe("useResearchProjectAgentTasks", () => {
     expect(launchHandlersSource).toContain('stageType === "experiment" ? "experiment_design" : "iteration_decision"');
     expect(launchHandlersSource).toContain("await researchStageProjectAgentTasks.startTask");
     expect(launchHandlersSource).toContain("navigate(agentTask.chatRoute)");
-    // Standalone page is a thin ExperimentStageComposer adapter (no inline stagePhase gate).
-    expect(standaloneSource).toContain("ExperimentStageComposer");
+    // Task 9: TeamResearchStageStandalonePagePanel removed with the Challenge Cup stage-rail shell.
   });
 
   it("defers project task queries on source-collection surfaces", () => {
