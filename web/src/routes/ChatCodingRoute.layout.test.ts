@@ -834,6 +834,7 @@ describe("ChatCodingRoute layout contract", () => {
     // Selection chrome is on the outer card so the close control stays inside the same surface.
     expect(agentSessionTabStripStyles.agentSessionTabActive).toContain("border-[color-mix");
     expect(agentSessionTabStripStyles.agentSessionTabActive).toContain("bg-[color-mix");
+    expect(agentSessionTabStripStyles.agentSessionTabActive).toContain("data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))]");
     expect(agentSessionTabStripStyles.agentSessionTabCloseButton).toContain("h-6");
     expect(agentSessionTabStripStyles.agentSessionTabCreateButton).toContain("shrink-0");
     expect(agentSessionTabStripStyles.agentSessionTabRail).toContain("flex-[0_1_auto]");
