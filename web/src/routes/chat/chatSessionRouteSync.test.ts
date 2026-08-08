@@ -1,6 +1,41 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldDeferUrlSessionSync } from "./chatSessionRouteSync";
+import {
+  shouldCanonicalizeUrlSessionSelection,
+  shouldDeferUrlSessionSync,
+} from "./chatSessionRouteSync";
+
+describe("shouldCanonicalizeUrlSessionSelection", () => {
+  it("canonicalizes an explicit deep-link target even when the store already paints it", () => {
+    expect(
+      shouldCanonicalizeUrlSessionSelection({
+        requestedSessionId: "session-a",
+        activeSessionId: "session-a",
+        intentSessionId: "",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not duplicate the select already scheduled by a tab click", () => {
+    expect(
+      shouldCanonicalizeUrlSessionSelection({
+        requestedSessionId: "session-a",
+        activeSessionId: "session-a",
+        intentSessionId: "session-a",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not send temporary local sessions to the server", () => {
+    expect(
+      shouldCanonicalizeUrlSessionSelection({
+        requestedSessionId: "temp-session-local",
+        activeSessionId: "",
+        intentSessionId: "",
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("shouldDeferUrlSessionSync", () => {
   it("defers URL→active sync while optimistic intent is ahead of the router", () => {

@@ -4,7 +4,11 @@ import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateA
 import { fetchJson } from "../../api/client";
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
-import { shouldDeferUrlSessionSync } from "./chatSessionRouteSync";
+import { isTempSessionId } from "../sessionOptimisticIds";
+import {
+  shouldCanonicalizeUrlSessionSelection,
+  shouldDeferUrlSessionSync,
+} from "./chatSessionRouteSync";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
@@ -203,10 +207,38 @@ export function useChatSessionSelection({
       ) {
         return;
       }
-      setActiveGroupRoomId("");
-      setActiveSession(requestedSessionId);
-      latestDirectSessionSelectionRef.current = requestedSessionId;
-      latestDirectSessionSelectionAtRef.current = Date.now();
+      const shouldCanonicalize = shouldCanonicalizeUrlSessionSelection({
+        requestedSessionId,
+        activeSessionId,
+        intentSessionId: latestDirectSessionSelectionRef.current,
+      });
+      if (activeSessionId !== requestedSessionId) {
+        setActiveGroupRoomId("");
+        setActiveSession(requestedSessionId);
+        if (isTempSessionId(requestedSessionId)) {
+          latestDirectSessionSelectionRef.current = requestedSessionId;
+          latestDirectSessionSelectionAtRef.current = Date.now();
+        }
+      }
+      if (shouldCanonicalize) {
+        // Explicit deep links must update the same backend active pointer as
+        // an in-app tab click; otherwise a remount bootstraps the old session.
+        reselectDirectSessionRef.current(requestedSessionId);
+      }
+      return;
+    }
+    if (
+      requestedSessionId
+      && !requestedRoomId
+      && shouldCanonicalizeUrlSessionSelection({
+        requestedSessionId,
+        activeSessionId,
+        intentSessionId: latestDirectSessionSelectionRef.current,
+      })
+    ) {
+      // A hard deep link can paint the same local session while the backend
+      // active pointer is still different; canonicalize that route explicitly.
+      reselectDirectSessionRef.current(requestedSessionId);
       return;
     }
     if (!activeSessionId && sessions && sessions.length > 0) {
@@ -220,6 +252,7 @@ export function useChatSessionSelection({
     latestDirectSessionSelectionRef,
     requestedRoomId,
     requestedSessionId,
+    reselectDirectSessionRef,
     sessions,
     setActiveGroupRoomId,
     setActiveSession,

@@ -3727,6 +3727,112 @@ def test_close_workbench_supersedes_pending_open_workbench(tmp_path, monkeypatch
     assert queued_event["payload"]["supersededPendingCommands"] == supersede_event["payload"]["commands"]
 
 
+@pytest.mark.parametrize("superseding_type", ["open_workbench", "restart_workbench"])
+def test_open_or_restart_workbench_supersedes_older_pending_close_workbench(tmp_path, monkeypatch, superseding_type):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    old_close = {
+        "commandId": "cmd-old-close",
+        "type": "close_workbench",
+        "requestedBy": "web_ui",
+        "requestedAt": "2026-08-07T12:00:00+00:00",
+        "args": {"reason": "web_close_button", "stopManager": False},
+    }
+    (inbox_dir / "cmd-old-close.json").write_text(json.dumps(old_close), encoding="utf-8")
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 0)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: False)
+    monkeypatch.setattr(command_queue, "load_state", lambda: {"stateVersion": 64})
+
+    new_command = command_queue.submit_command(
+        superseding_type,
+        args={"reason": "launcher_start" if superseding_type == "open_workbench" else "launcher_restart"},
+        requested_by="launcher_api",
+    )
+
+    assert [path.name for path in inbox_dir.glob("*.json")] == [f"{new_command['commandId']}.json"]
+    superseded_result = json.loads((results_dir / "cmd-old-close.json").read_text(encoding="utf-8"))
+    assert superseded_result["ok"] is False
+    assert superseded_result["completed"] is True
+    assert superseded_result["errorType"] == "SupersededByOpenWorkbench"
+    assert superseded_result["supersededByCommandId"] == new_command["commandId"]
+    assert superseded_result["supersededByCommandType"] == superseding_type
+    assert superseded_result["stateVersion"] == 64
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    supersede_event = next(event for event in events if event["type"] == "command_queue.pending_close_superseded_by_open")
+    assert supersede_event["payload"]["commandId"] == new_command["commandId"]
+    assert supersede_event["payload"]["type"] == superseding_type
+    assert supersede_event["payload"]["commands"] == [
+        {"commandId": "cmd-old-close", "type": "close_workbench", "status": "superseded"}
+    ]
+
+
+def test_recover_processing_queue_supersedes_stale_close_when_newer_open_is_pending(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    old_close = {
+        "commandId": "cmd-recovered-old-close",
+        "type": "close_workbench",
+        "requestedBy": "web_ui",
+        "requestedAt": "2026-08-07T12:00:00+00:00",
+        "args": {"reason": "web_close_button", "stopManager": False},
+    }
+    new_open = {
+        "commandId": "cmd-new-open",
+        "type": "open_workbench",
+        "requestedBy": "launcher_api",
+        "requestedAt": "2026-08-08T12:00:00+00:00",
+        "args": {"reason": "launcher_start"},
+    }
+    (processing_dir / "cmd-recovered-old-close.json").write_text(json.dumps(old_close), encoding="utf-8")
+    (inbox_dir / "cmd-new-open.json").write_text(json.dumps(new_open), encoding="utf-8")
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 65,
+            "runtimeState": "running",
+            "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+        },
+    )
+    monkeypatch.setattr(command_queue, "_live_observation_says_workbench_closed", lambda: False)
+
+    command_queue.recover_processing_queue()
+    claimed = command_queue.claim_next_command()
+
+    assert claimed is not None
+    _, claimed_payload = claimed
+    assert claimed_payload["commandId"] == new_open["commandId"]
+    superseded_result = json.loads((results_dir / "cmd-recovered-old-close.json").read_text(encoding="utf-8"))
+    assert superseded_result["ok"] is False
+    assert superseded_result["completed"] is True
+    assert superseded_result["errorType"] == "SupersededByOpenWorkbench"
+    assert superseded_result["supersededByCommandId"] == new_open["commandId"]
+    assert not (processing_dir / "cmd-recovered-old-close.json").exists()
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    recovered_event = next(event for event in events if event["type"] == "command_queue.recovered_close_superseded_by_open")
+    assert recovered_event["payload"]["supersededByCommandId"] == new_open["commandId"]
+
+
 def test_close_workbench_supersedes_pending_restart_workbench(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
