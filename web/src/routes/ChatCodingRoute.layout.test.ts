@@ -352,7 +352,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.userCard).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
     expect(conversationStyles.userCard).not.toContain("bg-[var(--surface-panel-strong)]");
 
-    expect(routeStyles.sessionItemActive).toContain("shadow-[var(--vui-shadow-inset-accent)]");
+    expect(directSessionIndexItemStyles.sessionItemActive).toContain("!bg-[color-mix(in_srgb,var(--accent-cool)_10%");
+    expect(directSessionIndexItemStyles.sessionItemActive).not.toContain("shadow-[var(--vui-shadow-inset-accent)]");
     expect(routeStyles.sessionItemActive).not.toContain("linear-gradient");
     expect(routeStyles.sessionItemActive).not.toContain("shadow-lg");
   });
@@ -3130,7 +3131,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemStyles.sessionItem).toContain("overflow-hidden");
     expect(directSessionIndexItemStyles.sessionItem).toMatch(/border border-vui-border-subtle|border border-\[var\(--vui-border-subtle\)\]/);
     expect(directSessionIndexItemStyles.sessionItem).toMatch(/!bg-vui-surface-row|!bg-\[var\(--vui-surface-row\)\]/);
-    expect(directSessionIndexItemStyles.sessionItemActive).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_10%");
+    expect(directSessionIndexItemStyles.sessionItemActive).toContain("!bg-[color-mix(in_srgb,var(--accent-cool)_10%");
     expect(directSessionIndexItemStyles.sessionItemActive).not.toContain("shadow-[var(--vui-shadow-inset-accent)]");
     expect(directSessionIndexItemStyles.conversationAvatar).toContain("h-8");
     expect(directSessionIndexItemStyles.sessionItemMain).toContain("min-h-[60px]");

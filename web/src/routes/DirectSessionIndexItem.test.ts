@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { SessionSummary } from "../api/types";
 import type { AgentDisplayInfo } from "./agentDisplay";
 import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
+import directSessionIndexItemStyles from "./DirectSessionIndexItem.styles";
 import {
   buildDirectSessionIndexViewModel,
   DirectSessionIndexItem,
@@ -94,6 +95,15 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).not.toContain('data-vui="chip"');
     expect(markup).toContain('data-slot="tooltip-trigger"');
     expect(markup).not.toContain('title="新会话 · 模型：mimo-v2.5"');
+  });
+
+  it("keeps the selected session row visible above the dense row surface", () => {
+    expect(directSessionIndexItemStyles.sessionItemActive).toContain(
+      "!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    );
+    expect(directSessionIndexItemStyles.sessionItemActive).not.toContain(
+      "shadow-[var(--vui-shadow-inset-accent)]",
+    );
   });
 
   it("wires hover/focus prefetch hooks for Cursor-style session warm", () => {

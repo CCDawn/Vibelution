@@ -62,7 +62,7 @@ describe("Wave 3B Chat session workbench composition", () => {
     expect(sessionStyles.sessionItem).toMatch(/!bg-vui-surface-row|vuiDenseRowClass|!bg-\[var\(--vui-surface-row\)\]/);
     expect(sessionStyles.sessionItem).toContain("!bg-vui-surface-row");
     expect(sessionStyles.sessionItemActive).toContain(
-      "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+      "!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
     );
     expect(sessionStyles.sessionIconButton).toContain("h-[var(--vui-control-height-sm)]");
     expect(sessionStyles.sessionRunningBadge).toContain(
@@ -90,6 +90,7 @@ describe("Wave 3B Chat session workbench composition", () => {
     expect(chrome).toContain("export const vuiControlPillClass");
     expect(surfaces).toContain("export const vuiDenseRowClass");
     expect(surfaces).toContain("export const vuiStateSelectedRowClass");
+    expect(surfaces).toContain("export const vuiStateSelectedOpaqueRowClass");
     expect(surfaces).toContain("export const vuiChatFillClass");
   });
 });
