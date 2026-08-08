@@ -1,3 +1,5 @@
+import { isTempSessionId } from "../sessionOptimisticIds";
+
 /**
  * Pure helpers for URL ↔ active session sync during optimistic tab switches.
  *
@@ -7,6 +9,22 @@
  */
 
 export const SESSION_ROUTE_INTENT_GRACE_MS = 2_000;
+
+export function shouldCanonicalizeUrlSessionSelection(options: {
+  requestedSessionId: string | null | undefined;
+  activeSessionId: string | null | undefined;
+  intentSessionId: string | null | undefined;
+}): boolean {
+  const requestedSessionId = String(options.requestedSessionId || "").trim();
+  if (!requestedSessionId || isTempSessionId(requestedSessionId)) {
+    return false;
+  }
+  const activeSessionId = String(options.activeSessionId || "").trim();
+  const intentSessionId = String(options.intentSessionId || "").trim();
+  // A route target is canonicalized unless the current user intent already
+  // scheduled the same server-side select (the normal tab-click path).
+  return activeSessionId !== requestedSessionId || intentSessionId !== requestedSessionId;
+}
 
 export function shouldDeferUrlSessionSync(options: {
   requestedSessionId: string | null | undefined;
