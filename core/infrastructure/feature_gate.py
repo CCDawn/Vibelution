@@ -1,4 +1,9 @@
-"""Trusted, fail-closed feature enablement decisions."""
+"""Trusted feature enablement decisions.
+
+Most features stay fail-closed on operator config. Per-turn chat toggles
+(``mental_model``) treat an explicit turn request as higher priority than the
+operator default: global config is the default when the turn does not say.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,10 @@ from dataclasses import dataclass
 import hashlib
 import json
 from typing import Any
+
+# Explicit session/turn UI request outranks operator default for these features.
+# Other trusted features remain fail-closed (request cannot force-enable).
+_TURN_PRIORITY_FEATURES = frozenset({"mental_model"})
 
 
 @dataclass(frozen=True)
@@ -93,13 +102,52 @@ def resolve_feature_decision(
         raise ValueError(f"Unknown trusted feature: {feature}")
 
     configured = values[feature]
-    effective = configured and requested is not False and not managed_denied
+    revision = _config_revision(values)
+
     if managed_denied:
-        reason = "managed_policy_denied"
-    elif not configured:
+        return FeatureDecision(
+            feature=feature,
+            configured_enabled=configured,
+            effective_enabled=False,
+            source="operator_config",
+            reason="managed_policy_denied",
+            config_revision=revision,
+            run_requested=requested,
+            managed_denied=True,
+        )
+
+    # Chat/session per-turn toggle: explicit request wins over operator default.
+    if feature in _TURN_PRIORITY_FEATURES and requested is not None:
+        if requested is True:
+            return FeatureDecision(
+                feature=feature,
+                configured_enabled=configured,
+                effective_enabled=True,
+                source="turn_request",
+                reason="turn_requested_enabled",
+                config_revision=revision,
+                run_requested=True,
+                managed_denied=False,
+            )
+        return FeatureDecision(
+            feature=feature,
+            configured_enabled=configured,
+            effective_enabled=False,
+            source="turn_request",
+            reason="run_narrowed_disabled",
+            config_revision=revision,
+            run_requested=False,
+            managed_denied=False,
+        )
+
+    # Fail-closed / default path for operator-owned features (and turn-priority
+    # features when the turn did not express a preference).
+    effective = bool(configured) and requested is not False
+    if not configured:
         reason = "operator_config_disabled"
     elif requested is False:
         reason = "run_narrowed_disabled"
+        effective = False
     else:
         reason = "operator_config_enabled"
     return FeatureDecision(
@@ -108,9 +156,9 @@ def resolve_feature_decision(
         effective_enabled=effective,
         source="operator_config",
         reason=reason,
-        config_revision=_config_revision(values),
+        config_revision=revision,
         run_requested=requested,
-        managed_denied=managed_denied,
+        managed_denied=False,
     )
 
 
