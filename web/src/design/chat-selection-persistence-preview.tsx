@@ -78,7 +78,7 @@ function App() {
                 >
                   <span className="avatar">{agent.name.slice(0, 1).toUpperCase()}</span>
                   <span className="row-copy"><strong>{agent.name}</strong><small>{agent.model} · {agent.sessions.length} 个会话</small></span>
-                  <span className="row-check" aria-hidden="true">{active ? "✓" : ""}</span>
+                  <span className="row-check" aria-hidden="true">{active ? "当前 Agent" : ""}</span>
                 </VButton>
               );
             })}
@@ -95,14 +95,14 @@ function App() {
                   key={session.id}
                   variant="ghost"
                   contentLayout="plain"
-                  className={["selection-row", active ? "selection-row-active" : ""].join(" ")}
+                  className={["selection-row", "session-selection-row", active ? "selection-row-active" : ""].join(" ")}
                   aria-current={active ? "page" : undefined}
                   data-selected={active ? "true" : "false"}
                   onPress={() => commit(selectChatSession(selection, session.id, currentAgent.id))}
                 >
                   <span className="session-mark">◷</span>
                   <span className="row-copy"><strong>{session.title}</strong><small>{session.id}</small></span>
-                  <span className="row-check" aria-hidden="true">{active ? "✓" : ""}</span>
+                  <span className="row-check" aria-hidden="true">{active ? "当前会话" : ""}</span>
                 </VButton>
               );
             })}
