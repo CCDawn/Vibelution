@@ -25,4 +25,9 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(workspaceSource).not.toContain("canonical");
     expect(workspaceSource).not.toContain("不维护第二份");
   });
+
+  it("has no fake-command fallback error (inspector renders only wired commands)", () => {
+    expect(workspaceSource).not.toContain("尚未接入业务服务");
+    expect(workspaceSource).toContain("WIRED_COMMANDS");
+  });
 });

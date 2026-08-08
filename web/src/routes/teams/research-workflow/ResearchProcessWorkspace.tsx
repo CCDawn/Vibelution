@@ -153,6 +153,8 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
 
   const onInspectorCommand = useCallback(
     (command: string, _adapter: NodeAdapterSpec) => {
+      // Inspector only renders WIRED_COMMANDS (nodeAdapterModel), so every
+      // reachable command has a live handler; no fallback error path.
       if (command === "accept_handoff") {
         void onResolveHuman(true);
         return;
@@ -161,7 +163,6 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
         void onResolveHuman(false);
         return;
       }
-      setLocalError(`命令「${command}」尚未接入业务服务`);
     },
     [onResolveHuman],
   );
