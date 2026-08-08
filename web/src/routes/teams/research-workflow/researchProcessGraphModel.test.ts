@@ -125,6 +125,14 @@ describe("researchProcessGraphModel", () => {
     expect(rerun?.sourceHandle).toBe("rerun");
   });
 
+  it("projects effective Agent bindings before a run exists", () => {
+    const graph = definitionToCanvasGraph(definition, {
+      primaryAgentIdByNode: new Map([["source_finding", "agent-finder"]]),
+    });
+    expect(graph.nodes.find((node) => node.nodeId === "source_finding")?.primaryAgentId).toBe("agent-finder");
+    expect(graph.nodes.find((node) => node.nodeId === "knowledge_handoff")?.primaryAgentId).toBeUndefined();
+  });
+
   it("projection keeps nodeRuns status, attempt, agent and human tasks", () => {
     const projection: WorkflowCanvasProjection = {
       definition,

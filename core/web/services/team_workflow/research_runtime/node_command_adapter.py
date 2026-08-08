@@ -7,16 +7,14 @@ available (via node_command_capabilities) and executes them through
 apply_node_command — no self-computed transitions.
 
 Current wiring:
-- start_agent_task     -> research project Agent task (bounded task turn in
-                          the flat project Agent session) + writes the
-                          NodeAgentSessionBinding (session/task/turn anchor);
-- run_smoke            -> real experiment smoke runner (needs planId);
-- start_controlled_run -> real full-run runner (needs planId);
-- view_artifacts       -> reads the run's recorded artifacts (Inspector zone);
-- rebind_node          -> controlled rebind keeping snapshot lineage
-                          (handled by the runtime service, declared here);
-- build_package / open_evidence_graph -> explicitly unavailable (no backend
-                          service exists yet; never rendered as clickable).
+- start_agent_task -> research project Agent task only for roles with a
+                       concrete task-kind mapping;
+- rebind_node      -> controlled rebind keeping snapshot lineage (handled by
+                       the runtime service);
+- session navigation is reported separately by the runtime service once the
+  full session/task/turn anchor exists;
+- smoke, controlled-run, artifact and roadmap actions are not advertised
+  until their node-specific UI contract supplies the required context.
 """
 
 from __future__ import annotations
@@ -50,23 +48,6 @@ TASK_KIND_BY_ROLE: dict[str, str] = {
     "iteration_versioning": "version_governance",
 }
 
-# Commands that never had a backend service: rendered as unavailable.
-UNAVAILABLE_COMMANDS: dict[str, str] = {
-    "build_package": "结果包服务尚未接入后端",
-    "open_evidence_graph": "证据图服务尚未接入后端",
-}
-
-# Commands the adapter can execute (availability may still depend on the
-# node/run context, evaluated per node by node_command_capabilities).
-AVAILABLE_COMMANDS: dict[str, str] = {
-    "start_agent_task": "",
-    "run_smoke": "",
-    "start_controlled_run": "",
-    "view_artifacts": "",
-    "rebind_node": "",
-}
-
-
 def _node_spec(node_id: str) -> dict[str, Any] | None:
     definition = build_challenge_cup_workflow_definition()
     return next((n.to_dict() for n in definition.nodes if n.nodeId == node_id), None)
@@ -89,27 +70,35 @@ def node_command_capabilities(
         return []
     actor_kind = str(node.get("actorKind") or "")
 
-    capabilities: list[dict[str, Any]] = []
     if actor_kind == ActorKind.AGENT.value:
+        role = str(node.get("primaryRoleKey") or "")
+        if role not in TASK_KIND_BY_ROLE:
+            return []
         agent_id = _snapshot_agent_id(record, node_id)
-        for command in ("start_agent_task", "run_smoke", "start_controlled_run", "view_artifacts", "rebind_node"):
-            if command in UNAVAILABLE_COMMANDS:
-                continue
-            reason = ""
-            available = True
-            if not agent_id:
-                available = False
-                reason = "节点尚未绑定 Agent，先完成绑定"
-            elif command in ("run_smoke", "start_controlled_run") and not str(record.get("projectId") or "").strip():
-                available = False
-                reason = "运行尚无 research project 上下文（缺少 projectId）"
-            capabilities.append({"command": command, "available": available, "reason": reason})
-        for command, reason in UNAVAILABLE_COMMANDS.items():
-            capabilities.append({"command": command, "available": False, "reason": reason})
-    elif actor_kind == ActorKind.HUMAN.value:
-        for command in ("accept_handoff", "reject_handoff", "revise"):
-            capabilities.append({"command": command, "available": True, "reason": ""})
-    return capabilities
+        if not agent_id:
+            return [{
+                "command": "start_agent_task",
+                "available": False,
+                "reason": "节点尚未绑定 Agent，先完成绑定",
+            }]
+        if not str(record.get("projectId") or "").strip():
+            return [{
+                "command": "start_agent_task",
+                "available": False,
+                "reason": "运行尚无 research project 上下文（缺少 projectId）",
+            }]
+        return [{"command": "start_agent_task", "available": True, "reason": ""}]
+
+    if actor_kind == ActorKind.HUMAN.value and any(
+        str(task.get("nodeId") or "") == node_id and str(task.get("status") or "") == "pending"
+        for task in record.get("humanTasks") or []
+        if isinstance(task, dict)
+    ):
+        return [
+            {"command": command, "available": True, "reason": ""}
+            for command in ("accept_handoff", "reject_handoff", "revise")
+        ]
+    return []
 
 
 def apply_node_command(
@@ -125,8 +114,26 @@ def apply_node_command(
     node = _node_spec(node_id)
     if node is None:
         raise NodeCommandError(f"Unknown nodeId: {node_id}", code="unknown_node")
-    if command in UNAVAILABLE_COMMANDS:
-        raise NodeCommandUnavailable(UNAVAILABLE_COMMANDS[command], code="command_unavailable")
+    if command == "open_session":
+        raise NodeCommandUnavailable("会话入口必须通过节点详情中的精确链接打开", code="navigation_only")
+    if command in {"accept_handoff", "reject_handoff", "revise"}:
+        raise NodeCommandUnavailable("人工任务必须通过人工任务接口处理", code="human_task_resolution_required")
+    capability = next(
+        (item for item in node_command_capabilities(record, node_id) if item["command"] == command),
+        None,
+    )
+    if capability is None:
+        raise NodeCommandUnavailable("该命令不适用于当前节点", code="command_not_allowed_for_node")
+    if not capability["available"]:
+        reason = str(capability["reason"] or "该命令当前不可用")
+        code = (
+            "no_project_context"
+            if "projectId" in reason
+            else "unbound_node"
+            if "绑定 Agent" in reason
+            else "node_command_unavailable"
+        )
+        raise NodeCommandUnavailable(reason, code=code)
     if command == "start_agent_task":
         return _start_agent_task(store, record, node, payload)
     if command == "run_smoke":
@@ -145,7 +152,9 @@ def apply_node_command(
 
 def _require_project(record: dict[str, Any], payload: dict[str, Any]) -> tuple[str, str]:
     team_id = str(record.get("teamId") or "").strip()
-    project_id = str(record.get("projectId") or payload.get("projectId") or "").strip()
+    # Project scope is frozen on the WorkflowRun. A command payload cannot
+    # smuggle a different project into an existing run.
+    project_id = str(record.get("projectId") or "").strip()
     if not team_id or not project_id:
         raise NodeCommandUnavailable(
             "运行缺少 research project 上下文（teamId/projectId）",

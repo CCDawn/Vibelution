@@ -33,6 +33,18 @@ export type WorkflowRunRecord = {
   langGraph?: Record<string, unknown>;
 };
 
+export type RequiredTeamScope = {
+  teamId: string;
+};
+
+function requiredTeamId(teamId: string): string {
+  const normalized = teamId.trim();
+  if (!normalized) {
+    throw new Error("teamId is required for research workflow requests");
+  }
+  return normalized;
+}
+
 export async function fetchResearchWorkflowDefinition(
   workflowId: string = CHALLENGE_CUP_WORKFLOW_ID,
 ): Promise<WorkflowDefinitionResponse> {
@@ -41,21 +53,17 @@ export async function fetchResearchWorkflowDefinition(
 
 export async function listResearchWorkflowRuns(
   workflowId: string = CHALLENGE_CUP_WORKFLOW_ID,
-  options?: { teamId?: string },
+  options: RequiredTeamScope,
 ): Promise<{ workflowId: string; runs: WorkflowRunRecord[] }> {
-  const qs = options?.teamId
-    ? `?teamId=${encodeURIComponent(options.teamId)}`
-    : "";
+  const qs = `?teamId=${encodeURIComponent(requiredTeamId(options.teamId))}`;
   return fetchJson(`/api/research/workflows/${encodeURIComponent(workflowId)}/runs${qs}`);
 }
 
 export async function fetchEffectiveAgentBindings(
   workflowId: string = CHALLENGE_CUP_WORKFLOW_ID,
-  options?: { teamId?: string },
+  options: RequiredTeamScope,
 ): Promise<EffectiveAgentBindingsResponse> {
-  const qs = options?.teamId
-    ? `?teamId=${encodeURIComponent(options.teamId)}`
-    : "";
+  const qs = `?teamId=${encodeURIComponent(requiredTeamId(options.teamId))}`;
   return fetchJson(
     `/api/research/workflows/${encodeURIComponent(workflowId)}/agent-bindings/effective${qs}`,
   );
@@ -65,9 +73,10 @@ export async function putResearchWorkflowAgentBindings(
   workflowId: string,
   payload: AgentBindingConfigPayload,
 ): Promise<EffectiveAgentBindingsResponse> {
+  const teamId = requiredTeamId(payload.teamId);
   return fetchJson(`/api/research/workflows/${encodeURIComponent(workflowId)}/agent-bindings`, {
     method: "PUT",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, teamId }),
   });
 }
 
@@ -86,17 +95,18 @@ export async function postResearchWorkflowNodeCommand(
   );
 }
 
-export async function createResearchWorkflowRun(options?: {
+export async function createResearchWorkflowRun(options: {
   workflowId?: string;
-  teamId?: string;
+  teamId: string;
   projectId?: string;
   idempotencyKey?: string;
 }): Promise<WorkflowRunRecord> {
   const workflowId = options?.workflowId ?? CHALLENGE_CUP_WORKFLOW_ID;
+  const teamId = requiredTeamId(options.teamId);
   return fetchJson(`/api/research/workflows/${encodeURIComponent(workflowId)}/runs`, {
     method: "POST",
     body: JSON.stringify({
-      teamId: options?.teamId ?? "",
+      teamId,
       projectId: options?.projectId ?? "",
       idempotencyKey: options?.idempotencyKey ?? "",
     }),
