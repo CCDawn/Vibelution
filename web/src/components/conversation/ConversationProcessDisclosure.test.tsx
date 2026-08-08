@@ -37,6 +37,18 @@ function processCell(status: CodexTranscriptCell["status"]): CodexTranscriptCell
   };
 }
 
+function retryCell(status: CodexTranscriptCell["status"] = "running"): CodexTranscriptCell {
+  return {
+    id: `retry-${status}`,
+    kind: "status",
+    messageId: "message-1",
+    status,
+    tone: status === "running" ? "running" : "warning",
+    title: "model_retry",
+    summary: "第 2/5 次；原因：server_error。本轮仍在继续。",
+  };
+}
+
 describe("ConversationProcessDisclosure", () => {
   it("renders a completed process collapsed with only its state and duration", () => {
     const html = renderToStaticMarkup(
@@ -103,6 +115,21 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain('data-codex-process-turn-streaming="true"');
     expect(html).toContain("完整流程步骤");
     expect(html).toContain("处理中");
+  });
+
+  it("adds the retry state to the same process summary", () => {
+    expect(processLabel([
+      processCell("completed"),
+      retryCell("running"),
+    ], "zh", undefined, true)).toContain("模型重试中（2/5）");
+
+    const html = renderToStaticMarkup(
+      <ConversationProcessDisclosure cells={[processCell("completed"), retryCell("running")]} language="zh" turnStreaming>
+        <span>工具步骤与重试</span>
+      </ConversationProcessDisclosure>,
+    );
+    expect(html).toContain("模型重试中（2/5）");
+    expect(html).toContain("工具步骤与重试");
   });
 
   it("settles to a clickable collapsed summary after the turn finishes streaming", () => {

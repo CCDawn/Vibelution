@@ -1,7 +1,7 @@
 import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-thread/types";
 import { AgentMessageOperation } from "./agentMessageOperations";
 import { shouldDisplayRuntimeStatus } from "./conversationDisplayProtocol";
-import { compactVisibleTimelineOperations } from "./conversationOperationState";
+import { compactVisibleTimelineOperations, isRetryOperation } from "./conversationOperationState";
 
 export type AgentMessageTimelineItemStatus = "pending" | "running" | "completed" | "failed" | "degraded";
 
@@ -259,13 +259,24 @@ function timelineItemsFromServer(
         id: item.id || `${timelineOperation.id}-timeline-operation`,
         kind: "operation",
         status,
-        title: String(item.title || timelineOperation.label).trim(),
+        title: timelineOperationTitle(item, timelineOperation, options.lang),
         summary: String(item.summary || timelineOperation.summary || "").trim(),
         operation: timelineOperation,
       });
     }
   }
   return mergeAdjacentThoughtItems(items);
+}
+
+function timelineOperationTitle(
+  item: AgentMessageTimelineServerItem,
+  operation: AgentMessageOperation,
+  lang: AgentMessageTimelineOptions["lang"],
+) {
+  if (isRetryOperation(operation)) {
+    return lang === "zh" ? "请求重试" : "Retrying";
+  }
+  return String(item.title || operation.label).trim();
 }
 
 function shouldDisplayTimelineOperation(

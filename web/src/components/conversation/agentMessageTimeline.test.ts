@@ -359,8 +359,14 @@ describe("agentMessageTimeline", () => {
 
     const items = timelineItemsForConversationMessage(message, { lang: "zh" });
 
-    expect(items.map((item) => item.kind)).toEqual(["assistant_text"]);
+    expect(items.map((item) => item.kind)).toEqual(["operation", "assistant_text"]);
     expect(items[0]).toMatchObject({
+      kind: "operation",
+      status: "completed",
+      title: "请求重试",
+      summary: "第 1/5 次；原因：server_error。",
+    });
+    expect(items[1]).toMatchObject({
       id: "server-answer",
       kind: "assistant_text",
       text: "最终回答",

@@ -234,12 +234,18 @@ describe("agent thread adapters", () => {
     const agentMessage = conversationMessageToAgentMessage(message);
     const serializedParts = JSON.stringify(agentMessage.parts);
 
-    expect(agentMessage.parts.map((part) => part.type)).toEqual(["text"]);
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["runtime-event", "text"]);
     expect(serializedParts).not.toContain("context_prepare");
     expect(serializedParts).not.toContain("agent_prepare");
     expect(serializedParts).not.toContain("model_request");
     expect(serializedParts).not.toContain("model_thinking");
-    expect(serializedParts).not.toContain("retrying");
+    expect(serializedParts).toContain("retrying");
+    expect(agentMessage.parts[0]).toMatchObject({
+      type: "runtime-event",
+      name: "retrying",
+      status: "running",
+      resultPreview: "第 2/5 次；原因：server_error。本轮仍在继续，请不要重复提交。",
+    });
     expect(serializedParts).not.toContain("正在准备对话上下文");
   });
 

@@ -562,7 +562,7 @@ describe("codexTranscriptCells", () => {
     ]);
   });
 
-  it("filters internal runtime status operation cells from legacy transcript projections", () => {
+  it("keeps model retry status cells in the process transcript while filtering setup noise", () => {
     const cells = buildCodexTranscriptCells(message({ id: "legacy-internal-status" }), {
       operations: [
         {
@@ -584,7 +584,13 @@ describe("codexTranscriptCells", () => {
       ],
     });
 
-    expect(cells).toEqual([]);
+    expect(cells).toHaveLength(1);
+    expect(cells[0]).toMatchObject({
+      kind: "status",
+      title: "retrying",
+      status: "completed",
+      summary: "第 1/5 次；原因：server_error。",
+    });
   });
 
   it("attaches the Codex-like lifecycle model to terminal tool cells", () => {

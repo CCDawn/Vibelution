@@ -130,7 +130,7 @@ describe("AgentThreadView", () => {
     expect(html).toContain("分析 Agent");
   });
 
-  it("does not render internal runtime pipeline statuses from conversation feedback", () => {
+  it("renders model retry status in the process section without exposing setup noise", () => {
     const assistantMessage: ConversationMessage = {
       id: "assistant-pipeline-status",
       role: "assistant",
@@ -179,10 +179,10 @@ describe("AgentThreadView", () => {
     expect(html).toContain("最终回答");
     expect(html).not.toContain("context_prepare");
     expect(html).not.toContain("model_request");
-    expect(html).not.toContain("retrying");
+    expect(html).toContain("retrying");
     expect(html).not.toContain("正在准备对话上下文");
     expect(html).not.toContain("正在请求模型");
-    expect(html).not.toContain("模型连接正在重试");
+    expect(html).toContain("模型连接正在重试");
   });
 
   it("renders message parts through stable process, content, and context sections", () => {

@@ -762,7 +762,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("responseSection");
   });
 
-  it("does not render internal runtime status cells from native transcripts", () => {
+  it("renders model retry status cells from native transcripts while filtering setup noise", () => {
     const html = renderConversation([
       {
         id: "assistant-native-status-noise",
@@ -809,9 +809,9 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
     expect(html).toContain("本轮已按请求停止。");
     expect(html).not.toContain("context_prepare");
-    expect(html).not.toContain("retrying");
+    expect(html).toContain("retrying");
     expect(html).not.toContain("正在准备对话上下文");
-    expect(html).not.toContain("模型连接正在重试");
+    expect(html).toContain("第 1/5 次");
   });
 
   it("does not render internal pipeline text when native transcripts carry it as assistant markdown", () => {

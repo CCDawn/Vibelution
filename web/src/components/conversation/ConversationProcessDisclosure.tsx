@@ -116,6 +116,33 @@ function firstFailedToolIdentity(
   return codexTranscriptToolRawName(failed) || String(failed.title || "").trim();
 }
 
+function isRetryCell(cell: CodexTranscriptCell) {
+  const content = [
+    cell.title,
+    cell.summary,
+    cell.text,
+  ].map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean).join(" ");
+  return Boolean(
+    content.includes("model_retry")
+    || content.includes("retrying")
+    || content.includes("模型连接正在重试")
+    || content.includes("模型请求重试")
+    || content.includes("请求重试")
+  );
+}
+
+function retryAttemptLabel(cell: CodexTranscriptCell, language: "zh" | "en") {
+  const content = [cell.summary, cell.text, cell.title]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const match = content.match(/(?:第\s*)?(\d+)\s*(?:\/|of)\s*(\d+)\s*(?:次|attempts?)?/i);
+  if (!match) {
+    return "";
+  }
+  return language === "zh" ? `（${match[1]}/${match[2]}）` : ` (${match[1]}/${match[2]})`;
+}
+
 export function processLabel(
   cells: readonly CodexTranscriptCell[],
   language: "zh" | "en",
@@ -127,6 +154,7 @@ export function processLabel(
     ? { completed: "已处理", failed: "工具失败", running: "处理中" }
     : { completed: "Processed", failed: "Tool failed", running: "Processing" };
   const duration = processDuration(cells);
+  const retry = [...cells].reverse().find(isRetryCell);
   // Codex: "已处理 18m 3s" — keep status + duration adjacent without middle-dot.
   const parts = [
     labels[state],
@@ -142,6 +170,14 @@ export function processLabel(
   } else if (cells.length >= 3) {
     // Hint that the disclosure holds a multi-step tool trail (including mid-turn).
     parts.push(language === "zh" ? `· ${cells.length} 步` : `· ${cells.length} steps`);
+  }
+  if (retry) {
+    const attempt = retryAttemptLabel(retry, language);
+    if (state === "running" && retry.status !== "completed") {
+      parts.push(language === "zh" ? `· 模型重试中${attempt}` : `· Retrying model${attempt}`);
+    } else {
+      parts.push(language === "zh" ? "· 含模型重试" : "· Included model retry");
+    }
   }
   return parts.filter(Boolean).join(" ");
 }

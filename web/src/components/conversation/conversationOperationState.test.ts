@@ -38,6 +38,7 @@ const labels: OperationStateLabels = {
   toolProcess: "Tool",
   mentalProcess: "Mental",
   status: "Status",
+  retrying: "Retrying model",
 };
 
 function operation(overrides: Partial<AgentMessageOperation>): AgentMessageOperation {
@@ -106,6 +107,14 @@ describe("conversation operation state helpers", () => {
     expect(shouldShowTimelineOperation(internalStatus)).toBe(false);
     expect(shouldShowTimelineOperation({ ...internalStatus, error: "failed to prepare" })).toBe(true);
     expect(shouldShowTimelineOperation(longLoopStatus)).toBe(true);
+    expect(shouldShowTimelineOperation(operation({
+      id: "retry",
+      kind: "status",
+      rawLabel: "model_retry",
+      label: "Request retry",
+      status: "running",
+      summary: "attempt 1/5; reason: server_error",
+    }))).toBe(true);
   });
 
   it("deduplicates visible long-loop progress while preserving ordinary operations", () => {
@@ -176,6 +185,14 @@ describe("conversation operation state helpers", () => {
     expect(isCompactAnswerOnlyRequestProcess([internalThinking])).toBe(true);
     expect(processSummaryTitle("running", [internalThinking], labels)).toBe("Thinking");
     expect(processSummaryMeta([internalThinking], labels)).toBe("");
+    expect(processSummaryTitle("running", [operation({
+      id: "retry",
+      kind: "status",
+      rawLabel: "model_retry",
+      label: "Request retry",
+      status: "running",
+      summary: "attempt 1/5; reason: server_error",
+    })], labels)).toBe("Retrying model");
   });
 
   it("keeps degraded and fallback processes visible in summaries instead of completed", () => {
