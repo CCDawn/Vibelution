@@ -161,6 +161,8 @@ def submit_command(
         _complete_rejected_shutdown_command(command, shutdown_state=shutdown_state)
         return command
     superseded_commands = _supersede_pending_open_commands_for_close(command)
+    if str(command.get("type") or "").strip() in {"open_workbench", "restart_workbench"}:
+        superseded_commands.extend(_supersede_pending_close_commands_for_open(command))
     active_interrupt = request_active_lifecycle_interrupt_for_close(command)
     joined_command_id = _joinable_lifecycle_command_id(command)
     if joined_command_id:
@@ -214,6 +216,8 @@ def recover_processing_queue() -> None:
             continue
         if _complete_recovered_satisfied_close_workbench(path, command):
             continue
+        if _supersede_recovered_close_for_newer_open(path, command):
+            continue
         target = INBOX_DIR / path.name
         try:
             os.replace(path, target)
@@ -225,6 +229,10 @@ def recover_processing_queue() -> None:
             )
         except OSError:
             continue
+    for path in sorted(INBOX_DIR.glob("*.json")):
+        command = _load_command_file(path)
+        if str(command.get("type") or "").strip() in {"open_workbench", "restart_workbench"}:
+            _supersede_pending_close_commands_for_open(command)
     _complete_satisfied_pending_close_commands()
 
 
@@ -866,6 +874,114 @@ def _supersede_pending_open_commands_for_close(command: dict[str, Any]) -> list[
             },
         )
     return superseded
+
+
+def _command_requested_after(newer: dict[str, Any], older: dict[str, Any]) -> bool:
+    newer_at = _parse_datetime(str(newer.get("requestedAt") or ""))
+    older_at = _parse_datetime(str(older.get("requestedAt") or ""))
+    if newer_at is not None and older_at is not None:
+        return newer_at > older_at
+    if newer_at is not None:
+        return True
+    if older_at is not None:
+        return False
+    newer_id = str(newer.get("commandId") or "")
+    older_id = str(older.get("commandId") or "")
+    return newer_id > older_id
+
+
+def _superseded_by_open_result(
+    path: Path,
+    command: dict[str, Any],
+    *,
+    superseding_command: dict[str, Any],
+) -> dict[str, Any]:
+    command_id = str(command.get("commandId") or path.stem).strip() or path.stem
+    superseding_type = str(superseding_command.get("type") or "open_workbench").strip()
+    state = load_state()
+    state_version = int(state.get("stateVersion") or 0) if isinstance(state, dict) else 0
+    result = {
+        "commandId": command_id,
+        "accepted": True,
+        "completed": True,
+        "ok": False,
+        "message": f"Command superseded by a {superseding_type} request.",
+        "errorType": "SupersededByOpenWorkbench",
+        "supersededByCommandId": str(superseding_command.get("commandId") or ""),
+        "supersededByCommandType": superseding_type,
+        "stateVersion": state_version,
+    }
+    complete_command(path, result)
+    return {
+        "commandId": command_id,
+        "type": str(command.get("type") or ""),
+        "status": "superseded",
+    }
+
+
+def _supersede_pending_close_commands_for_open(command: dict[str, Any]) -> list[dict[str, Any]]:
+    command_type = str(command.get("type") or "").strip()
+    if command_type not in {"open_workbench", "restart_workbench"}:
+        return []
+    superseded: list[dict[str, Any]] = []
+    for path in sorted(INBOX_DIR.glob("*.json")):
+        pending = _load_command_file(path)
+        if str(pending.get("type") or "").strip() != "close_workbench":
+            continue
+        if not _command_requested_after(command, pending):
+            continue
+        try:
+            superseded.append(_superseded_by_open_result(path, pending, superseding_command=command))
+        except OSError as exc:
+            superseded.append(
+                {
+                    "commandId": str(pending.get("commandId") or path.stem),
+                    "type": "close_workbench",
+                    "status": "failed",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+    if superseded:
+        _append_queue_event(
+            "command_queue.pending_close_superseded_by_open",
+            {
+                "commandId": str(command.get("commandId") or ""),
+                "type": command_type,
+                "count": len(superseded),
+                "commands": superseded,
+            },
+        )
+    return superseded
+
+
+def _supersede_recovered_close_for_newer_open(path: Path, command: dict[str, Any]) -> bool:
+    if str(command.get("type") or "").strip() != "close_workbench":
+        return False
+    for directory in (INBOX_DIR, PROCESSING_DIR):
+        for candidate_path in sorted(directory.glob("*.json")):
+            if candidate_path == path:
+                continue
+            candidate = _load_command_file(candidate_path)
+            if str(candidate.get("type") or "").strip() not in {"open_workbench", "restart_workbench"}:
+                continue
+            if not _command_requested_after(candidate, command):
+                continue
+            try:
+                superseded = _superseded_by_open_result(path, command, superseding_command=candidate)
+            except OSError:
+                return False
+            _append_queue_event(
+                "command_queue.recovered_close_superseded_by_open",
+                {
+                    "commandId": str(command.get("commandId") or path.stem),
+                    "type": "close_workbench",
+                    "supersededByCommandId": str(candidate.get("commandId") or candidate_path.stem),
+                    "supersededByCommandType": str(candidate.get("type") or ""),
+                    "status": str(superseded.get("status") or "superseded"),
+                },
+            )
+            return True
+    return False
 
 
 def _shutdown_in_progress_state() -> dict[str, Any] | None:
