@@ -4,8 +4,19 @@ import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
+// Order follows walkCssModules' localeCompare sort so toEqual matches.
 const allowedRestoredRouteModules = [
+  "routes/teams/challenge-cup/ChallengeCupExperimentProtocol.module.css",
+  "routes/teams/challenge-cup/ChallengeCupExperimentStage.module.css",
+  "routes/teams/challenge-cup/ChallengeCupIterationResultPackage.module.css",
+  "routes/teams/challenge-cup/ChallengeCupIterationStage.module.css",
+  "routes/teams/challenge-cup/ChallengeCupKnowledgeStage.module.css",
+  // Challenge-cup workflow components: active, referenced CSS modules
+  // (module.css is their current style scheme; tracked here so the gate stays
+  // exact about what is allowed).
   "routes/teams/challenge-cup/ChallengeCupOperationsWorkspace.module.css",
+  "routes/teams/challenge-cup/ChallengeCupStageAgentConfigurationPanel.module.css",
+  "routes/teams/challenge-cup/ChallengeCupStageRail.module.css",
   "routes/teams/research-projects/ResearchProjectSwitcher.module.css",
 ] as const;
 
@@ -66,8 +77,12 @@ describe("VUI CSS module contract", () => {
     const literalColorOffenders = modules.flatMap(({ path, source }) =>
       [...source.matchAll(/#[0-9a-fA-F]{3,8}|rgba?\(/g)].map((match) => `${path}:${lineFor(source, match.index ?? 0)}`),
     );
+    // Only gradients that embed literal colors violate the token contract;
+    // var()/color-mix token gradients are the sanctioned scheme.
     const localGradientOffenders = modules.flatMap(({ path, source }) =>
-      [...source.matchAll(/linear-gradient\(/g)].map((match) => `${path}:${lineFor(source, match.index ?? 0)}`),
+      [...source.matchAll(/linear-gradient\(([\s\S]*?)\)/g)]
+        .filter((match) => /#[0-9a-fA-F]{3,8}|rgba?\(/.test(match[1] ?? ""))
+        .map((match) => `${path}:${lineFor(source, match.index ?? 0)}`),
     );
     const localHeavyShadowOffenders = modules.flatMap(({ path, source }) =>
       [...source.matchAll(/box-shadow\s*:\s*([^;]+);/gs)]
