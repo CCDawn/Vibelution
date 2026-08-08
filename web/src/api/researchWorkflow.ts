@@ -4,7 +4,10 @@
  */
 import { fetchJson } from "./client";
 import type {
+  AgentBindingConfigPayload,
+  EffectiveAgentBindingsResponse,
   NodeAgentSessionBinding,
+  ResearchWorkflowNodeDetail,
   WorkflowCanvasProjection,
   WorkflowDefinition,
 } from "./types/researchWorkflow";
@@ -38,8 +41,49 @@ export async function fetchResearchWorkflowDefinition(
 
 export async function listResearchWorkflowRuns(
   workflowId: string = CHALLENGE_CUP_WORKFLOW_ID,
+  options?: { teamId?: string },
 ): Promise<{ workflowId: string; runs: WorkflowRunRecord[] }> {
-  return fetchJson(`/api/research/workflows/${encodeURIComponent(workflowId)}/runs`);
+  const qs = options?.teamId
+    ? `?teamId=${encodeURIComponent(options.teamId)}`
+    : "";
+  return fetchJson(`/api/research/workflows/${encodeURIComponent(workflowId)}/runs${qs}`);
+}
+
+export async function fetchEffectiveAgentBindings(
+  workflowId: string = CHALLENGE_CUP_WORKFLOW_ID,
+  options?: { teamId?: string },
+): Promise<EffectiveAgentBindingsResponse> {
+  const qs = options?.teamId
+    ? `?teamId=${encodeURIComponent(options.teamId)}`
+    : "";
+  return fetchJson(
+    `/api/research/workflows/${encodeURIComponent(workflowId)}/agent-bindings/effective${qs}`,
+  );
+}
+
+export async function putResearchWorkflowAgentBindings(
+  workflowId: string,
+  payload: AgentBindingConfigPayload,
+): Promise<EffectiveAgentBindingsResponse> {
+  return fetchJson(`/api/research/workflows/${encodeURIComponent(workflowId)}/agent-bindings`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function postResearchWorkflowNodeCommand(
+  runId: string,
+  nodeId: string,
+  command: string,
+  payload: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  return fetchJson(
+    `/api/research/workflow-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/commands`,
+    {
+      method: "POST",
+      body: JSON.stringify({ command, payload }),
+    },
+  );
 }
 
 export async function createResearchWorkflowRun(options?: {
@@ -70,7 +114,7 @@ export async function fetchResearchWorkflowCanvas(runId: string): Promise<Workfl
 export async function fetchResearchWorkflowNodeDetail(
   runId: string,
   nodeId: string,
-): Promise<Record<string, unknown>> {
+): Promise<ResearchWorkflowNodeDetail> {
   return fetchJson(
     `/api/research/workflow-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}`,
   );
