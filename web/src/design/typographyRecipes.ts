@@ -4,8 +4,8 @@
  * Inspired by Material Type roles, Apple HIG text styles, and Radix/shadcn
  * size ladders — adapted for a dense desktop workbench (no fluid hero type).
  *
- * Always use `[font-size:var(--vui-font-*)]` / role tokens; never
- * `text-[var(--vui-font-*)]` (Tailwind color trap — see typographyTokenContract).
+ * Always use the explicit font-size recipe / role tokens; never use a text
+ * color utility for font tokens (Tailwind color trap — see typographyTokenContract).
  */
 
 /** Micro meta (timestamps, rare dense tables). */
