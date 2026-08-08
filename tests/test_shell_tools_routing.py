@@ -218,6 +218,24 @@ class TestShellCommandClassifier:
         assert route.route == "powershell"
         assert "-WindowStyle Hidden" in route.final_command
 
+    def test_popen_command_prefers_shell_false_argv_on_windows(self, monkeypatch):
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+        cmd_route = shell_tools.classify_shell_command("dir")
+        argv, use_shell = shell_tools._popen_command_for_route(cmd_route, rewritten_command="dir")
+        assert use_shell is False
+        assert argv[:4] == ["cmd.exe", "/d", "/s", "/c"]
+        assert argv[-1] == "dir"
+
+        ps_route = shell_tools.classify_shell_command("Get-ChildItem tools")
+        ps_argv, ps_shell = shell_tools._popen_command_for_route(
+            ps_route,
+            rewritten_command="Get-ChildItem tools",
+        )
+        assert ps_shell is False
+        assert ps_argv[0].lower().startswith("powershell")
+        assert "-WindowStyle" in ps_argv
+        assert "Hidden" in ps_argv
+
     def test_shell_failure_cooldown_blocks_second_identical_intent(self):
         shell_tools.reset_shell_failure_cooldown()
         cmd = 'rg -n "pattern|other" path'
