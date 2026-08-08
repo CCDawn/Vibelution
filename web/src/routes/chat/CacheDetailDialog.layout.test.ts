@@ -49,6 +49,9 @@ describe("CacheDetailDialog donut layout contract", () => {
     expect(cacheDetailStyles.cacheDetailSegmentMeta).toContain("flex");
     expect(cacheDetailStyles.cacheDetailSegmentMeta).toContain("gap-1");
     expect(cacheDetailStyles.cacheDetailSegmentMeta).not.toMatch(/vuiGlass|p-2\b/);
+    for (const status of ["observed_hit", "observed_miss", "observed_partial", "not_observed"]) {
+      expect(cacheDetailStyles.cacheDetailSegmentMeta).toContain(`data-status=${status.replace("_", "\\_")}`);
+    }
     expect(cacheDetailStyles.cacheDetailSwatch).toContain("size-2.5");
     expect(cacheDetailStyles.cacheDetailSwatch).not.toMatch(/vuiGlass|p-2\b/);
     expect(cacheDetailDialogSource).toContain("cacheDetailSegmentStats");
