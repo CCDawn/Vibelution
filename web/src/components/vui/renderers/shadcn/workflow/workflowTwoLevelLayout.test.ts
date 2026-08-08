@@ -26,6 +26,7 @@ import type {
 } from "../../../product/workflow/workflowCanvasTypes";
 import { layoutTwoLevel } from "./workflowTwoLevelLayout";
 import { challengeCupDefinition } from "./workflowElkLayout.test";
+import { analyzeEdgeSections } from "./workflowElkEdgePath";
 
 const STAGE_ORDER = ["knowledge_collection", "experiment_design", "execution_iteration"] as const;
 
@@ -288,6 +289,26 @@ describe("two-level layout · cross-stage edges stay in the channel (RED on curr
         `label of ${edge.id} centered in the gap between ${sourceStageId} and ${targetStageId}`,
       ).toBeGreaterThanOrEqual(gapLeft);
       expect(labelCenterX).toBeLessThanOrEqual(gapRight);
+    }
+  });
+
+  it("keeps every cross-stage section chain well-formed after spacer reassembly", async () => {
+    const input = challengeCupDefinition();
+    const result = await layoutCurrent();
+    const stageOf = new Map(input.nodes.map((n) => [n.nodeId, n.stageId] as const));
+    const crossEdges = result.edges.filter((e) => {
+      const sourceStage = stageOf.get(e.source);
+      const targetStage = stageOf.get(e.target);
+      return sourceStage && targetStage && sourceStage !== targetStage;
+    });
+
+    expect(crossEdges.length).toBeGreaterThan(0);
+    for (const edge of crossEdges) {
+      const diagnostic = analyzeEdgeSections(edge.sections);
+      expect(
+        diagnostic.wellFormed,
+        `${edge.id}: ${diagnostic.diagnostics.join("; ")}`,
+      ).toBe(true);
     }
   });
 });
