@@ -53,19 +53,15 @@ describe("Task0 research legacy surface inventory", () => {
     expect(routerSource).not.toContain("ResearchRoute");
   });
 
-  it("ResearchRoute.tsx is a redirect shell and not router-mounted", () => {
-    const researchRoute = resolve(routesRoot, "ResearchRoute.tsx");
-    expect(existsSync(researchRoute)).toBe(true);
-    const source = readFileSync(researchRoute, "utf8");
-    expect(source).toContain("export function ResearchRoute");
-    expect(source).toContain("Navigate");
-    expect(routerSource).not.toContain("routes/ResearchRoute");
+  it("Task 9: ResearchRoute.tsx is fully removed (router redirect-only)", () => {
+    expect(existsSync(resolve(routesRoot, "ResearchRoute.tsx"))).toBe(false);
+    expect(existsSync(resolve(routesRoot, "ResearchRoute.styles.ts"))).toBe(false);
+    expect(existsSync(resolve(routesRoot, "ResearchRoute.layout.test.ts"))).toBe(false);
   });
 
-  it("ResearchFlowCanvasRoute is redirect-only; migration adapters remain on disk", () => {
-    const flow = readFileSync(resolve(routesRoot, "ResearchFlowCanvasRoute.tsx"), "utf8");
-    expect(flow).toContain("Navigate");
-    expect(flow.length).toBeLessThan(2000);
+  it("Task 9: ResearchFlowCanvasRoute is fully removed; migration adapters remain on disk", () => {
+    expect(existsSync(resolve(routesRoot, "ResearchFlowCanvasRoute.tsx"))).toBe(false);
+    expect(existsSync(resolve(routesRoot, "ResearchFlowCanvasRoute.styles.ts"))).toBe(false);
     const expectedPresent = [
       "teams/challenge-cup/ChallengeCupOperationsWorkspace.tsx",
       "teams/challenge-cup/ChallengeCupStageRail.tsx",
