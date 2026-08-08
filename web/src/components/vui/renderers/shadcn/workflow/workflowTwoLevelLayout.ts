@@ -48,8 +48,10 @@ export async function layoutTwoLevel(
   }
   const stageBoxes = new Map(stageLayouts.map((s) => [s.stageId, s.box] as const));
 
-  // Outer edge specs: cross-stage edges only, with label geometry + gateway
-  // anchors from the internal task centers.
+  // Outer edge specs: cross-stage edges only, with label geometry. Gateway
+  // port Y is not controllable (ELK layered ignores fixed port coordinates);
+  // the composer bridges from the internal task centers to the engine's
+  // channel Y via gateway stubs.
   const stageOf = new Map(input.nodes.map((n) => [n.nodeId, n.stageId] as const));
   const edgeSpecs: OuterEdgeSpec[] = [];
   for (const edge of input.edges) {
@@ -60,16 +62,15 @@ export async function layoutTwoLevel(
     }
     const sourceLocal = localLayouts.get(fromStage);
     const targetLocal = localLayouts.get(toStage);
-    const sourceTask = sourceLocal?.tasks.find((t) => t.id === edge.fromNodeId);
-    const targetTask = targetLocal?.tasks.find((t) => t.id === edge.toNodeId);
-    if (!sourceTask || !targetTask) {
+    if (
+      !sourceLocal?.tasks.some((t) => t.id === edge.fromNodeId) ||
+      !targetLocal?.tasks.some((t) => t.id === edge.toNodeId)
+    ) {
       continue;
     }
     edgeSpecs.push({
       edge,
       labelSpec: resolveEdgeLabelSpec(edge.label),
-      sourceAnchorY: sourceTask.y + sourceTask.height / 2,
-      targetAnchorY: targetTask.y + targetTask.height / 2,
     });
   }
 

@@ -89,13 +89,28 @@ describe("structuralWorkflowLayoutHash", () => {
     expect(structuralWorkflowLayoutHash(base).full).toBe(structuralWorkflowLayoutHash(runtimeChanged).full);
   });
 
-  it("ignores edge label text and run meta", () => {
+  it("ignores edge label text while the resolved label geometry is unchanged, and run meta", () => {
     const base = makeInput({});
     const relabeled = makeInput({
-      edges: [makeEdge({ label: "完全不同的文案" })],
+      // Same character count -> same resolveEdgeLabelSpec width/height.
+      edges: [makeEdge({ label: "交汇" })],
       run: { runId: "run-1", status: "running", runtimeCurrentNodeIds: ["knowledge_collection"] },
     });
     expect(structuralWorkflowLayoutHash(base).full).toBe(structuralWorkflowLayoutHash(relabeled).full);
+    expect(structuralWorkflowLayoutHash(base).structure).toBe(structuralWorkflowLayoutHash(relabeled).structure);
+  });
+
+  it("is sensitive to edge label geometry changes (wider label forces relayout)", () => {
+    const base = makeInput({});
+    const wider = makeInput({
+      edges: [makeEdge({ label: "知识包跨阶段正式交接" })],
+    });
+    const shorter = makeInput({
+      edges: [makeEdge({ label: "A" })],
+    });
+    expect(structuralWorkflowLayoutHash(base).structure).not.toBe(structuralWorkflowLayoutHash(wider).structure);
+    expect(structuralWorkflowLayoutHash(base).full).not.toBe(structuralWorkflowLayoutHash(wider).full);
+    expect(structuralWorkflowLayoutHash(base).structure).not.toBe(structuralWorkflowLayoutHash(shorter).structure);
   });
 
   it("is sensitive to stage order", () => {
