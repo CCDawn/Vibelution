@@ -48,6 +48,9 @@ logs/
 !/web/src/logs/**
 log_info/
 .runtime/
+# pnpm scaffold leftovers accidentally generated in web/ (npm is the project manager)
+/web/pnpm-lock.yaml
+/web/pnpm-workspace.yaml
 *.pyc
 *.pyo
 .env
