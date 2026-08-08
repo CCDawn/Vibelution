@@ -16,7 +16,6 @@ const api = vi.hoisted(() => ({
 vi.mock("../../../api/researchWorkflow", () => api);
 
 import {
-  EXPLICITLY_UNAVAILABLE,
   commandLabel,
   disableReasonFor,
   executeNodeCommand,
@@ -42,19 +41,14 @@ describe("nodeCommandAdapter", () => {
     api.resolveResearchWorkflowHumanTask.mockReset();
   });
 
-  it("every backend-declared command is executable or explicitly unavailable", () => {
+  it("every backend-declared command is executable (availability from backend)", () => {
     for (const command of ALL_BACKEND_COMMANDS) {
-      if (EXPLICITLY_UNAVAILABLE.has(command)) {
-        expect(disableReasonFor({ command, available: true, reason: "" })).not.toBe("");
-      } else {
-        expect(disableReasonFor({ command, available: true, reason: "" })).toBe("");
-      }
+      expect(disableReasonFor({ command, available: true, reason: "" })).toBe("");
     }
-    // Explicitly unavailable commands stay disabled even if the backend
-    // (incorrectly) lists them as available — no clickable fake buttons.
-    for (const command of EXPLICITLY_UNAVAILABLE.keys()) {
-      expect(disableReasonFor({ command, available: true, reason: "" })).not.toBe("");
-    }
+    // Backend-declared unavailability keeps its reason.
+    expect(disableReasonFor({ command: "build_package", available: false, reason: "尚无迭代决策" })).toBe(
+      "尚无迭代决策",
+    );
   });
 
   it("executes non-human commands through the backend node-command API", async () => {

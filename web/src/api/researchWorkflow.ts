@@ -6,6 +6,7 @@ import { fetchJson } from "./client";
 import type {
   AgentBindingConfigPayload,
   EffectiveAgentBindingsResponse,
+  IterationDecisionRecord,
   NodeAgentSessionBinding,
   ResearchWorkflowNodeDetail,
   WorkflowCanvasProjection,
@@ -31,6 +32,13 @@ export type WorkflowRunRecord = {
   bindingSnapshots?: Array<Record<string, unknown>>;
   events?: Array<Record<string, unknown>>;
   langGraph?: Record<string, unknown>;
+  iterationDecisions?: Array<Partial<IterationDecisionRecord>>;
+  promotionProposals?: Array<Record<string, unknown>>;
+  completionKind?: string;
+  terminalReason?: string;
+  blockedReason?: string;
+  officialCandidateRef?: string;
+  resultPackage?: Record<string, unknown>;
 };
 
 export type RequiredTeamScope = {

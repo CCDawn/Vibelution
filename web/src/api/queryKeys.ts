@@ -55,6 +55,8 @@ export const queryKeys = {
   teamWorkflowKnowledgeIngestionStatus: (id: string) => ["teams", id, "workflow-orchestration", "knowledge-ingestion", "status"] as const,
   challengeQuestionRunDetail: (teamId: string, questionId: string, runId = "") =>
     ["teams", teamId, "challenge-program", "questions", questionId, runId] as const,
+  challengeQuestionRunStatus: (teamId: string) =>
+    ["teams", teamId, "challenge-program", "question-runs", "status"] as const,
   teamWorkflowSourceCollectionRuns: (id: string, limit = 6) =>
     ["teams", id, "workflow-orchestration", "source-collection-runs", limit] as const,
   dataProcessingRunStatus: (id: string) => ["data-processing", "runs", id, "status"] as const,

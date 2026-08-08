@@ -229,6 +229,8 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
         teamId={String(selectedTeam?.teamId || selectedTeam?.id || ctx.effectiveTeamId || "")}
         experimentPanel={renderExperimentPlanningLedgerPanel ? renderExperimentPlanningLedgerPanel() : undefined}
         knowledgePanel={knowledgeDrawer ?? undefined}
+        iterationPanel={renderResearchLoopPanel ? renderResearchLoopPanel(null, "iteration") : undefined}
+        knowledgeIngestionPanel={ctx.renderKnowledgeCollectionCompletionFlowPanel ? ctx.renderKnowledgeCollectionCompletionFlowPanel({ presentation: "rail" }) : undefined}
       />
     );
   }
