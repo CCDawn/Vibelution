@@ -169,6 +169,10 @@ def normalize_usage_payload_via_rust(raw: Mapping[str, Any], *, timeout_s: float
     if binary is None:
         return None
     try:
+        # Rust release binaries are console-subsystem (CUI). Without CREATE_NO_WINDOW
+        # every LLM usage normalize flashes a console on agent turns (toolCallCount 0).
+        from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
         completed = subprocess.run(
             [str(binary)],
             input=json.dumps({"usage": dict(raw)}, ensure_ascii=False),
@@ -176,6 +180,7 @@ def normalize_usage_payload_via_rust(raw: Mapping[str, Any], *, timeout_s: float
             capture_output=True,
             timeout=max(0.2, float(timeout_s)),
             check=False,
+            **no_window_subprocess_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

@@ -205,6 +205,9 @@ def contain_path_via_rust(
         ensure_ascii=False,
     )
     try:
+        # Sidecar is CUI; hide console or every path check flashes a window mid-turn.
+        from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
         completed = subprocess.run(
             [str(binary)],
             input=payload,
@@ -212,6 +215,7 @@ def contain_path_via_rust(
             capture_output=True,
             timeout=max(0.2, float(timeout_s)),
             check=False,
+            **no_window_subprocess_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
