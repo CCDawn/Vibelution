@@ -66,6 +66,11 @@ def test_restart_can_resolve_pending_human_task(tmp_path: Path) -> None:
 def test_session_binding_survives_restart(tmp_path: Path) -> None:
     svc = _svc(tmp_path)
     run = svc.create_run(CHALLENGE_CUP_WORKFLOW_ID)
+    svc.apply_command(
+        run["runId"],
+        "rebind_node",
+        payload={"nodeId": "source_finding", "agentId": "agent-r"},
+    )
     svc.put_session_binding(
         run["runId"],
         "source_finding",
