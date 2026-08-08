@@ -633,6 +633,16 @@ def _persist_session_turn_result(
                     "hasImageArtifactEvidence": False,
                 },
             )
+        # Ensure reasoning is durable even when wire only committed final_answer.
+        thought_for_journal = str(assistant_entry.get("thought") or "").strip()
+        if thought_for_journal:
+            s._append_session_reasoning_item_if_needed(
+                session_id,
+                turn_id,
+                thought_for_journal,
+                source="persist_session_turn_result",
+                done=True,
+            )
         canonical_turn_items = s.conversation_turn_items_from_events(
             s.load_conversation_events(s.PROJECT_ROOT, session_id),
             turn_id=turn_id,

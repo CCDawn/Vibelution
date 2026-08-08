@@ -254,11 +254,57 @@ describe("canonical SessionTurnItem v2 rendering", () => {
 
     expect(surface.protocol).toBe("canonical_turn_items_v2");
     expect(surface.answerContent).toBe("canonical final answer");
+    // Answer-only package keeps live thought so journal final_answer cannot wipe thinking.
+    expect(surface.thoughtContent).toBe("legacy thought");
     expect(surface.codexTranscript?.cells).toHaveLength(1);
     expect(surface.codexTranscript?.cells[0]).toMatchObject({
       kind: "assistant_markdown",
       text: "canonical final answer",
     });
+  });
+
+  it("projects thought from reasoning turn items instead of clearing it", () => {
+    const projected = canonicalTurnProtocol.projectConversationMessageFromTurnItemsV2({
+      id: "message-with-thought",
+      role: "assistant",
+      content: "legacy answer",
+      thought: "legacy thought field",
+      timestamp: "2026-07-11T00:00:00.000Z",
+      turnItems: [
+        {
+          ...baseItem,
+          id: "reasoning-r0",
+          itemId: "reasoning",
+          revision: 0,
+          sequence: 1,
+          kind: "reasoning",
+          channel: "analysis",
+          phase: "reasoning",
+          type: "reasoning",
+          text: "package reasoning summary",
+        },
+        {
+          ...baseItem,
+          id: "answer-r0",
+          itemId: "answer",
+          revision: 0,
+          sequence: 2,
+          kind: "assistant_message",
+          channel: "answer",
+          phase: "final_answer",
+          type: "assistant_message",
+          terminal: true,
+          text: "canonical answer",
+        },
+      ],
+    } as never);
+
+    expect(projected.content).toBe("canonical answer");
+    expect(projected.thought).toBe("package reasoning summary");
+    expect(projected.codexTranscript?.cells.map((cell) => cell.kind)).toEqual([
+      "reasoning_summary",
+      "assistant_markdown",
+    ]);
   });
 
   it("keeps reasoning, commentary, tool calls, and the final answer in separate cells", () => {

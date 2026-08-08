@@ -72,6 +72,7 @@ from core.chat.conversation_ledger import (
     load_conversation_preview_slice,
     rewrite_conversation_events,
 )
+from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
 from core.chat.context_assembler import assemble_conversation_context
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
 from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
@@ -235,6 +236,7 @@ from .session.stream_capture import (
     _SESSION_UI_CAPTURE_THOUGHT_BATCH_MIN_CHARS,
     _SessionUiCaptureTextBatcher,
     _active_session_turn_capture,
+    _append_session_reasoning_item_if_needed,
     _attach_turn_capture_to_result,
     _capture_session_ui_stream,
     _commit_session_capture_assistant_segment,

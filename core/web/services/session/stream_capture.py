@@ -745,6 +745,72 @@ def _attach_turn_capture_to_result(
         result["feedback_events"] = list(capture.feedback_events)
     return result
 
+def _append_session_reasoning_item_if_needed(
+    session_id: str,
+    turn_id: str,
+    thought: str,
+    *,
+    source: str = "session_ui_capture",
+    done: bool = True,
+) -> bool:
+    """Durable-commit a reasoning SessionTurnItem when journal only has final_answer.
+
+    Wire protocol emits reasoning_delta but only item_completed for the answer, so
+    reload/detail would otherwise lose thinking after package_cells takes over.
+    """
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    thought_text = s._sanitize_thought_text(thought)
+    if not normalized_session_id or not normalized_turn_id or not thought_text:
+        return False
+    existing = s.conversation_turn_items_from_events(
+        s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id),
+        turn_id=normalized_turn_id,
+    )
+    if any(
+        str(item.get("kind") or item.get("type") or "").strip().lower() in {"reasoning", "analysis"}
+        or str(item.get("phase") or "").strip().lower() == "reasoning"
+        for item in existing
+        if isinstance(item, dict)
+    ):
+        return False
+    reasoning_id = f"{s._session_turn_item_base_id(normalized_session_id, normalized_turn_id)}-reasoning"
+    s._append_session_conversation_event(
+        normalized_session_id,
+        normalized_turn_id,
+        s.EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed" if done else "in_progress",
+        payload={
+            "schemaVersion": 2,
+            "sessionId": normalized_session_id,
+            "turnId": normalized_turn_id,
+            "invocationId": "",
+            "iteration": 0,
+            "itemId": reasoning_id,
+            "revision": 0,
+            "sequence": 0,
+            "kind": "reasoning",
+            "channel": "analysis",
+            "phase": "reasoning",
+            "status": "completed" if done else "in_progress",
+            "protocol": "session_capture",
+            "provisional": not bool(done),
+            "terminal": False,
+            "text": thought_text,
+            "callId": "",
+            "toolName": "",
+            "diagnosticSummary": {"reasoningSource": "session_ui_capture"},
+        },
+        source=source,
+        visible_in_model=False,
+        projection_kind="session_turn_item_v2",
+        source_kind="session_reasoning",
+    )
+    s._invalidate_session_conversation_events_cache(normalized_session_id)
+    return True
+
+
 def _commit_session_capture_assistant_segment(
     session_id: str,
     capture: SessionTurnCapture,
@@ -981,6 +1047,16 @@ def _capture_session_ui_stream(
             return
         s.append_conversation_turn_outcome(s.PROJECT_ROOT, session_id, capture.turn_id, outcome)
         s._invalidate_session_conversation_events_cache(session_id)
+        # Final answer item_completed lands without a reasoning commit; durable-write
+        # capture.thought so reload/detail package_cells still show thinking.
+        if capture.thought:
+            _append_session_reasoning_item_if_needed(
+                session_id,
+                capture.turn_id,
+                capture.thought,
+                source="session_ui_capture_llm_response",
+                done=True,
+            )
         capture.mark_content_committed()
 
     for event_name in (s.EventNames.TOOL_START, s.EventNames.TOOL_SUCCESS, s.EventNames.TOOL_ERROR):

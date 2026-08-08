@@ -197,6 +197,64 @@ def test_turn_items_projection_merges_live_content_when_journal_has_tools_only(m
     assert final_item["messageId"] == "message-live-1"
 
 
+def test_turn_items_projection_merges_thought_when_journal_has_answer_only(monkeypatch) -> None:
+    """Live/durable thought must survive journal final_answer package ownership."""
+    answer = {
+        "version": 2,
+        "id": "item-final:0",
+        "itemId": "item-final",
+        "type": "assistant_message",
+        "kind": "assistant_message",
+        "channel": "answer",
+        "phase": "final_answer",
+        "status": "completed",
+        "terminal": True,
+        "provisional": False,
+        "text": "你好！我是会话 Agent。",
+        "turnId": "turn-thought-1",
+        "sequence": 10,
+        "revision": 0,
+    }
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        lambda _session_id: [object()],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [dict(answer)] if turn_id == "turn-thought-1" else [],
+    )
+    thought = '用户只是打了个招呼"你好"。这是一个简单的问候，不需要调用任何工具。'
+    items = session_service._build_session_turn_items_projection(
+        session_id="session-1",
+        turn_id="turn-thought-1",
+        message_id="message-thought-1",
+        content="你好！我是会话 Agent。",
+        thought=thought,
+        done=True,
+        source="assistant_delta",
+    )
+    assert [item["kind"] for item in items] == ["reasoning", "assistant_message"]
+    assert items[0]["phase"] == "reasoning"
+    assert items[0]["text"] == thought
+    assert items[0]["messageId"] == "message-thought-1"
+    assert items[1]["text"] == "你好！我是会话 Agent。"
+    assert items[1]["itemId"] == "item-final"
+
+    transcript = session_service._build_codex_transcript_from_turn_items(
+        message_id="message-thought-1",
+        turn_items=items,
+        streaming=False,
+    )
+    assert transcript is not None
+    assert [cell["kind"] for cell in transcript["cells"]] == [
+        "reasoning_summary",
+        "assistant_markdown",
+    ]
+    assert transcript["cells"][0]["text"] == thought
+
+
 def test_turn_items_projection_extends_provisional_final_with_faster_content(monkeypatch) -> None:
     provisional = {
         "version": 2,
