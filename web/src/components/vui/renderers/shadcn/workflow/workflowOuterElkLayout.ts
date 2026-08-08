@@ -97,15 +97,29 @@ export function consumeOuterLayout(
     const spacer = spacerId ? spacerById.get(spacerId) : undefined;
     const legs1 = sectionByLeg.get(leg1) ?? [];
     const legs2 = sectionByLeg.get(leg2) ?? [];
-    const combined = [...legs1, ...legs2];
-    // Re-link the chain across the leg boundary.
-    if (combined.length >= 2) {
-      const lastOfFirst = combined[legs1.length - 1];
-      const firstOfSecond = combined[legs1.length];
-      if (lastOfFirst && firstOfSecond) {
-        lastOfFirst.outgoingSectionIds = [firstOfSecond.id];
-        firstOfSecond.incomingSectionIds = [lastOfFirst.id];
-      }
+    let combined = [...legs1, ...legs2];
+    // The two ELK legs terminate at opposite sides of the virtual spacer.
+    // They cannot be linked directly: the spacer width is a real gap in the
+    // returned geometry. Add an explicit bridge over that occupied label
+    // channel so the public edge remains one continuous, diagnosable chain.
+    const lastOfFirst = legs1[legs1.length - 1];
+    const firstOfSecond = legs2[0];
+    if (lastOfFirst && firstOfSecond) {
+      const bridge: WorkflowEdgeSection = {
+        id: `${edgeId}__spacer_bridge`,
+        start: { ...lastOfFirst.end },
+        end: { ...firstOfSecond.start },
+        bendPoints:
+          Math.abs(lastOfFirst.end.x - firstOfSecond.start.x) <= 1e-3 ||
+          Math.abs(lastOfFirst.end.y - firstOfSecond.start.y) <= 1e-3
+            ? []
+            : [{ x: firstOfSecond.start.x, y: lastOfFirst.end.y }],
+        incomingSectionIds: [lastOfFirst.id],
+        outgoingSectionIds: [firstOfSecond.id],
+      };
+      lastOfFirst.outgoingSectionIds = [bridge.id];
+      firstOfSecond.incomingSectionIds = [bridge.id];
+      combined = [...legs1, bridge, ...legs2];
     }
     edgeSectionsById.set(edgeId, combined);
     if (spacer) {
