@@ -104,6 +104,12 @@ describe("AgentConversationDirectory", () => {
     expect(styles.agentMeta).not.toContain("text-[var(--vui-font-xs)]");
   });
 
+  it("keeps the selected Agent row visible above the transparent base fill", () => {
+    expect(styles.agentRow).toContain("!bg-transparent");
+    expect(styles.agentRowActive).toContain("!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]");
+    expect(styles.agentRowActive).not.toContain("shadow-[var(--vui-shadow-inset-accent)]");
+  });
+
   it("keeps active no-session chat Agents visible and separates special Agents from team members", () => {
     const noSessionChatAgent = agent();
     const specialAgent = agent({
