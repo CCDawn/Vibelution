@@ -167,6 +167,8 @@ const styles = {
     "[margin:0] [line-height:1.4] [color:var(--state-error)]",
   errorTextCompact:
     "[margin:0] [padding:9px_10px] [border-radius:8px] [line-height:1.45] [overflow-wrap:anywhere] [color:var(--state-error)] [background:color-mix(in_srgb,_var(--state-error)_11%,_transparent)]",
+  supervisedSnapshotErrorBanner:
+    "[display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [padding:9px_10px] [border-radius:8px] [line-height:1.45] [overflow-wrap:anywhere] [color:var(--state-error)] [background:color-mix(in_srgb,_var(--state-error)_11%,_transparent)] [&>span]:[min-width:0]",
   eyebrow:
     "[margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.08em]",
   feedbackText:

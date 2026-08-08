@@ -544,7 +544,7 @@ export function PromptTemplatesRoute() {
 
           <label className={styles.searchBoxClass}>
             <Search size={14} />
-            <VNativeInput className={styles.searchInputClass} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} />
+            <VNativeInput className={styles.searchInputClass} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} aria-label={copy.search} />
           </label>
 
           <div className={styles.filterRowClass}>

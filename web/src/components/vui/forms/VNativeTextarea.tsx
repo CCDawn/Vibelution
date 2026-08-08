@@ -1,6 +1,7 @@
-import { forwardRef, type ComponentPropsWithoutRef } from "react";
+import { forwardRef, useContext, type ComponentPropsWithoutRef } from "react";
 
 import { type VuiDensity } from "../renderers/shared/buttonVariants";
+import { FieldRowIdContext } from "./fieldRowContext";
 import { vuiFormControlClass } from "./formClasses";
 
 export type VNativeTextareaProps = ComponentPropsWithoutRef<"textarea"> & {
@@ -15,16 +16,19 @@ export const VNativeTextarea = forwardRef<HTMLTextAreaElement, VNativeTextareaPr
     className,
     minRows,
     rows,
+    id,
     "data-vui": dataVui,
     ...props
   },
   ref,
 ) {
+  const fieldRowId = useContext(FieldRowIdContext);
   return (
     <textarea
       {...props}
       ref={ref}
       rows={rows ?? minRows}
+      id={id ?? fieldRowId}
       data-vui={dataVui ?? "native-textarea"}
       data-density={density}
       className={[

@@ -104,4 +104,43 @@ describe("VUI form primitives", () => {
     expect(markup).toContain('data-renderer="radix"');
     expect(markup).toContain("Alpha");
   });
+
+  it("associates VFieldRow label with child controls via generated id", () => {
+    const markup = renderToStaticMarkup(
+      <VuiProvider>
+        <form>
+          <VFieldRow label="Field A">
+            <VNativeInput value="a" readOnly />
+          </VFieldRow>
+          <VFieldRow label="Field B">
+            <VNativeTextarea value="b" readOnly />
+          </VFieldRow>
+          <VFieldRow label="Field C">
+            <VInput value="c" readOnly />
+          </VFieldRow>
+          <VFieldRow label="Field D">
+            <VTextarea value="d" readOnly />
+          </VFieldRow>
+          <VFieldRow label="Field E">
+            <VNativeSelect value="e" onChange={() => undefined}>
+              <option value="e">E</option>
+            </VNativeSelect>
+          </VFieldRow>
+          <VFieldRow label="Field F">
+            <VCheckbox isSelected />
+          </VFieldRow>
+          <VFieldRow label="Explicit field" htmlFor="explicit-control">
+            <VNativeInput id="explicit-control" value="x" readOnly />
+          </VFieldRow>
+        </form>
+      </VuiProvider>,
+    );
+
+    const ids = [...markup.matchAll(/<label[^>]*for="([^"]+)"/g)].map((match) => match[1]);
+    expect(ids.length).toBe(7);
+    for (const id of ids) {
+      expect(markup).toContain(`id="${id}"`);
+    }
+    expect(markup).toContain('for="explicit-control"');
+  });
 });

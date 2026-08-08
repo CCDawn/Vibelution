@@ -96,6 +96,7 @@ function copyFor(lang: string) {
         loading: "加载中...",
         loadFailed: "加载失败",
         copied: "已复制",
+        copyFailed: "复制失败，请手动复制指令",
         copyCommand: "复制指令",
         bulkSelected: "已选",
         bulkSelectVisible: "选择当前列表",
@@ -129,6 +130,7 @@ function copyFor(lang: string) {
         loading: "Loading...",
         loadFailed: "Load failed",
         copied: "Copied",
+        copyFailed: "Copy failed; copy the command manually",
         copyCommand: "Copy command",
         bulkSelected: "Selected",
         bulkSelectVisible: "Select visible",
@@ -199,7 +201,7 @@ export function SkillsRoute() {
       await navigator.clipboard?.writeText(text);
       setCopyState(copy.copied);
     } catch {
-      setCopyState(text);
+      setCopyState(copy.copyFailed);
     }
   }
 
@@ -233,7 +235,7 @@ export function SkillsRoute() {
       await navigator.clipboard?.writeText(text);
       setCopyState(copy.copied);
     } catch {
-      setCopyState(text);
+      setCopyState(copy.copyFailed);
     }
   }
 
@@ -275,7 +277,7 @@ export function SkillsRoute() {
 
           <label className={styles.searchBoxClass}>
             <Search size={14} />
-            <VNativeInput className={styles.searchInputClass} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} />
+            <VNativeInput className={styles.searchInputClass} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} aria-label={copy.search} />
           </label>
 
           <div className={styles.filterRowClass}>
@@ -443,7 +445,23 @@ export function SkillsRoute() {
                   </div>
                   <FileText size={17} />
                 </div>
-                <pre className={styles.contentPreClass}>{detailQuery.data?.content ?? activeSkill.preview}</pre>
+                {detailQuery.isError && !detailQuery.data ? (
+                  <div className={styles.detailErrorClass} role="alert">
+                    <span>{copy.loadFailed}</span>
+                    <VButton
+                      type="button"
+                      variant="secondary"
+                      className={styles.detailErrorRetryClass}
+                      onPress={() => void detailQuery.refetch()}
+                    >
+                      {copy.refresh}
+                    </VButton>
+                  </div>
+                ) : detailQuery.isPending && !detailQuery.data ? (
+                  <VStateSurface tone="loading" title={copy.loading} skeletonLines={3} />
+                ) : (
+                  <pre className={styles.contentPreClass}>{detailQuery.data?.content ?? activeSkill.preview}</pre>
+                )}
                 {detailQuery.data?.contentTruncated || activeSkill.previewTruncated ? (
                   <p className={styles.truncatedNoticeClass}>{copy.truncated}</p>
                 ) : null}

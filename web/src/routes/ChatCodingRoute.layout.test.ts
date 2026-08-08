@@ -500,7 +500,9 @@ describe("ChatCodingRoute layout contract", () => {
     }));
 
     expect(markup).toContain('role="dialog"');
-    expect(markup).toContain('aria-modal="true"');
+    // Non-modal by contract: this banner/inline surface has no focus trap, so
+    // declaring aria-modal would promise behavior the component does not provide.
+    expect(markup).not.toContain('aria-modal="true"');
     expect(markup).toContain("aria-labelledby=");
     expect(markup).toContain("aria-describedby=");
     expect(markup).toContain("允许执行？");

@@ -422,6 +422,7 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
               setUtilityFileFilter(event.target.value);
             }}
             placeholder={t("searchFilesPlaceholder")}
+            aria-label={t("searchFilesPlaceholder")}
           />
         </div>
         <div className={styles.utilityFileTree}>

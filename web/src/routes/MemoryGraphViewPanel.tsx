@@ -161,6 +161,7 @@ export function MemoryGraphViewPanel({
               value={graphSearchText}
               onChange={(event) => onGraphSearchTextChange(event.target.value)}
               placeholder={copy.graphSearchPlaceholder}
+              aria-label={copy.graphSearchPlaceholder}
             />
           </label>
           <VSection className={styles.managementPanel} title={copy.graphNodes} eyebrow={copy.graphNodeTypes}>

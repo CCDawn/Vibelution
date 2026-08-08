@@ -324,12 +324,12 @@ export function ChatGroupCenterSurface({
           )}
         />
         {projectBusRefreshError ? (
-          <div className={styles.inlineNotice}>{projectBusRefreshError}</div>
+          <div className={styles.inlineNotice} role="alert">{projectBusRefreshError}</div>
         ) : null}
         {groupRoomActionError ? (
-          <div className={styles.inlineNotice}>{groupRoomActionError}</div>
+          <div className={styles.inlineNotice} role="alert">{groupRoomActionError}</div>
         ) : null}
-        <div className={styles.groupMessageTimeline} aria-live={projectBusSendPending ? "polite" : undefined}>
+        <div className={styles.groupMessageTimeline} aria-live="polite">
           {projectBusEvents.length ? (
             projectBusEvents.map((event) => {
               const revoked = isProjectAgentBusEventRevoked(event);
@@ -494,9 +494,9 @@ export function ChatGroupCenterSurface({
         )}
       />
       {groupRoomRefreshError ? (
-        <div className={styles.inlineNotice}>{groupRoomRefreshError}</div>
+        <div className={styles.inlineNotice} role="alert">{groupRoomRefreshError}</div>
       ) : null}
-      <div className={styles.groupMessageTimeline} aria-live={groupRoundActive ? "polite" : undefined}>
+      <div className={styles.groupMessageTimeline} aria-live="polite">
         {rounds.length ? (
           <GroupRoundsTimeline
             rounds={rounds}

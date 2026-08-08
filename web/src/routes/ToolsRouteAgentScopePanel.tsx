@@ -24,6 +24,7 @@ type ToolsRouteAgentScopePanelProps = {
   activeAgents: AgentInstance[];
   activeAgent?: AgentInstance | null;
   agentsLoading: boolean;
+  agentsErrorText?: string;
   activeAgentScopeId: string;
   scopeOptions: ToolsRouteScopeOption[];
   scopeCounts: {
@@ -49,6 +50,7 @@ export function ToolsRouteAgentScopePanel({
   activeAgents,
   activeAgent,
   agentsLoading,
+  agentsErrorText,
   activeAgentScopeId,
   scopeOptions,
   scopeCounts,
@@ -73,7 +75,7 @@ export function ToolsRouteAgentScopePanel({
             onValueChange={onAgentChange}
             options={
               !activeAgents.length
-                ? [{ value: "", label: agentsLoading ? copy.loading : "-" }]
+                ? [{ value: "", label: agentsErrorText || (agentsLoading ? copy.loading : "-") }]
                 : activeAgents.map((agent) => ({
                     value: agent.agentId,
                     label: `${agent.agentCode ? `${agent.agentCode} · ` : ""}${agent.displayName || agent.agentId}`,

@@ -41,6 +41,7 @@ type MemoryKnowledgeSearchPanelProps = {
   resultCount: number;
   results: KnowledgeSearchPayload["results"];
   searchPending: boolean;
+  searchErrorText?: string;
   contexts: KnowledgeRagContext[];
   ragHealth: KnowledgeRagHealthPayload | undefined;
   ragProviderHealth: KnowledgeRagProviderHealth | undefined;
@@ -57,6 +58,7 @@ export function MemoryKnowledgeSearchPanel({
   resultCount,
   results,
   searchPending,
+  searchErrorText,
   contexts,
   ragHealth,
   ragProviderHealth,
@@ -143,7 +145,13 @@ export function MemoryKnowledgeSearchPanel({
             <small>{copy.semanticScore}: {Math.round(Number(item.semanticScore || 0) * 100)}% · {item.matchReason}</small>
           </section>
         ))}
-        {!searchPending && !results.length ? (
+        {searchErrorText ? (
+          <section className={styles.emptyDetail} role="alert">
+            <Search size={20} />
+            <strong>{searchErrorText}</strong>
+          </section>
+        ) : null}
+        {!searchPending && !searchErrorText && !results.length ? (
           <section className={styles.emptyDetail}>
             <Search size={20} />
             <strong>{copy.noMatches}</strong>

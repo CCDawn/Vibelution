@@ -165,7 +165,7 @@ export function AgentSelectedDetailContentPanel({
       {activePane === "effective" ? (
         <PaneSuspense lang={header.lang}>
           <div className={styles.paneContent}>
-            <AgentEffectiveConfigurationPanel {...effectiveConfiguration} />
+            <AgentEffectiveConfigurationPanel {...effectiveConfiguration} lang={header.lang} />
           </div>
         </PaneSuspense>
       ) : null}
@@ -179,7 +179,7 @@ export function AgentSelectedDetailContentPanel({
       {activePane === "changes" ? (
         <PaneSuspense lang={header.lang}>
           <div className={styles.paneContent}>
-            <AgentConfigChangeHistoryPanel {...configChanges} />
+            <AgentConfigChangeHistoryPanel {...configChanges} lang={header.lang} />
           </div>
         </PaneSuspense>
       ) : null}

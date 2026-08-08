@@ -46,10 +46,16 @@ const createPortalAllowlist = new Set([
 const fixedInsetAllowlist = new Set([
   "components/vui/renderers/shadcn/ShadcnDialog.tsx",
   "routes/ChatCodingRoute.styles.ts",
+  // Narrow-window Teams inspector drawer: backdrop + fixed right panel behind
+  // VBoardWorkbenchPage (non-modal, Escape/backdrop close, no focus trap).
+  "routes/TeamsRoute.styles.ts",
 ]);
 
 const handRolledDialogAllowlist = new Set([
   "routes/chat/ChatToolApprovalDialog.tsx",
+  // Avatar editor popover: focused on open + Escape close, intentionally
+  // non-modal (background stays interactive), same semantics as ChatToolApproval.
+  "routes/AgentAvatarEditorPanel.tsx",
 ]);
 
 describe("VUI overlay alignment gate", () => {

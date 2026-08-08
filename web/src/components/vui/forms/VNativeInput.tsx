@@ -1,6 +1,7 @@
-import { forwardRef, type ComponentPropsWithoutRef } from "react";
+import { forwardRef, useContext, type ComponentPropsWithoutRef } from "react";
 
 import { type VuiDensity } from "../renderers/shared/buttonVariants";
+import { FieldRowIdContext } from "./fieldRowContext";
 import { vuiFormControlClass } from "./formClasses";
 
 export type VNativeInputProps = ComponentPropsWithoutRef<"input"> & {
@@ -13,11 +14,13 @@ export const VNativeInput = forwardRef<HTMLInputElement, VNativeInputProps>(func
     density = "compact",
     className,
     type,
+    id,
     "data-vui": dataVui,
     ...props
   },
   ref,
 ) {
+  const fieldRowId = useContext(FieldRowIdContext);
   const inputType = type ?? "text";
   const isBox = inputType === "checkbox" || inputType === "radio";
   const controlClass = isBox
@@ -34,6 +37,7 @@ export const VNativeInput = forwardRef<HTMLInputElement, VNativeInputProps>(func
       {...props}
       ref={ref}
       type={inputType}
+      id={id ?? fieldRowId}
       data-vui={dataVui ?? "native-input"}
       data-density={density}
       className={[controlClass, className].filter(Boolean).join(" ")}

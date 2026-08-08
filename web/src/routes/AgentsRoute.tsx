@@ -380,6 +380,23 @@ function reconcileResetDirectSession(summary: AgentResetSummary) {
   }
 }
 
+function roomModeDisplayLabel(mode: string | undefined, lang: "zh" | "en") {
+  const value = String(mode || "").trim();
+  if (!value) {
+    return "-";
+  }
+  if (value === "round_robin") {
+    return lang === "zh" ? "轮询讨论" : "Round robin";
+  }
+  if (value === "opportunistic") {
+    return lang === "zh" ? "抢占式讨论" : "Opportunistic";
+  }
+  if (value === "medical_consultation_panel") {
+    return lang === "zh" ? "协同问诊会诊" : "Medical consultation";
+  }
+  return value;
+}
+
 export function AgentsRoute() {
   const { lang } = useShellI18n();
   // C1.2: load flat agents domain for high-frequency workbench dual-read.
@@ -2059,7 +2076,7 @@ export function AgentsRoute() {
         statusLabel: selected ? (lang === "zh" ? "已加入" : "Joined") : (lang === "zh" ? "未加入" : "Not joined"),
         statusTone: selected ? "active" : "stale",
         title: room.title || room.roomId,
-        meta: `${room.mode || "-"} · ${room.participantCount} members · ${formatTimestamp(room.updatedAt, lang)}`,
+        meta: `${roomModeDisplayLabel(room.mode, lang)} · ${room.participantCount} ${lang === "zh" ? "名成员" : "members"} · ${formatTimestamp(room.updatedAt, lang)}`,
         route: compactProjectionRoute(room, `/chat?room=${encodeURIComponent(room.roomId)}`),
         actionLabel: lang === "zh" ? "打开群聊" : "Open room",
       };

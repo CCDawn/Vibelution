@@ -1,6 +1,7 @@
-import { forwardRef, type ComponentPropsWithoutRef } from "react";
+import { forwardRef, useContext, type ComponentPropsWithoutRef } from "react";
 
 import { type VuiDensity } from "../shared/buttonVariants";
+import { FieldRowIdContext } from "../../forms/fieldRowContext";
 import { vuiFormControlClass } from "../../forms/formClasses";
 
 /**
@@ -23,6 +24,7 @@ export const ShadcnTextarea = forwardRef<HTMLTextAreaElement, ShadcnTextareaProp
       className,
       minRows,
       rows,
+      id,
       isDisabled = false,
       disabled,
       "data-vui": dataVui,
@@ -30,11 +32,13 @@ export const ShadcnTextarea = forwardRef<HTMLTextAreaElement, ShadcnTextareaProp
     },
     ref,
   ) {
+    const fieldRowId = useContext(FieldRowIdContext);
     return (
       <textarea
         {...props}
         ref={ref}
         rows={rows ?? minRows}
+        id={id ?? fieldRowId}
         disabled={Boolean(disabled || isDisabled)}
         data-vui={dataVui ?? "textarea"}
         data-density={density}

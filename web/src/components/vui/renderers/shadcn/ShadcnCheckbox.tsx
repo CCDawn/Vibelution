@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useContext,
   useId,
   type ChangeEvent,
   type ComponentPropsWithoutRef,
@@ -11,6 +12,7 @@ import {
   type VuiDensity,
   vuiControlMinHeightClass,
 } from "../shared/buttonVariants";
+import { FieldRowIdContext } from "../../forms/fieldRowContext";
 
 /**
  * Shadcn-style native checkbox renderer.
@@ -57,8 +59,9 @@ export const ShadcnCheckbox = forwardRef<HTMLInputElement, ShadcnCheckboxProps>(
     },
     ref,
   ) {
+    const fieldRowId = useContext(FieldRowIdContext);
     const autoId = useId();
-    const inputId = id ?? autoId;
+    const inputId = id ?? fieldRowId ?? autoId;
     const isDisabledResolved = Boolean(disabled || isDisabled);
     const controlled = isSelected !== undefined;
     const hasLabel = Boolean(children);

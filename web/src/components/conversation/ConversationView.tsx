@@ -4386,6 +4386,7 @@ export function ConversationView({
             value={composerValue}
             disabled={composerDisabled && resolvedActionMode !== "stop"}
             placeholder={composerPlaceholder}
+            aria-label={lang === "zh" ? "发送消息" : "Message"}
             aria-controls={showSlashSuggestions ? slashSuggestionListId : undefined}
             aria-expanded={showSlashSuggestions ? true : undefined}
             aria-autocomplete={showSlashSuggestions ? "list" : undefined}

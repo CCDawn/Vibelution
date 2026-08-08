@@ -514,6 +514,7 @@ export function SupervisedReviewRoute() {
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
                 placeholder={lang === "zh" ? "搜索标题、提示种子或日志" : "Search title, prompt seed, or log"}
+                aria-label={lang === "zh" ? "搜索标题、提示种子或日志" : "Search title, prompt seed, or log"}
               />
             </label>
           </div>

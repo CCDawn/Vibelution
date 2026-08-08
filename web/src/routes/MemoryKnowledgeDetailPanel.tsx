@@ -29,6 +29,7 @@ type MemoryKnowledgeDetailPanelProps = {
   trace: KnowledgeTracePayload | undefined;
   knowledgeItems: KnowledgeItem[];
   knowledgeItemsPending: boolean;
+  knowledgeItemsErrorText?: string;
   ratingDraft: MemoryKnowledgeRatingDraft;
   knowledgeBusy: boolean;
   onTraceTargetChange: (value: string) => void;
@@ -43,6 +44,7 @@ export function MemoryKnowledgeDetailPanel({
   trace,
   knowledgeItems,
   knowledgeItemsPending,
+  knowledgeItemsErrorText,
   ratingDraft,
   knowledgeBusy,
   onTraceTargetChange,
@@ -89,7 +91,13 @@ export function MemoryKnowledgeDetailPanel({
             onUpdateKnowledgeRating={onUpdateKnowledgeRating}
           />
         ))}
-        {!knowledgeItemsPending && !knowledgeItems.length ? (
+        {knowledgeItemsErrorText ? (
+          <section className={styles.emptyDetail} role="alert">
+            <FileText size={22} />
+            <strong>{knowledgeItemsErrorText}</strong>
+          </section>
+        ) : null}
+        {!knowledgeItemsPending && !knowledgeItemsErrorText && !knowledgeItems.length ? (
           <section className={styles.emptyDetail}>
             <FileText size={22} />
             <strong>{copy.noMatches}</strong>

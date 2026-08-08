@@ -88,7 +88,7 @@ export function MemorySourcePanel({
 
       <label className={styles.searchBox}>
         <Search size={15} />
-        <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} />
+        <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} aria-label={copy.searchPlaceholder} />
       </label>
 
       <VTabs
