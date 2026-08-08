@@ -22,13 +22,14 @@ export type ResearchProcessNodeInspectorProps = {
   handoffPending: boolean;
   busy: boolean;
   onCommand: (command: string) => void;
-  /** Opens a stage drawer panel (experiment/knowledge) from the node. */
-  onOpenPanel?: (panel: "experiment" | "knowledge") => void;
+  /** Opens a stage drawer panel (experiment/knowledge/iteration) from the node. */
+  onOpenPanel?: (panel: "experiment" | "knowledge" | "iteration") => void;
 };
 
-const DRAWER_PANEL_LABELS: Record<"experiment" | "knowledge", { zh: string; en: string }> = {
+const DRAWER_PANEL_LABELS: Record<"experiment" | "knowledge" | "iteration", { zh: string; en: string }> = {
   experiment: { zh: "打开实验设计面板", en: "Open experiment design" },
   knowledge: { zh: "打开知识搜集面板", en: "Open knowledge collection" },
+  iteration: { zh: "打开迭代决策面板", en: "Open iteration decisions" },
 };
 
 function bindingSourceLabel(source: string | undefined): string {
@@ -45,9 +46,6 @@ function bindingSourceLabel(source: string | undefined): string {
 function commandDisabledTitle(capability: NodeCommandCapability): string {
   if (!capability.available) {
     return capability.reason || "该操作当前不可用";
-  }
-  if (capability.command === "build_package" || capability.command === "open_evidence_graph") {
-    return "该服务尚未接入后端";
   }
   return "";
 }

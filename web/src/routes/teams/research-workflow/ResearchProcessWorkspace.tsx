@@ -38,23 +38,43 @@ import { useNodeDetailState } from "./useNodeDetailState";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
 import { useResearchWorkflowProjectContext } from "./useResearchWorkflowProjectContext";
 import { ResearchAgentBindingPanel } from "./ResearchAgentBindingPanel";
+import { IterationDecisionPanel } from "./IterationDecisionPanel";
+import { EvidenceGraphView } from "./EvidenceGraphView";
+import { ChallengeMvpProgressPanel } from "./ChallengeMvpProgressPanel";
+import { ChallengeQuestionDetailPanel } from "../challenge-cup/ChallengeQuestionDetailPanel";
+import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
+import { queryKeys } from "../../../api/queryKeys";
+import { useQuery } from "@tanstack/react-query";
 
 export type ResearchProcessWorkspaceProps = {
   teamId?: string;
   /** Stage drawer panel content injected by the shell (reuses existing stage functions). */
   experimentPanel?: ReactNode;
   knowledgePanel?: ReactNode;
+  iterationPanel?: ReactNode;
+  /** Knowledge-ingestion completion-flow content injected by the shell. */
+  knowledgeIngestionPanel?: ReactNode;
 };
 
 export function ResearchProcessWorkspace({
   teamId = "",
   experimentPanel,
   knowledgePanel,
+  iterationPanel,
+  knowledgeIngestionPanel,
 }: ResearchProcessWorkspaceProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const runId = searchParams.get("runId") || "";
   const selectedNodeId = searchParams.get("node") || null;
   const panel = (searchParams.get("panel") as ResearchProcessPanel | null) || "node";
+  const questionId = (searchParams.get("questionId") || "").trim().toUpperCase();
+
+  const questionDetailQuery = useQuery({
+    queryKey: queryKeys.challengeQuestionRunDetail(teamId, questionId),
+    queryFn: () => getChallengeQuestionRunDetail(teamId, questionId),
+    enabled: Boolean(teamId.trim()) && Boolean(questionId),
+    staleTime: 60_000,
+  });
 
   const { projection, run, error, busy, createRun, resolveHuman, refresh } = useResearchWorkflowRun(runId);
   const { activeProjectId, loading: projectLoading, error: projectError } = useResearchWorkflowProjectContext(teamId);
@@ -345,6 +365,13 @@ export function ResearchProcessWorkspace({
         >
           团队
         </VButton>
+        <VButton
+          type="button"
+          variant={panel === "progress" || panel === "question" ? "secondary" : "ghost"}
+          onClick={() => replaceParams({ panel: "progress" })}
+        >
+          题目进度
+        </VButton>
         {projection?.run.runtimeCurrentNodeIds?.length ? (
           <VButton type="button" variant="ghost" onClick={jumpToRuntime}>
             当前节点
@@ -365,7 +392,38 @@ export function ResearchProcessWorkspace({
   );
 
   const inspectorBody =
-    panel === "agents" ? (
+    panel === "progress" ? (
+      <ChallengeMvpProgressPanel
+        teamId={teamId}
+        onOpenQuestion={(nextQuestionId) =>
+          replaceParams({ panel: "question", questionId: nextQuestionId })
+        }
+      />
+    ) : panel === "question" ? (
+      questionId ? (
+        <div className="h-full min-h-0 overflow-auto">
+          <ChallengeQuestionDetailPanel
+            requestedQuestionId={questionId}
+            detail={questionDetailQuery.data}
+            isLoading={questionDetailQuery.isPending}
+            errorMessage={
+              questionDetailQuery.error instanceof Error
+                ? questionDetailQuery.error.message
+                : questionDetailQuery.isError
+                  ? "challenge_question_run_unavailable"
+                  : ""
+            }
+            onClose={() => replaceParams({ panel: "progress" })}
+          />
+        </div>
+      ) : (
+        <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
+          <VEmptyState title="单题验收" className="h-auto w-full border-0 bg-transparent">
+            从题目进度中选择一道题查看验收详情。
+          </VEmptyState>
+        </div>
+      )
+    ) : panel === "agents" ? (
       <ResearchAgentBindingPanel
         teamId={teamId}
         run={run}
@@ -381,13 +439,30 @@ export function ResearchProcessWorkspace({
         </div>
       )
     ) : panel === "knowledge" ? (
-      knowledgePanel ?? (
-        <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
-          <VEmptyState title="知识搜集" className="h-auto w-full border-0 bg-transparent">
-            知识搜集面板在此打开。
-          </VEmptyState>
-        </div>
+      selectedNodeId === "evidence_relations" && runId ? (
+        <EvidenceGraphView runId={runId} nodeId={selectedNodeId} teamId={teamId} />
+      ) : selectedNodeId === "knowledge_ingestion" ? (
+        knowledgeIngestionPanel ?? (
+          <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
+            <VEmptyState title="知识入库" className="h-auto w-full border-0 bg-transparent">
+              知识入库状态面板在此打开。
+            </VEmptyState>
+          </div>
+        )
+      ) : (
+        knowledgePanel ?? (
+          <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
+            <VEmptyState title="知识搜集" className="h-auto w-full border-0 bg-transparent">
+              知识搜集面板在此打开。
+            </VEmptyState>
+          </div>
+        )
       )
+    ) : panel === "iteration" ? (
+      <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto">
+        <IterationDecisionPanel runId={runId} run={run} busy={Boolean(busy)} onRefresh={refresh} />
+        {iterationPanel}
+      </div>
     ) : panel === "timeline" ? (
       <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
         <VPanelHeader title="运行事件" headingLevel={3} />

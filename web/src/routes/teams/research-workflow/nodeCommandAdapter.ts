@@ -36,12 +36,8 @@ const EXECUTABLE = new Set([
   "accept_handoff",
   "reject_handoff",
   "revise",
-]);
-
-/** Commands with no backend service: must render disabled, never clickable. */
-export const EXPLICITLY_UNAVAILABLE = new Map([
-  ["build_package", "结果包服务尚未接入后端"],
-  ["open_evidence_graph", "证据图服务尚未接入后端"],
+  "build_package",
+  "open_evidence_graph",
 ]);
 
 export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string {
@@ -82,9 +78,6 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
 export function disableReasonFor(capability: NodeCommandCapability): string {
   if (!capability.available) {
     return capability.reason || "该操作当前不可用";
-  }
-  if (EXPLICITLY_UNAVAILABLE.has(capability.command)) {
-    return EXPLICITLY_UNAVAILABLE.get(capability.command) ?? "该操作当前不可用";
   }
   return "";
 }

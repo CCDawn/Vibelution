@@ -1,4 +1,13 @@
-export type ResearchProcessPanel = "node" | "agents" | "team" | "timeline" | "experiment" | "knowledge";
+export type ResearchProcessPanel =
+  | "node"
+  | "agents"
+  | "team"
+  | "timeline"
+  | "experiment"
+  | "knowledge"
+  | "iteration"
+  | "progress"
+  | "question";
 
 export function shouldApplyCanvasNodeSelection({
   nodeId,
@@ -11,5 +20,5 @@ export function shouldApplyCanvasNodeSelection({
 }
 
 export function isStageDrawerPanel(panel: ResearchProcessPanel): boolean {
-  return panel === "experiment" || panel === "knowledge";
+  return panel === "experiment" || panel === "knowledge" || panel === "iteration";
 }

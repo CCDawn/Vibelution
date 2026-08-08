@@ -71,6 +71,13 @@ def node_command_capabilities(
     actor_kind = str(node.get("actorKind") or "")
 
     if actor_kind == ActorKind.AGENT.value:
+        if node_id == "evidence_relations":
+            from .evidence_graph_projection import evidence_graph_availability
+
+            available, reason = evidence_graph_availability(record)
+            return [
+                {"command": "open_evidence_graph", "available": available, "reason": reason}
+            ]
         role = str(node.get("primaryRoleKey") or "")
         if role not in TASK_KIND_BY_ROLE:
             return []
@@ -97,6 +104,15 @@ def node_command_capabilities(
         return [
             {"command": command, "available": True, "reason": ""}
             for command in ("accept_handoff", "reject_handoff", "revise")
+        ]
+
+    if actor_kind == ActorKind.SYSTEM.value and node_id == "result_package":
+        from .result_package import result_package_availability
+
+        available, reason = result_package_availability(record)
+        return [
+            {"command": "build_package", "available": available, "reason": reason},
+            {"command": "view_artifacts", "available": True, "reason": ""},
         ]
     return []
 
@@ -142,6 +158,10 @@ def apply_node_command(
         return _start_controlled_run(record, payload)
     if command == "view_artifacts":
         return _view_artifacts(record, node_id)
+    if command == "build_package":
+        return _build_package(store, record, payload)
+    if command == "open_evidence_graph":
+        return _open_evidence_graph(record)
     if command == "rebind_node":
         raise NodeCommandError(
             "rebind_node is handled by the runtime service command path",
@@ -269,3 +289,31 @@ def _view_artifacts(record: dict[str, Any], node_id: str) -> dict[str, Any]:
         "nodeId": node_id,
         "artifacts": artifacts,
     }
+
+
+def _build_package(
+    store: Any,
+    record: dict[str, Any],
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from .result_package import build_result_package
+
+    package = build_result_package(record)
+    run_id = str(record.get("runId") or "")
+    stored = record.get("resultPackage")
+    if not (isinstance(stored, dict) and stored.get("packageId") == package["packageId"]):
+        store.update_run(
+            run_id,
+            {
+                "resultPackage": package,
+                "resultPackageRef": package["packageRef"],
+            },
+        )
+    return {"command": "build_package", "resultPackage": package}
+
+
+def _open_evidence_graph(record: dict[str, Any]) -> dict[str, Any]:
+    from .evidence_graph_projection import project_evidence_graph
+
+    graph = project_evidence_graph(record)
+    return {"command": "open_evidence_graph", "graph": graph}
