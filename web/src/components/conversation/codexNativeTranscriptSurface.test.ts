@@ -282,7 +282,7 @@ describe("codexNativeTranscriptSurface", () => {
     ]);
   });
 
-  it("removes internal runtime status cells from native transcripts while keeping the answer", () => {
+  it("keeps model retry status cells in native process transcripts while filtering setup noise", () => {
     const surface = resolveCodexTranscriptSurface(message({
       content: "模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。\n\n本轮已按请求停止。",
       codexTranscript: {
@@ -330,7 +330,7 @@ describe("codexNativeTranscriptSurface", () => {
     }), projectedCells);
 
     expect(surface.mode).toBe("native");
-    expect(surface.cells.map((cell) => cell.id)).toEqual(["native-answer"]);
+    expect(surface.cells.map((cell) => cell.id)).toEqual(["status-retrying", "native-answer"]);
     expect(surface.hasAssistantMarkdown).toBe(true);
     expect(surface.suppressProjectedResponse).toBe(true);
   });

@@ -4614,8 +4614,9 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).not.toContain("回答</span>");
     expect(html).not.toContain("responseSection");
-    expect((html.match(/模型连接正在重试/g) ?? [])).toHaveLength(0);
-    expect((html.match(/本轮仍在继续/g) ?? [])).toHaveLength(0);
+    expect(html).toContain("请求重试");
+    expect(html).toContain("第 2/5 次");
+    expect(html).toContain("本轮仍在继续");
   });
 
   it("hides request-only internal process state without empty expandable details", () => {

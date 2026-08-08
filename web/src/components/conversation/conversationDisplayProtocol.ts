@@ -28,11 +28,42 @@ export type RuntimeStatusDisplayContext = {
   surface?: "active" | "transcript";
 };
 
+/**
+ * Model retries are part of the visible process trail, but remain an internal
+ * runtime status so their explanatory text never becomes the assistant answer.
+ * Keep the recognition bounded to the canonical stage names and safe labels
+ * emitted by the backend rather than exposing arbitrary provider errors.
+ */
+export function isRetryRuntimeStatus(input: RuntimeStatusDisplayInput) {
+  const stage = normalizedText(input.name ?? input.label ?? input.title);
+  if (stage === "model_retry" || stage === "retrying") {
+    return true;
+  }
+  const content = [
+    input.name,
+    input.label,
+    input.title,
+    input.summary,
+    input.resultPreview,
+    input.text,
+  ].map(normalizedText).filter(Boolean).join(" ");
+  return Boolean(
+    content.includes("model_retry")
+    || content.includes("retrying")
+    || content.includes("模型连接正在重试")
+    || content.includes("模型请求重试")
+    || content.includes("请求重试")
+  );
+}
+
 export function shouldDisplayRuntimeStatus(
   input: RuntimeStatusDisplayInput,
   context: RuntimeStatusDisplayContext = {},
 ) {
   if (normalizedText(input.kind) !== "status") {
+    return true;
+  }
+  if (isRetryRuntimeStatus(input)) {
     return true;
   }
   if (isModelTransportStatus(input)) {

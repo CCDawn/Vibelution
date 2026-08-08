@@ -6,7 +6,7 @@ import {
 } from "./conversationDisplayProtocol";
 
 describe("conversationDisplayProtocol", () => {
-  it("hides internal runtime statuses from visible conversation surfaces", () => {
+  it("hides internal pipeline statuses but keeps model retries visible in the process stream", () => {
     expect(shouldDisplayRuntimeStatus({
       kind: "status",
       name: "context_prepare",
@@ -18,7 +18,7 @@ describe("conversationDisplayProtocol", () => {
       name: "retrying",
       status: "done",
       summary: "第 1/5 次；原因：server_error。",
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it("keeps failed internal runtime statuses visible as temporary error information", () => {
@@ -83,6 +83,15 @@ describe("conversationDisplayProtocol", () => {
       title: "context_prepare",
       summary: "正在准备对话上下文...",
     })).toBe(false);
+    expect(shouldDisplayTranscriptCell({
+      id: "status-retrying",
+      kind: "status",
+      messageId: "message-1",
+      status: "running",
+      tone: "warning",
+      title: "retrying",
+      summary: "第 1/5 次；原因：server_error。",
+    })).toBe(true);
     expect(shouldDisplayTranscriptCell({
       id: "tool-call",
       kind: "tool_call",

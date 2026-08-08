@@ -12,6 +12,7 @@ export type OperationStateLabels = {
   done: string;
   pending: string;
   requesting: string;
+  retrying: string;
   requestFailed: string;
   pendingRequest: string;
   thinking: string;
@@ -144,9 +145,13 @@ export function processSummaryTitle(
   operations: AgentMessageOperation[],
   labels: Pick<
     OperationStateLabels,
-    "thinking" | "requesting" | "requestFailed" | "degraded" | "done" | "pendingRequest" | "generating" | "processFailed" | "process" | "processPending"
+    "thinking" | "requesting" | "retrying" | "requestFailed" | "degraded" | "done" | "pendingRequest" | "generating" | "processFailed" | "process" | "processPending"
   >,
 ) {
+  const retry = operations.find(isRetryOperation);
+  if (retry && ["running", "degraded"].includes(operationStatusTone(retry))) {
+    return labels.retrying || retry.label || labels.requesting;
+  }
   if (isCompactAnswerOnlyRequestProcess(operations)) {
     return compactInternalProcessStateLabel(tone, operations, labels);
   }
@@ -469,9 +474,22 @@ export function isLongLoopProgressOperation(operation: AgentMessageOperation) {
   ]);
 }
 
+export function isRetryOperation(operation: AgentMessageOperation) {
+  if (operation.kind !== "status") {
+    return false;
+  }
+  return operationMatchesAny(operation, [
+    "model_retry",
+    "retrying",
+    "模型连接正在重试",
+    "模型请求重试",
+    "请求重试",
+  ]);
+}
+
 export function shouldShowTimelineOperation(operation: AgentMessageOperation) {
   if (operation.kind === "status") {
-    return isLongLoopProgressOperation(operation) || Boolean(operation.error?.trim());
+    return isRetryOperation(operation) || isLongLoopProgressOperation(operation) || Boolean(operation.error?.trim());
   }
   return !isInternalPipelineOperation(operation) || Boolean(operation.error?.trim());
 }

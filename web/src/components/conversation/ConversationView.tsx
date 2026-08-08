@@ -106,6 +106,7 @@ import {
   processSummaryMeta,
   processSummaryPreview,
   processSummaryTitle,
+  isRetryOperation,
   shouldShowTimelineOperation,
   type OperationStateLabels,
 } from "./conversationOperationState";
@@ -869,6 +870,7 @@ export function ConversationView({
       done: lang === "zh" ? "已完成" : "Done",
       pending: lang === "zh" ? "待处理" : "Pending",
       requesting: lang === "zh" ? "正在请求" : "Requesting",
+      retrying: lang === "zh" ? "模型重试中" : "Retrying model",
       requestFailed: lang === "zh" ? "请求失败" : "Request failed",
       pendingRequest: lang === "zh" ? "等待请求" : "Pending request",
       thinking: lang === "zh" ? "正在思考中" : "Thinking",
@@ -1617,6 +1619,9 @@ export function ConversationView({
   }
 
   function operationLabel(operation: AgentMessageOperation) {
+    if (isRetryOperation(operation)) {
+      return lang === "zh" ? "请求重试" : "Retrying";
+    }
     return operationDisplayLabel(operation, operationStateLabels);
   }
 
@@ -2907,7 +2912,9 @@ export function ConversationView({
     const rawOperationLabel = String(operation.rawLabel ?? "").trim();
     const rawToolName = rawOperationLabel || rawTimelineTitle || operation.label;
     const semanticToolTitle = conversationToolPresentationLabel(rawToolName, lang);
-    const visibleTitle = operation.kind === "tool"
+    const visibleTitle = isRetryOperation(operation)
+      ? lang === "zh" ? "请求重试" : "Retrying"
+      : operation.kind === "tool"
       ? rawTimelineTitle && rawTimelineTitle !== rawOperationLabel
         ? rawTimelineTitle
         : semanticToolTitle
