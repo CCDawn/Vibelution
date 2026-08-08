@@ -26,8 +26,11 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(workspaceSource).not.toContain("不维护第二份");
   });
 
-  it("has no fake-command fallback error (inspector renders only wired commands)", () => {
+  it("has no fake-command fallback error (commands are backend-declared)", () => {
     expect(workspaceSource).not.toContain("尚未接入业务服务");
-    expect(workspaceSource).toContain("WIRED_COMMANDS");
+    expect(workspaceSource).not.toContain("WIRED_COMMANDS");
+    // Commands are executed through the real backend adapter only.
+    expect(workspaceSource).toContain("executeNodeCommand");
+    expect(workspaceSource).toContain("onInspectorCommand");
   });
 });
