@@ -410,6 +410,7 @@ def _publish_session_assistant_delta(
         codex_transcript=codex_transcript,
         done=done,
         source="assistant_delta",
+        stage=state.stage,
     )
     if turn_items:
         event["itemId"] = next(

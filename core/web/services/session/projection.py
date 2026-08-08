@@ -1051,6 +1051,7 @@ def _normalize_messages(
                     done=not is_streaming_message,
                     source="session_detail",
                     metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
+                    stage=raw.get("streamStage"),
                 )
                 if (
                     turn_items
@@ -1519,6 +1520,30 @@ def _is_session_turn_reasoning_item(item: Mapping[str, Any] | None) -> bool:
     return kind in {"reasoning", "analysis"} or phase == "reasoning" or channel in {"analysis", "reasoning"}
 
 
+# Stages where the model is still (or about to start) thinking. Once the stream
+# moves past these (answer/tool/terminal), the reasoning row is done even though
+# the turn itself has not committed yet.
+_SESSION_TURN_THINKING_STAGES = {
+    "model_thinking",
+    "server_thinking",
+    "thinking",
+    "reasoning",
+    "model_request",
+    "agent_prepare",
+    "user_submit",
+    "context_prepare",
+    "prepare",
+    "request",
+}
+
+
+def _session_turn_stage_past_thinking(stage: Any) -> bool:
+    normalized = str(stage or "").strip().lower()
+    if not normalized:
+        return False
+    return normalized not in _SESSION_TURN_THINKING_STAGES
+
+
 def _build_session_turn_reasoning_item(
     *,
     session_id: str,
@@ -1568,12 +1593,18 @@ def _merge_live_thought_into_turn_items(
     thought: Any = "",
     done: bool = False,
     source: str = "assistant_delta",
+    stage: Any = "",
 ) -> list[dict[str, Any]]:
     """Keep journal package authority while bridging live/durable thought as reasoning.
 
     Wire/journal often commits final_answer without a reasoning item even when the turn
     streamed thought. Without this bridge, package_cells drops thinking the moment the
     journal final answer lands (turnItemCount collapses to answer-only).
+
+    Segment lifecycle: the reasoning row must settle to ``completed`` the moment the
+    stream leaves the thinking stage (answer/tool delta), not wait for the turn-level
+    ``done``. Otherwise the UI keeps the thinking spinner after the thought segment
+    finished streaming.
     """
     s = _service()
     merged = [dict(item) for item in list(items or []) if isinstance(item, dict)]
@@ -1594,6 +1625,15 @@ def _merge_live_thought_into_turn_items(
             existing.get("provisional") is True
             or existing_status in {"", "pending", "running", "in_progress", "streaming"}
         )
+        thought_done = bool(done) or _session_turn_stage_past_thinking(stage)
+        if thought_done and can_extend and existing_status not in {"completed", "done", "success"}:
+            # The stream already moved past thinking: close the reasoning row so the
+            # segment spinner stops with the thought content, independent of turn done.
+            next_item = dict(existing)
+            next_item["status"] = "completed"
+            next_item["provisional"] = False
+            merged[reasoning_index] = s._compact_codex_record(next_item)
+            return merged
         if (
             can_extend
             and len(thought_text) > len(existing_text)
@@ -1605,7 +1645,7 @@ def _merge_live_thought_into_turn_items(
         ):
             next_item = dict(existing)
             next_item["text"] = thought_text
-            next_item["status"] = "completed" if done else (existing_status or "in_progress")
+            next_item["status"] = "completed" if thought_done else (existing_status or "in_progress")
             next_item["provisional"] = not bool(done)
             if not str(next_item.get("messageId") or "").strip():
                 next_item["messageId"] = str(message_id or "").strip()
@@ -1619,7 +1659,7 @@ def _merge_live_thought_into_turn_items(
         turn_id=turn_id,
         message_id=message_id,
         thought=thought_text,
-        done=done,
+        done=bool(done) or _session_turn_stage_past_thinking(stage),
         source=source,
         sequence=0,
     )
@@ -1724,6 +1764,7 @@ def _build_session_turn_items_projection(
     done: bool = False,
     source: str = "assistant_delta",
     metadata: Mapping[str, Any] | None = None,
+    stage: Any = "",
 ) -> list[dict[str, Any]]:
     """Project SessionTurnItem v2 for a turn.
 
@@ -1767,6 +1808,7 @@ def _build_session_turn_items_projection(
                 thought=thought,
                 done=done,
                 source=source,
+                stage=stage,
             )
     if (
         str(normalized_metadata.get("kind") or "").strip() == "turn_error"
@@ -1843,7 +1885,9 @@ def _build_session_turn_items_projection(
                     "kind": "reasoning",
                     "channel": "analysis",
                     "phase": "reasoning",
-                    "status": "completed" if done else "in_progress",
+                    "status": "completed"
+                    if (done or _session_turn_stage_past_thinking(stage) or bool(agent_text))
+                    else "in_progress",
                     "provisional": not bool(done),
                     "terminal": False,
                     "revision": 0,
