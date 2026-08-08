@@ -8,7 +8,7 @@
  * - canvas host is flex-1 min-h-0; React Flow fills via absolute inset host
  * - inspector is recipe aside (WORKBENCH_LAYOUT_IDS.researchFlow)
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import {
@@ -41,9 +41,16 @@ import { ResearchAgentBindingPanel } from "./ResearchAgentBindingPanel";
 
 export type ResearchProcessWorkspaceProps = {
   teamId?: string;
+  /** Stage drawer panel content injected by the shell (reuses existing stage functions). */
+  experimentPanel?: ReactNode;
+  knowledgePanel?: ReactNode;
 };
 
-export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspaceProps) {
+export function ResearchProcessWorkspace({
+  teamId = "",
+  experimentPanel,
+  knowledgePanel,
+}: ResearchProcessWorkspaceProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const runId = searchParams.get("runId") || "";
   const selectedNodeId = searchParams.get("node") || null;
@@ -365,6 +372,22 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
         effectiveBindings={effectiveBindings}
         lang="zh"
       />
+    ) : panel === "experiment" ? (
+      experimentPanel ?? (
+        <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
+          <VEmptyState title="实验设计" className="h-auto w-full border-0 bg-transparent">
+            实验设计面板在此打开。
+          </VEmptyState>
+        </div>
+      )
+    ) : panel === "knowledge" ? (
+      knowledgePanel ?? (
+        <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
+          <VEmptyState title="知识搜集" className="h-auto w-full border-0 bg-transparent">
+            知识搜集面板在此打开。
+          </VEmptyState>
+        </div>
+      )
     ) : panel === "timeline" ? (
       <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
         <VPanelHeader title="运行事件" headingLevel={3} />
@@ -423,6 +446,9 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
           handoffPending={Boolean(currentPendingTaskId(selectedNodeId))}
           busy={Boolean(busy) || commandBusy}
           onCommand={onInspectorCommand}
+          onOpenPanel={(drawerPanel) => {
+            replaceParams({ panel: drawerPanel });
+          }}
         />
       )
     ) : (

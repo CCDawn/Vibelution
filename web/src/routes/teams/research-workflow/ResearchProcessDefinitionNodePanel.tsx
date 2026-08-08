@@ -1,5 +1,6 @@
 import type { EffectiveAgentBinding, WorkflowDefinition } from "../../../api/types/researchWorkflow";
 import { VEmptyState, VPanelHeader, VSurface } from "../../../components/vui";
+import styles from "./ResearchProcessDefinitionNodePanel.styles";
 
 export type ResearchProcessDefinitionNodePanelProps = {
   nodeId: string;
@@ -20,17 +21,17 @@ export function ResearchProcessDefinitionNodePanel({
   const agentId = binding?.agentId || "未绑定";
 
   return (
-    <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3" data-vui="definition-node-detail">
+    <VSurface tone="panel" className={styles.panel} data-vui="definition-node-detail">
       <VPanelHeader title={node.label} headingLevel={3} />
-      <dl className="m-0 grid grid-cols-[88px_1fr] gap-x-2 gap-y-2 text-sm">
-        <dt className="text-[var(--fg-tertiary)]">执行者</dt>
-        <dd className="m-0 text-[var(--fg-primary)]">{node.actorKind}</dd>
-        <dt className="text-[var(--fg-tertiary)]">角色</dt>
-        <dd className="m-0 text-[var(--fg-primary)]">{node.primaryRoleKey}</dd>
-        <dt className="text-[var(--fg-tertiary)]">Agent</dt>
-        <dd className="m-0 break-all text-[var(--fg-primary)]">{agentId}</dd>
+      <dl className={styles.detailGrid}>
+        <dt className={styles.dt}>执行者</dt>
+        <dd className={styles.dd}>{node.actorKind}</dd>
+        <dt className={styles.dt}>角色</dt>
+        <dd className={styles.dd}>{node.primaryRoleKey}</dd>
+        <dt className={styles.dt}>Agent</dt>
+        <dd className={styles.ddBreak}>{agentId}</dd>
       </dl>
-      {node.description ? <p className="m-0 text-sm text-[var(--fg-secondary)]">{node.description}</p> : null}
+      {node.description ? <p className={styles.description}>{node.description}</p> : null}
     </VSurface>
   );
 }

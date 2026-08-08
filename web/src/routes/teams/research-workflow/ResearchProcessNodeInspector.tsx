@@ -22,6 +22,13 @@ export type ResearchProcessNodeInspectorProps = {
   handoffPending: boolean;
   busy: boolean;
   onCommand: (command: string) => void;
+  /** Opens a stage drawer panel (experiment/knowledge) from the node. */
+  onOpenPanel?: (panel: "experiment" | "knowledge") => void;
+};
+
+const DRAWER_PANEL_LABELS: Record<"experiment" | "knowledge", { zh: string; en: string }> = {
+  experiment: { zh: "打开实验设计面板", en: "Open experiment design" },
+  knowledge: { zh: "打开知识搜集面板", en: "Open knowledge collection" },
 };
 
 function bindingSourceLabel(source: string | undefined): string {
@@ -52,6 +59,7 @@ export function ResearchProcessNodeInspector({
   handoffPending,
   busy,
   onCommand,
+  onOpenPanel,
 }: ResearchProcessNodeInspectorProps) {
   if (!adapter) {
     return (
@@ -157,6 +165,16 @@ export function ResearchProcessNodeInspector({
       ) : null}
 
       <div className="flex flex-wrap gap-2" data-vui="node-commands">
+        {adapter.drawerPanel && onOpenPanel ? (
+          <VButton
+            type="button"
+            variant="secondary"
+            onClick={() => onOpenPanel(adapter.drawerPanel!)}
+            title={DRAWER_PANEL_LABELS[adapter.drawerPanel].zh}
+          >
+            {DRAWER_PANEL_LABELS[adapter.drawerPanel].zh}
+          </VButton>
+        ) : null}
         {capabilities.map((capability) => {
           const disabledTitle = commandDisabledTitle(capability);
           if (capability.command === "open_session") {

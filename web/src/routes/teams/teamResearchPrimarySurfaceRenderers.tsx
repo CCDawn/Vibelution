@@ -13,6 +13,7 @@ import { createExperimentController } from "./createExperimentController";
 import { workflowStateLabel } from "./workflowPresentation";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
 import { ResearchProcessWorkspace } from "./research-workflow/ResearchProcessWorkspace";
+import { TeamSourceCollectionSearchBriefPanel } from "./teamLazyPanels";
 
 /** Loose context bag from TeamsRoute. */
 export type ResearchPrimarySurfaceRenderContext = {
@@ -211,9 +212,23 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
   }
 
   function renderResearchProcessWorkflowSurface() {
+    const knowledgeDrawer =
+      ctx.renderSourceCollectionModeFields && ctx.setSourceCollectionDraft ? (
+        <TeamSourceCollectionSearchBriefPanel
+          lang={lang}
+          draft={sourceCollectionDraft}
+          modeFields={ctx.renderSourceCollectionModeFields()}
+          hasExistingRun={Boolean(selectedSourceCollectionRun)}
+          onDraftChange={(patch) =>
+            setSourceCollectionDraft((current: Record<string, unknown>) => ({ ...current, ...patch }))
+          }
+        />
+      ) : null;
     return (
       <ResearchProcessWorkspace
         teamId={String(selectedTeam?.teamId || selectedTeam?.id || ctx.effectiveTeamId || "")}
+        experimentPanel={renderExperimentPlanningLedgerPanel ? renderExperimentPlanningLedgerPanel() : undefined}
+        knowledgePanel={knowledgeDrawer ?? undefined}
       />
     );
   }

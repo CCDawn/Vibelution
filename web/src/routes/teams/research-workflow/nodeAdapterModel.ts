@@ -24,6 +24,11 @@ export type NodeAdapterSpec = {
   slot: NodeAdapterSlot;
   /** Primary command keys shown in inspector (not route navigations). */
   commands: string[];
+  /**
+   * Stage drawer panel this node opens (Task 6: legacy stage functions are
+   * embedded as same-shell secondary panels, not copied into the inspector).
+   */
+  drawerPanel?: "experiment" | "knowledge";
   /** Legacy surface this adapter replaces as primary entry. */
   replaces: string;
 };
@@ -45,6 +50,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "knowledge_ops",
     commands: ["start_agent_task", "open_session"],
+    drawerPanel: "knowledge",
     replaces: "researchView=knowledge_collection&collectionStage=finding",
   },
   {
@@ -54,6 +60,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "knowledge_ops",
     commands: ["start_agent_task", "open_session"],
+    drawerPanel: "knowledge",
     replaces: "collectionStage=extraction",
   },
   {
@@ -90,6 +97,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "experiment_ops",
     commands: ["start_agent_task", "open_session"],
+    drawerPanel: "experiment",
     replaces: "researchView=experiment",
   },
   {
@@ -99,6 +107,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "experiment_ops",
     commands: ["start_agent_task", "open_session"],
+    drawerPanel: "experiment",
     replaces: "protocol design draft",
   },
   {
