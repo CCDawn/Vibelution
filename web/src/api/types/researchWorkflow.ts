@@ -280,7 +280,7 @@ export type EffectiveAgentBindingsResponse = {
 
 /** Controlled-write binding config payload (whole-layer replacement). */
 export type AgentBindingConfigPayload = {
-  teamId?: string;
+  teamId: string;
   workflowDefaults?: Record<string, string>;
   stageOverrides?: Record<string, Record<string, string>>;
   nodeOverrides?: Record<string, string>;

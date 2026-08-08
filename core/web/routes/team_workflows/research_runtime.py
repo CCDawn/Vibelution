@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
@@ -15,8 +15,19 @@ from core.web.services.team_workflow.research_runtime.service import (
 from ._router import router
 
 
-class CreateRunPayload(BaseModel):
-    teamId: str = ""
+class TeamScopedPayload(BaseModel):
+    teamId: str = Field(..., min_length=1)
+
+    @field_validator("teamId")
+    @classmethod
+    def normalize_team_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("teamId must not be blank")
+        return normalized
+
+
+class CreateRunPayload(TeamScopedPayload):
     projectId: str = ""
     idempotencyKey: str = ""
 
@@ -45,8 +56,7 @@ class SessionBindingPayload(BaseModel):
     supersedesBindingId: str = ""
 
 
-class AgentBindingConfigPayload(BaseModel):
-    teamId: str = ""
+class AgentBindingConfigPayload(TeamScopedPayload):
     workflowDefaults: dict[str, str] = Field(default_factory=dict)
     stageOverrides: dict[str, dict[str, str]] = Field(default_factory=dict)
     nodeOverrides: dict[str, str] = Field(default_factory=dict)
@@ -59,6 +69,16 @@ class NodeCommandPayload(BaseModel):
 
 def _svc():
     return get_research_workflow_runtime_service()
+
+
+def _canonical_team_id(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "team_id_required", "message": "teamId must not be blank"},
+        )
+    return normalized
 
 
 def _map_error(exc: ResearchWorkflowError) -> HTTPException:
@@ -76,17 +96,23 @@ def research_workflow_definition(workflow_id: str) -> dict:
 
 
 @router.get("/research/workflows/{workflow_id}/runs")
-def research_workflow_runs(workflow_id: str, team_id: str = Query("")) -> dict:
-    return _svc().list_runs(workflow_id, team_id=team_id)
+def research_workflow_runs(
+    workflow_id: str,
+    # teamId is the only public team scope. Legacy team_id is intentionally
+    # rejected by FastAPI's required-field validation instead of ignored.
+    team_id: str = Query(..., alias="teamId", min_length=1),
+) -> dict:
+    return _svc().list_runs(workflow_id, team_id=_canonical_team_id(team_id))
 
 
 @router.get("/research/workflows/{workflow_id}/agent-bindings/effective")
 def research_workflow_effective_bindings(
     workflow_id: str,
-    team_id: str = Query(""),
+    # Keep the canonical camel-case contract identical to the runs endpoint.
+    team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
     try:
-        return _svc().get_effective_agent_bindings(workflow_id, team_id=team_id)
+        return _svc().get_effective_agent_bindings(workflow_id, team_id=_canonical_team_id(team_id))
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 

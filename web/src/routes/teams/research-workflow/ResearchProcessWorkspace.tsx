@@ -29,14 +29,15 @@ import {
   VWorkflowCanvas,
 } from "../../../components/vui";
 import { definitionToCanvasGraph, projectionToCanvasGraph } from "./researchProcessGraphModel";
+import { shouldApplyCanvasNodeSelection, type ResearchProcessPanel } from "./researchProcessPanelSelection";
+import { ResearchProcessDefinitionNodePanel } from "./ResearchProcessDefinitionNodePanel";
 import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import { getNodeAdapter } from "./nodeAdapterModel";
 import { executeNodeCommand } from "./nodeCommandAdapter";
 import { useNodeDetailState } from "./useNodeDetailState";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
+import { useResearchWorkflowProjectContext } from "./useResearchWorkflowProjectContext";
 import { ResearchAgentBindingPanel } from "./ResearchAgentBindingPanel";
-
-type PanelKind = "node" | "agents" | "team" | "timeline";
 
 export type ResearchProcessWorkspaceProps = {
   teamId?: string;
@@ -46,10 +47,13 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
   const [searchParams, setSearchParams] = useSearchParams();
   const runId = searchParams.get("runId") || "";
   const selectedNodeId = searchParams.get("node") || null;
-  const panel = (searchParams.get("panel") as PanelKind | null) || "node";
+  const panel = (searchParams.get("panel") as ResearchProcessPanel | null) || "node";
 
   const { projection, run, error, busy, createRun, resolveHuman, refresh } = useResearchWorkflowRun(runId);
+  const { activeProjectId, loading: projectLoading, error: projectError } = useResearchWorkflowProjectContext(teamId);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [runListError, setRunListError] = useState<string | null>(null);
+  const [bindingLoadError, setBindingLoadError] = useState<string | null>(null);
   const [runOptions, setRunOptions] = useState<Array<{ runId: string; status: string }>>([]);
   const [effectiveBindings, setEffectiveBindings] = useState<EffectiveAgentBinding[] | null>(null);
   const [commandBusy, setCommandBusy] = useState(false);
@@ -73,6 +77,14 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
 
   useEffect(() => {
     let cancelled = false;
+    if (!teamId.trim()) {
+      setRunOptions([]);
+      setRunListError("缺少 teamId，无法读取工作流运行");
+      return () => {
+        cancelled = true;
+      };
+    }
+    setRunListError(null);
     listResearchWorkflowRuns(CHALLENGE_CUP_WORKFLOW_ID, { teamId })
       .then((payload) => {
         if (cancelled) return;
@@ -83,24 +95,34 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
           })),
         );
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setRunOptions([]);
+          setRunListError(`运行列表加载失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
     return () => {
       cancelled = true;
     };
   }, [teamId, runId, run?.status]);
 
   useEffect(() => {
-    if (!teamId) {
+    if (!teamId.trim()) {
       setEffectiveBindings(null);
+      setBindingLoadError("缺少 teamId，无法读取 Agent 绑定");
       return;
     }
     let cancelled = false;
+    setBindingLoadError(null);
     fetchEffectiveAgentBindings(CHALLENGE_CUP_WORKFLOW_ID, { teamId })
       .then((payload) => {
         if (!cancelled) setEffectiveBindings(payload.bindings);
       })
-      .catch(() => {
-        if (!cancelled) setEffectiveBindings(null);
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setEffectiveBindings(null);
+          setBindingLoadError(`Agent 绑定加载失败：${err instanceof Error ? err.message : String(err)}`);
+        }
       });
     return () => {
       cancelled = true;
@@ -109,20 +131,36 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
 
   const graph = useMemo(() => {
     if (!projection) return null;
-    return runId ? projectionToCanvasGraph(projection) : definitionToCanvasGraph(projection.definition);
-  }, [projection, runId]);
+    if (runId) return projectionToCanvasGraph(projection);
+    return definitionToCanvasGraph(projection.definition, {
+      primaryAgentIdByNode: new Map(
+        (effectiveBindings ?? [])
+          .filter((binding) => Boolean(binding.agentId))
+          .map((binding) => [binding.nodeId, binding.agentId]),
+      ),
+    });
+  }, [effectiveBindings, projection, runId]);
 
   const onSelectNode = useCallback(
     (nodeId: string | null) => {
+      if (!shouldApplyCanvasNodeSelection({ nodeId, panel })) return;
       replaceParams({ node: nodeId, panel: "node" });
     },
-    [replaceParams],
+    [panel, replaceParams],
   );
 
   const onCreateRun = useCallback(async () => {
     setLocalError(null);
+    if (projectLoading) {
+      setLocalError("正在读取当前研究项目，请稍后再创建运行");
+      return;
+    }
+    if (!activeProjectId) {
+      setLocalError("当前团队没有活动研究项目，请先创建或选择项目");
+      return;
+    }
     try {
-      const created = await createRun(teamId);
+      const created = await createRun(teamId, activeProjectId);
       replaceParams({
         runId: created.runId,
         node: created.runtimeCurrentNodeIds?.[0] || "knowledge_handoff",
@@ -130,7 +168,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
-  }, [teamId, replaceParams, createRun]);
+  }, [activeProjectId, createRun, projectLoading, replaceParams, teamId]);
 
   const onResolveHuman = useCallback(
     async (accept: boolean) => {
@@ -216,7 +254,7 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
     [runId, selectedNodeId, teamId, nodeDetail, onResolveHuman, refresh, currentPendingTaskId],
   );
 
-  const displayError = localError || error;
+  const displayError = localError || error || runListError || bindingLoadError || projectError;
 
   // Canvas cell: flex column fill; React Flow absolute-fills the remaining host.
   const canvasBody = (
@@ -306,7 +344,12 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
           </VButton>
         ) : null}
         {!runId ? (
-          <VButton type="button" onClick={onCreateRun} isDisabled={busy}>
+          <VButton
+            type="button"
+            onClick={onCreateRun}
+            isDisabled={busy || projectLoading || !activeProjectId}
+            title={projectError || (!activeProjectId ? "请先选择活动研究项目" : undefined)}
+          >
             创建运行
           </VButton>
         ) : null}
@@ -346,6 +389,12 @@ export function ResearchProcessWorkspace({ teamId = "" }: ResearchProcessWorkspa
         <p className="m-0">团队 ID：{teamId || "—"}</p>
         <p className="m-0">运行：{runId || "未创建"}</p>
       </VSurface>
+    ) : selectedNodeId && !runId && projection ? (
+      <ResearchProcessDefinitionNodePanel
+        nodeId={selectedNodeId}
+        definition={projection.definition}
+        effectiveBindings={effectiveBindings}
+      />
     ) : selectedNodeId ? (
       nodeDetailState.state.kind === "loading" ? (
         <VStateSurface tone="loading" title="加载节点详情" fill className="h-full min-h-0" />

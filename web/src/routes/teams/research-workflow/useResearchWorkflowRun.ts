@@ -31,7 +31,7 @@ export type UseResearchWorkflowRunResult = {
   busy: boolean;
   lastSequence: number;
   refresh: () => Promise<void>;
-  createRun: (teamId: string) => Promise<WorkflowRunRecord>;
+  createRun: (teamId: string, projectId?: string) => Promise<WorkflowRunRecord>;
   resolveHuman: (taskId: string, accept: boolean) => Promise<WorkflowRunRecord>;
 };
 
@@ -232,12 +232,13 @@ export function useResearchWorkflowRun(runId: string): UseResearchWorkflowRunRes
   }, [runId, run?.status]);
 
   const createRun = useCallback(
-    async (teamId: string) => {
+    async (teamId: string, projectId?: string) => {
       setBusy(true);
       setError(null);
       try {
         const created = await createResearchWorkflowRun({
           teamId,
+          projectId,
           workflowId: CHALLENGE_CUP_WORKFLOW_ID,
           idempotencyKey: `ui-${teamId || "default"}-${Date.now()}`,
         });

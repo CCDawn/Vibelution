@@ -15,15 +15,24 @@ Covers the acceptance matrix:
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
-from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID, build_challenge_cup_workflow_definition
+from core.research.workflow.definition import (
+    CHALLENGE_CUP_WORKFLOW_ID,
+    build_challenge_cup_workflow_definition,
+)
 from core.research.workflow.models import ActorKind
+from core.web.app import create_app
+from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.services.team_workflow.research_runtime.node_command_adapter import (
+    NodeCommandUnavailable,
+    _require_project,
+)
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
     reset_research_workflow_runtime_service_for_tests,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
-
 
 # research-team org canvas with the 9 challenge-cup agent roles.
 ROLE_AGENTS = {
@@ -158,6 +167,66 @@ def test_effective_bindings_view_reflects_current_config(runtime_service) -> Non
     assert by_node["source_finding"]["resolvedFrom"] == "workflow_default"
 
 
+def test_team_scoped_read_routes_require_camel_team_id(runtime_service) -> None:
+    """The public HTTP contract has one canonical teamId query key only."""
+    research_run = runtime_service.create_run(CHALLENGE_CUP_WORKFLOW_ID, team_id="research-team")
+    runtime_service.create_run(CHALLENGE_CUP_WORKFLOW_ID, team_id="other-team")
+    client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+    base = f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}"
+
+    canonical_runs = client.get(f"{base}/runs?teamId=research-team")
+    assert canonical_runs.status_code == 200, canonical_runs.text
+    assert [item["runId"] for item in canonical_runs.json()["runs"]] == [research_run["runId"]]
+
+    canonical_bindings = client.get(f"{base}/agent-bindings/effective?teamId=research-team")
+    assert canonical_bindings.status_code == 200, canonical_bindings.text
+    assert canonical_bindings.json()["teamId"] == "research-team"
+
+    for path in (f"{base}/runs?team_id=research-team", f"{base}/agent-bindings/effective?team_id=research-team"):
+        legacy = client.get(path)
+        assert legacy.status_code == 422, legacy.text
+
+    blank = client.get(f"{base}/runs?teamId=%20%20")
+    assert blank.status_code == 422, blank.text
+    missing_body = client.post(f"{base}/runs", json={"idempotencyKey": "missing-team"})
+    assert missing_body.status_code == 422, missing_body.text
+
+
+def test_node_commands_are_scoped_to_real_node_handlers(runtime_service) -> None:
+    run = runtime_service.create_run(CHALLENGE_CUP_WORKFLOW_ID, team_id="research-team")
+
+    source_detail = runtime_service.get_node_detail(run["runId"], "source_finding")
+    source_commands = {item["command"]: item for item in source_detail["commands"]}
+    assert "start_agent_task" not in source_commands
+    assert "run_smoke" not in source_commands
+    assert "start_controlled_run" not in source_commands
+    assert source_commands["open_session"]["available"] is False
+
+    # A later human gate has no pending task yet, so it must not advertise a
+    # clickable resolution action.
+    assert runtime_service.get_node_detail(run["runId"], "protocol_freeze")["commands"] == []
+
+    hypothesis_detail = runtime_service.get_node_detail(run["runId"], "hypothesis_design")
+    hypothesis_commands = {item["command"]: item for item in hypothesis_detail["commands"]}
+    assert hypothesis_commands["start_agent_task"]["available"] is False
+    assert "projectId" in hypothesis_commands["start_agent_task"]["reason"]
+
+    with pytest.raises(ResearchWorkflowError) as exc:
+        runtime_service.apply_node_command(
+            run["runId"],
+            "source_finding",
+            "start_agent_task",
+            payload={},
+        )
+    assert exc.value.code == "command_not_allowed_for_node"
+
+
+def test_node_command_project_context_cannot_be_supplied_by_request_payload() -> None:
+    with pytest.raises(NodeCommandUnavailable) as exc:
+        _require_project({"teamId": "research-team", "projectId": ""}, {"projectId": "spoofed"})
+    assert exc.value.code == "no_project_context"
+
+
 def test_controlled_write_rejects_unknown_role_and_node(runtime_service) -> None:
     with pytest.raises(ResearchWorkflowError) as exc:
         runtime_service.put_agent_binding_config(
@@ -222,7 +291,7 @@ def test_start_agent_task_writes_full_session_task_turn_binding(
 ) -> None:
     run = runtime_service.create_run(CHALLENGE_CUP_WORKFLOW_ID, team_id="research-team")
     # Add a research project context (projectId) so the adapter can resolve.
-    record = runtime_service._store.update_run(run["runId"], {"projectId": "proj-1"})
+    runtime_service._store.update_run(run["runId"], {"projectId": "proj-1"})
 
     started_task = {
         "task": {
@@ -270,6 +339,7 @@ def test_start_agent_task_writes_full_session_task_turn_binding(
     assert detail["sessionAnchorDegraded"] is False
     assert "focusTask=research-agent-task-abc123" in (detail["chatDeepLink"] or "")
     assert "focusTurn=turn-xyz" in (detail["chatDeepLink"] or "")
+    assert {item["command"]: item for item in detail["commands"]}["open_session"]["available"] is True
 
 
 def test_start_agent_task_fails_closed_without_project(runtime_service) -> None:
@@ -286,7 +356,7 @@ def test_start_agent_task_fails_closed_without_project(runtime_service) -> None:
 
 def test_rebind_keeps_lineage_and_history(runtime_service) -> None:
     run = runtime_service.create_run(CHALLENGE_CUP_WORKFLOW_ID, team_id="research-team")
-    first = runtime_service.apply_command(
+    runtime_service.apply_command(
         run["runId"],
         "rebind_node",
         payload={"nodeId": "source_finding", "agentId": "agent-v1"},
