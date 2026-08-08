@@ -28,7 +28,6 @@ const WORKBENCH_MAINLINE_STYLE_FILES = Array.from(
 const SPECIAL_ROUTE_STYLE_FILES = [
   resolve(routeRoot, "ToolsRoute.styles.ts"),
   resolve(routeRoot, "LogsRoute.styles.ts"),
-  resolve(routeRoot, "ResearchRoute.styles.ts"),
   resolve(routeRoot, "ResetRoute.styles.ts"),
   resolve(routeRoot, "KernelTaskCenterRoute.styles.ts"),
 ] as const;
@@ -36,9 +35,7 @@ const SPECIAL_ROUTE_STYLE_FILES = [
 const NON_HOT_ROUTE_HOVER_STYLE_FILES = [
   resolve(routeRoot, "ToolsRoute.styles.ts"),
   resolve(routeRoot, "RuntimeScenesPane.styles.ts"),
-  resolve(routeRoot, "ResearchRoute.styles.ts"),
   resolve(routeRoot, "LogsRoute.styles.ts"),
-  resolve(routeRoot, "ResearchFlowCanvasRoute.styles.ts"),
   resolve(routeRoot, "TeamsRoute.styles.ts"),
 ] as const;
 
@@ -192,7 +189,6 @@ describe("route aesthetic contract", () => {
     const offenders = Array.from(new Set([
       resolve(routeRoot, "ChatCodingRoute.styles.ts"),
       resolve(routeRoot, "MemoryRoute.styles.ts"),
-      resolve(routeRoot, "ResearchFlowCanvasRoute.styles.ts"),
       resolve(routeRoot, "TeamsRoute.styles.ts"),
       resolve(routeRoot, "TeamsRoute.research.styles.ts"),
       resolve(routeRoot, "TeamsRoute.aiSearch.styles.ts"),
