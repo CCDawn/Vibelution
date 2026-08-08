@@ -246,3 +246,91 @@ def test_open_evidence_graph_command_returns_projection(monkeypatch, tmp_path: P
     assert result["command"] == "open_evidence_graph"
     assert result["graph"]["nodes"]
     assert result["graph"]["edges"]
+
+
+# --- end-to-end acceptance chain: real run -> structured stop -> build_package ---
+
+
+def _accept_all_gates_until_iteration(svc: ResearchWorkflowRuntimeService, run_id: str) -> dict:
+    for _ in range(14):
+        run = svc.get_run(run_id)
+        current = run.get("runtimeCurrentNodeIds") or []
+        if "iteration_decision" in current:
+            return run
+        pending = [t for t in run.get("humanTasks") or [] if t.get("status") == "pending"]
+        if not pending:
+            if run.get("status") in {"succeeded", "blocked"}:
+                return run
+            break
+        svc.resolve_human_task(run_id, pending[0]["taskId"], accept=True, resolved_by="test")
+    return svc.get_run(run_id)
+
+
+def test_end_to_end_stop_decision_then_build_package(tmp_path: Path) -> None:
+    """Acceptance: a real run driven to stop builds a durable result package."""
+    svc = _svc(tmp_path)
+    run = svc.create_run(CHALLENGE_CUP_WORKFLOW_ID, project_id="project-1")
+    run = _accept_all_gates_until_iteration(svc, run["runId"])
+    assert "iteration_decision" in (run.get("runtimeCurrentNodeIds") or [])
+
+    stopped = svc.apply_command(
+        run["runId"],
+        "iteration_decision",
+        payload={
+            "decisionKind": "stop",
+            "reason": "enough evidence",
+            "terminalReason": "enough_evidence",
+            "decidedBy": "operator",
+        },
+        idempotency_key="accept-stop-1",
+    )
+    assert stopped.get("status") == "succeeded"
+    assert stopped.get("completionKind") == "stopped"
+    assert stopped.get("resultPackageRef")
+    assert any(
+        d.get("decisionKind") == "stop" for d in (stopped.get("iterationDecisions") or [])
+    )
+
+    result = svc.apply_node_command(stopped["runId"], "result_package", "build_package")
+    assert result["command"] == "build_package"
+    package = result["resultPackage"]
+    assert package["overview"]["completionKind"] == "stopped"
+    assert package["overview"]["terminalReason"] == "enough_evidence"
+    assert package["overview"]["iterationAttemptCount"] >= 1
+
+    stored = svc.get_run(stopped["runId"]).get("resultPackage") or {}
+    assert stored.get("packageId") == package["packageId"]
+    assert stored.get("packageRef") == package["packageRef"]
+
+    # Capability flips to available after facts exist; command is idempotent.
+    caps = node_command_capabilities(svc.get_run(stopped["runId"]), "result_package")
+    assert next(c for c in caps if c["command"] == "build_package")["available"] is True
+    again = svc.apply_node_command(stopped["runId"], "result_package", "build_package")
+    assert again["resultPackage"]["packageId"] == package["packageId"]
+
+
+def test_end_to_end_promote_decision_reaches_candidate_promotion_gate(tmp_path: Path) -> None:
+    """Acceptance: promote creates a human promotion gate then resolves to success."""
+    svc = _svc(tmp_path)
+    run = svc.create_run(CHALLENGE_CUP_WORKFLOW_ID, project_id="project-1")
+    run = _accept_all_gates_until_iteration(svc, run["runId"])
+    assert "iteration_decision" in (run.get("runtimeCurrentNodeIds") or [])
+
+    after = svc.apply_command(
+        run["runId"],
+        "iteration_decision",
+        payload={
+            "decisionKind": "promote_candidate",
+            "reason": "best validated candidate",
+            "selectedCandidateRef": "candidate:best",
+            "decidedBy": "operator",
+        },
+        idempotency_key="accept-promote-1",
+    )
+    assert "candidate_promotion" in (after.get("runtimeCurrentNodeIds") or [])
+    pending = [t for t in after.get("humanTasks") or [] if t.get("status") == "pending"]
+    assert pending and pending[0].get("nodeId") == "candidate_promotion"
+
+    resolved = svc.resolve_human_task(after["runId"], pending[0]["taskId"], accept=True, resolved_by="test")
+    assert resolved.get("status") == "succeeded"
+    assert resolved.get("officialCandidateRef") == "candidate:best"
