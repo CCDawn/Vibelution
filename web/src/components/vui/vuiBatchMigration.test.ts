@@ -27,12 +27,14 @@ const teamStyles = {
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
 const rawControlPattern = /<(button|input|select|textarea)\b/;
-const configFileInputPattern = /<input\s+type="file"\s+accept="image\/png,image\/jpeg,image\/webp"\s+disabled=\{disabled \|\| imageUploading\}[\s\S]*?\/>/g;
+// ConfigRoute migrated its image uploads to the VUI <VInput> facade; the gate
+// tracks that migrated shape (3 file inputs + the styles that back them).
+const configFileInputPattern = /<VInput\s+type="file"\s+accept="image\/png,image\/jpeg,image\/webp"\s+disabled=\{disabled \|\| imageUploading\}[\s\S]*?\/>/g;
 const configFileInputContexts = [
-  /styles\.themeBackgroundDropButton[\s\S]{0,1200}<input\s+type="file"/,
-  /styles\.themeBackgroundImageActions[\s\S]{0,1200}<input\s+type="file"/,
-  /styles\.avatarImageDropButton[\s\S]{0,1200}<input\s+type="file"/,
-  /styles\.avatarImageActions[\s\S]{0,1200}<input\s+type="file"/,
+  /styles\.themeBackgroundDropButton[\s\S]{0,1200}<VInput\s+type="file"/,
+  /styles\.themeBackgroundImageActions[\s\S]{0,1200}<VInput\s+type="file"/,
+  /styles\.avatarImageDropButton[\s\S]{0,1200}<VInput\s+type="file"/,
+  /styles\.avatarImageActions[\s\S]{0,1200}<VInput\s+type="file"/,
 ] as const;
 
 const rawControlAllowedFiles = new Set([
@@ -476,7 +478,7 @@ describe("VUI batch migration", () => {
     expect(violations).toEqual([]);
   });
 
-  it("permits only the four styled image-upload inputs in Config", () => {
+  it("permits only the styled image-upload inputs in Config via VInput", () => {
     const configSource = readTargetSource("routes/ConfigRoute.tsx");
     const configStyles = readTargetSource("routes/ConfigRoute.styles.ts");
     const currentFileInputs = configSource.match(configFileInputPattern) ?? [];
