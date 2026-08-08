@@ -255,6 +255,7 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
         codex_transcript=codex_transcript,
         done=False,
         source="session_live_overlay",
+        stage=stage,
     )
     if turn_items:
         message["turnItems"] = turn_items
