@@ -45,6 +45,18 @@ class SessionBindingPayload(BaseModel):
     supersedesBindingId: str = ""
 
 
+class AgentBindingConfigPayload(BaseModel):
+    teamId: str = ""
+    workflowDefaults: dict[str, str] = Field(default_factory=dict)
+    stageOverrides: dict[str, dict[str, str]] = Field(default_factory=dict)
+    nodeOverrides: dict[str, str] = Field(default_factory=dict)
+
+
+class NodeCommandPayload(BaseModel):
+    command: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 def _svc():
     return get_research_workflow_runtime_service()
 
@@ -64,8 +76,34 @@ def research_workflow_definition(workflow_id: str) -> dict:
 
 
 @router.get("/research/workflows/{workflow_id}/runs")
-def research_workflow_runs(workflow_id: str) -> dict:
-    return _svc().list_runs(workflow_id)
+def research_workflow_runs(workflow_id: str, team_id: str = Query("")) -> dict:
+    return _svc().list_runs(workflow_id, team_id=team_id)
+
+
+@router.get("/research/workflows/{workflow_id}/agent-bindings/effective")
+def research_workflow_effective_bindings(
+    workflow_id: str,
+    team_id: str = Query(""),
+) -> dict:
+    try:
+        return _svc().get_effective_agent_bindings(workflow_id, team_id=team_id)
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+
+
+@router.put("/research/workflows/{workflow_id}/agent-bindings")
+def research_workflow_put_binding_config(
+    workflow_id: str,
+    payload: AgentBindingConfigPayload,
+) -> dict:
+    try:
+        return _svc().put_agent_binding_config(
+            workflow_id,
+            payload.model_dump(),
+            team_id=payload.teamId,
+        )
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
 
 
 @router.post("/research/workflows/{workflow_id}/runs", status_code=201)
@@ -137,6 +175,19 @@ def research_workflow_human_resolve(run_id: str, task_id: str, payload: HumanTas
             task_id,
             accept=payload.accept,
             resolved_by=payload.resolvedBy,
+        )
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+
+
+@router.post("/research/workflow-runs/{run_id}/nodes/{node_id}/commands")
+def research_workflow_node_command(run_id: str, node_id: str, payload: NodeCommandPayload) -> dict:
+    try:
+        return _svc().apply_node_command(
+            run_id,
+            node_id,
+            payload.command,
+            payload=payload.payload,
         )
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc

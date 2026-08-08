@@ -14,7 +14,11 @@ from typing import Any
 
 from langgraph.types import Command
 
-from core.research.workflow.bindings import AgentBindingLayers, build_run_binding_snapshots
+from core.research.workflow.bindings import (
+    AgentBindingLayers,
+    build_run_binding_snapshots,
+    resolve_effective_agent_id,
+)
 from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
 from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
 from core.research.workflow.definition import (
@@ -28,6 +32,7 @@ from core.research.workflow.iteration_decisions import (
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
 
+from .binding_config import BindingConfigValidationError, WorkflowBindingConfigStore
 from .durable_index import DurableWorkflowIndex
 from .handoff_builder import (
     artifact_kind_for_gate,
@@ -43,11 +48,41 @@ from .iteration_transition import (
     apply_iteration_decision_side_effects,
     find_decision_by_idempotency,
 )
+from .node_command_adapter import (
+    NodeCommandError,
+    NodeCommandUnavailable,
+    apply_node_command,
+    node_command_capabilities,
+)
+from .session_binding_bridge import (
+    SessionBindingBridge,
+    SessionBindingError,
+)
 from .store import WorkflowRunStore
+from .team_role_source import effective_binding_layers
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _node_attempt(record: dict[str, Any], node_id: str) -> int:
+    attempts = record.get("nodeAttempts") or {}
+    if isinstance(attempts, dict):
+        return int(attempts.get(node_id) or 0)
+    return 0
+
+
+def _agent_display_name(agent_id: str) -> str:
+    try:
+        from core.web.services.agent_directory_service import get_agent_config
+
+        agent = get_agent_config(agent_id)
+        if isinstance(agent, dict):
+            return str(agent.get("displayName") or agent.get("agentName") or agent_id)
+    except Exception:
+        pass
+    return agent_id
 
 
 class ResearchWorkflowError(Exception):
@@ -63,6 +98,7 @@ class ResearchWorkflowRuntimeService:
         run_store: WorkflowRunStore | None = None,
         checkpoint_path: str | None = None,
         durable_index: DurableWorkflowIndex | None = None,
+        binding_config_store: WorkflowBindingConfigStore | None = None,
     ):
         self._store = run_store or WorkflowRunStore()
         self._checkpoint_path = checkpoint_path or os.environ.get(
@@ -80,6 +116,9 @@ class ResearchWorkflowRuntimeService:
         self._index = durable_index or DurableWorkflowIndex(index_root)
         self._lock = threading.RLock()
         self._bindings = AgentBindingLayers()
+        # Per-(workflowId, teamId) controlled config; team roles are the
+        # fallback default source resolved at run creation (never random).
+        self._binding_config = binding_config_store or WorkflowBindingConfigStore(self._store.root)
         # Command-level idempotency is also durable via index keys with prefix.
         self._command_memory: dict[str, str] = {}  # key -> run_id snapshot path only for process; reloaded from index
 
@@ -93,9 +132,107 @@ class ResearchWorkflowRuntimeService:
             "definition": definition.to_dict(),
         }
 
-    def list_runs(self, workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID) -> dict[str, Any]:
+    def list_runs(self, workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID, *, team_id: str = "") -> dict[str, Any]:
         runs = self._store.list_runs(workflow_id)
+        if str(team_id or "").strip():
+            runs = [r for r in runs if str(r.get("teamId") or "") == str(team_id).strip()]
         return {"workflowId": workflow_id, "runs": runs}
+
+    def _effective_binding_layers(self, workflow_id: str, team_id: str) -> AgentBindingLayers:
+        """Controlled config (per workflow+team) merged over team-role defaults."""
+        config = self._binding_config.load(workflow_id, team_id)
+        return effective_binding_layers(team_id, config)
+
+    def get_effective_agent_bindings(
+        self,
+        workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID,
+        *,
+        team_id: str = "",
+    ) -> dict[str, Any]:
+        """Current-configuration view per agent node (never touches run history)."""
+        meta = self.get_definition(workflow_id)
+        definition = build_challenge_cup_workflow_definition()
+        layers = self._effective_binding_layers(workflow_id, team_id)
+        bindings = []
+        for node in definition.nodes:
+            if node.actorKind is not ActorKind.AGENT:
+                continue
+            agent_id, resolved_from = resolve_effective_agent_id(node, layers)
+            bindings.append(
+                {
+                    "nodeId": node.nodeId,
+                    "roleKey": node.primaryRoleKey,
+                    "agentId": agent_id,
+                    "resolvedFrom": resolved_from,
+                }
+            )
+        return {
+            "workflowId": workflow_id,
+            "workflowVersionId": meta["workflowVersionId"],
+            "teamId": str(team_id or "").strip(),
+            "bindings": bindings,
+        }
+
+    def put_agent_binding_config(
+        self,
+        workflow_id: str,
+        payload: dict[str, Any],
+        *,
+        team_id: str = "",
+    ) -> dict[str, Any]:
+        """Controlled write of binding config layers (per workflow+team scope).
+
+        Only the keys present in the payload are replaced; missing layers keep
+        their persisted values. Validated against the workflow definition
+        before persisting (unknown role/stage/node rejected).
+        """
+        if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
+            raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
+        current = self._binding_config.load(workflow_id, team_id)
+        # Replace-whole-layer semantics: a layer present in the payload fully
+        # replaces its persisted value (an empty dict clears it); absent
+        # layers keep their persisted values.
+        update = {
+            "workflowDefaults": (
+                {str(k): str(v) for k, v in (payload.get("workflowDefaults") or {}).items()}
+                if "workflowDefaults" in payload
+                else current.workflowDefaults
+            ),
+            "stageOverrides": (
+                {
+                    str(k): {str(rk): str(av) for rk, av in v.items()}
+                    for k, v in (payload.get("stageOverrides") or {}).items()
+                }
+                if "stageOverrides" in payload
+                else current.stageOverrides
+            ),
+            "nodeOverrides": (
+                {str(k): str(v) for k, v in (payload.get("nodeOverrides") or {}).items()}
+                if "nodeOverrides" in payload
+                else current.nodeOverrides
+            ),
+        }
+        try:
+            self._binding_config.validate_payload(update)
+        except BindingConfigValidationError as exc:
+            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+        saved = self._binding_config.save(
+            workflow_id,
+            team_id,
+            AgentBindingLayers(
+                workflowDefaults=update["workflowDefaults"],
+                stageOverrides=update["stageOverrides"],
+                nodeOverrides=update["nodeOverrides"],
+            ),
+        )
+        return {
+            "workflowId": workflow_id,
+            "teamId": saved["teamId"],
+            "workflowDefaults": saved["workflowDefaults"],
+            "stageOverrides": saved["stageOverrides"],
+            "nodeOverrides": saved["nodeOverrides"],
+            "updatedAt": saved["updatedAt"],
+        }
 
     def _new_human_task(
         self,
@@ -168,7 +305,19 @@ class ResearchWorkflowRuntimeService:
             meta = self.get_definition(workflow_id)
             run_id = f"run-{uuid.uuid4().hex[:12]}"
             thread_id = f"thread-{run_id}"
-            layers = binding_layers or self._bindings
+            # Binding resolution: explicit layers > non-empty service-level
+            # config > team-role default mapping (per teamId, never random).
+            service_config = self._bindings
+            has_service_config = bool(
+                service_config.workflowDefaults
+                or service_config.stageOverrides
+                or service_config.nodeOverrides
+            )
+            layers = (
+                binding_layers
+                or (service_config if has_service_config else None)
+                or self._effective_binding_layers(workflow_id, team_id)
+            )
             snapshots = build_run_binding_snapshots(
                 run_id=run_id,
                 workflow_version_id=meta["workflowVersionId"],
@@ -338,31 +487,30 @@ class ResearchWorkflowRuntimeService:
             raise ResearchWorkflowError(f"Unknown nodeId: {node_id}", code="unknown_node")
         snapshots = {s["nodeId"]: s for s in record.get("bindingSnapshots") or []}
         snap = snapshots.get(node_id) or {}
-        session_binding = self._store.get_session_binding(run_id, node_id)
-        degraded = False
-        chat_href = None
-        if node.actorKind is ActorKind.AGENT:
-            if not session_binding or not session_binding.get("taskId") or not session_binding.get("turnId"):
-                degraded = True
-            elif session_binding.get("sessionId"):
-                chat_href = (
-                    f"/chat?session={session_binding['sessionId']}"
-                    f"&focusTask={session_binding['taskId']}"
-                    f"&focusTurn={session_binding['turnId']}"
-                    f"&returnTo=/teams?researchView=workflow&runId={run_id}&node={node_id}"
-                    f"&returnLabel=workflow"
-                )
+        bridge = SessionBindingBridge(self._store)
+        chat_href, degraded = bridge.deep_link_for(record, node_id)
+        if node.actorKind is not ActorKind.AGENT:
+            degraded = False
+            chat_href = None
+        display_name = ""
+        if snap.get("agentId"):
+            display_name = _agent_display_name(str(snap["agentId"]))
         return {
             "runId": run_id,
             "nodeId": node_id,
             "actorKind": node.actorKind.value,
             "primaryRoleKey": node.primaryRoleKey,
-            "bindingSnapshot": snap,
-            "sessionBinding": session_binding,
+            "label": node.label,
+            "bindingSnapshot": {**snap, "displayName": display_name},
+            "sessionBinding": self._store.get_session_binding(run_id, node_id),
             "chatDeepLink": chat_href,
             "sessionAnchorDegraded": degraded,
             "runtimeCurrent": node_id in (record.get("runtimeCurrentNodeIds") or []),
             "status": record.get("status"),
+            "nodeAttempt": _node_attempt(record, node_id),
+            "blockedReason": str(record.get("blockedReason") or (record.get("langGraph") or {}).get("blockedReason") or ""),
+            "artifacts": (record.get("langGraph") or {}).get("artifacts") or {},
+            "commands": node_command_capabilities(record, node_id),
         }
 
     def resolve_human_task(
@@ -830,29 +978,73 @@ class ResearchWorkflowRuntimeService:
         return record
 
     def put_session_binding(self, run_id: str, node_id: str, binding: dict[str, Any]) -> dict[str, Any]:
-        self.get_run(run_id)
-        required = ("sessionId", "taskId", "turnId", "agentId")
-        missing = [k for k in required if not str(binding.get(k) or "").strip()]
-        record = {
-            "bindingId": str(binding.get("bindingId") or f"nsb-{uuid.uuid4().hex[:10]}"),
-            "runId": run_id,
-            "nodeId": node_id,
-            "nodeRunId": str(binding.get("nodeRunId") or f"nr-{node_id}"),
-            "nodeAttempt": int(binding.get("nodeAttempt") or 1),
-            "agentId": str(binding.get("agentId") or ""),
-            "roleKey": str(binding.get("roleKey") or ""),
-            "sessionId": str(binding.get("sessionId") or ""),
-            "sessionAttempt": int(binding.get("sessionAttempt") or 1),
-            "taskId": str(binding.get("taskId") or ""),
-            "turnId": str(binding.get("turnId") or ""),
-            "checkpointId": str(binding.get("checkpointId") or ""),
-            "status": "degraded" if missing else "bound",
-            "boundAt": _utc_now(),
-            "supersedesBindingId": str(binding.get("supersedesBindingId") or ""),
-            "missingFields": missing,
-        }
-        self._store.put_session_binding(run_id, node_id, record)
-        return record
+        record = self.get_run(run_id)
+        try:
+            bridge = SessionBindingBridge(self._store)
+            record_binding = bridge.put(record, node_id, binding)
+        except SessionBindingError as exc:
+            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+        self._store.append_event(
+            run_id,
+            {
+                "runId": run_id,
+                "nodeId": node_id,
+                "type": "session_binding.bound",
+                "summary": {
+                    "bindingId": record_binding["bindingId"],
+                    "agentId": record_binding["agentId"],
+                    "sessionId": record_binding["sessionId"],
+                    "taskId": record_binding["taskId"],
+                    "turnId": record_binding["turnId"],
+                    "status": record_binding["status"],
+                    "supersedesBindingId": record_binding.get("supersedesBindingId") or "",
+                },
+            },
+        )
+        return record_binding
+
+    def apply_node_command(
+        self,
+        run_id: str,
+        node_id: str,
+        command: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Node-level command execution through the real backend adapter."""
+        with self._lock:
+            record = self.get_run(run_id)
+            if command == "rebind_node":
+                # Controlled rebind keeps snapshot lineage (apply_command).
+                return self.apply_command(
+                    run_id,
+                    "rebind_node",
+                    payload={**(payload or {}), "nodeId": node_id},
+                )
+            try:
+                result = apply_node_command(
+                    store=self._store,
+                    record=record,
+                    node_id=node_id,
+                    command=command,
+                    payload=payload,
+                )
+            except NodeCommandUnavailable as exc:
+                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+            except NodeCommandError as exc:
+                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+            self._store.append_event(
+                run_id,
+                {
+                    "runId": run_id,
+                    "nodeId": node_id,
+                    "type": "node.command.applied",
+                    "summary": {
+                        "command": command,
+                        "result": {k: v for k, v in result.items() if k != "artifacts"},
+                    },
+                },
+            )
+            return result
 
     def list_events(self, run_id: str, *, after_sequence: int = 0) -> dict[str, Any]:
         record = self.get_run(run_id)

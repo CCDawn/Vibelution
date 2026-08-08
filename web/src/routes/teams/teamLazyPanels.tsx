@@ -26,7 +26,6 @@ export const TeamAiSearchWorkspacePanel = createLazyNamedTeamPanel(loadTeamResea
 export const TeamResearchStageAgentPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageAgentPanel");
 export const TeamResearchStageAgentSummary = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageAgentSummary");
 export const TeamResearchStageLauncherPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageLauncherPanel");
-export const TeamResearchStageStandalonePagePanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageStandalonePagePanel");
 export const TeamResearchLoopPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchLoopPanel");
 export const TeamExperimentPlanningLedgerPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamExperimentPlanningLedgerPanel");
 // TeamExperimentMethodPanel is mounted inside TeamExperimentPlanningLedgerPanel (same experiment pack).

@@ -81,7 +81,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/teams/useTeamsShellCanvasWorkspace.ts": 1,
   "routes/teams/useTeamsWorkbenchFoundation.tsx": 1,
 };
-// Task 9: retired ResearchFlowCanvasRoute (-5) + ResearchRoute (-8) fetchJson budgets.
+// Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
 const legacyRouteFetchJsonAggregateBudget = 270;
 
 function walkSourceFiles(dir: string): string[] {

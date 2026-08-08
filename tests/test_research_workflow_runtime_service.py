@@ -57,6 +57,26 @@ def test_node_detail_degraded_without_session_anchor(runtime_service) -> None:
     assert detail["sessionAnchorDegraded"] is True
     assert detail["chatDeepLink"] is None
 
+    # Session binding is fail-closed: an unbound node must be rejected.
+    with pytest.raises(Exception, match="unbound"):
+        runtime_service.put_session_binding(
+            run["runId"],
+            "source_finding",
+            {
+                "sessionId": "sess-1",
+                "taskId": "task-1",
+                "turnId": "turn-1",
+                "agentId": "agent-1",
+                "roleKey": "source_finder",
+            },
+        )
+
+    # Bind an agent first (controlled rebind), then attach the session anchor.
+    rebound = runtime_service.apply_command(
+        run["runId"],
+        "rebind_node",
+        payload={"nodeId": "source_finding", "agentId": "agent-1"},
+    )
     runtime_service.put_session_binding(
         run["runId"],
         "source_finding",
@@ -72,6 +92,59 @@ def test_node_detail_degraded_without_session_anchor(runtime_service) -> None:
     assert detail2["sessionAnchorDegraded"] is False
     assert "focusTask=task-1" in (detail2["chatDeepLink"] or "")
     assert "focusTurn=turn-1" in (detail2["chatDeepLink"] or "")
+
+
+def test_session_binding_rejects_agent_mismatch(runtime_service) -> None:
+    run = runtime_service.create_run(CHALLENGE_CUP_WORKFLOW_ID)
+    runtime_service.apply_command(
+        run["runId"],
+        "rebind_node",
+        payload={"nodeId": "source_finding", "agentId": "agent-bound"},
+    )
+    with pytest.raises(Exception, match="does not match"):
+        runtime_service.put_session_binding(
+            run["runId"],
+            "source_finding",
+            {
+                "sessionId": "sess-1",
+                "taskId": "task-1",
+                "turnId": "turn-1",
+                "agentId": "agent-other",
+            },
+        )
+
+
+def test_session_binding_supersedes_keeps_lineage(runtime_service) -> None:
+    run = runtime_service.create_run(CHALLENGE_CUP_WORKFLOW_ID)
+    runtime_service.apply_command(
+        run["runId"],
+        "rebind_node",
+        payload={"nodeId": "source_finding", "agentId": "agent-1"},
+    )
+    first = runtime_service.put_session_binding(
+        run["runId"],
+        "source_finding",
+        {
+            "sessionId": "sess-a",
+            "taskId": "task-a",
+            "turnId": "turn-a",
+            "agentId": "agent-1",
+        },
+    )
+    second = runtime_service.put_session_binding(
+        run["runId"],
+        "source_finding",
+        {
+            "sessionId": "sess-b",
+            "taskId": "task-b",
+            "turnId": "turn-b",
+            "agentId": "agent-1",
+        },
+    )
+    assert second["supersedesBindingId"] == first["bindingId"]
+    record = runtime_service.get_run(run["runId"])
+    history = [h for h in record["bindingHistory"] if h.get("bindingId") == first["bindingId"]]
+    assert history and history[0]["supersededAt"]
 
 
 def test_rebind_node_updates_snapshot_not_silent(runtime_service) -> None:

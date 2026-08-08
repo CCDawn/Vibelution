@@ -284,7 +284,6 @@ import teamResearchWorkflowPanelHostSource from "./teams/TeamResearchWorkflowPan
 import teamResearchWorkflowStageModulesSource from "./teams/TeamResearchWorkflowStageModules.tsx?raw";
 import teamSourceCollectionSearchBriefShellSource from "./teams/TeamSourceCollectionSearchBriefShell.tsx?raw";
 import teamSourceCollectionStorageActionsInjectSource from "./teams/TeamSourceCollectionStorageActionsInject.tsx?raw";
-import teamResearchStageStandalonePagePanelSource from "./TeamResearchStageStandalonePagePanel.tsx?raw";
 import teamResearchLoopPanelSource from "./TeamResearchLoopPanel.tsx?raw";
 import teamExperimentPlanningLedgerPanelSource from "./TeamExperimentPlanningLedgerPanel.tsx?raw";
 import teamExperimentHypothesisGovernancePanelSource from "./TeamExperimentHypothesisGovernancePanel.tsx?raw";
@@ -635,7 +634,6 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentPlanningLedgerPanelSource).toContain("进入执行与迭代");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("openIterationWorkspace");
     expect(routeSource).toContain('researchWorkspaceStageRoute(selectedTeam.teamId, "iteration")');
-    expect(teamResearchStageStandalonePagePanelSource).toContain("refreshStageWorkspace");
     expect(routeSource).toMatch(/experimentMethodCatalogQuery\?\.refetch|experimentMethodCatalogQuery\.refetch/);
     expect(routeSource).toMatch(/researchLoopStatusQuery\?\.refetch|researchLoopStatusQuery\.refetch/);
     expect(routeSource).toMatch(/createExperimentPlanMutation\?\.reset|createExperimentPlanMutation\.reset/);
@@ -1556,8 +1554,7 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8H: summary is invoked from TeamResearchStageLauncherPanel.
     // Product workbench: stage page mounts ledger only (no agent panel dump).
     expect(teamResearchStageLauncherPanelSource).toContain("renderResearchStageAgentSummary(stageType)");
-    expect(teamResearchStageStandalonePagePanelSource).toContain("renderExperimentPlanningLedgerPanel");
-    expect(teamResearchStageStandalonePagePanelSource).not.toContain("renderResearchStageAgentPanel(stageType)");
+    // Task 9: TeamResearchStageStandalonePagePanel removed with the Challenge Cup stage-rail shell.
     expect(routeSource).toContain("function renderResearchStageAgentPanel");
     expect(routeSource).toContain("renderResearchStageAgentPanel");
     expect(routeSource).toContain("TeamResearchStageAgentSummary");
@@ -1767,7 +1764,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("stageSlot=");
     expect(teamResearchBoardPrimarySurfaceSource).toContain('boardPrimaryMode === "stage"');
     expect(teamResearchBoardPrimarySurfaceSource).toContain("stageSlot");
-    expect(teamResearchStageStandalonePagePanelSource).toContain("embeddedInBoard");
     // Wave 8H: research graph / MVP console copy and ChallengeCup workspace live on launcher panel.
     expect(teamResearchStageLauncherPanelSource).toContain("研究关系图");
     expect(teamResearchStageLauncherPanelSource).toContain("researchStageHeaderActions");
@@ -1838,7 +1834,6 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8H: compact memory mount stays on launcher; stage page stays action-first.
     expect(teamResearchStageLauncherPanelSource).toContain("ResearchMemoryEvidencePanel");
     expect(teamResearchStageLauncherPanelSource).toContain("stage={stage}");
-    expect(teamResearchStageStandalonePagePanelSource).toContain('stageView === "experiment"');
     expect(routeSource).toContain('stageView="iteration"');
     expect(researchWorkspaceModelSource).toContain('value === "source_collection"');
     expect(researchWorkspaceModelSource).toContain('return "knowledge_collection"');

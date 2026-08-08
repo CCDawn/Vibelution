@@ -178,16 +178,6 @@ const routeShellTargets = [
     forbidden: ["<header className={styles.header}"],
   },
   {
-    path: "routes/ResearchFlowCanvasRoute.tsx",
-    expected: ["Navigate"],
-    forbidden: ["/api/research/flow-canvas/execute", "VCanvasWorkbenchPage"],
-  },
-  {
-    path: "routes/ResearchRoute.tsx",
-    expected: ["Navigate"],
-    forbidden: ["useAppI18n", "VRouteHeader"],
-  },
-  {
     path: "routes/teams/research-workflow/ResearchProcessWorkspace.tsx",
     expected: ["VWorkflowCanvas", "VPanelHeader"],
     forbidden: ["ChallengeCupStageRail", "ChallengeCupOperationsWorkspace"],

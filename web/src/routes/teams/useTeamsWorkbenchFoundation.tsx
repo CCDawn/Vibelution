@@ -135,8 +135,7 @@ import { workflowGraphLayout } from "../TeamWorkflowGraphLayout";
 import {
   RESEARCH_TEAM_ID,
 } from "../TeamsRoute.canvasData";
-// ChallengeCupOperationsWorkspace is rendered from TeamResearchStageLauncherPanel (lazy path),
-// not from this foundation bag — keep it out of the TeamsRoute eager graph.
+// Task 9: Challenge Cup stage-rail/operations shell removed; workflow runs on ResearchProcessWorkspace.
 export function useTeamsWorkbenchFoundation({
   forcedTeamId = "",
   forcedResearchWorkspaceView,
