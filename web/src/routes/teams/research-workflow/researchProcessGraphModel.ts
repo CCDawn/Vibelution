@@ -51,6 +51,7 @@ function mapNodes(
   definition: WorkflowDefinition,
   options: {
     nodeRuns?: WorkflowCanvasProjection["run"]["nodeRuns"];
+    primaryAgentIdByNode?: ReadonlyMap<string, string>;
     runtimeCurrentNodeIds?: string[];
     pendingHumanNodeIds?: Set<string>;
     blockedReason?: string | null;
@@ -93,7 +94,7 @@ function mapNodes(
       acceptsGateKinds: node.acceptsGateKinds,
       status: isRuntimeCurrent && effectiveStatus === "pending" ? "running" : effectiveStatus,
       attempt: run?.attempt,
-      primaryAgentId: run?.primaryAgentId,
+      primaryAgentId: run?.primaryAgentId || options.primaryAgentIdByNode?.get(node.nodeId),
       isRuntimeCurrent,
       hasPendingHumanTask,
       blockedReason:
@@ -140,8 +141,15 @@ function mapEdges(
   return buildEdgePathStates(partial, nodeById, current);
 }
 
-export function definitionToCanvasGraph(definition: WorkflowDefinition): WorkflowLayoutInput {
-  const nodes = mapNodes(definition);
+export type DefinitionCanvasGraphOptions = {
+  primaryAgentIdByNode?: ReadonlyMap<string, string>;
+};
+
+export function definitionToCanvasGraph(
+  definition: WorkflowDefinition,
+  options: DefinitionCanvasGraphOptions = {},
+): WorkflowLayoutInput {
+  const nodes = mapNodes(definition, options);
   const edges = mapEdges(definition, nodes, []);
   const stages = definition.stages.map((stage) => {
     const members = nodes.filter((n) => n.stageId === stage.stageId);

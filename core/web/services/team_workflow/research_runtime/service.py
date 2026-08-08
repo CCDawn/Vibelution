@@ -35,7 +35,6 @@ from core.research.workflow.projection import build_canvas_projection
 from .binding_config import BindingConfigValidationError, WorkflowBindingConfigStore
 from .durable_index import DurableWorkflowIndex
 from .handoff_builder import (
-    artifact_kind_for_gate,
     build_handoff_record,
     successor_node,
 )
@@ -80,7 +79,7 @@ def _agent_display_name(agent_id: str) -> str:
         agent = get_agent_config(agent_id)
         if isinstance(agent, dict):
             return str(agent.get("displayName") or agent.get("agentName") or agent_id)
-    except Exception:
+    except (ImportError, KeyError, OSError, TypeError, ValueError):
         pass
     return agent_id
 
@@ -259,7 +258,7 @@ class ResearchWorkflowRuntimeService:
         try:
             cfg = state.config.get("configurable") or {}
             return str(cfg.get("checkpoint_id") or "")
-        except Exception:
+        except (AttributeError, KeyError, TypeError, ValueError):
             return ""
 
     def _append_auto_handoffs(
@@ -409,7 +408,7 @@ class ResearchWorkflowRuntimeService:
                 )
                 human_tasks = [human_task]
 
-            record = self._store.update_run(
+            self._store.update_run(
                 run_id,
                 {
                     "status": status,
@@ -495,6 +494,15 @@ class ResearchWorkflowRuntimeService:
         display_name = ""
         if snap.get("agentId"):
             display_name = _agent_display_name(str(snap["agentId"]))
+        commands = node_command_capabilities(record, node_id)
+        if node.actorKind is ActorKind.AGENT:
+            commands.append(
+                {
+                    "command": "open_session",
+                    "available": bool(chat_href) and not degraded,
+                    "reason": "" if chat_href and not degraded else "会话锚点尚未完整绑定",
+                }
+            )
         return {
             "runId": run_id,
             "nodeId": node_id,
@@ -510,7 +518,7 @@ class ResearchWorkflowRuntimeService:
             "nodeAttempt": _node_attempt(record, node_id),
             "blockedReason": str(record.get("blockedReason") or (record.get("langGraph") or {}).get("blockedReason") or ""),
             "artifacts": (record.get("langGraph") or {}).get("artifacts") or {},
-            "commands": node_command_capabilities(record, node_id),
+            "commands": commands,
         }
 
     def resolve_human_task(
@@ -533,7 +541,6 @@ class ResearchWorkflowRuntimeService:
             gate_node = str(task.get("nodeId") or "")
             workflow_id = str(record.get("workflowId") or CHALLENGE_CUP_WORKFLOW_ID)
             workflow_version_id = str(record.get("workflowVersionId") or "")
-            previous_completed = list((record.get("langGraph") or {}).get("completedNodeIds") or [])
             existing_handoffs = list(record.get("handoffs") or [])
             # Uniqueness is definition edgeId only (never mix with from->to keys).
             existing_edge_ids = existing_active_edge_ids(existing_handoffs)
@@ -613,7 +620,7 @@ class ResearchWorkflowRuntimeService:
                 )
                 is_human_gate = next_spec is not None and next_spec.actorKind is ActorKind.HUMAN
                 # Avoid duplicate pending for same node
-                tasks_now = list((self.get_run(run_id).get("humanTasks") or []))
+                tasks_now = list(self.get_run(run_id).get("humanTasks") or [])
                 has_pending_next = any(
                     str(t.get("nodeId")) == next_gate and str(t.get("status")) == "pending"
                     for t in tasks_now
