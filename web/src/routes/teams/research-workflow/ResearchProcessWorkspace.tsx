@@ -321,6 +321,7 @@ export function ResearchProcessWorkspace({
         {runId
           ? `${runId} · ${run?.status || projection?.run.status || ""}`
           : "创建运行后由工作流引擎驱动"}
+        {activeProjectId ? ` · 项目 ${activeProjectId}` : ""}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {runOptions.length > 0 ? (
