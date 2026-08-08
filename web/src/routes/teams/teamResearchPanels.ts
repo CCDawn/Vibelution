@@ -10,5 +10,4 @@ export {
   TeamResearchStageAgentSummary,
 } from "../TeamResearchStageAgentPanel";
 export { TeamResearchStageLauncherPanel } from "../TeamResearchStageLauncherPanel";
-export { TeamResearchStageStandalonePagePanel } from "../TeamResearchStageStandalonePagePanel";
 export { TeamResearchLoopPanel } from "../TeamResearchLoopPanel";

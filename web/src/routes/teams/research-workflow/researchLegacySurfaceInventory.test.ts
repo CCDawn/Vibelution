@@ -62,16 +62,23 @@ describe("Task0 research legacy surface inventory", () => {
   it("Task 9: ResearchFlowCanvasRoute is fully removed; migration adapters remain on disk", () => {
     expect(existsSync(resolve(routesRoot, "ResearchFlowCanvasRoute.tsx"))).toBe(false);
     expect(existsSync(resolve(routesRoot, "ResearchFlowCanvasRoute.styles.ts"))).toBe(false);
+    // Challenge Cup stage-rail/operations main surfaces are removed with Task 9;
+    // generic Teams research surfaces and the new workflow workspace remain.
     const expectedPresent = [
-      "teams/challenge-cup/ChallengeCupOperationsWorkspace.tsx",
-      "teams/challenge-cup/ChallengeCupStageRail.tsx",
       "teams/ResearchOverviewSurface.tsx",
       "teams/researchStageAgentBindings.ts",
       "teams/researchWorkspaceModel.ts",
       "teams/research-workflow/ResearchProcessWorkspace.tsx",
     ];
+    const expectedRemoved = [
+      "teams/challenge-cup/ChallengeCupOperationsWorkspace.tsx",
+      "teams/challenge-cup/ChallengeCupStageRail.tsx",
+    ];
     for (const rel of expectedPresent) {
       expect(existsSync(resolve(routesRoot, rel)), rel).toBe(true);
+    }
+    for (const rel of expectedRemoved) {
+      expect(existsSync(resolve(routesRoot, rel)), rel).toBe(false);
     }
   });
 
