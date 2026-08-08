@@ -135,6 +135,56 @@ describe("codexTranscriptCells", () => {
     expect(display.map((cell) => cell.id)).toEqual(["thought-run", "tool-committed"]);
   });
 
+  it("dedupes substring-overlapping thought vs commentary (mid-stream protocol segment)", () => {
+    const cells = [
+      {
+        id: "reasoning-full",
+        kind: "reasoning_summary" as const,
+        messageId: "m1",
+        status: "completed" as const,
+        tone: "neutral" as const,
+        text: "先检查日志，再看证据链，最后验证结论",
+      },
+      {
+        id: "commentary-segment",
+        kind: "assistant_markdown" as const,
+        messageId: "m1",
+        status: "completed" as const,
+        tone: "neutral" as const,
+        phase: "commentary" as const,
+        channel: "commentary" as const,
+        text: "再看证据链",
+      },
+    ];
+    const deduped = dedupeCodexTranscriptCellsForDisplay(cells);
+    expect(deduped.map((cell) => cell.id)).toEqual(["reasoning-full"]);
+  });
+
+  it("keeps non-overlapping thought and commentary separate", () => {
+    const cells = [
+      {
+        id: "reasoning",
+        kind: "reasoning_summary" as const,
+        messageId: "m1",
+        status: "completed" as const,
+        tone: "neutral" as const,
+        text: "分析根因",
+      },
+      {
+        id: "commentary",
+        kind: "assistant_markdown" as const,
+        messageId: "m1",
+        status: "completed" as const,
+        tone: "neutral" as const,
+        phase: "commentary" as const,
+        channel: "commentary" as const,
+        text: "执行工具校验",
+      },
+    ];
+    const deduped = dedupeCodexTranscriptCellsForDisplay(cells);
+    expect(deduped.map((cell) => cell.id)).toEqual(["reasoning", "commentary"]);
+  });
+
   it("keeps journal ready/waiting tool cells pending instead of completed", () => {
     // Live overlays often pre-commit tools as status=ready while approval waits.
     // Those must stay active so the process rail does not flash completed→running.

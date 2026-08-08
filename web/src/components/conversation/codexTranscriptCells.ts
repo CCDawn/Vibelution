@@ -855,7 +855,9 @@ function thoughtLikeCellRank(cell: CodexTranscriptCell) {
 
 /**
  * Drop overlapping thought/commentary cells that restate the same stream
- * (completed snapshot + running longer copy, or exact duplicates).
+ * (completed snapshot + running longer copy, exact duplicates, or substring
+ * overlaps where protocol commentary is a mid-stream segment of the full
+ * reasoning text).
  */
 export function dedupeThoughtLikeTranscriptCells(
   cells: readonly CodexTranscriptCell[],
@@ -882,7 +884,9 @@ export function dedupeThoughtLikeTranscriptCells(
       }
       const overlaps = leftText === rightText
         || rightText.startsWith(leftText)
-        || leftText.startsWith(rightText);
+        || leftText.startsWith(rightText)
+        || leftText.includes(rightText)
+        || rightText.includes(leftText);
       if (!overlaps) {
         continue;
       }

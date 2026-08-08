@@ -1520,6 +1520,16 @@ def _is_session_turn_reasoning_item(item: Mapping[str, Any] | None) -> bool:
     return kind in {"reasoning", "analysis"} or phase == "reasoning" or channel in {"analysis", "reasoning"}
 
 
+def _is_session_turn_commentary_item(item: Mapping[str, Any] | None) -> bool:
+    """Commentary rows also carry thought text (protocol commits tool-lead text as commentary)."""
+    if not isinstance(item, Mapping):
+        return False
+    kind = str(item.get("kind") or item.get("type") or "").strip().lower()
+    phase = str(item.get("phase") or "").strip().lower()
+    channel = str(item.get("channel") or "").strip().lower()
+    return kind == "commentary" or phase in {"commentary", "interim"} or channel in {"commentary", "interim"}
+
+
 # Stages where the model is still (or about to start) thinking. Once the stream
 # moves past these (answer/tool/terminal), the reasoning row is done even though
 # the turn itself has not committed yet.
@@ -1653,6 +1663,42 @@ def _merge_live_thought_into_turn_items(
                 next_item["source"] = source
             merged[reasoning_index] = s._compact_codex_record(next_item)
         return merged
+
+    # No reasoning row: a protocol commentary row may already carry the same
+    # thought text (tool-lead summaries). Merge the complete live thought into
+    # it instead of creating a second reasoning item — otherwise the UI paints
+    # the same thinking twice (reasoning_summary + commentary cells).
+    commentary_index = next(
+        (index for index, item in enumerate(merged) if _is_session_turn_commentary_item(item)),
+        -1,
+    )
+    if commentary_index >= 0:
+        existing = merged[commentary_index]
+        existing_text = str(existing.get("text") or existing.get("summary") or "").strip()
+        existing_status = str(existing.get("status") or "").strip().lower()
+        thought_overlaps_commentary = (
+            not existing_text
+            or thought_text == existing_text
+            or thought_text.startswith(existing_text)
+            or existing_text in thought_text
+            or existing_text.startswith(thought_text)
+        )
+        if thought_overlaps_commentary and len(thought_text) >= len(existing_text):
+            next_item = dict(existing)
+            next_item["text"] = thought_text
+            # Committed/terminal commentary keeps its final state; streaming rows
+            # settle with the segment lifecycle.
+            if existing_status not in {"completed", "done", "success", "failed", "degraded"}:
+                next_item["status"] = "completed" if (done or _session_turn_stage_past_thinking(stage)) else (
+                    existing_status or "in_progress"
+                )
+                next_item["provisional"] = not bool(done)
+            if not str(next_item.get("messageId") or "").strip():
+                next_item["messageId"] = str(message_id or "").strip()
+            if not str(next_item.get("source") or "").strip():
+                next_item["source"] = source
+            merged[commentary_index] = s._compact_codex_record(next_item)
+            return merged
 
     reasoning_item = _build_session_turn_reasoning_item(
         session_id=session_id,
