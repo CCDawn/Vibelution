@@ -37,9 +37,12 @@ describe("TeamResearchStageLauncherPanel lifecycle truth", () => {
     expect(panelAndProps).toContain("flattenResearchStageLauncherProps");
   });
 
-  it("keeps historical Challenge Cup projection behind the progress surface", () => {
-    expect(source).toContain(
-      'challengeCupResearchTeamSelected && challengeTeamSurface === "progress"',
-    );
+  it("keeps the Challenge Cup program projection on the overview console", () => {
+    // The program projection renders read-only program-level state (stage 1
+    // readiness / MVP progress); single-question acceptance moved to the
+    // workflow workspace panel=question deep link, not a parallel rail shell.
+    expect(source).toContain("challengeProgramProjection");
+    expect(source).not.toContain("challengeTeamSurface");
+    expect(source).not.toContain("ChallengeQuestionDetailPanel");
   });
 });

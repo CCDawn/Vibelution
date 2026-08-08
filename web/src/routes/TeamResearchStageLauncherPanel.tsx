@@ -4,12 +4,8 @@
  * Presentation + local pure helpers; mutations/query objects injected by the route.
  */
 import { CheckCircle2, Eye, Link2, Play, RefreshCw, Settings2 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
 
-import { getChallengeQuestionRunDetail } from "../api/challengeQuestionRuns";
-import { queryKeys } from "../api/queryKeys";
 import type {
   ExperimentMethodId,
   ResearchProjectAgentTaskKind,
@@ -22,7 +18,6 @@ import {
 import { isChallengeCupResearchWorkflowTeam } from "./teams/teamKindModel";
 import { RESEARCH_TEAM_ID } from "./TeamsRoute.canvasData";
 import {
-  challengeQuestionDetailRoute,
   parseResearchWorkspaceView,
   RESEARCH_WORKSPACE_NAV_ITEMS,
   researchCanvasRoute,
@@ -52,18 +47,6 @@ import {
 import researchStyles from "./TeamsRoute.research.styles";
 import shellStyles from "./TeamsRoute.styles";
 
-/** Challenge question detail only — main Challenge Cup surface is ResearchProcessWorkspace. */
-const ChallengeQuestionDetailPanel = lazy(() =>
-  import("./teams/challenge-cup/ChallengeQuestionDetailPanel").then((module) => ({
-    default: module.ChallengeQuestionDetailPanel,
-  })),
-);
-const ResearchProcessWorkspace = lazy(() =>
-  import("./teams/research-workflow/ResearchProcessWorkspace").then((module) => ({
-    default: module.ResearchProcessWorkspace,
-  })),
-);
-
 const styles = { ...shellStyles, ...researchStyles } as Record<string, string>;
 
 export type { TeamResearchStageLauncherPanelProps };
@@ -77,7 +60,6 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     selectedTeam,
     selectedTeamMemoryMembers,
     lang,
-    challengeTeamSurface,
     presentationMode,
     sourceCollectionDraft,
     setSourceCollectionDraft,
@@ -135,32 +117,13 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     researchStageStartFeedbackText,
   } = flattenResearchStageLauncherProps(props);
   const workflowTeamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
-  const selectedChallengeQuestionId = searchParams.get("challengeQuestion")?.trim().toUpperCase() || "";
-  const selectedChallengeRunId = searchParams.get("challengeRun")?.trim() || "";
-  const challengeQuestionDetailQuery = useQuery({
-    queryKey: queryKeys.challengeQuestionRunDetail(
-      workflowTeamId,
-      selectedChallengeQuestionId,
-      selectedChallengeRunId,
-    ),
-    queryFn: () => getChallengeQuestionRunDetail(
-      workflowTeamId,
-      selectedChallengeQuestionId,
-      selectedChallengeRunId,
-    ),
-    enabled: challengeCupResearchTeamSelected && Boolean(selectedChallengeQuestionId),
-    staleTime: 60_000,
-  });
   const researchProjectAgentTasks = useResearchProjectAgentTasks({
     teamId: workflowTeamId,
     enabled: challengeCupResearchTeamSelected,
   });
-  // The historical Challenge Cup projection is an explicit progress surface.
-  // The default workspace must render the active research-project workflow so
-  // reset progress and historical sample records cannot appear in one view.
-  const challengeProgramSurfaceSelected =
-    challengeCupResearchTeamSelected && challengeTeamSurface === "progress";
-
+  // Single-question acceptance detail lives in the workflow workspace
+  // (panel=question deep link); the launcher no longer hosts a progress
+  // surface that shadows the active research-project workflow.
   const startResearchProjectAgentTask = async (
     taskKind: ResearchProjectAgentTaskKind,
     options: { formalRetry?: boolean; retryTaskId?: string } = {},
@@ -182,35 +145,6 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
 
     if (!researchWorkflowTeamSelected) {
       return null;
-    }
-    if (challengeProgramSurfaceSelected) {
-      const challengeProjection = experimentPlanningStatus?.challengeProgramProjection;
-      const challengeTeamId = workflowTeamId;
-      if (selectedChallengeQuestionId) {
-        return (
-          <Suspense fallback={<div className={styles.panel} aria-busy="true">Loading…</div>}>
-            <ChallengeQuestionDetailPanel
-              requestedQuestionId={selectedChallengeQuestionId}
-              detail={challengeQuestionDetailQuery.data}
-              isLoading={challengeQuestionDetailQuery.isPending}
-              errorMessage={
-                challengeQuestionDetailQuery.error instanceof Error
-                  ? challengeQuestionDetailQuery.error.message
-                  : challengeQuestionDetailQuery.isError
-                    ? "challenge_question_run_unavailable"
-                    : ""
-              }
-              onClose={() => navigate(teamWorkspaceRoute(challengeTeamId))}
-            />
-          </Suspense>
-        );
-      }
-      // Task 9/10: single process canvas only (no parallel stage-rail operations shell).
-      return (
-        <Suspense fallback={<div className={styles.panel} aria-busy="true">Loading challenge workspace…</div>}>
-          <ResearchProcessWorkspace teamId={challengeTeamId} />
-        </Suspense>
-      );
     }
     const stageCardsReadOnly = presentationMode === "overview";
     const phaseOrder: ResearchStageType[] = knowledgeExpansionWorkflowTeamSelected ? ["knowledge_collection"] : ["knowledge_collection", "experiment", "iteration"];
@@ -321,11 +255,11 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const stageStatusLoading = !researchStageRoundStatus && researchStageRoundStatusQuery.isPending;
     const stageStatusUnavailable = !researchStageRoundStatus && researchStageRoundStatusQuery.isError;
     const experimentLifecycleProjection = experimentPlanningStatus?.lifecycleProjection;
-    const challengeProgramProjection = challengeTeamSurface === "progress"
-      ? experimentPlanningStatus?.challengeProgramProjection
-      : undefined;
-    const challengeProgramExpected = isChallengeCupResearchWorkflowTeam(selectedTeam)
-      && challengeTeamSurface === "progress";
+    // Challenge-program projection is a read-only program-level surface shown
+    // on the overview console; the workflow canvas remains the operations
+    // surface (no parallel stage-rail shell).
+    const challengeProgramProjection = experimentPlanningStatus?.challengeProgramProjection;
+    const challengeProgramExpected = isChallengeCupResearchWorkflowTeam(selectedTeam);
     const challengeProgramLoading = challengeProgramExpected
       && !challengeProgramProjection
       && experimentPlanningStatusQuery.isPending;
