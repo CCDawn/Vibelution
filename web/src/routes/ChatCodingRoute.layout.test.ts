@@ -353,6 +353,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.userCard).not.toContain("bg-[var(--surface-panel-strong)]");
 
     expect(directSessionIndexItemStyles.sessionItemActive).toContain("!bg-[color-mix(in_srgb,var(--accent-cool)_10%");
+    expect(directSessionIndexItemStyles.sessionItemActive).toContain("data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_10%");
     expect(directSessionIndexItemStyles.sessionItemActive).not.toContain("shadow-[var(--vui-shadow-inset-accent)]");
     expect(routeStyles.sessionItemActive).not.toContain("linear-gradient");
     expect(routeStyles.sessionItemActive).not.toContain("shadow-lg");

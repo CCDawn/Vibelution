@@ -391,6 +391,7 @@ export function DirectSessionIndexItem({
   return (
     <div
       aria-current={active ? "true" : undefined}
+      data-selected={active ? "true" : undefined}
       onContextMenu={(event) => onContextMenu(event, session)}
       className={sessionItemClassName}
     >

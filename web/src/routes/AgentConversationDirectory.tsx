@@ -224,6 +224,7 @@ export function AgentConversationDirectory({
         variant="ghost"
         contentLayout="plain"
         className={[styles.agentRow, active ? styles.agentRowActive : ""].filter(Boolean).join(" ")}
+        data-selected={active ? "true" : undefined}
         aria-current={active ? "page" : undefined}
         onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}
         onPress={() => onOpenAgent(agent, latestSession ?? null)}
