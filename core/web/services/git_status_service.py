@@ -20,9 +20,10 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STATUS_LIMIT = 80
 MAX_STATUS_LIMIT = 500
-# Utility menu polls ~6s; keep snapshot warm so runtime does not thrash git.exe.
-GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS = 8.0
-GIT_STATUS_METADATA_CACHE_TTL_SECONDS = 45.0
+# Utility menu polls ~6s; keep snapshot warm so runtime does not thrash git.exe
+# (each cold status can spawn many git processes and flash consoles on Windows).
+GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS = 45.0
+GIT_STATUS_METADATA_CACHE_TTL_SECONDS = 120.0
 DEFAULT_COMMIT_LIMIT = 20
 MAX_COMMIT_LIMIT = 60
 STATUS_LOCAL_COMMIT_LIMIT = 5
@@ -978,12 +979,12 @@ def _worktrees_payload(service: Any, current_branch: str) -> dict[str, Any]:
     items.sort(key=lambda item: (not bool(item["isMain"]), not bool(item["hasCommits"]), str(item["branch"])))
     with_commits = sum(1 for item in items if item["hasCommits"])
     visible = items[:STATUS_WORKTREE_LIMIT]
+    # Do not run per-worktree `rev-list main...branch` on the hot status path —
+    # that was N extra git.exe spawns (console flash) every utility-menu poll.
+    # hasCommits already comes from a single `branch --no-merged main`.
     for item in visible:
-        branch = str(item.get("branch") or "").strip()
-        relation = _branch_main_relation(service, branch)
-        item["aheadMain"] = relation["ahead"]
-        item["behindMain"] = relation["behind"]
-        item["hasCommits"] = bool(item["hasCommits"]) or relation["ahead"] > 0
+        item["aheadMain"] = 0
+        item["behindMain"] = 0
     return {
         "available": True,
         "error": "",

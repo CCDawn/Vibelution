@@ -128,6 +128,8 @@ def _subprocess_no_window_kwargs() -> dict:
     CREATE_NO_WINDOW alone is not always enough when ``shell=True`` spawns
     cmd.exe; also force STARTF_USESHOWWINDOW + SW_HIDE so agent cli_tool bursts
     do not flash visible consoles during long turns.
+    Prefer ``shell=False`` argv form via ``_popen_command_for_route`` so cmd is
+    not introduced as an intermediate console host.
     """
     if not IS_WINDOWS:
         return {}
@@ -143,6 +145,43 @@ def _subprocess_no_window_kwargs() -> dict:
     except Exception:
         pass
     return kwargs
+
+
+def _popen_command_for_route(route: "ShellCommandRoute", *, rewritten_command: str) -> tuple[str | list[str], bool]:
+    """Return ``(command, shell)`` for Popen with minimal console flash on Windows.
+
+    Prefer argv + shell=False. Only fall back to shell=True when the route string
+    cannot be safely turned into a list without a shell.
+    """
+    if not IS_WINDOWS:
+        return route.final_command, True
+
+    original = str(rewritten_command or route.command or "").strip()
+    if route.route == "cmd":
+        # Avoid shell=True (implicit cmd) — invoke cmd.exe explicitly, hidden.
+        return ["cmd.exe", "/d", "/s", "/c", original], False
+    if route.route == "powershell":
+        return [
+            "powershell.exe",
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            original,
+        ], False
+    if route.route == "git_bash":
+        bash_path = _find_git_bash()
+        if bash_path:
+            return [bash_path, "-c", original], False
+        return route.final_command, True
+    if route.route == "bash":
+        # Explicit bash -c "..." already in final_command; keep shell for quoting.
+        return route.final_command, True
+    if route.route == "no_console_git":
+        return route.final_command, False
+    return route.final_command, True
 
 
 def _terminate_shell_process(process: subprocess.Popen) -> None:
@@ -1218,9 +1257,15 @@ def execute_shell_command(
                 process_env = apply_no_console_git_env(process_env, git_exe=resolve_git_executable())
             except Exception:
                 pass
+        # Prefer argv + shell=False on Windows. shell=True always goes through cmd.exe
+        # and is the main source of visible console flashes during agent turns.
+        popen_command, use_shell = _popen_command_for_route(
+            route,
+            rewritten_command=str(route.command or command or "").strip() or final_command,
+        )
         process = subprocess.Popen(
-            final_command,
-            shell=True,
+            popen_command,
+            shell=use_shell,
             cwd=cwd,
             env=process_env,
             stdout=subprocess.PIPE,
