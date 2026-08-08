@@ -79,6 +79,37 @@ def test_relay_prompt_tokens_dominates_tail_input():
     assert n["cacheHitRate"] == pytest.approx(4000 / 4700, rel=1e-4)
 
 
+def test_rust_usage_normalize_spawn_uses_create_no_window(monkeypatch):
+    """CUI rust sidecar must not flash a console on every LLM usage event."""
+
+    import subprocess as sp
+
+    from core.llm import usage_normalize as un
+
+    captured: dict = {}
+
+    def fake_run(*_args, **kwargs):
+        captured.update(kwargs)
+
+        class _Result:
+            returncode = 0
+            stdout = (
+                '{"inputTokens":1,"outputTokens":2,"totalTokens":3,'
+                '"cachedInputTokens":0,"cacheCreationInputTokens":0}'
+            )
+            stderr = ""
+
+        return _Result()
+
+    monkeypatch.setattr(un, "resolve_usage_normalize_binary", lambda: Path("fake-usage-normalize.exe"))
+    monkeypatch.setattr(sp, "run", fake_run)
+    result = un.normalize_usage_payload_via_rust({"prompt_tokens": 1})
+    assert result is not None
+    flags = int(captured.get("creationflags") or 0)
+    assert flags & int(getattr(sp, "CREATE_NO_WINDOW", 0x08000000))
+    assert captured.get("startupinfo") is not None
+
+
 @pytest.mark.skipif(resolve_usage_normalize_binary() is None, reason="Rust binary not built")
 def test_rust_binary_parity_with_python():
     cases = [
@@ -104,12 +135,15 @@ def test_rust_binary_parity_with_python():
     assert binary is not None
     for raw in cases:
         py = normalize_usage_dict(raw, engine="python")
+        from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
         completed = subprocess.run(
             [str(binary)],
             input=json.dumps({"usage": raw}),
             text=True,
             capture_output=True,
             check=True,
+            **no_window_subprocess_kwargs(),
         )
         rust = json.loads(completed.stdout)
         assert rust["inputTokens"] == py["inputTokens"]

@@ -46,6 +46,34 @@ def test_empty_and_null_byte():
     assert contain_path_dict("c:/root", "a\x00b")["error"] == "null_byte"
 
 
+def test_rust_path_containment_spawn_uses_create_no_window(monkeypatch, tmp_path: Path):
+    """CUI path-containment sidecar must hide console on hot file checks."""
+
+    import subprocess as sp
+
+    from core.infrastructure import path_containment as pc
+
+    captured: dict = {}
+
+    def fake_run(*_args, **kwargs):
+        captured.update(kwargs)
+
+        class _Result:
+            returncode = 0
+            stdout = '{"ok":true,"relative":"a.txt"}'
+            stderr = ""
+
+        return _Result()
+
+    monkeypatch.setattr(pc, "resolve_path_containment_binary", lambda: Path("fake-path-containment.exe"))
+    monkeypatch.setattr(sp, "run", fake_run)
+    result = pc.contain_path_via_rust(tmp_path, "a.txt")
+    assert isinstance(result, dict)
+    flags = int(captured.get("creationflags") or 0)
+    assert flags & int(getattr(sp, "CREATE_NO_WINDOW", 0x08000000))
+    assert captured.get("startupinfo") is not None
+
+
 @pytest.mark.skipif(resolve_path_containment_binary() is None, reason="Rust binary not built")
 def test_rust_binary_parity(tmp_path: Path):
     binary = resolve_path_containment_binary()
@@ -57,12 +85,15 @@ def test_rust_binary_parity(tmp_path: Path):
     ]
     for candidate in cases:
         py = contain_path_dict(tmp_path, candidate, engine="python")
+        from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
         completed = subprocess.run(
             [str(binary)],
             input=json.dumps({"projectRoot": str(tmp_path), "candidate": candidate}),
             text=True,
             capture_output=True,
             check=True,
+            **no_window_subprocess_kwargs(),
         )
         rust = json.loads(completed.stdout)
         assert rust["ok"] is py["ok"]
