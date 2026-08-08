@@ -287,6 +287,17 @@ const isCanonicalAnswer = (item: CanonicalSessionTurnItem): boolean =>
 const canonicalFinalAnswer = (items: readonly CanonicalSessionTurnItem[]): string =>
   items.filter(isCanonicalAnswer).map(itemText).filter(Boolean).join("\n\n");
 
+const isCanonicalReasoning = (item: CanonicalSessionTurnItem): boolean =>
+  item.kind === "reasoning"
+  || item.kind === "analysis"
+  || item.channel === "analysis"
+  || item.channel === "reasoning"
+  || item.phase === "reasoning";
+
+/** Prefer package reasoning text; keeps thought rails aligned with reasoning_summary cells. */
+const canonicalThoughtContent = (items: readonly CanonicalSessionTurnItem[]): string =>
+  items.filter(isCanonicalReasoning).map(itemText).filter(Boolean).join("\n\n");
+
 const isCanonicalCommentary = (item: CanonicalSessionTurnItem): boolean =>
   item.kind === "commentary"
   || item.channel === "commentary"
@@ -404,10 +415,13 @@ export const resolveAssistantTurnRenderSurface = (input: {
 }): CanonicalTurnRenderSurface => {
   const turnItems = consolidateSessionTurnItemsV2(input.turnItems);
   if (turnItems.length > 0) {
+    const packageThought = canonicalThoughtContent(turnItems);
     return {
       protocol: "canonical_turn_items_v2",
       answerContent: canonicalFinalAnswer(turnItems),
-      thoughtContent: "",
+      // Package reasoning owns thought when present; otherwise keep live/legacy thought
+      // so an answer-only journal commit cannot wipe a still-streaming thought field.
+      thoughtContent: packageThought || compactText(input.thoughtContent) || "",
       feedbackEvents: input.feedbackEvents ?? [],
       codexTranscript: canonicalTranscript(turnItems),
       turnItems,
@@ -473,10 +487,14 @@ export const resolveAssistantTurnRenderSurface = (input: {
 export const projectConversationMessageFromTurnItemsV2 = <T extends CanonicalConversationMessage>(message: T): T => {
   const turnItems = consolidateSessionTurnItemsV2(message.turnItems);
   if (turnItems.length === 0) return message;
+  const packageThought = canonicalThoughtContent(turnItems);
+  const legacyThought = compactText(message.thought);
   return {
     ...message,
     content: canonicalFinalAnswer(turnItems),
-    thought: undefined,
+    // Never hard-clear thought when the package is present: derive from reasoning
+    // rows, else keep the live/settled thought field for dual-rail safety.
+    thought: packageThought || legacyThought || undefined,
     turnItems,
     codexTranscript: canonicalTranscript(turnItems),
   };

@@ -1510,6 +1510,125 @@ def _is_committed_session_turn_final_answer_item(item: Mapping[str, Any] | None)
     return item.get("terminal") is True or status in {"completed", "done", "failed"}
 
 
+def _is_session_turn_reasoning_item(item: Mapping[str, Any] | None) -> bool:
+    if not isinstance(item, Mapping):
+        return False
+    kind = str(item.get("kind") or item.get("type") or "").strip().lower()
+    phase = str(item.get("phase") or "").strip().lower()
+    channel = str(item.get("channel") or "").strip().lower()
+    return kind in {"reasoning", "analysis"} or phase == "reasoning" or channel in {"analysis", "reasoning"}
+
+
+def _build_session_turn_reasoning_item(
+    *,
+    session_id: str,
+    turn_id: str,
+    message_id: str,
+    thought: Any,
+    done: bool = False,
+    source: str = "assistant_delta",
+    sequence: int = 0,
+) -> dict[str, Any] | None:
+    """Build a SessionTurnItem v2 reasoning row from live/durable thought text."""
+    s = _service()
+    thought_text = s._sanitize_thought_text(thought)
+    if not thought_text:
+        return None
+    reasoning_id = f"{s._session_turn_item_base_id(session_id, turn_id or 'turn')}-reasoning"
+    return s._compact_codex_record(
+        {
+            "version": 2,
+            "id": f"{reasoning_id}:0",
+            "itemId": reasoning_id,
+            "type": "reasoning",
+            "kind": "reasoning",
+            "channel": "analysis",
+            "phase": "reasoning",
+            "status": "completed" if done else "in_progress",
+            "provisional": not bool(done),
+            "terminal": False,
+            "revision": 0,
+            "sequence": max(0, int(sequence or 0)),
+            "sessionId": str(session_id or "").strip(),
+            "turnId": str(turn_id or "").strip(),
+            "messageId": str(message_id or "").strip(),
+            "source": source,
+            "protocol": "session_detail",
+            "text": thought_text,
+        }
+    )
+
+
+def _merge_live_thought_into_turn_items(
+    items: list[dict[str, Any]],
+    *,
+    session_id: str,
+    turn_id: str,
+    message_id: str,
+    thought: Any = "",
+    done: bool = False,
+    source: str = "assistant_delta",
+) -> list[dict[str, Any]]:
+    """Keep journal package authority while bridging live/durable thought as reasoning.
+
+    Wire/journal often commits final_answer without a reasoning item even when the turn
+    streamed thought. Without this bridge, package_cells drops thinking the moment the
+    journal final answer lands (turnItemCount collapses to answer-only).
+    """
+    s = _service()
+    merged = [dict(item) for item in list(items or []) if isinstance(item, dict)]
+    thought_text = s._sanitize_thought_text(thought)
+    if not thought_text:
+        return merged
+
+    reasoning_index = next(
+        (index for index, item in enumerate(merged) if _is_session_turn_reasoning_item(item)),
+        -1,
+    )
+    if reasoning_index >= 0:
+        existing = merged[reasoning_index]
+        existing_text = str(existing.get("text") or existing.get("summary") or "").strip()
+        # Prefer longer live thought while the reasoning row is still provisional/streaming.
+        existing_status = str(existing.get("status") or "").strip().lower()
+        can_extend = (
+            existing.get("provisional") is True
+            or existing_status in {"", "pending", "running", "in_progress", "streaming"}
+        )
+        if (
+            can_extend
+            and len(thought_text) > len(existing_text)
+            and (
+                not existing_text
+                or thought_text.startswith(existing_text)
+                or existing_text in thought_text
+            )
+        ):
+            next_item = dict(existing)
+            next_item["text"] = thought_text
+            next_item["status"] = "completed" if done else (existing_status or "in_progress")
+            next_item["provisional"] = not bool(done)
+            if not str(next_item.get("messageId") or "").strip():
+                next_item["messageId"] = str(message_id or "").strip()
+            if not str(next_item.get("source") or "").strip():
+                next_item["source"] = source
+            merged[reasoning_index] = s._compact_codex_record(next_item)
+        return merged
+
+    reasoning_item = _build_session_turn_reasoning_item(
+        session_id=session_id,
+        turn_id=turn_id,
+        message_id=message_id,
+        thought=thought_text,
+        done=done,
+        source=source,
+        sequence=0,
+    )
+    if reasoning_item is None:
+        return merged
+    # Reasoning belongs before tools/answer so chrono rails stay thought → work → answer.
+    return [reasoning_item, *merged]
+
+
 def _merge_live_content_into_turn_items(
     items: list[dict[str, Any]],
     *,
@@ -1629,12 +1748,23 @@ def _build_session_turn_items_projection(
         )
         if canonical_items:
             stamped = s._stamp_turn_items_message_id(canonical_items, normalized_message_id)
-            return _merge_live_content_into_turn_items(
+            merged = _merge_live_content_into_turn_items(
                 stamped,
                 session_id=session_id,
                 turn_id=normalized_turn_id,
                 message_id=normalized_message_id,
                 content=content,
+                done=done,
+                source=source,
+            )
+            # Journal final_answer / tools often land without a reasoning commit.
+            # Bridge live/durable thought so package_cells keep thinking visible.
+            return _merge_live_thought_into_turn_items(
+                merged,
+                session_id=session_id,
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                thought=thought,
                 done=done,
                 source=source,
             )
