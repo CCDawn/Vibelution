@@ -5,6 +5,7 @@ import {
   adaptersForStage,
   getNodeAdapter,
   listNodeAdapters,
+  WIRED_COMMANDS,
 } from "./nodeAdapterModel";
 
 describe("nodeAdapterModel", () => {
@@ -12,6 +13,43 @@ describe("nodeAdapterModel", () => {
     const adapters = listNodeAdapters();
     expect(adapters).toHaveLength(15);
     expect(adapters.map((a) => a.nodeId).sort()).toEqual([...CHALLENGE_CUP_NODE_IDS].sort());
+  });
+
+  it("wires exactly the commands with a live handler (human-gate actions)", () => {
+    // The inspector renders only wired commands; every wired command must be
+    // handled by the workspace onInspectorCommand. Adding a command here
+    // without a handler recreates the fake-button error path.
+    expect(WIRED_COMMANDS).toEqual(["accept_handoff", "reject_handoff", "revise"]);
+    for (const command of WIRED_COMMANDS) {
+      expect(
+        listNodeAdapters().some((a) => a.commands.includes(command)),
+        `wired command ${command} is declared by at least one adapter`,
+      ).toBe(true);
+    }
+  });
+
+  it("declares only wired commands, the session link slot, or known roadmap commands", () => {
+    // Adapters keep their target-state declarations (roadmap); the inspector
+    // filters to WIRED_COMMANDS + open_session at render time. Every declared
+    // command must be explicitly classified so no command can surface as an
+    // unwired button.
+    const ROADMAP_COMMANDS = [
+      "start_agent_task",
+      "open_evidence_graph",
+      "run_smoke",
+      "start_controlled_run",
+      "view_artifacts",
+      "build_package",
+    ];
+    const declared = listNodeAdapters().flatMap((a) => a.commands);
+    for (const command of declared) {
+      expect(
+        (WIRED_COMMANDS as readonly string[]).includes(command) ||
+          command === "open_session" ||
+          ROADMAP_COMMANDS.includes(command),
+        `command ${command} is wired, the session link slot, or a known roadmap command`,
+      ).toBe(true);
+    }
   });
 
   it("maps knowledge handoff to human gate slot", () => {

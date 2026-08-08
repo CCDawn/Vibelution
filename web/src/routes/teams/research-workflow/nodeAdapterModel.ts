@@ -28,6 +28,15 @@ export type NodeAdapterSpec = {
   replaces: string;
 };
 
+/**
+ * Commands with a LIVE business handler today. `commands` above is the
+ * target-state declaration (roadmap); the inspector renders ONLY wired
+ * commands (plus the `open_session` link/disabled slot), so a declared but
+ * unwired command can never surface as a button that ends in
+ * "尚未接入业务服务".
+ */
+export const WIRED_COMMANDS = ["accept_handoff", "reject_handoff", "revise"] as const;
+
 const ADAPTERS: NodeAdapterSpec[] = [
   {
     nodeId: "source_finding",

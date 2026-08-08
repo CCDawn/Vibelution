@@ -7,6 +7,7 @@ import { VButton, VEmptyState, VSurface } from "../../../components/vui";
 import {
   commandLabel,
   getNodeAdapter,
+  WIRED_COMMANDS,
   type NodeAdapterSpec,
 } from "./nodeAdapterModel";
 
@@ -105,29 +106,47 @@ export function ResearchProcessNodeInspector({
       </dl>
 
       <div className="flex flex-wrap gap-2">
-        {adapter.commands.map((command) => {
-          if (command === "open_session" && chatDeepLink && !sessionAnchorDegraded) {
-            return (
-              <a key={command} href={chatDeepLink} className="inline-flex">
-                <VButton type="button" variant="ghost">
+        {adapter.commands
+          // Only commands with a live handler (or the open_session link
+          // slot) render — declared-but-unwired commands stay on the
+          // roadmap without faking a button that errors on click.
+          .filter((command) => WIRED_COMMANDS.includes(command as (typeof WIRED_COMMANDS)[number]) || command === "open_session")
+          .map((command) => {
+            if (command === "open_session") {
+              const sessionAvailable = chatDeepLink && !sessionAnchorDegraded;
+              if (sessionAvailable) {
+                return (
+                  <a key={command} href={chatDeepLink} className="inline-flex">
+                    <VButton type="button" variant="ghost">
+                      {commandLabel(command)}
+                    </VButton>
+                  </a>
+                );
+              }
+              return (
+                <VButton
+                  key={command}
+                  type="button"
+                  variant="ghost"
+                  isDisabled
+                  title={sessionAnchorDegraded ? "会话锚点不可用" : "节点尚未绑定会话"}
+                >
                   {commandLabel(command)}
                 </VButton>
-              </a>
+              );
+            }
+            return (
+              <VButton
+                key={command}
+                type="button"
+                variant={command.startsWith("accept") ? "primary" : "ghost"}
+                isDisabled={Boolean(busy)}
+                onClick={() => onCommand?.(command, adapter)}
+              >
+                {commandLabel(command)}
+              </VButton>
             );
-          }
-          return (
-            <VButton
-              key={command}
-              type="button"
-
-              variant={command.startsWith("accept") ? "primary" : "ghost"}
-              isDisabled={Boolean(busy)}
-              onClick={() => onCommand?.(command, adapter)}
-            >
-              {commandLabel(command)}
-            </VButton>
-          );
-        })}
+          })}
       </div>
 
     </VSurface>
