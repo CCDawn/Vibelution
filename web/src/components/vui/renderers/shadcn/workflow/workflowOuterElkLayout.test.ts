@@ -19,7 +19,24 @@ import { describe, expect, it } from "vitest";
 import type { WorkflowLayoutInput, WorkflowLayoutResult } from "../../../product/workflow/workflowCanvasTypes";
 import { layoutTwoLevel } from "./workflowTwoLevelLayout";
 import { challengeCupDefinition, fourDecisionEdges } from "./workflowElkLayout.test";
+import { segmentIntersectsRect } from "./workflowLayoutCollision";
 import { rectsOverlap, type Rect } from "./workflowLayoutGeometry";
+
+/**
+ * Walks the full polyline of a section chain as consecutive SEGMENTS
+ * (start -> bend -> ... -> bend -> end), not just isolated points: a point
+ * outside a rect does not prove the segment between two points is.
+ */
+function segmentsOf(sections: WorkflowLayoutResult["edges"][number]["sections"]): Array<{ a: { x: number; y: number }; b: { x: number; y: number } }> {
+  const segments: Array<{ a: { x: number; y: number }; b: { x: number; y: number } }> = [];
+  for (const section of sections) {
+    const polyline = [section.start, ...section.bendPoints, section.end];
+    for (let i = 0; i + 1 < polyline.length; i += 1) {
+      segments.push({ a: polyline[i]!, b: polyline[i + 1]! });
+    }
+  }
+  return segments;
+}
 
 const SAFE_LABEL_STAGE = 12;
 const SAFE_LABEL_NODE = 12;
@@ -171,14 +188,16 @@ describe("outer-ELK layout · multi-edge and long-edge contracts (RED on current
     const middle = stages.find((s) => s.stageId === "experiment_design")!;
     const edge = result.edges.find((e) => e.id === "e_find_package");
     expect(edge, "direct first->third edge exists").toBeDefined();
-    for (const section of edge!.sections) {
-      const pts = [section.start, section.end, ...section.bendPoints];
-      for (const p of pts) {
-        const strictlyInside =
-          p.x > middle.x && p.x < middle.x + middle.width &&
-          p.y > middle.y && p.y < middle.y + middle.height;
-        expect(strictlyInside, `section of ${edge!.id} crosses middle stage`).toBe(false);
-      }
+    const segments = segmentsOf(edge!.sections);
+    expect(segments.length, "edge has at least one segment").toBeGreaterThan(0);
+    // Segment-level check: every consecutive pair of polyline points must not
+    // intersect the middle stage. Point-only checks are fake-green — the
+    // segment between two outside points can still pierce the stage.
+    for (const segment of segments) {
+      expect(
+        segmentIntersectsRect(segment.a, segment.b, middle),
+        `segment of ${edge!.id} crosses middle stage`,
+      ).toBe(false);
     }
   });
 
@@ -229,6 +248,23 @@ describe("outer-ELK layout · multi-edge and long-edge contracts (RED on current
           rectsOverlap(padded(a, SAFE_LABEL_LABEL), b),
           `labels ${labels[i]!.id} and ${labels[j]!.id} overlap`,
         ).toBe(false);
+      }
+    }
+
+    const labelRects = labels.map((label) => ({ id: label.id, rect: label.rect }));
+    // Edge segments must not pierce ANY OTHER edge's label rect (an edge
+    // naturally passes through its OWN label — that is the label's anchor).
+    // Segment-level check on the full polyline (points-only would be
+    // fake-green for the same reason as the middle-stage test).
+    for (const edge of crossEdges) {
+      for (const segment of segmentsOf(edge.sections)) {
+        for (const label of labelRects) {
+          if (label.id === edge.id) continue;
+          expect(
+            segmentIntersectsRect(segment.a, segment.b, label.rect),
+            `segment of ${edge.id} crosses label ${label.id}`,
+          ).toBe(false);
+        }
       }
     }
   });

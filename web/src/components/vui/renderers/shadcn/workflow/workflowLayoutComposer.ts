@@ -101,7 +101,14 @@ export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
 
   const edges: WorkflowLayoutResult["edges"] = input.edges.map((edge) => {
     const internal = collectInternalSections(input, localLayouts, edge.edgeId, outer);
-    const crossSections = internal ?? outer.edgeSections.get(edge.edgeId);
+    let sections = internal ?? outer.edgeSections.get(edge.edgeId) ?? [];
+    if (!internal) {
+      // Cross-stage edges: the outer ELK sections start/end at the stage
+      // gateway ports; append the internal legs from the source task's right
+      // edge to the source gateway and from the target gateway to the target
+      // task's left edge, so the final polyline is continuous node-to-node.
+      sections = withGatewayStubs(edge, sections, ctx);
+    }
     const labelBounds = internal
       ? internalLabelBounds(localLayouts, input, edge.edgeId, outer)
       : outer.labelPositions.get(edge.edgeId);
@@ -117,12 +124,136 @@ export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
       targetHandle: targetHandleByEdge.get(edge.edgeId),
       gateKind: edge.gateKind,
       requiresHumanAccept: edge.requiresHumanAccept,
-      sections: crossSections ?? [],
+      sections,
       labelBounds,
     };
   });
 
   return { nodes, edges, width: outer.size.width, height: outer.size.height };
+}
+
+/**
+ * Prepends/appends the internal node-to-gateway legs for a cross-stage edge.
+ *
+ * The outer ELK graph routes between stage gateway ports, so its sections
+ * begin at the source stage's EAST edge (at the Y the engine chose for the
+ * port) and end at the target stage's WEST edge. ELK's layered algorithm does
+ * NOT honor fixed port coordinates (probed: FIXED_POS/FIXED_RATIO/anchors are
+ * ignored; ports float), so the composer bridges from the actual task port to
+ * the engine's chosen channel entry:
+ *
+ *   src task right edge --horizontal--> stage EAST edge
+ *   stage EAST edge ----vertical (if Y differs)--> engine channel Y
+ *   ...engine sections...
+ *   engine channel Y ----vertical (if Y differs)--> target stage WEST edge
+ *   target stage WEST edge --horizontal--> tgt task left edge
+ *
+ * The polyline is fully orthogonal, node-to-node continuous, and the section
+ * chain stays well-formed (symmetric declaration, geometric joins).
+ */
+function withGatewayStubs(
+  edge: WorkflowLayoutInput["edges"][number],
+  sections: WorkflowLayoutResult["edges"][number]["sections"],
+  ctx: ComposerInput,
+): WorkflowLayoutResult["edges"][number]["sections"] {
+  if (sections.length === 0) {
+    return sections;
+  }
+  const { input, localLayouts, outer, stageBoxes } = ctx;
+  const sourceNode = input.nodes.find((n) => n.nodeId === edge.fromNodeId);
+  const targetNode = input.nodes.find((n) => n.nodeId === edge.toNodeId);
+  if (!sourceNode || !targetNode || sourceNode.stageId === targetNode.stageId) {
+    return sections;
+  }
+  const srcLocal = localLayouts.get(sourceNode.stageId);
+  const tgtLocal = localLayouts.get(targetNode.stageId);
+  const srcPos = outer.stagePositions.get(sourceNode.stageId);
+  const tgtPos = outer.stagePositions.get(targetNode.stageId);
+  const srcBox = stageBoxes.get(sourceNode.stageId);
+  if (!srcLocal || !tgtLocal || !srcPos || !tgtPos || !srcBox) {
+    return sections;
+  }
+  const srcTask = srcLocal.tasks.find((t) => t.id === edge.fromNodeId);
+  const tgtTask = tgtLocal.tasks.find((t) => t.id === edge.toNodeId);
+  if (!srcTask || !tgtTask) {
+    return sections;
+  }
+
+  const first = sections[0];
+  const last = sections[sections.length - 1];
+  const srcAnchorY = srcTask.y + srcTask.height / 2;
+  const tgtAnchorY = tgtTask.y + tgtTask.height / 2;
+  const engineSrcY = first.start.y;
+  const engineTgtY = last.end.y;
+
+  const srcPort: { x: number; y: number } = offset({ x: srcTask.x + srcTask.width, y: srcAnchorY }, srcPos);
+  const srcBorder: { x: number; y: number } = offset({ x: srcBox.width, y: srcAnchorY }, srcPos);
+  const tgtBorder: { x: number; y: number } = offset({ x: 0, y: tgtAnchorY }, tgtPos);
+  const tgtPort: { x: number; y: number } = offset({ x: tgtTask.x, y: tgtAnchorY }, tgtPos);
+
+  const srcStubs: WorkflowLayoutResult["edges"][number]["sections"] = [];
+  srcStubs.push({
+    id: `${edge.edgeId}_src_exit`,
+    start: srcPort,
+    end: srcBorder,
+    bendPoints: [],
+    incomingSectionIds: [],
+    outgoingSectionIds: [],
+  });
+  if (Math.abs(srcBorder.y - engineSrcY) > 1e-3) {
+    srcStubs.push({
+      id: `${edge.edgeId}_src_drop`,
+      start: srcBorder,
+      end: { x: srcBorder.x, y: engineSrcY },
+      bendPoints: [],
+      incomingSectionIds: [],
+      outgoingSectionIds: [],
+    });
+  }
+  const tgtStubs: WorkflowLayoutResult["edges"][number]["sections"] = [];
+  if (Math.abs(tgtBorder.y - engineTgtY) > 1e-3) {
+    tgtStubs.push({
+      id: `${edge.edgeId}_tgt_drop`,
+      start: { x: tgtBorder.x, y: engineTgtY },
+      end: tgtBorder,
+      bendPoints: [],
+      incomingSectionIds: [],
+      outgoingSectionIds: [],
+    });
+  }
+  tgtStubs.push({
+    id: `${edge.edgeId}_tgt_enter`,
+    start: tgtBorder,
+    end: tgtPort,
+    bendPoints: [],
+    incomingSectionIds: [],
+    outgoingSectionIds: [],
+  });
+
+  for (let i = 0; i < srcStubs.length; i += 1) {
+    srcStubs[i]!.outgoingSectionIds = [i + 1 < srcStubs.length ? srcStubs[i + 1]!.id : first.id];
+    if (i > 0) {
+      srcStubs[i]!.incomingSectionIds = [srcStubs[i - 1]!.id];
+    }
+  }
+  for (let i = 0; i < tgtStubs.length; i += 1) {
+    tgtStubs[i]!.incomingSectionIds = [i > 0 ? tgtStubs[i - 1]!.id : last.id];
+    if (i + 1 < tgtStubs.length) {
+      tgtStubs[i]!.outgoingSectionIds = [tgtStubs[i + 1]!.id];
+    }
+  }
+
+  const updatedSections = sections.map((s) => {
+    let next = s;
+    if (s.id === first.id) {
+      next = { ...next, incomingSectionIds: [srcStubs[srcStubs.length - 1]!.id] };
+    }
+    if (s.id === last.id) {
+      next = { ...next, outgoingSectionIds: [tgtStubs[0]!.id] };
+    }
+    return next;
+  });
+  return [...srcStubs, ...updatedSections, ...tgtStubs];
 }
 
 /** Internal edge sections: local sections offset by the outer stage position. */

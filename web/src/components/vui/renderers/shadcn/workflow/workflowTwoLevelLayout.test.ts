@@ -245,10 +245,14 @@ describe("two-level layout · cross-stage edges stay in the channel (RED on curr
         }
       }
       // The label rect must cover the leg boundary gap (spacer occupancy).
+      // Leg sections are identified by their id (leg1/leg2 are the layout
+      // edge ids); the composer's gateway stubs sit outside the legs.
       const lb = edge.labelBounds;
-      if (lb && edge.sections.length >= 2) {
-        const leg1End = edge.sections[0]!.end;
-        const leg2Start = edge.sections[1]!.start;
+      const leg1Sections = edge.sections.filter((s) => s.id.includes("leg1"));
+      const leg2Sections = edge.sections.filter((s) => s.id.includes("leg2"));
+      if (lb && leg1Sections.length > 0 && leg2Sections.length > 0) {
+        const leg1End = leg1Sections[leg1Sections.length - 1]!.end;
+        const leg2Start = leg2Sections[0]!.start;
         const covered =
           leg1End.x >= lb.x - 1e-3 && leg2Start.x <= lb.x + lb.width + 1e-3;
         expect(covered, `label of ${edge.id} covers the leg boundary`).toBe(true);

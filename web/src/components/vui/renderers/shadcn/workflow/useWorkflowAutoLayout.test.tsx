@@ -116,29 +116,44 @@ export function fakeLayout(graph: ElkNode): ElkNode {
       cursor += (node.width ?? 0) + 40;
       return placed;
     });
-    // Horizontal, orthogonal, continuous leg sections so the well-formed
-    // chain diagnostic passes (leg1 end == leg2 start across the boundary).
-    let legCursor = 0;
+    // Every leg section must START/END at the stage gateway border, like the
+    // real engine: leg1 runs from the source stage's EAST edge to the
+    // midpoint, leg2 continues from the midpoint to the target stage's WEST
+    // edge, so the composer's gateway stubs join geometrically.
+    const portStage = new Map<string, string>();
+    for (const child of children) {
+      for (const port of child.ports ?? []) {
+        portStage.set(String(port.id), String(child.id));
+      }
+    }
+    const stageOfPort = (portId: string | undefined) => {
+      const nodeId = portId ? portStage.get(portId) : undefined;
+      return nodeId && !String(nodeId).startsWith("__label_spacer__")
+        ? children.find((c) => String(c.id) === nodeId)
+        : undefined;
+    };
     const edges = (graph.edges ?? []).map((edge) => {
-      const startX = legCursor;
-      legCursor += 80;
+      const srcPort = String(edge.sources?.[0] ?? "");
+      const tgtPort = String(edge.targets?.[0] ?? "");
+      const isLeg1 = String(edge.id).includes("leg1");
+      // The two legs of one domain edge must meet at the SAME point: the
+      // spacer's center X (both legs touch the spacer's WEST/EAST ports).
+      const spacerNodeId = portStage.get(isLeg1 ? tgtPort : srcPort);
+      const spacerNode = children.find((c) => String(c.id) === spacerNodeId);
+      const midX = (spacerNode?.x ?? 0) + (spacerNode?.width ?? 0) / 2;
+      const srcRight = (stageOfPort(srcPort)?.x ?? 0) + (stageOfPort(srcPort)?.width ?? 0);
+      const tgtLeft = stageOfPort(tgtPort)?.x ?? srcRight + 80;
+      // One section per leg; consumeOuterLayout re-links leg1 end -> leg2
+      // start at midX, so the chain stays continuous.
       return {
         ...edge,
         sections: [
           {
             id: `s-${edge.id}`,
-            startPoint: { x: startX, y: 40 },
-            endPoint: { x: startX + 40, y: 40 },
+            startPoint: { x: isLeg1 ? srcRight : midX, y: 40 },
+            endPoint: { x: isLeg1 ? midX : tgtLeft, y: 40 },
             bendPoints: [],
             incomingSections: [],
-            outgoingSections: [`s-${edge.id}-next`],
-          },
-          {
-            id: `s-${edge.id}-next`,
-            startPoint: { x: startX + 40, y: 40 },
-            endPoint: { x: startX + 80, y: 40 },
-            bendPoints: [],
-            incomingSections: [`s-${edge.id}`],
             outgoingSections: [],
           },
         ],
@@ -345,6 +360,35 @@ describe("useWorkflowAutoLayout behavior", () => {
     expect(latest?.layoutRevision).toBe(2);
     expect(latest?.nodes).toHaveLength(6);
     expect(latest?.nodes.filter((node) => node.kind === "stage")).toHaveLength(3);
+  });
+
+  it("re-runs ELK when a cross-stage edge label widens, but not for same-geometry text", async () => {
+    const engine = makeEngine();
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+    await renderWith(graph, engine);
+    expect(engine.layout).toHaveBeenCalledTimes(3);
+    const firstRevision = latest?.layoutRevision;
+
+    // Label text grows: resolved geometry widens -> the outer spacer grows,
+    // so the stage channel must relayout (regression: label geometry used to
+    // be excluded from the layout hash).
+    const widerLabel: WorkflowLayoutInput = {
+      ...graph,
+      edges: graph.edges.map((edge) => ({ ...edge, label: "知识包跨阶段正式交接" })),
+    };
+    await renderWith(widerLabel, engine);
+    expect(engine.layout).toHaveBeenCalledTimes(6);
+    expect(latest?.layoutRevision).toBe((firstRevision ?? 0) + 1);
+
+    // Same-geometry text change (same character count): runtime-only merge,
+    // no relayout, no extra ELK calls.
+    const sameSizeText: WorkflowLayoutInput = {
+      ...widerLabel,
+      edges: widerLabel.edges.map((edge) => ({ ...edge, label: "阶段通道必须重新布局" })),
+    };
+    await renderWith(sameSizeText, engine);
+    expect(engine.layout).toHaveBeenCalledTimes(6);
+    expect(latest?.layoutRevision).toBe((firstRevision ?? 0) + 1);
   });
 
   it("re-runs ELK at most once for measured size calibration, then converges", async () => {

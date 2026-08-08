@@ -140,7 +140,7 @@ leg 边方向错乱）——阶段布局与外层布局串行执行，三阶段�
 
 ## 4. ELK 图模型构建
 
-### 4.1 图模型：两级（`workflowStageSubgraphAdapter.ts` + `workflowStageMetaGraphAdapter.ts`）
+### 4.1 图模型：两级（`workflowStageSubgraphAdapter.ts` + `workflowOuterElkGraphAdapter.ts`）
 
 **阶段 A · 阶段内部子图**（每阶段一个，`workflowStageSubgraphAdapter`）：
 
@@ -162,8 +162,10 @@ stage:knowledge_collection { layoutOptions: { direction DOWN, edgeRouting ORTHOG
 - 每条跨阶段边一个 **label spacer node**（尺寸 = `workflowEdgeLabelGeometry`
   共享契约）；跨阶段边映射为两条布局边：`stage A EAST port → spacer →
   stage B WEST port`；
-- gateway ports 用 `FIXED_SIDE`（ELK 自动排 Y）；ELK 输出阶段坐标（gap
-  自动随 spacer 宽度增长）、spacer 位置（label 锚点）、两段边 sections；
+- gateway ports 用 `FIXED_SIDE`（elkjs layered 实测忽略 FIXED_POS/FIXED_RATIO/
+  anchor 等固定坐标，端口 Y 由引擎决定）；`workflowLayoutComposer` 在外部
+  路段前后补齐「任务边界 → 阶段 gateway → 引擎通道 Y」的正交 stub 段，
+  最终折线从任务实际端口出发、节点到节点连续；
 - 阶段顺序由 ELK RIGHT 分层 + 阶段间真实连接边保证。
 
 **坐标合成**（`workflowLayoutComposer`）：
@@ -362,12 +364,12 @@ hash = stableStringify({
 | `workflowElkPorts.ts` | 端口 id 常量表 + 端口分配纯函数 | 布局算法 |
 | `workflowStageSubgraphAdapter.ts` | 阶段 A：按 stageId 分组 + 阶段内 edges 子图 | 布局执行 |
 | `workflowStageLayout.ts` | 阶段 A：并行 ELK DOWN 布局 + 阶段 box/本地坐标 | 元图 |
-| `workflowStageMetaGraphAdapter.ts` | 阶段 B：meta 节点 + 确定性 RIGHT 单行排列 | 引擎依赖 |
-| `workflowStageComposition.ts` | task 绝对坐标合成 + 阶段内边偏移 | 路由 |
-| `workflowCrossStageRouter.ts` | 跨阶段 gateway 正交通道路由（纯函数） | 布局 |
 | `workflowLayoutGeometry.ts` | bounds/intersection/compactness 纯函数 | 状态 |
+| `workflowLayoutCollision.ts` | 共享碰撞检测（rect/rect、segment/rect，测试与诊断用） | 布局 |
 | `workflowLayoutSettling.ts` | design/calibration/settled 状态机纯函数 | 几何 |
 | `workflowTwoLevelLayout.ts` | 两级布局编排器 → `WorkflowLayoutResult` | 渲染 |
+| `workflowOuterElkGraphAdapter.ts` | 阶段 B：meta nodes + label spacer + 两条 leg 边（FIXED_POS gateway） | 引擎依赖 |
+| `workflowOuterElkLayout.ts` | 阶段 B：外层 ELK 消费（阶段坐标/spacer 位置/leg 重组） | 引擎依赖 |
 | `workflowElkOptions.ts` | layoutOptions 常量（探针验证后冻结） | 逻辑 |
 | `workflowElkLayout.ts` | 兼容/单次 compound 输出消费（遗留测试） | 渲染 |
 | `workflowElkEdgePath.ts` | sections → SVG path（纯函数） | 状态 |
