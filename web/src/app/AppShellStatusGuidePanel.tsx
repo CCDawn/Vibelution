@@ -1,4 +1,4 @@
-import type { RuntimeSummary } from "../api/types";
+import type { CodeFreshness, RuntimeSummary } from "../api/types";
 import type { Language, ShellTranslationKey } from "../i18n/shellDictionary";
 import {
   VMetricChip,
@@ -44,6 +44,7 @@ export type AppShellStatusGuidePanelProps = {
   lifecycleProof?: RuntimeSummary["lifecycleProof"] | null;
   workbench?: RuntimeSummary["workbench"] | null;
   buildId: string;
+  codeFreshness?: CodeFreshness | null;
 };
 
 function systemToneToStatus(tone: SystemStatusTone): VStatusTone {
@@ -51,6 +52,11 @@ function systemToneToStatus(tone: SystemStatusTone): VStatusTone {
   if (tone === "caution") return "warning";
   if (tone === "failed") return "danger";
   return "neutral";
+}
+
+function codeFreshnessShortHead(value: string | undefined): string {
+  const text = String(value || "").trim();
+  return text.length > 12 ? text.slice(0, 12) : text || "-";
 }
 
 export function AppShellStatusGuidePanel({
@@ -63,6 +69,7 @@ export function AppShellStatusGuidePanel({
   lifecycleProof,
   workbench,
   buildId,
+  codeFreshness,
 }: AppShellStatusGuidePanelProps) {
   const detailsById: Record<AppShellStatusSummaryCard["id"], Omit<StatusGuideCard, keyof AppShellStatusSummaryCard>> = {
     frontend: {
@@ -148,6 +155,40 @@ export function AppShellStatusGuidePanel({
     ...detailsById[card.id],
   }));
   const lifecycleTone = systemToneToStatus(lifecycleStateTone(lifecycleProof?.overallState));
+  const codeFreshnessView = (() => {
+    if (!codeFreshness) {
+      return { tone: "neutral" as VStatusTone, label: t("codeFreshnessUnknown"), note: t("codeFreshnessHint") };
+    }
+    if (codeFreshness.verdict === "current") {
+      return { tone: "success" as VStatusTone, label: t("codeFreshnessCurrent"), note: t("codeFreshnessHint") };
+    }
+    if (
+      codeFreshness.verdict === "backend_behind"
+      || codeFreshness.verdict === "frontend_behind"
+      || codeFreshness.verdict === "backend_and_frontend_behind"
+    ) {
+      const runningHead = codeFreshnessShortHead(codeFreshness.backend.running?.head);
+      const diskHead = codeFreshnessShortHead(codeFreshness.backend.disk?.head);
+      const behindCount = codeFreshness.backend.behindCount;
+      const behindText = behindCount != null
+        ? `${behindCount} ${t("codeFreshnessBehindSuffix")}`
+        : "";
+      const versionLine = [
+        runningHead !== "-" && diskHead !== "-"
+          ? `${t("codeFreshnessRunningAt")} @${runningHead} · ${t("codeFreshnessDiskAt")} @${diskHead}${behindText ? ` · ${behindText}` : ""}`
+          : "",
+        codeFreshness.frontend.stale
+          ? `frontend @${codeFreshness.frontend.builtFromCommit || "-"}`
+          : "",
+      ].filter(Boolean).join(" · ");
+      return {
+        tone: "warning" as VStatusTone,
+        label: t("codeFreshnessBehind"),
+        note: [t("codeFreshnessRestartHint"), versionLine].filter(Boolean).join(" "),
+      };
+    }
+    return { tone: "neutral" as VStatusTone, label: t("codeFreshnessUnknown"), note: t("codeFreshnessHint") };
+  })();
 
   return (
     <VSurface
@@ -255,6 +296,41 @@ export function AppShellStatusGuidePanel({
               ))}
             </ul>
           </>
+        ) : null}
+      </VSurface>
+      <VSurface
+        tone="row"
+        elevation="flat"
+        padding="compact"
+        className={styles.codeFreshnessCard}
+        ariaLabel={t("codeFreshnessTitle")}
+      >
+        <VPanelHeader
+          headingLevel={4}
+          className={styles.lifecycleProofHeader}
+          title={t("codeFreshnessTitle")}
+          tooltip={codeFreshnessView.note}
+          tooltipLabel={t("codeFreshnessTitle")}
+          actions={(
+            <VStatusChip tone={codeFreshnessView.tone}>
+              {codeFreshnessView.label}
+            </VStatusChip>
+          )}
+        />
+        {codeFreshness?.backend.running ? (
+          <div className={styles.codeFreshnessMeta}>
+            <span className={styles.codeFreshnessCommit}>
+              {t("codeFreshnessRunningAt")} @{codeFreshnessShortHead(codeFreshness.backend.running.head)}
+            </span>
+            <span className={styles.codeFreshnessCommit}>
+              {t("codeFreshnessDiskAt")} @{codeFreshnessShortHead(codeFreshness.backend.disk?.head)}
+            </span>
+            {codeFreshness.frontend.builtFromCommit ? (
+              <span className={styles.codeFreshnessCommit}>
+                frontend @{codeFreshness.frontend.builtFromCommit}
+              </span>
+            ) : null}
+          </div>
         ) : null}
       </VSurface>
     </VSurface>

@@ -5,23 +5,26 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from core.runtime_manager.command_queue import cancel_lifecycle_command
+from core.web.services.code_freshness import resolve_code_freshness
+from core.web.services.runtime_scene_service import record_browser_telemetry
 from core.web.services.runtime_service import (
     RuntimeRestartActiveWorkBlocked,
     get_runtime_summary_http_future,
     request_runtime_restart,
     request_runtime_shutdown,
 )
-from core.web.services.runtime_scene_service import record_browser_telemetry
-
 
 router = APIRouter(tags=["runtime"])
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class BrowserTelemetryPayload(BaseModel):
@@ -41,6 +44,11 @@ class RuntimeLifecycleCancelPayload(BaseModel):
 @router.get("/runtime/summary")
 async def runtime_summary() -> dict:
     return await asyncio.wrap_future(get_runtime_summary_http_future())
+
+
+@router.get("/runtime/code-freshness")
+def runtime_code_freshness() -> dict:
+    return resolve_code_freshness(project_root=PROJECT_ROOT)
 
 
 @router.post("/runtime/shutdown", status_code=202)

@@ -19,6 +19,7 @@ import { cancelRuntimeLifecycleCommand } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
+  CodeFreshness,
   ConfigSummary,
   RuntimeSummary,
 } from "../api/types";
@@ -804,6 +805,18 @@ export function AppShell() {
     refetchIntervalInBackground: shellStartupWarmupActive,
     // Heartbeat-only field churn must not re-render the whole shell + route tree.
     structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged,
+    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
+  });
+  // Running-code freshness: compare the commit this backend was started from
+  // with disk HEAD. Refetched on window focus + periodic poll; git reads are
+  // lock-free (GIT_OPTIONAL_LOCKS=0) and cheap.
+  const codeFreshnessQuery = useQuery<CodeFreshness>({
+    queryKey: queryKeys.codeFreshness(),
+    queryFn: ({ signal }) => fetchJson<CodeFreshness>("/api/runtime/code-freshness", { signal }),
+    enabled: shellStartupDataReady,
+    refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000),
+    refetchIntervalInBackground: false,
+    staleTime: 30_000,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
 
@@ -2164,6 +2177,19 @@ export function AppShell() {
   const primaryStatusCard = rightStatusCards.reduce((selected, item) =>
     statusPriority[item.tone] < statusPriority[selected.tone] ? item : selected,
   rightStatusCards[0]);
+  // Code-freshness: a behind instance is a caution-grade system condition the
+  // user should act on (restart), without masking a real failure.
+  const codeStale = Boolean(
+    codeFreshnessQuery.data
+    && (
+      codeFreshnessQuery.data.verdict === "backend_behind"
+      || codeFreshnessQuery.data.verdict === "frontend_behind"
+      || codeFreshnessQuery.data.verdict === "backend_and_frontend_behind"
+    ),
+  );
+  const effectivePrimaryStatusCard = codeStale && primaryStatusCard.tone !== "failed"
+    ? { ...primaryStatusCard, tone: "caution" as const }
+    : primaryStatusCard;
   const statusSummaryTitle = rightStatusCards.map((item) => `${item.label}: ${item.value}`).join(" · ");
 
   return (
@@ -2554,15 +2580,15 @@ export function AppShell() {
                   title={statusSummaryTitle}
                   aria-haspopup="dialog"
                   aria-expanded={statusGuideOpen}
-                  aria-label={`${t("systemStatusGuide")}: ${primaryStatusCard.label} ${primaryStatusCard.value}`}
+                  aria-label={`${t("systemStatusGuide")}: ${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`}
                 >
                   <VStatusChip
-                    tone={systemToneToStatus(primaryStatusCard.tone)}
+                    tone={systemToneToStatus(effectivePrimaryStatusCard.tone)}
                     className={styles.statusSummaryToneChip}
                   >
-                    {primaryStatusCard.label}
+                    {effectivePrimaryStatusCard.label}
                   </VStatusChip>
-                  <strong className={styles.statusBadgeValue}>{primaryStatusCard.value}</strong>
+                  <strong className={styles.statusBadgeValue}>{effectivePrimaryStatusCard.value}</strong>
                   <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>
                 </VButton>
               )}
@@ -2578,6 +2604,7 @@ export function AppShell() {
                   lifecycleProof={lifecycleProof}
                   workbench={workbench}
                   buildId={buildId}
+                  codeFreshness={codeFreshnessQuery.data}
                 />
               </Suspense>
             </VPopover>

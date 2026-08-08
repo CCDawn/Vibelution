@@ -607,6 +607,40 @@ export type RuntimeLifecycleProof = {
 
 export type WindowProvider = "none" | "edge_app" | "electron";
 
+export type CodeFreshnessVerdict =
+  | "current"
+  | "backend_behind"
+  | "frontend_behind"
+  | "backend_and_frontend_behind"
+  | "unknown";
+
+export type CodeFreshness = {
+  schemaVersion: number;
+  verdict: CodeFreshnessVerdict;
+  backend: {
+    available: boolean;
+    behind: boolean;
+    behindCount: number | null;
+    reason: string;
+    running: {
+      head: string;
+      branch: string;
+      startedAt: string;
+    } | null;
+    disk: {
+      head: string;
+      branch: string;
+    } | null;
+  };
+  frontend: {
+    available: boolean;
+    stale: boolean;
+    reason: string;
+    builtFromCommit: string;
+    frontendTree: string;
+  };
+};
+
 export type RuntimeSummary = {
   status: string;
   mode: string;
