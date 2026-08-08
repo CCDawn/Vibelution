@@ -29,15 +29,37 @@ def _config(*, mental_model: bool = False) -> SimpleNamespace:
     )
 
 
-def test_runtime_request_cannot_enable_operator_disabled_feature() -> None:
+def test_mental_model_turn_request_outranks_operator_default_off() -> None:
+    """Chat 心智开关优先：全局默认关时，下轮显式开仍注入。"""
     decision = resolve_feature_decision(
         "mental_model",
         config=_config(mental_model=False),
         requested=True,
     )
     assert decision.configured_enabled is False
-    assert decision.effective_enabled is False
-    assert decision.reason == "operator_config_disabled"
+    assert decision.effective_enabled is True
+    assert decision.source == "turn_request"
+    assert decision.reason == "turn_requested_enabled"
+
+
+def test_mental_model_without_turn_request_uses_operator_default() -> None:
+    off = resolve_feature_decision(
+        "mental_model",
+        config=_config(mental_model=False),
+        requested=None,
+    )
+    assert off.effective_enabled is False
+    assert off.source == "operator_config"
+    assert off.reason == "operator_config_disabled"
+
+    on = resolve_feature_decision(
+        "mental_model",
+        config=_config(mental_model=True),
+        requested=None,
+    )
+    assert on.effective_enabled is True
+    assert on.source == "operator_config"
+    assert on.reason == "operator_config_enabled"
 
 
 def test_runtime_request_can_narrow_operator_enabled_feature() -> None:
@@ -48,7 +70,20 @@ def test_runtime_request_can_narrow_operator_enabled_feature() -> None:
     )
     assert decision.configured_enabled is True
     assert decision.effective_enabled is False
+    assert decision.source == "turn_request"
     assert decision.reason == "run_narrowed_disabled"
+
+
+def test_non_turn_priority_feature_stays_fail_closed() -> None:
+    """监督等可信能力仍 fail-closed：run 请求不能强开 operator 关项。"""
+    decision = resolve_feature_decision(
+        "context_compression",
+        config=_config(mental_model=False),
+        requested=True,
+    )
+    assert decision.configured_enabled is False
+    assert decision.effective_enabled is False
+    assert decision.reason == "operator_config_disabled"
 
 
 def test_snapshot_contains_safe_feature_provenance() -> None:
