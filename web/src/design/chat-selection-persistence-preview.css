@@ -40,7 +40,18 @@ h2 { font-size: 20px; }
 .row-copy strong, .row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-copy strong { font-size: 13px; }
 .row-copy small { color: var(--preview-muted); font-size: 11px; }
-.row-check { color: var(--preview-accent); font-weight: 800; text-align: center; }
+.row-check { color: var(--preview-accent); font-size: 10px; font-weight: 800; text-align: right; white-space: nowrap; }
+.session-selection-row { min-height: 58px; }
+.session-selection-row.selection-row-active {
+  background: #e1e6eb !important;
+  border-color: #b7c3ce !important;
+  box-shadow: inset 3px 0 0 var(--preview-accent), inset 0 0 0 1px rgb(255 255 255 / 38%);
+}
+.session-selection-row.selection-row-active .session-mark {
+  background: #d8e0e7;
+  border-color: #aebbc7;
+  color: var(--preview-accent);
+}
 .projection-panel { display: grid; align-content: start; gap: 13px; }
 .projection-list { margin: 0; display: grid; gap: 1px; border: 1px solid var(--preview-line); border-radius: 9px; overflow: hidden; }
 .projection-list div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; padding: 9px 10px; background: var(--preview-surface); }
