@@ -73,7 +73,7 @@ export const vuiStateSelectedRowFillClass =
  * selected-row tint does not change every VUI list consumer.
  */
 export const vuiStateSelectedOpaqueRowClass =
-  "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]";
+  "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]";
 
 /**
  * Warm selected / active row (Agents list active uses product warm accent).

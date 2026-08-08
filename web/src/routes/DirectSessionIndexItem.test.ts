@@ -89,6 +89,7 @@ describe("DirectSessionIndexItem helpers", () => {
     const markup = renderDirectItem();
 
     expect(markup).toContain('aria-current="true"');
+    expect(markup).toContain('data-selected="true"');
     expect(markup).toContain("sessionItemActive");
     expect(markup).not.toContain("sessionStatusCluster");
     expect(markup).not.toContain("sessionCurrentBadge");
@@ -100,6 +101,9 @@ describe("DirectSessionIndexItem helpers", () => {
   it("keeps the selected session row visible above the dense row surface", () => {
     expect(directSessionIndexItemStyles.sessionItemActive).toContain(
       "!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    );
+    expect(directSessionIndexItemStyles.sessionItemActive).toContain(
+      "data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
     );
     expect(directSessionIndexItemStyles.sessionItemActive).not.toContain(
       "shadow-[var(--vui-shadow-inset-accent)]",

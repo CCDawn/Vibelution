@@ -42,6 +42,7 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain("display.modelLabel");
     expect(directorySource).toContain("sessionCountByAgentId");
     expect(directorySource).toContain('aria-current={active ? "page" : undefined}');
+    expect(directorySource).toContain('data-selected={active ? "true" : undefined}');
     expect(directorySource).toContain("onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}");
     expect(directorySource).toContain("onPress={() => onOpenAgent(agent, latestSession ?? null)}");
   });
@@ -107,6 +108,7 @@ describe("AgentConversationDirectory", () => {
   it("keeps the selected Agent row visible above the transparent base fill", () => {
     expect(styles.agentRow).toContain("!bg-transparent");
     expect(styles.agentRowActive).toContain("!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]");
+    expect(styles.agentRowActive).toContain("data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]");
     expect(styles.agentRowActive).not.toContain("shadow-[var(--vui-shadow-inset-accent)]");
   });
 
