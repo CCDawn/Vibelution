@@ -23,6 +23,10 @@ const styles = {
   statusGuidePanel:
     "vui-app-appshell statusGuidePanel grid min-w-0 gap-2.5 !border-0 !bg-transparent !p-0 !shadow-none",
   statusGuideStateChip: "vui-app-appshell statusGuideStateChip max-w-full truncate",
+  codeFreshnessCard: `vui-app-appshell codeFreshnessCard grid min-w-0 gap-2 ${vuiOpaqueRowClass} p-2`,
+  codeFreshnessMeta: "vui-app-appshell codeFreshnessMeta flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1",
+  codeFreshnessCommit:
+    "vui-app-appshell codeFreshnessCommit min-w-0 truncate font-mono text-[0.72rem] text-[var(--fg-secondary)]",
 } as const;
 
 export default styles;

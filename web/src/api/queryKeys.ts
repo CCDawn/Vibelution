@@ -1,5 +1,6 @@
 export const queryKeys = {
   runtimeSummary: () => ["runtime", "summary"] as const,
+  codeFreshness: () => ["runtime", "code-freshness"] as const,
   usageSummary: (scope = "global", sessionId = "", agentId = "", provider = "", model = "") =>
     ["usage", "summary", scope, sessionId, agentId, provider, model] as const,
   launcherStatus: () => ["launcher", "status"] as const,

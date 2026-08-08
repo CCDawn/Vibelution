@@ -65,8 +65,12 @@ async def web_workbench_lifespan(app: FastAPI | None):
 
     loop.set_exception_handler(handle_loop_exception)
     from .route_bootstrap import warm_web_routes_in_background
-    from .services.cli_agent_terminal_service import reconcile_cli_agent_terminal_states_on_startup
-    from .services.session_service import recover_wakeable_agent_inbox_messages_on_startup
+    from .services.cli_agent_terminal_service import (
+        reconcile_cli_agent_terminal_states_on_startup,
+    )
+    from .services.session_service import (
+        recover_wakeable_agent_inbox_messages_on_startup,
+    )
 
     startup_routes_task: asyncio.Task[Any] | None = None
     if app is not None:
@@ -75,6 +79,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
         # Route import/mount is the cold-start bulk cost — do not await before yield so
         # /api/health can pass and Launcher can open the window early.
         startup_routes_task = asyncio.create_task(warm_web_routes_in_background(app))
+    # Snapshot the git commit this backend was started from (best effort, never
+    # blocks health). The UI compares it with disk HEAD to flag stale instances.
+    startup_code_fingerprint_task = asyncio.create_task(asyncio.to_thread(_write_running_code_fingerprint_on_startup))
     # Do not await terminal reconcile before yield — it blocked /api/health readiness
     # and stretched launcher open_launcher_action by the full reconcile cost.
     startup_cli_reconcile_task = asyncio.create_task(
@@ -119,6 +126,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_inbox_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
     )
+    startup_code_fingerprint_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Running-code fingerprint snapshot failed during startup."
+        )
+    )
     try:
         # Emit after tasks are scheduled so open-path diagnosis can see pre-yield cost.
         try:
@@ -156,6 +168,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_cache_prewarm_task,
             startup_catalog_task,
             startup_agent_inbox_recovery_task,
+            startup_code_fingerprint_task,
         ):
             if startup_task is None:
                 continue
@@ -163,10 +176,19 @@ async def web_workbench_lifespan(app: FastAPI | None):
                 startup_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await startup_task
-        from .services.cli_agent_terminal_service import shutdown_cli_agent_terminal_sessions
+        from .services.cli_agent_terminal_service import (
+            shutdown_cli_agent_terminal_sessions,
+        )
 
         await asyncio.to_thread(shutdown_cli_agent_terminal_sessions)
         loop.set_exception_handler(previous_handler)
+
+
+def _write_running_code_fingerprint_on_startup() -> None:
+    from .services.code_freshness import write_running_code_fingerprint
+
+    project_root = Path(__file__).resolve().parents[2]
+    write_running_code_fingerprint(project_root=project_root, source="web_workbench_lifespan")
 
 
 def _prewarm_git_memory_on_startup() -> tuple[Any, int]:
