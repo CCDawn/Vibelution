@@ -1,5 +1,6 @@
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Plus, X } from "lucide-react";
 
 import { VButton, VSurface } from "../components/vui";
 import {
@@ -60,6 +61,45 @@ function App() {
         </div>
       </header>
 
+      <nav className="conversation-tab-strip" aria-label="打开的会话" role="tablist">
+        {currentAgent.sessions.map((session) => {
+          const active = selection.sessionId === session.id;
+          return (
+            <div key={session.id} className={["conversation-tab", active ? "conversation-tab-active" : ""].join(" ")} data-selected={active ? "true" : "false"}>
+              <VButton
+                variant="ghost"
+                contentLayout="plain"
+                className="conversation-tab-main"
+                role="tab"
+                aria-selected={active}
+                onPress={() => commit(selectChatSession(selection, session.id, currentAgent.id))}
+              >
+                <span className="conversation-tab-icon" aria-hidden="true">▣</span>
+                <span className="conversation-tab-title">{session.title}</span>
+              </VButton>
+              <VButton
+                variant="ghost"
+                contentLayout="plain"
+                className="conversation-tab-close"
+                aria-label={`关闭 ${session.title}`}
+                onPress={() => undefined}
+              >
+                <X size={13} aria-hidden="true" />
+              </VButton>
+            </div>
+          );
+        })}
+        <VButton
+          variant="ghost"
+          contentLayout="plain"
+          className="conversation-tab-new"
+          aria-label="新建会话"
+          onPress={() => undefined}
+        >
+          <Plus size={15} aria-hidden="true" />
+        </VButton>
+      </nav>
+
       <div className="selection-grid">
         <VSurface as="aside" tone="card" elevation="panel" padding="none" className="directory-panel" aria-label="Agent 目录">
           <div className="panel-heading"><strong>Agent</strong><span>{agents.length}</span></div>
@@ -78,7 +118,7 @@ function App() {
                 >
                   <span className="avatar">{agent.name.slice(0, 1).toUpperCase()}</span>
                   <span className="row-copy"><strong>{agent.name}</strong><small>{agent.model} · {agent.sessions.length} 个会话</small></span>
-                  <span className="row-check" aria-hidden="true">{active ? "当前 Agent" : ""}</span>
+                  <span className="row-check" aria-hidden="true">{active ? "✓" : ""}</span>
                 </VButton>
               );
             })}
@@ -102,7 +142,7 @@ function App() {
                 >
                   <span className="session-mark">◷</span>
                   <span className="row-copy"><strong>{session.title}</strong><small>{session.id}</small></span>
-                  <span className="row-check" aria-hidden="true">{active ? "当前会话" : ""}</span>
+                  <span className="row-check" aria-hidden="true">{active ? "✓" : ""}</span>
                 </VButton>
               );
             })}
