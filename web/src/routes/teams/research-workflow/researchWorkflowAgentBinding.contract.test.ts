@@ -14,6 +14,14 @@ const workspaceSource = readFileSync(
   resolve(import.meta.dirname, "ResearchProcessWorkspace.tsx"),
   "utf8",
 );
+const inspectorSource = readFileSync(
+  resolve(import.meta.dirname, "ResearchProcessNodeInspector.tsx"),
+  "utf8",
+);
+const renderersSource = readFileSync(
+  resolve(import.meta.dirname, "../teamResearchPrimarySurfaceRenderers.tsx"),
+  "utf8",
+);
 const chatAnchorSource = readFileSync(
   resolve(import.meta.dirname, "chatSessionAnchor.ts"),
   "utf8",
@@ -45,5 +53,19 @@ describe("researchWorkflowAgentBinding.contract", () => {
     expect(workspaceSource).toContain("ResearchAgentBindingPanel");
     expect(workspaceSource).toContain("effectiveBindings");
     expect(workspaceSource).toContain("useResearchWorkflowRun");
+  });
+
+  it("stage drawers embed existing functions (Task 6): workspace mounts injected panels", () => {
+    expect(workspaceSource).toContain('panel === "experiment"');
+    expect(workspaceSource).toContain("experimentPanel");
+    expect(workspaceSource).toContain('panel === "knowledge"');
+    expect(workspaceSource).toContain("knowledgePanel");
+    expect(renderersSource).toContain("TeamSourceCollectionSearchBriefPanel");
+    expect(renderersSource).toContain("renderExperimentPlanningLedgerPanel()");
+  });
+
+  it("node inspector opens stage drawers from adapters with drawerPanel", () => {
+    expect(inspectorSource).toContain("onOpenPanel");
+    expect(inspectorSource).toContain("adapter.drawerPanel");
   });
 });

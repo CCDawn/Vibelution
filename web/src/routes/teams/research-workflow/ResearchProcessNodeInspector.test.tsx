@@ -165,4 +165,47 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     );
     expect(markup).toContain("选择流程节点");
   });
+
+  it("renders a stage drawer entry for adapters with drawerPanel and calls onOpenPanel", () => {
+    const onOpenPanel = vi.fn();
+    const hypothesisMarkup = renderToStaticMarkup(
+      <ResearchProcessNodeInspector
+        nodeId="hypothesis_design"
+        adapter={getNodeAdapter("hypothesis_design")}
+        detail={makeDetail({ nodeId: "hypothesis_design", label: "假设设计" })}
+        handoffPending={false}
+        busy={false}
+        onCommand={vi.fn()}
+        onOpenPanel={onOpenPanel}
+      />,
+    );
+    expect(hypothesisMarkup).toContain("打开实验设计面板");
+
+    const findingMarkup = renderToStaticMarkup(
+      <ResearchProcessNodeInspector
+        nodeId="source_finding"
+        adapter={getNodeAdapter("source_finding")}
+        detail={makeDetail()}
+        handoffPending={false}
+        busy={false}
+        onCommand={vi.fn()}
+        onOpenPanel={onOpenPanel}
+      />,
+    );
+    expect(findingMarkup).toContain("打开知识搜集面板");
+  });
+
+  it("hides the drawer entry when onOpenPanel is not provided", () => {
+    const markup = renderToStaticMarkup(
+      <ResearchProcessNodeInspector
+        nodeId="hypothesis_design"
+        adapter={getNodeAdapter("hypothesis_design")}
+        detail={makeDetail({ nodeId: "hypothesis_design", label: "假设设计" })}
+        handoffPending={false}
+        busy={false}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(markup).not.toContain("打开实验设计面板");
+  });
 });
