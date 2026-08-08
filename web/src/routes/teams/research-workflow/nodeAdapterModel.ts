@@ -81,7 +81,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "human",
     slot: "human_gate",
     commands: ["accept_handoff", "reject_handoff", "revise"],
-    replaces: "TeamKnowledgeCollectionCompletionFlowPanel",
+    replaces: "researchView=coordination completion flow",
   },
   {
     nodeId: "hypothesis_design",
@@ -90,7 +90,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "experiment_ops",
     commands: ["start_agent_task", "open_session"],
-    replaces: "researchView=experiment / ChallengeCupExperimentStage",
+    replaces: "researchView=experiment",
   },
   {
     nodeId: "protocol_design",
@@ -99,7 +99,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "experiment_ops",
     commands: ["start_agent_task", "open_session"],
-    replaces: "ChallengeCupExperimentProtocol draft",
+    replaces: "protocol design draft",
   },
   {
     nodeId: "protocol_review",
@@ -144,7 +144,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "iteration_ops",
     commands: ["start_agent_task", "open_session"],
-    replaces: "ChallengeCupIterationStage evaluation",
+    replaces: "iteration evaluation",
   },
   {
     nodeId: "iteration_decision",
@@ -171,7 +171,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "system",
     slot: "result_package",
     commands: ["build_package", "view_artifacts"],
-    replaces: "ChallengeCupIterationResultPackage",
+    replaces: "result package",
   },
 ];
 

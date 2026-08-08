@@ -6,17 +6,8 @@ import { describe, expect, it } from "vitest";
 const sourceRoot = resolve(import.meta.dirname, "../..");
 // Order follows walkCssModules' localeCompare sort so toEqual matches.
 const allowedRestoredRouteModules = [
-  "routes/teams/challenge-cup/ChallengeCupExperimentProtocol.module.css",
-  "routes/teams/challenge-cup/ChallengeCupExperimentStage.module.css",
-  "routes/teams/challenge-cup/ChallengeCupIterationResultPackage.module.css",
-  "routes/teams/challenge-cup/ChallengeCupIterationStage.module.css",
-  "routes/teams/challenge-cup/ChallengeCupKnowledgeStage.module.css",
-  // Challenge-cup workflow components: active, referenced CSS modules
-  // (module.css is their current style scheme; tracked here so the gate stays
-  // exact about what is allowed).
-  "routes/teams/challenge-cup/ChallengeCupOperationsWorkspace.module.css",
+  // Task 9: Challenge Cup stage-rail/operations CSS modules removed with their components.
   "routes/teams/challenge-cup/ChallengeCupStageAgentConfigurationPanel.module.css",
-  "routes/teams/challenge-cup/ChallengeCupStageRail.module.css",
   "routes/teams/research-projects/ResearchProjectSwitcher.module.css",
 ] as const;
 

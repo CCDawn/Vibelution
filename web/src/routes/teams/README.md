@@ -56,7 +56,7 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 | Overview primary CTA + stage handoff pure model | `researchPrimaryActionModel.ts` | TeamsRoute orchestration only |
 | Overview surface composition (CTA → stages → advanced) | `ResearchOverviewSurface.tsx` | burying CTA under stage console |
 | Overview primary CTA UI | `ResearchPrimaryActionBar.tsx` | mutations ownership |
-| Overview advanced disclosure shell | `ResearchOverviewSecondary.tsx` | evidence/path dumps in hero |
+| Overview advanced disclosure shell | (removed with Task 9; advanced dumps live in NodeInspector artifact views) | evidence/path dumps in hero |
 | Design acceptance preview (static) | `web/research-overview-preview-standalone.html` + `design/research-overview-preview.*` | production routes |
 | Process-flow single-page workspace preview (static) | `web/research-process-flow-preview.html` + `design/research-process-flow-preview.*` | production multi-page stage routes as primary nav; board/canvas dual shell as primary IA |
 | Process-flow single-page workspace **PRD** | [`docs/prds/2026-08-07-research-process-flow-single-page-workspace.md`](../../../../docs/prds/2026-08-07-research-process-flow-single-page-workspace.md) | treating preview alone as implementation authority |
@@ -106,7 +106,7 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 | AI Search workspace UI | `../TeamAiSearchWorkspacePanel.tsx` (via secondary pack) | start mutation wiring |
 | Research stage agent summary/grid UI | `../TeamResearchStageAgentPanel.tsx` (via secondary pack) | binding projection |
 | Research stage launcher console | `../TeamResearchStageLauncherPanel.tsx` (via secondary pack) | query/mutation injection |
-| Research stage standalone page (experiment/iteration) | `../TeamResearchStageStandalonePagePanel.tsx` (via secondary pack) | ledger/loop render props + launch mutations |
+| Research stage standalone page (experiment/iteration) | (removed with Task 9; experiment/iteration run inside the single workflow workspace) | ledger/loop render props + launch mutations |
 | Research loop (template / evidence / decision) | `../TeamResearchLoopPanel.tsx` (via secondary pack) | create/record mutations + drafts |
 | Experiment planning ledger | `../TeamExperimentPlanningLedgerPanel.tsx` (via secondary pack) | plan/baseline/smoke/full-run mutations + loop render prop |
 | Knowledge-collection completion flow graph | `../TeamKnowledgeCollectionCompletionFlowPanel.tsx` (via secondary pack) | stage chat + retry injectables |

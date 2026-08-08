@@ -41,8 +41,9 @@ describe("researchWorkflowAgentBinding.contract", () => {
     expect(chatAnchorSource).toContain("degraded");
   });
 
-  it("workspace agents panel reads run snapshot not a second config table", () => {
-    expect(workspaceSource).toContain("bindingSnapshots");
+  it("workspace agents panel reads effective bindings + run snapshot", () => {
+    expect(workspaceSource).toContain("ResearchAgentBindingPanel");
+    expect(workspaceSource).toContain("effectiveBindings");
     expect(workspaceSource).toContain("useResearchWorkflowRun");
   });
 });

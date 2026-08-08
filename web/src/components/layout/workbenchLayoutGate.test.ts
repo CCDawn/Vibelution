@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -164,16 +164,14 @@ describe("workbench layout gate (Wave 5)", () => {
     }
   });
 
-  it("retires ResearchFlowCanvasRoute to redirect; researchFlow layout id remains registered", () => {
-    const research = readFileSync(resolve(webSrc, "routes/ResearchFlowCanvasRoute.tsx"), "utf-8");
+  it("Task 9: ResearchFlowCanvasRoute removed; researchFlow layout id remains registered", () => {
+    expect(existsSync(resolve(webSrc, "routes/ResearchFlowCanvasRoute.tsx"))).toBe(false);
     const ids = readFileSync(resolve(webSrc, "components/layout/workbenchLayoutIds.ts"), "utf-8");
     const workspace = readFileSync(
       resolve(webSrc, "routes/teams/research-workflow/ResearchProcessWorkspace.tsx"),
       "utf-8",
     );
     expect(ids).toContain("researchFlow");
-    expect(research).toContain("Navigate");
-    expect(research).toContain("researchView=workflow");
     expect(workspace).toContain("VWorkflowCanvas");
     expect(workspace).toContain("VCanvasWorkbenchPage");
     expect(workspace).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");

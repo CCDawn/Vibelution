@@ -1,60 +1,77 @@
 /**
- * Task 6: Node inspector — adapter slots + runtime commands.
- * Does not embed full legacy stage pages as nested workbenches.
- * Empty selection uses VEmptyState (recipe/shadcn empty), not a sparse full-height panel.
+ * Node inspector — single-canvas node detail surface.
+ *
+ * Renders the BACKEND node detail: binding snapshot (source / agent name /
+ * role), session anchor status, handoff state, attempt, blocked reason,
+ * artifacts and the backend-declared command capabilities. Commands are only
+ * clickable when the backend reports them available; everything else renders
+ * as a disabled button with the explicit reason (no fake buttons).
  */
 import { VButton, VEmptyState, VSurface } from "../../../components/vui";
-import {
-  commandLabel,
-  getNodeAdapter,
-  WIRED_COMMANDS,
-  type NodeAdapterSpec,
-} from "./nodeAdapterModel";
-
-import type { NodeOpsProjection } from "./nodeOpsProjection";
+import type {
+  NodeCommandCapability,
+  ResearchWorkflowNodeDetail,
+} from "../../../api/types/researchWorkflow";
+import type { NodeAdapterSpec } from "./nodeAdapterModel";
+import { commandLabel } from "./nodeCommandAdapter";
 
 export type ResearchProcessNodeInspectorProps = {
   nodeId: string | null;
-  runtimeCurrent: boolean;
-  actorKind?: string;
-  sessionAnchorDegraded?: boolean;
-  chatDeepLink?: string | null;
-  bindingLabel?: string;
-  handoffPending?: boolean;
-  busy?: boolean;
-  ops?: NodeOpsProjection | null;
-  onCommand?: (command: string, adapter: NodeAdapterSpec) => void;
+  adapter: NodeAdapterSpec | null;
+  detail: ResearchWorkflowNodeDetail | null;
+  handoffPending: boolean;
+  busy: boolean;
+  onCommand: (command: string) => void;
 };
+
+function bindingSourceLabel(source: string | undefined): string {
+  const labels: Record<string, string> = {
+    workflow_default: "团队/工作流默认",
+    stage_override: "阶段覆盖",
+    node_override: "节点覆盖",
+    rebind: "运行内换绑",
+    unbound: "未绑定",
+  };
+  return labels[source ?? ""] ?? source ?? "—";
+}
+
+function commandDisabledTitle(capability: NodeCommandCapability): string {
+  if (!capability.available) {
+    return capability.reason || "该操作当前不可用";
+  }
+  if (capability.command === "build_package" || capability.command === "open_evidence_graph") {
+    return "该服务尚未接入后端";
+  }
+  return "";
+}
 
 export function ResearchProcessNodeInspector({
   nodeId,
-  runtimeCurrent,
-  actorKind,
-  sessionAnchorDegraded,
-  chatDeepLink,
-  bindingLabel,
+  adapter,
+  detail,
   handoffPending,
   busy,
-  ops,
   onCommand,
 }: ResearchProcessNodeInspectorProps) {
-  const adapter = getNodeAdapter(nodeId);
-
   if (!adapter) {
     return (
       <div
         className="flex h-full min-h-0 flex-col items-stretch justify-center p-3"
         data-vui="node-inspector-empty"
       >
-        <VEmptyState
-          title="选择流程节点"
-          className="h-auto w-full border-0 bg-transparent"
-        >
-          在画布上点击任务节点，查看绑定、交接与运行命令。
+        <VEmptyState title="选择流程节点" className="h-auto w-full border-0 bg-transparent">
+          在画布上点击任务节点，查看绑定、会话与运行命令。
         </VEmptyState>
       </div>
     );
   }
+
+  const snapshot = detail?.bindingSnapshot ?? {};
+  const sessionBinding = detail?.sessionBinding ?? null;
+  const agentName =
+    String(snapshot.displayName || "") || String(snapshot.agentId || "") || "";
+  const isAgent = adapter.actorKind === "agent";
+  const capabilities = detail?.commands ?? [];
 
   return (
     <VSurface
@@ -67,88 +84,118 @@ export function ResearchProcessNodeInspector({
           <div className="text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]">
             {adapter.stageId.replace(/_/g, " ")}
           </div>
-          <h3 className="m-0 text-base font-semibold text-[var(--fg-primary)]">{adapter.label}</h3>
+          <h3 className="m-0 text-base font-semibold text-[var(--fg-primary)]">
+            {detail?.label || adapter.label}
+          </h3>
           <div className="mt-1 text-xs text-[var(--fg-secondary)]">
-            {actorKind || adapter.actorKind}
-            {runtimeCurrent ? " · 运行当前" : ""}
-            {bindingLabel ? ` · ${bindingLabel}` : ""}
+            {adapter.actorKind}
+            {detail?.runtimeCurrent ? " · 运行当前" : ""}
+            {detail?.nodeAttempt ? ` · 第 ${detail.nodeAttempt} 次尝试` : ""}
           </div>
         </div>
       </header>
 
-      {ops?.blockedReason ? (
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]" role="status">
-          {ops.blockedReason}
+      {detail?.blockedReason ? (
+        <div
+          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]"
+          role="status"
+        >
+          阻塞原因：{detail.blockedReason}
         </div>
       ) : null}
 
       <dl className="m-0 grid grid-cols-[88px_1fr] gap-x-2 gap-y-1 text-xs">
-        <dt className="text-[var(--fg-tertiary)]">插槽</dt>
-        <dd className="m-0 text-[var(--fg-primary)]">{adapter.slot}</dd>
+        <dt className="text-[var(--fg-tertiary)]">角色</dt>
+        <dd className="m-0 text-[var(--fg-primary)]">{detail?.primaryRoleKey || adapter.slot}</dd>
+        <dt className="text-[var(--fg-tertiary)]">绑定 Agent</dt>
+        <dd className="m-0 min-w-0 text-[var(--fg-primary)]">
+          {isAgent ? (agentName || "未绑定") : "非 Agent 节点"}
+        </dd>
+        <dt className="text-[var(--fg-tertiary)]">绑定来源</dt>
+        <dd className="m-0 text-[var(--fg-primary)]">
+          {bindingSourceLabel(String(snapshot.resolvedFrom || ""))}
+        </dd>
+        <dt className="text-[var(--fg-tertiary)]">Agent ID</dt>
+        <dd className="m-0 break-all text-[var(--fg-primary)]">
+          {String(snapshot.agentId || "—")}
+        </dd>
         <dt className="text-[var(--fg-tertiary)]">会话</dt>
         <dd className="m-0 text-[var(--fg-primary)]">
-          {adapter.actorKind !== "agent"
+          {!isAgent
             ? "非 Agent 节点"
-            : sessionAnchorDegraded
-              ? "锚点不可用"
-              : chatDeepLink
-                ? "可打开精确会话"
-                : "未绑定"}
+            : detail?.sessionAnchorDegraded
+              ? "会话锚点不可用"
+              : detail?.chatDeepLink
+                ? "已绑定精确会话"
+                : "未绑定会话"}
         </dd>
         <dt className="text-[var(--fg-tertiary)]">交接</dt>
         <dd className="m-0 text-[var(--fg-primary)]">{handoffPending ? "等待人工" : "—"}</dd>
-        {(ops?.facts || []).map((fact) => (
-          <div key={fact.label} className="contents">
-            <dt className="text-[var(--fg-tertiary)]">{fact.label}</dt>
-            <dd className="m-0 text-[var(--fg-primary)]">{fact.value}</dd>
-          </div>
-        ))}
       </dl>
 
-      <div className="flex flex-wrap gap-2">
-        {adapter.commands
-          // Only commands with a live handler (or the open_session link
-          // slot) render — declared-but-unwired commands stay on the
-          // roadmap without faking a button that errors on click.
-          .filter((command) => WIRED_COMMANDS.includes(command as (typeof WIRED_COMMANDS)[number]) || command === "open_session")
-          .map((command) => {
-            if (command === "open_session") {
-              const sessionAvailable = chatDeepLink && !sessionAnchorDegraded;
-              if (sessionAvailable) {
-                return (
-                  <a key={command} href={chatDeepLink} className="inline-flex">
-                    <VButton type="button" variant="ghost">
-                      {commandLabel(command)}
-                    </VButton>
-                  </a>
-                );
-              }
+      {sessionBinding && sessionBinding.sessionId ? (
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]" data-vui="session-anchor">
+          <div className="break-all">会话：{sessionBinding.sessionId}</div>
+          <div className="break-all">任务：{sessionBinding.taskId}</div>
+          <div className="break-all">轮次：{sessionBinding.turnId}</div>
+        </div>
+      ) : null}
+
+      {Object.keys(detail?.artifacts ?? {}).length > 0 ? (
+        <div data-vui="node-artifacts">
+          <div className="text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]">
+            产物
+          </div>
+          <ul className="m-0 list-none p-0 text-xs text-[var(--fg-primary)]">
+            {Object.entries(detail!.artifacts).map(([key, value]) => (
+              <li key={key} className="break-all">
+                {key}: {typeof value === "string" ? value : JSON.stringify(value)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2" data-vui="node-commands">
+        {capabilities.map((capability) => {
+          const disabledTitle = commandDisabledTitle(capability);
+          if (capability.command === "open_session") {
+            const canOpen = Boolean(detail?.chatDeepLink) && !detail?.sessionAnchorDegraded;
+            if (canOpen) {
               return (
-                <VButton
-                  key={command}
-                  type="button"
-                  variant="ghost"
-                  isDisabled
-                  title={sessionAnchorDegraded ? "会话锚点不可用" : "节点尚未绑定会话"}
-                >
-                  {commandLabel(command)}
-                </VButton>
+                <a key={capability.command} href={detail!.chatDeepLink!} className="inline-flex">
+                  <VButton type="button" variant="ghost">
+                    {commandLabel(capability.command)}
+                  </VButton>
+                </a>
               );
             }
             return (
               <VButton
-                key={command}
+                key={capability.command}
                 type="button"
-                variant={command.startsWith("accept") ? "primary" : "ghost"}
-                isDisabled={Boolean(busy)}
-                onClick={() => onCommand?.(command, adapter)}
+                variant="ghost"
+                isDisabled
+                title={disabledTitle || "会话锚点不可用"}
               >
-                {commandLabel(command)}
+                {commandLabel(capability.command)}
               </VButton>
             );
-          })}
+          }
+          return (
+            <VButton
+              key={capability.command}
+              type="button"
+              variant={capability.command.startsWith("accept") ? "primary" : "ghost"}
+              isDisabled={Boolean(busy) || Boolean(disabledTitle)}
+              title={disabledTitle || undefined}
+              onClick={() => onCommand(capability.command)}
+            >
+              {commandLabel(capability.command)}
+            </VButton>
+          );
+        })}
       </div>
-
     </VSurface>
   );
 }

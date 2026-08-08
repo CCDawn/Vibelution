@@ -262,3 +262,52 @@ export const CHALLENGE_CUP_NODE_IDS = [
 export type ChallengeCupNodeId = (typeof CHALLENGE_CUP_NODE_IDS)[number];
 
 export const CHALLENGE_CUP_WORKFLOW_ID = "challenge-cup-research";
+
+/** Effective (current-configuration) agent binding for one node. */
+export type EffectiveAgentBinding = {
+  nodeId: string;
+  roleKey: string;
+  agentId: string;
+  resolvedFrom: "workflow_default" | "stage_override" | "node_override" | "unbound" | string;
+};
+
+export type EffectiveAgentBindingsResponse = {
+  workflowId: string;
+  workflowVersionId: string;
+  teamId: string;
+  bindings: EffectiveAgentBinding[];
+};
+
+/** Controlled-write binding config payload (whole-layer replacement). */
+export type AgentBindingConfigPayload = {
+  teamId?: string;
+  workflowDefaults?: Record<string, string>;
+  stageOverrides?: Record<string, Record<string, string>>;
+  nodeOverrides?: Record<string, string>;
+};
+
+/** Per-node command capability as reported by the backend (drives UI). */
+export type NodeCommandCapability = {
+  command: string;
+  available: boolean;
+  reason: string;
+};
+
+/** Extended node detail payload (Task: binding + session + commands). */
+export type ResearchWorkflowNodeDetail = {
+  runId: string;
+  nodeId: string;
+  actorKind: ActorKind;
+  primaryRoleKey: string;
+  label: string;
+  bindingSnapshot: Record<string, unknown>;
+  sessionBinding: NodeAgentSessionBinding | null;
+  chatDeepLink: string | null;
+  sessionAnchorDegraded: boolean;
+  runtimeCurrent: boolean;
+  status: string | null;
+  nodeAttempt: number;
+  blockedReason: string;
+  artifacts: Record<string, unknown>;
+  commands: NodeCommandCapability[];
+};
