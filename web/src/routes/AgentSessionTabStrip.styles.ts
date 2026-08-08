@@ -3,7 +3,7 @@ const styles = {
   agentSessionTab:
     "vui-routes-chatcodingroute agentSessionTab -mb-px min-w-0 inline-flex h-9 w-fit max-w-[16rem] shrink-0 items-center gap-0 rounded-t-[var(--radius-control)] rounded-b-none border border-transparent bg-transparent pr-0.5 text-[var(--fg-secondary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--vui-control-hover-fg)]",
   agentSessionTabActive:
-    "vui-routes-chatcodingroute agentSessionTabActive min-w-0 z-[1] border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))] text-[var(--fg-primary)] opacity-100 hover:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] hover:bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))] hover:text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute agentSessionTabActive min-w-0 z-[1] border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))] data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))] text-[var(--fg-primary)] opacity-100 hover:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] hover:bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))] hover:text-[var(--fg-primary)]",
   agentSessionTabChild:
     "vui-routes-chatcodingroute agentSessionTabChild min-w-0",
   agentSessionTabCli:

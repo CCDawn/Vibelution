@@ -157,6 +157,7 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).not.toContain("agentSessionTabCurrentBadge");
     expect(markup).toContain("agentSessionTabTitleActive");
     expect(markup).toContain("aria-current=\"true\"");
+    expect(markup).toContain("data-selected=\"true\"");
     expect(markup).toContain("role=\"tablist\"");
     expect(markup.match(/role="tab"/g)?.length).toBe(2);
     expect(markup.match(/role="presentation"/g)?.length).toBe(2);

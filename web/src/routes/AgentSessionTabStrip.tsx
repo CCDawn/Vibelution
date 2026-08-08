@@ -311,6 +311,7 @@ export function AgentSessionTabStrip({
               key={session.id}
               className={tabClassName}
               role="presentation"
+              data-selected={tabActive ? "true" : undefined}
               data-agent-session-tab-container
               onContextMenu={(event) => onContextMenu(event, session)}
             >
@@ -381,6 +382,7 @@ export function AgentSessionTabStrip({
             key={session.id}
             className={`${tabClassName} ${styles.agentSessionTabClosable}`}
             role="presentation"
+            data-selected={tabActive ? "true" : undefined}
             data-agent-session-tab-container
             {...dragReferenceProps}
             onContextMenu={(event) => onContextMenu(event, session)}
@@ -469,6 +471,7 @@ export function AgentSessionTabStrip({
             key={run.id}
             className={`${tabClassName} ${styles.agentSessionTabClosable}`}
             role="presentation"
+            data-selected={tabActive ? "true" : undefined}
             data-agent-session-tab-container
           >
             <VButton
