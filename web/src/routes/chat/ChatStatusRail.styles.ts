@@ -76,6 +76,16 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute featurePresetBlock min-w-0",
   featurePresetScope:
     "vui-routes-chatcodingroute featurePresetScope min-w-0 shrink-0 [font-size:10px] font-semibold leading-none text-[var(--fg-tertiary)]",
+  mentalRuntimeBlock:
+    "vui-routes-chatcodingroute mentalRuntimeBlock min-w-0 content-start",
+  mentalRuntimeSummary:
+    "vui-routes-chatcodingroute mentalRuntimeSummary !grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_56%,transparent)] bg-[var(--vui-surface-raised)] px-1.5 py-1.5",
+  mentalRuntimeSummaryCopy:
+    "vui-routes-chatcodingroute mentalRuntimeSummaryCopy grid min-w-0 gap-0.5 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)] [&>p]:min-w-0 [&>p]:[display:-webkit-box] [&>p]:[-webkit-box-orient:vertical] [&>p]:[-webkit-line-clamp:2] [&>p]:overflow-hidden [&>p]:leading-snug [&>p]:[overflow-wrap:anywhere]",
+  mentalRuntimeSummaryTitle:
+    "vui-routes-chatcodingroute mentalRuntimeSummaryTitle min-w-0 truncate [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-primary)]",
+  embeddedTailBody:
+    "vui-routes-chatcodingroute embeddedTailBody relative z-0 mt-0.5 grid min-h-0 min-w-0 content-start gap-1.5 border-t border-[color:color-mix(in_srgb,var(--border-soft)_80%,transparent)] pt-1.5",
   groupApplyButton:
     `vui-routes-chatcodingroute groupApplyButton min-w-0 ${vuiControlQuietClass}`,
   groupDeleteButton:

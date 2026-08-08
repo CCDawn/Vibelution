@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { VButton, VTooltip } from "../../components/vui";
@@ -18,12 +19,18 @@ export type TurnStatusTailPanelProps = {
   activeSessionId: string;
   lang: "zh" | "en";
   injectMasterEnabled: boolean;
+  /**
+   * `section` — standalone left-rail card (legacy).
+   * `embedded` — body-only under 心智与运行, default-collapsed details.
+   */
+  variant?: "section" | "embedded";
 };
 
 export function TurnStatusTailPanel({
   activeSessionId,
   lang,
   injectMasterEnabled,
+  variant = "section",
 }: TurnStatusTailPanelProps) {
   const [config, setConfig] = useState<TurnStatusTailConfig>(() =>
     activeSessionId ? loadTurnStatusTailConfig(activeSessionId) : defaultTurnStatusTailConfig(),
@@ -64,31 +71,12 @@ export function TurnStatusTailPanel({
     persist({ ...config, enabled: !config.enabled });
   };
 
-  return (
-    <section
-      className={`${routeStyles.leftBlock} ${styles.featurePresetBlock}`}
-      data-testid="turn-status-tail-panel"
-      aria-label={lang === "zh" ? "回合尾部现场" : "Turn tail context"}
-    >
-      <div className={routeStyles.sectionHeader}>
-        <h3 className={routeStyles.railSectionHeading}>
-          {lang === "zh" ? "回合尾部现场" : "Turn tail context"}
-        </h3>
-        <span
-          className={styles.featurePresetScope}
-          title={
-            lang === "zh"
-              ? "会话级：勾选后在模型消息列表尾部追加；不影响前缀缓存形态"
-              : "Session-level: append selected blocks at message-list tail (prefix-cache safe)"
-          }
-        >
-          {lang === "zh" ? "会话 · 尾部" : "Session · tail"}
-        </span>
-      </div>
+  const body = (
+    <>
       <p className={styles.groupManagementHint}>
         {lang === "zh"
-          ? "选择每步注入模型尾部的块。默认仅预算与时钟；Git/路径默认关。全文 diff 不提供。"
-          : "Choose tail blocks injected each model step. Defaults: budget + clock. Full diff is not offered."}
+          ? "默认仅预算与时钟；Git/路径默认关。全文 diff 不提供。"
+          : "Defaults: budget + clock. Full diff is not offered."}
       </p>
       {!injectMasterEnabled ? (
         <p className={styles.groupManagementHint}>
@@ -151,6 +139,57 @@ export function TurnStatusTailPanel({
           max {config.limits.maxTailChars} {lang === "zh" ? "字" : "chars"}
         </span>
       </div>
+    </>
+  );
+
+  if (variant === "embedded") {
+    return (
+      <details
+        className={styles.compactDetails}
+        data-testid="turn-status-tail-panel"
+        aria-label={lang === "zh" ? "回合尾部现场" : "Turn tail context"}
+      >
+        <summary>
+          <ChevronRight size={14} aria-hidden="true" />
+          <span className={styles.compactDetailsClosedLabel}>
+            {lang === "zh" ? "尾部现场" : "Tail context"}
+            {!injectMasterEnabled
+              ? (lang === "zh" ? " · 状态关" : " · status off")
+              : config.enabled
+                ? (lang === "zh" ? " · 开" : " · on")
+                : (lang === "zh" ? " · 关" : " · off")}
+          </span>
+          <span className={styles.compactDetailsOpenLabel}>
+            {lang === "zh" ? "收起尾部" : "Collapse tail"}
+          </span>
+        </summary>
+        <div className={styles.embeddedTailBody}>{body}</div>
+      </details>
+    );
+  }
+
+  return (
+    <section
+      className={`${routeStyles.leftBlock} ${styles.featurePresetBlock}`}
+      data-testid="turn-status-tail-panel"
+      aria-label={lang === "zh" ? "回合尾部现场" : "Turn tail context"}
+    >
+      <div className={routeStyles.sectionHeader}>
+        <h3 className={routeStyles.railSectionHeading}>
+          {lang === "zh" ? "回合尾部现场" : "Turn tail context"}
+        </h3>
+        <span
+          className={styles.featurePresetScope}
+          title={
+            lang === "zh"
+              ? "会话级：勾选后在模型消息列表尾部追加；不影响前缀缓存形态"
+              : "Session-level: append selected blocks at message-list tail (prefix-cache safe)"
+          }
+        >
+          {lang === "zh" ? "会话 · 尾部" : "Session · tail"}
+        </span>
+      </div>
+      {body}
     </section>
   );
 }

@@ -33,11 +33,7 @@ import {
 } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "../agentDisplay";
-import {
-  CHAT_FEATURE_PRESETS,
-  chatFeaturePresetShortLabel,
-  type FeaturePresetKey,
-} from "./chatFeaturePresets";
+import type { FeaturePresetKey } from "./chatFeaturePresets";
 import {
   CHAT_COMPACT_DETAILS_HEIGHT_PANE,
   CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE,
@@ -243,8 +239,9 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     activeSessionId,
     onMentalModelEnabledChange,
     onRuntimeStatusEnabledChange,
-    featurePresetState,
-    onToggleFeaturePreset,
+    // Reserved frontend presets (planning/goal/tool) stay wired but off-rail for this preview.
+    featurePresetState: _featurePresetState,
+    onToggleFeaturePreset: _onToggleFeaturePreset,
     cacheDetailAvailable,
     cacheDetailOpen,
     cacheDetailOpenLabel,
@@ -567,10 +564,18 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
           ) : null}
         </section>
 
-        <section className={`${routeStyles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
+        <section
+          className={`${routeStyles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock} ${styles.mentalRuntimeBlock}`}
+          data-testid="mental-runtime-module"
+          aria-label={lang === "zh" ? "心智与运行" : "Mental and runtime"}
+        >
           <div className={routeStyles.sectionHeader}>
-            <h3 className={routeStyles.railSectionHeading}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
-            <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
+            <h3 className={routeStyles.railSectionHeading}>
+              {lang === "zh" ? "心智与运行" : "Mental & runtime"}
+            </h3>
+            <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>
+              {lang === "zh" ? "下轮生效" : "Next turn"}
+            </span>
           </div>
           <div className={styles.featureChipRow}>
             <VButton
@@ -607,32 +612,104 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
               <strong>{lang === "zh" ? "状态" : "Status"}</strong>
               <em>{runtimeStatusEnabledForNextTurn ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
             </VButton>
-            {CHAT_FEATURE_PRESETS.map((item) => {
-              const enabled = featurePresetState[item.key];
-              const featureLabel = t(item.labelKey);
-              return (
-                <VButton
-                  key={item.key}
-                  type="button"
-                  contentLayout="plain"
-                  className={enabled ? `${styles.featureChip} ${styles.featureChipActive}` : styles.featureChip}
-                  aria-pressed={enabled}
-                  onClick={() => onToggleFeaturePreset(item.key)}
-                  title={t(item.hintKey)}
-                >
-                  <strong>{chatFeaturePresetShortLabel(item.key, lang, featureLabel)}</strong>
-                  <em>{enabled ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
-                </VButton>
-              );
-            })}
           </div>
-        </section>
 
-        <TurnStatusTailPanel
-          activeSessionId={String(activeSessionId || "")}
-          injectMasterEnabled={runtimeStatusEnabledForNextTurn}
-          lang={lang}
-        />
+          <div className={styles.mentalRuntimeSummary}>
+            <VTooltip
+              content={mentalCompactLine || mentalSourceLabel || mentalSummary}
+              renderTrigger={(tooltipTriggerProps) => {
+                const {
+                  children: _triggerChildren,
+                  className: triggerClassName,
+                  role: _triggerRole,
+                  tabIndex: _triggerTabIndex,
+                  ...triggerProps
+                } = tooltipTriggerProps;
+
+                return (
+                  <VButton
+                    {...(triggerProps as unknown as VButtonProps)}
+                    type="button"
+                    className={[
+                      triggerClassName,
+                      routeStyles.mentalStateBadge,
+                      styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
+                    ].filter(Boolean).join(" ")}
+                    aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel || mentalSummary}`}
+                  >
+                    {mentalStateLabel}
+                  </VButton>
+                );
+              }}
+            >
+              {mentalStateLabel}
+            </VTooltip>
+            <div className={styles.mentalRuntimeSummaryCopy}>
+              <div className={styles.companionHeaderMeta}>
+                <strong className={styles.mentalRuntimeSummaryTitle}>
+                  {lang === "zh" ? "本轮心智" : "This turn"}
+                </strong>
+                {!mentalModelEnabledForNextTurn ? (
+                  <span
+                    className={styles.featurePresetScope}
+                    title={t("chatMentalHistoryVisibleHint")}
+                  >
+                    {lang === "zh" ? "下轮关" : "Next off"}
+                  </span>
+                ) : null}
+              </div>
+              <p title={mentalCompactLine || mentalSummary}>
+                {mentalCompactLine || mentalSummary || (lang === "zh" ? "暂无心智快照" : "No mental snapshot yet")}
+              </p>
+            </div>
+          </div>
+
+          <details className={styles.compactDetails}>
+            <summary>
+              <ChevronRight size={14} aria-hidden="true" />
+              <span className={styles.compactDetailsClosedLabel}>
+                {lang === "zh" ? "心智明细" : "Mental details"}
+              </span>
+              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
+            </summary>
+            <div className={styles.compactDetailsBody}>
+              <p className={routeStyles.oneLineValue} title={mentalWhisper}>
+                <span>{t("mentalWhisper")}</span>
+                {mentalWhisper}
+              </p>
+              <div className={styles.inlineStatGrid}>
+                <div className={styles.inlineStat}>
+                  <span>{t("state")}</span>
+                  <strong>{mentalCognitiveStateLabel}</strong>
+                </div>
+                <div className={styles.inlineStat}>
+                  <span>{t("mentalConfidence")}</span>
+                  <strong>{mentalConfidence}</strong>
+                </div>
+                <div className={styles.inlineStat}>
+                  <span>{t("mentalSource")}</span>
+                  <strong>{mentalSourceLabel}</strong>
+                </div>
+                <div className={styles.inlineStat}>
+                  <span>{t("mentalLastUpdated")}</span>
+                  <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
+                </div>
+              </div>
+              {!mentalModelEnabledForNextTurn ? (
+                <p className={routeStyles.contextLineCompact} title={t("chatMentalHistoryVisibleHint")}>
+                  {lang === "zh" ? "下轮心智关闭；历史快照仍展示。" : "Next-turn mental is off; historical snapshots still show."}
+                </p>
+              ) : null}
+            </div>
+          </details>
+
+          <TurnStatusTailPanel
+            activeSessionId={String(activeSessionId || "")}
+            injectMasterEnabled={runtimeStatusEnabledForNextTurn}
+            lang={lang}
+            variant="embedded"
+          />
+        </section>
 
         <TokenCoreStatusPanel
           cacheDetailAvailable={cacheDetailAvailable}
@@ -667,45 +744,6 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
         <section className={`${routeStyles.leftBlock} ${styles.companionBlock}`}>
           <div className={routeStyles.sectionHeader}>
             <h3 className={routeStyles.railSectionHeading}>{lang === "zh" ? "陪伴" : "Companion"}</h3>
-            <div className={styles.companionHeaderMeta}>
-              <VTooltip
-                content={mentalCompactLine || mentalSourceLabel || mentalSummary}
-                renderTrigger={(tooltipTriggerProps) => {
-                  const {
-                    children: _triggerChildren,
-                    className: triggerClassName,
-                    role: _triggerRole,
-                    tabIndex: _triggerTabIndex,
-                    ...triggerProps
-                  } = tooltipTriggerProps;
-
-                  return (
-                    <VButton
-                      {...(triggerProps as unknown as VButtonProps)}
-                      type="button"
-                      className={[
-                        triggerClassName,
-                        routeStyles.mentalStateBadge,
-                        styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
-                      ].filter(Boolean).join(" ")}
-                      aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel || mentalSummary}`}
-                    >
-                      {mentalStateLabel}
-                    </VButton>
-                  );
-                }}
-              >
-                {mentalStateLabel}
-              </VTooltip>
-              {!mentalModelEnabledForNextTurn ? (
-                <span
-                  className={styles.featurePresetScope}
-                  title={t("chatMentalHistoryVisibleHint")}
-                >
-                  {lang === "zh" ? "下轮关" : "Next off"}
-                </span>
-              ) : null}
-            </div>
           </div>
           <div className={styles.companionCompact}>
             <div className={styles.petMiniAvatar} aria-hidden="true">
@@ -727,7 +765,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                 <strong>{pet?.name ?? t("loadingPetState")}</strong>
                 <span>{t("level")} {pet?.level ?? 0} · {petPresetLabel}</span>
               </div>
-              <p title={petCompactLine || mentalSummary}>{petCompactLine || mentalSummary}</p>
+              <p title={petCompactLine}>{petCompactLine || (lang === "zh" ? "暂无陪伴状态" : "No companion state yet")}</p>
             </div>
           </div>
           <details className={styles.compactDetails}>
@@ -736,41 +774,13 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
               <span className={styles.compactDetailsClosedLabel}>{lang === "zh" ? "明细" : "Details"}</span>
               <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
             </summary>
-            {/* Height shell only wraps the open body — closed summary stays content-sized. */}
             <PersistedHeightListShell
               layoutId={CHAT_LIST_HEIGHT_LAYOUT_ID}
               pane={CHAT_COMPACT_DETAILS_HEIGHT_PANE}
-              label={lang === "zh" ? "调整状态明细高度" : "Resize status details height"}
+              label={lang === "zh" ? "调整陪伴明细高度" : "Resize companion details height"}
               className={styles.compactDetailsBody}
               resizeHandleClassName={styles.compactDetailsResizeHandle}
             >
-              <p className={routeStyles.oneLineValue} title={mentalWhisper}>
-                <span>{t("mentalWhisper")}</span>
-                {mentalWhisper}
-              </p>
-              <div className={styles.inlineStatGrid}>
-                <div className={styles.inlineStat}>
-                  <span>{t("state")}</span>
-                  <strong>{mentalCognitiveStateLabel}</strong>
-                </div>
-                <div className={styles.inlineStat}>
-                  <span>{t("mentalConfidence")}</span>
-                  <strong>{mentalConfidence}</strong>
-                </div>
-                <div className={styles.inlineStat}>
-                  <span>{t("mentalSource")}</span>
-                  <strong>{mentalSourceLabel}</strong>
-                </div>
-                <div className={styles.inlineStat}>
-                  <span>{t("mentalLastUpdated")}</span>
-                  <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
-                </div>
-              </div>
-              {!mentalModelEnabledForNextTurn ? (
-                <p className={routeStyles.contextLineCompact} title={t("chatMentalHistoryVisibleHint")}>
-                  {lang === "zh" ? "下轮心智关闭；历史快照仍展示。" : "Next-turn mental is off; historical snapshots still show."}
-                </p>
-              ) : null}
               <div className={styles.inlineMetaList}>
                 <span className={styles.inlineMetaPill}>
                   <span>{t("dailyTokens")}</span>
