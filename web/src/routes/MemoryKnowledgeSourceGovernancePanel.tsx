@@ -84,6 +84,8 @@ type MemoryKnowledgeSourceGovernancePanelProps = {
   centralSources: KnowledgeCentralSource[];
   isSourceInboxPending: boolean;
   isCentralSourcesPending: boolean;
+  sourceInboxErrorText?: string;
+  centralSourcesErrorText?: string;
   knowledgeBusy: boolean;
   canSubmitOwnerSource: boolean;
   canAttachCentralSource: boolean;
@@ -157,6 +159,8 @@ export function MemoryKnowledgeSourceGovernancePanel({
   centralSources,
   isSourceInboxPending,
   isCentralSourcesPending,
+  sourceInboxErrorText,
+  centralSourcesErrorText,
   knowledgeBusy,
   canSubmitOwnerSource,
   canAttachCentralSource,
@@ -360,7 +364,13 @@ export function MemoryKnowledgeSourceGovernancePanel({
                 </article>
               );
             })}
-            {!isSourceInboxPending && !ownerInboxSources.length ? (
+            {sourceInboxErrorText ? (
+              <section className={styles.emptyDetail} role="alert">
+                <FileText size={20} />
+                <strong>{sourceInboxErrorText}</strong>
+              </section>
+            ) : null}
+            {!isSourceInboxPending && !sourceInboxErrorText && !ownerInboxSources.length ? (
               <section className={styles.emptyDetail}>
                 <FileText size={20} />
                 <strong>{copy.noInboxSources}</strong>
@@ -393,7 +403,13 @@ export function MemoryKnowledgeSourceGovernancePanel({
             </div>
           </article>
         ))}
-        {!isCentralSourcesPending && !centralSources.length ? (
+        {centralSourcesErrorText ? (
+          <section className={styles.emptyDetail} role="alert">
+            <Database size={20} />
+            <strong>{centralSourcesErrorText}</strong>
+          </section>
+        ) : null}
+        {!isCentralSourcesPending && !centralSourcesErrorText && !centralSources.length ? (
           <section className={styles.emptyDetail}>
             <Database size={20} />
             <strong>{copy.noCentralSources}</strong>

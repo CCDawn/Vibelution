@@ -137,6 +137,8 @@ type Copy = {
   refresh: string;
   loading: string;
   loadFailed: string;
+  knowledgeLoadFailed: string;
+  retry: string;
   refreshFailed: string;
   sections: string;
   items: string;
@@ -626,6 +628,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     refresh: "刷新",
     loading: "正在整理记忆...",
     loadFailed: "记忆概览加载失败",
+    knowledgeLoadFailed: "知识库工作区加载失败",
+    retry: "重试",
     refreshFailed: "记忆概览刷新失败",
     sections: "来源分区",
     items: "记忆条目",
@@ -1011,6 +1015,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     refresh: "Refresh",
     loading: "Loading memory...",
     loadFailed: "Memory overview failed to load",
+    knowledgeLoadFailed: "Knowledge workspace failed to load",
+    retry: "Retry",
     refreshFailed: "Memory overview refresh failed",
     sections: "Sources",
     items: "Memory Items",
@@ -3712,7 +3718,59 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     </>
   );
 
-  const renderKnowledgeView = () => (
+  const renderKnowledgeView = () => {
+    const knowledgeBlockingError =
+      knowledgeDashboardSnapshotQuery.isError && !knowledgeDashboardSnapshot;
+    if (knowledgeBlockingError) {
+      const message = knowledgeDashboardSnapshotQuery.error instanceof Error
+        ? knowledgeDashboardSnapshotQuery.error.message
+        : String(knowledgeDashboardSnapshotQuery.error);
+      return (
+        <VStateSurface
+          fill
+          tone="error"
+          title={copy.knowledgeLoadFailed}
+          actions={(
+            <VButton type="button" variant="secondary" onClick={refresh}>
+              {copy.retry}
+            </VButton>
+          )}
+        >
+          {message}
+        </VStateSurface>
+      );
+    }
+    const sourceInboxErrorText = sourceInboxQuery.isError
+      ? sourceInboxQuery.error instanceof Error
+        ? sourceInboxQuery.error.message
+        : String(sourceInboxQuery.error)
+      : "";
+    const centralSourcesErrorText = centralSourcesQuery.isError
+      ? centralSourcesQuery.error instanceof Error
+        ? centralSourcesQuery.error.message
+        : String(centralSourcesQuery.error)
+      : "";
+    const ratingSuggestionsErrorText = ratingSuggestionsQuery.isError
+      ? ratingSuggestionsQuery.error instanceof Error
+        ? ratingSuggestionsQuery.error.message
+        : String(ratingSuggestionsQuery.error)
+      : "";
+    const knowledgeItemsErrorText = knowledgeItemsQuery.isError
+      ? knowledgeItemsQuery.error instanceof Error
+        ? knowledgeItemsQuery.error.message
+        : String(knowledgeItemsQuery.error)
+      : "";
+    const knowledgeSearchErrorText = knowledgeSearchQuery.isError
+      ? knowledgeSearchQuery.error instanceof Error
+        ? knowledgeSearchQuery.error.message
+        : String(knowledgeSearchQuery.error)
+      : "";
+    const knowledgeRagErrorText = knowledgeRagRetrieveQuery.isError
+      ? knowledgeRagRetrieveQuery.error instanceof Error
+        ? knowledgeRagRetrieveQuery.error.message
+        : String(knowledgeRagRetrieveQuery.error)
+      : "";
+    return (
     <>
       <MemoryKnowledgePipelinePanel
         copy={copy}
@@ -3811,6 +3869,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             centralSources={centralSources}
             isSourceInboxPending={sourceInboxQuery.isPending}
             isCentralSourcesPending={centralSourcesQuery.isPending}
+            sourceInboxErrorText={sourceInboxErrorText}
+            centralSourcesErrorText={centralSourcesErrorText}
             knowledgeBusy={knowledgeBusy}
             canSubmitOwnerSource={!knowledgeBusy && Boolean(activeSourceOwnerId)}
             canAttachCentralSource={Boolean(activeKnowledgeBase?.permissions.canPropose && activeKnowledgeBaseForItems) && !knowledgeBusy}
@@ -3836,6 +3896,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             resultCount={knowledgeSearchQuery.data?.summary.resultCount ?? 0}
             results={knowledgeSearchResults}
             searchPending={knowledgeSearchQuery.isPending}
+            searchErrorText={knowledgeSearchErrorText}
             contexts={knowledgeRagContexts}
             ragHealth={knowledgeRagHealth}
             ragProviderHealth={localRagProviderHealth}
@@ -3880,6 +3941,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             ratingSuggestionStatus={ratingSuggestionStatus}
             ratingSuggestionPriority={ratingSuggestionPriority}
             ratingSuggestionsPending={ratingSuggestionsQuery.isPending}
+            ratingSuggestionsErrorText={ratingSuggestionsErrorText}
             knowledgeBusy={knowledgeBusy}
             onProposalDraftChange={setProposalDraft}
             onSubmitRefinementProposal={submitRefinementProposal}
@@ -3904,6 +3966,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           trace={knowledgeTraceQuery.data}
           knowledgeItems={knowledgeItems}
           knowledgeItemsPending={knowledgeItemsQuery.isPending}
+          knowledgeItemsErrorText={knowledgeItemsErrorText}
           ratingDraft={ratingDraft}
           knowledgeBusy={knowledgeBusy}
           onTraceTargetChange={setTraceTargetId}
@@ -3913,7 +3976,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         )}
       />
     </>
-  );
+    );
+  };
 
   const createCleanupPanel = () => {
     const report = cleanupExecution ?? cleanupPreview;

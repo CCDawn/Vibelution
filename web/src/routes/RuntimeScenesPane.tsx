@@ -1448,6 +1448,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
             value={sceneSearch}
             onChange={(event) => setSceneSearch(event.target.value)}
             placeholder={t("searchRuntimeScenesPlaceholder")}
+            aria-label={t("searchRuntimeScenesPlaceholder")}
           />
         </div>
 

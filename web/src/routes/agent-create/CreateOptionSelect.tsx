@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { VNativeButton } from "../../components/vui";
 import styles from "./CreateOptionSelect.styles";
@@ -35,9 +35,16 @@ export function CreateOptionSelect({
 }: CreateOptionSelectProps) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [open, setOpen] = useState(false);
   const selected = options.find((option) => option.value === value);
   const triggerLabel = selected?.label || placeholder;
+  const selectedIndex = options.findIndex((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    optionRefs.current[selectedIndex >= 0 ? selectedIndex : 0]?.focus();
+  }, [open, selectedIndex]);
 
   useEffect(() => {
     if (!open) return;
@@ -57,6 +64,66 @@ export function CreateOptionSelect({
     };
   }, [open]);
 
+  const focusNextEnabledOption = (fromIndex: number, direction: 1 | -1) => {
+    const length = options.length;
+    if (length === 0) return;
+    let target = -1;
+    if (direction === 1) {
+      for (let i = 1; i <= length; i += 1) {
+        const index = (fromIndex + i) % length;
+        if (!options[index].disabled) {
+          target = index;
+          break;
+        }
+      }
+    } else {
+      for (let i = 1; i <= length; i += 1) {
+        const index = (fromIndex - i + length * 2) % length;
+        if (!options[index].disabled) {
+          target = index;
+          break;
+        }
+      }
+    }
+    if (target >= 0) {
+      optionRefs.current[target]?.focus();
+    }
+  };
+
+  const handleTriggerKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (!open) {
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      focusNextEnabledOption(selectedIndex >= 0 ? selectedIndex : -1, event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      optionRefs.current[0]?.focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      optionRefs.current[options.length - 1]?.focus();
+    }
+  };
+
+  const handleOptionKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusNextEnabledOption(index, 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusNextEnabledOption(index, -1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      optionRefs.current[0]?.focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      optionRefs.current[options.length - 1]?.focus();
+    } else if (event.key === "Tab") {
+      setOpen(false);
+    }
+  };
+
   return (
     <div ref={rootRef} className={styles.root}>
       <VNativeButton
@@ -68,17 +135,21 @@ export function CreateOptionSelect({
         aria-label={label}
         disabled={disabled || options.length === 0}
         onClick={() => setOpen((current) => !current)}
+        onKeyDown={handleTriggerKeyDown}
       >
         <span className={styles.triggerText}>{triggerLabel}</span>
         <ChevronDown size={15} aria-hidden="true" />
       </VNativeButton>
       {open ? (
         <ul id={listId} className={styles.list} role="listbox" aria-label={label}>
-          {options.map((option) => {
+          {options.map((option, index) => {
             const isSelected = option.value === value;
             return (
               <li key={option.value} role="presentation">
                 <VNativeButton
+                  ref={(node) => {
+                    optionRefs.current[index] = node;
+                  }}
                   type="button"
                   role="option"
                   aria-selected={isSelected}
@@ -94,6 +165,7 @@ export function CreateOptionSelect({
                     onChange(option.value);
                     setOpen(false);
                   }}
+                  onKeyDown={(event) => handleOptionKeyDown(event, index)}
                 >
                   <span>{option.label}</span>
                   {option.description ? <small>{option.description}</small> : null}

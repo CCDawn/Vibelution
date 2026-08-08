@@ -68,6 +68,8 @@ const surfacePanelClass = `grid gap-2 ${detailSurfaceClass} p-2`;
 const contentHeaderClass = "flex min-w-0 items-start justify-between gap-3 max-[720px]:flex-wrap";
 const contentPreClass = `m-0 max-h-[48vh] overflow-auto ${fieldSurfaceClass} p-2.5 [font-size:var(--vui-font-xs)] leading-[1.48] text-vui-fg-primary whitespace-pre-wrap break-words`;
 const truncatedNoticeClass = "m-0 [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
+const detailErrorClass = "m-0 flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_34%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,transparent)] px-2.5 py-2 [font-size:var(--vui-font-xs)] leading-[1.4] text-[var(--state-error)]";
+const detailErrorRetryClass = "min-h-[var(--vui-control-height-sm)]";
 const rootRowClass = "grid min-w-0 grid-cols-[90px_minmax(0,1fr)] items-center gap-2.5 max-[720px]:grid-cols-1 max-[720px]:gap-1";
 const rootSourceClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const rootPathClass = "min-w-0 truncate";
@@ -123,6 +125,8 @@ const styles = {
   contentHeaderClass,
   contentPreClass,
   truncatedNoticeClass,
+  detailErrorClass,
+  detailErrorRetryClass,
   rootRowClass,
   rootSourceClass,
   rootPathClass,

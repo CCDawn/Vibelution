@@ -121,7 +121,7 @@ function shortId(value: string) {
   return `${text.slice(0, 10)}…${text.slice(-6)}`;
 }
 
-function formatTime(value: string) {
+function formatTime(value: string, lang: "zh" | "en") {
   if (!value) {
     return "-";
   }
@@ -129,7 +129,7 @@ function formatTime(value: string) {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString();
+  return date.toLocaleString(lang === "zh" ? "zh-CN" : "en-US", { hour12: false });
 }
 
 function describeError(error: unknown, fallback: string) {
@@ -205,6 +205,7 @@ export function KernelTaskCenterRoute() {
         selected={task.taskId === selectedTaskId}
         onSelect={() => updateSelectedTaskId(task.taskId)}
         copy={copy}
+        lang={lang}
       />
     ))
   );
@@ -273,7 +274,7 @@ export function KernelTaskCenterRoute() {
         </div>
         <div className={styles.lifecycleTimelineClass}>
           {timeline.timeline.map((item, index) => (
-            <LifecycleRow key={`${item.kind}-${item.at}-${index}`} item={item} />
+            <LifecycleRow key={`${item.kind}-${item.at}-${index}`} item={item} lang={lang} />
           ))}
         </div>
       </section>
@@ -344,11 +345,13 @@ function TaskRow({
   selected,
   onSelect,
   copy,
+  lang,
 }: {
   task: KernelTask;
   selected: boolean;
   onSelect: () => void;
   copy: (typeof COPY)["zh"] | (typeof COPY)["en"];
+  lang: "zh" | "en";
 }) {
   return (
     <VButton
@@ -362,7 +365,7 @@ function TaskRow({
       </span>
       <span className={styles.taskRowMetaClass}>
         <span>{copy.assigned}: {(task.assignedAgentIds ?? []).map(shortId).join(", ") || "-"}</span>
-        <span>{copy.updated}: {formatTime(task.updatedAt)}</span>
+        <span>{copy.updated}: {formatTime(task.updatedAt, lang)}</span>
       </span>
       <code className={styles.monoCodeClass}>{task.taskId}</code>
     </VButton>
@@ -409,7 +412,7 @@ function LedgerBucket({
   );
 }
 
-function LifecycleRow({ item }: { item: KernelTimelineItem }) {
+function LifecycleRow({ item, lang }: { item: KernelTimelineItem; lang: "zh" | "en" }) {
   return (
     <div className={styles.lifecycleRowClass}>
       <VStatusChip tone={statusTone(item.status)} className={styles.lifecycleToneChipClass} aria-hidden="true">
@@ -421,7 +424,7 @@ function LifecycleRow({ item }: { item: KernelTimelineItem }) {
           <StatusPill status={item.status} />
         </div>
         <p className={styles.lifecycleSummaryClass}>{item.summary}</p>
-        <span className={styles.mutedLineClass}>{formatTime(item.at)}</span>
+        <span className={styles.mutedLineClass}>{formatTime(item.at, lang)}</span>
         {item.refs.length > 0 ? (
           <div className={styles.chipsClass}>
             {item.refs.map((ref) => (

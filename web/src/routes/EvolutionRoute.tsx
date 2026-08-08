@@ -1542,11 +1542,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const allVisibleDeletableRunsSelected =
     visibleDeletableRunIds.length > 0
     && visibleDeletableRunIds.every((runId) => selectedRunIdSet.has(runId));
-  const runHeaderMessage = !hasRuns
-    ? t("noRunsRecordedHint")
-    : filteredRunsEmpty
-      ? t("runFilterEmptyHint")
-      : t("runQueueHint");
+  const supervisedSnapshotError = supervisedTrackQueriesEnabled && workspaceSnapshotQuery.isError && !workspaceSnapshot;
+  const supervisedSnapshotErrorText = supervisedSnapshotError
+    ? workspaceSnapshotQuery.error instanceof Error
+      ? workspaceSnapshotQuery.error.message
+      : String(workspaceSnapshotQuery.error)
+    : "";
+  const runHeaderMessage = supervisedSnapshotError
+    ? t("loadFailed")
+    : !hasRuns
+      ? t("noRunsRecordedHint")
+      : filteredRunsEmpty
+        ? t("runFilterEmptyHint")
+        : t("runQueueHint");
   const libraryHeaderMessage = libraryPaneEmpty
     ? (libraryView === "items" ? t("emptyLibraryItems") : t("emptyPendingItems"))
     : libraryFilteredEmpty
@@ -2217,6 +2225,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 <p className={styles.errorTextCompact}>
                   {lang === "zh" ? "评测来源暂时不可用，正在等待目录刷新。" : "Evaluation sources are temporarily unavailable while the catalog refreshes."}
                 </p>
+              ) : null}
+              {supervisedSnapshotErrorText ? (
+                <div className={styles.supervisedSnapshotErrorBanner} role="alert">
+                  <span>
+                    {lang === "zh" ? "运行记录与当前状态加载失败：" : "Run records and current status failed to load: "}
+                    {supervisedSnapshotErrorText}
+                  </span>
+                  <VButton type="button" variant="secondary" onPress={() => void workspaceSnapshotQuery.refetch()}>
+                    {lang === "zh" ? "重试" : "Retry"}
+                  </VButton>
+                </div>
               ) : null}
 
               <div className={styles.supervisedRunConsoleGrid}>

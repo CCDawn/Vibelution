@@ -57,6 +57,7 @@ type MemoryKnowledgeReviewPanelProps = {
   ratingSuggestionStatus: MemoryKnowledgeRatingSuggestionStatusFilter;
   ratingSuggestionPriority: MemoryKnowledgeRatingSuggestionPriorityFilter;
   ratingSuggestionsPending: boolean;
+  ratingSuggestionsErrorText?: string;
   knowledgeBusy: boolean;
   onProposalDraftChange: (draft: MemoryKnowledgeProposalDraft) => void;
   onSubmitRefinementProposal: () => void;
@@ -81,6 +82,7 @@ export function MemoryKnowledgeReviewPanel({
   ratingSuggestionStatus,
   ratingSuggestionPriority,
   ratingSuggestionsPending,
+  ratingSuggestionsErrorText,
   knowledgeBusy,
   onProposalDraftChange,
   onSubmitRefinementProposal,
@@ -281,7 +283,13 @@ export function MemoryKnowledgeReviewPanel({
                 </VButton>
             </section>
           ))}
-          {!ratingSuggestionsPending && !ratingSuggestions.length ? (
+          {ratingSuggestionsErrorText ? (
+            <section className={styles.emptyDetail} role="alert">
+              <CheckCircle2 size={20} />
+              <strong>{ratingSuggestionsErrorText}</strong>
+            </section>
+          ) : null}
+          {!ratingSuggestionsPending && !ratingSuggestionsErrorText && !ratingSuggestions.length ? (
             <section className={styles.emptyDetail}>
               <CheckCircle2 size={20} />
               <strong>{copy.noIssues}</strong>

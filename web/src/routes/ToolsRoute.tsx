@@ -1714,7 +1714,7 @@ export function ToolsRoute() {
         copy={{
           blocked: t("toolsScopeBlocked"),
           callable: t("toolsScopeCallable"),
-          configure: lang === "zh" ? "配置" : "Agent",
+          configure: lang === "zh" ? "配置" : "Configure",
           configureAgent: lang === "zh" ? "配置 Agent" : "Configure Agent",
           loading: t("loading"),
           scope: t("toolsAgentScope"),
@@ -1725,6 +1725,11 @@ export function ToolsRoute() {
         activeAgents={activeAgents}
         activeAgent={activePolicyAgent}
         agentsLoading={agentsQuery.isPending}
+        agentsErrorText={agentsQuery.isError
+          ? agentsQuery.error instanceof Error
+            ? agentsQuery.error.message
+            : String(agentsQuery.error)
+          : ""}
         activeAgentScopeId={activeAgentScopeId}
         scopeOptions={toolScopeOptions}
         scopeCounts={activeAgentScope.counts}
@@ -1755,6 +1760,7 @@ export function ToolsRoute() {
               value={searchText}
               placeholder={t("toolsSearchPlaceholder")}
               onChange={(event) => setSearchText(event.target.value)}
+              aria-label={t("toolsSearchPlaceholder")}
             />
           </label>
           <div className={styles.filterRow}>
@@ -1870,7 +1876,20 @@ export function ToolsRoute() {
                 </div>
               </section>
             ))}
-            {!visibleTools.length ? <VStateSurface tone="empty" title={t("toolsNoMatches")} /> : null}
+            {toolsQuery.isError && !toolsQuery.data ? (
+              <VStateSurface
+                tone="error"
+                title={t("loadFailed")}
+                actions={(
+                  <VButton type="button" variant="secondary" onPress={() => void toolsQuery.refetch()}>
+                    {lang === "zh" ? "重试" : "Retry"}
+                  </VButton>
+                )}
+              >
+                {toolsQuery.error instanceof Error ? toolsQuery.error.message : String(toolsQuery.error)}
+              </VStateSurface>
+            ) : null}
+            {!toolsQuery.isError && !visibleTools.length ? <VStateSurface tone="empty" title={t("toolsNoMatches")} /> : null}
           </div>
         </aside>
 
@@ -2481,7 +2500,11 @@ export function ToolsRoute() {
             <section className={styles.emptyDetail}>
               <Wrench size={24} />
               <strong>{t("toolsCurrentAgentTools")}</strong>
-              <p>{toolsQuery.isPending ? t("loading") : t("toolsNoMatches")}</p>
+              {toolsQuery.isError && !toolsQuery.data ? (
+                <p>{lang === "zh" ? "工具列表加载失败，请重试" : "Tool registry failed to load; retry"}</p>
+              ) : (
+                <p>{toolsQuery.isPending ? t("loading") : t("toolsNoMatches")}</p>
+              )}
             </section>
           )}
         </main>

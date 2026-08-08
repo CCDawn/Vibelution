@@ -952,6 +952,7 @@ export function LogsRoute() {
                   value={fileFilter}
                   onChange={(event) => setFileFilter(event.target.value)}
                   placeholder={lang === "zh" ? "搜索日志包或包内文件" : "Search packages or files"}
+                  aria-label={lang === "zh" ? "搜索日志包或包内文件" : "Search packages or files"}
                 />
               </div>
 

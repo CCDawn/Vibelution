@@ -1,6 +1,7 @@
-import { forwardRef, type ComponentPropsWithoutRef } from "react";
+import { forwardRef, useContext, type ComponentPropsWithoutRef } from "react";
 
 import { type VuiDensity } from "../shared/buttonVariants";
+import { FieldRowIdContext } from "../../forms/fieldRowContext";
 import { vuiFormControlClass } from "../../forms/formClasses";
 
 /**
@@ -19,6 +20,7 @@ export const ShadcnInput = forwardRef<HTMLInputElement, ShadcnInputProps>(functi
     density = "compact",
     className,
     type,
+    id,
     isDisabled = false,
     disabled,
     "data-vui": dataVui,
@@ -26,6 +28,7 @@ export const ShadcnInput = forwardRef<HTMLInputElement, ShadcnInputProps>(functi
   },
   ref,
 ) {
+  const fieldRowId = useContext(FieldRowIdContext);
   const inputType = type ?? "text";
   const isBox = inputType === "checkbox" || inputType === "radio";
   const isRange = inputType === "range";
@@ -51,6 +54,7 @@ export const ShadcnInput = forwardRef<HTMLInputElement, ShadcnInputProps>(functi
       {...props}
       ref={ref}
       type={inputType}
+      id={id ?? fieldRowId}
       disabled={Boolean(disabled || isDisabled)}
       data-vui={dataVui ?? "input"}
       data-density={density}

@@ -150,6 +150,7 @@ export function AgentFilterRail({
           value={searchValue}
           placeholder={searchPlaceholder}
           onChange={(event) => onSearchChange(event.target.value)}
+          aria-label={searchPlaceholder}
           className="min-w-0 w-full !border-0 !bg-transparent !px-0 !shadow-none outline-0 text-[var(--fg-primary)] text-[0.82rem] font-[inherit]"
         />
       </label>

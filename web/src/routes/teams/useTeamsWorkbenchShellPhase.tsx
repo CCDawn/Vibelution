@@ -3,7 +3,7 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { VNativeButton, VTooltip } from "../../components/vui";
 import { buildTeamsWorkbenchResearchSurfacesFromBag } from "./buildTeamsWorkbenchResearchSurfacesFromBag";
@@ -683,10 +683,48 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   // Right inspector column: stage tools / workflow (not stacked under primary → empty floor).
   // Hide on process workflow / overview so ResearchProcessWorkspace (VCanvasWorkbenchPage)
   // owns the full main column + its own node inspector — avoids double aside + dead space.
+  // Narrow windows (<=900px) render the inspector as an overlay drawer via board toggle.
+  const [boardInspectorNarrow, setBoardInspectorNarrow] = useState(() =>
+    typeof window === "undefined" || typeof window.matchMedia !== "function"
+      ? false
+      : !window.matchMedia("(min-width: 900px)").matches,
+  );
+  const [boardInspectorOverlayOpen, setBoardInspectorOverlayOpen] = useState(false);
+  const toggleBoardInspectorOverlay = () => setBoardInspectorOverlayOpen((current) => !current);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const media = window.matchMedia("(min-width: 900px)");
+    const syncNarrow = (event: MediaQueryListEvent) => {
+      setBoardInspectorNarrow(!event.matches);
+      if (event.matches) {
+        setBoardInspectorOverlayOpen(false);
+      }
+    };
+    media.addEventListener("change", syncNarrow);
+    return () => media.removeEventListener("change", syncNarrow);
+  }, []);
+
+  useEffect(() => {
+    if (!boardInspectorNarrow || !boardInspectorOverlayOpen) {
+      return;
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setBoardInspectorOverlayOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [boardInspectorNarrow, boardInspectorOverlayOpen]);
+
   const showBoardInspectorAside =
     researchWorkflowTeamSelected
     && !researchCanvasVisible
-    && !isProcessWorkflowView;
+    && !isProcessWorkflowView
+    && !boardInspectorNarrow;
 
   // Legacy experiment/iteration query is normalized at TeamsLegacyResearchBoundary
   // to workflow + node before this shell phase. Do not mount ResearchStageStandalonePage
@@ -707,6 +745,9 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     stageSlot: null,
     launcherSlot: renderResearchStageLauncher("interactive"),
     showBoardInspectorAside,
+    narrowInspector: boardInspectorNarrow,
+    inspectorOverlayOpen: boardInspectorOverlayOpen,
+    onToggleInspectorOverlay: toggleBoardInspectorOverlay,
     inspectorBody: (
       <>
         {selectedTeam && !challengeCupResearchTeamSelected ? renderTeamMemoryIndex() : null}

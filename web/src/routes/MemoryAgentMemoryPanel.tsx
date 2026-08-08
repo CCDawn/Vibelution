@@ -179,7 +179,7 @@ export function MemoryAgentMemoryPanel({
             </div>
             <label className={styles.searchBox}>
               <Search size={15} />
-              <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} />
+              <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} aria-label={copy.searchPlaceholder} />
             </label>
             <div className={styles.itemList}>
               {inventoryPending ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}

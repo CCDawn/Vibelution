@@ -40,6 +40,10 @@ type ChatToolApprovalDialogProps = {
  * - Body: one-line command preview
  * - Actions: Yes · Always · No
  * - Hotkeys: y / a / n (when not pending)
+ *
+ * Semantics: this banner/inline surface is intentionally non-modal — it has no
+ * focus trap or background blocking, so aria-modal is never declared.
+ * variant === "banner" renders composer-adjacent; "inline" renders in transcript.
  */
 export function ChatToolApprovalDialog({
   lang,
@@ -118,7 +122,6 @@ export function ChatToolApprovalDialog({
       <section
         className={variant === "inline" ? styles.dialogInline : styles.dialog}
         role="dialog"
-        aria-modal={variant === "banner" ? "true" : undefined}
         aria-labelledby={titleId}
         aria-describedby={descriptionIds}
         aria-busy={pending}
@@ -161,7 +164,7 @@ export function ChatToolApprovalDialog({
               <span className={styles.toolItem} role="listitem">{lang === "zh" ? `另 ${extraCount} 项` : `+${extraCount}`}</span>
             ) : null}
           </div>
-          <p className={styles.hotkeys} aria-hidden="true">
+          <p className={styles.hotkeys}>
             {lang === "zh" ? "Y 是 · A 始终 · N 否" : "Y Yes · A Always · N No"}
           </p>
         </div>

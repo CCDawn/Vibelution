@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import type { AgentAvatarOptionsPayload } from "../api/types";
 import { VButton, VContextualHint, VNativeButton, VNativeInput, VTooltip } from "../components/vui";
@@ -59,6 +59,23 @@ export function AgentAvatarEditorPanel({
   onSelectAvatar,
 }: AgentAvatarEditorPanelProps) {
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const titleIdRef = useRef(`avatar-editor-${Math.random().toString(36).slice(2, 8)}`);
+  const titleId = titleIdRef.current;
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    closeButtonRef.current?.focus();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onOpenChange(false);
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [isOpen, onOpenChange]);
 
   return (
     <div className={styles.avatarEditorAnchor}>
@@ -68,15 +85,22 @@ export function AgentAvatarEditorPanel({
           className={styles.detailAvatarButton}
           onClick={() => onOpenChange(!isOpen)}
           aria-expanded={isOpen}
+          aria-haspopup="dialog"
+          aria-controls={isOpen ? titleId : undefined}
           aria-label={copy.editAvatar}
         >
           {renderAgentAvatar(styles.detailAvatar, avatarImageUrl, avatarInitials)}
         </VNativeButton>
       </VTooltip>
       {isOpen ? (
-        <section className={styles.avatarEditorPanel}>
+        <section
+          className={styles.avatarEditorPanel}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+        >
           <div className={styles.avatarEditorHeader}>
-            <div>
+            <div id={titleId}>
               <p className={styles.panelEyebrow}>{copy.avatarEditorTitle}</p>
               <strong className={styles.contextualHintRow}>
                 {copy.editAvatar}
@@ -84,7 +108,13 @@ export function AgentAvatarEditorPanel({
               </strong>
             </div>
             <VTooltip content={lang === "zh" ? "关闭头像编辑" : "Close avatar editor"}>
-              <VNativeButton type="button" className={styles.iconButton} onClick={() => onOpenChange(false)} aria-label={lang === "zh" ? "关闭" : "Close"}>
+              <VNativeButton
+                ref={closeButtonRef}
+                type="button"
+                className={styles.iconButton}
+                onClick={() => onOpenChange(false)}
+                aria-label={lang === "zh" ? "关闭" : "Close"}
+              >
                 ×
               </VNativeButton>
             </VTooltip>
