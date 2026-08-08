@@ -129,6 +129,13 @@ workspace/
 /vsa-*/
 /UsersAdministrator*/
 
+# --- Local operator data (user documents / runtime stores) never leaves the machine ---
+/data/
+/Documents/
+/Vibelution/
+/VibelutionData*/
+/runtime/
+
 # --- OS ---
 .DS_Store
 Thumbs.db
