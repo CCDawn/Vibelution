@@ -103,7 +103,6 @@ export const queryKeys = {
   researchThemeDiscoveryPrompts: () => ["research", "theme-discovery", "prompts"] as const,
   researchKnowledgeBase: (query = "", kind = "", category = "") =>
     ["research", "knowledge-base", query, kind, category] as const,
-  researchFlowCanvas: () => ["research", "flow-canvas"] as const,
   researchOrganization: () => ["research", "organization"] as const,
   logRoots: () => ["logs", "roots"] as const,
   logTree: (root: string) => ["logs", "tree", root] as const,
