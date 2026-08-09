@@ -38,13 +38,37 @@ def _inferred_task_timezone(
     return timezone(timedelta(seconds=rounded_offset_seconds))
 
 
+def _paired_timestamp_timezone(
+    naive_timestamp: datetime,
+    aware_reference: datetime | None,
+):
+    """Infer the writer timezone from near-simultaneous local/UTC timestamps."""
+    if naive_timestamp.tzinfo is not None or aware_reference is None:
+        return None
+    if aware_reference.tzinfo is None:
+        return None
+    utc_reference = aware_reference.astimezone(timezone.utc).replace(tzinfo=None)
+    raw_offset_seconds = (naive_timestamp - utc_reference).total_seconds()
+    rounded_offset_seconds = round(raw_offset_seconds / 900) * 900
+    if (
+        abs(rounded_offset_seconds) > timedelta(hours=14).total_seconds()
+        or abs(raw_offset_seconds - rounded_offset_seconds) > 300
+    ):
+        return None
+    return timezone(timedelta(seconds=rounded_offset_seconds))
+
+
 def _elapsed_seconds(
     session_detail: dict[str, Any],
     started: datetime,
     finished: datetime,
+    *,
+    started_reference: datetime | None = None,
 ) -> int:
     if started.tzinfo is None and finished.tzinfo is not None:
-        inferred = _inferred_task_timezone(session_detail, finished)
+        inferred = _paired_timestamp_timezone(started, started_reference)
+        if inferred is None:
+            inferred = _inferred_task_timezone(session_detail, finished)
         started = started.replace(tzinfo=inferred or finished.tzinfo)
     elif finished.tzinfo is None and started.tzinfo is not None:
         finished = finished.replace(tzinfo=started.tzinfo)
@@ -125,7 +149,15 @@ def collect_agent_task_budget_usage(
                     "terminal Agent task is missing wall-clock usage",
                     code="agent_usage_missing",
                 )
-            raw_seconds = _elapsed_seconds(session_detail, started, finished)
+            started_reference = parse_task_time(
+                task.get("createdAt") or node_run.get("startedAt")
+            )
+            raw_seconds = _elapsed_seconds(
+                session_detail,
+                started,
+                finished,
+                started_reference=started_reference,
+            )
         usage["wallClockSeconds"] = raw_seconds
 
     for counter in ("experiments", "computeUnits"):
