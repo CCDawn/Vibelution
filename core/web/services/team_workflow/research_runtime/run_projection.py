@@ -6,7 +6,10 @@ from typing import Any
 
 from core.research.workflow.iteration_decisions import DEFAULT_ITERATION_BUDGET
 from core.research.workflow.models import WorkflowRunStatus
-from core.research.workflow.projection import build_canvas_projection
+from core.research.workflow.projection import (
+    build_canvas_projection,
+    default_node_run_projection,
+)
 
 
 def build_run_canvas_projection(record: dict[str, Any]) -> dict[str, Any]:
@@ -24,6 +27,14 @@ def build_run_canvas_projection(record: dict[str, Any]) -> dict[str, Any]:
             existing.get("attempt") or 0
         ):
             latest[node_id] = dict(node_run)
+    for snapshot in record.get("bindingSnapshots") or []:
+        node_id = str(snapshot.get("nodeId") or "")
+        agent_id = str(snapshot.get("agentId") or "")
+        if not node_id or not agent_id:
+            continue
+        projection = latest.setdefault(node_id, default_node_run_projection(node_id))
+        projection["primaryAgentId"] = agent_id
+        projection["actorKind"] = "agent"
     pending = [
         task
         for task in record.get("humanTasks") or []
