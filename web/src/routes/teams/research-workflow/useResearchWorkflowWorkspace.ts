@@ -1,11 +1,14 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import {
   parseResearchProcessLocation,
   patchResearchProcessSearch,
 } from "./researchProcessLocation";
-import { shouldApplyCanvasNodeSelection } from "./researchProcessPanelSelection";
+import {
+  shouldApplyCanvasNodeSelection,
+  type ResearchProcessPanel,
+} from "./researchProcessPanelSelection";
 
 export function useResearchWorkflowWorkspace(teamId: string) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -13,6 +16,11 @@ export function useResearchWorkflowWorkspace(teamId: string) {
     () => parseResearchProcessLocation(searchParams),
     [searchParams],
   );
+  const pendingPanelRef = useRef<ResearchProcessPanel | null>(null);
+
+  useEffect(() => {
+    if (pendingPanelRef.current === location.panel) pendingPanelRef.current = null;
+  }, [location.panel]);
 
   const replaceParams = useCallback(
     (patch: Record<string, string | null | undefined>) => {
@@ -26,11 +34,20 @@ export function useResearchWorkflowWorkspace(teamId: string) {
 
   const selectNode = useCallback(
     (nodeId: string | null) => {
+      if (pendingPanelRef.current && pendingPanelRef.current !== "node") return;
       if (!shouldApplyCanvasNodeSelection({ nodeId, panel: location.panel })) return;
       replaceParams({ node: nodeId, panel: "node" });
     },
     [location.panel, replaceParams],
   );
 
-  return { ...location, replaceParams, selectNode };
+  const openPanel = useCallback(
+    (panel: ResearchProcessPanel) => {
+      pendingPanelRef.current = panel;
+      replaceParams({ panel });
+    },
+    [replaceParams],
+  );
+
+  return { ...location, replaceParams, selectNode, openPanel };
 }
