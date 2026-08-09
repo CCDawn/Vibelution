@@ -124,6 +124,7 @@ describe("chat active turn layer", () => {
     } as SessionDetail;
 
     expect(activeTurnTerminalRefreshKey(layer, detail)).toBe("turn-1:detail:10");
+    expect(activeTurnTerminalRefreshKey({ ...layer!, status: "completed" }, detail)).toBe("turn-1:detail:10");
   });
 
   it("keeps clientSubmissionId when an optimistic layer binds to a canonical turn", () => {
