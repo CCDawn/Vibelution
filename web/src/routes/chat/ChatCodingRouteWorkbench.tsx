@@ -1662,6 +1662,10 @@ export function ChatCodingRoute() {
       return;
     }
     const settledTurnId = activeTurnLayer.turnId;
+    updateSessionSummaryCaches(queryClient, (sessions) =>
+      mergeSessionDetailIntoSummaries(sessions, detail),
+    );
+    reconcileAgentSessionDetailCache(queryClient, detail);
     setActiveTurnLayersBySession((current) => {
       const currentLayer = current[activeSessionId];
       if (!isActiveTurnSettledByDetail(currentLayer, detail)) {
@@ -1681,7 +1685,7 @@ export function ChatCodingRoute() {
         ledgerSeq: detail.ledgerSeq ?? 0,
       },
     });
-  }, [activeSessionId, activeTurnLayer, activeTurnSettledByDetail, detail]);
+  }, [activeSessionId, activeTurnLayer, activeTurnSettledByDetail, detail, queryClient]);
   const handleConversationStreamingFramePaint = useCallback((metrics: ConversationStreamingFramePaintMetrics) => {
     const sessionId = String(metrics.sessionId || "").trim();
     if (!sessionId || sessionId !== activeSessionId) {

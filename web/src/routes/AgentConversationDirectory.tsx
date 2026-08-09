@@ -84,6 +84,28 @@ export function visibleDirectoryAgents(
   return agents.filter((agent) => isVisibleFlatDirectoryAgent(agent));
 }
 
+function sessionRecencyTimestamp(session: Pick<SessionSummary, "updatedAt" | "lastActive">): number {
+  const rawTimestamp = String(session.updatedAt || session.lastActive || "").trim();
+  if (!rawTimestamp) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const parsedTimestamp = Date.parse(rawTimestamp);
+  return Number.isFinite(parsedTimestamp) ? parsedTimestamp : Number.NEGATIVE_INFINITY;
+}
+
+export function isSessionMoreRecent(
+  candidate: Pick<SessionSummary, "updatedAt" | "lastActive">,
+  previous: Pick<SessionSummary, "updatedAt" | "lastActive">,
+): boolean {
+  const candidateTimestamp = sessionRecencyTimestamp(candidate);
+  const previousTimestamp = sessionRecencyTimestamp(previous);
+  if (candidateTimestamp !== previousTimestamp) {
+    return candidateTimestamp > previousTimestamp;
+  }
+  return String(candidate.updatedAt || candidate.lastActive || "")
+    > String(previous.updatedAt || previous.lastActive || "");
+}
+
 export function agentDirectorySessionCount(
   agent: AgentInstance,
   knownSessionCount: number,
@@ -174,7 +196,7 @@ export function AgentConversationDirectory({
     agentSessions.push(session);
     sessionsByAgentId.set(agentId, agentSessions);
     const previous = latestSessionByAgentId.get(agentId);
-    if (!previous || String(previous.updatedAt || previous.lastActive || "") < String(session.updatedAt || session.lastActive || "")) {
+    if (!previous || isSessionMoreRecent(session, previous)) {
       latestSessionByAgentId.set(agentId, session);
     }
   }
