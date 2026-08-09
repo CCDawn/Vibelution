@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import Future, ThreadPoolExecutor
-from typing import AsyncIterator, Iterator, Literal
+from concurrent.futures import ThreadPoolExecutor
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -12,15 +12,23 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 
+from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services.session.tool_approvals import (
+    ToolApprovalConflictError,
+    ToolApprovalError,
+    ToolApprovalNotFoundError,
+    list_tool_approval_requests,
+    resolve_tool_approval_request,
+)
 from core.web.services.session_service import (
     SESSION_USER_IMAGE_MAX_BYTES,
-    SessionChatReviewCandidateExistsError,
     SessionBusyError,
+    SessionChatReviewCandidateExistsError,
     SessionNotFoundError,
     SessionValidationError,
     create_chat_review_candidate_from_session,
-    create_child_session,
     create_chat_session,
+    create_child_session,
     delete_chat_session,
     delete_chat_session_lightweight,
     edit_and_resubmit_session_message,
@@ -31,11 +39,11 @@ from core.web.services.session_service import (
     list_sessions,
     query_sessions,
     request_stop_session_turn,
-    resolve_session_stream_initial_payload,
     resolve_session_image_artifact,
+    resolve_session_stream_initial_payload,
     select_chat_session,
     store_session_user_image_attachment,
-    stream_session_events,
+    stream_session_events_async,
     submit_session_guidance,
     submit_session_message,
     submit_session_message_lightweight,
@@ -43,66 +51,12 @@ from core.web.services.session_service import (
     update_chat_session_title,
     update_session_reasoning_effort,
 )
-from core.web.services.runtime_scene_service import record_runtime_scene_event
-from core.web.services.session.tool_approvals import (
-    ToolApprovalConflictError,
-    ToolApprovalError,
-    ToolApprovalNotFoundError,
-    list_tool_approval_requests,
-    resolve_tool_approval_request,
-)
-
 
 router = APIRouter(tags=["sessions"])
-# Each synchronous SSE iterator can wait on its subscriber queue until the
-# heartbeat. Keep this bounded, while allowing a reconnect/new page to begin
-# before four older streams have observed their disconnect.
+# Initial session projection can perform filesystem work, so keep it off the
+# event loop. Long-lived queue waits use the async subscriber and never occupy
+# these workers.
 _SESSION_STREAM_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="session-stream")
-_SESSION_STREAM_END = object()
-
-
-def _next_session_stream_item(iterator: Iterator[str]) -> str | object:
-    try:
-        return next(iterator)
-    except StopIteration:
-        return _SESSION_STREAM_END
-
-
-def _close_session_stream_iterator(iterator: Iterator[str]) -> None:
-    close = getattr(iterator, "close", None)
-    if not callable(close):
-        return
-    try:
-        close()
-    except ValueError:
-        # A disconnect can race the worker finishing queue.get(); the pending
-        # future callback retries close after next() leaves the generator.
-        return
-
-
-def _close_session_stream_after_pending(iterator: Iterator[str], _future: Future[object]) -> None:
-    _SESSION_STREAM_EXECUTOR.submit(_close_session_stream_iterator, iterator)
-
-
-async def _iterate_session_stream(iterator: Iterator[str]) -> AsyncIterator[str]:
-    pending: Future[object] | None = None
-    try:
-        while True:
-            pending = _SESSION_STREAM_EXECUTOR.submit(_next_session_stream_item, iterator)
-            item = await asyncio.wrap_future(pending)
-            pending = None
-            if item is _SESSION_STREAM_END:
-                break
-            yield str(item)
-    finally:
-        if pending is not None and not pending.done():
-            pending.add_done_callback(lambda future: _close_session_stream_after_pending(iterator, future))
-        else:
-            await asyncio.get_running_loop().run_in_executor(
-                _SESSION_STREAM_EXECUTOR,
-                _close_session_stream_iterator,
-                iterator,
-            )
 
 
 def _record_session_attachment_upload_rejected(
@@ -415,14 +369,13 @@ async def session_events(session_id: str, initial: str = Query("light")) -> Stre
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
-    iterator = stream_session_events(
-        session_id,
-        initial_detail=detail,
-        initial=initial_mode,
-        initial_state=initial_state,
-    )
     return StreamingResponse(
-        _iterate_session_stream(iterator),
+        stream_session_events_async(
+            session_id,
+            initial_detail=detail,
+            initial=initial_mode,
+            initial_state=initial_state,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

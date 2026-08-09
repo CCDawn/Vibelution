@@ -9,11 +9,10 @@ DTO projection lives in ``projection.py``. Capture batching stays in
 
 from __future__ import annotations
 
+import asyncio
 import json
 import queue
-import threading
-import time
-from typing import Any, Generator
+from typing import Any
 
 
 def _service():
@@ -22,14 +21,48 @@ def _service():
     return session_service
 
 
-def stream_session_events(
+class _AsyncSessionStreamSubscriber(queue.Queue[dict[str, Any]]):
+    """Bounded subscriber queue that wakes one async SSE consumer from any thread."""
+
+    def __init__(self, *, maxsize: int, loop: asyncio.AbstractEventLoop) -> None:
+        super().__init__(maxsize=maxsize)
+        self._loop = loop
+        self._ready = asyncio.Event()
+
+    def put_nowait(self, item: dict[str, Any]) -> None:
+        super().put_nowait(item)
+        try:
+            self._loop.call_soon_threadsafe(self._ready.set)
+        except RuntimeError:
+            # The HTTP client can disconnect while a worker is publishing its
+            # last snapshot. The queue is unregistered by the stream finally.
+            return
+
+    async def get_async(self, *, timeout: float) -> dict[str, Any]:
+        while True:
+            try:
+                return self.get_nowait()
+            except queue.Empty:
+                pass
+
+            self._ready.clear()
+            # Close the clear/await race: a publisher may have enqueued after
+            # the first empty read but before the readiness flag was cleared.
+            try:
+                return self.get_nowait()
+            except queue.Empty:
+                pass
+
+            await asyncio.wait_for(self._ready.wait(), timeout=timeout)
+
+
+def _resolve_session_stream_bootstrap(
     session_id: str,
-    initial_detail: dict[str, Any] | None = None,
+    initial_detail: dict[str, Any] | None,
     *,
-    initial: str = "full",
-    initial_state: dict[str, Any] | None = None,
-):
-    """Yield SSE events for one persisted chat session."""
+    initial: str,
+    initial_state: dict[str, Any] | None,
+) -> tuple[str, str, dict[str, Any] | None, dict[str, Any] | None]:
     s = _service()
 
     conversation_id = str(session_id or "").strip()
@@ -52,29 +85,91 @@ def stream_session_events(
             raise s.SessionNotFoundError(
                 s.text_for(s.get_web_language(), zh="未找到当前会话。", en="Session not found.")
             )
-    elif initial_mode == "none":
-        # The REST detail request is the bootstrap authority for this mode.
-        # SSE only carries events appended after the subscriber is registered.
-        state = None
+    return conversation_id, initial_mode, detail, state
+
+
+def _initial_session_stream_event(
+    conversation_id: str,
+    initial_mode: str,
+    detail: dict[str, Any] | None,
+    state: dict[str, Any] | None,
+) -> str | None:
+    s = _service()
+    if initial_mode == "full" and detail is not None:
+        return s._encode_sse_event(
+            "session_detail",
+            {
+                "type": "session_detail",
+                "sessionId": conversation_id,
+                "detail": detail,
+            },
+        )
+    if initial_mode == "light" and state is not None:
+        return s._encode_sse_event("session_initial", state)
+    return None
+
+
+def stream_session_events(
+    session_id: str,
+    initial_detail: dict[str, Any] | None = None,
+    *,
+    initial: str = "full",
+    initial_state: dict[str, Any] | None = None,
+):
+    """Yield SSE events for one persisted chat session."""
+    s = _service()
+    conversation_id, initial_mode, detail, state = _resolve_session_stream_bootstrap(
+        session_id,
+        initial_detail,
+        initial=initial,
+        initial_state=initial_state,
+    )
 
     subscriber: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=s._SESSION_STREAM_QUEUE_SIZE)
     s._register_session_stream_subscriber(conversation_id, subscriber)
     try:
-        if initial_mode == "full" and detail is not None:
-            yield s._encode_sse_event(
-                "session_detail",
-                {
-                    "type": "session_detail",
-                    "sessionId": conversation_id,
-                    "detail": detail,
-                },
-            )
-        elif initial_mode == "light" and state is not None:
-            yield s._encode_sse_event("session_initial", state)
+        initial_event = _initial_session_stream_event(conversation_id, initial_mode, detail, state)
+        if initial_event is not None:
+            yield initial_event
         while True:
             try:
                 event = subscriber.get(timeout=s._SESSION_STREAM_HEARTBEAT_SECONDS)
             except queue.Empty:
+                yield ": keep-alive\n\n"
+                continue
+            yield s._encode_sse_event(str(event.get("type") or "message"), event)
+    finally:
+        s._unregister_session_stream_subscriber(conversation_id, subscriber)
+
+
+async def stream_session_events_async(
+    session_id: str,
+    initial_detail: dict[str, Any] | None = None,
+    *,
+    initial: str = "full",
+    initial_state: dict[str, Any] | None = None,
+):
+    """Yield SSE events without occupying a worker while the stream is idle."""
+    s = _service()
+    conversation_id, initial_mode, detail, state = _resolve_session_stream_bootstrap(
+        session_id,
+        initial_detail,
+        initial=initial,
+        initial_state=initial_state,
+    )
+    subscriber = _AsyncSessionStreamSubscriber(
+        maxsize=s._SESSION_STREAM_QUEUE_SIZE,
+        loop=asyncio.get_running_loop(),
+    )
+    s._register_session_stream_subscriber(conversation_id, subscriber)
+    try:
+        initial_event = _initial_session_stream_event(conversation_id, initial_mode, detail, state)
+        if initial_event is not None:
+            yield initial_event
+        while True:
+            try:
+                event = await subscriber.get_async(timeout=s._SESSION_STREAM_HEARTBEAT_SECONDS)
+            except TimeoutError:
                 yield ": keep-alive\n\n"
                 continue
             yield s._encode_sse_event(str(event.get("type") or "message"), event)
@@ -155,7 +250,6 @@ def resolve_session_stream_initial_payload(
 
 
 def normalize_session_stream_initial_mode(initial: str | None, *, default: str = "light") -> str:
-    s = _service()
     normalized_default = str(default or "light").strip().lower()
     if normalized_default not in {"full", "light", "none"}:
         normalized_default = "light"
@@ -473,7 +567,6 @@ def _merge_session_assistant_delta_events(
     previous: dict[str, Any],
     current: dict[str, Any],
 ) -> dict[str, Any]:
-    s = _service()
     merged = dict(current)
     # Prefer the newest turnItems snapshot (full rebuild from live state). Fall back
     # to the previous package only when the current frame omitted items entirely.
@@ -559,7 +652,6 @@ def _drop_session_stream_event_for_room(
     *,
     prefer_non_assistant_delta: bool = False,
 ) -> tuple[dict[str, Any] | None, int]:
-    s = _service()
     queued_events: list[dict[str, Any]] = []
     while True:
         try:
@@ -637,7 +729,6 @@ def _unregister_session_stream_subscriber(session_id: str, subscriber: queue.Que
 
 
 def _encode_sse_event(event_name: str, payload: dict[str, Any]) -> str:
-    s = _service()
     body = json.dumps(payload, ensure_ascii=False)
     return f"event: {event_name}\ndata: {body}\n\n"
 
