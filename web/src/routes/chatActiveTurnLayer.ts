@@ -214,6 +214,23 @@ export function runningToolStartedAtEpochMs(item: RunningToolTurnItem): number {
   return Date.parse(item.updatedAt || item.createdAt || "");
 }
 
+export function toolStartToFirstPaintMs(
+  item: RunningToolTurnItem,
+  firstPaintedAtEpochMs: number | undefined,
+  observedAtEpochMs: number,
+) {
+  const toolStartEpochMs = runningToolStartedAtEpochMs(item);
+  if (!Number.isFinite(toolStartEpochMs)) {
+    return 0;
+  }
+  const firstPaintEpochMs = Number.isFinite(firstPaintedAtEpochMs)
+    ? Number(firstPaintedAtEpochMs)
+    : observedAtEpochMs;
+  // `0` is reserved for "not measured". A row painted in the same
+  // millisecond as (or just before) executor start is still an observed paint.
+  return Math.max(1, Math.round(firstPaintEpochMs - toolStartEpochMs));
+}
+
 export function selectFirstUnpaintedRunningTool(
   layer: ActiveTurnLayerState | undefined,
   paintedToolIds: readonly string[],

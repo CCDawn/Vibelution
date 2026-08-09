@@ -158,9 +158,9 @@ import {
   activeTurnLayerToConversationMessage,
   activeTurnLayerTextLength,
   isActiveTurnSettledByDetail,
-  runningToolStartedAtEpochMs,
   selectFirstUnpaintedRunningTool,
   setActiveTurnLayerForSession,
+  toolStartToFirstPaintMs,
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
 import {
@@ -455,6 +455,7 @@ export function ChatCodingRoute() {
   // during render so a newly-started tool is measured on its first painted frame.
   activeTurnLayersBySessionRef.current = activeTurnLayersBySession;
   const paintedRunningToolIdsBySessionRef = useRef<Record<string, string[]>>({});
+  const firstPaintedRunningToolAtBySessionRef = useRef<Record<string, Record<string, number>>>({});
   const terminalIndexRefreshKeysBySessionRef = useRef<Record<string, string>>({});
   const desktopConversationNotifierRef = useRef(createDesktopConversationNotifier({
     bridge: browserDesktopNotificationBridge(),
@@ -1711,6 +1712,18 @@ export function ChatCodingRoute() {
     );
     const newlyPaintedRunningTool = paintedToolSelection.tool;
     const newlyPaintedRunningTools = paintedToolSelection.tools;
+    const firstPaintedToolAtById = {
+      ...(firstPaintedRunningToolAtBySessionRef.current[sessionId] ?? {}),
+    };
+    paintedToolSelection.runningToolIds.forEach((toolId) => {
+      if (!Number.isFinite(firstPaintedToolAtById[toolId])) {
+        firstPaintedToolAtById[toolId] = now;
+      }
+    });
+    firstPaintedRunningToolAtBySessionRef.current = {
+      ...firstPaintedRunningToolAtBySessionRef.current,
+      [sessionId]: firstPaintedToolAtById,
+    };
     const lastLoggedAt = lastConversationStreamingFrameTelemetryAtRef.current[sessionId] ?? 0;
     if (now - lastLoggedAt < 1_000 && !newlyPaintedRunningTool) {
       return;
@@ -1726,9 +1739,9 @@ export function ChatCodingRoute() {
     }
     const paintedAtMs = metrics.paintedAtMs || chatStreamPerformanceNowMs();
     const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
-    const toolStartToBrowserPaintMs = newlyPaintedRunningTools.reduce((maximum, tool) => {
-      const toolStartEpochMs = runningToolStartedAtEpochMs(tool);
-      return Number.isFinite(toolStartEpochMs) ? Math.max(maximum, now - toolStartEpochMs) : maximum;
+    const toolStartToBrowserPaintMs = newlyPaintedRunningTools.reduce((maximum, tool, index) => {
+      const toolId = paintedToolSelection.toolIds[index];
+      return Math.max(maximum, toolStartToFirstPaintMs(tool, firstPaintedToolAtById[toolId], now));
     }, 0);
     lastConversationStreamingFrameTelemetryAtRef.current = {
       ...lastConversationStreamingFrameTelemetryAtRef.current,
