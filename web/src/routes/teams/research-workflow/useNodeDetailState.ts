@@ -20,7 +20,12 @@ export type NodeDetailState =
   | { kind: "ready"; detail: ResearchWorkflowNodeDetail }
   | { kind: "error"; nodeId: string; message: string };
 
-export function useNodeDetailState(teamId: string, runId: string, nodeId: string | null): {
+export function useNodeDetailState(
+  teamId: string,
+  runId: string,
+  nodeId: string | null,
+  runVersion: number | null = null,
+): {
   state: NodeDetailState;
   retry: () => void;
 } {
@@ -67,7 +72,7 @@ export function useNodeDetailState(teamId: string, runId: string, nodeId: string
       return;
     }
     void load(runId, nodeId);
-  }, [teamId, runId, nodeId, load, retryTick]);
+  }, [teamId, runId, nodeId, runVersion, load, retryTick]);
 
   const retry = useCallback(() => {
     if (runId && nodeId) {
