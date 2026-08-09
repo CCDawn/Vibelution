@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .node_execution_support import NodeExecutionError
@@ -16,6 +16,41 @@ def parse_task_time(value: object) -> datetime | None:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _inferred_task_timezone(
+    session_detail: dict[str, Any],
+    finished: datetime,
+):
+    if finished.tzinfo is None:
+        return None
+    local_updated = parse_task_time(session_detail.get("updatedAt"))
+    if local_updated is None or local_updated.tzinfo is not None:
+        return None
+    utc_finished = finished.astimezone(timezone.utc).replace(tzinfo=None)
+    offset = local_updated - utc_finished
+    if abs(offset) > timedelta(hours=14) or offset.total_seconds() % 900:
+        return None
+    return timezone(offset)
+
+
+def _elapsed_seconds(
+    session_detail: dict[str, Any],
+    started: datetime,
+    finished: datetime,
+) -> int:
+    if started.tzinfo is None and finished.tzinfo is not None:
+        inferred = _inferred_task_timezone(session_detail, finished)
+        started = started.replace(tzinfo=inferred or finished.tzinfo)
+    elif finished.tzinfo is None and started.tzinfo is not None:
+        finished = finished.replace(tzinfo=started.tzinfo)
+    elapsed = int((finished - started).total_seconds())
+    if elapsed < 0:
+        raise NodeExecutionError(
+            "terminal Agent task has inconsistent wall-clock timestamps",
+            code="agent_usage_invalid",
+        )
+    return elapsed
 
 
 def collect_agent_task_budget_usage(
@@ -86,11 +121,7 @@ def collect_agent_task_budget_usage(
                     "terminal Agent task is missing wall-clock usage",
                     code="agent_usage_missing",
                 )
-            if started.tzinfo is None and finished.tzinfo is not None:
-                started = started.replace(tzinfo=finished.tzinfo)
-            elif finished.tzinfo is None and started.tzinfo is not None:
-                finished = finished.replace(tzinfo=started.tzinfo)
-            raw_seconds = max(0, int((finished - started).total_seconds()))
+            raw_seconds = _elapsed_seconds(session_detail, started, finished)
         usage["wallClockSeconds"] = raw_seconds
 
     for counter in ("experiments", "computeUnits"):
