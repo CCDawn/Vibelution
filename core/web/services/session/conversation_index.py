@@ -1115,18 +1115,42 @@ def create_chat_session(
     created_by: str = "user",
     conversation_index_kind: str = agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT,
     experiment_binding: dict[str, Any] | None = None,
+    session_metadata: dict[str, Any] | None = None,
     lightweight: bool = False,
+    activate: bool = True,
 ) -> dict:
-    """Create a new empty chat session and make it active.
+    """Create a new empty chat session, active by default.
 
     ``lightweight=True`` (UI Prefer: respond-async) skips full detail projection and
     returns a handoff payload built from the just-created conversation so the chat
     shell can switch tabs without waiting on ledger/agent hydration.
+
+    ``activate=False`` is the narrow managed-background seam. Such callers must
+    use a hidden conversation index kind; the current workbench conversation is
+    preserved byte-for-byte. ``session_metadata`` is allowlisted and bounded so
+    task pointers can be audited without storing prompts or arbitrary payloads.
     """
     s = _service()
 
     lang = s.get_web_language()
     normalized_agent_id = str(agent_id or "").strip()
+    normalized_index_kind = str(conversation_index_kind or "").strip()
+    if not activate and normalized_index_kind != agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
+        raise s.SessionValidationError("Non-activating sessions must use the hidden conversation index kind.")
+    raw_session_metadata = session_metadata if isinstance(session_metadata, dict) else {}
+    normalized_session_metadata = {
+        key: str(raw_session_metadata.get(key) or "").strip()[:240]
+        for key in (
+            "source",
+            "externalTaskId",
+            "effectivePermissionProfile",
+            "runtimeRevision",
+            "hostType",
+            "mcpClientName",
+            "mcpClientVersion",
+        )
+        if str(raw_session_metadata.get(key) or "").strip()
+    }
     normalized_llm_bindings = s._normalize_session_agent_llm_bindings(llm_bindings)
     raw_experiment_binding = experiment_binding if isinstance(experiment_binding, dict) else {}
     try:
@@ -1185,6 +1209,8 @@ def create_chat_session(
             timestamp=now,
             conversation_index_kind=conversation_index_kind,
         )
+        if normalized_session_metadata:
+            conversation["metadata"] = normalized_session_metadata
         s._ensure_conversation_workspace_metadata(conversation)
         if bound_agent is not None:
             conversation.update(
@@ -1216,7 +1242,8 @@ def create_chat_session(
                 conversation["sessionRole"] = "primary"
         conversations.append(conversation)
         payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-        payload["active_conversation_id"] = session_id
+        if activate:
+            payload["active_conversation_id"] = session_id
         payload["updated_at"] = now
         payload["conversations"] = conversations
         s.save_chat_state(s.PROJECT_ROOT, payload)

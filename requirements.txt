@@ -16,6 +16,7 @@ langchain-openai>=0.0.2
 litellm>=1.51.0
 openai[realtime]>=2.38.0
 socksio>=1.0.0             # httpx SOCKS proxy support for LiteLLM when ALL_PROXY is set
+mcp==2.0.0                 # Official MCP Python SDK v2; legacy + modern protocol eras
 
 # Research workflow runtime (ADR 0006) — direct deps, not transitive-only
 langgraph>=0.2.0
