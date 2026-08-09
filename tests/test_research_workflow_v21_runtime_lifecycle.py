@@ -136,6 +136,10 @@ def test_canvas_projection_uses_real_node_runs_not_legacy_attempt_counters(
     assert canvas["run"]["runtimeCurrentNodeIds"] == ["source_finding"]
     assert canvas["run"]["nodeRuns"]["source_finding"]["status"] == "ready"
     assert (
+        canvas["run"]["nodeRuns"]["source_finding"]["primaryAgentId"]
+        == "agent-source-finder"
+    )
+    assert (
         canvas["run"]["nodeRuns"]["source_finding"]["nodeRunId"]
         == run["nodeRuns"][0]["nodeRunId"]
     )
