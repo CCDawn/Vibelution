@@ -16,6 +16,10 @@ from .external_agent_task_failure import (
     reopen_external_agent_reconciliation_failure,
 )
 from .external_agent_task_lookup import load_external_agent_task
+from .failed_agent_budget import (
+    FailedAgentBudgetError,
+    settle_failed_agent_task_budget,
+)
 from .node_completion import complete_node_execution
 from .node_execution_support import NodeExecutionError, iso, utc_now
 from .store import WorkflowRunStore
@@ -23,6 +27,41 @@ from .store import WorkflowRunStore
 _ACTIVE_TASK_STATUSES = frozenset({"accepted", "queued", "running", "starting"})
 _BLOCKED_TASK_STATUSES = frozenset({"blocked", "incomplete"})
 _FAILED_TASK_STATUSES = frozenset({"cancelled", "canceled", "failed", "stopped"})
+
+
+def _settle_then_block(
+    store: WorkflowRunStore,
+    *,
+    record: dict[str, Any],
+    node_run: dict[str, Any],
+    failure_code: str,
+    failure_summary: str,
+) -> dict[str, Any]:
+    """Persist consumed Agent usage before making its terminal failure visible."""
+    try:
+        settled = settle_failed_agent_task_budget(
+            store,
+            record=record,
+            node_run=node_run,
+        )
+    except FailedAgentBudgetError as exc:
+        return block_external_agent_node_run(
+            store,
+            record=record,
+            node_run=node_run,
+            failure_code=exc.code,
+            failure_summary=(
+                f"{failure_code}: {failure_summary} "
+                f"Budget settlement failed: {exc}"
+            ),
+        )
+    return block_external_agent_node_run(
+        store,
+        record=settled,
+        node_run=node_run,
+        failure_code=failure_code,
+        failure_summary=failure_summary,
+    )
 
 
 def _reconcile_one(
@@ -89,7 +128,7 @@ def _reconcile_one(
     if status in _BLOCKED_TASK_STATUSES | _FAILED_TASK_STATUSES or (
         status == "needs_review" and not review_artifact_ready
     ):
-        return block_external_agent_node_run(
+        return _settle_then_block(
             store,
             record=record,
             node_run=node_run,
@@ -107,7 +146,7 @@ def _reconcile_one(
         not isinstance(source_completion_gate, dict)
         or not source_completion_gate.get("passed")
     ):
-        return block_external_agent_node_run(
+        return _settle_then_block(
             store,
             record=record,
             node_run=node_run,
@@ -170,7 +209,7 @@ def _reconcile_one(
             },
         )
     except (KeyError, StopIteration, TypeError, ValueError, NodeExecutionError) as exc:
-        return block_external_agent_node_run(
+        return _settle_then_block(
             store,
             record=record,
             node_run=node_run,
