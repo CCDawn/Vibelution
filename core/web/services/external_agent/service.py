@@ -994,9 +994,35 @@ class ExternalAgentTaskService:
                 continue
             if str(message.get("role") or "").strip().lower() != "assistant":
                 continue
-            return _clip(
-                message.get("content") or message.get("text") or "", _MAX_RESULT_CHARS
+            direct_text = _clip(
+                message.get("content") or message.get("text") or "",
+                _MAX_RESULT_CHARS,
             )
+            if direct_text:
+                return direct_text
+            turn_items = (
+                message.get("turnItems")
+                if isinstance(message.get("turnItems"), list)
+                else message.get("turn_items")
+                if isinstance(message.get("turn_items"), list)
+                else []
+            )
+            for item in reversed(turn_items):
+                if not isinstance(item, dict):
+                    continue
+                item_type = str(item.get("type") or item.get("kind") or "").strip()
+                phase = str(item.get("phase") or "").strip().lower()
+                if phase != "final_answer" and not (
+                    item_type in {"agent_message", "assistant_message"}
+                    and item.get("terminal") is True
+                ):
+                    continue
+                final_text = _clip(
+                    item.get("text") or item.get("content") or "",
+                    _MAX_RESULT_CHARS,
+                )
+                if final_text:
+                    return final_text
         return _clip(
             detail.get("summary") or detail.get("resultSummary") or "",
             _MAX_RESULT_CHARS,
