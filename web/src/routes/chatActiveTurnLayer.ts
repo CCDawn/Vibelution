@@ -202,6 +202,25 @@ function runningToolPaintId(item: RunningToolTurnItem) {
   return compactText(item.callId) || compactText(item.itemId) || compactText(item.id);
 }
 
+export function runningToolPaintKeys(layer: ActiveTurnLayerState | undefined) {
+  const occurrences = new Map<string, number>();
+  return (layer?.turnItems ?? []).flatMap((item) => {
+    if (item.type !== "tool_call") {
+      return [];
+    }
+    const toolName = compactText(item.toolName) || "tool";
+    const occurrence = occurrences.get(toolName) ?? 0;
+    occurrences.set(toolName, occurrence + 1);
+    if (item.status !== "pending" && item.status !== "running") {
+      return [];
+    }
+    return [{
+      toolId: runningToolPaintId(item),
+      fallbackKey: `tool:${toolName}:${occurrence}`,
+    }];
+  });
+}
+
 export function runningToolStartedAtEpochMs(item: RunningToolTurnItem): number {
   const exactStart = Number(item.metadata?.executionStartedAtEpochMs);
   if (Number.isFinite(exactStart) && exactStart > 0) {

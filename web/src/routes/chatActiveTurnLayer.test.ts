@@ -12,6 +12,7 @@ import {
   isActiveTurnSettledByDetail,
   mergeAssistantDeltaIntoActiveTurnLayer,
   runningToolStartedAtEpochMs,
+  runningToolPaintKeys,
   toolStartToFirstPaintMs,
 } from "./chatActiveTurnLayer";
 
@@ -171,6 +172,43 @@ describe("chat active turn layer", () => {
 
     expect(toolStartToFirstPaintMs(tool, 1_055, 6_000)).toBe(55);
     expect(toolStartToFirstPaintMs(tool, 999, 6_000)).toBe(1);
+  });
+
+  it("keeps a bounded name-occurrence fallback when a placeholder call id changes", () => {
+    const base = {
+      id: "tool-a:1",
+      itemId: "tool-a",
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "tool_call",
+      status: "completed",
+      revision: 1,
+      sequence: 1,
+      callId: "call-a",
+      toolName: "grep_search_tool",
+    } satisfies SessionTurnItem;
+    const layer = {
+      id: "active",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      updatedAt: "2026-08-10T00:00:00Z",
+      status: "running",
+      turnItems: [base, {
+        ...base,
+        id: "tool-placeholder:1",
+        itemId: "tool-placeholder",
+        callId: "placeholder-id",
+        status: "running",
+        sequence: 2,
+      }],
+      ledgerSeq: 2,
+    } satisfies ActiveTurnLayerState;
+
+    expect(runningToolPaintKeys(layer)).toEqual([{
+      toolId: "placeholder-id",
+      fallbackKey: "tool:grep_search_tool:1",
+    }]);
   });
 
   it("requests one authoritative index refresh only for terminal active layers", () => {
