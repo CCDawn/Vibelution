@@ -233,7 +233,11 @@ def test_node_start_uses_one_durable_lease_and_rejects_owner_mismatch(
             run["runId"],
             "source_finding",
             "heartbeat_execution",
-            payload={"leaseOwner": "worker-other", "leaseSeconds": 60},
+            payload={
+                "idempotencyKey": "heartbeat-owner-mismatch",
+                "leaseOwner": "worker-other",
+                "leaseSeconds": 60,
+            },
         )
     assert exc.value.code == "lease_owner_mismatch"
 

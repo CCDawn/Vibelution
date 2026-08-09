@@ -57,6 +57,7 @@ class WorkflowRunStore:
             record = {
                 **payload,
                 "runId": run_id,
+                "runVersion": 1,
                 "createdAt": payload.get("createdAt") or _utc_now(),
                 "updatedAt": _utc_now(),
             }
@@ -75,7 +76,13 @@ class WorkflowRunStore:
             current = self.get_run(run_id)
             if current is None:
                 raise KeyError(run_id)
-            next_record = {**current, **patch, "runId": run_id, "updatedAt": _utc_now()}
+            next_record = {
+                **current,
+                **patch,
+                "runId": run_id,
+                "runVersion": int(current.get("runVersion") or 0) + 1,
+                "updatedAt": _utc_now(),
+            }
             self._write_record(self._run_path(run_id), next_record)
             return next_record
 
@@ -90,9 +97,12 @@ class WorkflowRunStore:
             if current is None:
                 raise KeyError(run_id)
             mutated = mutation(copy.deepcopy(current))
+            if mutated == current:
+                return current
             next_record = {
                 **mutated,
                 "runId": run_id,
+                "runVersion": int(current.get("runVersion") or 0) + 1,
                 "updatedAt": _utc_now(),
             }
             self._write_record(self._run_path(run_id), next_record)

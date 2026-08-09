@@ -31,6 +31,8 @@ def build_run_canvas_projection(record: dict[str, Any]) -> dict[str, Any]:
     ]
     return build_canvas_projection(
         run_id=str(record.get("runId") or ""),
+        team_id=str(record.get("teamId") or ""),
+        run_version=int(record.get("runVersion") or 0) or None,
         run_status=status,
         runtime_current_node_ids=list(record.get("runtimeCurrentNodeIds") or []),
         node_runs=latest,

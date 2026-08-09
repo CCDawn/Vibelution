@@ -153,12 +153,39 @@ def heartbeat_node_execution(
     node_id: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    idempotency_key = str(payload.get("idempotencyKey") or "").strip()
     lease_owner = str(payload.get("leaseOwner") or "").strip()
+    if not idempotency_key or not lease_owner:
+        raise NodeExecutionError(
+            "heartbeat_execution requires idempotencyKey and leaseOwner",
+            code="invalid_execution_heartbeat",
+        )
     lease_seconds = max(1, int(payload.get("leaseSeconds") or 60))
     now = utc_now()
 
     def mutation(record: dict[str, Any]) -> dict[str, Any]:
         node_run = latest_node_run(record, node_id)
+        prior = next(
+            (
+                item
+                for item in record.get("events") or []
+                if item.get("type") == "LeaseHeartbeat"
+                and (item.get("summary") or {}).get("idempotencyKey")
+                == idempotency_key
+            ),
+            None,
+        )
+        if prior:
+            summary = prior.get("summary") or {}
+            if (
+                prior.get("nodeRunId") != node_run.get("nodeRunId")
+                or summary.get("leaseOwner") != lease_owner
+            ):
+                raise NodeExecutionError(
+                    "idempotencyKey conflicts with another lease heartbeat",
+                    code="idempotency_conflict",
+                )
+            return record
         leases = list(record.get("taskLeases") or [])
         lease = next(
             (
@@ -178,6 +205,46 @@ def heartbeat_node_execution(
         lease["heartbeatAt"] = iso(now)
         lease["leaseExpiresAt"] = iso(now + timedelta(seconds=lease_seconds))
         replace_by_id(leases, "idempotencyKey", lease["idempotencyKey"], lease)
-        return {**record, "taskLeases": leases}
+        envelopes = list(record.get("executionEnvelopes") or [])
+        envelope = next(
+            (
+                dict(item)
+                for item in reversed(envelopes)
+                if item.get("nodeRunId") == node_run.get("nodeRunId")
+                and item.get("status") == "running"
+            ),
+            None,
+        )
+        if envelope:
+            envelope["heartbeatAt"] = lease["heartbeatAt"]
+            envelope["leaseExpiresAt"] = lease["leaseExpiresAt"]
+            replace_by_id(
+                envelopes,
+                "idempotencyKey",
+                str(envelope["idempotencyKey"]),
+                envelope,
+            )
+        event = build_event(
+            record,
+            workflowId=record["workflowId"],
+            workflowVersionId=record["workflowVersionId"],
+            checkpointId=(record.get("langGraph") or {}).get("checkpointId") or "",
+            nodeId=node_id,
+            nodeRunId=node_run["nodeRunId"],
+            attempt=node_run["attempt"],
+            type="LeaseHeartbeat",
+            summary={
+                "idempotencyKey": idempotency_key,
+                "leaseOwner": lease_owner,
+                "heartbeatAt": lease["heartbeatAt"],
+                "leaseExpiresAt": lease["leaseExpiresAt"],
+            },
+        )
+        return {
+            **record,
+            "taskLeases": leases,
+            "executionEnvelopes": envelopes,
+            "events": [*(record.get("events") or []), event],
+        }
 
     return store.mutate_run(run_id, mutation)

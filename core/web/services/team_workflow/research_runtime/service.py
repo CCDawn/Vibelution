@@ -67,6 +67,13 @@ from .node_execution import heartbeat_node_execution, start_node_execution
 from .node_execution_support import NodeExecutionError
 from .node_recovery import reconcile_expired_execution, retry_node_execution
 from .research_ledger import project_research_ledger
+from .run_access import RunAccessError, require_run_access
+from .run_domain_queries import (
+    project_budget,
+    project_evaluation,
+    project_experiment_campaigns,
+    project_hypotheses,
+)
 from .run_lifecycle import (
     binding_snapshot_payload,
     build_initial_run_record,
@@ -389,6 +396,23 @@ class ResearchWorkflowRuntimeService:
             raise ResearchWorkflowError(f"Unknown runId: {run_id}", code="unknown_run")
         return record
 
+    def authorize_run_access(
+        self,
+        run_id: str,
+        *,
+        team_id: str,
+        expected_run_version: int | None = None,
+    ) -> dict[str, Any]:
+        """Validate the only public Run scope and optional write version."""
+        try:
+            return require_run_access(
+                self.get_run(run_id),
+                team_id=team_id,
+                expected_run_version=expected_run_version,
+            )
+        except RunAccessError as exc:
+            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+
     def get_canvas_projection(self, run_id: str | None = None) -> dict[str, Any]:
         if not run_id:
             return build_canvas_projection()
@@ -428,6 +452,8 @@ class ResearchWorkflowRuntimeService:
             )
         return {
             "runId": run_id,
+            "teamId": record["teamId"],
+            "runVersion": record["runVersion"],
             "nodeId": node_id,
             "actorKind": node.actorKind.value,
             "primaryRoleKey": node.primaryRoleKey,
@@ -489,6 +515,18 @@ class ResearchWorkflowRuntimeService:
             team_knowledge=team_knowledge,
             experiment_planning=experiment_planning,
         )
+
+    def get_budget(self, run_id: str) -> dict[str, Any]:
+        return project_budget(self.get_run(run_id))
+
+    def get_hypotheses(self, run_id: str) -> dict[str, Any]:
+        return project_hypotheses(self.get_run(run_id))
+
+    def get_experiment_campaigns(self, run_id: str) -> dict[str, Any]:
+        return project_experiment_campaigns(self.get_run(run_id))
+
+    def get_evaluation(self, run_id: str) -> dict[str, Any]:
+        return project_evaluation(self.get_run(run_id))
 
     def cancel_task_bundle(
         self,
@@ -949,6 +987,8 @@ class ResearchWorkflowRuntimeService:
         events = [e for e in (record.get("events") or []) if int(e.get("sequence") or 0) > after_sequence]
         return {
             "runId": run_id,
+            "teamId": record["teamId"],
+            "runVersion": record["runVersion"],
             "events": events,
             "snapshot": {
                 "status": record.get("status"),

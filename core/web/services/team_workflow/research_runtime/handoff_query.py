@@ -14,6 +14,8 @@ class HandoffQueryError(ValueError):
 def list_handoffs(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "runId": record["runId"],
+        "teamId": record["teamId"],
+        "runVersion": record["runVersion"],
         "handoffs": [dict(item) for item in record.get("handoffs") or []],
     }
 
@@ -44,6 +46,8 @@ def get_handoff_detail(
     human_task_id = str(handoff.get("humanTaskId") or "")
     return {
         "runId": record["runId"],
+        "teamId": record["teamId"],
+        "runVersion": record["runVersion"],
         "handoff": handoff,
         "fromNodeRun": next(
             (
