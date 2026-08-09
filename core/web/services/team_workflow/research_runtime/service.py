@@ -65,6 +65,7 @@ from .node_completion import complete_node_execution
 from .node_execution import heartbeat_node_execution, start_node_execution
 from .node_execution_support import NodeExecutionError
 from .node_recovery import reconcile_expired_execution, retry_node_execution
+from .research_ledger import project_research_ledger
 from .run_lifecycle import (
     binding_snapshot_payload,
     build_initial_run_record,
@@ -78,6 +79,11 @@ from .session_binding_bridge import (
     SessionBindingError,
 )
 from .store import WorkflowRunStore
+from .task_bundle_lifecycle import (
+    TaskBundleError,
+    cancel_task_bundle,
+    reconcile_expired_task_bundles,
+)
 from .team_role_source import effective_binding_layers
 
 
@@ -442,6 +448,69 @@ class ResearchWorkflowRuntimeService:
             return get_handoff_detail(self.get_run(run_id), handoff_id)
         except HandoffQueryError as exc:
             raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+
+    def get_research_ledger(self, run_id: str) -> dict[str, Any]:
+        record = self.get_run(run_id)
+        try:
+            from core.web.services import (
+                research_evidence_service,
+                team_knowledge_service,
+            )
+            from core.web.services.team_workflow.experiment_api.plan import (
+                get_experiment_planning_status,
+            )
+
+            claim_evidence = research_evidence_service.list_claim_evidence(
+                str(record["teamId"])
+            )
+            team_knowledge = team_knowledge_service.list_team_knowledge_bases(
+                str(record["teamId"]),
+                internal=True,
+            )
+            experiment_planning = get_experiment_planning_status(
+                str(record["teamId"])
+            )
+        except Exception as exc:
+            raise ResearchWorkflowError(
+                f"ResearchLedger canonical source failed: {exc}",
+                code="research_ledger_source_failed",
+            ) from exc
+        return project_research_ledger(
+            record,
+            claim_evidence=claim_evidence,
+            team_knowledge=team_knowledge,
+            experiment_planning=experiment_planning,
+        )
+
+    def cancel_task_bundle(
+        self,
+        run_id: str,
+        bundle_id: str,
+        *,
+        reason: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            try:
+                return cancel_task_bundle(
+                    self._store,
+                    run_id=run_id,
+                    bundle_id=bundle_id,
+                    reason=reason,
+                    idempotency_key=idempotency_key,
+                )
+            except TaskBundleError as exc:
+                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+
+    def reconcile_task_bundles(self, run_id: str) -> dict[str, Any]:
+        with self._lock:
+            try:
+                return reconcile_expired_task_bundles(
+                    self._store,
+                    run_id=run_id,
+                )
+            except TaskBundleError as exc:
+                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
 
     def resolve_human_task(
         self,

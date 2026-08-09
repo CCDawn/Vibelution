@@ -274,6 +274,15 @@ def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_no
         "cacheDisposition": "produced",
         "createdAt": "2026-08-09T09:00:00Z",
     }
+    artifact_payloads = {
+        manifest["artifactId"]: {
+            "perspectives": ["技术路线", "可验证性"],
+            "queries": ["predictive coding evidence", "challenge cup baseline"],
+            "candidateSources": [
+                {"sourceId": "source-1", "url": "https://example.test/source-1"}
+            ],
+        }
+    }
 
     completed = service.apply_node_command(
         run["runId"],
@@ -283,6 +292,7 @@ def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_no
             "idempotencyKey": "complete-source-1",
             "leaseOwner": "worker-1",
             "artifactManifests": [manifest],
+            "artifactPayloads": artifact_payloads,
         },
     )
     repeated = service.apply_node_command(
@@ -293,6 +303,7 @@ def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_no
             "idempotencyKey": "complete-source-1",
             "leaseOwner": "worker-1",
             "artifactManifests": [manifest],
+            "artifactPayloads": artifact_payloads,
         },
     )
 
@@ -304,6 +315,7 @@ def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_no
     assert len(completed["commandReceipts"]) == 1
     assert len(completed["outbox"]) == 1
     assert len(completed["handoffs"]) == 1
+    assert completed["qualityGateEvaluations"][0]["status"] == "passed"
     assert completed["handoffs"][0]["outputArtifactRefs"][0]["contentHash"] == "a" * 64
     assert repeated["commandReceipts"] == completed["commandReceipts"]
     assert repeated["handoffs"] == completed["handoffs"]

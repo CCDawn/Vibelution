@@ -52,6 +52,11 @@ class HumanTaskResolvePayload(BaseModel):
     idempotencyKey: str = Field(..., min_length=1)
 
 
+class TaskBundleCancelPayload(BaseModel):
+    reason: str = Field(..., min_length=1)
+    idempotencyKey: str = Field(..., min_length=1)
+
+
 class CommandPayload(BaseModel):
     command: str
     idempotencyKey: str = ""
@@ -205,10 +210,43 @@ def research_workflow_handoffs(run_id: str) -> dict:
         raise _map_error(exc) from exc
 
 
+@router.get("/research/workflow-runs/{run_id}/research-ledger")
+def research_workflow_research_ledger(run_id: str) -> dict:
+    try:
+        return _svc().get_research_ledger(run_id)
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+
+
 @router.get("/research/workflow-runs/{run_id}/handoffs/{handoff_id}")
 def research_workflow_handoff_detail(run_id: str, handoff_id: str) -> dict:
     try:
         return _svc().get_handoff_detail(run_id, handoff_id)
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+
+
+@router.post("/research/workflow-runs/{run_id}/task-bundles/{bundle_id}/cancel")
+def research_workflow_cancel_task_bundle(
+    run_id: str,
+    bundle_id: str,
+    payload: TaskBundleCancelPayload,
+) -> dict:
+    try:
+        return _svc().cancel_task_bundle(
+            run_id,
+            bundle_id,
+            reason=payload.reason,
+            idempotency_key=payload.idempotencyKey,
+        )
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+
+
+@router.post("/research/workflow-runs/{run_id}/task-bundles/reconcile")
+def research_workflow_reconcile_task_bundles(run_id: str) -> dict:
+    try:
+        return _svc().reconcile_task_bundles(run_id)
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 

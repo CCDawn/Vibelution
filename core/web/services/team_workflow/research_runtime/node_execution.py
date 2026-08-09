@@ -92,6 +92,10 @@ def start_node_execution(
                 "taskId": envelope["taskId"],
                 "sessionId": envelope["sessionId"],
                 "budgetLedgerRef": envelope["budgetReservationRef"],
+                "modelRef": str(payload.get("modelRef") or ""),
+                "modelPurpose": str(payload.get("modelPurpose") or ""),
+                "estimatedCost": float(payload.get("estimatedCost") or 0),
+                "escalationReason": str(payload.get("escalationReason") or ""),
             }
         )
         node_runs = list(record.get("nodeRuns") or [])

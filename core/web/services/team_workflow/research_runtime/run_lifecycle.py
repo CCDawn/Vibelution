@@ -12,6 +12,8 @@ from core.research.workflow.contracts import WorkflowRunInputSnapshot
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.models import RunAgentBindingSnapshot
 
+from .budget_lifecycle import build_initial_budget_ledgers
+
 
 def create_request_fingerprint(request: Mapping[str, Any]) -> str:
     canonical = json.dumps(
@@ -114,6 +116,11 @@ def build_initial_run_record(
         checkpoint_id=checkpoint_id,
         binding_snapshots=binding_snapshots,
     )
+    budget_ledgers = build_initial_budget_ledgers(
+        run_id=run_id,
+        budget_policy=input_snapshot.budgetPolicy,
+        created_at=created_at,
+    )
     return {
         "runId": run_id,
         "workflowId": workflow_id,
@@ -154,6 +161,8 @@ def build_initial_run_record(
         "taskLeases": [],
         "commandReceipts": [],
         "outbox": [],
+        "budgetLedgers": budget_ledgers,
+        "budgetReservations": [],
         "officialCandidateRef": "",
         "baselineCandidateRef": "",
         "childRunIds": [],

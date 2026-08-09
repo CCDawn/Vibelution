@@ -13,6 +13,9 @@ from core.research.workflow.contracts import (
 )
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 
+from .artifact_quality_gate import ArtifactQualityError, validate_artifact_quality
+from .artifact_reuse import ArtifactReuseError, validate_artifact_reuse
+from .budget_lifecycle import BudgetLifecycleError, settle_budget_records
 from .checkpoint_lifecycle import advance_checkpoint
 from .node_execution_support import (
     NodeExecutionError,
@@ -24,6 +27,7 @@ from .node_execution_support import (
 )
 from .store import WorkflowRunStore
 from .successor_records import build_successor_records
+from .task_bundle_lifecycle import complete_task_bundle_records
 
 
 def _artifact_snapshot_hash(manifests: list[ArtifactManifest]) -> str:
@@ -114,12 +118,87 @@ def complete_node_execution(
             )
         return record
 
-    _, lease, manifests = _validate_completion(
+    validated_node_run, lease, manifests = _validate_completion(
         record,
         node_id=node_id,
         lease_owner=lease_owner,
         raw_manifests=payload.get("artifactManifests"),
     )
+    raw_artifact_payloads = payload.get("artifactPayloads") or {}
+    if not isinstance(raw_artifact_payloads, dict):
+        raise NodeExecutionError(
+            "artifactPayloads must be an object",
+            code="invalid_artifact_payloads",
+        )
+    manifest_ids = {item.artifactId for item in manifests}
+    unknown_payload_ids = set(raw_artifact_payloads) - manifest_ids
+    if unknown_payload_ids:
+        raise NodeExecutionError(
+            "artifactPayloads contains unknown artifact ids",
+            code="invalid_artifact_payloads",
+        )
+    artifact_payloads = {
+        artifact_id: dict(value)
+        for artifact_id, value in raw_artifact_payloads.items()
+        if isinstance(value, dict)
+    }
+    source_manifests = list(record.get("artifactManifests") or [])
+    parent_run_id = str(record.get("parentRunId") or "")
+    if parent_run_id:
+        parent = store.get_run(parent_run_id)
+        if parent is not None:
+            source_manifests.extend(parent.get("artifactManifests") or [])
+    try:
+        reuse_records = validate_artifact_reuse(
+            manifests,
+            source_manifests=source_manifests,
+        )
+        quality_gate, quality_records = validate_artifact_quality(
+            record,
+            node_id=node_id,
+            manifests=[item.to_dict() for item in manifests],
+            payloads=artifact_payloads,
+        )
+    except (ArtifactQualityError, ArtifactReuseError) as exc:
+        raise NodeExecutionError(
+            str(exc),
+            code=str(getattr(exc, "code", "quality_gate_failed")),
+        ) from exc
+    now = iso(utc_now())
+    requested_reservation_id = str(
+        validated_node_run.get("budgetLedgerRef") or ""
+    )
+    reservation_id = (
+        requested_reservation_id
+        if any(
+            item.get("reservationId") == requested_reservation_id
+            for item in record.get("budgetReservations") or []
+        )
+        else ""
+    )
+    budget_usage = payload.get("budgetUsage")
+    if reservation_id and not isinstance(budget_usage, dict):
+        raise NodeExecutionError(
+            "Agent completion requires budgetUsage",
+            code="budget_usage_required",
+        )
+    try:
+        budget_ledgers, budget_reservations = (
+            settle_budget_records(
+                record,
+                reservation_id=reservation_id,
+                actual=budget_usage,
+                settled_at=now,
+            )
+            if reservation_id
+            else (
+                list(record.get("budgetLedgers") or []),
+                list(record.get("budgetReservations") or []),
+            )
+        )
+    except BudgetLifecycleError as exc:
+        raise NodeExecutionError(str(exc), code=exc.code) from exc
+
     definition = build_challenge_cup_workflow_definition()
     completed_ids = [
         item["nodeId"]
@@ -142,7 +221,6 @@ def complete_node_execution(
         },
     )
     input_hash = _artifact_snapshot_hash(manifests)
-    now = iso(utc_now())
 
     def mutation(current: dict[str, Any]) -> dict[str, Any]:
         if any(
@@ -201,6 +279,83 @@ def complete_node_execution(
             handoffs.append(handoff)
         if human_task is not None:
             human_tasks.append(human_task)
+        task_bundles = complete_task_bundle_records(
+            current,
+            node_run_id=str(current_node_run["nodeRunId"]),
+            output_artifact_refs=[item.artifactId for item in manifests],
+            completed_at=now,
+        )
+        transition_events: list[dict[str, Any]] = []
+        for reuse_record in reuse_records:
+            event_record = {
+                **current,
+                "events": [
+                    *(current.get("events") or []),
+                    *transition_events,
+                ],
+            }
+            transition_events.append(
+                build_event(
+                    event_record,
+                    workflowId=current["workflowId"],
+                    workflowVersionId=current["workflowVersionId"],
+                    checkpointId=checkpoint_id,
+                    nodeId=node_id,
+                    nodeRunId=current_node_run["nodeRunId"],
+                    attempt=current_node_run["attempt"],
+                    type="ArtifactReused",
+                    summary=reuse_record,
+                    artifactRefs=[reuse_record["artifactId"]],
+                )
+            )
+        if quality_gate is not None:
+            event_record = {
+                **current,
+                "events": [
+                    *(current.get("events") or []),
+                    *transition_events,
+                ],
+            }
+            transition_events.append(
+                build_event(
+                    event_record,
+                    workflowId=current["workflowId"],
+                    workflowVersionId=current["workflowVersionId"],
+                    checkpointId=checkpoint_id,
+                    nodeId=node_id,
+                    nodeRunId=current_node_run["nodeRunId"],
+                    attempt=current_node_run["attempt"],
+                    type="QualityGateEvaluated",
+                    summary={
+                        "qualityGateId": quality_gate["qualityGateId"],
+                        "status": "passed",
+                    },
+                )
+            )
+        if reservation_id:
+            event_record = {
+                **current,
+                "events": [
+                    *(current.get("events") or []),
+                    *transition_events,
+                ],
+            }
+            transition_events.append(
+                build_event(
+                    event_record,
+                    workflowId=current["workflowId"],
+                    workflowVersionId=current["workflowVersionId"],
+                    checkpointId=checkpoint_id,
+                    nodeId=node_id,
+                    nodeRunId=current_node_run["nodeRunId"],
+                    attempt=current_node_run["attempt"],
+                    type="BudgetSettled",
+                    summary={
+                        "reservationId": reservation_id,
+                        "actual": budget_usage,
+                    },
+                )
+            )
         receipt = {
             "receiptId": f"receipt-{uuid.uuid4().hex[:10]}",
             "runId": run_id,
@@ -211,17 +366,26 @@ def complete_node_execution(
             "status": "applied",
             "recordedAt": now,
         }
-        event = build_event(
-            current,
-            workflowId=current["workflowId"],
-            workflowVersionId=current["workflowVersionId"],
-            checkpointId=checkpoint_id,
-            nodeId=node_id,
-            nodeRunId=current_node_run["nodeRunId"],
-            attempt=current_node_run["attempt"],
-            type="NodeRunTransitioned",
-            summary={"from": "running", "to": "succeeded"},
-            artifactRefs=[item.artifactId for item in manifests],
+        event_record = {
+            **current,
+            "events": [
+                *(current.get("events") or []),
+                *transition_events,
+            ],
+        }
+        transition_events.append(
+            build_event(
+                event_record,
+                workflowId=current["workflowId"],
+                workflowVersionId=current["workflowVersionId"],
+                checkpointId=checkpoint_id,
+                nodeId=node_id,
+                nodeRunId=current_node_run["nodeRunId"],
+                attempt=current_node_run["attempt"],
+                type="NodeRunTransitioned",
+                summary={"from": "running", "to": "succeeded"},
+                artifactRefs=[item.artifactId for item in manifests],
+            )
         )
         return {
             **current,
@@ -240,8 +404,43 @@ def complete_node_execution(
                 *(current.get("artifactManifests") or []),
                 *(item.to_dict() for item in manifests),
             ],
+            "artifactPayloads": {
+                **(current.get("artifactPayloads") or {}),
+                **artifact_payloads,
+            },
+            "qualityGateEvaluations": [
+                *(current.get("qualityGateEvaluations") or []),
+                *([quality_gate] if quality_gate is not None else []),
+            ],
+            "hypothesisPortfolios": [
+                *(current.get("hypothesisPortfolios") or []),
+                *(
+                    [quality_records["hypothesisPortfolio"]]
+                    if "hypothesisPortfolio" in quality_records
+                    else []
+                ),
+            ],
+            "experimentCampaigns": [
+                *(current.get("experimentCampaigns") or []),
+                *(
+                    [quality_records["experimentCampaign"]]
+                    if "experimentCampaign" in quality_records
+                    else []
+                ),
+            ],
+            "competitionEvaluations": [
+                *(current.get("competitionEvaluations") or []),
+                *(
+                    [quality_records["competitionEvaluation"]]
+                    if "competitionEvaluation" in quality_records
+                    else []
+                ),
+            ],
             "handoffs": handoffs,
             "humanTasks": human_tasks,
+            "taskBundles": task_bundles,
+            "budgetLedgers": budget_ledgers,
+            "budgetReservations": budget_reservations,
             "commandReceipts": [*(current.get("commandReceipts") or []), receipt],
             "outbox": [
                 *(current.get("outbox") or []),
@@ -256,7 +455,7 @@ def complete_node_execution(
                     "recordedAt": now,
                 },
             ],
-            "events": [*(current.get("events") or []), event],
+            "events": [*(current.get("events") or []), *transition_events],
             "langGraph": {
                 **(current.get("langGraph") or {}),
                 "checkpointId": checkpoint_id,
