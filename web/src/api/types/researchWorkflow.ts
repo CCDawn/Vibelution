@@ -270,6 +270,7 @@ export type EffectiveAgentBinding = {
   nodeId: string;
   roleKey: string;
   agentId: string;
+  displayName?: string;
   resolvedFrom: "workflow_default" | "stage_override" | "node_override" | "unbound" | string;
 };
 

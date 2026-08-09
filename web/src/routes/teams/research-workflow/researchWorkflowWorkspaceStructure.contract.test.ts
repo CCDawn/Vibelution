@@ -16,6 +16,7 @@ describe("research workflow workspace responsibility contract", () => {
       "ResearchRunTimeline.tsx",
       "ResearchTeamPanel.tsx",
       "ResearchProcessInspectorPane.tsx",
+      "DefinitionNodeAgentSection.tsx",
       "NodeAgentSection.tsx",
       "NodeSessionSection.tsx",
       "NodeHandoffSection.tsx",
