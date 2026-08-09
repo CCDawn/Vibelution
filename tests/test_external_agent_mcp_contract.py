@@ -61,6 +61,24 @@ def test_mcp_server_metadata_contains_discovery_fallback() -> None:
         assert descriptor["outputSchema"]["type"] == "object"
 
 
+def test_guide_resource_descriptor_uses_cross_protocol_stable_fields() -> None:
+    mcp_server = _mcp_server_module()
+
+    async def list_resources() -> list[dict[str, object]]:
+        resources = await mcp_server.build_server(PROJECT_ROOT).list_resources()
+        return [
+            item.model_dump(by_alias=True, exclude_none=True) for item in resources
+        ]
+
+    descriptors = anyio.run(list_resources)
+
+    assert len(descriptors) == 1
+    assert descriptors[0]["uri"] == GUIDE_URI
+    assert descriptors[0]["mimeType"] == "text/markdown"
+    assert "annotations" not in descriptors[0]
+    assert "_meta" not in descriptors[0]
+
+
 def test_default_mcp_backend_is_loopback_client() -> None:
     mcp_server = _mcp_server_module()
 
