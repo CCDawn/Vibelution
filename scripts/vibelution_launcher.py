@@ -1616,7 +1616,7 @@ def _ensure_project_python_runtime() -> str:
 
 def _select_background_python(executable: str) -> dict[str, object]:
     raw = str(executable or "").strip()
-    creation_flag_names = list(_windows_creation_flag_names())
+    creation_flag_names = list(_windows_creation_flag_names(detach=True))
     result: dict[str, object] = {
         "pythonExecutable": raw,
         "sourcePythonExecutable": raw,
@@ -1819,7 +1819,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         stdout=stdout,
         stderr=stderr,
         start_new_session=True,
-        creationflags=_windows_creation_flags(),
+        creationflags=_windows_creation_flags(detach=True),
         startupinfo=_hidden_startup_info(),
     )
     stdout.close()

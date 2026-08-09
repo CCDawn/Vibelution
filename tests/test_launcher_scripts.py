@@ -573,7 +573,13 @@ def test_python_launcher_start_launches_backend_with_project_venv_python(monkeyp
     monkeypatch.setattr(launcher, "_remember_project_backend_port", lambda port, *, reason="": None)
     monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
     monkeypatch.setattr(launcher, "_backend_environment", lambda host: {})
-    monkeypatch.setattr(launcher, "_windows_creation_flags", lambda: 0)
+    creation_flag_requests: list[bool] = []
+
+    def fake_windows_creation_flags(*, detach: bool = False) -> int:
+        creation_flag_requests.append(detach)
+        return 0
+
+    monkeypatch.setattr(launcher, "_windows_creation_flags", fake_windows_creation_flags)
     monkeypatch.setattr(launcher, "_hidden_startup_info", lambda: None)
     written: list[dict] = []
     monkeypatch.setattr(launcher, "_write_state", lambda state: written.append(state))
@@ -604,6 +610,7 @@ def test_python_launcher_start_launches_backend_with_project_venv_python(monkeyp
     assert state["pythonExecutable"] == str(venv_python)
     assert state["lastReason"] == "python_launcher_fresh_start"
     assert written[-1]["pythonExecutable"] == str(venv_python)
+    assert creation_flag_requests == [True]
 
 
 def test_python_launcher_selects_venv_pythonw_on_windows(monkeypatch, tmp_path):
@@ -622,6 +629,7 @@ def test_python_launcher_selects_venv_pythonw_on_windows(monkeypatch, tmp_path):
     assert result["noConsolePythonExecutable"] == str(pythonw_exe)
     assert result["consoleFallbackReason"] == ""
     assert result["consoleWindowSuppressed"] is True
+    assert result["creationFlagNames"] == ["DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP"]
 
 
 def test_python_launcher_stop_reconciles_stale_state_with_real_project_port_owner(monkeypatch):
@@ -880,7 +888,7 @@ def test_python_launcher_start_retires_previous_handles_before_spawn(monkeypatch
     })
     monkeypatch.setattr(launcher, "_ensure_project_python_runtime", lambda: {})
     monkeypatch.setattr(launcher, "_backend_environment", lambda host: {})
-    monkeypatch.setattr(launcher, "_windows_creation_flags", lambda: 0)
+    monkeypatch.setattr(launcher, "_windows_creation_flags", lambda *, detach=False: 0)
     monkeypatch.setattr(launcher, "_hidden_startup_info", lambda: None)
     monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
     monkeypatch.setattr(launcher, "_remember_project_backend_port", lambda port, *, reason="": None)
