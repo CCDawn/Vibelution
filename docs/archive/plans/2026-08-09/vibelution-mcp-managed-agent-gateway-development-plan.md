@@ -1,6 +1,6 @@
 # Vibelution MCP 受管 Agent 网关后续开发计划
 
-> **Status:** Revised / Product Boundaries Confirmed / Awaiting Implementation Review
+> **Status:** Complete
 > **Date:** 2026-08-09
 > **Owner Surface:** `agent-runtime-core` / `external-agent gateway`
 > **Base Commit:** `b9b324d4b537fbde4a1629f90f4e059bb1bedd85`
@@ -23,6 +23,18 @@
 6. Windows 启动、运行、取消、退出全链路没有可见控制台窗口，也没有遗留子进程。
 7. 调用 Agent 能从 server instructions 和 `resources/list` 自动发现权威操作指南，并按指南完成首次部署/调用；不支持 Resources 的 Host 有明确降级指引。
 8. 聚焦测试、后端测试、配置校验和运行时场景证据均为绿色；未覆盖边界已明确记录。
+
+### 0.1 完成记录（2026-08-09）
+
+- M0-M5 已实现并合入本地 `main` 的集成提交 `1a9e7c64672e158816ae77cb701a488cb4480d8b`；后续本节关闭记录只更新文档，不改变运行契约。
+- 固定入口使用官方 Python MCP SDK `mcp==2.0.0`、Server/Guide `0.3.0`、API protocol `1.0`；adapter 仅走 loopback backend API，backend 保持唯一写入者。
+- 最终聚焦矩阵为 `140 passed`。真实 MCP Inspector 与原生 Codex CLI 完成五工具、`resources/list`、指南读取和首次只读任务验收；Codex 返回 `resourceListOk=true`、`guideRead=true`、`taskStatus=succeeded`。
+- 显式审批、错误 capability/owner、`acceptAlways` 禁止、取消、超时、lease expiry、团队资格撤销、`full_access -> workspace_write` 权限收窄、隐藏会话与 active conversation 不变量均有自动化或隔离运行态证据。
+- Windows 验收使用原生 `codex.exe` 和项目 no-console 路径；任务后无残留 adapter、Codex、`cmd.exe` 或 Node 进程。隔离 backend 与确定性 LLM fixture 仅用于本轮验收，关闭阶段按精确 PID/正式 stop 入口回收。
+- 未修改 `web/`，因此不需要 `tsc -b`；未写用户 operator config 或 Codex 持久 MCP 注册，未 push。正式启用前仍需用户授权配置写入并通过 Launcher 受管 restart。
+- MCP SDK 2.0.0 当前没有可用的服务端 Tasks extension，本版固定五工具闭环并在 self-check/指南中显式记录；这不是隐式降级或未完成项。
+- 全仓历史基线仍存在与本功能无关的 session monkeypatch/cache/archived-reasoning 测试失败；已在干净基线复现或按未修改分支归因，本轮不越界修复。
+- version impact：新增的本地 MCP gateway 默认 disabled，以 `0.3.0` 协议/指南版本标识；不修改应用发布版本。project-memory 不更新，权威交接由本计划、调用指南、模块 README 和测试承担。
 
 ## 1. 执行摘要
 
@@ -778,25 +790,25 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 
 只有同时满足以下条件才可以宣称“Vibelution MCP 首版完成”：
 
-- [ ] 使用官方 SDK v2，legacy/modern stdio 兼容矩阵与真实 Host 握手通过。
-- [ ] 权威操作指南从根 `AGENTS.md` 可发现，顶部状态和命令与当前实现一致。
-- [ ] 双时代 server instructions 与固定 Markdown Resource 可引导陌生调用 Agent 完成首次调用；无 Resources Host 有 Tool 降级指引。
-- [ ] MCP adapter 不直接导入或调用有写副作用的 backend service。
-- [ ] backend 为唯一写入者，任务可在 adapter 重启后查询。
-- [ ] 五个工具契约稳定，输入输出有 schema、有界且可诊断；不支持 Tasks 的 Host 也能完整闭环。
-- [ ] 只有非团队 Agent 可发现和启动；active team 普通成员、团队专用 Agent 与猜测 ID 均被服务端拒绝。
-- [ ] 默认 `read_only`，服务端权限上限不可被调用方突破。
-- [ ] 不存在自动接受审批的外部路径；任务 owner 可以显式审批，其他主体/团队任务不能审批。
-- [ ] `acceptAlways` 只有在 `approval.persist`、Agent policy 和 config revision 同时允许时生效并留下审计证据。
-- [ ] cancel/timeout 能停止实际执行并到达可信终态。
-- [ ] graceful shutdown 和异常断开均受 lease 管理，不产生无限运行任务。
-- [ ] 外部任务使用隐藏会话，不改变 active conversation。
-- [ ] backend 身份或版本不匹配时 fail closed。
-- [ ] Windows 全链路无可见控制台、无孤儿进程。
-- [ ] Codex 端到端验收记录完整，source/runtime/config 一致。
-- [ ] Host 支持 Tasks 时原生投影通过；不支持时能力边界已记录且不影响五工具闭环。
-- [ ] 运维文档包含启用、禁用、诊断、回滚和兼容边界。
-- [ ] Git claim、测试证据、runtime refresh、version impact 和遗留项均已关闭记录。
+- [x] 使用官方 SDK v2，legacy/modern stdio 兼容矩阵与真实 Host 握手通过。
+- [x] 权威操作指南从根 `AGENTS.md` 可发现，顶部状态和命令与当前实现一致。
+- [x] 双时代 server instructions 与固定 Markdown Resource 可引导陌生调用 Agent 完成首次调用；无 Resources Host 有 Tool 降级指引。
+- [x] MCP adapter 不直接导入或调用有写副作用的 backend service。
+- [x] backend 为唯一写入者，任务可在 adapter 重启后查询。
+- [x] 五个工具契约稳定，输入输出有 schema、有界且可诊断；不支持 Tasks 的 Host 也能完整闭环。
+- [x] 只有非团队 Agent 可发现和启动；active team 普通成员、团队专用 Agent 与猜测 ID 均被服务端拒绝。
+- [x] 默认 `read_only`，服务端权限上限不可被调用方突破。
+- [x] 不存在自动接受审批的外部路径；任务 owner 可以显式审批，其他主体/团队任务不能审批。
+- [x] `acceptAlways` 只有在 `approval.persist`、Agent policy 和 config revision 同时允许时生效并留下审计证据。
+- [x] cancel/timeout 能停止实际执行并到达可信终态。
+- [x] graceful shutdown 和异常断开均受 lease 管理，不产生无限运行任务。
+- [x] 外部任务使用隐藏会话，不改变 active conversation。
+- [x] backend 身份或版本不匹配时 fail closed。
+- [x] Windows 全链路无可见控制台、无孤儿进程。
+- [x] Codex 端到端验收记录完整，source/runtime/config 一致。
+- [x] Host 支持 Tasks 时原生投影通过；不支持时能力边界已记录且不影响五工具闭环。
+- [x] 运维文档包含启用、禁用、诊断、回滚和兼容边界。
+- [x] Git claim、测试证据、runtime refresh、version impact 和遗留项均已关闭记录。
 
 ## 18. 延后项
 
