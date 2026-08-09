@@ -365,10 +365,11 @@ def start_source_collection_stage_session_task(
         quality = str(item.get("qualityStatus") or item.get("currentState") or "").lower()
         if "approv" in quality or "screened" in quality or "ready" in quality or "synced" in quality:
             approved_or_source_count += 1
-        elif s._trim_text(item.get("candidateId"), max_length=160):
+        elif s._trim_text(item.get("candidateId"), max_length=160) and str(
+            item.get("candidateType") or ""
+        ) in {"source_manifest", "paper_note", "algorithm_hypothesis"}:
             # Count concrete source/manifest candidates even before quality label is perfect.
-            if str(item.get("candidateType") or "") in {"source_manifest", "paper_note", "algorithm_hypothesis"}:
-                approved_or_source_count += 1
+            approved_or_source_count += 1
     assert_source_collection_stage_advance_ready(
         stage_id=stage_id,
         record_count=len(records) if isinstance(records, list) else 0,
@@ -587,10 +588,14 @@ def start_source_collection_stage_session_task(
             created_from_task_id=task_id,
             formal_retry=formal_retry,
             previous_task=previous_stage_task,
+            recover_missing_session=previous_stage_task is None,
         )
     except s.ResearchProjectAgentSessionError as exc:
         raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
     session_id = experiment_session["sessionId"]
+    if experiment_session.get("recoveryReason") == "missing_canonical_session":
+        formal_retry = True
+        formal_retry_reason = "missing_canonical_session"
     session_isolation = {
         "status": "not_required",
         "reason": "research_project_agent_session_registry",
