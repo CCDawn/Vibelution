@@ -98,7 +98,7 @@ export function ResearchProcessInspectorPane(props: {
       : <ResearchCenteredEmptyState title="证据关系尚不可用" />;
   }
   if (scope.panel === "timeline") {
-    return <ResearchRunTimeline run={state.run} insights={state.insights} />;
+    return <ResearchRunTimeline run={state.run} projection={state.projection} insights={state.insights} />;
   }
   if (scope.panel === "team") {
     return <ResearchTeamPanel teamId={scope.teamId} teamName={scope.teamName} linkedChatRoomId={scope.linkedChatRoomId} run={state.run} projection={state.projection} effectiveBindings={state.effectiveBindings} />;

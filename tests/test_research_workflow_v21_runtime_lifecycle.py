@@ -228,6 +228,13 @@ def test_node_start_uses_one_durable_lease_and_rejects_owner_mismatch(
     assert started["status"] == "running"
     assert repeated["taskLeases"][0]["idempotencyKey"] == "start-source-1"
 
+    detail = service.get_node_detail(run["runId"], "source_finding")
+    assert detail["executionEnvelope"]["nodeRunId"] == started["nodeRuns"][0]["nodeRunId"]
+    assert detail["taskLease"]["leaseOwner"] == "worker-1"
+    assert detail["qualityGateEvaluation"] is None
+    assert detail["artifactManifests"] == []
+    assert detail["artifactReuseCount"] == 0
+
     with pytest.raises(ResearchWorkflowError) as exc:
         service.apply_node_command(
             run["runId"],

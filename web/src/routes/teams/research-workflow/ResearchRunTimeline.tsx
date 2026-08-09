@@ -1,17 +1,21 @@
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
+import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
 import { VEmptyState, VPanelHeader, VSurface } from "../../../components/vui";
 import { buildResearchTimelineGroups } from "./researchWorkflowTimelineModel";
 import { ResearchWorkflowInsightsPanel } from "./ResearchWorkflowInsightsPanel";
+import { ResearchCriticalPathPanel } from "./ResearchCriticalPathPanel";
 import type { ResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import styles from "./ResearchRunTimeline.styles";
 
 export function ResearchRunTimeline(props: {
   run: WorkflowRunRecord | null;
+  projection: WorkflowCanvasProjection | null;
   insights: ResearchWorkflowInsights;
 }) {
   const groups = buildResearchTimelineGroups(props.run?.events);
   return (
     <div className={styles.root}>
+      <ResearchCriticalPathPanel projection={props.projection} insights={props.insights} />
       <ResearchWorkflowInsightsPanel insights={props.insights} />
       <VSurface tone="panel" className={styles.surface}>
         <VPanelHeader title="运行时间线" headingLevel={3} />

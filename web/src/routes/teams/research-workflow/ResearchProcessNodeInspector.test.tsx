@@ -29,6 +29,11 @@ function makeDetail(
     nodeAttempt: 1,
     blockedReason: "",
     artifacts: {},
+    executionEnvelope: null,
+    taskLease: null,
+    qualityGateEvaluation: null,
+    artifactManifests: [],
+    artifactReuseCount: 0,
     commands: [
       { command: "start_agent_task", available: true, reason: "" },
       { command: "open_session", available: true, reason: "" },
@@ -156,6 +161,30 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     );
     expect(markup).toContain("等待人工");
     expect(markup).toContain("knowledge_package_rejected");
+  });
+
+  it("shows lease, quality gate and artifact reuse from node detail", () => {
+    const detail = makeDetail({
+      executionEnvelope: { status: "running" },
+      taskLease: { status: "running", leaseOwner: "worker-1" },
+      qualityGateEvaluation: { status: "passed" },
+      artifactManifests: [{ artifactId: "artifact-1" }],
+      artifactReuseCount: 1,
+    });
+    const markup = renderToStaticMarkup(
+      <ResearchProcessNodeInspector
+        nodeId="source_finding"
+        adapter={getNodeAdapter("source_finding")}
+        detail={detail}
+        handoffPending={false}
+        busy={false}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("运行治理");
+    expect(markup).toContain("worker-1");
+    expect(markup).toContain("passed");
+    expect(markup).toContain("复用命中");
   });
 
   it("shows an empty state when no node is selected", () => {
