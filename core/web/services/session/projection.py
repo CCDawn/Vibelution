@@ -1920,6 +1920,44 @@ def _merge_live_content_into_turn_items(
     return merged
 
 
+def _merge_live_tool_start_metadata_into_turn_items(
+    items: list[dict[str, Any]],
+    codex_transcript: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Enrich canonical journal tools with executor-only live start metadata.
+
+    The journal remains authoritative for item identity, order, and status.  The
+    executor start epoch is captured before execution and can arrive only on the
+    live tool revision, so merge that immutable timing fact by callId instead of
+    discarding it when journal items already exist.
+    """
+    s = _service()
+    exact_start_by_call_id: dict[str, int | float] = {}
+    for cell in list((codex_transcript or {}).get("cells") or []):
+        if not isinstance(cell, dict):
+            continue
+        call_id = str(cell.get("callId") or "").strip()
+        exact_start = s._coerce_tool_number(
+            cell.get("executionStartedAtEpochMs") or cell.get("execution_started_at_epoch_ms")
+        )
+        if call_id and exact_start is not None and exact_start > 0:
+            exact_start_by_call_id[call_id] = exact_start
+    if not exact_start_by_call_id:
+        return items
+
+    merged: list[dict[str, Any]] = []
+    for raw in items:
+        item = dict(raw)
+        call_id = str(item.get("callId") or "").strip()
+        exact_start = exact_start_by_call_id.get(call_id)
+        if exact_start is not None:
+            metadata = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}
+            metadata["executionStartedAtEpochMs"] = exact_start
+            item["metadata"] = metadata
+        merged.append(item)
+    return merged
+
+
 def _build_session_turn_items_projection(
     *,
     session_id: str,
@@ -1957,6 +1995,7 @@ def _build_session_turn_items_projection(
         )
         if canonical_items:
             stamped = s._stamp_turn_items_message_id(canonical_items, normalized_message_id)
+            stamped = _merge_live_tool_start_metadata_into_turn_items(stamped, codex_transcript)
             merged = _merge_live_content_into_turn_items(
                 stamped,
                 session_id=session_id,
