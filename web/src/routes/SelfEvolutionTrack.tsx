@@ -1126,8 +1126,23 @@ export function SelfEvolutionTrack({
       {
         id: "self-readiness",
         role: "assistant",
-        content: joinReadableLines([selectedWorkflowStep?.summary, overview.readiness.summary, overview.readiness.nextAction]),
         timestamp: "",
+        turnId: "self-readiness",
+        status: "completed",
+        turnItems: [{
+          id: "self-readiness-answer",
+          itemId: "self-readiness-answer",
+          version: 3,
+          sessionId: "self-evolution",
+          turnId: "self-readiness",
+          status: "completed",
+          revision: 1,
+          sequence: 1,
+          terminal: true,
+          type: "agent_message",
+          phase: "final_answer",
+          text: joinReadableLines([selectedWorkflowStep?.summary, overview.readiness.summary, overview.readiness.nextAction]),
+        }],
       },
     ];
   }, [overview, selectedWorkflowStep]);

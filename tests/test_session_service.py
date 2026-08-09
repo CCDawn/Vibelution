@@ -336,14 +336,14 @@ def test_delete_session_restores_direct_agent_binding_when_chat_save_fails(tmp_p
 
 def test_session_stream_coalescing_preserves_assistant_delta_events():
     subscriber = queue.Queue()
-    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
-    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "好"})
+    subscriber.put_nowait({"type": "assistant_delta", "turnItems": [{"type": "agent_message", "text": "你"}]})
+    subscriber.put_nowait({"type": "assistant_delta", "turnItems": [{"type": "agent_message", "text": "你好"}]})
 
     dropped = session_service._coalesce_session_stream_queue(subscriber, event_type="assistant_delta")
 
     assert dropped == 0
-    assert subscriber.get_nowait()["contentDelta"] == "你"
-    assert subscriber.get_nowait()["contentDelta"] == "好"
+    assert subscriber.get_nowait()["turnItems"][0]["text"] == "你"
+    assert subscriber.get_nowait()["turnItems"][0]["text"] == "你好"
     assert session_service._SESSION_STREAM_COALESCED_EVENT_TYPES == {"session_detail"}
 
 
@@ -354,10 +354,7 @@ def test_session_assistant_delta_queue_coalesces_pending_same_turn_deltas():
             "type": "assistant_delta",
             "sessionId": "session-live",
             "turnId": "turn-1",
-            "contentDelta": "你",
-            "thoughtDelta": "",
-            "replaceContent": False,
-            "replaceThought": False,
+            "turnItems": [{"itemId": "answer", "type": "agent_message", "text": "你"}],
         },
     )
     subscriber.put_nowait({"type": "session_detail", "ledgerSeq": 1})
@@ -368,19 +365,19 @@ def test_session_assistant_delta_queue_coalesces_pending_same_turn_deltas():
             "type": "assistant_delta",
             "sessionId": "session-live",
             "turnId": "turn-1",
-            "contentDelta": "好",
-            "thoughtDelta": "思考",
-            "replaceContent": False,
-            "replaceThought": False,
+            "turnItems": [
+                {"itemId": "reasoning", "type": "reasoning", "text": "思考"},
+                {"itemId": "answer", "type": "agent_message", "text": "你好"},
+            ],
         },
     )
 
     assert dropped == 1
-    assert merged["contentDelta"] == "你好"
-    assert merged["thoughtDelta"] == "思考"
-    assert merged["replaceContent"] is False
-    assert merged["replaceThought"] is False
-    assert "feedbackEvents" not in merged
+    assert [(item["type"], item["text"]) for item in merged["turnItems"]] == [
+        ("reasoning", "思考"),
+        ("agent_message", "你好"),
+    ]
+    assert "contentDelta" not in merged
     assert subscriber.get_nowait()["type"] == "session_detail"
 
 
@@ -391,18 +388,8 @@ def test_session_assistant_delta_queue_merges_feedback_events_for_same_turn_delt
             "type": "assistant_delta",
             "sessionId": "session-live",
             "turnId": "turn-1",
-            "contentDelta": "准备",
-            "thoughtDelta": "",
-            "replaceContent": False,
-            "replaceThought": False,
-            "feedbackEvents": [
-                {
-                    "sequence": 1,
-                    "kind": "status",
-                    "status": "running",
-                    "name": "context_prepare",
-                    "summary": "正在准备上下文",
-                }
+            "turnItems": [
+                {"itemId": "context", "type": "status", "code": "context_prepare", "text": "正在准备上下文"}
             ],
         },
     )
@@ -413,47 +400,33 @@ def test_session_assistant_delta_queue_merges_feedback_events_for_same_turn_delt
             "type": "assistant_delta",
             "sessionId": "session-live",
             "turnId": "turn-1",
-            "contentDelta": "请求模型",
-            "thoughtDelta": "",
-            "replaceContent": False,
-            "replaceThought": False,
-            "feedbackEvents": [
-                {
-                    "sequence": 2,
-                    "kind": "status",
-                    "status": "running",
-                    "name": "model_request",
-                    "summary": "正在请求模型",
-                }
+            "turnItems": [
+                {"itemId": "context", "type": "status", "code": "context_prepare", "text": "正在准备上下文"},
+                {"itemId": "request", "type": "status", "code": "model_request", "text": "正在请求模型"},
             ],
         },
     )
 
     assert dropped == 1
-    assert merged["contentDelta"] == "准备请求模型"
-    assert [event["name"] for event in merged["feedbackEvents"]] == [
+    assert [item["code"] for item in merged["turnItems"]] == [
         "context_prepare",
         "model_request",
     ]
 
 
-def test_session_assistant_delta_queue_updates_unsequenced_feedback_event():
+def test_session_assistant_delta_queue_uses_latest_tool_item_snapshot():
     subscriber = queue.Queue(maxsize=4)
     subscriber.put_nowait(
         {
             "type": "assistant_delta",
             "sessionId": "session-live",
             "turnId": "turn-1",
-            "contentDelta": "",
-            "thoughtDelta": "",
-            "replaceContent": False,
-            "replaceThought": False,
-            "feedbackEvents": [
+            "turnItems": [
                 {
-                    "sequence": 0,
-                    "kind": "tool",
+                    "itemId": "tool-context",
+                    "type": "tool_call",
                     "status": "running",
-                    "name": "source_collection_context_tool",
+                    "toolName": "source_collection_context_tool",
                     "summary": "正在读取受控资料上下文",
                 }
             ],
@@ -466,59 +439,45 @@ def test_session_assistant_delta_queue_updates_unsequenced_feedback_event():
             "type": "assistant_delta",
             "sessionId": "session-live",
             "turnId": "turn-1",
-            "contentDelta": "",
-            "thoughtDelta": "",
-            "replaceContent": False,
-            "replaceThought": False,
-            "feedbackEvents": [
+            "turnItems": [
                 {
-                    "sequence": 0,
-                    "kind": "tool",
-                    "status": "done",
-                    "name": "source_collection_context_tool",
+                    "itemId": "tool-context",
+                    "type": "tool_call",
+                    "status": "completed",
+                    "toolName": "source_collection_context_tool",
                     "summary": "上下文已读取",
-                    "resultPreview": "candidatePage.returned=19",
+                    "output": "candidatePage.returned=19",
                 }
             ],
         },
     )
 
     assert dropped == 1
-    assert merged["feedbackEvents"] == [
+    assert merged["turnItems"] == [
         {
-            "sequence": 0,
-            "kind": "tool",
-            "status": "done",
-            "name": "source_collection_context_tool",
+            "itemId": "tool-context",
+            "type": "tool_call",
+            "status": "completed",
+            "toolName": "source_collection_context_tool",
             "summary": "上下文已读取",
-            "resultPreview": "candidatePage.returned=19",
+            "output": "candidatePage.returned=19",
         }
     ]
 
 
-def test_session_assistant_delta_feedback_merge_keeps_parallel_same_name_tool_calls():
-    merged = session_service._merge_session_assistant_delta_feedback_events(
-        [
-            {
-                "sequence": 0,
-                "kind": "tool",
-                "status": "running",
-                "name": "read_file_tool",
-                "callId": "call-a",
-            }
-        ],
-        [
-            {
-                "sequence": 0,
-                "kind": "tool",
-                "status": "running",
-                "name": "read_file_tool",
-                "callId": "call-b",
-            }
-        ],
+def test_session_assistant_delta_snapshot_keeps_parallel_same_name_tool_calls():
+    merged = session_service._merge_session_assistant_delta_events(
+        {"type": "assistant_delta", "turnItems": []},
+        {
+            "type": "assistant_delta",
+            "turnItems": [
+                {"itemId": "tool-a", "type": "tool_call", "toolName": "read_file_tool", "callId": "call-a"},
+                {"itemId": "tool-b", "type": "tool_call", "toolName": "read_file_tool", "callId": "call-b"},
+            ],
+        },
     )
 
-    assert [event["callId"] for event in merged] == ["call-a", "call-b"]
+    assert [item["callId"] for item in merged["turnItems"]] == ["call-a", "call-b"]
 
 
 def test_session_turn_capture_correlates_parallel_same_name_tools_by_call_id():
@@ -674,18 +633,16 @@ def test_session_live_output_publishes_long_loop_progress_as_status_only_delta(m
     event = subscriber.get_nowait()
     progress = [
         item
-        for item in event["feedbackEvents"]
-        if item.get("kind") == "status" and item.get("name") == "long_loop_progress"
+        for item in event["turnItems"]
+        if item.get("type") == "status" and item.get("code") == "long_loop_progress"
     ]
 
     assert event["type"] == "assistant_delta"
     assert event["sessionId"] == "session-loop"
     assert event["turnId"] == "turn-loop"
     assert event["ledgerSeq"] == 7
-    assert event["content"] == ""
-    assert event["contentDelta"] == ""
     assert progress
-    assert "第 3 次工具调用" in progress[0]["summary"]
+    assert "第 3 次工具调用" in progress[0]["text"]
 
 
 def test_completed_visible_reply_with_tool_trace_is_terminal():
@@ -1020,11 +977,15 @@ def test_clearing_matching_live_turn_emits_terminal_assistant_delta(monkeypatch,
     assert event["turnId"] == turn_id
     assert event["ledgerSeq"] == 23
     assert event["done"] is True
-    assert event["contentDelta"] == "正在停止命令。"
-    assert event["thoughtDelta"] == "等待终端确认。"
-    assert event["replaceContent"] is True
-    assert event["replaceThought"] is True
-    assert event["feedbackEvents"][0]["status"] == "cancelled"
+    assert any(
+        item.get("type") == "agent_message" and item.get("text") == "正在停止命令。"
+        for item in event["turnItems"]
+    )
+    assert any(
+        item.get("type") == "reasoning" and item.get("text") == "等待终端确认。"
+        for item in event["turnItems"]
+    )
+    assert any(item.get("status") == "failed" for item in event["turnItems"])
     assert session_service._snapshot_session_live_output(session_id) is None
 
 
@@ -1353,12 +1314,12 @@ def test_terminal_fallback_does_not_block_running_cleanup_when_fallback_persiste
 
 def test_session_stream_full_queue_prefers_dropping_snapshots_before_assistant_delta():
     subscriber = queue.Queue(maxsize=2)
-    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
+    subscriber.put_nowait({"type": "assistant_delta", "turnItems": [{"type": "agent_message", "text": "你"}]})
     subscriber.put_nowait({"type": "session_detail", "ledgerSeq": 1})
 
     delivered, dropped = session_service._put_session_stream_event(
         subscriber,
-        {"type": "assistant_delta", "content": "你好", "contentDelta": "好", "replaceContent": False},
+        {"type": "assistant_delta", "turnItems": [{"type": "agent_message", "text": "你好"}]},
         recover_assistant_delta_on_drop=True,
     )
 
@@ -1367,26 +1328,23 @@ def test_session_stream_full_queue_prefers_dropping_snapshots_before_assistant_d
     first = subscriber.get_nowait()
     second = subscriber.get_nowait()
     assert first["type"] == "assistant_delta"
-    assert first["contentDelta"] == "你"
+    assert first["turnItems"][0]["text"] == "你"
     assert second["type"] == "assistant_delta"
-    assert second["contentDelta"] == "好"
-    assert second["replaceContent"] is False
+    assert second["turnItems"][0]["text"] == "你好"
 
 
 def test_session_stream_full_queue_recovers_when_old_assistant_delta_must_drop():
     subscriber = queue.Queue(maxsize=1)
-    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
+    subscriber.put_nowait({"type": "assistant_delta", "turnItems": [{"type": "agent_message", "text": "你"}]})
 
     delivered, dropped = session_service._put_session_stream_event(
         subscriber,
         {
             "type": "assistant_delta",
-            "content": "你好",
-            "thought": "思考",
-            "contentDelta": "好",
-            "thoughtDelta": "考",
-            "replaceContent": False,
-            "replaceThought": False,
+            "turnItems": [
+                {"type": "reasoning", "text": "思考"},
+                {"type": "agent_message", "text": "你好"},
+            ],
         },
         recover_assistant_delta_on_drop=True,
     )
@@ -1394,48 +1352,39 @@ def test_session_stream_full_queue_recovers_when_old_assistant_delta_must_drop()
     assert delivered is True
     assert dropped == 1
     recovered = subscriber.get_nowait()
-    assert recovered["contentDelta"] == "你好"
-    assert recovered["thoughtDelta"] == "思考"
-    assert recovered["replaceContent"] is True
-    assert recovered["replaceThought"] is True
+    assert [(item["type"], item["text"]) for item in recovered["turnItems"]] == [
+        ("reasoning", "思考"),
+        ("agent_message", "你好"),
+    ]
 
 
 def test_session_stream_full_queue_recovers_from_explicit_snapshot_when_public_delta_is_lightweight():
     subscriber = queue.Queue(maxsize=1)
-    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
+    subscriber.put_nowait({"type": "assistant_delta", "turnItems": [{"type": "agent_message", "text": "你"}]})
 
     delivered, dropped = session_service._put_session_stream_event(
         subscriber,
         {
             "type": "assistant_delta",
-            "content": "",
-            "thought": "",
-            "contentDelta": "好",
-            "thoughtDelta": "考",
-            "replaceContent": False,
-            "replaceThought": False,
+            "turnItems": [{"type": "agent_message", "text": "好"}],
         },
         recover_assistant_delta_on_drop=True,
         assistant_delta_recovery_event={
             "type": "assistant_delta",
-            "content": "",
-            "thought": "",
-            "contentDelta": "你好",
-            "thoughtDelta": "思考",
-            "replaceContent": True,
-            "replaceThought": True,
+            "turnItems": [
+                {"type": "reasoning", "text": "思考"},
+                {"type": "agent_message", "text": "你好"},
+            ],
         },
     )
 
     assert delivered is True
     assert dropped == 1
     recovered = subscriber.get_nowait()
-    assert recovered["content"] == ""
-    assert recovered["thought"] == ""
-    assert recovered["contentDelta"] == "你好"
-    assert recovered["thoughtDelta"] == "思考"
-    assert recovered["replaceContent"] is True
-    assert recovered["replaceThought"] is True
+    assert [(item["type"], item["text"]) for item in recovered["turnItems"]] == [
+        ("reasoning", "思考"),
+        ("agent_message", "你好"),
+    ]
 
 
 def test_session_assistant_delta_publish_recovers_full_snapshot_with_lightweight_public_event(monkeypatch):
@@ -1445,7 +1394,7 @@ def test_session_assistant_delta_publish_recovers_full_snapshot_with_lightweight
             "type": "assistant_delta",
             "sessionId": "session-live",
             "turnId": "turn-old",
-            "contentDelta": "旧",
+            "turnItems": [{"type": "agent_message", "text": "旧"}],
         }
     )
     monkeypatch.setattr(session_service, "_session_ledger_sequence", lambda session_id: 42)
@@ -1469,12 +1418,8 @@ def test_session_assistant_delta_publish_recovers_full_snapshot_with_lightweight
     assert recovered["sessionId"] == "session-live"
     assert recovered["turnId"] == "turn-1"
     assert recovered["ledgerSeq"] == 42
-    assert recovered["content"] == ""
-    assert recovered["thought"] == ""
-    assert recovered["contentDelta"] == "你好"
-    assert recovered["thoughtDelta"] == "思考"
-    assert recovered["replaceContent"] is True
-    assert recovered["replaceThought"] is True
+    assert any(item.get("type") == "agent_message" and item.get("text") == "你好" for item in recovered["turnItems"])
+    assert any(item.get("type") == "reasoning" and item.get("text") == "思考" for item in recovered["turnItems"])
 
 
 def test_session_stream_initial_state_prefers_live_overlay_summary(tmp_path, monkeypatch):
@@ -1537,6 +1482,22 @@ def test_session_stream_initial_state_prefers_live_overlay_summary(tmp_path, mon
     assert latest["contentLength"] == len("实时内容")
     assert latest["thoughtLength"] == len("实时思考")
     assert latest["feedbackEventCount"] == 1
+
+
+def test_session_stream_preview_rejects_retired_assistant_envelope():
+    assert (
+        session_service._session_stream_preview_message_components(
+            {
+                "id": "legacy-assistant",
+                "role": "assistant",
+                "content": "不应继续读取",
+                "thought": "旧思考",
+                "streaming": True,
+                "toolCalls": [{"name": "legacy_tool"}],
+            }
+        )
+        is None
+    )
 
 
 def test_get_session_detail_materializes_agent_directory_stub_without_switching_active(tmp_path, monkeypatch):

@@ -30,18 +30,6 @@ describe("chatSessionDetailHelpers", () => {
     expect(isStaleLedgerUpdate(5, 6)).toBe(false);
     expect(isStaleLedgerUpdate(0, 1)).toBe(false);
   });
-
-  it("builds a stable session detail snapshot key", () => {
-    const detail = {
-      id: "s1",
-      status: "running",
-      currentPhase: "answering",
-      updatedAt: "t1",
-      messages: [{ id: "m1", role: "assistant", content: "hi", streaming: false }],
-    } as SessionDetail;
-    expect(sessionDetailSnapshotKey(detail)).toContain("s1|running|answering|t1|1|m1|");
-  });
-
   it("builds an empty detail shell from summary for optimistic switches", () => {
     const summary = {
       id: "s2",

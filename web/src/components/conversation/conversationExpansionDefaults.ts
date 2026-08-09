@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
+import { assistantTurnIsStreaming } from "../../routes/chatTurnProtocol";
 import type { AgentMessageRenderState } from "./agentMessageRenderState";
 import type { AgentMessageTimelineItem } from "./agentMessageTimeline";
 import { buildAgentMessageReActOperationGroups, type AgentMessageOperationGroups } from "./agentMessageOperations";
@@ -79,7 +80,7 @@ export function preserveConversationExpansionDefaults({
 
     const renderState = renderStatesByMessageId.get(message.id);
     if (renderState?.sectionState.hasResponseBlock) {
-      setDefault("response", Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id));
+      setDefault("response", assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id));
     }
 
     const timelineItems = timelineItemsByMessageId.get(message.id) ?? [];

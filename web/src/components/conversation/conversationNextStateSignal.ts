@@ -1,4 +1,5 @@
-import type { ChatNextStateSignalSummary, ConversationMessage, ToolCall } from "../../api/types";
+import type { ChatNextStateSignalSummary, ConversationMessage, ToolCallTurnItem } from "../../api/types";
+import { assistantToolCallTurnItems } from "../../routes/chatTurnProtocol";
 
 function isBusyConversationPhase(phase: string) {
   return ["queued", "running", "stopping"].includes(String(phase || "").trim().toLowerCase());
@@ -9,21 +10,16 @@ function failedToolName(signal: ChatNextStateSignalSummary) {
   return match?.[1]?.trim() || "";
 }
 
-function isFailedToolCall(toolCall: ToolCall) {
-  const status = String(toolCall.status || "").trim().toLowerCase();
-  const semanticStatus = String(toolCall.semanticStatus || "").trim().toLowerCase();
-  return ["failed", "error"].includes(status) || semanticStatus === "failed";
+function isFailedToolCall(toolCall: ToolCallTurnItem) {
+  return toolCall.status === "failed";
 }
 
-function isSuccessfulToolCall(toolCall: ToolCall) {
-  const status = String(toolCall.status || "").trim().toLowerCase();
-  const semanticStatus = String(toolCall.semanticStatus || "").trim().toLowerCase();
-  return ["done", "completed", "succeeded", "success"].includes(status)
-    && semanticStatus !== "failed";
+function isSuccessfulToolCall(toolCall: ToolCallTurnItem) {
+  return toolCall.status === "completed";
 }
 
-function toolCallIdentity(toolCall: ToolCall) {
-  return String(toolCall.rawToolName || toolCall.name || toolCall.title || "").trim();
+function toolCallIdentity(toolCall: ToolCallTurnItem) {
+  return toolCall.toolName.trim();
 }
 
 function latestTurnRecoveredToolFailure(
@@ -43,7 +39,7 @@ function latestTurnRecoveredToolFailure(
   }
   const latestTurnToolCalls = messages
     .slice(Math.max(0, latestUserIndex + 1))
-    .flatMap((message) => message.toolCalls ?? [])
+    .flatMap(assistantToolCallTurnItems)
     .filter((toolCall) => toolCallIdentity(toolCall) === toolName);
   const terminalToolCalls = latestTurnToolCalls.filter(
     (toolCall) => isFailedToolCall(toolCall) || isSuccessfulToolCall(toolCall),

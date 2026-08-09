@@ -63,6 +63,17 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
             payload = checkpoint_payload
             if checkpoint_has_assistant_payload:
                 s._persist_recovered_live_output_to_chat_state(normalized_session_id, turn_id, checkpoint)
+                s._append_session_reasoning_item_if_needed(
+                    normalized_session_id,
+                    turn_id,
+                    str(payload.get("thought") or ""),
+                    source="recover_live_output_checkpoint",
+                )
+                s._append_missing_canonical_result_items(
+                    normalized_session_id,
+                    turn_id,
+                    {"toolCalls": list(payload.get("toolCalls") or [])},
+                )
                 s._append_session_conversation_event(
                     normalized_session_id,
                     turn_id,

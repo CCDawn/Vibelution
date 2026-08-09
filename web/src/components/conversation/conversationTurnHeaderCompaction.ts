@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
+import { assistantTurnIsStreaming } from "../../routes/chatTurnProtocol";
 import type { AgentMessageSectionState } from "./agentMessageSections";
 import { conversationMessageTurnId } from "./conversationMessageIdentity";
 import {
@@ -21,9 +22,8 @@ export function isAssistantProcessThreadCandidate(
     return false;
   }
   return Boolean(
-    message.streaming
-    || String(message.streamStage ?? "").trim()
-    || (message.timelineItems?.length ?? 0) > 0
+    assistantTurnIsStreaming(message)
+    || message.turnItems.length > 0
     || sectionState.hasProcessSection
     || isTurnErrorMessage(message)
   );

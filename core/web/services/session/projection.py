@@ -906,6 +906,91 @@ def _is_ephemeral_tool_event_bubble(
     return False
 
 
+def _merge_assistant_turn_items(
+    existing_items: Any,
+    incoming_items: Any,
+) -> list[dict[str, Any]]:
+    """Merge duplicate projections of one turn into one ordered item list."""
+
+    merged_by_key: dict[str, dict[str, Any]] = {}
+    insertion_order: dict[str, int] = {}
+    for raw_item in [*list(existing_items or []), *list(incoming_items or [])]:
+        if not isinstance(raw_item, dict):
+            continue
+        item = dict(raw_item)
+        key = str(item.get("itemId") or item.get("id") or "").strip()
+        if not key:
+            key = "|".join(
+                [
+                    str(item.get("type") or ""),
+                    str(item.get("callId") or ""),
+                    str(item.get("sequence") or ""),
+                    str(len(insertion_order)),
+                ]
+            )
+        if key not in insertion_order:
+            insertion_order[key] = len(insertion_order)
+        previous = merged_by_key.get(key)
+        if previous is None:
+            merged_by_key[key] = item
+            continue
+        richer = dict(previous)
+        richer.update(item)
+        for field in ("text", "input", "output", "summary"):
+            previous_text = str(previous.get(field) or "")
+            incoming_text = str(item.get(field) or "")
+            if len(previous_text) > len(incoming_text):
+                richer[field] = previous_text
+        richer["sequence"] = max(
+            int(previous.get("sequence") or 0),
+            int(item.get("sequence") or 0),
+        )
+        merged_by_key[key] = richer
+    return [
+        item
+        for key, item in sorted(
+            merged_by_key.items(),
+            key=lambda pair: (
+                int(pair[1].get("sequence") or 0),
+                insertion_order[pair[0]],
+            ),
+        )
+    ]
+
+
+def _coalesce_assistant_messages_by_turn(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose exactly one assistant message for each canonical turn."""
+
+    result: list[dict[str, Any]] = []
+    assistant_index_by_turn: dict[str, int] = {}
+    for raw_message in messages:
+        message = dict(raw_message)
+        if str(message.get("role") or "") != "assistant":
+            result.append(message)
+            continue
+        turn_id = str(message.get("turnId") or "").strip()
+        if not turn_id or turn_id not in assistant_index_by_turn:
+            if turn_id:
+                assistant_index_by_turn[turn_id] = len(result)
+            result.append(message)
+            continue
+        target_index = assistant_index_by_turn[turn_id]
+        existing = dict(result[target_index])
+        existing["turnItems"] = _merge_assistant_turn_items(
+            existing.get("turnItems"),
+            message.get("turnItems"),
+        )
+        existing_metadata = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+        incoming_metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        existing["metadata"] = {**existing_metadata, **incoming_metadata}
+        if str(message.get("timestamp") or "") > str(existing.get("timestamp") or ""):
+            existing["timestamp"] = message["timestamp"]
+        if str(message.get("status") or "") in {"running", "failed"}:
+            existing["status"] = message["status"]
+        result[target_index] = existing
+    return result
+
+
 def _normalize_messages(
     conversation_id: str,
     items: Any,
@@ -969,6 +1054,7 @@ def _normalize_messages(
             "content": content,
             "timestamp": str(raw.get("timestamp") or "").strip(),
         }
+        turn_items: list[dict[str, Any]] = []
         if thought:
             entry["thought"] = thought
         if mental_snapshot is not None:
@@ -1039,7 +1125,6 @@ def _normalize_messages(
                     tool_calls=tool_calls,
                     streaming=is_streaming_message,
                 )
-            turn_items: list[dict[str, Any]] = []
             if role == "assistant":
                 turn_items = s._build_session_turn_items_projection(
                     session_id=conversation_id,
@@ -1047,6 +1132,7 @@ def _normalize_messages(
                     message_id=entry["id"],
                     content=content,
                     thought=thought,
+                    mental_snapshot=mental_snapshot,
                     codex_transcript=codex_transcript,
                     done=not is_streaming_message,
                     source="session_detail",
@@ -1107,8 +1193,9 @@ def _normalize_messages(
                     message_id=entry["id"],
                     content=content,
                 )
-            if codex_transcript:
-                entry["codexTranscript"] = codex_transcript
+            # `codex_transcript` is deliberately not serialized.  It used to be
+            # a second assistant representation; the web renderer now derives
+            # cells locally from `turnItems`.
         if attachments:
             entry["attachments"] = attachments
         if references:
@@ -1118,8 +1205,42 @@ def _normalize_messages(
             entry["metadata"] = dict(metadata)
             if role == "assistant" and str(metadata.get("kind") or "").strip() == "turn_error":
                 entry["content"] = s._complete_turn_error_visible_content(entry["content"], metadata)
+        if role == "assistant":
+            if not turn_items:
+                turn_items = s._build_session_turn_items_projection(
+                    session_id=conversation_id,
+                    turn_id=turn_id,
+                    message_id=entry["id"],
+                    content=content,
+                    thought=thought,
+                    mental_snapshot=mental_snapshot,
+                    done=not bool(raw.get("streaming")),
+                    source="session_detail",
+                    metadata=raw_metadata if isinstance(raw_metadata, dict) else {},
+                    stage=raw.get("streamStage"),
+                )
+            assistant_status = (
+                "running"
+                if bool(raw.get("streaming"))
+                else "failed"
+                if isinstance(raw_metadata, dict)
+                and (
+                    str(raw_metadata.get("kind") or "").strip() == "turn_error"
+                    or raw_metadata.get("providerFailure") is True
+                )
+                else "completed"
+            )
+            entry = {
+                "id": entry["id"],
+                "role": "assistant",
+                "timestamp": entry["timestamp"],
+                "turnId": turn_id,
+                "status": assistant_status,
+                "turnItems": turn_items,
+                "metadata": dict(metadata) if isinstance(metadata, dict) else {},
+            }
         messages.append(entry)
-    return s._dedupe_turn_error_messages(messages)
+    return _coalesce_assistant_messages_by_turn(s._dedupe_turn_error_messages(messages))
 
 
 def _build_session_active_task(
@@ -1806,6 +1927,7 @@ def _build_session_turn_items_projection(
     message_id: str,
     content: Any = "",
     thought: Any = "",
+    mental_snapshot: Mapping[str, Any] | None = None,
     codex_transcript: dict[str, Any] | None = None,
     done: bool = False,
     source: str = "assistant_delta",
@@ -1846,29 +1968,37 @@ def _build_session_turn_items_projection(
             )
             # Journal final_answer / tools often land without a reasoning commit.
             # Bridge live/durable thought so package_cells keep thinking visible.
-            return _merge_live_thought_into_turn_items(
-                merged,
+            return _canonicalize_session_turn_items_for_protocol(
+                _merge_live_thought_into_turn_items(
+                    merged,
+                    session_id=session_id,
+                    turn_id=normalized_turn_id,
+                    message_id=normalized_message_id,
+                    thought=thought,
+                    done=done,
+                    source=source,
+                    stage=stage,
+                ),
                 session_id=session_id,
                 turn_id=normalized_turn_id,
-                message_id=normalized_message_id,
-                thought=thought,
-                done=done,
-                source=source,
-                stage=stage,
             )
     if (
         str(normalized_metadata.get("kind") or "").strip() == "turn_error"
         or normalized_metadata.get("providerFailure") is True
     ):
-        return [
-            s._build_terminal_error_turn_item(
-                session_id=session_id,
-                turn_id=normalized_turn_id,
-                message_id=message_id,
-                content=content,
-                metadata=normalized_metadata,
-            )
-        ]
+        return _canonicalize_session_turn_items_for_protocol(
+            [
+                s._build_terminal_error_turn_item(
+                    session_id=session_id,
+                    turn_id=normalized_turn_id,
+                    message_id=message_id,
+                    content=content,
+                    metadata=normalized_metadata,
+                )
+            ],
+            session_id=session_id,
+            turn_id=normalized_turn_id,
+        )
     if not normalized_message_id:
         return []
     transcript_cells = list((codex_transcript or {}).get("cells") or [])
@@ -1947,8 +2077,55 @@ def _build_session_turn_items_projection(
                 }
             )
         )
+    normalized_mental_snapshot = s._normalize_mental_snapshot(mental_snapshot)
+    if normalized_mental_snapshot is not None:
+        mental_item_id = f"{s._session_turn_item_base_id(session_id, normalized_turn_id or 'turn')}-mental"
+        mental_summary = s._sanitize_message_content(
+            "assistant",
+            normalized_mental_snapshot.get("summary")
+            or normalized_mental_snapshot.get("feeling")
+            or normalized_mental_snapshot.get("whisper")
+            or normalized_mental_snapshot.get("mood")
+            or "Mental state updated.",
+        )
+        items.append(
+            s._compact_codex_record(
+                {
+                    "version": 2,
+                    "id": f"{mental_item_id}:0",
+                    "itemId": mental_item_id,
+                    "type": "status",
+                    "kind": "status",
+                    "code": "mental_snapshot",
+                    "title": "Mental state",
+                    "status": "completed" if done else "running",
+                    "provisional": not bool(done),
+                    "terminal": False,
+                    "revision": 0,
+                    "sequence": 1,
+                    "sessionId": str(session_id or "").strip(),
+                    "turnId": normalized_turn_id,
+                    "messageId": normalized_message_id,
+                    "source": source,
+                    "protocol": "session_detail",
+                    "text": mental_summary,
+                    "mentalSnapshot": normalized_mental_snapshot,
+                }
+            )
+        )
     for index, cell in enumerate(transcript_cells, start=1):
         if not isinstance(cell, dict):
+            continue
+        # Live thought is already represented by the canonical reasoning item
+        # above.  A legacy feedback-derived reasoning cell would otherwise
+        # create a second spinner/body for the same progress update.
+        cell_kind = str(cell.get("kind") or "").strip()
+        if thought_text and cell_kind == "reasoning_summary":
+            continue
+        # A stream tail was only a renderer placeholder for the retired
+        # transcript envelope.  The running status item is the authoritative
+        # progress signal now, so emitting both would show duplicate spinners.
+        if cell_kind == "stream_tail":
             continue
         item = s._session_turn_item_from_codex_cell(
             session_id=session_id,
@@ -1967,7 +2144,130 @@ def _build_session_turn_items_projection(
             if not item.get("kind"):
                 item["kind"] = str(item.get("type") or "tool_call")
             items.append(item)
-    return items
+    return _canonicalize_session_turn_items_for_protocol(
+        items,
+        session_id=session_id,
+        turn_id=normalized_turn_id,
+    )
+
+
+def _canonicalize_session_turn_items_for_protocol(
+    items: list[dict[str, Any]] | None,
+    *,
+    session_id: str,
+    turn_id: str,
+) -> list[dict[str, Any]]:
+    """Emit the v3 SessionTurnItem algebra and discard v2 renderer aliases.
+
+    Journal and live-output internals may use richer records while executing a
+    turn.  The session DTO is intentionally narrower: it has one revisioned
+    item list, not parallel content/thought/timeline/transcript projections.
+    """
+    s = _service()
+    canonical: list[dict[str, Any]] = []
+    for index, raw in enumerate(items or []):
+        if not isinstance(raw, dict):
+            continue
+        raw_type = str(raw.get("type") or raw.get("kind") or "status").strip().lower()
+        item_type = {
+            "assistant_message": "agent_message",
+            "assistant_text": "agent_message",
+            "commentary": "agent_message",
+            "analysis": "reasoning",
+            "thought": "reasoning",
+            "tool_result": "tool_call",
+            "tool": "tool_call",
+            "tool_call_started": "tool_call",
+            "retrying": "retry",
+            "model_retry": "retry",
+        }.get(raw_type, raw_type)
+        if item_type not in {"agent_message", "reasoning", "tool_call", "retry", "status", "error"}:
+            item_type = "status"
+        raw_status = str(raw.get("status") or "").strip().lower()
+        status = {
+            "in_progress": "running",
+            "streaming": "running",
+            "done": "completed",
+            "degraded": "failed",
+            "error": "failed",
+        }.get(raw_status, raw_status)
+        if status not in {"pending", "running", "completed", "failed"}:
+            status = "completed" if raw.get("terminal") is True else "running"
+        item_id = str(raw.get("itemId") or raw.get("id") or "").strip()
+        if not item_id:
+            item_id = f"{s._session_turn_item_base_id(session_id, turn_id or 'turn')}-{index + 1}"
+        revision = max(0, int(raw.get("revision") or 0))
+        text = s._sanitize_message_content(
+            "assistant",
+            raw.get("text") or raw.get("summary") or raw.get("title") or "",
+        )
+        raw_item_metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+        metadata = {
+            key: value
+            for key, value in raw.items()
+            if key not in {
+                "id", "itemId", "version", "type", "kind", "status", "revision", "sequence",
+                "sessionId", "turnId", "messageId", "channel", "phase", "protocol", "provisional",
+                "terminal", "callId", "toolName", "title", "summary", "text", "diagnosticSummary",
+                "source", "sourceCellId", "sourceCellKind", "sourceItemId", "metadata", "code",
+                "input", "output",
+            }
+        }
+        if raw_item_metadata:
+            metadata = {**raw_item_metadata, **metadata}
+        item: dict[str, Any] = {
+            "id": f"{item_id}:{revision}",
+            "itemId": item_id,
+            "version": 3,
+            "sessionId": str(raw.get("sessionId") or session_id).strip(),
+            "turnId": str(raw.get("turnId") or turn_id).strip(),
+            "type": item_type,
+            "status": status,
+            "revision": revision,
+            "sequence": max(0, int(raw.get("sequence") or index + 1)),
+            "terminal": bool(raw.get("terminal")) or status in {"completed", "failed"},
+            "title": str(raw.get("title") or "").strip() or None,
+            "summary": str(raw.get("summary") or "").strip() or None,
+            "diagnosticSummary": dict(raw.get("diagnosticSummary") or {}) if isinstance(raw.get("diagnosticSummary"), dict) else None,
+            "metadata": metadata or None,
+        }
+        if item_type == "agent_message":
+            item["phase"] = "commentary" if str(raw.get("phase") or "").strip().lower() in {"commentary", "interim"} else "final_answer"
+            item["text"] = text
+        elif item_type == "reasoning":
+            item["text"] = text
+        elif item_type == "tool_call":
+            item["callId"] = str(raw.get("callId") or item_id).strip()
+            item["toolName"] = str(raw.get("toolName") or raw.get("title") or "tool").strip()
+            item["input"] = str(raw.get("input") or "").strip() or None
+            item["output"] = text or None
+        elif item_type == "retry":
+            item["attempt"] = max(1, int(raw.get("attempt") or raw.get("iteration") or 1))
+            item["targetItemId"] = str(raw.get("targetItemId") or raw.get("sourceItemId") or item_id).strip()
+            item["reason"] = text
+        else:
+            item["code"] = str(raw.get("code") or raw.get("name") or raw.get("title") or item_type).strip()
+            item["text"] = text
+        canonical.append(s._compact_codex_record(item))
+    # A fallback final answer is synthesized before legacy tool cells are
+    # converted.  Keep the visual/event order truthful: process items precede
+    # the terminal answer even when that old source did not carry a sequence.
+    process_max_sequence = max(
+        (
+            int(item.get("sequence") or 0)
+            for item in canonical
+            if item.get("type") != "agent_message"
+        ),
+        default=0,
+    )
+    final_answer_offset = 0
+    for item in canonical:
+        if item.get("type") != "agent_message" or item.get("phase") != "final_answer":
+            continue
+        if int(item.get("sequence") or 0) <= process_max_sequence:
+            final_answer_offset += 1
+            item["sequence"] = process_max_sequence + final_answer_offset
+    return sorted(canonical, key=lambda item: (int(item.get("sequence") or 0), str(item.get("itemId") or "")))
 
 
 def _slim_session_turn_items_for_window_payload(
@@ -3265,7 +3565,25 @@ def _messages_with_live_output(
 def _latest_message_summary(messages: list[dict[str, Any]]) -> str:
     s = _service()
     for item in reversed(messages):
-        preview = s._compact_preview_text(item.get("content") or "")
+        preview_source = item.get("content") or ""
+        if str(item.get("role") or "").strip().lower() == "assistant":
+            turn_items = [
+                turn_item
+                for turn_item in list(item.get("turnItems") or [])
+                if isinstance(turn_item, dict)
+            ]
+            final_answer = next(
+                (
+                    str(turn_item.get("text") or "").strip()
+                    for turn_item in reversed(turn_items)
+                    if str(turn_item.get("type") or "").strip() == "agent_message"
+                    and str(turn_item.get("phase") or "final_answer").strip() == "final_answer"
+                    and str(turn_item.get("text") or "").strip()
+                ),
+                "",
+            )
+            preview_source = final_answer
+        preview = s._compact_preview_text(preview_source)
         if preview:
             return preview
     return ""

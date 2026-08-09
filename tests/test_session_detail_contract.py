@@ -34,6 +34,17 @@ def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(self_evolution_control_service, "_runtime_manager_live_control_enabled", lambda: False)
 
 
+def _visible_conversation_message_text(message: dict) -> str:
+    if message.get("role") == "user":
+        return str(message.get("content") or "")
+    return "\n".join(
+        str(item.get("text") or "")
+        for item in message.get("turnItems") or []
+        if item.get("type") == "agent_message"
+        and item.get("phase") in {"commentary", "final_answer"}
+    ).strip()
+
+
 def test_session_detail_surfaces_missing_agent_placeholder(tmp_path, monkeypatch):
     save_chat_state(
         tmp_path,
@@ -479,7 +490,7 @@ def test_record_session_llm_usage_warns_when_runtime_scene_rejects_event(monkeyp
     assert "turn-provider-usage" in warnings[-1][0]
 
 
-def test_persist_turn_result_preserves_ordered_feedback_events(tmp_path, monkeypatch):
+def test_persist_turn_result_does_not_revive_legacy_feedback_events(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -538,15 +549,23 @@ def test_persist_turn_result_preserves_ordered_feedback_events(tmp_path, monkeyp
     )
 
     detail = session_service.get_session_detail("session-live")
-    feedback_events = detail["messages"][-1]["feedbackEvents"]
-    assert [item["kind"] for item in feedback_events] == ["thought", "tool", "thought", "tool"]
-    assert feedback_events[1]["relatedThoughtSequence"] == 1
-    assert feedback_events[3]["relatedThoughtSequence"] == 3
-    timeline_items = detail["messages"][-1]["timelineItems"]
-    assert [item["kind"] for item in timeline_items] == ["thought", "operation", "thought", "operation", "assistant_text"]
-    assert timeline_items[0]["text"] == "先看日志。"
-    assert timeline_items[1]["operationIds"] == [f"{detail['messages'][-1]['id']}-feedback-2"]
-    assert timeline_items[-1]["text"] == "已完成。"
+    assistant = detail["messages"][-1]
+    assert "feedbackEvents" not in assistant
+    assert "timelineItems" not in assistant
+    turn_items = assistant["turnItems"]
+    # The old feedback rail is no longer a public source. Result-only tool facts
+    # are committed once into the durable turn-item journal instead.
+    assert [item["type"] for item in turn_items] == [
+        "reasoning",
+        "tool_call",
+        "tool_call",
+        "agent_message",
+    ]
+    assert turn_items[0]["text"] == "再查 React 链路。"
+    assert [item["toolName"] for item in turn_items[1:3]] == ["read_log", "rg"]
+    assert turn_items[-1]["type"] == "agent_message"
+    assert turn_items[-1]["phase"] == "final_answer"
+    assert turn_items[-1]["text"] == "已完成。"
 
 
 def test_session_detail_attaches_turn_timeline_once_for_tool_result_packets(tmp_path, monkeypatch):
@@ -620,31 +639,16 @@ def test_session_detail_attaches_turn_timeline_once_for_tool_result_packets(tmp_
     )
 
     detail = session_service.get_session_detail("session-live")
-    turn_messages = [
-        message
-        for message in detail["messages"]
-        if (message.get("metadata") or {}).get("turnId") == turn_id
-    ]
-    assistant_text_messages = [
-        message
-        for message in turn_messages
-        if any(item.get("kind") == "assistant_text" for item in message.get("timelineItems") or [])
-    ]
+    turn_messages = [message for message in detail["messages"] if message.get("turnId") == turn_id]
 
-    assert [message["metadata"]["kind"] for message in turn_messages] == [
-        "tool_result",
-        "tool_result",
-        "journal_assistant_message",
+    assert len(turn_messages) == 1
+    assistant = turn_messages[0]
+    assert assistant["metadata"]["kind"] == "journal_assistant_message"
+    assert all(field not in assistant for field in ("content", "toolCalls", "feedbackEvents", "timelineItems", "codexTranscript"))
+    assert [item["toolName"] for item in assistant["turnItems"] if item["type"] == "tool_call"] == [
+        "read_log", "rg",
     ]
-    assert assistant_text_messages == []
-    assert [
-        item["kind"]
-        for item in turn_messages[-1]["timelineItems"]
-    ] == ["operation", "operation"]
-    transcript = turn_messages[-1]["codexTranscript"]
-    assert transcript["cells"][-1]["kind"] == "assistant_markdown"
-    assert transcript["cells"][-1]["text"] == "先说明现象，再给出结论。"
-    assert all("timelineItems" not in message for message in turn_messages[:-1])
+    assert _visible_conversation_message_text(assistant) == "先说明现象，再给出结论。"
 
 
 def _append_window_test_turn(project_root, session_id: str, turn_number: int) -> None:
@@ -691,7 +695,7 @@ def test_session_detail_window_returns_latest_messages_and_paging_metadata(tmp_p
 
     assert response.status_code == 200
     payload = response.json()
-    assert [message["content"] for message in payload["messages"]] == [
+    assert [_visible_conversation_message_text(message) for message in payload["messages"]] == [
         "窗口问题 2",
         "窗口回答 2",
         "窗口问题 3",
@@ -720,7 +724,7 @@ def test_session_detail_window_can_page_earlier_without_reindexing_messages(tmp_
 
     assert response.status_code == 200
     payload = response.json()
-    assert [message["content"] for message in payload["messages"]] == [
+    assert [_visible_conversation_message_text(message) for message in payload["messages"]] == [
         "窗口问题 1",
         "窗口回答 1",
     ]
@@ -745,16 +749,16 @@ def test_session_detail_window_can_omit_native_transcript_for_light_payloads(tmp
     assert response.status_code == 200
     payload = response.json()
     assistant = payload["messages"][-1]
-    assert assistant["content"] == "窗口回答 1"
-    assert assistant["toolCalls"] == [
-        {"name": "rg", "status": "done", "summary": "搜索 1", "callId": "tool-window-1"},
-    ]
-    assert "codexTranscript" not in assistant
+    assert _visible_conversation_message_text(assistant) == "窗口回答 1"
+    assert all(field not in assistant for field in ("content", "toolCalls", "feedbackEvents", "timelineItems", "codexTranscript"))
+    # `transcriptScope=none` is intentionally the minimal detail payload: no
+    # projected tool cells are synthesized from the retired raw tool rail.
+    assert all(item["type"] != "tool_call" for item in assistant["turnItems"])
     assert payload["messageWindow"]["transcriptScope"] == "none"
 
 
 def test_session_detail_window_skips_heavy_codex_transcript_for_settled_turns(tmp_path, monkeypatch):
-    """Chat-switch window payloads ship a minimal final-answer transcript only."""
+    """Chat-switch window payloads ship one minimal turn-item package only."""
     _seed_chat_state(tmp_path, task_status="done")
     _append_window_test_turn(tmp_path, "session-live", 1)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -766,12 +770,10 @@ def test_session_detail_window_skips_heavy_codex_transcript_for_settled_turns(tm
     assistant = next(
         message
         for message in payload["messages"]
-        if message["role"] == "assistant" and message.get("content") == "窗口回答 1"
+        if message["role"] == "assistant" and _visible_conversation_message_text(message) == "窗口回答 1"
     )
-    assert assistant["toolCalls"] == [
-        {"name": "rg", "status": "done", "summary": "搜索 1", "callId": "tool-window-1"},
-    ]
-    # Settled window turns carry SessionTurnItem v2 + slim final-answer transcript.
+    assert all(field not in assistant for field in ("content", "toolCalls", "feedbackEvents", "timelineItems", "codexTranscript"))
+    # Settled window turns carry one v3 item package, including final answer.
     turn_items = assistant.get("turnItems") or []
     assert turn_items, "window settled assistant must expose turnItems as UI package"
     final_items = [
@@ -781,21 +783,8 @@ def test_session_detail_window_skips_heavy_codex_transcript_for_settled_turns(tm
         or str(item.get("kind") or item.get("type") or "") in {"assistant_message", "agent_message"}
     ]
     assert final_items
-    assert final_items[0]["text"] == assistant["content"]
-    assert final_items[0].get("version") == 2
-
-    transcript = assistant["codexTranscript"]
-    assert transcript["source"] == "native"
-    assert transcript.get("windowSlimmed") is True
-    assert transcript.get("rolloutEvents") in (None, [])
-    assert transcript.get("terminalOperations") in (None, [])
-    cells = transcript["cells"]
-    assert any(
-        cell.get("kind") == "assistant_markdown"
-        and (cell.get("phase") == "final_answer" or cell.get("terminal") is True)
-        and cell.get("text") == assistant["content"]
-        for cell in cells
-    )
+    assert final_items[0]["text"] == "窗口回答 1"
+    assert final_items[0].get("version") == 3
     assert payload["messageWindow"]["transcriptScope"] == "window"
 
 
@@ -814,12 +803,7 @@ def test_select_chat_session_returns_windowed_detail_contract(tmp_path, monkeypa
     assert payload["messageWindow"]["transcriptScope"] == "window"
     assert payload["messageWindow"]["returnedMessages"] <= 40
     # Select must not rebuild full unwindowed history for switch latency.
-    assert all(
-        "codexTranscript" not in message
-        or message.get("codexTranscript", {}).get("windowSlimmed") is True
-        or message.get("streaming") is True
-        for message in payload["messages"]
-    )
+    assert all("codexTranscript" not in message for message in payload["messages"])
 
 
 def test_session_detail_snapshot_publish_uses_windowed_detail_by_default(monkeypatch):
@@ -879,7 +863,7 @@ def test_session_detail_snapshot_publish_uses_windowed_detail_by_default(monkeyp
     assert event["detail"]["messageWindow"]["transcriptScope"] == "window"
 
 
-def test_persist_turn_result_normalizes_completed_feedback_statuses(tmp_path, monkeypatch):
+def test_persist_turn_result_does_not_project_completed_legacy_feedback_statuses(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -906,11 +890,13 @@ def test_persist_turn_result_normalizes_completed_feedback_statuses(tmp_path, mo
     )
 
     detail = session_service.get_session_detail("session-live")
-    feedback_events = detail["messages"][-1]["feedbackEvents"]
-    assert [item["status"] for item in feedback_events] == ["done", "done", "done"]
+    assistant = detail["messages"][-1]
+    assert "feedbackEvents" not in assistant
+    assert all(item["status"] == "completed" for item in assistant["turnItems"])
+    assert assistant["turnItems"][-1]["type"] == "agent_message"
 
 
-def test_persist_turn_result_marks_only_latest_unfinished_feedback_failed(tmp_path, monkeypatch):
+def test_persist_turn_result_does_not_project_failed_legacy_feedback_statuses(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -938,11 +924,12 @@ def test_persist_turn_result_marks_only_latest_unfinished_feedback_failed(tmp_pa
     )
 
     detail = session_service.get_session_detail("session-live")
-    feedback_events = detail["messages"][-1]["feedbackEvents"]
-    assert [item["status"] for item in feedback_events] == ["done", "done", "done", "failed"]
+    assistant = detail["messages"][-1]
+    assert "feedbackEvents" not in assistant
+    assert any(item["type"] == "error" and item["status"] == "failed" for item in assistant["turnItems"])
 
 
-def test_persist_completed_visible_reply_with_tool_trace_stays_completed(tmp_path, monkeypatch):
+def test_persist_tool_trace_without_conclusion_stays_resumable(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -976,18 +963,21 @@ def test_persist_completed_visible_reply_with_tool_trace_stays_completed(tmp_pat
     )
 
     conversation = load_chat_state(tmp_path)["conversations"][0]
-    assert conversation["last_turn_status"] == "ready"
+    # A tool-backed generic greeting does not contain a conclusion or next
+    # action, so the existing terminal-state policy correctly leaves it
+    # resumable instead of presenting a false completion.
+    assert conversation["last_turn_status"] == "needs_continue"
 
     journal_events = load_conversation_events(tmp_path, "session-live")
     completed_event = next(item for item in reversed(journal_events) if item.event_type == "turn_completed")
-    assert completed_event.status == "completed"
+    assert completed_event.status == "needs_continue"
     assert completed_event.payload["resultStatus"] == "completed"
-    assert completed_event.payload["finalStatus"] == "completed"
+    assert completed_event.payload["finalStatus"] == "needs_continue"
 
     detail = session_service.get_session_detail("session-live")
     assistant = detail["messages"][-1]
-    assert assistant["content"] == "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？"
-    assert [item["status"] for item in assistant["feedbackEvents"]] == ["done", "done", "done"]
+    assert _visible_conversation_message_text(assistant) == "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？"
+    assert "feedbackEvents" not in assistant
 
 
 def test_persist_turn_result_records_provider_llm_usage(tmp_path, monkeypatch):
@@ -1091,7 +1081,8 @@ def test_persist_turn_usage_enriches_existing_canonical_assistant(tmp_path, monk
     assert completed_event.payload["llmUsage"]["cachedInputTokens"] == 15360
     detail = session_service.get_session_detail("session-live")
     assistant = detail["messages"][-1]
-    assert assistant["content"] == "CACHE-PROBE-B-OK"
+    assert _visible_conversation_message_text(assistant) == "CACHE-PROBE-B-OK"
+    assert "content" not in assistant
     assert assistant["metadata"]["llmUsage"]["source"] == "provider_usage"
     assert detail["llmUsage"]["cachedInputTokens"] == 15360
 
@@ -1439,8 +1430,8 @@ def test_provider_failure_persists_previous_context_composition_with_missing_cac
     assert len(error_message["turnItems"]) == 1
     assert error_message["turnItems"][0]["type"] == "error"
     assert error_message["turnItems"][0]["terminal"] is True
-    assert error_message["turnItems"][0]["text"] == error_message["content"]
-    assert error_message["codexTranscript"]["cells"][0]["kind"] == "error_notice"
+    assert error_message["turnItems"][0]["text"]
+    assert all(field not in error_message for field in ("content", "codexTranscript", "feedbackEvents", "timelineItems"))
 
 
 def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, monkeypatch):
@@ -1466,7 +1457,6 @@ def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, mo
     payload = response.json()
     assistant = payload["messages"][-1]
     assert assistant["role"] == "assistant"
-    assert assistant["content"] == ""
-    assert assistant["toolCalls"] == [
-        {"name": "read_file_tool", "status": "done", "summary": "session_service.py"},
-    ]
+    assert "content" not in assistant
+    assert "toolCalls" not in assistant
+    assert [item["toolName"] for item in assistant["turnItems"] if item["type"] == "tool_call"] == ["read_file_tool"]

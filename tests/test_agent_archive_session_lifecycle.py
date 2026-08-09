@@ -116,6 +116,42 @@ def test_agent_purge_removes_all_archived_sessions_and_private_workspaces(tmp_pa
     assert not child_workspace.exists(), {"stage": "after_404_checks", **payload}
 
 
+def test_reset_all_agent_test_conversations_preserves_agents_and_clears_lineage(tmp_path, monkeypatch):
+    direct, child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    second = session_service.create_chat_session(title="第二个测试 Agent")
+    child_workspace = tmp_path / child["workspacePath"]
+    child_workspace.mkdir(parents=True, exist_ok=True)
+    (child_workspace / "turn_journal.jsonl").write_text("{}\n", encoding="utf-8")
+
+    result = session_service.reset_all_agent_test_conversations()
+
+    assert result["status"] == "deleted"
+    assert set(result["sessionIds"]) == {direct["id"], child["id"], second["id"]}
+    assert result["deletedCount"] == 3
+    assert result["agentBindingsCleared"] >= 2
+    assert not child_workspace.exists()
+    assert client.get("/api/conversations").json() == []
+    for agent_id in (direct["agentId"], second["agentId"]):
+        agent = agent_directory_service.get_agent(agent_id, include_archived=True)
+        assert agent is not None
+        assert agent["status"] == "active"
+        assert agent.get("directSessionId") in {None, ""}
+
+
+def test_reset_all_agent_test_conversations_fails_closed_while_a_turn_is_active(tmp_path, monkeypatch):
+    direct, child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    session_service._set_session_running(child["id"], True)
+
+    with pytest.raises(session_service.SessionBusyError):
+        session_service.reset_all_agent_test_conversations()
+
+    assert session_service.get_session_detail(direct["id"]) is not None
+    assert session_service.get_session_detail(child["id"]) is not None
+    agent = agent_directory_service.get_agent(direct["agentId"], include_archived=True)
+    assert agent is not None
+    assert agent.get("directSessionId") == direct["id"]
+
+
 def test_bulk_purge_uses_the_same_session_delete_contract(tmp_path, monkeypatch):
     direct, child = _create_agent_with_child_session(tmp_path, monkeypatch)
     agent_directory_service.archive_agent_instance(

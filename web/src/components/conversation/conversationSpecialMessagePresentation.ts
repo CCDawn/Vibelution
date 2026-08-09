@@ -1,5 +1,10 @@
 import type { ConversationMessage } from "../../api/types";
+import { assistantFinalAnswerText } from "../../routes/chatTurnProtocol";
 import { conversationMessageMetadataText } from "./conversationMessageIdentity";
+
+function messageText(message: ConversationMessage) {
+  return message.role === "user" ? message.content : assistantFinalAnswerText(message);
+}
 
 export function cliAgentLifecycleLabel(message: ConversationMessage, lang: "zh" | "en") {
   const label = conversationMessageMetadataText(message.metadata, "label")
@@ -16,7 +21,7 @@ export function cliAgentLifecycleLabel(message: ConversationMessage, lang: "zh" 
 export function cliAgentLifecycleDetail(message: ConversationMessage) {
   return conversationMessageMetadataText(message.metadata, "cliRunId")
     || conversationMessageMetadataText(message.metadata, "terminalSessionId")
-    || message.content;
+    || messageText(message);
 }
 
 export function agentInboxSourceLabel(message: ConversationMessage) {
@@ -28,7 +33,7 @@ export function agentInboxSourceLabel(message: ConversationMessage) {
   if (sourceLabel) {
     return `Agent 私信 · ${sourceLabel}`;
   }
-  const fallback = String(message.content ?? "").match(/^来源 Agent:\s*(.+)$/m)?.[1]?.trim();
+  const fallback = messageText(message).match(/^来源 Agent:\s*(.+)$/m)?.[1]?.trim();
   return fallback ? `Agent 私信 · ${fallback}` : "Agent 私信";
 }
 
@@ -37,7 +42,7 @@ export function agentInboxSummary(message: ConversationMessage) {
   if (metadataSummary) {
     return metadataSummary;
   }
-  const content = String(message.content ?? "");
+  const content = messageText(message);
   const summaryMatch = content.match(/^摘要:\s*([\s\S]*?)(?:\n\s*消息内容:|$)/m);
   const summary = summaryMatch?.[1]?.trim();
   if (summary) {

@@ -140,11 +140,15 @@ function assistantDeltaDrainTelemetry(
 }
 
 function assistantDeltaContentLength(payload: SessionAssistantDeltaPayload) {
-  return (payload.contentDelta ?? payload.content ?? "").length;
+  return payload.turnItems
+    .filter((item) => item.type === "agent_message")
+    .reduce((total, item) => total + item.text.length, 0);
 }
 
 function assistantDeltaThoughtLength(payload: SessionAssistantDeltaPayload) {
-  return (payload.thoughtDelta ?? payload.thought ?? "").length;
+  return payload.turnItems
+    .filter((item) => item.type === "reasoning")
+    .reduce((total, item) => total + item.text.length, 0);
 }
 
 function oldestQueuedAge(queue: QueuedSessionAssistantDelta[], nowMs: number) {

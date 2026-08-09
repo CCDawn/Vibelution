@@ -1,4 +1,9 @@
 import type { ConversationMessage } from "../api/types";
+import {
+  assistantFinalAnswerText,
+  assistantReasoningText,
+  assistantTurnIsStreaming,
+} from "./chatTurnProtocol";
 
 export type TokenSpeedSample = {
   sessionId: string;
@@ -37,7 +42,7 @@ export function latestStreamingAssistantMessage(
 ): ConversationMessage | null {
   return [...(messages ?? [])].reverse().find((message) =>
     message.role === "assistant"
-    && Boolean(message.streaming)
+    && assistantTurnIsStreaming(message)
     && estimateGeneratedTokens(generatedTokenTextForMessage(message)) > 0
   ) ?? null;
 }
@@ -48,8 +53,8 @@ export function generatedTokenTextForMessage(message: ConversationMessage | null
   }
 
   const parts = [
-    String(message.thought ?? "").trim(),
-    looksLikeAnswerOutput(message.content) ? String(message.content ?? "").trim() : "",
+    assistantReasoningText(message),
+    looksLikeAnswerOutput(assistantFinalAnswerText(message)) ? assistantFinalAnswerText(message) : "",
   ].filter(Boolean);
 
   return parts.join("\n");

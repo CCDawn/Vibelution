@@ -6,10 +6,15 @@ import type {
   ChatRoomDetail,
   ConversationMessage,
   ConversationSummary,
-  MentalStateSnapshot,
   SessionDetail,
   SessionSummary,
 } from "../../api/types";
+import {
+  assistantFinalAnswerText,
+  assistantStatusTurnItems,
+  assistantTurnIsStreaming,
+  assistantTurnItemsForMessage,
+} from "../chatTurnProtocol";
 import { isTurnErrorMessage } from "../../components/conversation/conversationMessagePredicates";
 import { sessionToConversationSummary } from "../conversationIndexModel";
 import { isAgentRootSession } from "../DirectSessionIndexItem";
@@ -258,7 +263,17 @@ export function isForeignSessionDetailQueryKey(
 
 export function latestVisibleTurnErrorMessage(messages: ConversationMessage[] | undefined) {
   const latestMessage = messages?.[messages.length - 1];
-  return latestMessage && isTurnErrorMessage(latestMessage) ? String(latestMessage.content ?? "") : "";
+  if (!latestMessage || !isTurnErrorMessage(latestMessage)) {
+    return "";
+  }
+  const statusItems = assistantStatusTurnItems(latestMessage);
+  for (let index = statusItems.length - 1; index >= 0; index -= 1) {
+    const item = statusItems[index];
+    if (item?.type === "error") {
+      return item.text;
+    }
+  }
+  return "";
 }
 
 
@@ -352,10 +367,10 @@ export function latestSessionMessageSignal(detail: SessionDetail): string {
   }
   return [
     message.id ?? "",
-    message.streaming ? "streaming" : "settled",
-    message.content?.length ?? 0,
-    message.toolCalls?.length ?? 0,
-    message.feedbackEvents?.length ?? 0,
+    assistantTurnIsStreaming(message) ? "streaming" : "settled",
+    message.role === "user" ? message.content.length : assistantFinalAnswerText(message).length,
+    assistantTurnItemsForMessage(message).filter((item) => item.type === "tool_call").length,
+    assistantStatusTurnItems(message).length,
   ].join(":");
 }
 
@@ -386,8 +401,10 @@ export function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown): 
 }
 
 
-export function latestMentalSnapshot(messages: ConversationMessage[] | undefined): MentalStateSnapshot | undefined {
-  return [...(messages ?? [])].reverse().find((message) => message.role === "assistant" && message.mentalSnapshot)?.mentalSnapshot;
+export function latestMentalSnapshot(_messages: ConversationMessage[] | undefined) {
+  // Mental snapshots were a parallel mutable message field. Canonical turns do
+  // not transport it, so callers deliberately receive no synthetic fallback.
+  return undefined;
 }
 
 

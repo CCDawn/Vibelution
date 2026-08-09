@@ -95,6 +95,155 @@ def _ensure_session_turn_terminal_fallback(
         except Exception:
             pass
 
+
+def _append_missing_canonical_result_items(
+    session_id: str,
+    turn_id: str,
+    assistant_entry: dict[str, Any],
+) -> None:
+    """Commit result-only UI facts into the same canonical turn item journal.
+
+    Some Agent adapters return a mental snapshot or a compact tool trace only
+    with the terminal result.  The protocol outcome already committed the
+    answer/reasoning items, so keeping these facts solely on the retired
+    assistant envelope would make them disappear from the v3 projection.
+    """
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_session_id or not normalized_turn_id:
+        return
+    mental_snapshot = s._normalize_mental_snapshot(
+        assistant_entry.get("mental_snapshot") or assistant_entry.get("mentalSnapshot")
+    )
+    tool_calls = s._normalize_message_tool_calls(
+        assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []
+    )
+    if mental_snapshot is None and not tool_calls:
+        return
+
+    existing = s.conversation_turn_items_from_events(
+        s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id),
+        turn_id=normalized_turn_id,
+    )
+    base_id = s._session_turn_item_base_id(normalized_session_id, normalized_turn_id)
+    has_mental_snapshot = any(
+        str(item.get("code") or "").strip() == "mental_snapshot"
+        or (
+            str(item.get("kind") or item.get("type") or "").strip().lower() == "status"
+            and isinstance(item.get("metadata"), dict)
+            and isinstance(item["metadata"].get("mentalSnapshot"), dict)
+        )
+        for item in existing
+        if isinstance(item, dict)
+    )
+    if mental_snapshot is not None and not has_mental_snapshot:
+        mental_text = s._sanitize_message_content(
+            "assistant",
+            mental_snapshot.get("summary")
+            or mental_snapshot.get("feeling")
+            or mental_snapshot.get("whisper")
+            or mental_snapshot.get("mood")
+            or "Mental state updated.",
+        )
+        s._append_session_conversation_event(
+            normalized_session_id,
+            normalized_turn_id,
+            s.EVENT_ASSISTANT_ITEM_COMMITTED,
+            status="completed",
+            payload={
+                "schemaVersion": 2,
+                "sessionId": normalized_session_id,
+                "turnId": normalized_turn_id,
+                "invocationId": "",
+                "iteration": 0,
+                "itemId": f"{base_id}-mental",
+                "revision": 0,
+                "sequence": 0,
+                "kind": "status",
+                "channel": "status",
+                "phase": "mental_snapshot",
+                "status": "completed",
+                "protocol": "session_result",
+                "provisional": False,
+                "terminal": True,
+                "text": mental_text,
+                "code": "mental_snapshot",
+                "metadata": {"mentalSnapshot": mental_snapshot},
+            },
+            source="persist_session_turn_result",
+            visible_in_model=False,
+            projection_kind="session_turn_item_v2",
+            source_kind="session_mental_snapshot",
+        )
+
+    existing_tool_counts: dict[str, int] = {}
+    for item in existing:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("kind") or item.get("type") or "").strip().lower() != "tool_call":
+            continue
+        name = str(item.get("toolName") or "").strip()
+        if name:
+            existing_tool_counts[name] = existing_tool_counts.get(name, 0) + 1
+    seen_tool_counts: dict[str, int] = {}
+    for index, tool_call in enumerate(tool_calls, start=1):
+        name = str(tool_call.get("name") or tool_call.get("toolName") or "tool").strip() or "tool"
+        seen_tool_counts[name] = seen_tool_counts.get(name, 0) + 1
+        if existing_tool_counts.get(name, 0) >= seen_tool_counts[name]:
+            continue
+        call_id = str(
+            tool_call.get("callId")
+            or tool_call.get("toolCallId")
+            or tool_call.get("id")
+            or f"{base_id}-tool-{index}"
+        ).strip()
+        status = str(tool_call.get("status") or "completed").strip().lower() or "completed"
+        text = s._sanitize_message_content(
+            "assistant",
+            tool_call.get("resultPreview")
+            or tool_call.get("result_preview")
+            or tool_call.get("summary")
+            or tool_call.get("result")
+            or tool_call.get("error")
+            or "",
+        )
+        s._append_session_conversation_event(
+            normalized_session_id,
+            normalized_turn_id,
+            s.EVENT_ASSISTANT_ITEM_COMMITTED,
+            status=status,
+            payload={
+                "schemaVersion": 2,
+                "sessionId": normalized_session_id,
+                "turnId": normalized_turn_id,
+                "invocationId": "",
+                "iteration": 0,
+                "itemId": f"{base_id}-tool-{index}",
+                "revision": 0,
+                "sequence": index,
+                "kind": "tool_call",
+                "channel": "tool",
+                "phase": "tool",
+                "status": status,
+                "protocol": "session_result",
+                "provisional": False,
+                "terminal": status not in {"pending", "queued", "running", "in_progress"},
+                "text": text,
+                "callId": call_id,
+                "toolName": name,
+            },
+            source="persist_session_turn_result",
+            visible_in_model=False,
+            projection_kind="session_turn_item_v2",
+            tool_call_id=call_id,
+            correlation_id=call_id,
+            source_kind="session_tool_result",
+        )
+    s._invalidate_session_conversation_events_cache(normalized_session_id)
+
+
 def _persist_session_turn_result(
     session_id: str,
     result: Any,
@@ -643,6 +792,7 @@ def _persist_session_turn_result(
                 source="persist_session_turn_result",
                 done=True,
             )
+        _append_missing_canonical_result_items(session_id, turn_id, assistant_entry)
         canonical_turn_items = s.conversation_turn_items_from_events(
             s.load_conversation_events(s.PROJECT_ROOT, session_id),
             turn_id=turn_id,

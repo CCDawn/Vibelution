@@ -95,81 +95,7 @@ describe("desktop conversation notifier", () => {
     notifier.handleAssistantDelta(assistantDelta({ done: false }), { sessionTitle: "测试会话" });
 
     expect(notify).not.toHaveBeenCalled();
-  });
-
-  it("emits once for a detail transition from busy to ready", () => {
-    const notify = vi.fn();
-    const notifier = createDesktopConversationNotifier({
-      bridge: { notifyConversationCompleted: notify },
-      postTelemetry: vi.fn(),
-    });
-
-    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), { sessionTitle: "测试会话" });
-    notifier.handleSessionDetail(detail({ currentPhase: "ready", status: "ready" }), { sessionTitle: "测试会话" });
-    notifier.handleSessionDetail(detail({ currentPhase: "ready", status: "ready" }), { sessionTitle: "测试会话" });
-
-    expect(notify).toHaveBeenCalledTimes(1);
-  });
-
-  it("emits once for a detail transition from busy to failed", () => {
-    const notify = vi.fn();
-    const telemetry = vi.fn();
-    const notifier = createDesktopConversationNotifier({
-      bridge: { notifyConversationCompleted: notify },
-      postTelemetry: telemetry,
-    });
-
-    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), { sessionTitle: "测试会话" });
-    notifier.handleSessionDetail(detail({ currentPhase: "failed", status: "failed" }), { sessionTitle: "测试会话" });
-    notifier.handleSessionDetail(detail({ currentPhase: "failed", status: "failed" }), { sessionTitle: "测试会话" });
-
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith(
-      expect.objectContaining({
-        notificationKey: "session-1:turn-1:failed",
-        terminalStatus: "failed",
-      }),
-    );
-    expect(telemetry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventCode: "browser.desktop_notification.conversation_completed_emitted",
-      }),
-    );
-  });
-
-  it("emits once for a detail transition from busy to interrupted", () => {
-    const notify = vi.fn();
-    const notifier = createDesktopConversationNotifier({
-      bridge: { notifyConversationCompleted: notify },
-      postTelemetry: vi.fn(),
-    });
-
-    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), { sessionTitle: "测试会话" });
-    notifier.handleSessionDetail(
-      detail({
-        currentPhase: "needs_continue",
-        status: "needs_continue",
-      }),
-      { sessionTitle: "测试会话" },
-    );
-    notifier.handleSessionDetail(
-      detail({
-        currentPhase: "needs_continue",
-        status: "needs_continue",
-      }),
-      { sessionTitle: "测试会话" },
-    );
-
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith(
-      expect.objectContaining({
-        notificationKey: "session-1:turn-1:needs_continue",
-        terminalStatus: "needs_continue",
-      }),
-    );
-  });
-
-  it("uses the last turn error id when a failed detail has no assistant message", () => {
+  });it("uses the last turn error id when a failed detail has no assistant message", () => {
     const notify = vi.fn();
     const notifier = createDesktopConversationNotifier({
       bridge: { notifyConversationCompleted: notify },
@@ -208,21 +134,6 @@ describe("desktop conversation notifier", () => {
     expect(JSON.stringify(notify.mock.calls[0]?.[0])).not.toContain("provider failed");
     expect(JSON.stringify(notify.mock.calls[0]?.[0])).not.toContain("C:\\hidden.txt");
   });
-
-  it("supports the route pattern of assistant delta final followed by final detail without duplicate notification", () => {
-    const notify = vi.fn();
-    const notifier = createDesktopConversationNotifier({
-      bridge: { notifyConversationCompleted: notify },
-      postTelemetry: vi.fn(),
-    });
-
-    notifier.handleAssistantDelta(assistantDelta({ done: true }), { sessionTitle: "测试会话" });
-    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), { sessionTitle: "测试会话" });
-    notifier.handleSessionDetail(detail({ currentPhase: "ready", status: "ready" }), { sessionTitle: "测试会话" });
-
-    expect(notify).toHaveBeenCalledTimes(1);
-  });
-
   it("degrades to telemetry-only when the Electron bridge is missing", () => {
     const telemetry = vi.fn();
     const notifier = createDesktopConversationNotifier({

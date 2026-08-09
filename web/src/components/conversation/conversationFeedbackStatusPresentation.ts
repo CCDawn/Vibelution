@@ -1,12 +1,13 @@
-import type { ConversationMessage } from "../../api/types";
+import type { ConversationMessage, SessionTurnItem } from "../../api/types";
+import { assistantStatusTurnItems, assistantTurnIsStreaming } from "../../routes/chatTurnProtocol";
 
 import type { AgentMessageOperation, AgentMessageOperationGroups } from "./agentMessageOperations";
 import { isInternalStreamingStatusStage } from "./conversationInternalStatus";
 import { isRunningOperationStatus } from "./conversationOperationState";
 
-export type ConversationFeedbackEvent = NonNullable<ConversationMessage["feedbackEvents"]>[number];
+export type ConversationFeedbackEvent = Extract<SessionTurnItem, { type: "status" | "retry" | "error" }>;
 
-/** Attach a synthetic status operation from message feedbackEvents when timeline lacks one. */
+/** Attach a status operation only when the canonical TurnItems have no rendered status row. */
 export function operationGroupsWithFeedbackStatusPlaceholder(
   groups: AgentMessageOperationGroups,
   message: ConversationMessage,
@@ -38,20 +39,19 @@ export function feedbackStatusPlaceholderOperation(
       .map((operation) => operation.sequence)
       .filter((sequence): sequence is number => typeof sequence === "number" && Number.isFinite(sequence)),
   );
-  const statusEvents = (message.feedbackEvents ?? [])
-    .filter((event) => event.kind === "status")
+  const statusEvents = assistantStatusTurnItems(message)
     .filter((event) => {
-      const sequence = Number(event.sequence ?? 0);
+      const sequence = event.sequence;
       return !Number.isFinite(sequence) || sequence <= 0 || !existingSequences.has(sequence);
     })
-    .filter((event) => shouldUseFeedbackStatusPlaceholder(event, Boolean(message.streaming)));
+    .filter((event) => shouldUseFeedbackStatusPlaceholder(event, assistantTurnIsStreaming(message)));
   const event = statusEvents[statusEvents.length - 1];
   if (!event) {
     return null;
   }
   const sequence = Number(event.sequence ?? 0);
-  const rawName = String(event.name || "status").trim();
-  const summary = isActiveInternalStreamingStatus(event, Boolean(message.streaming))
+  const rawName = statusEventName(event);
+  const summary = isActiveInternalStreamingStatus(event, assistantTurnIsStreaming(message))
     ? ""
     : statusEventSummary(event);
   return {
@@ -59,14 +59,14 @@ export function feedbackStatusPlaceholderOperation(
     kind: "status",
     label: feedbackStatusPlaceholderLabel(event, lang),
     rawLabel: rawName,
-    status: String(event.status || (message.streaming ? "running" : "done")).trim() || "running",
-    rawStatus: String(event.status || "").trim() || undefined,
+    status: event.status,
+    rawStatus: event.status,
     summary,
     durationSeconds: null,
     resultPreview: summary || undefined,
-    error: typeof event.error === "string" ? event.error : undefined,
+    error: event.type === "error" ? event.text : undefined,
     sequence: sequence > 0 ? sequence : undefined,
-    timestamp: event.timestamp,
+    timestamp: event.updatedAt ?? event.createdAt,
   };
 }
 
@@ -96,13 +96,21 @@ export function shouldUseFeedbackStatusPlaceholder(event: ConversationFeedbackEv
 
 export function isActiveInternalStreamingStatus(event: ConversationFeedbackEvent, streaming: boolean) {
   return streaming
-    && isRunningOperationStatus(String(event.status ?? ""))
-    && isInternalStreamingStatusStage(event.name);
+    && isRunningOperationStatus(event.status)
+    && isInternalStreamingStatusStage(statusEventName(event));
+}
+
+function statusEventName(event: ConversationFeedbackEvent) {
+  return event.type === "status" ? event.code : event.type === "retry" ? "model_retry" : event.code;
+}
+
+function statusEventText(event: ConversationFeedbackEvent) {
+  return event.type === "retry" ? event.reason : event.text;
 }
 
 export function feedbackStatusPlaceholderLabel(event: ConversationFeedbackEvent, lang: "zh" | "en" | string) {
   const zh = lang !== "en";
-  const stage = String(event.name ?? "").trim().toLowerCase();
+  const stage = statusEventName(event).toLowerCase();
   const combined = statusEventCombinedText(event).toLowerCase();
   if (feedbackStatusIsLongLoopProgress(event)) {
     return zh ? "工具循环" : "Tool loop";
@@ -158,11 +166,9 @@ export function feedbackStatusIsLongLoopProgress(event: ConversationFeedbackEven
 }
 
 export function statusEventHasDiagnostic(event: ConversationFeedbackEvent) {
-  const status = String(event.status ?? "").trim().toLowerCase();
+  const status = event.status;
   return Boolean(
-    event.error
-    || event.failureClass
-    || event.timedOut
+    event.type === "error"
     || ["failed", "error", "failure", "timeout", "timed_out", "cancelled"].includes(status)
     || ["degraded", "fallback", "partial", "recovered", "unavailable"].includes(status),
   );
@@ -170,16 +176,16 @@ export function statusEventHasDiagnostic(event: ConversationFeedbackEvent) {
 
 export function statusEventCombinedText(event: ConversationFeedbackEvent) {
   return [
-    event.name,
+    statusEventName(event),
     event.summary,
-    event.resultPreview,
+    statusEventText(event),
   ].map((value) => String(value ?? "").trim()).filter(Boolean).join("\n");
 }
 
 export function statusEventSummary(event: ConversationFeedbackEvent) {
-  return String(event.summary || event.resultPreview || "").trim();
+  return String(event.summary || statusEventText(event) || "").trim();
 }
 
 export function statusEventResultPreview(event: ConversationFeedbackEvent) {
-  return String(event.resultPreview || "").trim();
+  return statusEventText(event).trim();
 }

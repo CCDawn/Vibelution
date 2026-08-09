@@ -478,55 +478,79 @@ export type CodexTranscriptProjection = CodexToolLifecycleModel & {
   rolloutEvents?: CodexRolloutTraceEvent[];
 };
 
-export type SessionTurnItemType =
-  | "agent_message"
-  | "reasoning"
-  | "tool_call"
-  | "status"
-  | "error"
-  | string;
+/**
+ * One immutable item within an assistant turn.
+ *
+ * A turn is the only assistant conversation record.  Text, reasoning, tools,
+ * retries and terminal state are separate revisioned items; callers must not
+ * reconstruct a second assistant state from top-level message fields.
+ */
+export type SessionTurnItemStatus = "pending" | "running" | "completed" | "failed";
 
-export type SessionTurnItemStatus =
-  | "pending"
-  | "running"
-  | "in_progress"
-  | "completed"
-  | "failed"
-  | "degraded"
-  | string;
-
-export type SessionTurnItem = {
+type SessionTurnItemBase = {
+  /** Stable logical identity; `id` changes only when an item revision is emitted. */
   id: string;
-  type: SessionTurnItemType;
+  itemId: string;
+  version: 3;
+  sessionId: string;
+  turnId: string;
   status: SessionTurnItemStatus;
-  version?: number;
-  sessionId?: string;
-  turnId?: string;
-  invocationId?: string;
-  iteration?: number;
-  itemId?: string;
-  revision?: number;
-  sequence?: number;
-  kind?: string;
-  channel?: string;
-  phase?: string;
-  protocol?: string;
-  provisional?: boolean;
+  revision: number;
+  sequence: number;
+  createdAt?: string;
+  updatedAt?: string;
   terminal?: boolean;
-  callId?: string;
-  toolName?: string;
-  messageId?: string;
-  source?: string;
-  sourceCellId?: string;
-  sourceCellKind?: string;
-  sourceItemId?: string;
-  operationIds?: string[];
   title?: string;
   summary?: string;
-  text?: string;
   diagnosticSummary?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 };
+
+export type AgentMessageTurnItem = SessionTurnItemBase & {
+  type: "agent_message";
+  phase: "commentary" | "final_answer";
+  text: string;
+};
+
+export type ReasoningTurnItem = SessionTurnItemBase & {
+  type: "reasoning";
+  text: string;
+};
+
+export type ToolCallTurnItem = SessionTurnItemBase & {
+  type: "tool_call";
+  callId: string;
+  toolName: string;
+  input?: string;
+  output?: string;
+};
+
+export type RetryTurnItem = SessionTurnItemBase & {
+  type: "retry";
+  attempt: number;
+  targetItemId: string;
+  reason: string;
+};
+
+export type StatusTurnItem = SessionTurnItemBase & {
+  type: "status";
+  code: string;
+  text: string;
+};
+
+export type ErrorTurnItem = SessionTurnItemBase & {
+  type: "error";
+  code: string;
+  text: string;
+};
+
+export type SessionTurnItem =
+  | AgentMessageTurnItem
+  | ReasoningTurnItem
+  | ToolCallTurnItem
+  | RetryTurnItem
+  | StatusTurnItem
+  | ErrorTurnItem;
 
 export type MentalStateSnapshot = {
   mood: string;
@@ -560,25 +584,27 @@ export type SessionReferenceAttachment = {
   createdAt?: string;
 };
 
-export type ConversationMessage = {
+type ConversationMessageBase = {
   id: string;
-  role: "user" | "assistant";
-  content: string;
   timestamp: string;
-  thought?: string;
-  streamStage?: string;
-  mentalSnapshot?: MentalStateSnapshot;
-  feedbackEvents?: ConversationFeedbackEvent[];
-  timelineItems?: ConversationTimelineItem[];
-  codexTranscript?: CodexTranscriptProjection;
-  itemId?: string;
-  turnItems?: SessionTurnItem[];
-  streaming?: boolean;
-  toolCalls?: ToolCall[];
-  attachments?: ConversationAttachment[];
-  references?: SessionReferenceAttachment[];
   metadata?: Record<string, unknown>;
 };
+
+export type UserConversationMessage = ConversationMessageBase & {
+  role: "user";
+  content: string;
+  attachments?: ConversationAttachment[];
+  references?: SessionReferenceAttachment[];
+};
+
+export type AssistantConversationTurn = ConversationMessageBase & {
+  role: "assistant";
+  turnId: string;
+  status: SessionTurnItemStatus;
+  turnItems: SessionTurnItem[];
+};
+
+export type ConversationMessage = UserConversationMessage | AssistantConversationTurn;
 
 export type ConversationAttachment = {
   artifactId: string;
@@ -932,17 +958,7 @@ export type SessionAssistantDeltaStreamEvent = {
   turnId: string;
   ledgerSeq?: number;
   stage: string;
-  content: string;
-  thought: string;
-  contentDelta?: string;
-  thoughtDelta?: string;
-  replaceContent?: boolean;
-  replaceThought?: boolean;
-  feedbackEvents?: ConversationFeedbackEvent[];
-  timelineItems?: ConversationTimelineItem[];
-  codexTranscript?: CodexTranscriptProjection;
-  itemId?: string;
-  turnItems?: SessionTurnItem[];
+  turnItems: SessionTurnItem[];
   updatedAt: string;
   done: boolean;
 };

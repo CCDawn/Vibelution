@@ -1,4 +1,5 @@
-import type { ConversationMessage, ToolCall } from "../../api/types";
+import type { ConversationMessage, ToolCall, ToolCallTurnItem } from "../../api/types";
+import { assistantToolCallTurnItems } from "../chatTurnProtocol";
 import type { CliAgentRunTab } from "../AgentSessionTabStrip";
 
 export const CLI_AGENT_TOOL_NAME = "cli_agent_run_tool";
@@ -147,6 +148,33 @@ function parseCliAgentResult(toolCall: ToolCall): CliAgentRunResult | null {
     }
   }
   return null;
+}
+
+function parseToolInput(value: string | undefined) {
+  const source = String(value ?? "").trim();
+  if (!source || !source.startsWith("{")) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(source);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function cliToolCallFromTurnItem(item: ToolCallTurnItem): ToolCall {
+  return {
+    callId: item.callId,
+    name: item.toolName,
+    sequence: item.sequence,
+    status: item.status,
+    summary: item.summary,
+    arguments: parseToolInput(item.input),
+    resultPreview: item.output,
+  };
 }
 
 function cliAgentTitle(agentType: string, result: CliAgentRunResult | null) {
@@ -471,7 +499,8 @@ export function buildCliAgentRunViews(messages: ConversationMessage[], sourceSes
       runsById.delete(closedRunId);
       continue;
     }
-    for (const [index, toolCall] of (message.toolCalls ?? []).entries()) {
+    for (const [index, turnItem] of assistantToolCallTurnItems(message).entries()) {
+      const toolCall = cliToolCallFromTurnItem(turnItem);
       if (toolCall.name !== CLI_AGENT_TOOL_NAME) {
         continue;
       }

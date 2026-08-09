@@ -955,6 +955,9 @@ export function useChatComposerSubmitActions({
   ]);
 
   const handleEditUserMessage = useCallback((message: ConversationMessage) => {
+    if (message.role !== "user") {
+      return;
+    }
     if (!activeSessionId || sessionBusy) {
       return;
     }

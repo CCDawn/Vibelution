@@ -161,7 +161,7 @@ function baseTrace<T extends SessionStreamEventType>(
     sessionId: String(payload?.sessionId ?? input.activeSessionId ?? ""),
     ledgerSeq: normalizedNumber(payload?.ledgerSeq),
     turnId: String(assistantPayload?.turnId ?? ""),
-    itemId: String(assistantPayload?.itemId ?? ""),
+    itemId: String(assistantPayload?.turnItems?.[0]?.itemId ?? ""),
     turnItemCount: Array.isArray(assistantPayload?.turnItems) ? assistantPayload.turnItems.length : 0,
     ...itemCounts,
     stage: String(assistantPayload?.stage ?? ""),
@@ -169,16 +169,16 @@ function baseTrace<T extends SessionStreamEventType>(
   };
 }
 
-export function canonicalItemCounts(items: SessionAssistantDeltaStreamEvent["turnItems"]) {
+export function canonicalItemCounts(items: SessionAssistantDeltaStreamEvent["turnItems"] | undefined) {
   const canonical = consolidateSessionTurnItemsV2(items);
   return {
     finalAnswerItemCount: canonical.filter(
-      (item) => item.channel === "answer" && item.phase === "final_answer",
+      (item) => item.type === "agent_message" && item.phase === "final_answer",
     ).length,
-    commentaryItemCount: canonical.filter((item) => item.channel === "commentary").length,
-    toolItemCount: canonical.filter((item) => item.kind === "tool_call").length,
+    commentaryItemCount: canonical.filter((item) => item.type === "agent_message" && item.phase === "commentary").length,
+    toolItemCount: canonical.filter((item) => item.type === "tool_call").length,
     terminalErrorItemCount: canonical.filter(
-      (item) => (item.kind === "error" || item.type === "error") && item.terminal === true,
+      (item) => item.type === "error" && item.terminal === true,
     ).length,
   };
 }
@@ -192,10 +192,6 @@ function eventType(payload: SessionStreamEvent | undefined): SessionStreamProtoc
 
 function resolveAssistantDeltaProtocol(payload: SessionAssistantDeltaStreamEvent) {
   return resolveAssistantTurnRenderProtocol({
-    answerContent: payload.contentDelta ?? payload.content,
-    thoughtContent: payload.thoughtDelta ?? payload.thought,
-    feedbackEventCount: payload.feedbackEvents?.length ?? 0,
-    codexTranscript: payload.codexTranscript,
     turnItems: payload.turnItems,
   });
 }

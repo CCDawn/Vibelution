@@ -96,11 +96,17 @@ function latestAssistantTurnMessage(detail: SessionDetail): ConversationMessage 
     if (kind === "session_active_turn_layer" || kind === "session_live_overlay") {
       return false;
     }
-    return Boolean(normalizeText(message.content ?? message.thought ?? ""));
+    return message.turnItems.some((item) => (
+      (item.type === "agent_message" || item.type === "reasoning")
+      && Boolean(normalizeText(item.text))
+    ));
   });
 }
 
 function messageTurnId(message: ConversationMessage | undefined): string {
+  if (message?.role === "assistant") {
+    return normalizeText(message.turnId);
+  }
   const raw = normalizeText(message?.metadata?.turnId);
   return raw.startsWith("live:") ? raw.slice("live:".length) : raw;
 }

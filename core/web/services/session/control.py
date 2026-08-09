@@ -254,6 +254,13 @@ def _persist_session_interrupted_snapshot(
         status="stopped",
         active_task=next_active_task,
     )
+    s._append_session_reasoning_item_if_needed(
+        session_id,
+        turn_id,
+        live_thought,
+        source="persist_interrupted_snapshot",
+    )
+    s._append_missing_canonical_result_items(session_id, turn_id, assistant_entry)
     s._append_session_conversation_event(
         session_id,
         turn_id,

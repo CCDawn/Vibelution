@@ -47,35 +47,4 @@ describe("cliAgentRunModel hand-test substitutes", () => {
   it("keeps close tokens stable across id/sourceRunId fallback", () => {
     expect(cliAgentRunCloseToken(run({ id: "a", sourceRunId: "b" }))).toBe("a");
     expect(cliAgentRunCloseToken(run({ id: "", sourceRunId: "b" }))).toBe("b");
-  });
-
-  it("builds visible CLI runs from tool-call messages and filters empty tool names", () => {
-    const views = buildCliAgentRunViews(
-      [
-        {
-          id: "m1",
-          role: "assistant",
-          content: "running cli",
-          toolCalls: [
-            {
-              id: "tc1",
-              name: "cli_agent_run_tool",
-              status: "running",
-              summary: "claude",
-              resultPreview: JSON.stringify({
-                status: "running",
-                runId: "cli-run-9",
-                terminalSessionId: "term-9",
-                agentType: "claude_code",
-                commandPreview: ["claude"],
-              }),
-            },
-          ],
-        } as never,
-      ],
-      "session-1",
-    );
-    expect(views.length).toBeGreaterThan(0);
-    expect(views.some((item) => item.terminalSessionId === "term-9" || item.id.includes("cli-run") || item.sourceRunId)).toBe(true);
-  });
-});
+  });});

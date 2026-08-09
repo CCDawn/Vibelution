@@ -238,13 +238,8 @@ function activeTurnRenderState(layer: ActiveTurnLayerState | undefined) {
   return {
     sessionId: layer.sessionId,
     turnId: layer.turnId,
-    streaming: layer.streaming,
+    status: layer.status,
     processStage: layer.processStage,
-    answerContent: layer.answerContent,
-    thoughtContent: layer.thoughtContent,
-    feedbackEvents: layer.feedbackEvents,
-    timelineItems: layer.timelineItems,
-    codexTranscript: layer.codexTranscript,
     turnItems: layer.turnItems,
   };
 }
