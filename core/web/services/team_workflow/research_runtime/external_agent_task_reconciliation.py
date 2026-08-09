@@ -10,7 +10,11 @@ from core.research.workflow.models import ActorKind
 from .agent_node_execution import SOURCE_NODE_TASKS
 from .agent_task_artifact_builder import build_agent_task_artifacts
 from .agent_task_budget_usage import collect_agent_task_budget_usage, parse_task_time
-from .external_agent_task_failure import block_external_agent_node_run
+from .external_agent_task_failure import (
+    block_external_agent_node_run,
+    is_recoverable_external_reconciliation_failure,
+    reopen_external_agent_reconciliation_failure,
+)
 from .external_agent_task_lookup import load_external_agent_task
 from .node_completion import complete_node_execution
 from .node_execution_support import NodeExecutionError, iso, utc_now
@@ -168,18 +172,43 @@ def reconcile_external_agent_tasks(
     checkpoint_path: str,
     record: dict[str, Any],
 ) -> dict[str, Any]:
-    """Apply terminal external task state exactly once for running Agent nodes."""
+    """Apply terminal external task state exactly once for reconcilable Agent nodes."""
     current = record
     definition = build_challenge_cup_workflow_definition()
     actor_by_node = {item.nodeId: item.actorKind for item in definition.nodes}
-    running = [
+    candidates = [
         dict(item)
         for item in current.get("nodeRuns") or []
-        if item.get("status") == "running"
+        if (
+            item.get("status") == "running"
+            or is_recoverable_external_reconciliation_failure(dict(item))
+        )
         and item.get("taskId")
         and actor_by_node.get(str(item.get("nodeId") or "")) is ActorKind.AGENT
     ]
-    for node_run in running:
+    for node_run in candidates:
+        if is_recoverable_external_reconciliation_failure(node_run):
+            try:
+                task = load_external_agent_task(current, node_run)
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+                continue
+            if task is None or str(task.get("status") or "").lower() != "completed":
+                continue
+            current = reopen_external_agent_reconciliation_failure(
+                store,
+                record=current,
+                node_run=node_run,
+            )
+            node_run = next(
+                (
+                    dict(item)
+                    for item in current.get("nodeRuns") or []
+                    if item.get("nodeRunId") == node_run.get("nodeRunId")
+                ),
+                node_run,
+            )
+            if node_run.get("status") != "running":
+                continue
         current = _reconcile_one(
             store,
             checkpoint_path=checkpoint_path,
@@ -187,3 +216,14 @@ def reconcile_external_agent_tasks(
             node_run=node_run,
         )
     return current
+
+
+def has_reconcilable_external_agent_tasks(record: dict[str, Any]) -> bool:
+    return any(
+        item.get("taskId")
+        and (
+            item.get("status") == "running"
+            or is_recoverable_external_reconciliation_failure(dict(item))
+        )
+        for item in record.get("nodeRuns") or []
+    )

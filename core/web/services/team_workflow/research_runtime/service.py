@@ -29,7 +29,10 @@ from core.research.workflow.projection import build_canvas_projection
 from .binding_config import BindingConfigValidationError, WorkflowBindingConfigStore
 from .checkpoint_lifecycle import prepare_initial_checkpoint
 from .durable_index import DurableWorkflowIndex
-from .external_agent_task_reconciliation import reconcile_external_agent_tasks
+from .external_agent_task_reconciliation import (
+    has_reconcilable_external_agent_tasks,
+    reconcile_external_agent_tasks,
+)
 from .handoff_lineage import (
     build_auto_handoffs_for_completed,
 )
@@ -378,10 +381,7 @@ class ResearchWorkflowRuntimeService:
         record = self._store.get_run(run_id)
         if record is None:
             raise ResearchWorkflowError(f"Unknown runId: {run_id}", code="unknown_run")
-        if any(
-            item.get("status") == "running" and item.get("taskId")
-            for item in record.get("nodeRuns") or []
-        ):
+        if has_reconcilable_external_agent_tasks(record):
             with self._lock:
                 latest = self._store.get_run(run_id)
                 if latest is None:

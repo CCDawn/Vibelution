@@ -86,6 +86,10 @@ def collect_agent_task_budget_usage(
                     "terminal Agent task is missing wall-clock usage",
                     code="agent_usage_missing",
                 )
+            if started.tzinfo is None and finished.tzinfo is not None:
+                started = started.replace(tzinfo=finished.tzinfo)
+            elif finished.tzinfo is None and started.tzinfo is not None:
+                finished = finished.replace(tzinfo=started.tzinfo)
             raw_seconds = max(0, int((finished - started).total_seconds()))
         usage["wallClockSeconds"] = raw_seconds
 

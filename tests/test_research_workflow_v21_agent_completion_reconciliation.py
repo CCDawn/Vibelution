@@ -6,6 +6,9 @@ from pathlib import Path
 
 from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.web.services.team_workflow.research_runtime.external_agent_task_failure import (
+    block_external_agent_node_run,
+)
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowRuntimeService,
 )
@@ -105,8 +108,9 @@ def _terminal_source_task() -> dict:
         "agentId": "agent-source-finder",
         "sessionId": "session-source-finding",
         "status": "completed",
-        "createdAt": "2026-08-09T10:00:00Z",
-        "updatedAt": "2026-08-09T10:00:12Z",
+        "createdAt": "2026-08-09T10:00:00+08:00",
+        "updatedAt": "2026-08-09T10:00:12+08:00",
+        "turn": {"acceptedAt": "2026-08-09T10:00:02"},
         "result": {
             "candidateLeads": leads,
             "materializedSources": materialized,
@@ -121,25 +125,13 @@ def _terminal_source_task() -> dict:
     }
 
 
-def test_completed_external_source_task_advances_workflow_exactly_once(
-    tmp_path: Path,
+def _start_source_node(
+    service: ResearchWorkflowRuntimeService,
+    run: dict,
+    terminal: dict,
+    observed_status: dict[str, str],
     monkeypatch,
 ) -> None:
-    service = ResearchWorkflowRuntimeService(
-        run_store=WorkflowRunStore(tmp_path / "runs"),
-        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
-    )
-    run = service.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_run_input(),
-        binding_layers=AgentBindingLayers(
-            workflowDefaults={"source_finder": "agent-source-finder"}
-        ),
-        idempotency_key="create-agent-reconcile",
-    )
-    terminal = _terminal_source_task()
-    observed_status = {"value": "running"}
-
     monkeypatch.setattr(
         "core.web.services.team_workflow.source_collection.runs.start_source_collection_run",
         lambda _team_id, _payload: {"run": {"runId": "source-run-1"}},
@@ -179,7 +171,6 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
             "llmUsage": {"totalTokens": 90},
         },
     )
-
     service.apply_node_command(
         run["runId"],
         "source_finding",
@@ -193,6 +184,27 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
             },
         },
     )
+
+
+def test_completed_external_source_task_advances_workflow_exactly_once(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = ResearchWorkflowRuntimeService(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={"source_finder": "agent-source-finder"}
+        ),
+        idempotency_key="create-agent-reconcile",
+    )
+    terminal = _terminal_source_task()
+    observed_status = {"value": "running"}
+    _start_source_node(service, run, terminal, observed_status, monkeypatch)
     observed_status["value"] = "completed"
 
     completed = service.get_run(run["runId"])
@@ -225,7 +237,7 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
     assert completed["budgetReservations"][0]["actual"] == {
         "tokens": 90,
         "toolCalls": 2,
-        "wallClockSeconds": 12,
+        "wallClockSeconds": 10,
     }
     assert completed["taskLeases"][0]["status"] == "succeeded"
     assert completed["taskBundles"][0]["status"] == "succeeded"
@@ -237,3 +249,63 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
     assert len(
         [item for item in replay["nodeRuns"] if item["nodeId"] == "source_extraction"]
     ) == 1
+
+
+def test_completed_task_recovers_one_internal_reconciliation_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = WorkflowRunStore(tmp_path / "runs")
+    service = ResearchWorkflowRuntimeService(
+        run_store=store,
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={"source_finder": "agent-source-finder"}
+        ),
+        idempotency_key="create-agent-reconciliation-recovery",
+    )
+    terminal = _terminal_source_task()
+    observed_status = {"value": "running"}
+    _start_source_node(service, run, terminal, observed_status, monkeypatch)
+    running = store.get_run(run["runId"])
+    assert running is not None
+    node_run = next(
+        item for item in running["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
+    blocked = block_external_agent_node_run(
+        store,
+        record=running,
+        node_run=node_run,
+        failure_code="external_task_completion_invalid",
+        failure_summary="can't subtract offset-naive and offset-aware datetimes",
+    )
+    assert blocked["status"] == "blocked"
+    observed_status["value"] = "completed"
+
+    completed = service.get_run(run["runId"])
+    replay = service.get_run(run["runId"])
+
+    source_run = next(
+        item for item in completed["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
+    recovery_receipts = [
+        item
+        for item in replay["commandReceipts"]
+        if item["command"] == "retry_external_agent_reconciliation"
+    ]
+    recovery_events = [
+        item
+        for item in replay["events"]
+        if item["type"] == "ExternalAgentTaskReconciliationRetried"
+    ]
+    assert source_run["status"] == "succeeded"
+    assert source_run["taskId"] == terminal["taskId"]
+    assert source_run["sessionId"] == terminal["sessionId"]
+    assert len(recovery_receipts) == 1
+    assert len(recovery_events) == 1
+    assert len(replay["artifactManifests"]) == 1
+    assert len(replay["handoffs"]) == 1
