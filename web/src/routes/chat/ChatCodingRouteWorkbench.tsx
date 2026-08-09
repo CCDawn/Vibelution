@@ -1635,7 +1635,7 @@ export function ChatCodingRoute() {
   ]);
   const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined;
   const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail);
-  const terminalIndexRefreshKey = activeTurnTerminalRefreshKey(activeTurnLayer);
+  const terminalIndexRefreshKey = activeTurnTerminalRefreshKey(activeTurnLayer, detail);
   const activeTurnMessage = useMemo(
     () => activeTurnSettledByDetail ? undefined : activeTurnLayerToConversationMessage(activeTurnLayer),
     [activeTurnLayer, activeTurnSettledByDetail],
