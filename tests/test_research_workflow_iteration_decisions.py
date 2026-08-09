@@ -11,24 +11,28 @@ from core.research.workflow.challenge_cup_graph import (
     compile_challenge_cup_graph,
     compiled_iteration_route_map,
     route_after_iteration_decision,
+    route_after_version_governance,
 )
 from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
-from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.definition import (
+    CHALLENGE_CUP_WORKFLOW_ID,
+    build_challenge_cup_workflow_definition,
+)
 from core.research.workflow.iteration_decisions import (
     DEFAULT_ITERATION_BUDGET,
     IterationDecisionError,
-    IterationDecisionKind,
     normalize_decision_dict,
     parse_decision_kind,
 )
-from core.web.services.team_workflow.research_runtime.durable_index import DurableWorkflowIndex
+from core.web.services.team_workflow.research_runtime.durable_index import (
+    DurableWorkflowIndex,
+)
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
     ResearchWorkflowRuntimeService,
     reset_research_workflow_runtime_service_for_tests,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
-from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 
 
 def _svc(tmp_path: Path, *, budget: int = DEFAULT_ITERATION_BUDGET) -> ResearchWorkflowRuntimeService:
@@ -97,15 +101,15 @@ def test_definition_edges_match_compiled_graph_routes() -> None:
     definition = build_challenge_cup_workflow_definition()
     edge_ids = {e.edgeId for e in definition.edges}
     assert "e_decision_rerun" in edge_ids
-    assert "e_decision_promo" in edge_ids
-    assert "e_decision_rollback" in edge_ids
-    assert "e_decision_stop" in edge_ids
+    assert "e_decision_version" in edge_ids
+    assert "e_version_promotion" in edge_ids
+    assert "e_version_package" in edge_ids
     # No linear-only edge that skips conditionals without definition peer
     routes = compiled_iteration_route_map()
     assert routes["rerun_same_protocol"] == "controlled_run"
-    assert routes["promote_candidate"] == "candidate_promotion"
-    assert routes["rollback_candidate"] == "candidate_promotion"
-    assert routes["stop"] == "result_package"
+    assert routes["promote_candidate"] == "version_governance"
+    assert routes["rollback_candidate"] == "version_governance"
+    assert routes["stop"] == "version_governance"
     assert routes["revise_protocol"] is None
 
     # Router function parity
@@ -114,6 +118,13 @@ def test_definition_edges_match_compiled_graph_routes() -> None:
             continue
         state = {"iteration_decision": {"decisionKind": kind}}
         assert route_after_iteration_decision(state) == target  # type: ignore[arg-type]
+
+    assert route_after_version_governance(
+        {"iteration_decision": {"decisionKind": "promote_candidate"}}
+    ) == "candidate_promotion"
+    assert route_after_version_governance(
+        {"iteration_decision": {"decisionKind": "stop"}}
+    ) == "result_package"
 
 
 # --- graph-level routing ---
@@ -152,7 +163,7 @@ def test_rerun_same_protocol_routes_to_controlled_run(tmp_path: Path) -> None:
         pytest.fail("never reached iteration_decision")
 
 
-def test_stop_routes_directly_to_result_package(tmp_path: Path) -> None:
+def test_stop_routes_through_version_governance_to_result_package(tmp_path: Path) -> None:
     db = tmp_path / "g2.sqlite"
     with open_sqlite_checkpointer(db) as checkpointer:
         graph = compile_challenge_cup_graph(checkpointer)
@@ -175,6 +186,7 @@ def test_stop_routes_directly_to_result_package(tmp_path: Path) -> None:
                 )
                 state = graph.get_state(cfg)
                 completed = state.values.get("completed_node_ids") or []
+                assert "version_governance" in completed
                 assert "result_package" in completed or not state.next
                 assert state.values.get("completion_kind") in {"stopped", "branched_revision", None, ""} or state.values.get(
                     "terminal_reason"
@@ -386,7 +398,9 @@ def test_promote_candidate_creates_human_promotion_task(tmp_path: Path) -> None:
     assert proposals and proposals[-1]["operation"] == "promote"
 
 
-def test_rollback_candidate_creates_rollback_proposal(tmp_path: Path) -> None:
+def test_rollback_candidate_is_applied_by_version_governance_without_promotion_gate(
+    tmp_path: Path,
+) -> None:
     svc = _svc(tmp_path)
     run = svc.create_run(CHALLENGE_CUP_WORKFLOW_ID)
     run = _accept_all_gates_until_iteration(svc, run["runId"])
@@ -399,11 +413,14 @@ def test_rollback_candidate_creates_rollback_proposal(tmp_path: Path) -> None:
         ),
         idempotency_key="rb-1",
     )
-    proposals = after.get("promotionProposals") or []
-    assert proposals[-1]["operation"] == "rollback"
-    assert proposals[-1]["targetCandidateRef"] == "cand-baseline"
+    assert after["completionKind"] == "rolled_back"
+    assert after["officialCandidateRef"] == "cand-baseline"
     pending = [t for t in after["humanTasks"] if t.get("status") == "pending"]
-    assert any(t.get("promotionOperation") == "rollback" for t in pending)
+    assert not any(t.get("promotionOperation") == "rollback" for t in pending)
+    assert any(
+        handoff.get("edgeId") == "e_decision_version"
+        for handoff in after.get("handoffs") or []
+    )
 
 
 def test_rollback_references_existing_candidate(tmp_path: Path) -> None:
@@ -511,9 +528,9 @@ def test_all_iteration_decisions_create_handoff_lineage(tmp_path: Path) -> None:
     svc = _svc(tmp_path)
     kinds_edges = [
         ("rerun_same_protocol", "e_decision_rerun", {}),
-        ("promote_candidate", "e_decision_promo", {"selectedCandidateRef": "c1"}),
-        ("rollback_candidate", "e_decision_rollback", {"baselineRef": "b1", "selectedCandidateRef": "b1"}),
-        ("stop", "e_decision_stop", {"terminalReason": "done"}),
+        ("promote_candidate", "e_decision_version", {"selectedCandidateRef": "c1"}),
+        ("rollback_candidate", "e_decision_version", {"baselineRef": "b1", "selectedCandidateRef": "b1"}),
+        ("stop", "e_decision_version", {"terminalReason": "done"}),
     ]
     for kind, edge_id, extra in kinds_edges:
         run = svc.create_run(CHALLENGE_CUP_WORKFLOW_ID, idempotency_key=f"lineage-{kind}")

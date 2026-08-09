@@ -41,10 +41,10 @@ def test_definition_hash_is_stable() -> None:
     assert a.workflowId == CHALLENGE_CUP_WORKFLOW_ID
 
 
-def test_definition_has_three_stages_and_fifteen_nodes() -> None:
+def test_definition_has_three_stages_and_sixteen_nodes() -> None:
     d = build_challenge_cup_workflow_definition()
     assert len(d.stages) == 3
-    assert len(d.nodes) == 15
+    assert len(d.nodes) == 16
     assert {s.stageId.value for s in d.stages} == {
         "knowledge_collection",
         "experiment_design",
@@ -65,6 +65,7 @@ def test_definition_has_three_stages_and_fifteen_nodes() -> None:
         "controlled_run",
         "result_evaluation",
         "iteration_decision",
+        "version_governance",
         "candidate_promotion",
         "result_package",
     ]
@@ -78,6 +79,7 @@ def test_actor_kinds_match_adr0007() -> None:
     assert by_id["smoke_gate"].actorKind is ActorKind.HUMAN
     assert by_id["controlled_run"].actorKind is ActorKind.SYSTEM
     assert by_id["result_package"].actorKind is ActorKind.SYSTEM
+    assert by_id["version_governance"].actorKind is ActorKind.AGENT
     assert by_id["candidate_promotion"].actorKind is ActorKind.HUMAN
 
 
@@ -128,16 +130,16 @@ def test_run_snapshot_not_rewritten_by_live_config_change() -> None:
 
 
 def test_handoff_only_accepted_is_consumable() -> None:
-    base = dict(
-        handoffId="h1",
-        workflowId=CHALLENGE_CUP_WORKFLOW_ID,
-        workflowVersionId="wv-1",
-        runId="run-1",
-        fromNodeId="knowledge_handoff",
-        fromNodeRunId="nr-1",
-        toNodeId="hypothesis_design",
-        gateKind=GateKind.KNOWLEDGE_PACKAGE,
-        outputArtifactRefs=(
+    base = {
+        "handoffId": "h1",
+        "workflowId": CHALLENGE_CUP_WORKFLOW_ID,
+        "workflowVersionId": "wv-1",
+        "runId": "run-1",
+        "fromNodeId": "knowledge_handoff",
+        "fromNodeRunId": "nr-1",
+        "toNodeId": "hypothesis_design",
+        "gateKind": GateKind.KNOWLEDGE_PACKAGE,
+        "outputArtifactRefs": (
             ArtifactRef(
                 artifactId="a1",
                 kind="knowledge_package",
@@ -145,9 +147,9 @@ def test_handoff_only_accepted_is_consumable() -> None:
                 contentHash="abc",
             ),
         ),
-        inputSnapshotHash="abc",
-        offeredAt="2026-08-07T00:00:00Z",
-    )
+        "inputSnapshotHash": "abc",
+        "offeredAt": "2026-08-07T00:00:00Z",
+    }
     pending = NodeHandoffRecord(**base, status=HandoffStatus.PENDING)
     accepted = NodeHandoffRecord(**base, status=HandoffStatus.ACCEPTED)
     rejected = NodeHandoffRecord(**base, status=HandoffStatus.REJECTED)

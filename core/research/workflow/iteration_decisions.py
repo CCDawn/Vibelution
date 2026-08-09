@@ -5,9 +5,10 @@ Graph routing and service transitions consume this module; free-form strings are
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
 
 class IterationDecisionKind(str, Enum):
@@ -38,18 +39,18 @@ class PromotionOperation(str, Enum):
 ITERATION_ROUTE_TARGETS: dict[IterationDecisionKind, str | None] = {
     IterationDecisionKind.RERUN_SAME_PROTOCOL: "controlled_run",
     IterationDecisionKind.REVISE_PROTOCOL: None,  # ends parent; service forks child
-    IterationDecisionKind.PROMOTE_CANDIDATE: "candidate_promotion",
-    IterationDecisionKind.ROLLBACK_CANDIDATE: "candidate_promotion",
-    IterationDecisionKind.STOP: "result_package",
+    IterationDecisionKind.PROMOTE_CANDIDATE: "version_governance",
+    IterationDecisionKind.ROLLBACK_CANDIDATE: "version_governance",
+    IterationDecisionKind.STOP: "version_governance",
 }
 
 # Definition edgeIds that must exist for runnable routes (not revise fork).
 ITERATION_DEFINITION_EDGE_IDS: dict[IterationDecisionKind, str | None] = {
     IterationDecisionKind.RERUN_SAME_PROTOCOL: "e_decision_rerun",
     IterationDecisionKind.REVISE_PROTOCOL: None,
-    IterationDecisionKind.PROMOTE_CANDIDATE: "e_decision_promo",
-    IterationDecisionKind.ROLLBACK_CANDIDATE: "e_decision_rollback",
-    IterationDecisionKind.STOP: "e_decision_stop",
+    IterationDecisionKind.PROMOTE_CANDIDATE: "e_decision_version",
+    IterationDecisionKind.ROLLBACK_CANDIDATE: "e_decision_version",
+    IterationDecisionKind.STOP: "e_decision_version",
 }
 
 DEFAULT_ITERATION_BUDGET = 3
@@ -88,7 +89,7 @@ class IterationDecisionRecord:
         return data
 
     @staticmethod
-    def from_dict(raw: Mapping[str, Any]) -> "IterationDecisionRecord":
+    def from_dict(raw: Mapping[str, Any]) -> IterationDecisionRecord:
         kind_raw = str(raw.get("decisionKind") or "").strip()
         try:
             kind = IterationDecisionKind(kind_raw)
