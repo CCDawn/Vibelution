@@ -19,6 +19,8 @@ export function submitTelemetryFields(
     turnId?: string;
     acceptedAt?: string;
     durationMs?: number;
+    submitToOptimisticPaintMs?: number;
+    activeStatusSource?: "optimistic_submit" | "assistant_delta";
     error?: unknown;
   } = {},
 ) {
@@ -73,6 +75,12 @@ export function submitTelemetryFields(
   }
   if (options.durationMs !== undefined) {
     fields.durationMs = options.durationMs;
+  }
+  if (options.submitToOptimisticPaintMs !== undefined) {
+    fields.submitToOptimisticPaintMs = options.submitToOptimisticPaintMs;
+  }
+  if (options.activeStatusSource !== undefined) {
+    fields.activeStatusSource = options.activeStatusSource;
   }
   if (options.error instanceof Error) {
     fields.errorName = options.error.name;

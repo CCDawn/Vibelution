@@ -13,6 +13,7 @@ export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant
 export type ActiveTurnLayerState = {
   id: string;
   renderKey?: string;
+  clientSubmissionId?: string;
   sessionId: string;
   turnId: string;
   updatedAt: string;
@@ -25,6 +26,7 @@ export type ActiveTurnLayerState = {
 export type OptimisticActiveTurnLayerInput = {
   sessionId: string;
   turnId?: string;
+  clientSubmissionId?: string;
   updatedAt?: string;
   summary?: string;
 };
@@ -86,6 +88,7 @@ export function createOptimisticActiveTurnLayer(
   return {
     id: activeTurnMessageId(sessionId, turnId),
     renderKey: activeTurnRenderKey(sessionId),
+    clientSubmissionId: compactText(input.clientSubmissionId) || undefined,
     sessionId,
     turnId,
     updatedAt,
@@ -154,7 +157,8 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   if (payload.done && !hasVisibleActiveTurnProtocolContent({ turnItems: withStatus })) return undefined;
   return {
     id: activeTurnMessageId(sessionId, turnId),
-    renderKey: base?.renderKey || activeTurnRenderKey(sessionId),
+    renderKey: previous?.renderKey || activeTurnRenderKey(sessionId),
+    clientSubmissionId: previous?.clientSubmissionId,
     sessionId,
     turnId,
     updatedAt,
@@ -180,7 +184,10 @@ export function activeTurnLayerToConversationMessage(
       kind: "session_active_turn_layer",
       sessionId: layer.sessionId,
       renderKey: layer.renderKey || activeTurnRenderKey(layer.sessionId),
+      clientSubmissionId: layer.clientSubmissionId,
       ledgerSeq: layer.ledgerSeq,
+      processStage: layer.processStage,
+      activeStatusSource: layer.ledgerSeq > 0 ? "assistant_delta" : "optimistic_submit",
     },
   };
 }

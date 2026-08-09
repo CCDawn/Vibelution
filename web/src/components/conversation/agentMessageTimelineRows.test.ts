@@ -86,7 +86,7 @@ describe("AgentMessage timeline rows", () => {
     expect(committedRow.processKey).not.toBe(committedRow.answerKey);
   });
 
-  it("uses session-active key only for placeholder turns, then locks to canonical turn id", () => {
+  it("keeps the assistant row on the submission anchor through backend acceptance", () => {
     const optimistic = assistantMessage("session-1-message-active-optimistic", {
       streaming: true,
       turnId: "optimistic-submit",
@@ -96,6 +96,7 @@ describe("AgentMessage timeline rows", () => {
         metadata: {
           kind: "session_active_turn_layer",
           renderKey: "session-1-active",
+          clientSubmissionId: "submission-1",
         },
       },
       parts: [],
@@ -109,6 +110,7 @@ describe("AgentMessage timeline rows", () => {
         metadata: {
           kind: "session_active_turn_layer",
           renderKey: "session-1-active",
+          clientSubmissionId: "submission-1",
         },
       },
       parts: [],
@@ -116,17 +118,15 @@ describe("AgentMessage timeline rows", () => {
     const committed = assistantMessage("session-1-message-committed", {
       streaming: false,
       turnId: "turn-accepted",
+      metadata: { clientSubmissionId: "submission-1" },
     });
 
     const [optimisticRow] = buildAgentMessageTimelineRowIdentities([optimistic]);
     const [boundRow] = buildAgentMessageTimelineRowIdentities([bound]);
     const [committedRow] = buildAgentMessageTimelineRowIdentities([committed]);
 
-    // Pre-accept placeholder may use session-active renderKey.
-    expect(optimisticRow.rowKey).toBe("assistant-active:session-1-active");
-    // Once the backend turn id is known, active layer and committed share one row
-    // so settle does not remount (ChatGPT/Claude stable bubble identity).
-    expect(boundRow.rowKey).toBe("assistant-turn:turn-accepted");
+    expect(optimisticRow.rowKey).toBe("assistant-submission:submission-1");
+    expect(boundRow.rowKey).toBe(optimisticRow.rowKey);
     expect(committedRow.rowKey).toBe(boundRow.rowKey);
   });
 

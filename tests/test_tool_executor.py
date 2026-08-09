@@ -2673,8 +2673,20 @@ def test_semantic_failure_return_publishes_tool_error_event():
     assert error_events[-1]["result"] == result
 
 
-def test_tool_events_preserve_call_id():
+def test_tool_events_preserve_call_and_turn_identity(monkeypatch):
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-live",
+            "sessionId": "session-live",
+            "turnId": "turn-live",
+        },
+    )
     executor = ToolExecutor()
+    monkeypatch.setattr(executor, "_check_canonical_execution_authorization", lambda *_args, **_kwargs: None)
     bus = get_event_bus()
     start_events = []
     success_events = []
@@ -2692,8 +2704,18 @@ def test_tool_events_preserve_call_id():
 
     assert result == "ok"
     assert action is None
+    assert [event["lifecyclePhase"] for event in start_events] == ["started", "arguments_ready"]
+    assert start_events[0]["callId"] == "call-identity"
     assert start_events[-1]["callId"] == "call-identity"
+    assert "args" not in start_events[0]
+    assert start_events[-1]["args"] == {}
     assert success_events[-1]["callId"] == "call-identity"
+    assert start_events[-1]["sessionId"] == "session-live"
+    assert start_events[-1]["turnId"] == "turn-live"
+    assert start_events[-1]["agentId"] == "agent-live"
+    assert success_events[-1]["sessionId"] == "session-live"
+    assert success_events[-1]["turnId"] == "turn-live"
+    assert start_events[-1]["eventAtEpochMs"] > 0
 
 
 if __name__ == "__main__":

@@ -64,16 +64,20 @@ function isPlaceholderAssistantTurnId(turnId: string) {
   return turnId === "optimistic" || turnId === "current" || turnId.startsWith("optimistic-");
 }
 
-function userSubmissionRenderKey(message: AgentMessage) {
+function submissionRenderKey(message: AgentMessage) {
   const clientSubmissionId = metadataText(message.metadata, "clientSubmissionId")
     || metadataText(message.source.metadata, "clientSubmissionId");
-  if (message.role === "user" && clientSubmissionId) {
-    return `user-submission:${clientSubmissionId}`;
+  if (clientSubmissionId) {
+    return `${message.role}-submission:${clientSubmissionId}`;
   }
   return "";
 }
 
 function baseTimelineRowKey(message: AgentMessage) {
+  const submissionKey = submissionRenderKey(message);
+  if (submissionKey) {
+    return submissionKey;
+  }
   const turnId = normalizedMessageTurnId(message);
   // Canonical turn wins over active-layer renderKey so settle does not remount.
   if (message.role === "assistant" && turnId && !isPlaceholderAssistantTurnId(turnId)) {
@@ -82,10 +86,6 @@ function baseTimelineRowKey(message: AgentMessage) {
   const renderKey = activeTurnRenderKey(message);
   if (renderKey) {
     return renderKey;
-  }
-  const userRenderKey = userSubmissionRenderKey(message);
-  if (userRenderKey) {
-    return userRenderKey;
   }
   if (message.role === "assistant" && turnId) {
     return `assistant-turn:${turnId}`;

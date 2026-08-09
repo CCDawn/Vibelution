@@ -200,6 +200,7 @@ export function useChatComposerTurnMutations({
           createOptimisticActiveTurnLayer({
             sessionId: variables.sessionId,
             turnId: optimisticTurnIdForSubmission("submit", variables.sessionId, createdAt),
+            clientSubmissionId: variables.clientSubmissionId,
             updatedAt: createdAt,
           }),
         )
@@ -210,6 +211,23 @@ export function useChatComposerTurnMutations({
       updateSessionSummaryCaches(queryClient, (sessions) =>
         markSessionSummaryRunning(sessions, variables.sessionId),
       );
+      if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(() => {
+          postSubmitTelemetry(
+            "browser.chat_submit.optimistic_painted",
+            "Optimistic user and Agent rows reached the next browser paint.",
+            variables.sessionId,
+            {
+              clientSubmissionId: variables.clientSubmissionId,
+              submitToOptimisticPaintMs: Math.max(
+                0,
+                Math.round(chatStreamPerformanceNowMs() - variables.requestStartedAtMs),
+              ),
+              activeStatusSource: "optimistic_submit",
+            },
+          );
+        });
+      }
     },
     onSuccess: (acceptedTurn, variables) => {
       postSubmitTelemetry(
@@ -250,6 +268,7 @@ export function useChatComposerTurnMutations({
             ? createOptimisticActiveTurnLayer({
               sessionId: variables.sessionId,
               turnId: acceptedTurn.turnId,
+              clientSubmissionId: variables.clientSubmissionId,
               updatedAt: acceptedTurn.acceptedAt,
             })
             : undefined,
@@ -329,6 +348,7 @@ export function useChatComposerTurnMutations({
           createOptimisticActiveTurnLayer({
             sessionId: variables.sessionId,
             turnId: optimisticTurnIdForSubmission("edit", variables.sessionId, createdAt),
+            clientSubmissionId: variables.clientSubmissionId,
             updatedAt: createdAt,
           }),
         )
@@ -371,6 +391,7 @@ export function useChatComposerTurnMutations({
           createOptimisticActiveTurnLayer({
             sessionId: variables.sessionId,
             turnId: acceptedTurnId,
+            clientSubmissionId: variables.clientSubmissionId,
             updatedAt: nextDetail.updatedAt,
           }),
         );

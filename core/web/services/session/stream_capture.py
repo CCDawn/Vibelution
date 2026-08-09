@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -281,6 +282,9 @@ class SessionTurnCapture:
         entry = {
             "name": tool_name,
             "status": s._normalize_tool_call_status(semantic_status or status, default="running"),
+            "revision": 0,
+            "createdAt": s._now_timestamp(),
+            "updatedAt": s._now_timestamp(),
         }
         if normalized_call_id:
             entry["callId"] = normalized_call_id
@@ -321,15 +325,18 @@ class SessionTurnCapture:
             related_thought_sequence = self._latest_thought_sequence or self._pending_related_thought_sequence or 0
             for index in range(len(self.tool_calls) - 1, -1, -1):
                 existing = self.tool_calls[index]
-                if existing.get("status") != "running":
-                    continue
                 existing_call_id = str(existing.get("callId") or "").strip()
                 if normalized_call_id:
                     if existing_call_id != normalized_call_id:
                         continue
-                elif existing_call_id or existing.get("name") != tool_name:
+                    existing_status = s._normalize_tool_call_status(existing.get("status"), default="running")
+                    if existing_status != "running" and entry["status"] == "running":
+                        return
+                elif existing.get("status") != "running" or existing_call_id or existing.get("name") != tool_name:
                     continue
                 if existing.get("name") == tool_name:
+                    entry["revision"] = s._coerce_nonnegative_int(existing.get("revision")) + 1
+                    entry["createdAt"] = str(existing.get("createdAt") or entry["createdAt"])
                     self.tool_calls[index] = entry
                     self._update_running_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
                     self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name, normalized_call_id)
@@ -439,6 +446,9 @@ class SessionTurnCapture:
         }
         for key in (
             "callId",
+            "revision",
+            "createdAt",
+            "updatedAt",
             "arguments",
             "resultPreview",
             "resultType",
@@ -474,10 +484,14 @@ class SessionTurnCapture:
             existing_call_id = str(existing.get("callId") or "").strip()
             if (
                 existing.get("kind") == "tool"
-                and existing.get("status") == "running"
                 and (
                     (call_id and existing_call_id == call_id)
-                    or (not call_id and not existing_call_id and existing.get("name") == tool_name)
+                    or (
+                        not call_id
+                        and not existing_call_id
+                        and existing.get("status") == "running"
+                        and existing.get("name") == tool_name
+                    )
                 )
             ):
                 sequence = existing.get("sequence")
@@ -489,9 +503,13 @@ class SessionTurnCapture:
                     "status": s._normalize_tool_call_status(tool_call.get("status"), default="done"),
                     "name": tool_name,
                     "summary": trim_lines(tool_call.get("summary") or "", max_lines=2),
+                    "revision": s._coerce_nonnegative_int(tool_call.get("revision")),
+                    "createdAt": str(tool_call.get("createdAt") or "").strip(),
+                    "updatedAt": str(tool_call.get("updatedAt") or "").strip(),
                 }
                 for key in (
                     "callId",
+                    "revision",
                     "arguments",
                     "resultPreview",
                     "resultType",
@@ -872,9 +890,40 @@ def _capture_session_ui_stream(
     def tool_event_proxy(event):
         s = _service()
         context = _SESSION_UI_CAPTURE_CONTEXT.get({})
-        if not isinstance(context, dict) or context.get("capture") is not capture:
+        data = event.data or {}
+        event_session_id = str(data.get("sessionId") or data.get("session_id") or "").strip()
+        event_turn_id = str(data.get("turnId") or data.get("turn_id") or "").strip()
+        context_matches = isinstance(context, dict) and context.get("capture") is capture
+        explicit_identity_present = bool(event_session_id or event_turn_id)
+        explicit_identity_matches = (
+            event_session_id == session_id
+            and event_turn_id == capture.turn_id
+        )
+        if (explicit_identity_present and not explicit_identity_matches) or (
+            not explicit_identity_present and not context_matches
+        ):
+            reason = "turn_mismatch" if explicit_identity_present else "capture_missing"
+            try:
+                s.record_runtime_scene_event(
+                    "conversation",
+                    "tool_event_discarded",
+                    "chat.tool_event.discarded",
+                    level="warning",
+                    outcome="discarded",
+                    message="Tool event did not belong to the active session capture.",
+                    fields={
+                        "reason": reason,
+                        "sessionId": session_id,
+                        "turnId": capture.turn_id,
+                        "eventSessionId": event_session_id,
+                        "eventTurnId": event_turn_id,
+                        "callIdPresent": bool(str(data.get("callId") or data.get("call_id") or "").strip()),
+                    },
+                )
+            except Exception:
+                pass
             return
-        batcher = context.get("textBatcher")
+        batcher = context.get("textBatcher") if isinstance(context, dict) else None
         if isinstance(batcher, _SessionUiCaptureTextBatcher):
             batcher.flush_all()
         _commit_session_capture_assistant_segment(
@@ -882,11 +931,30 @@ def _capture_session_ui_stream(
             capture,
             boundary="tool_event",
         )
-        data = event.data or {}
         name = str(data.get("name") or "").strip()
         if not name:
             return
         call_id = str(data.get("callId") or data.get("call_id") or "").strip()
+        if not call_id:
+            try:
+                s.record_runtime_scene_event(
+                    "conversation",
+                    "tool_event_discarded",
+                    "chat.tool_event.discarded",
+                    level="warning",
+                    outcome="discarded",
+                    message="Tool event was missing its canonical call identity.",
+                    fields={
+                        "reason": "call_id_missing",
+                        "sessionId": session_id,
+                        "turnId": capture.turn_id,
+                        "toolName": name,
+                    },
+                )
+            except Exception:
+                pass
+            return
+        event_at_epoch_ms = s._coerce_tool_number(data.get("eventAtEpochMs") or data.get("event_at_epoch_ms"))
         semantic_status = str(data.get("semanticStatus") or data.get("semantic_status") or "").strip()
         status = {
             s.EventNames.TOOL_START: "running",
@@ -958,6 +1026,28 @@ def _capture_session_ui_stream(
             tool_calls=capture.tool_calls,
             feedback_events=capture.feedback_events,
         )
+        if event.name == s.EventNames.TOOL_START and str(data.get("lifecyclePhase") or "").strip() != "arguments_ready":
+            try:
+                publish_finished_at_ms = time.time() * 1000
+                s.record_runtime_scene_event(
+                    "conversation",
+                    "tool_start_delta_published",
+                    "chat.tool_start.delta_published",
+                    level="info",
+                    outcome="published",
+                    message="Tool start was projected into the assistant delta stream.",
+                    fields={
+                        "sessionId": session_id,
+                        "turnId": capture.turn_id,
+                        "callIdPresent": bool(call_id),
+                        "toolStartToDeltaPublishMs": max(
+                            0,
+                            round(publish_finished_at_ms - event_at_epoch_ms),
+                        ) if event_at_epoch_ms is not None else None,
+                    },
+                )
+            except Exception:
+                pass
         if event.name == s.EventNames.TOOL_ERROR:
             error_preview = trim_lines(summary or str(error or ""), max_lines=2)
             work_run_summary = s.text_for(

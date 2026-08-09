@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage, SessionTurnItem } from "../api/types";
 import {
+  codexTranscriptFromTurnItems,
   consolidateSessionTurnItemsV2,
   hasCommittedAssistantProtocolAnswer,
   projectConversationMessageFromTurnItemsV2,
@@ -31,5 +32,18 @@ describe("canonical SessionTurnItem v3 rendering", () => {
     }) as ConversationMessage;
     expect(hasCommittedAssistantProtocolAnswer(message)).toBe(true);
     expect(message).not.toHaveProperty("content");
+  });
+
+  it("keeps the rendered tool row identity stable across revisions", () => {
+    const running: SessionTurnItem = {
+      ...base, id: "tool-r0", itemId: "tool", type: "tool_call", callId: "call-1", toolName: "glob_tool",
+      status: "running", revision: 0, sequence: 1,
+    };
+    const completed: SessionTurnItem = {
+      ...running, id: "tool-r1", status: "completed", revision: 1, output: "done",
+    };
+
+    expect(codexTranscriptFromTurnItems([running]).cells[0]?.id).toBe("tool");
+    expect(codexTranscriptFromTurnItems([completed]).cells[0]?.id).toBe("tool");
   });
 });

@@ -127,7 +127,9 @@ export function codexTranscriptFromTurnItems(
 ): CodexTranscriptProjection {
   const cells = items.flatMap<CodexTranscriptProjection["cells"][number]>((item) => {
     const base = {
-      id: item.id,
+      // Revisions replace one logical row; the renderer key must stay on the
+      // stable item identity instead of remounting for every streamed frame.
+      id: item.itemId,
       messageId: item.itemId,
       status: item.status,
       tone: cellTone(item),

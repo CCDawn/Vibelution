@@ -2210,7 +2210,7 @@ def _canonicalize_session_turn_items_for_protocol(
                 "sessionId", "turnId", "messageId", "channel", "phase", "protocol", "provisional",
                 "terminal", "callId", "toolName", "title", "summary", "text", "diagnosticSummary",
                 "source", "sourceCellId", "sourceCellKind", "sourceItemId", "metadata", "code",
-                "input", "output",
+                "input", "output", "createdAt", "updatedAt",
             }
         }
         if raw_item_metadata:
@@ -2225,6 +2225,8 @@ def _canonicalize_session_turn_items_for_protocol(
             "status": status,
             "revision": revision,
             "sequence": max(0, int(raw.get("sequence") or index + 1)),
+            "createdAt": str(raw.get("createdAt") or "").strip() or None,
+            "updatedAt": str(raw.get("updatedAt") or "").strip() or None,
             "terminal": bool(raw.get("terminal")) or status in {"completed", "failed"},
             "title": str(raw.get("title") or "").strip() or None,
             "summary": str(raw.get("summary") or "").strip() or None,

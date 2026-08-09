@@ -13,4 +13,17 @@ describe("submitTelemetryFields", () => {
       runtimeStatusEnabled: false,
     });
   });
+
+  it("projects optimistic paint latency and its active status source", () => {
+    expect(
+      submitTelemetryFields("session-1", {
+        submitToOptimisticPaintMs: 16,
+        activeStatusSource: "optimistic_submit",
+      }),
+    ).toMatchObject({
+      sessionId: "session-1",
+      submitToOptimisticPaintMs: 16,
+      activeStatusSource: "optimistic_submit",
+    });
+  });
 });
