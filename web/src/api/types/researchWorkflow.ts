@@ -294,6 +294,8 @@ export type NodeCommandCapability = {
   command: string;
   available: boolean;
   reason: string;
+  /** Backend-owned replay key for commands bound to durable runtime state. */
+  idempotencyKey?: string;
   /** Backend-owned command input; the client must pass it through unchanged. */
   payload?: Record<string, unknown>;
 };

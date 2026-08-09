@@ -102,13 +102,14 @@ export async function executeNodeCommand(
   }
   if (
     command === "start_agent_task" &&
-    (!capability.payload ||
+    (!capability.idempotencyKey?.trim() ||
+      !capability.payload ||
       !capability.payload.budgetRequest ||
       typeof capability.payload.budgetRequest !== "object" ||
       Array.isArray(capability.payload.budgetRequest) ||
       Object.keys(capability.payload.budgetRequest).length === 0)
   ) {
-    throw new Error("启动 Agent 任务缺少后端预算契约");
+    throw new Error("启动 Agent 任务缺少后端幂等与预算契约");
   }
 
   if (command === "accept_handoff" || command === "reject_handoff" || command === "revise") {
@@ -131,7 +132,10 @@ export async function executeNodeCommand(
   const raw = await postResearchWorkflowNodeCommand(runId, nodeId, {
     teamId: context.teamId,
     expectedRunVersion: context.runVersion,
-    idempotencyKey: `node:${runId}:${nodeId}:${command}:v${context.runVersion}`,
+    idempotencyKey:
+      command === "start_agent_task"
+        ? capability.idempotencyKey!
+        : `node:${runId}:${nodeId}:${command}:v${context.runVersion}`,
     command,
     payload: capability.payload ?? {},
   });

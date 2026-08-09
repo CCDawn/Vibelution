@@ -220,6 +220,9 @@ def start_agent_node_execution(
             "requested agentId does not match the frozen NodeRun binding",
             code="binding_agent_mismatch",
         )
+    idempotency_key = str(
+        payload.get("idempotencyKey") or f"agent-task:{node_run['nodeRunId']}"
+    ).strip()
     if node_run.get("status") == "running" and node_run.get("taskId"):
         binding = store.get_session_binding(str(record.get("runId") or ""), node_id)
         bundle_id = task_bundle_id(str(node_run["nodeRunId"]))
@@ -231,6 +234,12 @@ def start_agent_node_execution(
             ),
             {},
         )
+        persisted_key = str(bundle.get("idempotencyKey") or "").strip()
+        if not persisted_key or persisted_key != idempotency_key:
+            raise AgentNodeExecutionError(
+                "Agent task replay idempotencyKey conflicts with the persisted TaskBundle",
+                code="agent_task_idempotency_conflict",
+            )
         if bundle and bundle.get("status") == "pending" and binding:
             bundle = bind_agent_task_bundle(
                 store,
@@ -264,9 +273,6 @@ def start_agent_node_execution(
         )
     if not agent_id:
         raise AgentNodeExecutionError("agent node is unbound", code="agent_unbound")
-    idempotency_key = str(
-        payload.get("idempotencyKey") or f"agent-task:{node_run['nodeRunId']}"
-    ).strip()
     node_spec = next(
         item
         for item in build_challenge_cup_workflow_definition().nodes

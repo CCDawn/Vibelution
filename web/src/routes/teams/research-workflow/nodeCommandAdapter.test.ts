@@ -85,13 +85,26 @@ describe("nodeCommandAdapter", () => {
 
     await executeNodeCommand(
       { runId: "run-1", nodeId: "source_finding", teamId: "t1", runVersion: 7 },
-      { command: "start_agent_task", available: true, reason: "", payload },
+      {
+        command: "start_agent_task",
+        available: true,
+        reason: "",
+        idempotencyKey: "agent-task:nr-run-1-source_finding-a1",
+        payload,
+      },
     );
 
     expect(api.postResearchWorkflowNodeCommand).toHaveBeenCalledWith(
       "run-1",
       "source_finding",
       expect.objectContaining({ payload }),
+    );
+    expect(api.postResearchWorkflowNodeCommand).toHaveBeenCalledWith(
+      "run-1",
+      "source_finding",
+      expect.objectContaining({
+        idempotencyKey: "agent-task:nr-run-1-source_finding-a1",
+      }),
     );
   });
 
@@ -101,7 +114,22 @@ describe("nodeCommandAdapter", () => {
         { runId: "run-1", nodeId: "source_finding", teamId: "t1", runVersion: 7 },
         { command: "start_agent_task", available: true, reason: "" },
       ),
-    ).rejects.toThrow("启动 Agent 任务缺少后端预算契约");
+    ).rejects.toThrow("启动 Agent 任务缺少后端幂等与预算契约");
+    expect(api.postResearchWorkflowNodeCommand).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when an Agent start capability has no backend idempotency key", async () => {
+    await expect(
+      executeNodeCommand(
+        { runId: "run-1", nodeId: "source_finding", teamId: "t1", runVersion: 7 },
+        {
+          command: "start_agent_task",
+          available: true,
+          reason: "",
+          payload: { budgetRequest: { tokens: 250 } },
+        },
+      ),
+    ).rejects.toThrow("启动 Agent 任务缺少后端幂等与预算契约");
     expect(api.postResearchWorkflowNodeCommand).not.toHaveBeenCalled();
   });
 
