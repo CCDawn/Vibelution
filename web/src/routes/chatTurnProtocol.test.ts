@@ -46,4 +46,24 @@ describe("canonical SessionTurnItem v3 rendering", () => {
     expect(codexTranscriptFromTurnItems([running]).cells[0]?.id).toBe("tool");
     expect(codexTranscriptFromTurnItems([completed]).cells[0]?.id).toBe("tool");
   });
+
+  it("preserves an exact tool start from an older-sequence live enrichment", () => {
+    const cached: SessionTurnItem = {
+      ...base, id: "tool-cached", itemId: "tool", type: "tool_call", callId: "call-1",
+      toolName: "grep_search_tool", status: "running", revision: 1, sequence: 8,
+      updatedAt: "2026-08-10T00:00:00Z",
+    };
+    const exactStart: SessionTurnItem = {
+      ...cached, id: "tool-live", sequence: 7,
+      metadata: { executionStartedAtEpochMs: 1_786_294_806_000 },
+    };
+
+    expect(consolidateSessionTurnItemsV2([cached], [exactStart])).toEqual([
+      expect.objectContaining({
+        id: "tool-cached",
+        sequence: 8,
+        metadata: { executionStartedAtEpochMs: 1_786_294_806_000 },
+      }),
+    ]);
+  });
 });

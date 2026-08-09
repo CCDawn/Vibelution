@@ -34,6 +34,30 @@ const shouldReplaceCanonicalItem = (current: SessionTurnItem, candidate: Session
   || (candidate.revision === current.revision && candidate.sequence >= current.sequence)
 );
 
+const preserveExactToolStartMetadata = (
+  selected: SessionTurnItem,
+  alternate: SessionTurnItem,
+): SessionTurnItem => {
+  if (selected.type !== "tool_call" || alternate.type !== "tool_call") {
+    return selected;
+  }
+  const selectedStart = Number(selected.metadata?.executionStartedAtEpochMs);
+  const alternateStart = Number(alternate.metadata?.executionStartedAtEpochMs);
+  if (Number.isFinite(selectedStart) && selectedStart > 0) {
+    return selected;
+  }
+  if (!Number.isFinite(alternateStart) || alternateStart <= 0) {
+    return selected;
+  }
+  return {
+    ...selected,
+    metadata: {
+      ...(selected.metadata ?? {}),
+      executionStartedAtEpochMs: alternateStart,
+    },
+  };
+};
+
 export const isSessionTurnItemV2 = (item: SessionTurnItem): boolean => (
   item.version === 3
   && Boolean(item.id)
@@ -53,9 +77,16 @@ export const consolidateSessionTurnItemsV2 = (
   groups.flatMap((group) => group ?? []).filter(isSessionTurnItemV2).forEach((item, index) => {
     const identity = canonicalItemIdentity(item);
     const current = byIdentity.get(identity);
-    if (!current || shouldReplaceCanonicalItem(current.item, item)) {
-      byIdentity.set(identity, { item, firstIndex: current?.firstIndex ?? index });
+    if (!current) {
+      byIdentity.set(identity, { item, firstIndex: index });
+      return;
     }
+    const replace = shouldReplaceCanonicalItem(current.item, item);
+    const selected = preserveExactToolStartMetadata(
+      replace ? item : current.item,
+      replace ? current.item : item,
+    );
+    byIdentity.set(identity, { item: selected, firstIndex: current.firstIndex });
   });
   return [...byIdentity.entries()]
     .sort(([leftIdentity, left], [rightIdentity, right]) => (
