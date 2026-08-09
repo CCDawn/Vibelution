@@ -1036,6 +1036,10 @@ def _active_chat_turn_work_run_for_session(
     with s._RUNNING_SESSIONS_LOCK:
         active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
     candidates: list[dict[str, Any]] = []
+    if normalized_turn_id:
+        snapshot = s._WORK_RUN_STORE.load_snapshot("chat_turn", normalized_turn_id)
+        if isinstance(snapshot, dict):
+            candidates.append(snapshot)
     if active_turn_id:
         snapshot = s._WORK_RUN_STORE.load_snapshot("chat_turn", active_turn_id)
         if isinstance(snapshot, dict):
