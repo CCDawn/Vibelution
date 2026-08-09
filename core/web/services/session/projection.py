@@ -1923,38 +1923,66 @@ def _merge_live_content_into_turn_items(
 def _merge_live_tool_start_metadata_into_turn_items(
     items: list[dict[str, Any]],
     codex_transcript: dict[str, Any] | None,
+    *,
+    session_id: str,
+    turn_id: str,
+    message_id: str,
+    source: str,
 ) -> list[dict[str, Any]]:
-    """Enrich canonical journal tools with executor-only live start metadata.
+    """Merge executor-only live tool facts into a canonical journal package.
 
     The journal remains authoritative for item identity, order, and status.  The
     executor start epoch is captured before execution and can arrive only on the
-    live tool revision, so merge that immutable timing fact by callId instead of
-    discarding it when journal items already exist.
+    live tool revision. A just-started call may also be newer than the cached
+    journal projection, so append only that missing live call by stable callId.
     """
     s = _service()
-    exact_start_by_call_id: dict[str, int | float] = {}
-    for cell in list((codex_transcript or {}).get("cells") or []):
+    transcript_cells = list((codex_transcript or {}).get("cells") or [])
+    live_cell_by_call_id: dict[str, tuple[int, dict[str, Any]]] = {}
+    for index, cell in enumerate(transcript_cells, start=1):
         if not isinstance(cell, dict):
             continue
         call_id = str(cell.get("callId") or "").strip()
-        exact_start = s._coerce_tool_number(
-            cell.get("executionStartedAtEpochMs") or cell.get("execution_started_at_epoch_ms")
-        )
-        if call_id and exact_start is not None and exact_start > 0:
-            exact_start_by_call_id[call_id] = exact_start
-    if not exact_start_by_call_id:
+        if call_id:
+            live_cell_by_call_id[call_id] = (index, cell)
+    if not live_cell_by_call_id:
         return items
 
     merged: list[dict[str, Any]] = []
+    existing_call_ids: set[str] = set()
     for raw in items:
         item = dict(raw)
         call_id = str(item.get("callId") or "").strip()
-        exact_start = exact_start_by_call_id.get(call_id)
-        if exact_start is not None:
+        if call_id:
+            existing_call_ids.add(call_id)
+        live_cell = live_cell_by_call_id.get(call_id, (0, {}))[1]
+        exact_start = s._coerce_tool_number(
+            live_cell.get("executionStartedAtEpochMs")
+            or live_cell.get("execution_started_at_epoch_ms")
+        )
+        if exact_start is not None and exact_start > 0:
             metadata = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}
             metadata["executionStartedAtEpochMs"] = exact_start
             item["metadata"] = metadata
         merged.append(item)
+
+    for call_id, (index, cell) in live_cell_by_call_id.items():
+        if call_id in existing_call_ids:
+            continue
+        live_item = s._session_turn_item_from_codex_cell(
+            session_id=session_id,
+            turn_id=turn_id,
+            message_id=message_id,
+            cell=cell,
+            index=index,
+            source=source,
+        )
+        if live_item and str(live_item.get("type") or "").strip() == "tool_call":
+            live_item["sequence"] = max(
+                s._coerce_nonnegative_int(live_item.get("sequence")),
+                max((s._coerce_nonnegative_int(item.get("sequence")) for item in merged), default=0) + 1,
+            )
+            merged.append(live_item)
     return merged
 
 
@@ -1995,7 +2023,14 @@ def _build_session_turn_items_projection(
         )
         if canonical_items:
             stamped = s._stamp_turn_items_message_id(canonical_items, normalized_message_id)
-            stamped = _merge_live_tool_start_metadata_into_turn_items(stamped, codex_transcript)
+            stamped = _merge_live_tool_start_metadata_into_turn_items(
+                stamped,
+                codex_transcript,
+                session_id=session_id,
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                source=source,
+            )
             merged = _merge_live_content_into_turn_items(
                 stamped,
                 session_id=session_id,

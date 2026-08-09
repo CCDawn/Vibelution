@@ -173,6 +173,59 @@ def test_live_tool_start_metadata_enriches_existing_journal_item(monkeypatch) ->
     assert tool_item["metadata"]["executionStartedAtEpochMs"] == 1_786_294_801_125
 
 
+def test_live_tool_start_appends_call_missing_from_cached_journal(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-s3b", turn_id="cap-t3b")
+    capture.note_tool_event(
+        "grep_search_tool",
+        "running",
+        call_id="call-new",
+        event_at_epoch_ms=1_786_294_801_125,
+    )
+    transcript = session_service._build_codex_transcript_projection(
+        message_id="message-live",
+        feedback_events=capture.feedback_events,
+        tool_calls=capture.tool_calls,
+        streaming=True,
+    )
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", lambda _session_id: [])
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id: [
+            {
+                "id": "journal-tool:0",
+                "itemId": "journal-tool",
+                "version": 3,
+                "sessionId": "cap-s3b",
+                "turnId": turn_id,
+                "type": "tool_call",
+                "status": "completed",
+                "revision": 0,
+                "sequence": 1,
+                "callId": "call-existing",
+                "toolName": "glob_tool",
+            }
+        ],
+    )
+
+    turn_items = session_service._build_session_turn_items_projection(
+        session_id="cap-s3b",
+        turn_id="cap-t3b",
+        message_id="message-live",
+        codex_transcript=transcript,
+        done=False,
+        source="assistant_delta",
+    )
+
+    assert [item["callId"] for item in turn_items if item["type"] == "tool_call"] == [
+        "call-existing",
+        "call-new",
+    ]
+    live_item = next(item for item in turn_items if item.get("callId") == "call-new")
+    assert live_item["status"] == "running"
+    assert live_item["metadata"]["executionStartedAtEpochMs"] == 1_786_294_801_125
+
+
 def test_explicit_wrong_turn_is_dropped_even_inside_capture_context(monkeypatch) -> None:
     capture = stream_capture.SessionTurnCapture(session_id="cap-s3c", turn_id="cap-t3c")
     discarded: list[dict] = []
