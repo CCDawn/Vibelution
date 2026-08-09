@@ -21,7 +21,8 @@
 4. 外部任务不会切换当前工作台会话，也不会污染普通会话列表。
 5. 超时和取消能够停止后端实际执行，而不是只停止等待方。
 6. Windows 启动、运行、取消、退出全链路没有可见控制台窗口，也没有遗留子进程。
-7. 聚焦测试、后端测试、配置校验和运行时场景证据均为绿色；未覆盖边界已明确记录。
+7. 调用 Agent 能从 server instructions 和 `resources/list` 自动发现权威操作指南，并按指南完成首次部署/调用；不支持 Resources 的 Host 有明确降级指引。
+8. 聚焦测试、后端测试、配置校验和运行时场景证据均为绿色；未覆盖边界已明确记录。
 
 ## 1. 执行摘要
 
@@ -79,6 +80,7 @@ MCP 进程只负责协议、参数校验和后端连接；Agent 外部资格判�
 5. 让外部任务使用隐藏会话，绝不改变工作台当前会话。
 6. 提供运行时来源校验、结构化错误、最小日志和 Windows 无控制台保证。
 7. 通过真实 Codex Host 验收 legacy/modern 协议兼容、非团队隔离和显式审批，而不是停在 `tools/list` 或单元测试。
+8. 提供一份可被仓库 Agent 与 MCP Host 自动发现的权威部署/调用指南，包含 readiness gate、注册、五工具流程、审批、取消、诊断和回滚。
 
 ### 3.2 明确非目标
 
@@ -90,6 +92,7 @@ MCP 进程只负责协议、参数校验和后端连接；Agent 外部资格判�
 - 本轮不重构通用聊天、Teams 或 Terminal 页面。
 - 本轮不把 MCP Tasks 扩展作为关键依赖；先保留稳定应用层工具契约，并在 Host 协商支持时提供可选原生 Tasks 投影。
 - 本轮不承诺 Claude Desktop、Cursor 的正式兼容，仅在 Codex 验收后建立兼容矩阵。
+- 本轮不提供任意项目文件 Resource、Resource template 或文件浏览器；Resources 首版只暴露固定 allowlisted 操作指南。
 
 ## 4. 已锁定的架构决策
 
@@ -181,6 +184,15 @@ MCP 进程只负责协议、参数校验和后端连接；Agent 外部资格判�
 - 不把 Python exception 类型、堆栈、绝对敏感路径或原始内部消息直接返回 Host；对外只返回稳定 code、短 message、retryable 和必要 correlation ID。
 - MCP Tasks 投影中的 `failed` 只表示协议任务自身无法执行/保存；Agent 业务失败投影为 `completed` + `CallToolResult.isError=true`，避免 Host 错误重试已完成的业务任务。
 
+### D12. 操作指南是可自动发现的首版协议能力
+
+- 权威正文固定为 `docs/agents/mcp-managed-agent-gateway.md`，仓库根 `AGENTS.md`、`docs/README.md` 和配置索引只链接，不复制命令或工具语义。
+- MCP 固定暴露 `vibelution://guide/mcp-managed-agent-gateway` Markdown Resource，annotation 使用 `audience=[assistant,user]`、`priority=1.0`；`resources/read` 只允许读取这一份与当前 source revision 对应的文件，不提供任意路径或 Resource template。
+- legacy `initialize.result.instructions` 与 modern `server/discover.result.instructions` 都要求首次工具调用前读取该 Resource，并给出 `list → start → get → resolve/cancel` 最短顺序。
+- MCP 规范不保证 Host 自动把 Resource 注入上下文，因此五个 Tool description 必须包含指南 URI 与版本，`list_project_agents` 的结构化结果还必须返回 `guideUri` 与 `guideVersion`，作为降级发现入口。
+- 指南顶部状态是部署硬门：实现完成前为 `PLANNED_NOT_DEPLOYABLE`；只有 M0-M5、准确命令演练和真实 Host 验收完成后，才能在同一变更中切换为 `DEPLOYABLE`。
+- 依据：[MCP Resources](https://modelcontextprotocol.io/specification/draft/server/resources)、[MCP Discovery](https://modelcontextprotocol.io/specification/draft/server/discover)。
+
 ## 5. 目标架构
 
 ```text
@@ -191,6 +203,7 @@ Codex / compatible MCP Host
 Official-SDK MCP Adapter
   - legacy/modern protocol lifecycle
   - input/output schema
+  - server instructions + fixed guide Resource
   - fixed tool registry + negotiated Tasks projection
   - bounded backend client
   - no project-data writes
@@ -215,6 +228,7 @@ Hidden external-agent session + auditable task state
 | --- | --- | --- |
 | Agent 身份、启用状态、能力摘要 | Agent Directory | MCP 自建 Agent 注册表 |
 | 外部调用资格 | Agent Directory + active Team membership + team-agent classification | 只按工具列表或单一 UI 字段过滤 |
+| 部署/调用说明 | `docs/agents/mcp-managed-agent-gateway.md` + 同内容 MCP Resource | Host 配置、Tool description 和多份文档各自维护 |
 | 消息、Turn、终态 | Session / Turn Journal | MCP 子进程写第二份任务历史 |
 | 外部任务状态投影 | Backend external-agent task service | 仅保存在 MCP 进程内存中 |
 | 工具审批 | 现有 Tool Approval Service | Headless adapter 自动批准，或 adapter 自建审批账本 |
@@ -224,7 +238,7 @@ Hidden external-agent session + auditable task state
 
 ## 6. MCP 工具契约
 
-首版固定暴露五个工具，不为每个 Agent 动态创建一个工具。工具描述和 annotations 只帮助 Host 展示与决策，真正的 Agent 外部资格、任务归属和权限检查仍由后端执行。
+首版固定暴露五个工具，不为每个 Agent 动态创建一个工具。首次调用前，server instructions 应引导 Host 读取 `vibelution://guide/mcp-managed-agent-gateway`；工具描述和 annotations 只帮助 Host 展示与决策，真正的 Agent 外部资格、任务归属和权限检查仍由后端执行。
 
 ### 6.1 `list_project_agents`
 
@@ -232,7 +246,7 @@ Hidden external-agent session + auditable task state
 
 - 输入：可选的能力/名称过滤和分页参数。
 - 候选集必须排除任何 active team 的 `members[].agentId`，并排除显式或推断出的团队专用 Agent；operator 规则只能继续收窄，不能把团队 Agent 重新加入。
-- 输出：`agentId`、名称、短描述、可用状态、外部最大权限与审批能力摘要。
+- 输出：`agentId`、名称、短描述、可用状态、外部最大权限与审批能力摘要，以及固定 `guideUri`/`guideVersion`。
 - 不输出内部 Prompt、secret、完整工具策略或敏感配置。
 - annotation：`readOnlyHint=true`、`destructiveHint=false`。
 
@@ -507,6 +521,7 @@ backend 提供单一 `external_mcp_eligible(agent_id)` 判定，至少组合以�
 | dependency | `requirements.txt` / 项目既有锁定入口 | 固定经探针验证的官方 MCP SDK 版本 |
 | tests | `tests/test_external_agent_*.py` | 契约、权限、状态机、恢复、取消和进程测试 |
 | ops docs | `docs/ops/config/` 对应现行配置文档 | 注册、禁用、诊断、兼容矩阵和回滚 |
+| caller guide | `docs/agents/mcp-managed-agent-gateway.md` | 唯一部署/发现/调用说明；作为固定 MCP Resource 返回 |
 
 实现时同步更新 `core/web/services/README.md` 的 service/pack 索引。首版不修改 `web/`；若后续增加管理界面，必须另开 VUI 规划和 claim。
 
@@ -527,8 +542,8 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 | M0 | BDD/TDD | protocol probe + `core/external_agent` | 无 |
 | M1 | BDD/TDD | backend task API + non-team exposure + session/Turn integration | M0 contract draft；session claim gate |
 | M2 | BDD/TDD | permission、explicit approval、cancel、lease | M1 |
-| M3 | BDD/TDD | official SDK adapter + five tools + optional Tasks projection | M0、M1、M2 |
-| M4 | Simple implementation + runtime verification | config、lifecycle、ops docs | M3 |
+| M3 | BDD/TDD | official SDK adapter + guide Resource + five tools + optional Tasks projection | M0、M1、M2 |
+| M4 | Simple implementation + runtime verification | self-check、config、lifecycle、caller guide | M3 |
 | M5 | Acceptance-only | real Codex Host + managed runtime | M0-M4 |
 
 ### M0. 协议、SDK 与 Host 兼容探针
@@ -544,9 +559,10 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 3. 核对 Python 3.11、Pydantic 2、FastAPI 现有依赖兼容性；生产依赖使用普通 `mcp`，Inspector/conformance 保持开发工具隔离。
 4. 使用 MCP Inspector 做真实 stdio 进程 smoke；conformance 只在适配 stdio/wire-schema 时加入，不为工具强制引入生产 HTTP transport。
 5. 用本机 Codex 的隔离/临时配置做只加载/发现 smoke，记录实际 protocol era、启动命令、解释器和退出行为；如必须修改用户持久 Codex 配置，先单独取得授权。
-6. 产出明确的 SDK 精确 pin、双时代兼容矩阵、tool schema 约定、EOF/request cancellation 和 adapter shutdown 约定。
+6. 固定 legacy/modern server instructions、`resources/list`/`resources/read` 指南 Resource schema，以及不支持 Resources Host 的 tool-description 降级契约。
+7. 产出明确的 SDK 精确 pin、双时代兼容矩阵、tool schema 约定、EOF/request cancellation 和 adapter shutdown 约定。
 
-**验证：** 新测试先红后绿；legacy/modern 两组协议测试、真实进程退出码、stdout framing、stderr 有界；无残留进程。
+**验证：** 新测试先红后绿；legacy/modern 两组协议测试；两种 era 的 instructions 一致；固定指南可 list/read；真实进程退出码、stdout framing、stderr 有界；无残留进程。
 
 **停止条件：** 官方 SDK 与当前依赖冲突，或 Codex Host 不支持目标工具输出契约时，停止后续实现并重新对齐版本/协议，不自建第二套协议。
 
@@ -600,7 +616,7 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 
 ### M3. 官方 SDK MCP adapter 与 backend client
 
-**目标：** 替换手写协议和进程内业务调用，暴露五个稳定工具，并在 Host 协商支持时提供同一后端任务的可选 MCP Tasks 投影。
+**目标：** 替换手写协议和进程内业务调用，暴露可自动发现的操作指南与五个稳定工具，并在 Host 协商支持时提供同一后端任务的可选 MCP Tasks 投影。
 
 **前置：** M0 SDK pin；M1/M2 API 和安全契约稳定。
 
@@ -609,22 +625,23 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 **工作项：**
 
 1. 实现 `backend_client` 的短连接超时、身份检查和结构化错误映射。
-2. 用官方 SDK 实现五个 MCP 工具和 input/output schema，其中 `get` 返回清洗后的 pending approvals，`resolve` 只提交显式决策。
-3. 添加合适 annotations，但不依赖 annotation 做授权。
-4. 支持 legacy/modern protocol era；处理未知方法、无效参数、request cancellation、Host 断开、stdin EOF 和 shutdown。
-5. 对声明 Tasks extension 的 Host 增加可选 `tasks/get/update/cancel` 投影；不支持时保持五工具兼容面。
-6. 在 adapter 存活期间续期非终态任务 lease，shutdown 时有界请求取消。
-7. 将 CLI 改为调用 backend client。
-8. 删除或隔离旧手写 framing；禁止 direct-write fallback。
-9. 为兼容 wrapper 设置明确删除条件。
+2. 用官方 SDK 实现 legacy/modern server instructions、固定 `resources` capability 与 `vibelution://guide/mcp-managed-agent-gateway` 的 list/read；只读取 allowlisted 权威指南。
+3. 实现五个 MCP 工具和 input/output schema，其中 `get` 返回清洗后的 pending approvals，`resolve` 只提交显式决策；每个 Tool description 和 Agent 列表结果提供 guide 降级入口。
+4. 添加合适 annotations，但不依赖 annotation 做授权。
+5. 支持 legacy/modern protocol era；处理未知方法、无效参数、request cancellation、Host 断开、stdin EOF 和 shutdown。
+6. 对声明 Tasks extension 的 Host 增加可选 `tasks/get/update/cancel` 投影；不支持时保持五工具兼容面。
+7. 在 adapter 存活期间续期非终态任务 lease，shutdown 时有界请求取消。
+8. 将 CLI 改为调用 backend client。
+9. 删除或隔离旧手写 framing；禁止 direct-write fallback。
+10. 为兼容 wrapper 设置明确删除条件。
 
-**验证：** 官方 client 双时代进程测试；五工具 schema/structured output；Tasks 支持与不支持两种协商路径；backend 不可达/版本不匹配 fail closed；CLI/MCP 都不导入后端写 service；退出无残留进程。
+**验证：** 官方 client 双时代进程测试；instructions/Resource/五工具 schema/structured output；Resource 不接受任意 URI；Tasks 支持与不支持两种协商路径；backend 不可达/版本不匹配 fail closed；CLI/MCP 都不导入后端写 service；退出无残留进程。
 
 **停止条件：** adapter 需要直接访问存储才能完成工具调用，或 backend 身份无法确认时，禁止继续注册到 Host。
 
 ### M4. 启用、配置、诊断与 Windows 生命周期
 
-**目标：** 提供可重复、可禁用、无可见控制台的本机注册方式。
+**目标：** 提供可被其他 Agent 自动发现、可重复部署、可禁用、无可见控制台的本机注册与调用方式。
 
 **前置：** M3 进程测试绿色。
 
@@ -633,13 +650,15 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 **工作项：**
 
 1. 使用项目虚拟环境中的明确 Python 解释器，不依赖全局 PATH。
-2. 形成 Codex MCP 注册说明和诊断命令；不自动覆盖用户现有配置。
-3. 说明 backend 不可达、版本不匹配、权限拒绝和取消失败的处理。
-4. Windows 后台启动必须使用项目 shared no-console helper、`pythonw`、`CREATE_NO_WINDOW` 或等价受管路径。
-5. 增加禁用和回滚步骤；关闭 Host 后确认 adapter/child 无残留。
-6. 记录 Launcher/runtime refresh 判定。
+2. 为 `scripts/project_agent_tool.py` 增加稳定 `self-check --project-root ... --json` 与 `mcp --project-root ...` 入口，输出 deployable、source revision、backend 身份、协议时代、guide URI/version 和五工具清单。
+3. 逐条演练 `docs/agents/mcp-managed-agent-gateway.md` 中的 Codex 注册、现有注册冲突、自动发现、五工具调用、审批、取消、禁用和诊断步骤；未演练的目标命令不能把指南状态改为 `DEPLOYABLE`。
+4. 不自动覆盖用户现有 Host 配置；已有同名但 command/project root 不同的注册必须停止并报告。
+5. 说明 backend 不可达、版本不匹配、权限拒绝、审批冲突和取消失败的处理。
+6. Windows 后台启动必须使用项目 shared no-console helper、`CREATE_NO_WINDOW`/`windowsHide` 或等价受管路径，同时保持 stdio pipes；不能用会丢失 stdin/stdout 的 `pythonw` 直接运行 MCP server。
+7. 增加禁用和回滚步骤；关闭 Host 后确认 adapter/child 无残留。
+8. 记录 Launcher/runtime refresh 判定。
 
-**验证：** 干净用户态注册演练；桌面观察无 `cmd.exe`/PowerShell/Windows Terminal/OpenConsole 弹窗；进程树和 runtime scene 一致。
+**验证：** 从根 `AGENTS.md` 自动找到指南；`self-check` 机器可读；干净用户态按指南注册演练；MCP Host 从 instructions/Resource 找到同一指南；桌面观察无 `cmd.exe`/PowerShell/Windows Terminal/OpenConsole 弹窗；进程树和 runtime scene 一致。
 
 **停止条件：** 任何非用户主动终端路径出现可见控制台，或注册必须写入 secret 明文，则不得进入 M5。
 
@@ -653,20 +672,23 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 
 **验收场景：**
 
-1. Codex 加载 server，记录实际 legacy/modern protocol era，并完成 tools discovery。
-2. `list_project_agents` 只返回非团队 Agent；active team 普通成员和团队专用 Agent 均不出现，也不泄露内部配置。
-3. 对不可见团队 Agent 使用猜测 ID 调用 `start`，确认返回不可发现错误且不创建 session/task。
-4. 启动一个只读任务，轮询至成功，结果有界。
-5. 触发需审批任务，确认不会自动接受；通过 `resolve_project_agent_approval` 完成一次显式 `accept`，任务继续执行。
-6. 用其他调用主体、团队任务或无 `approval.persist` capability 尝试审批/`acceptAlways`，确认 fail closed。
-7. 启动长任务并取消，确认后端实际停止且无残留。
-8. 任务运行中把 Agent 加入 active team，确认新的审批/执行资格撤销并进入受管停止；查询和取消仍可用于收尾。
-9. 请求超出 operator 上限的权限，确认被拒绝或降权。
-10. 任务前后当前工作台会话不变，普通会话列表无外部任务噪声。
-11. backend 停止或 revision 不匹配时，adapter fail closed 并给出可诊断错误。
-12. Host 关闭后 adapter 正常退出，无可见控制台和孤儿进程。
-13. 强制结束 adapter，确认 lease expiry 会触发受管停止，且不会留下无限运行任务。
-14. 若 Codex 声明 Tasks extension，验证原生 task 创建/查询/取消；若未声明，记录为 Host 能力边界，五工具闭环仍必须通过。
+1. 一个不了解实现细节的 Agent 从根 `AGENTS.md` 自动找到权威指南，按 readiness gate 判断是否允许部署。
+2. Codex 加载 server，记录实际 legacy/modern protocol era；server instructions 明确要求先读固定 guide Resource。
+3. `resources/list` 能发现 `vibelution://guide/mcp-managed-agent-gateway`，`resources/read` 内容、guide version 和 source revision 一致；任意 URI/path 读取被拒绝。
+4. 在不预先告诉调用顺序的情况下，让调用 Agent 仅依赖 instructions/Resource 完成 tools discovery；若 Codex 不自动注入 Resource，验证 Tool description/结果降级路径并记录 Host 边界。
+5. `list_project_agents` 只返回非团队 Agent；active team 普通成员和团队专用 Agent 均不出现，也不泄露内部配置。
+6. 对不可见团队 Agent 使用猜测 ID 调用 `start`，确认返回不可发现错误且不创建 session/task。
+7. 启动一个只读任务，轮询至成功，结果有界。
+8. 触发需审批任务，确认不会自动接受；通过 `resolve_project_agent_approval` 完成一次显式 `accept`，任务继续执行。
+9. 用其他调用主体、团队任务或无 `approval.persist` capability 尝试审批/`acceptAlways`，确认 fail closed。
+10. 启动长任务并取消，确认后端实际停止且无残留。
+11. 任务运行中把 Agent 加入 active team，确认新的审批/执行资格撤销并进入受管停止；查询和取消仍可用于收尾。
+12. 请求超出 operator 上限的权限，确认被拒绝或降权。
+13. 任务前后当前工作台会话不变，普通会话列表无外部任务噪声。
+14. backend 停止或 revision 不匹配时，adapter fail closed 并给出可诊断错误。
+15. Host 关闭后 adapter 正常退出，无可见控制台和孤儿进程。
+16. 强制结束 adapter，确认 lease expiry 会触发受管停止，且不会留下无限运行任务。
+17. 若 Codex 声明 Tasks extension，验证原生 task 创建/查询/取消；若未声明，记录为 Host 能力边界，五工具闭环仍必须通过。
 
 **交付门：** 全部场景有命令、时间、source revision、结果和未覆盖边界；仅 tools discovery 不能算完成。
 
@@ -676,6 +698,7 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 | --- | --- | --- |
 | Contract | 五个 tool input/output schema、错误码、状态枚举、审批决策 | schema snapshot / focused tests |
 | Protocol | newline framing、legacy initialize、modern server/discover、request cancellation、EOF/shutdown | 官方 SDK client 双时代子进程测试 |
+| Guide discovery | repo indexes、双时代 instructions、resources list/read、tool fallback、任意 URI 拒绝 | docs contract + SDK process + real Host tests |
 | Exposure | active team 普通成员、团队专用 Agent、猜测 ID、运行中加入团队 | policy/service/route negative tests |
 | Service | task 状态机、恢复、幂等、结果有界 | backend service tests |
 | Permission | 默认只读、服务端 clamp、调用主体与 task capability | negative tests |
@@ -697,6 +720,7 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 
 - 保留现有测试作为基线，但新增测试明确证明旧 framing、自动审批和同步取消语义不合格。
 - MCP 默认未注册、未启用，不改变现有用户环境。
+- 权威操作指南保持 `PLANNED_NOT_DEPLOYABLE`，明确禁止部署历史原型。
 
 ### Stage B：先建后端受管能力
 
@@ -712,6 +736,7 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 ### Stage D：Codex 受控启用
 
 - 用户明确确认后写入/更新 Codex MCP 配置。
+- 只有指南中的 self-check、注册和自动发现步骤经真实演练后，才把 `Gateway Status` 与 runtime Resource 同步切换为 `DEPLOYABLE`。
 - 先只启用 `read_only`，通过 live acceptance 后再评估 `workspace_write`。
 
 ### Stage E：兼容矩阵扩展
@@ -723,16 +748,19 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 
 1. 从 Host 配置禁用或移除 Vibelution MCP 注册，不删除用户其他 MCP 配置。
 2. backend external-agent API 保持 disabled/inert，不影响普通聊天和 Agent 运行。
-3. 回滚 adapter/依赖代码到已知绿色提交；不回滚或删除用户会话数据。
-4. 已生成的隐藏任务保留审计信息，后续按独立清理流程处理。
-5. 若新 session kind 引发索引问题，停止新建并回到兼容 hidden kind；禁止批量破坏性迁移。
-6. 回滚后复验普通 Chat/Teams/Terminal 会话不受影响，并确认无残留进程。
+3. 权威指南与 runtime Resource 状态同步切到 `DISABLED`，阻止其他 Agent 按旧命令重新注册。
+4. 回滚 adapter/依赖代码到已知绿色提交；不回滚或删除用户会话数据。
+5. 已生成的隐藏任务保留审计信息，后续按独立清理流程处理。
+6. 若新 session kind 引发索引问题，停止新建并回到兼容 hidden kind；禁止批量破坏性迁移。
+7. 回滚后复验普通 Chat/Teams/Terminal 会话不受影响，并确认无残留进程。
 
 ## 16. 主要风险与控制
 
 | 风险 | 概率/影响 | 控制 |
 | --- | --- | --- |
 | MCP SDK 版本漂移 | 中/高 | M0 隔离探针、精确 pin、真实 Host 测试 |
+| 指南与运行时漂移 | 中/高 | 单一权威文件、guide version/source revision、自检与 Resource 契约测试 |
+| Host 不自动读取 Resource | 中/中 | 双时代 instructions + Tool description/结果降级入口 + M5 陌生 Agent 验收 |
 | 连接到错误 backend | 中/高 | project root + runtime revision + API version 身份校验 |
 | session 热路径并发修改 | 当前/高 | 等待现有 claim 释放或明确协调，避免重叠写 |
 | 调用方提权 | 高/高 | 服务端权限交集、默认只读、禁止单次请求提权 |
@@ -751,6 +779,8 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 只有同时满足以下条件才可以宣称“Vibelution MCP 首版完成”：
 
 - [ ] 使用官方 SDK v2，legacy/modern stdio 兼容矩阵与真实 Host 握手通过。
+- [ ] 权威操作指南从根 `AGENTS.md` 可发现，顶部状态和命令与当前实现一致。
+- [ ] 双时代 server instructions 与固定 Markdown Resource 可引导陌生调用 Agent 完成首次调用；无 Resources Host 有 Tool 降级指引。
 - [ ] MCP adapter 不直接导入或调用有写副作用的 backend service。
 - [ ] backend 为唯一写入者，任务可在 adapter 重启后查询。
 - [ ] 五个工具契约稳定，输入输出有 schema、有界且可诊断；不支持 Tasks 的 Host 也能完整闭环。
@@ -775,7 +805,7 @@ M0 与 M1 的“契约设计”可并行；共享 DTO 定稿由同一 owner 串�
 - 多轮任务的显式 `continue_project_agent_task` 输入协议。
 - MCP 远程 transport、远程身份认证和多用户租户隔离。
 - 外部任务管理 VUI、审批 VUI 的专用视图。
-- MCP Resources 或 Apps 扩展，以及把 Agent catalog 镜像为 Resource 的 Host 体验优化。
+- MCP Apps 扩展，以及把 Agent catalog 或任意项目文件镜像为 Resource 的 Host 体验优化；首版 Resources 仅含固定操作指南。
 - 对 MCP Tasks 的强依赖、Tasks 专属交互或脱离五工具兼容面的能力；首版仅做协商可选投影。
 - Host 主动推送进度通知，而不是轮询。
 - 跨设备/跨节点 Agent 调用和员工权限映射。
