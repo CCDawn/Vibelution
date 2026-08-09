@@ -1,163 +1,99 @@
 from __future__ import annotations
 
-import json
+import importlib.util
+from functools import partial
+from pathlib import Path
 
-import pytest
+import anyio
 
-from core.external_agent.mcp_stdio_server import TOOLS, _call_tool, _dispatch
-from core.external_agent.project_agent_tool_service import (
-    ProjectAgentToolError,
-    list_project_agents_for_tool,
-    run_project_agent_tool,
-)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_list_project_agents_for_tool_shapes_summary() -> None:
-    def _list(**_kwargs):
-        return [
-            {
-                "agentId": "a2",
-                "agentCode": "reviewer",
-                "displayName": "Reviewer",
-                "status": "active",
-                "permissionPreset": "auto_review",
-            },
-            {
-                "agentId": "a1",
-                "agentCode": "coder",
-                "displayName": "Coder",
-                "status": "active",
-            },
-        ]
-
-    payload = list_project_agents_for_tool(list_agents_fn=_list)
-    assert payload["status"] == "ok"
-    assert payload["count"] == 2
-    assert payload["agents"][0]["displayName"] == "Coder"
-    assert payload["agents"][1]["agentId"] == "a2"
+def _script_module():
+    path = PROJECT_ROOT / "scripts" / "project_agent_tool.py"
+    spec = importlib.util.spec_from_file_location("project_agent_tool_script", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def test_run_project_agent_tool_sync_happy_path() -> None:
-    created: dict[str, object] = {}
-    submitted: dict[str, object] = {}
-    polls = {"n": 0}
+class FakeBackend:
+    def __init__(self) -> None:
+        self.get_calls = 0
 
-    def _get_agent(agent_id: str, **_kwargs):
-        if agent_id == "agent-1":
-            return {"agentId": "agent-1", "agentCode": "coder", "displayName": "Coder"}
-        return None
-
-    def _create_session(**kwargs):
-        created.update(kwargs)
-        return {"sessionId": "sess-1"}
-
-    def _submit(session_id: str, content: str, **kwargs):
-        submitted.update({"sessionId": session_id, "content": content, **kwargs})
-        return {"turnId": "turn-1"}
-
-    def _detail(session_id: str, **_kwargs):
-        polls["n"] += 1
-        if polls["n"] < 2:
-            return {"status": "running", "activeTurnId": "turn-1", "messages": []}
+    async def list_agents(self, *, limit: int = 50):
         return {
-            "status": "ready",
-            "activeTurnId": "",
-            "messages": [
-                {"role": "user", "content": "do the thing"},
-                {"role": "assistant", "content": "done: thing complete"},
-            ],
+            "status": "ok",
+            "agents": [
+                {"agentId": "coder", "agentCode": "code", "displayName": "Coder"}
+            ][:limit],
         }
 
-    result = run_project_agent_tool(
-        agent_id="agent-1",
-        task="do the thing",
-        timeout_seconds=10,
-        create_session_fn=_create_session,
-        submit_message_fn=_submit,
-        get_detail_fn=_detail,
-        get_agent_fn=_get_agent,
-        list_agents_fn=lambda **_k: [],
-        list_approvals_fn=lambda *_a, **_k: [],
-        sleep_fn=lambda _s: None,
-        monotonic_fn=lambda: 0.0 if polls["n"] < 5 else 0.0,
-    )
-    assert created["agent_id"] == "agent-1"
-    assert submitted["content"] == "do the thing"
-    assert result["status"] == "ok"
-    assert result["sessionId"] == "sess-1"
-    assert result["reply"] == "done: thing complete"
-    assert result["permissionMode"] == "auto_review"
+    async def start_task(self, **_kwargs):
+        return {"taskId": "eat-1", "status": "running", "shouldPoll": True}
 
-
-def test_run_project_agent_tool_requires_task() -> None:
-    with pytest.raises(ProjectAgentToolError):
-        run_project_agent_tool(agent_id="a", task="  ")
-
-
-def test_run_project_agent_tool_auto_accepts_approvals() -> None:
-    polls = {"n": 0}
-    resolved: list[tuple[str, str, str]] = []
-
-    def _get_agent(agent_id: str, **_kwargs):
-        return {"agentId": agent_id, "displayName": "X"}
-
-    def _detail(session_id: str, **_kwargs):
-        polls["n"] += 1
-        if polls["n"] == 1:
-            return {"status": "running", "activeTurnId": "t1", "messages": []}
+    async def get_task(self, *, task_id: str):
+        self.get_calls += 1
+        assert task_id == "eat-1"
         return {
-            "status": "ready",
-            "messages": [{"role": "assistant", "content": "ok"}],
+            "taskId": task_id,
+            "status": "awaiting_approval",
+            "shouldPoll": True,
+            "pendingApprovals": [{"approvalId": "approval-1"}],
         }
 
-    def _list_approvals(session_id: str, status: str = ""):
-        if polls["n"] == 1:
-            return [{"requestId": "req-1", "status": "pending"}]
-        return []
 
-    def _resolve(session_id: str, request_id: str, decision: str):
-        resolved.append((session_id, request_id, decision))
-        return {"status": "resolved"}
-
-    result = run_project_agent_tool(
-        agent_id="agent-1",
-        task="hi",
-        create_session_fn=lambda **_k: {"sessionId": "s1"},
-        submit_message_fn=lambda *_a, **_k: {"turnId": "t1"},
-        get_detail_fn=_detail,
-        get_agent_fn=_get_agent,
-        list_agents_fn=lambda **_k: [],
-        list_approvals_fn=_list_approvals,
-        resolve_approval_fn=_resolve,
-        sleep_fn=lambda _s: None,
-        monotonic_fn=lambda: 0.0,
+def test_cli_source_has_no_backend_write_service_or_auto_approval_import() -> None:
+    source = (PROJECT_ROOT / "scripts" / "project_agent_tool.py").read_text(
+        encoding="utf-8"
     )
-    assert result["status"] == "ok"
-    assert resolved == [("s1", "req-1", "accept")]
-    assert result["approvalAutoAccepted"] >= 1
+
+    assert "project_agent_tool_service" not in source
+    assert "core.web.services" not in source
+    assert "auto_accept" not in source.lower()
+    assert "ManagedAgentBackendClient" in source
 
 
-def test_mcp_tools_list_and_call_list_agents() -> None:
-    assert {tool["name"] for tool in TOOLS} == {"list_project_agents", "run_project_agent"}
-    listed = _dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-    assert listed is not None
-    assert "result" in listed
-    assert len(listed["result"]["tools"]) == 2
+def test_list_cli_uses_managed_backend() -> None:
+    module = _script_module()
+
+    result = anyio.run(partial(module.list_via_backend, FakeBackend(), limit=20))
+
+    assert result["agents"][0]["agentId"] == "coder"
 
 
-def test_mcp_initialize() -> None:
-    response = _dispatch(
-        {
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test"}},
-        }
+def test_run_wrapper_returns_task_when_explicit_approval_is_required() -> None:
+    module = _script_module()
+    backend = FakeBackend()
+
+    result = anyio.run(
+        partial(
+            module.run_via_backend,
+            backend,
+            agent_id="coder",
+            agent_code="",
+            task="write something",
+            permission_profile="workspace_write",
+            client_request_id="request-1",
+            title="",
+            timeout_seconds=2,
+        )
     )
-    assert response is not None
-    assert response["result"]["serverInfo"]["name"] == "vibelution-project-agent"
+
+    assert result["status"] == "awaiting_approval"
+    assert result["taskId"] == "eat-1"
+    assert result["pendingApprovals"] == [{"approvalId": "approval-1"}]
+    assert backend.get_calls == 1
+    assert "compatibilityWrapper" in result
 
 
-def test_mcp_call_tool_invalid_argument() -> None:
-    with pytest.raises(ProjectAgentToolError):
-        _call_tool("run_project_agent", {"task": ""})
+def test_cli_parser_defaults_to_read_only_and_managed_mcp() -> None:
+    module = _script_module()
+    parser = module.build_parser()
+
+    run_args = parser.parse_args(["run", "--agent-id", "coder", "--task", "hello"])
+    mcp_args = parser.parse_args(["mcp", "--project-root", str(PROJECT_ROOT)])
+
+    assert run_args.permission_profile == "read_only"
+    assert mcp_args.project_root == PROJECT_ROOT

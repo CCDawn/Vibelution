@@ -288,18 +288,21 @@ def _child_environment(
     *,
     instance_id: str,
     backend_port: int,
-    frontend_port: int,
+    frontend_port: int | None,
     data_root: Path,
     config_root: Path,
 ) -> dict[str, str]:
     env = os.environ.copy()
-    env.pop("VIBELUTION_CONFIG_PATH", None)
+    for key in (
+        "VIBELUTION_CONFIG_PATH",
+        "VIBELUTION_FRONTEND_PORT",
+        "AGENT_WORKBENCH_FRONTEND_PORT",
+    ):
+        env.pop(key, None)
     env.update(
         {
             "VIBELUTION_PORT": str(int(backend_port)),
             "AGENT_WORKBENCH_BACKEND_PORT": str(int(backend_port)),
-            "VIBELUTION_FRONTEND_PORT": str(int(frontend_port)),
-            "AGENT_WORKBENCH_FRONTEND_PORT": str(int(frontend_port)),
             "VIBELUTION_DATA_HOME": str(data_root),
             "VIBELUTION_CONFIG_HOME": str(config_root),
             "VIBELUTION_ACCEPTANCE_INSTANCE_ID": instance_id,
@@ -308,6 +311,13 @@ def _child_environment(
             "VIBELUTION_ENABLE_USER_ENV_FALLBACK": "0",
         }
     )
+    if frontend_port is not None:
+        env.update(
+            {
+                "VIBELUTION_FRONTEND_PORT": str(int(frontend_port)),
+                "AGENT_WORKBENCH_FRONTEND_PORT": str(int(frontend_port)),
+            }
+        )
     return env
 
 
@@ -452,6 +462,7 @@ def start_instance(
     runtime_home: Path | str | None = None,
     mode: str = MODE,
     readiness_timeout: float = 45.0,
+    backend_only: bool = False,
 ) -> dict[str, Any]:
     if str(mode or "").strip() != MODE:
         raise ValueError(
@@ -490,13 +501,15 @@ def start_instance(
             candidates=BACKEND_PORTS,
         )
         provisional_state["ports"]["backend"] = backend_port
-        frontend_port = _allocate_port(
-            lease_root=paths["leaseRoot"],
-            kind="frontend",
-            instance_id=safe_id,
-            candidates=FRONTEND_PORTS,
-        )
-        provisional_state["ports"]["frontend"] = frontend_port
+        frontend_port: int | None = None
+        if not backend_only:
+            frontend_port = _allocate_port(
+                lease_root=paths["leaseRoot"],
+                kind="frontend",
+                instance_id=safe_id,
+                candidates=FRONTEND_PORTS,
+            )
+            provisional_state["ports"]["frontend"] = frontend_port
         env = _child_environment(
             instance_id=safe_id,
             backend_port=backend_port,
@@ -514,7 +527,6 @@ def start_instance(
                     if part
                 )
         backend_command = _backend_command(project=project, backend_port=backend_port)
-        frontend_command = _frontend_command(project=project, frontend_port=frontend_port)
         backend_process = _spawn(
             backend_command,
             cwd=project,
@@ -530,56 +542,71 @@ def start_instance(
             pid=backend_process.pid,
             create_time=_process_create_time(backend_process.pid),
         )
-        frontend_process = _spawn(
-            frontend_command,
-            cwd=project / "web",
-            env=env,
-            stdout_path=paths["logsRoot"] / "frontend.stdout.log",
-            stderr_path=paths["logsRoot"] / "frontend.stderr.log",
-        )
-        _update_lease_owner(
-            lease_root=paths["leaseRoot"],
-            kind="frontend",
-            port=frontend_port,
-            instance_id=safe_id,
-            pid=frontend_process.pid,
-            create_time=_process_create_time(frontend_process.pid),
-        )
+        if not backend_only:
+            assert frontend_port is not None
+            frontend_command = _frontend_command(
+                project=project,
+                frontend_port=frontend_port,
+            )
+            frontend_process = _spawn(
+                frontend_command,
+                cwd=project / "web",
+                env=env,
+                stdout_path=paths["logsRoot"] / "frontend.stdout.log",
+                stderr_path=paths["logsRoot"] / "frontend.stderr.log",
+            )
+            _update_lease_owner(
+                lease_root=paths["leaseRoot"],
+                kind="frontend",
+                port=frontend_port,
+                instance_id=safe_id,
+                pid=frontend_process.pid,
+                create_time=_process_create_time(frontend_process.pid),
+            )
         backend_url = f"http://127.0.0.1:{backend_port}"
-        frontend_url = f"http://127.0.0.1:{frontend_port}"
         _wait_ready(
             url=f"{backend_url}/api/health",
             process=backend_process,
             timeout_seconds=readiness_timeout,
         )
-        _wait_ready(
-            url=frontend_url,
-            process=frontend_process,
-            timeout_seconds=readiness_timeout,
-        )
+        if frontend_process is not None:
+            _wait_ready(
+                url=f"http://127.0.0.1:{frontend_port}",
+                process=frontend_process,
+                timeout_seconds=readiness_timeout,
+            )
+        ports = {"backend": backend_port}
+        processes = {
+            "backend": {
+                "pid": backend_process.pid,
+                "createTime": _process_create_time(backend_process.pid),
+            }
+        }
+        if frontend_process is not None:
+            ports["frontend"] = frontend_port
+            processes["frontend"] = {
+                "pid": frontend_process.pid,
+                "createTime": _process_create_time(frontend_process.pid),
+            }
         state = {
             "schemaVersion": SCHEMA_VERSION,
             "instanceId": safe_id,
             "mode": MODE,
+            "backendOnly": bool(backend_only),
             "status": "running",
             "projectRoot": str(project),
             "sourceCommit": _source_commit(project),
-            "ports": {"backend": backend_port, "frontend": frontend_port},
+            "ports": ports,
             "dataRoot": str(paths["dataRoot"]),
             "configRoot": str(paths["configRoot"]),
             "logsRoot": str(paths["logsRoot"]),
             "backendUrl": backend_url,
-            "frontendUrl": frontend_url,
-            "processes": {
-                "backend": {
-                    "pid": backend_process.pid,
-                    "createTime": _process_create_time(backend_process.pid),
-                },
-                "frontend": {
-                    "pid": frontend_process.pid,
-                    "createTime": _process_create_time(frontend_process.pid),
-                },
-            },
+            **(
+                {"frontendUrl": f"http://127.0.0.1:{frontend_port}"}
+                if frontend_process is not None
+                else {}
+            ),
+            "processes": processes,
             "createdAt": _now_iso(),
             "updatedAt": _now_iso(),
         }
@@ -618,7 +645,12 @@ def status_instance(
     result = dict(state)
     processes = state.get("processes") if isinstance(state.get("processes"), dict) else {}
     process_status: dict[str, bool] = {}
-    for name in ("backend", "frontend"):
+    process_names = (
+        ("backend",)
+        if bool(state.get("backendOnly"))
+        else ("backend", "frontend")
+    )
+    for name in process_names:
         identity = processes.get(name) if isinstance(processes.get(name), dict) else {}
         process_status[name] = _process_matches(
             int(identity.get("pid") or 0),
@@ -658,7 +690,12 @@ def stop_instance(
         return {"instanceId": safe_id, "status": "stopped", "existed": False}
     processes = state.get("processes") if isinstance(state.get("processes"), dict) else {}
     terminated: dict[str, bool] = {}
-    for name in ("frontend", "backend"):
+    process_names = (
+        ("backend",)
+        if bool(state.get("backendOnly"))
+        else ("frontend", "backend")
+    )
+    for name in process_names:
         identity = processes.get(name) if isinstance(processes.get(name), dict) else {}
         terminated[name] = _terminate_recorded(
             int(identity.get("pid") or 0),
@@ -689,6 +726,11 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--project", required=True)
     start.add_argument("--mode", default=MODE)
     start.add_argument("--readiness-timeout", type=float, default=45.0)
+    start.add_argument(
+        "--backend-only",
+        action="store_true",
+        help="Start only the isolated backend; do not allocate or spawn Vite/Node.",
+    )
     for command in ("status", "stop"):
         action = subparsers.add_parser(command)
         action.add_argument("--instance-id", required=True)
@@ -707,6 +749,7 @@ def main(argv: list[str] | None = None) -> int:
                 runtime_home=runtime_home,
                 mode=args.mode,
                 readiness_timeout=args.readiness_timeout,
+                backend_only=bool(args.backend_only),
             )
         elif args.command == "status":
             payload = status_instance(instance_id=args.instance_id, runtime_home=runtime_home)

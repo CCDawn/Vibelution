@@ -1,13 +1,12 @@
-"""Local project-agent-as-tool surface for host agents (MCP/CLI)."""
+"""Managed local project-Agent gateway for host agents."""
 
-from .project_agent_tool_service import (
-    ProjectAgentToolError,
-    list_project_agents_for_tool,
-    run_project_agent_tool,
-)
+from .backend_client import BackendClientError, ManagedAgentBackendClient
+from .contracts import GUIDE_URI, GUIDE_VERSION, MCP_TOOL_NAMES
 
 __all__ = [
-    "ProjectAgentToolError",
-    "list_project_agents_for_tool",
-    "run_project_agent_tool",
+    "GUIDE_URI",
+    "GUIDE_VERSION",
+    "MCP_TOOL_NAMES",
+    "BackendClientError",
+    "ManagedAgentBackendClient",
 ]

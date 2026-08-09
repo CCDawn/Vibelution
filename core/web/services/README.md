@@ -25,11 +25,12 @@
 | `team_knowledge/` | `team_knowledge_service.py` | [team_knowledge/README.md](team_knowledge/README.md) |
 | `agent_directory/` | `agent_directory_service.py` | [agent_directory/README.md](agent_directory/README.md) |
 | `runtime_scene/` | `runtime_scene_service.py` | [runtime_scene/README.md](runtime_scene/README.md) |
+| `external_agent/` | — | [external_agent/README.md](external_agent/README.md) |
 
 ## 统计
 
 - Facade `*_service.py`：**69**
-- 有 pack README：**6**
+- 有 pack README：**7**
 - 仅单文件 facade：**63**
 
 ## Domain 速查
