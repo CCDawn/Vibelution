@@ -13,7 +13,13 @@ const CONTRACT = {
   sourcePolicy: { minimumPrimarySources: 3 },
   budgetPolicy: { toolCalls: 20 },
   stopPolicy: { maxNoImprovementRounds: 2 },
-  modelRoutingPolicy: { reasoning: "model-a" },
+  modelRoutingPolicy: {
+    source_discovery: "model-a",
+    extraction: "model-a",
+    reasoning: "model-a",
+    review: "model-a",
+    governance: "model-a",
+  },
   evaluationContract: { requiredSeeds: [11, 29, 47] },
 };
 
@@ -76,5 +82,18 @@ describe("buildResearchRunInput", () => {
         draft: draft({ contractJson: JSON.stringify({ ...CONTRACT, budgetPolicy: null }) }),
       }),
     ).toThrow("运行合同缺少 budgetPolicy");
+
+    expect(() =>
+      buildResearchRunInput({
+        teamId: "team-1",
+        projectId: "project-1",
+        draft: draft({
+          contractJson: JSON.stringify({
+            ...CONTRACT,
+            modelRoutingPolicy: { ...CONTRACT.modelRoutingPolicy, source_discovery: "" },
+          }),
+        }),
+      }),
+    ).toThrow("运行合同缺少 modelRoutingPolicy.source_discovery");
   });
 });

@@ -11,6 +11,7 @@ import {
 } from "../../../components/vui";
 import {
   buildResearchRunInput,
+  RESEARCH_MODEL_ROUTING_PURPOSES,
   type ResearchRunLaunchDraft,
 } from "./researchRunLaunchContract";
 import styles from "./ResearchRunLaunchPanel.styles";
@@ -32,7 +33,12 @@ const INITIAL_CONTRACT = JSON.stringify(
       maxRetries: 2,
     },
     stopPolicy: { maxNoImprovementRounds: 2, stopOnBudgetExhaustion: true },
-    modelRoutingPolicy: { reasoning: "", extraction: "" },
+    modelRoutingPolicy: Object.fromEntries(
+      RESEARCH_MODEL_ROUTING_PURPOSES.map((purpose) => [
+        purpose,
+        "relay_openai/gpt-5.6-luna",
+      ]),
+    ),
     evaluationContract: { minimumClaimEvidenceCoverage: 0.9, requiredSeeds: [11, 29, 47] },
   },
   null,

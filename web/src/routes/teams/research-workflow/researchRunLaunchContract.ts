@@ -1,5 +1,13 @@
 import type { CreateResearchWorkflowRunInput } from "../../../api/researchWorkflow";
 
+export const RESEARCH_MODEL_ROUTING_PURPOSES = [
+  "source_discovery",
+  "extraction",
+  "reasoning",
+  "review",
+  "governance",
+] as const;
+
 export type ResearchRunLaunchDraft = {
   questionId: string;
   researchBriefHash: string;
@@ -49,6 +57,16 @@ export function buildResearchRunInput(options: {
       throw new Error(`运行合同缺少 ${key}`);
     }
   }
+  const modelRoutingPolicy = contract.modelRoutingPolicy as Record<string, unknown>;
+  for (const purpose of RESEARCH_MODEL_ROUTING_PURPOSES) {
+    const route = modelRoutingPolicy[purpose];
+    const modelRef = typeof route === "string"
+      ? route.trim()
+      : route && typeof route === "object" && !Array.isArray(route)
+        ? String((route as Record<string, unknown>).modelRef || "").trim()
+        : "";
+    if (!modelRef) throw new Error(`运行合同缺少 modelRoutingPolicy.${purpose}`);
+  }
   const datasets = draft.datasetRefs
     .split(/[\n,]/)
     .map((value) => value.trim())
@@ -67,7 +85,7 @@ export function buildResearchRunInput(options: {
     sourcePolicy: contract.sourcePolicy as Record<string, unknown>,
     budgetPolicy: contract.budgetPolicy as Record<string, unknown>,
     stopPolicy: contract.stopPolicy as Record<string, unknown>,
-    modelRoutingPolicy: contract.modelRoutingPolicy as Record<string, unknown>,
+    modelRoutingPolicy,
     evaluationContract: contract.evaluationContract as Record<string, unknown>,
     idempotencyKey: `create:${keySeed}`,
   };
