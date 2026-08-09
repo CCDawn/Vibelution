@@ -2,7 +2,7 @@
 
 > **Document Status:** Current operational contract
 > **Gateway Status:** `DEPLOYABLE`
-> **Guide Version:** `0.3.2`
+> **Guide Version:** `0.3.3`
 > **Canonical MCP Name:** `vibelution`
 > **Canonical Resource URI:** `vibelution://guide/mcp-managed-agent-gateway`
 > **Target stdio Entry:** `<project-root>\.venv\Scripts\python.exe <project-root>\scripts\project_agent_tool.py mcp --project-root <project-root>`
@@ -91,7 +91,9 @@ lease_seconds = 30
 
 - `enabled=false` 是默认值，也是紧急停止新任务的开关。
 - `permission_ceiling` 只能缩小外部请求权限；首轮部署保持 `read_only`。
-- `allowed_agent_ids` 和 `denied_agent_ids` 是 operator 附加收窄，不会让团队 Agent 变成可调用对象。
+- 团队专属 Agent 和活跃团队成员始终不可外部调用，`allowed_agent_ids` 不能覆盖这条硬边界。
+- `allowed_agent_ids` 非空时会收窄普通 `personal_agent`；同时，它也是 active、非团队 `hidden` Agent 的显式开放清单。未列入的 `hidden` Agent 保持内部不可见。
+- `denied_agent_ids` 始终优先于 allowlist。
 - `approval_persist_enabled=false` 时，即使 Host 请求 `acceptAlways` 也会被拒绝。
 - 配置变更后只通过 Launcher 受管重启；不直接启动第二套 backend。
 
@@ -125,7 +127,7 @@ requested profile
   "serverVersion": "0.3.1",
   "protocolEras": ["legacy", "modern"],
   "guideUri": "vibelution://guide/mcp-managed-agent-gateway",
-  "guideVersion": "0.3.2",
+  "guideVersion": "0.3.3",
   "tools": [
     "list_project_agents",
     "start_project_agent_task",

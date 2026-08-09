@@ -95,7 +95,12 @@ class FakeRuntime:
         self.events.append({"args": args, "kwargs": kwargs})
 
 
-def _service(tmp_path, runtime: FakeRuntime) -> ExternalAgentTaskService:
+def _service(
+    tmp_path,
+    runtime: FakeRuntime,
+    *,
+    allowed_agent_ids: tuple[str, ...] = (),
+) -> ExternalAgentTaskService:
     dependencies = ExternalAgentTaskServiceDependencies(
         list_agents=runtime.list_agents,
         get_agent=runtime.get_agent,
@@ -115,7 +120,36 @@ def _service(tmp_path, runtime: FakeRuntime) -> ExternalAgentTaskService:
         runtime_permission_ceiling="workspace_write",
         lease_seconds=30,
         approval_persist_enabled=True,
+        allowed_agent_ids=allowed_agent_ids,
     )
+
+
+def test_explicit_allowlist_exposes_and_runs_hidden_non_team_agent(tmp_path) -> None:
+    runtime = FakeRuntime(
+        agents=[_agent("hidden-coder", conversationIndexKind="hidden")]
+    )
+    service = _service(
+        tmp_path,
+        runtime,
+        allowed_agent_ids=("hidden-coder",),
+    )
+
+    discovered = service.list_agents()
+    started = service.start_task(
+        owner_id="host-a",
+        adapter_connection_id="connection-a",
+        capabilities=set(),
+        agent_id="hidden-coder",
+        task="run a bounded read-only check",
+        permission_profile="read_only",
+        client_request_id="hidden-coder-request",
+        title="",
+        runtime_revision="rev-1",
+    )
+
+    assert [item["agentId"] for item in discovered["agents"]] == ["hidden-coder"]
+    assert started["status"] == "running"
+    assert started["effectivePermissionProfile"] == "read_only"
 
 
 def test_start_is_hidden_async_and_does_not_persist_prompt(tmp_path) -> None:
