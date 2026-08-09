@@ -59,6 +59,7 @@ def _terminal_source_task() -> dict:
             "locator": "https://example.test/a",
             "sourceType": "paper",
             "query": "mechanism perspective",
+            "perspective": "mechanism",
             "summary": "Mechanism evidence.",
         },
         {
@@ -66,6 +67,7 @@ def _terminal_source_task() -> dict:
             "locator": "https://example.test/b",
             "sourceType": "paper",
             "query": "baseline perspective",
+            "perspective": "independent_baseline",
             "summary": "Baseline evidence.",
         },
         {
@@ -73,6 +75,7 @@ def _terminal_source_task() -> dict:
             "locator": "https://example.test/c",
             "sourceType": "web",
             "query": "implementation perspective",
+            "perspective": "falsification",
             "summary": "Implementation evidence.",
         },
     ]
@@ -113,6 +116,15 @@ def _terminal_source_task() -> dict:
         "turn": {"acceptedAt": "2026-08-09T10:00:02"},
         "result": {
             "candidateLeads": leads,
+            "searchTrace": [
+                {
+                    "perspective": lead["perspective"],
+                    "query": lead["query"],
+                    "status": "found",
+                    "resultRefs": [lead["locator"]],
+                }
+                for lead in leads
+            ],
             "materializedSources": materialized,
         },
         "materializedSources": materialized,
@@ -232,6 +244,8 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
         "implementation perspective",
     ]
     assert len(payload["perspectives"]) >= 2
+    assert len(payload["counterEvidenceCandidateSources"]) == 1
+    assert len(payload["searchTrace"]) == 3
     assert len(payload["candidateSources"]) == 3
     assert completed["qualityGateEvaluations"][0]["status"] == "passed"
     assert completed["budgetReservations"][0]["status"] == "settled"

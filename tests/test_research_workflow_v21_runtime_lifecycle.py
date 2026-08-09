@@ -296,6 +296,12 @@ def test_node_completion_records_real_artifact_receipt_handoff_and_next_ready_no
             "candidateSources": [
                 {"sourceId": "source-1", "url": "https://example.test/source-1"}
             ],
+            "counterEvidenceCandidateSources": [
+                {
+                    "sourceId": "source-counter-1",
+                    "perspective": "falsification",
+                }
+            ],
         }
     }
 

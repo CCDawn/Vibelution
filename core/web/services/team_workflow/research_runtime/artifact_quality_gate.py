@@ -66,14 +66,22 @@ def validate_artifact_quality(
             perspectives = list(payload.get("perspectives") or [])
             queries = list(payload.get("queries") or [])
             candidates = list(payload.get("candidateSources") or [])
+            counter_candidates = list(
+                payload.get("counterEvidenceCandidateSources") or []
+            )
             if len(perspectives) < 2 or not queries or not candidates:
                 raise ArtifactQualityError(
                     "source finding requires at least two perspectives, queries and candidates"
+                )
+            if not counter_candidates:
+                raise ArtifactQualityError(
+                    "source finding requires a real limitation, null-result or falsification candidate"
                 )
             details = {
                 "perspectiveCount": len(perspectives),
                 "queryCount": len(queries),
                 "candidateCount": len(candidates),
+                "counterEvidenceCandidateCount": len(counter_candidates),
             }
         elif node_id == "source_extraction":
             payload = _payload_for_kind(manifests, payloads, "evidence_card_batch")

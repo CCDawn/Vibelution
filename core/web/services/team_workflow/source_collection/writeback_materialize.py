@@ -2421,6 +2421,10 @@ def _source_collection_stage_writeback_record_payload(
             "authors": s._source_collection_stage_writeback_authors(lead.get("authors")),
             "certainty": s._trim_text(lead.get("certainty"), max_length=120),
             "priority": s._trim_text(lead.get("priority"), max_length=80),
+            "perspective": s._trim_text(
+                lead.get("perspective") or lead.get("perspectiveId"),
+                max_length=80,
+            ),
         }
     )
     trace = {
@@ -2431,6 +2435,7 @@ def _source_collection_stage_writeback_record_payload(
         "agentId": agent_id,
         "agentRole": agent_role,
         "query": s._trim_text(lead.get("query"), max_length=1000),
+        "perspective": metadata["perspective"],
         "leadId": s._trim_text(lead.get("leadId") or lead.get("id"), max_length=160),
         "searchProvider": s._trim_text(lead.get("searchProvider"), max_length=80) or "agent_stage_writeback",
         "storageTarget": "data_processing.records",

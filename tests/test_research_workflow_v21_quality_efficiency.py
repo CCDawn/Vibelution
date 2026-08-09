@@ -181,6 +181,12 @@ def test_agent_completion_settles_budget_and_task_bundle_with_real_artifact(
                     "perspectives": ["技术", "竞赛价值"],
                     "queries": ["quality query"],
                     "candidateSources": [{"sourceId": "source-quality"}],
+                    "counterEvidenceCandidateSources": [
+                        {
+                            "sourceId": "source-quality-counter",
+                            "perspective": "falsification",
+                        }
+                    ],
                 }
             },
             "budgetUsage": {
@@ -227,12 +233,51 @@ def test_source_quality_gate_requires_perspectives_queries_and_candidates() -> N
                 "perspectives": ["技术", "竞赛价值"],
                 "queries": ["query-a"],
                 "candidateSources": [{"sourceId": "source-a"}],
+                "counterEvidenceCandidateSources": [
+                    {
+                        "sourceId": "source-counter-a",
+                        "perspective": "limitation_or_null",
+                    }
+                ],
             }
         },
     )
     assert gate is not None and gate["status"] == "passed"
     assert gate["details"]["perspectiveCount"] == 2
+    assert gate["details"]["counterEvidenceCandidateCount"] == 1
     assert records == {}
+
+
+def test_source_quality_gate_rejects_support_only_candidates() -> None:
+    manifest = {"artifactId": "source_candidate_batch:support-only"}
+    with pytest.raises(
+        ArtifactQualityError,
+        match="real limitation, null-result or falsification candidate",
+    ):
+        validate_artifact_quality(
+            {"runId": "run-support-only"},
+            node_id="source_finding",
+            manifests=[manifest],
+            payloads={
+                manifest["artifactId"]: {
+                    "perspectives": ["mechanism", "independent_baseline"],
+                    "queries": ["mechanism query", "baseline query"],
+                    "candidateSources": [
+                        {"sourceId": "source-support", "perspective": "mechanism"}
+                    ],
+                    "counterEvidenceCandidateSources": [],
+                    "searchTrace": [
+                        {
+                            "perspective": "falsification",
+                            "query": "falsification query",
+                            "status": "no_credible_source",
+                            "resultRefs": [],
+                            "failureReason": "no traceable negative result found",
+                        }
+                    ],
+                }
+            },
+        )
 
 
 def test_hypothesis_campaign_and_evaluation_gates_enforce_rigor() -> None:

@@ -939,6 +939,10 @@ def test_start_source_collection_stage_session_task_submits_project_session_task
     assert "不要调用通用 `task_list_tool`、`task_create_tool` 或 `task_update_tool`" in submitted[0]["content"]
     assert "candidateLeads[]" in submitted[0]["content"]
     assert "每条 `candidateLeads[]` 至少包含" in submitted[0]["content"]
+    assert "`limitation_or_null`" in submitted[0]["content"]
+    assert "`falsification`" in submitted[0]["content"]
+    assert "`result.searchTrace[]`" in submitted[0]["content"]
+    assert "不得伪造负面资料" in submitted[0]["content"]
     assert "`locator`（可验证 DOI 或 https URL）" in submitted[0]["content"]
     assert "资料提炼阶段如果 `candidatePage.total=0`" not in submitted[0]["content"]
     assert "`recordExtractions[]` 回写" not in submitted[0]["content"]
@@ -1501,6 +1505,8 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
                     "year": "1999",
                     "locator": "DOI: 10.1038/4580",
                     "sourceType": "paper",
+                    "query": "predictive coding falsification failure result",
+                    "perspective": "falsification",
                     "relevance": "预测编码奠基论文。",
                 },
                 {
@@ -1532,6 +1538,11 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     assert materialized["skipped"][0]["reason"] == "insufficient_source_identity"
     records = data_processing_service.list_records(run_id)
     assert records["summary"]["recordCount"] == 2
+    assert records["records"][0]["metadata"]["perspective"] == "falsification"
+    assert (
+        records["records"][0]["metadata"]["sourceCollectionTrace"]["perspective"]
+        == "falsification"
+    )
     candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
     assert candidates["candidateCount"] == 2
     assert {item["metadata"]["doi"] for item in candidates["candidates"]} == {"10.1038/4580", "10.1038/nrn2787"}
