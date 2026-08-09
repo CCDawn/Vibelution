@@ -108,8 +108,8 @@ def _terminal_source_task() -> dict:
         "agentId": "agent-source-finder",
         "sessionId": "session-source-finding",
         "status": "completed",
-        "createdAt": "2026-08-09T10:00:00+08:00",
-        "updatedAt": "2026-08-09T10:00:12+08:00",
+        "createdAt": "2026-08-09T02:00:00+00:00",
+        "updatedAt": "2026-08-09T02:00:12+00:00",
         "turn": {"acceptedAt": "2026-08-09T10:00:02"},
         "result": {
             "candidateLeads": leads,
@@ -168,6 +168,7 @@ def _start_source_node(
         lambda *_args, **_kwargs: {
             "id": terminal["sessionId"],
             "currentPhase": "ready",
+            "updatedAt": "2026-08-09T10:00:12",
             "llmUsage": {"totalTokens": 90},
         },
     )
