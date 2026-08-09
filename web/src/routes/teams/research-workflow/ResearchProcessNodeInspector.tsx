@@ -4,6 +4,7 @@ import type { NodeAdapterSpec } from "./nodeAdapterModel";
 import { NodeAgentSection } from "./NodeAgentSection";
 import { NodeArtifactSection } from "./NodeArtifactSection";
 import { NodeCommandSection } from "./NodeCommandSection";
+import { NodeExecutionSection } from "./NodeExecutionSection";
 import { NodeHandoffSection } from "./NodeHandoffSection";
 import { NodeSessionSection } from "./NodeSessionSection";
 import styles from "./ResearchProcessNodeInspector.styles";
@@ -52,6 +53,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
       {adapter.actorKind === "agent" ? <NodeSessionSection detail={detail} /> : null}
       <NodeHandoffSection handoffs={props.handoffs ?? []} pending={props.handoffPending} blockedReason={detail.blockedReason} />
       <NodeArtifactSection artifacts={detail.artifacts} />
+      <NodeExecutionSection detail={detail} />
       <NodeCommandSection capabilities={detail.commands} busy={props.busy} onCommand={props.onCommand} />
     </VSurface>
   );

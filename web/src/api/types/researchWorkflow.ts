@@ -314,6 +314,11 @@ export type ResearchWorkflowNodeDetail = {
   blockedReason: string;
   artifacts: Record<string, unknown>;
   commands: NodeCommandCapability[];
+  executionEnvelope: Record<string, unknown> | null;
+  taskLease: Record<string, unknown> | null;
+  qualityGateEvaluation: Record<string, unknown> | null;
+  artifactManifests: Array<Record<string, unknown>>;
+  artifactReuseCount: number;
 };
 
 export type ResearchWorkflowScopedProjection = {

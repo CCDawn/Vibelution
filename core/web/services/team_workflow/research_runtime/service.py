@@ -65,6 +65,7 @@ from .node_command_adapter import (
 from .node_completion import complete_node_execution
 from .node_execution import heartbeat_node_execution, start_node_execution
 from .node_execution_support import NodeExecutionError
+from .node_operational_projection import project_node_operations
 from .node_recovery import reconcile_expired_execution, retry_node_execution
 from .research_ledger import project_research_ledger
 from .run_access import RunAccessError, require_run_access
@@ -468,6 +469,7 @@ class ResearchWorkflowRuntimeService:
             "blockedReason": str(record.get("blockedReason") or (record.get("langGraph") or {}).get("blockedReason") or ""),
             "artifacts": (record.get("langGraph") or {}).get("artifacts") or {},
             "commands": commands,
+            **project_node_operations(record, node_id),
         }
 
     def list_handoffs(self, run_id: str) -> dict[str, Any]:
