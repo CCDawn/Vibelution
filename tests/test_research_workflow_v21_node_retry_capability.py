@@ -43,22 +43,31 @@ def _run_input() -> dict:
     }
 
 
-def _block_latest(store: WorkflowRunStore, run_id: str) -> dict:
+def _block_latest(
+    store: WorkflowRunStore,
+    run_id: str,
+    *,
+    failure_code: str = "counter_evidence_missing",
+) -> dict:
     run = store.get_run(run_id)
     assert run is not None
     node_runs = [dict(item) for item in run["nodeRuns"]]
     node_runs[-1].update(
         {
             "status": "blocked",
-            "failureCode": "counter_evidence_missing",
-            "failureSummary": "counter-evidence is required",
+            "failureCode": failure_code,
+            "failureSummary": (
+                "external Agent task was interrupted"
+                if failure_code == "external_task_interrupted"
+                else "counter-evidence is required"
+            ),
         }
     )
     return store.update_run(
         run_id,
         {
             "status": "blocked",
-            "blockedReason": "counter_evidence_missing",
+            "blockedReason": failure_code,
             "nodeRuns": node_runs,
         },
     )
@@ -118,3 +127,97 @@ def test_blocked_agent_node_retries_as_a_new_lineage_attempt(tmp_path: Path) -> 
     )
     assert exhausted_retry["available"] is False
     assert "重试预算已耗尽" in exhausted_retry["reason"]
+
+
+def test_infrastructure_interruption_recovers_without_reopening_business_retry_budget(
+    tmp_path: Path,
+) -> None:
+    store = WorkflowRunStore(tmp_path / "runs")
+    service = ResearchWorkflowRuntimeService(
+        run_store=store,
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    created = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={"source_finder": "agent-source-finder"}
+        ),
+        idempotency_key="create-infrastructure-recovery",
+    )
+
+    first_failure = _block_latest(store, created["runId"])
+    first_retry = next(
+        item
+        for item in service.get_node_detail(
+            first_failure["runId"], "source_finding"
+        )["commands"]
+        if item["command"] == "retry_execution"
+    )
+    service.apply_node_command(
+        first_failure["runId"],
+        "source_finding",
+        "retry_execution",
+        payload={"idempotencyKey": first_retry["idempotencyKey"]},
+    )
+
+    started_record = store.get_run(created["runId"])
+    assert started_record is not None
+    started_runs = [dict(item) for item in started_record["nodeRuns"]]
+    started_runs[-1].update(
+        {
+            "budgetLedgerRef": "reservation-prior-attempt",
+            "modelRef": "model-prior-attempt",
+            "modelPurpose": "source_discovery",
+            "estimatedCost": 12.5,
+            "escalationReason": "prior attempt route",
+        }
+    )
+    store.update_run(created["runId"], {"nodeRuns": started_runs})
+
+    interrupted = _block_latest(
+        store,
+        created["runId"],
+        failure_code="external_task_interrupted",
+    )
+    recovery = next(
+        item
+        for item in service.get_node_detail(
+            interrupted["runId"], "source_finding"
+        )["commands"]
+        if item["command"] == "retry_execution"
+    )
+
+    assert recovery["available"] is True
+    assert recovery["payload"] == {"retryKind": "infrastructure_recovery"}
+
+    recovered = service.apply_node_command(
+        interrupted["runId"],
+        "source_finding",
+        "retry_execution",
+        payload={
+            "idempotencyKey": recovery["idempotencyKey"],
+            **recovery["payload"],
+        },
+    )
+    latest = recovered["nodeRuns"][-1]
+    assert latest["attempt"] == 3
+    assert latest["retryKind"] == "infrastructure_recovery"
+    assert latest["countsAgainstRetryBudget"] is False
+    assert latest["recoveryOfNodeRunId"] == interrupted["nodeRuns"][-1]["nodeRunId"]
+    assert latest["budgetLedgerRef"] == ""
+    assert latest["modelRef"] == ""
+    assert latest.get("modelPurpose", "") == ""
+    assert latest.get("estimatedCost", 0) == 0
+    assert latest.get("escalationReason", "") == ""
+
+    business_failure_after_recovery = _block_latest(store, created["runId"])
+    exhausted = next(
+        item
+        for item in service.get_node_detail(
+            business_failure_after_recovery["runId"], "source_finding"
+        )["commands"]
+        if item["command"] == "retry_execution"
+    )
+    assert exhausted["available"] is False
+    assert "重试预算已耗尽" in exhausted["reason"]

@@ -34,6 +34,7 @@ from .agent_start_contract import (
     AgentStartContractError,
     build_agent_start_contract,
 )
+from .retry_policy import retry_is_available
 
 
 class NodeCommandUnavailable(Exception):
@@ -75,12 +76,7 @@ def _retry_execution_capability(
     if str(latest.get("status") or "") not in {"blocked", "failed"}:
         return None
     attempt = int(latest.get("attempt") or 0)
-    max_retries = int(
-        ((record.get("inputSnapshot") or {}).get("budgetPolicy") or {}).get(
-            "maxRetries", 0
-        )
-    )
-    available = attempt <= max_retries
+    available, retry_kind = retry_is_available(record, node_id, latest)
     return {
         "command": "retry_execution",
         "available": available,
@@ -88,7 +84,7 @@ def _retry_execution_capability(
         "idempotencyKey": (
             f"retry-node:{latest.get('nodeRunId')}:a{attempt + 1}"
         ),
-        "payload": {},
+        "payload": {"retryKind": retry_kind},
     }
 
 
