@@ -11,6 +11,7 @@ import {
   selectFirstUnpaintedRunningTool,
   isActiveTurnSettledByDetail,
   mergeAssistantDeltaIntoActiveTurnLayer,
+  runningToolStartedAtEpochMs,
 } from "./chatActiveTurnLayer";
 
 function assistantDelta(
@@ -81,6 +82,27 @@ describe("chat active turn layer", () => {
       toolIds: ["call-b"],
     });
     expect(selectFirstUnpaintedRunningTool(layer, ["call-a", "call-b"]).tool).toBeUndefined();
+  });
+
+  it("measures tool paint from the running revision instead of model call creation", () => {
+    const runningTool = {
+      id: "tool-a:2",
+      itemId: "tool-a",
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "tool_call",
+      status: "running",
+      revision: 2,
+      sequence: 2,
+      terminal: false,
+      callId: "call-a",
+      toolName: "glob_tool",
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:01.250Z",
+    } satisfies SessionTurnItem;
+
+    expect(runningToolStartedAtEpochMs(runningTool)).toBe(Date.parse("2026-08-10T00:00:01.250Z"));
   });
 
   it("requests one authoritative index refresh only for terminal active layers", () => {
