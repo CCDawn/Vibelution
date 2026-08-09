@@ -1755,7 +1755,25 @@ def _mark_session_workspace_intentionally_deleted(
         }
         marker.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return True
-    except Exception:
+    except Exception as exc:
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "chat_state",
+                "conversation.tombstone_write_failed",
+                level="warning",
+                outcome="failed",
+                message="Failed to write session deleted tombstone; workspace recovery guard may be missing.",
+                fields={
+                    "sessionId": normalized_session_id,
+                    "reason": str(reason or "deleted").strip()[:64],
+                    "agentId": str(agent_id or "").strip(),
+                    "errorType": type(exc).__name__,
+                },
+                lifecycle=True,
+            )
+        except Exception:
+            pass
         return False
 
 
@@ -1894,6 +1912,27 @@ def _materialize_agent_directory_conversation_locked(
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id or s._find_conversation_entry(payload, normalized_session_id) is not None:
+        return False
+    # Intentional delete/clear/reset: never resurrect an agent-direct session
+    # from a stale binding while the workspace tombstone is present.
+    if s._is_session_workspace_intentionally_deleted(normalized_session_id):
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "chat_state",
+                "conversation.materialize_blocked",
+                level="info",
+                outcome="blocked",
+                message="Skipped materializing a session marked intentionally deleted.",
+                fields={
+                    "sessionId": normalized_session_id,
+                    "source": str(source or "").strip()[:64],
+                    "reason": "session_deleted_tombstone",
+                },
+                lifecycle=True,
+            )
+        except Exception:
+            pass
         return False
     agent = s._agent_for_direct_session(normalized_session_id)
     if not agent:

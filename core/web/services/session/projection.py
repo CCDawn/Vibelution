@@ -3694,6 +3694,9 @@ def _append_agent_directory_conversations(
             continue
         if s._agent_directory_stub_hidden_from_user_index(agent, hidden_team_member_agent_ids):
             continue
+        # Intentional delete/clear/reset: never append a stub for a deleted session.
+        if s._is_session_workspace_intentionally_deleted(session_id):
+            continue
         conversation = s._agent_directory_conversation_stub(
             agent,
             session_id=session_id,

@@ -195,6 +195,9 @@ def _agent_directory_session_stub_for_id(
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return None
+    # Intentional delete/clear/reset: never surface a stub for a deleted session.
+    if s._is_session_workspace_intentionally_deleted(normalized_session_id):
+        return None
     agents = list((agent_by_id if agent_by_id is not None else s._agent_lookup_for_conversations()).values())
     for agent in agents:
         if not isinstance(agent, dict):
@@ -919,6 +922,9 @@ def _ensure_session_mutable(
             payload = s.load_chat_state(s.PROJECT_ROOT)
             target = s._find_conversation_entry(payload, normalized_session_id)
     if target is None:
+        raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
+    # Intentional delete/clear/reset: do not mutate state on a deleted session.
+    if s._is_session_workspace_intentionally_deleted(normalized_session_id):
         raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
     if s._conversation_is_read_only(target):
         raise s.SessionValidationError(
