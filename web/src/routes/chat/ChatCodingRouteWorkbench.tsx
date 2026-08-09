@@ -1662,10 +1662,19 @@ export function ChatCodingRoute() {
       return;
     }
     const settledTurnId = activeTurnLayer.turnId;
-    updateSessionSummaryCaches(queryClient, (sessions) =>
-      mergeSessionDetailIntoSummaries(sessions, detail),
-    );
-    reconcileAgentSessionDetailCache(queryClient, detail);
+    void queryClient.refetchQueries({
+      queryKey: queryKeys.session(activeSessionId),
+      exact: true,
+    }).then(() => {
+      const canonicalDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId));
+      if (!canonicalDetail) {
+        return;
+      }
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        mergeSessionDetailIntoSummaries(sessions, canonicalDetail),
+      );
+      reconcileAgentSessionDetailCache(queryClient, canonicalDetail);
+    });
     setActiveTurnLayersBySession((current) => {
       const currentLayer = current[activeSessionId];
       if (!isActiveTurnSettledByDetail(currentLayer, detail)) {
