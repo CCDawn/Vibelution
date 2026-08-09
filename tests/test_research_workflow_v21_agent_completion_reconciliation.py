@@ -252,6 +252,37 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
     ) == 1
 
 
+def test_source_task_review_disposition_defers_to_passed_artifact_gates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = ResearchWorkflowRuntimeService(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={"source_finder": "agent-source-finder"}
+        ),
+        idempotency_key="create-agent-review-disposition",
+    )
+    terminal = _terminal_source_task()
+    observed_status = {"value": "running"}
+    _start_source_node(service, run, terminal, observed_status, monkeypatch)
+    observed_status["value"] = "needs_review"
+
+    completed = service.get_run(run["runId"])
+
+    source_run = next(
+        item for item in completed["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
+    assert source_run["status"] == "succeeded"
+    assert completed["qualityGateEvaluations"][0]["status"] == "passed"
+    assert completed["runtimeCurrentNodeIds"] == ["source_extraction"]
+
+
 def test_completed_task_recovers_one_internal_reconciliation_failure(
     tmp_path: Path,
     monkeypatch,
