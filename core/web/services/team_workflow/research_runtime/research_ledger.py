@@ -20,6 +20,7 @@ def project_research_ledger(
     return {
         "runId": record["runId"],
         "teamId": record["teamId"],
+        "runVersion": record["runVersion"],
         "projectId": record["projectId"],
         "claimEvidence": claims,
         "teamKnowledge": knowledge_bases,

@@ -11,6 +11,8 @@ from .models import NodeRunStatus, WorkflowRunStatus
 def empty_run_overlay() -> dict[str, Any]:
     return {
         "runId": None,
+        "teamId": None,
+        "runVersion": None,
         "status": None,
         "runtimeCurrentNodeIds": [],
         "nodeRuns": {},
@@ -21,6 +23,8 @@ def empty_run_overlay() -> dict[str, Any]:
 def build_canvas_projection(
     *,
     run_id: str | None = None,
+    team_id: str | None = None,
+    run_version: int | None = None,
     run_status: WorkflowRunStatus | None = None,
     runtime_current_node_ids: list[str] | None = None,
     node_runs: dict[str, dict[str, Any]] | None = None,
@@ -38,6 +42,8 @@ def build_canvas_projection(
     # selectedNodeId must never appear on server projection.
     run = {
         "runId": run_id,
+        "teamId": team_id,
+        "runVersion": run_version,
         "status": run_status.value if run_status else None,
         "runtimeCurrentNodeIds": list(runtime_current_node_ids or []),
         "nodeRuns": node_runs or {},
