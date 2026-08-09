@@ -163,6 +163,10 @@ def build_initial_run_record(
         "outbox": [],
         "budgetLedgers": budget_ledgers,
         "budgetReservations": [],
+        "iterationBudgetMax": min(
+            3,
+            max(1, int(input_snapshot.budgetPolicy.get("experiments") or 1)),
+        ),
         "officialCandidateRef": "",
         "baselineCandidateRef": "",
         "childRunIds": [],

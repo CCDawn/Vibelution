@@ -59,6 +59,8 @@ def _snapshot_agent_id(record: dict[str, Any], node_id: str) -> str:
 def node_command_capabilities(
     record: dict[str, Any],
     node_id: str,
+    *,
+    research_ledger: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-node capability list driving the frontend (no fake buttons)."""
     node = _node_spec(node_id)
@@ -111,15 +113,66 @@ def node_command_capabilities(
         for task in record.get("humanTasks") or []
         if isinstance(task, dict)
     ):
-        return [
+        capabilities = [
             {"command": command, "available": True, "reason": ""}
             for command in ("accept_handoff", "reject_handoff", "revise")
         ]
+        if node_id == "smoke_gate":
+            passed_smoke = any(
+                item.get("nodeId") == "smoke_gate"
+                and item.get("command") == "run_smoke"
+                and item.get("status") == "succeeded"
+                and (item.get("observation") or {}).get("status") == "passed"
+                for item in record.get("systemActions") or []
+            )
+            capabilities[0] = {
+                "command": "accept_handoff",
+                "available": passed_smoke,
+                "reason": "" if passed_smoke else "需要先完成并通过真实 Smoke",
+            }
+            capabilities.insert(
+                0,
+                {"command": "run_smoke", "available": True, "reason": ""},
+            )
+        return capabilities
+
+    if actor_kind == ActorKind.SYSTEM.value and node_id == "controlled_run":
+        ready = any(
+            item.get("nodeId") == node_id and item.get("status") == "ready"
+            for item in record.get("nodeRuns") or []
+        )
+        passed_smoke = any(
+            item.get("nodeId") == "smoke_gate"
+            and item.get("command") == "run_smoke"
+            and item.get("status") == "succeeded"
+            and (item.get("observation") or {}).get("status") == "passed"
+            for item in record.get("systemActions") or []
+        )
+        return [
+            {
+                "command": "start_controlled_run",
+                "available": ready and passed_smoke,
+                "reason": (
+                    "" if ready and passed_smoke else "需要受控运行节点 ready 且 Smoke 已放行"
+                ),
+            }
+        ]
 
     if actor_kind == ActorKind.SYSTEM.value and node_id == "result_package":
-        from .result_package import result_package_availability
+        from .result_package import (
+            ResultPackageError,
+            result_package_availability,
+            terminal_package_candidate,
+        )
 
-        available, reason = result_package_availability(record)
+        try:
+            candidate = terminal_package_candidate(record)
+            available, reason = result_package_availability(
+                candidate,
+                research_ledger=research_ledger,
+            )
+        except ResultPackageError as exc:
+            available, reason = False, str(exc)
         return [
             {"command": "build_package", "available": available, "reason": reason},
             {"command": "view_artifacts", "available": True, "reason": ""},
@@ -130,10 +183,12 @@ def node_command_capabilities(
 def apply_node_command(
     *,
     store: Any,
+    checkpoint_path: str,
     record: dict[str, Any],
     node_id: str,
     command: str,
     payload: dict[str, Any] | None = None,
+    research_ledger: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute one node command against a real backend handler."""
     payload = payload or {}
@@ -148,10 +203,57 @@ def apply_node_command(
         raise NodeCommandUnavailable(
             "人工任务必须通过人工任务接口处理", code="human_task_resolution_required"
         )
+    # System adapters own their state and idempotency validation. Dispatching
+    # before the UI capability check permits an exact replay after the node has
+    # already advanced, while a new key still fails against the durable state.
+    if command == "run_smoke":
+        from .smoke_system_adapter import execute_smoke_action
+        from .system_action_records import SystemActionError
+
+        try:
+            return execute_smoke_action(store, record=record, payload=payload)
+        except SystemActionError as exc:
+            raise NodeCommandError(str(exc), code=exc.code) from exc
+    if command == "start_controlled_run":
+        from .controlled_run_system_adapter import execute_controlled_run_action
+        from .system_action_records import SystemActionError
+
+        try:
+            return execute_controlled_run_action(
+                store,
+                checkpoint_path=checkpoint_path,
+                record=record,
+                payload=payload,
+            )
+        except (SystemActionError, AgentNodeExecutionError) as exc:
+            raise NodeCommandError(str(exc), code=exc.code) from exc
+    if command == "build_package":
+        from .result_package_system_adapter import execute_result_package_action
+        from .system_action_records import SystemActionError
+
+        if research_ledger is None:
+            raise NodeCommandError(
+                "build_package requires the canonical ResearchLedger projection",
+                code="research_ledger_required",
+            )
+        try:
+            return execute_result_package_action(
+                store,
+                checkpoint_path=checkpoint_path,
+                record=record,
+                research_ledger=research_ledger,
+                payload=payload,
+            )
+        except SystemActionError as exc:
+            raise NodeCommandError(str(exc), code=exc.code) from exc
     capability = next(
         (
             item
-            for item in node_command_capabilities(record, node_id)
+            for item in node_command_capabilities(
+                record,
+                node_id,
+                research_ledger=research_ledger,
+            )
             if item["command"] == command
         ),
         None,
@@ -180,14 +282,8 @@ def apply_node_command(
             )
         except AgentNodeExecutionError as exc:
             raise NodeCommandError(str(exc), code=exc.code) from exc
-    if command == "run_smoke":
-        return _run_smoke(record, payload)
-    if command == "start_controlled_run":
-        return _start_controlled_run(record, payload)
     if command == "view_artifacts":
         return _view_artifacts(record, node_id)
-    if command == "build_package":
-        return _build_package(store, record, payload)
     if command == "open_evidence_graph":
         return _open_evidence_graph(record)
     if command == "rebind_node":
@@ -198,55 +294,6 @@ def apply_node_command(
     raise NodeCommandError(f"Unknown node command: {command}", code="unknown_command")
 
 
-def _require_project(
-    record: dict[str, Any], payload: dict[str, Any]
-) -> tuple[str, str]:
-    team_id = str(record.get("teamId") or "").strip()
-    # Project scope is frozen on the WorkflowRun. A command payload cannot
-    # smuggle a different project into an existing run.
-    project_id = str(record.get("projectId") or "").strip()
-    if not team_id or not project_id:
-        raise NodeCommandUnavailable(
-            "运行缺少 research project 上下文（teamId/projectId）",
-            code="no_project_context",
-        )
-    return team_id, project_id
-
-
-def _run_smoke(record: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    team_id, _project_id = _require_project(record, payload)
-    plan_id = str(payload.get("planId") or "").strip()
-    if not plan_id:
-        raise NodeCommandUnavailable(
-            "run_smoke 需要 planId（冻结实验计划）",
-            code="missing_plan",
-        )
-    from core.web.services.team_workflow.experiment_api.smoke import (
-        run_experiment_smoke_run,
-    )
-
-    result = run_experiment_smoke_run(team_id, plan_id, payload)
-    return {"command": "run_smoke", "smoke": result}
-
-
-def _start_controlled_run(
-    record: dict[str, Any], payload: dict[str, Any]
-) -> dict[str, Any]:
-    team_id, _project_id = _require_project(record, payload)
-    plan_id = str(payload.get("planId") or "").strip()
-    if not plan_id:
-        raise NodeCommandUnavailable(
-            "start_controlled_run 需要 planId（冻结实验计划）",
-            code="missing_plan",
-        )
-    from core.web.services.team_workflow.experiment_api.full_run import (
-        execute_experiment_full_run,
-    )
-
-    result = execute_experiment_full_run(team_id, plan_id, payload)
-    return {"command": "start_controlled_run", "run": result}
-
-
 def _view_artifacts(record: dict[str, Any], node_id: str) -> dict[str, Any]:
     artifacts = (record.get("langGraph") or {}).get("artifacts") or {}
     return {
@@ -254,29 +301,6 @@ def _view_artifacts(record: dict[str, Any], node_id: str) -> dict[str, Any]:
         "nodeId": node_id,
         "artifacts": artifacts,
     }
-
-
-def _build_package(
-    store: Any,
-    record: dict[str, Any],
-    payload: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    from .result_package import build_result_package
-
-    package = build_result_package(record)
-    run_id = str(record.get("runId") or "")
-    stored = record.get("resultPackage")
-    if not (
-        isinstance(stored, dict) and stored.get("packageId") == package["packageId"]
-    ):
-        store.update_run(
-            run_id,
-            {
-                "resultPackage": package,
-                "resultPackageRef": package["packageRef"],
-            },
-        )
-    return {"command": "build_package", "resultPackage": package}
 
 
 def _open_evidence_graph(record: dict[str, Any]) -> dict[str, Any]:

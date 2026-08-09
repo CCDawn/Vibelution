@@ -19,19 +19,21 @@ def build_node_run(
     input_hash: str,
     checkpoint_id: str,
     status: str = "ready",
+    attempt: int = 1,
+    supersedes_node_run_id: str = "",
 ) -> dict[str, Any]:
     return {
-        "nodeRunId": f"nr-{run_id}-{node_id}-a1",
+        "nodeRunId": f"nr-{run_id}-{node_id}-a{attempt}",
         "runId": run_id,
         "nodeId": node_id,
-        "attempt": 1,
+        "attempt": attempt,
         "actorType": actor_type,
         "agentId": agent_id,
         "taskId": "",
         "sessionId": "",
         "status": status,
         "inputSnapshotHash": input_hash,
-        "idempotencyKey": f"{run_id}:{node_id}:1",
+        "idempotencyKey": f"{run_id}:{node_id}:{attempt}",
         "modelRef": "",
         "budgetLedgerRef": "",
         "artifactRefs": [],
@@ -40,7 +42,7 @@ def build_node_run(
         "finishedAt": "",
         "failureCode": "",
         "failureSummary": "",
-        "supersedesNodeRunId": "",
+        "supersedesNodeRunId": supersedes_node_run_id,
     }
 
 
@@ -68,6 +70,17 @@ def build_successor_records(
             (item for item in bindings if item.get("nodeId") == node_id),
             {},
         )
+        prior_runs = [
+            item
+            for item in record.get("nodeRuns") or []
+            if item.get("nodeId") == node_id
+        ]
+        prior = (
+            max(prior_runs, key=lambda item: int(item.get("attempt") or 0))
+            if prior_runs
+            else None
+        )
+        attempt = int((prior or {}).get("attempt") or 0) + 1
         node_runs.append(
             build_node_run(
                 run_id=str(record.get("runId") or ""),
@@ -79,6 +92,8 @@ def build_successor_records(
                 status=(
                     "waiting_human" if spec.actorKind.value == "human" else "ready"
                 ),
+                attempt=attempt,
+                supersedes_node_run_id=str((prior or {}).get("nodeRunId") or ""),
             )
         )
     edge = next(

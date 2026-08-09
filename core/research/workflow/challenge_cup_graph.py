@@ -99,7 +99,7 @@ def route_after_version_governance(
     if kind is IterationDecisionKind.STOP:
         return "result_package"
     if kind is IterationDecisionKind.ROLLBACK_CANDIDATE:
-        return END  # type: ignore[return-value]
+        return "result_package"
     raise IterationDecisionError(
         f"illegal governed decision {kind.value}",
         code="illegal_governed_decision",

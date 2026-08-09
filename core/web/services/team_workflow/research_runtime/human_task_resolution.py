@@ -21,6 +21,44 @@ class HumanTaskResolutionError(ValueError):
         self.code = code
 
 
+def _smoke_release_context(
+    record: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    action = next(
+        (
+            dict(item)
+            for item in reversed(record.get("systemActions") or [])
+            if item.get("nodeId") == "smoke_gate"
+            and item.get("command") == "run_smoke"
+            and item.get("status") == "succeeded"
+            and (item.get("observation") or {}).get("status") == "passed"
+        ),
+        None,
+    )
+    if action is None:
+        raise HumanTaskResolutionError(
+            "Smoke release requires a passed real Smoke observation",
+            code="smoke_evidence_missing",
+        )
+    artifact_ref = str(action.get("artifactRef") or "")
+    if not artifact_ref or not any(
+        item.get("artifactId") == artifact_ref
+        for item in record.get("artifactManifests") or []
+    ):
+        raise HumanTaskResolutionError(
+            "Smoke observation ArtifactManifest is missing",
+            code="smoke_evidence_missing",
+        )
+    observation = dict(action.get("observation") or {})
+    return artifact_ref, {
+        "systemActionId": action["actionId"],
+        "planId": observation.get("planId"),
+        "smokeRunId": observation.get("smokeRunId"),
+        "smokeStatus": observation.get("status"),
+        "smokeObservationRef": artifact_ref,
+    }
+
+
 def _find_by_id(
     items: list[dict[str, Any]],
     key: str,
@@ -152,6 +190,28 @@ def resolve_human_task(
             code="required_artifact_missing",
         )
 
+    gate_context: dict[str, Any] = {}
+    if node_id == "smoke_gate" and decision == "accept":
+        smoke_artifact_ref, gate_context = _smoke_release_context(record)
+        source_artifact_ids.append(smoke_artifact_ref)
+    if node_id == "candidate_promotion" and decision == "accept":
+        proposed = dict(record.get("proposedVersion") or {})
+        if not (
+            proposed.get("status") == "proposed"
+            and proposed.get("versionId")
+            and proposed.get("candidateRef")
+        ):
+            raise HumanTaskResolutionError(
+                "candidate promotion requires a governed proposed version",
+                code="promotion_proposal_missing",
+            )
+        gate_context = {
+            "proposalId": f"proposal:{proposed['versionId']}",
+            "versionId": proposed["versionId"],
+            "candidateRef": proposed["candidateRef"],
+            "operation": "promote",
+        }
+
     operator = resolved_by.strip() or "operator"
     if decision in {"reject", "revise"}:
         try:
@@ -182,6 +242,7 @@ def resolve_human_task(
         decision=decision,
         resolved_by=operator,
         created_at=now,
+        gate_context=gate_context,
     )
     completed_ids = [
         *[item for item in record.get("completedNodeIds") or [] if item != node_id],
@@ -315,6 +376,34 @@ def resolve_human_task(
             summary={"taskId": task_id, "decision": decision},
             artifactRefs=[item.artifactId for item in manifests],
         )
+        official_version = dict(current.get("officialVersion") or {})
+        proposed_version = dict(current.get("proposedVersion") or {})
+        official_candidate_ref = str(current.get("officialCandidateRef") or "")
+        completion_kind = str(current.get("completionKind") or "")
+        promotion_proposals = list(current.get("promotionProposals") or [])
+        if node_id == "candidate_promotion":
+            official_version = {
+                **proposed_version,
+                "status": "official",
+                "confirmedAt": now,
+                "confirmedBy": operator,
+            }
+            official_candidate_ref = str(proposed_version["candidateRef"])
+            completion_kind = "promoted"
+            proposal_id = f"proposal:{proposed_version['versionId']}"
+            promotion_proposals = [
+                (
+                    {
+                        **item,
+                        "status": "accepted",
+                        "acceptedAt": now,
+                        "acceptedBy": operator,
+                    }
+                    if item.get("proposalId") == proposal_id
+                    else item
+                )
+                for item in promotion_proposals
+            ]
         return {
             **current,
             "status": (
@@ -329,6 +418,13 @@ def resolve_human_task(
             "nodeRuns": node_runs,
             "humanTasks": human_tasks,
             "handoffs": handoffs,
+            "officialVersion": official_version,
+            "proposedVersion": (
+                {} if node_id == "candidate_promotion" else proposed_version
+            ),
+            "officialCandidateRef": official_candidate_ref,
+            "completionKind": completion_kind,
+            "promotionProposals": promotion_proposals,
             "artifactManifests": [
                 *(current.get("artifactManifests") or []),
                 *(item.to_dict() for item in manifests),
