@@ -196,6 +196,39 @@ export function activeTurnLayerTextLength(layer: ActiveTurnLayerState | undefine
   return activeTurnProtocolTextLength({ turnItems: layer?.turnItems });
 }
 
+type RunningToolTurnItem = SessionTurnItem & { type: "tool_call" };
+
+function runningToolPaintId(item: RunningToolTurnItem) {
+  return compactText(item.callId) || compactText(item.itemId) || compactText(item.id);
+}
+
+export function selectFirstUnpaintedRunningTool(
+  layer: ActiveTurnLayerState | undefined,
+  paintedToolIds: readonly string[],
+): { tool: RunningToolTurnItem | undefined; toolId: string; runningToolIds: string[] } {
+  const painted = new Set(paintedToolIds.map(compactText).filter(Boolean));
+  const runningTools = (layer?.turnItems ?? []).filter((item): item is RunningToolTurnItem => (
+    item.type === "tool_call" && (item.status === "pending" || item.status === "running")
+  ));
+  const runningToolIds = runningTools.map(runningToolPaintId).filter(Boolean);
+  const tool = runningTools.find((item) => {
+    const id = runningToolPaintId(item);
+    return Boolean(id) && !painted.has(id);
+  });
+  return {
+    tool,
+    toolId: tool ? runningToolPaintId(tool) : "",
+    runningToolIds,
+  };
+}
+
+export function activeTurnTerminalRefreshKey(layer: ActiveTurnLayerState | undefined) {
+  if (!layer || !layer.turnId || (layer.status !== "completed" && layer.status !== "failed")) {
+    return "";
+  }
+  return `${layer.turnId}:${layer.status}:${layer.ledgerSeq}`;
+}
+
 export function isActiveTurnSettledByDetail(
   layer: ActiveTurnLayerState | undefined,
   detail: SessionDetail | undefined,
