@@ -10,6 +10,7 @@ from core.web.services.tool_catalog import TOOL_CATALOG
 
 ActiveTeamLookup = Callable[[str], dict[str, Any] | None]
 OperatorEnabled = Callable[[str], bool]
+OperatorExplicitlyEnabled = Callable[[str], bool]
 
 _TEAM_INDEX_KIND = "team_agent"
 _PERSONAL_INDEX_KIND = "personal_agent"
@@ -128,6 +129,7 @@ def external_mcp_eligibility(
     *,
     active_team_lookup: ActiveTeamLookup | None = None,
     operator_enabled: OperatorEnabled | None = None,
+    operator_explicitly_enabled: OperatorExplicitlyEnabled | None = None,
 ) -> ExternalAgentEligibility:
     if not isinstance(agent, dict):
         return ExternalAgentEligibility(False, "agent_not_found")
@@ -150,7 +152,16 @@ def external_mcp_eligibility(
         or metadata.get("conversationIndexKind")
         or ""
     ).strip()
-    if index_kind and index_kind != _PERSONAL_INDEX_KIND:
+    hidden_explicitly_enabled = bool(
+        index_kind == "hidden"
+        and operator_explicitly_enabled is not None
+        and operator_explicitly_enabled(agent_id)
+    )
+    if (
+        index_kind
+        and index_kind != _PERSONAL_INDEX_KIND
+        and not hidden_explicitly_enabled
+    ):
         return ExternalAgentEligibility(False, "unsupported_agent_class")
     return ExternalAgentEligibility(True, "eligible")
 
@@ -179,6 +190,7 @@ def list_externally_callable_agents(
     *,
     active_team_lookup: ActiveTeamLookup | None = None,
     operator_enabled: OperatorEnabled | None = None,
+    operator_explicitly_enabled: OperatorExplicitlyEnabled | None = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for agent in agents:
@@ -186,6 +198,7 @@ def list_externally_callable_agents(
             agent,
             active_team_lookup=active_team_lookup,
             operator_enabled=operator_enabled,
+            operator_explicitly_enabled=operator_explicitly_enabled,
         )
         if decision.eligible:
             result.append(_public_agent_projection(agent))

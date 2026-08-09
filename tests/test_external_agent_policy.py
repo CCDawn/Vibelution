@@ -30,6 +30,45 @@ def test_external_policy_allows_active_personal_agent() -> None:
     assert decision.reason == "eligible"
 
 
+def test_external_policy_allows_explicitly_enabled_hidden_non_team_agent() -> None:
+    decision = external_mcp_eligibility(
+        _agent("hidden-coder", index_kind="hidden"),
+        active_team_lookup=lambda _agent_id: None,
+        operator_enabled=lambda _agent_id: True,
+        operator_explicitly_enabled=lambda _agent_id: True,
+    )
+
+    assert decision.eligible is True
+    assert decision.reason == "eligible"
+
+
+def test_external_policy_keeps_unlisted_hidden_agent_private() -> None:
+    decision = external_mcp_eligibility(
+        _agent("hidden-coder", index_kind="hidden"),
+        active_team_lookup=lambda _agent_id: None,
+        operator_enabled=lambda _agent_id: True,
+        operator_explicitly_enabled=lambda _agent_id: False,
+    )
+
+    assert decision.eligible is False
+    assert decision.reason == "unsupported_agent_class"
+
+
+def test_external_policy_does_not_let_allowlist_override_active_team_membership() -> None:
+    decision = external_mcp_eligibility(
+        _agent("hidden-team-member", index_kind="hidden"),
+        active_team_lookup=lambda _agent_id: {
+            "teamId": "team-1",
+            "status": "active",
+        },
+        operator_enabled=lambda _agent_id: True,
+        operator_explicitly_enabled=lambda _agent_id: True,
+    )
+
+    assert decision.eligible is False
+    assert decision.reason == "active_team_member"
+
+
 def test_external_policy_excludes_active_team_member_even_if_personal() -> None:
     decision = external_mcp_eligibility(
         _agent("coder"),

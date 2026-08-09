@@ -4,7 +4,7 @@ from __future__ import annotations
 
 API_PROTOCOL_VERSION = "1.0"
 GUIDE_URI = "vibelution://guide/mcp-managed-agent-gateway"
-GUIDE_VERSION = "0.3.2"
+GUIDE_VERSION = "0.3.3"
 SERVER_NAME = "vibelution"
 SERVER_VERSION = "0.3.1"
 

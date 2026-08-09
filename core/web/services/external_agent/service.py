@@ -186,6 +186,7 @@ class ExternalAgentTaskService:
             agents,
             active_team_lookup=self.dependencies.active_team_lookup,
             operator_enabled=self._operator_agent_enabled,
+            operator_explicitly_enabled=self._operator_agent_explicitly_enabled,
         )[:bounded_limit]
         self._record_gateway_event(
             "external_agent.discovery.completed",
@@ -899,6 +900,7 @@ class ExternalAgentTaskService:
             agent,
             active_team_lookup=self.dependencies.active_team_lookup,
             operator_enabled=self._operator_agent_enabled,
+            operator_explicitly_enabled=self._operator_agent_explicitly_enabled,
         )
         if not decision.eligible:
             raise ExternalAgentAccessError(
@@ -918,6 +920,15 @@ class ExternalAgentTaskService:
         if not self.enabled or not normalized or normalized in self.denied_agent_ids:
             return False
         return not self.allowed_agent_ids or normalized in self.allowed_agent_ids
+
+    def _operator_agent_explicitly_enabled(self, agent_id: str) -> bool:
+        normalized = str(agent_id or "").strip()
+        return bool(
+            self.enabled
+            and normalized
+            and normalized in self.allowed_agent_ids
+            and normalized not in self.denied_agent_ids
+        )
 
     def operator_capabilities(self) -> set[str]:
         return {"approval.persist"} if self.approval_persist_enabled else set()
