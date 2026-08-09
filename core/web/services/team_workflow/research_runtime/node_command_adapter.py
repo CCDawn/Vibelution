@@ -30,6 +30,10 @@ from .agent_node_execution import (
     AgentNodeExecutionError,
     start_agent_node_execution,
 )
+from .node_budget_allocation import (
+    NodeBudgetAllocationError,
+    build_agent_budget_request,
+)
 
 
 class NodeCommandUnavailable(Exception):
@@ -102,9 +106,25 @@ def node_command_capabilities(
                     "reason": "运行尚无 research project 上下文（缺少 projectId）",
                 },
             ]
+        try:
+            budget_request = build_agent_budget_request(record, node_id)
+        except NodeBudgetAllocationError as exc:
+            return [
+                *supplemental,
+                {
+                    "command": "start_agent_task",
+                    "available": False,
+                    "reason": str(exc),
+                },
+            ]
         return [
             *supplemental,
-            {"command": "start_agent_task", "available": True, "reason": ""},
+            {
+                "command": "start_agent_task",
+                "available": True,
+                "reason": "",
+                "payload": {"budgetRequest": budget_request},
+            },
         ]
 
     if actor_kind == ActorKind.HUMAN.value and any(

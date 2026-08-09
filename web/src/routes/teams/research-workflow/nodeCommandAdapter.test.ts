@@ -71,6 +71,40 @@ describe("nodeCommandAdapter", () => {
     expect(result.command).toBe("view_artifacts");
   });
 
+  it("passes the backend-owned Agent budget payload without inventing defaults", async () => {
+    api.postResearchWorkflowNodeCommand.mockResolvedValue({ command: "start_agent_task" });
+    const payload = {
+      budgetRequest: {
+        tokens: 250,
+        toolCalls: 3,
+        wallClockSeconds: 30,
+        experiments: 1,
+        computeUnits: 5,
+      },
+    };
+
+    await executeNodeCommand(
+      { runId: "run-1", nodeId: "source_finding", teamId: "t1", runVersion: 7 },
+      { command: "start_agent_task", available: true, reason: "", payload },
+    );
+
+    expect(api.postResearchWorkflowNodeCommand).toHaveBeenCalledWith(
+      "run-1",
+      "source_finding",
+      expect.objectContaining({ payload }),
+    );
+  });
+
+  it("fails closed when an Agent start capability has no backend budget payload", async () => {
+    await expect(
+      executeNodeCommand(
+        { runId: "run-1", nodeId: "source_finding", teamId: "t1", runVersion: 7 },
+        { command: "start_agent_task", available: true, reason: "" },
+      ),
+    ).rejects.toThrow("启动 Agent 任务缺少后端预算契约");
+    expect(api.postResearchWorkflowNodeCommand).not.toHaveBeenCalled();
+  });
+
   it("executes human-gate commands with the CURRENT node's pending task id", async () => {
     api.resolveResearchWorkflowHumanTask.mockResolvedValue({ runId: "run-1" });
     await executeNodeCommand(

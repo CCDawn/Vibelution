@@ -294,6 +294,8 @@ export type NodeCommandCapability = {
   command: string;
   available: boolean;
   reason: string;
+  /** Backend-owned command input; the client must pass it through unchanged. */
+  payload?: Record<string, unknown>;
 };
 
 /** Extended node detail payload (Task: binding + session + commands). */
