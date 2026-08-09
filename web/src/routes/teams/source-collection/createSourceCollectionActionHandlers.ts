@@ -309,8 +309,11 @@ export function createSourceCollectionActionHandlers(ctx: SourceCollectionAction
     const precheckCandidateCount = options.precheckCandidateCount ?? sourceCollectionPrecheckCandidateCount;
     selectResearchWorkspaceView("canvas" as ResearchWorkspaceView);
     const nextParams = new URLSearchParams(searchParams);
-    nextParams.set("team", selectedTeam.teamId);
-    nextParams.set("researchView", "canvas");
+    nextParams.delete("team");
+    nextParams.delete("team_id");
+    nextParams.set("teamId", selectedTeam.teamId);
+    nextParams.set("researchView", "workflow");
+    nextParams.set("node", "knowledge_ingestion");
     setSearchParams(nextParams, { replace: false });
     runKnowledgeCollectionCompletionMutation.mutate({
       teamId: selectedTeam.teamId,

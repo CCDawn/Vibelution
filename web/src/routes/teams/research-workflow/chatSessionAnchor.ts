@@ -52,12 +52,13 @@ export function parseChatSessionAnchor(search: string): ChatSessionAnchorParseRe
 }
 
 export function buildWorkflowReturnTo(options: {
-  teamId?: string;
+  teamId: string;
   runId: string;
   nodeId: string;
 }): string {
   const params = new URLSearchParams();
-  if (options.teamId) params.set("team", options.teamId);
+  if (!options.teamId.trim()) throw new Error("teamId 不能为空");
+  params.set("teamId", options.teamId.trim());
   params.set("researchView", "workflow");
   params.set("runId", options.runId);
   params.set("node", options.nodeId);

@@ -16,6 +16,7 @@ export type NodeCommandContext = {
   runId: string;
   nodeId: string;
   teamId: string;
+  runVersion: number;
   /** Node-scoped pending HumanTask id (never the global first task). */
   pendingHumanTaskId?: string;
 };
@@ -101,19 +102,29 @@ export async function executeNodeCommand(
   }
 
   if (command === "accept_handoff" || command === "reject_handoff" || command === "revise") {
-    const accept = command === "accept_handoff";
+    const decision =
+      command === "accept_handoff" ? "accept" : command === "revise" ? "revise" : "reject";
     const task = await resolveResearchWorkflowHumanTask(runId, contextPendingTaskId(context), {
-      accept,
-      resolvedBy: "operator",
+      teamId: context.teamId,
+      expectedRunVersion: context.runVersion,
+      idempotencyKey: `node:${runId}:${nodeId}:${command}:v${context.runVersion}`,
+      decision,
     });
     return {
       command,
-      message: accept ? "已接受交接" : "已拒绝交接",
+      message:
+        decision === "accept" ? "已接受交接" : decision === "revise" ? "已要求修订" : "已拒绝交接",
       raw: { task },
     };
   }
 
-  const raw = await postResearchWorkflowNodeCommand(runId, nodeId, command, {});
+  const raw = await postResearchWorkflowNodeCommand(runId, nodeId, {
+    teamId: context.teamId,
+    expectedRunVersion: context.runVersion,
+    idempotencyKey: `node:${runId}:${nodeId}:${command}:v${context.runVersion}`,
+    command,
+    payload: {},
+  });
   return {
     command,
     message: `${commandLabel(command)}已提交`,

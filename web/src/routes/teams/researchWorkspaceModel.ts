@@ -1,5 +1,3 @@
-import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
-
 export type ResearchStageWorkspaceView = "knowledge_collection" | "experiment" | "iteration";
 export type ResearchLegacyWorkspaceView =
   | "source_collection"
@@ -92,19 +90,7 @@ export function researchWorkspaceViewLabel(view: ResearchWorkspaceView, lang: "z
 }
 
 export function parseResearchWorkspaceView(value: string | null): ResearchWorkspaceView | null {
-  if (!value) {
-    return null;
-  }
-  // Legacy aliases → current product views.
-  if (value === "source_collection") {
-    return "knowledge_collection";
-  }
-  // "canvas" is not a separate page: org canvas is the overview home body.
-  // Challenge Cup migrates canvas/overview defaults toward workflow (ADR 0006).
-  if (value === "canvas") {
-    return "workflow";
-  }
-  return value in RESEARCH_WORKSPACE_LABELS ? (value as ResearchWorkspaceView) : null;
+  return value === "workflow" || value === "overview" ? value : null;
 }
 
 /** Map stage workspace views onto fixed workflow node ids (ADR 0006). */
@@ -114,28 +100,27 @@ export function researchStageViewToNodeId(view: ResearchStageWorkspaceView): str
   return "source_finding";
 }
 
-/**
- * Canonical stage deep link: single workflow canvas + focused node.
- * Legacy researchView=stage values still resolve via compatibility layer.
- */
+/** Canonical stage deep link: single workflow canvas + focused node. */
 export function researchWorkspaceStageRoute(
-  teamId = RESEARCH_TEAM_ID,
-  view: ResearchStageWorkspaceView = "knowledge_collection",
+  teamId: string,
+  view: ResearchStageWorkspaceView,
 ) {
+  if (!teamId.trim()) throw new Error("teamId 不能为空");
   const node = researchStageViewToNodeId(view);
-  return `/teams?team=${encodeURIComponent(teamId)}&researchView=workflow&workflowId=challenge-cup-research&node=${encodeURIComponent(node)}`;
+  return `/teams?teamId=${encodeURIComponent(teamId)}&researchView=workflow&workflowId=challenge-cup-research&node=${encodeURIComponent(node)}`;
 }
 
-export function researchSourceCollectionRoute(teamId = RESEARCH_TEAM_ID) {
+export function researchSourceCollectionRoute(teamId: string) {
   return researchWorkspaceStageRoute(teamId, "knowledge_collection");
 }
 
 export function challengeQuestionDetailRoute(
-  teamId = RESEARCH_TEAM_ID,
+  teamId: string,
   questionId = "",
   runId = "",
 ) {
-  const params = new URLSearchParams({ team: teamId, challengeQuestion: questionId });
+  if (!teamId.trim()) throw new Error("teamId 不能为空");
+  const params = new URLSearchParams({ teamId, challengeQuestion: questionId });
   if (runId) {
     params.set("challengeRun", runId);
   }
@@ -144,16 +129,27 @@ export function challengeQuestionDetailRoute(
 
 /**
  * Canonical research / team home for end users: single-canvas workflow workspace.
- * All "返回团队页面" / overview back links should use this — not a bare `?team=` URL.
+ * All "返回团队页面" / overview back links use this teamId-scoped URL.
  */
-export function teamWorkspaceRoute(teamId = RESEARCH_TEAM_ID) {
-  return `/teams?team=${encodeURIComponent(teamId)}&researchView=workflow&workflowId=challenge-cup-research`;
+export function teamWorkspaceRoute(
+  teamId: string,
+  location: { runId?: string; nodeId?: string; panel?: string } = {},
+) {
+  if (!teamId.trim()) throw new Error("teamId 不能为空");
+  const params = new URLSearchParams({
+    teamId,
+    researchView: "workflow",
+    workflowId: "challenge-cup-research",
+  });
+  if (location.runId) params.set("runId", location.runId);
+  if (location.nodeId) params.set("node", location.nodeId);
+  if (location.panel) params.set("panel", location.panel);
+  return `/teams?${params.toString()}`;
 }
 
 /**
- * Historical name for the org-canvas home. Now agents panel on the workflow shell
- * (ADR 0006: organization graph is secondary to process workflow).
+ * Agents panel on the workflow shell.
  */
-export function researchCanvasRoute(teamId = RESEARCH_TEAM_ID) {
+export function researchCanvasRoute(teamId: string) {
   return `${teamWorkspaceRoute(teamId)}&panel=agents`;
 }

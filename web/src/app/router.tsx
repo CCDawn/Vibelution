@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
-import { Navigate, createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
 import { LauncherShell } from "./LauncherShell";
@@ -55,10 +55,6 @@ const MemoryRoute = lazyRoute(() => import("../routes/MemoryRoute").then((module
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
 const PromptTemplatesRoute = lazyRoute(() => import("../routes/PromptTemplatesRoute").then((module) => ({ default: module.PromptTemplatesRoute })));
 const ResetRoute = lazyRoute(() => import("../routes/ResetRoute").then((module) => ({ default: module.ResetRoute })));
-// ResearchFlowCanvasRoute retired as primary page (Task 8/9): redirect only.
-function ResearchFlowCanvasRedirect() {
-  return <Navigate to="/teams?researchView=workflow&panel=agents" replace />;
-}
 const SkillsRoute = lazyRoute(() => import("../routes/SkillsRoute").then((module) => ({ default: module.SkillsRoute })));
 const SupervisedReviewRoute = lazyRoute(() => import("../routes/SupervisedReviewRoute").then((module) => ({ default: module.SupervisedReviewRoute })));
 const TeamsRoute = lazyRoute(() => import("../routes/TeamsRoute").then((module) => ({ default: module.TeamsRoute })));
@@ -208,8 +204,6 @@ export const router = createBrowserRouter([
       { path: "git", ...guardedLazyElement(<GitRoute />) },
       { path: "usage", ...guardedLazyElement(<UsageRoute />) },
       { path: "logs", ...guardedLazyElement(<LogsRoute />) },
-      { path: "research", element: <LegacyTeamsRedirect /> },
-      { path: "research/flow-canvas", element: <ResearchFlowCanvasRedirect /> },
       { path: "pet", ...guardedLazyElement(<PetRoute />) },
       { path: "reset", ...guardedLazyElement(<ResetRoute />) },
       { path: "config", ...guardedLazyElement(<ConfigRoute />, "workbench", "config") },

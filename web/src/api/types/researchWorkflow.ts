@@ -170,6 +170,8 @@ export type WorkflowCanvasProjection = {
   definition: WorkflowDefinition;
   run: {
     runId: string | null;
+    teamId: string | null;
+    runVersion: number | null;
     status: WorkflowRunStatus | null;
     runtimeCurrentNodeIds: string[];
     nodeRuns: Record<string, WorkflowNodeRunProjection>;
@@ -296,6 +298,8 @@ export type NodeCommandCapability = {
 /** Extended node detail payload (Task: binding + session + commands). */
 export type ResearchWorkflowNodeDetail = {
   runId: string;
+  teamId: string;
+  runVersion: number;
   nodeId: string;
   actorKind: ActorKind;
   primaryRoleKey: string;
@@ -310,4 +314,121 @@ export type ResearchWorkflowNodeDetail = {
   blockedReason: string;
   artifacts: Record<string, unknown>;
   commands: NodeCommandCapability[];
+};
+
+export type ResearchWorkflowScopedProjection = {
+  runId: string;
+  teamId: string;
+  runVersion: number;
+};
+
+export type ResearchBudgetLedgerSnapshot = {
+  budgetLedgerId: string;
+  runId: string;
+  stageId: string;
+  policySnapshotHash: string;
+  limits: Record<string, number>;
+  reserved: Record<string, number>;
+  consumed: Record<string, number>;
+  remaining: Record<string, number>;
+  stopReason: string;
+  updatedAt: string;
+};
+
+export type ResearchBudgetProjection = ResearchWorkflowScopedProjection & {
+  budgetLedgers: ResearchBudgetLedgerSnapshot[];
+  budgetReservations: Array<Record<string, unknown>>;
+};
+
+export type HypothesisCandidateSnapshot = {
+  candidateId: string;
+  claim: string;
+  scores: Record<string, number>;
+  counterEvidenceRefs: string[];
+  derivedFromCandidateIds: string[];
+  status: string;
+  reviewRef: string;
+};
+
+export type HypothesisPortfolioSnapshot = {
+  portfolioId: string;
+  runId: string;
+  maxCandidates: number;
+  maxEvolutionRounds: number;
+  candidates: HypothesisCandidateSnapshot[];
+};
+
+export type ResearchHypothesesProjection = ResearchWorkflowScopedProjection & {
+  hypothesisPortfolios: HypothesisPortfolioSnapshot[];
+};
+
+export type ExperimentCampaignSnapshot = {
+  campaignId: string;
+  runId: string;
+  hypothesisCandidateId: string;
+  protocolHash: string;
+  environmentSnapshotHash: string;
+  datasetSnapshotRefs: string[];
+  baselineRefs: string[];
+  metricContractRef: string;
+  stage: "feasibility" | "baseline" | "agenda" | "ablation_replication" | string;
+  seedSet: number[];
+  replicationCount: number;
+  budgetLedgerRef: string;
+  stopCriteria: Record<string, unknown>;
+  experimentRunRefs: string[];
+  resultArtifactRefs: string[];
+  decision: string;
+};
+
+export type ResearchExperimentCampaignsProjection = ResearchWorkflowScopedProjection & {
+  experimentCampaigns: ExperimentCampaignSnapshot[];
+};
+
+export type CompetitionEvaluationSnapshot = {
+  evaluationId: string;
+  runId: string;
+  rubricVersion: string;
+  dimensionScores: Record<string, number>;
+  claimCoverage: number;
+  evidenceCoverage: number;
+  experimentCoverage: number;
+  deliverableCoverage: number;
+  blockingWarnings: string[];
+  reviewerRefs: string[];
+  evaluatedAt: string;
+};
+
+export type ResearchEvaluationProjection = ResearchWorkflowScopedProjection & {
+  competitionEvaluations: CompetitionEvaluationSnapshot[];
+  qualityGateEvaluations: Array<Record<string, unknown>>;
+};
+
+export type ResearchLedgerProjection = ResearchWorkflowScopedProjection & {
+  projectId: string;
+  claimEvidence: Array<Record<string, unknown>>;
+  teamKnowledge: Array<Record<string, unknown>>;
+  experimentPlanning: Record<string, unknown>;
+  nodeRuns: Array<Record<string, unknown>>;
+  handoffs: Array<Record<string, unknown>>;
+  artifactManifests: Array<Record<string, unknown>>;
+  resultPackage: Record<string, unknown> | null;
+  summary: {
+    claimEvidenceCount: number;
+    knowledgeBaseCount: number;
+    nodeRunCount: number;
+    handoffCount: number;
+    artifactCount: number;
+  };
+  boundaries: {
+    readOnly: true;
+    persistsCanonicalEvidence: false;
+    writesTeamKnowledge: false;
+    writesExperimentContract: false;
+    writesWorkflowRun: false;
+  };
+};
+
+export type ResearchHandoffsProjection = ResearchWorkflowScopedProjection & {
+  handoffs: NodeHandoffRecord[];
 };

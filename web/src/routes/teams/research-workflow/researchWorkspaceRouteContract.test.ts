@@ -15,6 +15,10 @@ const workspaceSource = readFileSync(
   resolve(import.meta.dirname, "ResearchProcessWorkspace.tsx"),
   "utf8",
 );
+const canvasSource = readFileSync(resolve(import.meta.dirname, "ResearchWorkflowCanvasPane.tsx"), "utf8");
+const workspaceStylesSource = readFileSync(resolve(import.meta.dirname, "ResearchProcessWorkspace.styles.ts"), "utf8");
+const canvasStylesSource = readFileSync(resolve(import.meta.dirname, "ResearchWorkflowCanvasPane.styles.ts"), "utf8");
+const locationSource = readFileSync(resolve(import.meta.dirname, "researchProcessLocation.ts"), "utf8");
 
 describe("researchWorkspaceRouteContract", () => {
   it("registers workflow view and mounts ResearchProcessWorkspace for challenge cup", () => {
@@ -25,16 +29,17 @@ describe("researchWorkspaceRouteContract", () => {
     expect(primarySource).toContain("challengeCupResearchTeamSelected");
   });
 
-  it("flow-canvas is redirect only — no lazy ResearchFlowCanvasRoute page", () => {
-    expect(routerSource).toContain("ResearchFlowCanvasRedirect");
-    expect(routerSource).toContain('path: "research/flow-canvas"');
+  it("physically removes the retired research routes", () => {
+    expect(routerSource).not.toContain("ResearchFlowCanvasRedirect");
+    expect(routerSource).not.toContain('path: "research/flow-canvas"');
+    expect(routerSource).not.toContain('path: "research"');
     expect(routerSource).not.toMatch(/import\("\.\.\/routes\/ResearchFlowCanvasRoute"\)/);
   });
 
   it("workspace uses single canvas navigation semantics", () => {
-    expect(workspaceSource).toContain("VWorkflowCanvas");
-    expect(workspaceSource).toContain("researchView");
-    expect(workspaceSource).toContain("workflow");
+    expect(canvasSource).toContain("VWorkflowCanvas");
+    expect(locationSource).toContain("researchView");
+    expect(locationSource).toContain("workflow");
     expect(workspaceSource).not.toContain("ChallengeCupStageRail");
   });
 
@@ -43,15 +48,14 @@ describe("researchWorkspaceRouteContract", () => {
     expect(workspaceSource).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");
     expect(workspaceSource).toContain("hideHeader");
     expect(workspaceSource).toContain("research-process-workspace-host");
-    expect(workspaceSource).toContain("h-full min-h-0 w-full min-w-0 flex-1");
-    expect(workspaceSource).toContain('height="100%"');
-    expect(workspaceSource).toContain("!absolute !inset-0");
+    expect(workspaceStylesSource).toContain("h-full min-h-0 w-full min-w-0 flex-1");
+    expect(canvasSource).toContain('height="100%"');
+    expect(canvasStylesSource).toContain("!absolute !inset-0");
     expect(workspaceSource).not.toContain("height={440}");
     expect(workspaceSource).not.toContain("height={420}");
   });
 
   it("selection is URL node only and does not claim runtime write", () => {
-    expect(workspaceSource).toContain("Selection is UI-only");
     expect(workspaceSource).toContain("runtimeCurrentNodeIds");
     expect(workspaceSource).not.toContain("setRuntimeCurrent");
   });

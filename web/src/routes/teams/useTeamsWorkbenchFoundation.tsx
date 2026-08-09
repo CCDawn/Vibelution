@@ -164,7 +164,7 @@ export function useTeamsWorkbenchFoundation({
   // Late-bound: mutations hook is declared above scroll helper; keep stable identity via ref.
   const scrollSourceCollectionPanelIntoViewRef = useRef<(panelId: string) => void>(() => {});
 
-  const requestedTeamId = searchParams.get("team") ?? "";
+  const requestedTeamId = searchParams.get("teamId") ?? "";
   const requestedAgentId = searchParams.get("agent") ?? "";
   const {
     teamsQuery,

@@ -54,14 +54,19 @@ describe("nodeCommandAdapter", () => {
   it("executes non-human commands through the backend node-command API", async () => {
     api.postResearchWorkflowNodeCommand.mockResolvedValue({ command: "view_artifacts", artifacts: {} });
     const result = await executeNodeCommand(
-      { runId: "run-1", nodeId: "source_finding", teamId: "t1" },
+      { runId: "run-1", nodeId: "source_finding", teamId: "t1", runVersion: 7 },
       { command: "view_artifacts", available: true, reason: "" },
     );
     expect(api.postResearchWorkflowNodeCommand).toHaveBeenCalledWith(
       "run-1",
       "source_finding",
-      "view_artifacts",
-      {},
+      {
+        teamId: "t1",
+        expectedRunVersion: 7,
+        idempotencyKey: "node:run-1:source_finding:view_artifacts:v7",
+        command: "view_artifacts",
+        payload: {},
+      },
     );
     expect(result.command).toBe("view_artifacts");
   });
@@ -69,20 +74,25 @@ describe("nodeCommandAdapter", () => {
   it("executes human-gate commands with the CURRENT node's pending task id", async () => {
     api.resolveResearchWorkflowHumanTask.mockResolvedValue({ runId: "run-1" });
     await executeNodeCommand(
-      { runId: "run-1", nodeId: "knowledge_handoff", teamId: "t1", pendingHumanTaskId: "ht-current" },
+      { runId: "run-1", nodeId: "knowledge_handoff", teamId: "t1", runVersion: 8, pendingHumanTaskId: "ht-current" },
       { command: "accept_handoff", available: true, reason: "" },
     );
     expect(api.resolveResearchWorkflowHumanTask).toHaveBeenCalledWith(
       "run-1",
       "ht-current",
-      { accept: true, resolvedBy: "operator" },
+      {
+        teamId: "t1",
+        expectedRunVersion: 8,
+        idempotencyKey: "node:run-1:knowledge_handoff:accept_handoff:v8",
+        decision: "accept",
+      },
     );
   });
 
   it("rejects a human-gate command without the current node's task id", async () => {
     await expect(
       executeNodeCommand(
-        { runId: "run-1", nodeId: "knowledge_handoff", teamId: "t1" },
+        { runId: "run-1", nodeId: "knowledge_handoff", teamId: "t1", runVersion: 3 },
         { command: "accept_handoff", available: true, reason: "" },
       ),
     ).rejects.toThrow("当前节点没有待处理的人工任务");
@@ -92,7 +102,7 @@ describe("nodeCommandAdapter", () => {
   it("rejects unavailable capabilities before any API call", async () => {
     await expect(
       executeNodeCommand(
-        { runId: "run-1", nodeId: "source_finding", teamId: "t1" },
+        { runId: "run-1", nodeId: "source_finding", teamId: "t1", runVersion: 3 },
         { command: "run_smoke", available: false, reason: "缺少 planId" },
       ),
     ).rejects.toThrow("缺少 planId");

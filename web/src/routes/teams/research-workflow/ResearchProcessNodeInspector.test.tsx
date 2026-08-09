@@ -1,5 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
@@ -110,14 +111,16 @@ describe("ResearchProcessNodeInspector command rendering", () => {
       sessionBinding: { bindingId: "b1", runId: "run-1", nodeId: "source_finding", nodeRunId: "nr-1", nodeAttempt: 1, agentId: "agent-1", roleKey: "source_finder", sessionId: "s1", sessionAttempt: 1, taskId: "t1", turnId: "u1", checkpointId: "", status: "bound", boundAt: "" },
     });
     const linkMarkup = renderToStaticMarkup(
-      <ResearchProcessNodeInspector
-        nodeId="source_finding"
-        adapter={getNodeAdapter("source_finding")}
-        detail={bound}
-        handoffPending={false}
-        busy={false}
-        onCommand={vi.fn()}
-      />,
+      <MemoryRouter>
+        <ResearchProcessNodeInspector
+          nodeId="source_finding"
+          adapter={getNodeAdapter("source_finding")}
+          detail={bound}
+          handoffPending={false}
+          busy={false}
+          onCommand={vi.fn()}
+        />
+      </MemoryRouter>,
     );
     expect(linkMarkup).toContain('href="/chat?session=s1');
 
@@ -166,36 +169,7 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     expect(markup).toContain("选择流程节点");
   });
 
-  it("renders a stage drawer entry for adapters with drawerPanel and calls onOpenPanel", () => {
-    const onOpenPanel = vi.fn();
-    const hypothesisMarkup = renderToStaticMarkup(
-      <ResearchProcessNodeInspector
-        nodeId="hypothesis_design"
-        adapter={getNodeAdapter("hypothesis_design")}
-        detail={makeDetail({ nodeId: "hypothesis_design", label: "假设设计" })}
-        handoffPending={false}
-        busy={false}
-        onCommand={vi.fn()}
-        onOpenPanel={onOpenPanel}
-      />,
-    );
-    expect(hypothesisMarkup).toContain("打开实验设计面板");
-
-    const findingMarkup = renderToStaticMarkup(
-      <ResearchProcessNodeInspector
-        nodeId="source_finding"
-        adapter={getNodeAdapter("source_finding")}
-        detail={makeDetail()}
-        handoffPending={false}
-        busy={false}
-        onCommand={vi.fn()}
-        onOpenPanel={onOpenPanel}
-      />,
-    );
-    expect(findingMarkup).toContain("打开知识搜集面板");
-  });
-
-  it("hides the drawer entry when onOpenPanel is not provided", () => {
+  it("does not render a legacy stage drawer entry", () => {
     const markup = renderToStaticMarkup(
       <ResearchProcessNodeInspector
         nodeId="hypothesis_design"
