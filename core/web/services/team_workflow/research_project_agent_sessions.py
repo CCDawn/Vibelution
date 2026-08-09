@@ -164,7 +164,7 @@ def _write_registry(
 
 
 def _normalize_attempt(value: dict[str, Any]) -> dict[str, Any]:
-    return {
+    normalized = {
         "sessionId": _text(value.get("sessionId")),
         "agentId": _text(value.get("agentId")),
         "roleKey": _text(value.get("roleKey"), limit=80),
@@ -173,6 +173,10 @@ def _normalize_attempt(value: dict[str, Any]) -> dict[str, Any]:
         "createdFromTaskId": _text(value.get("createdFromTaskId")),
         "createdAt": _text(value.get("createdAt"), limit=120),
     }
+    recovery_reason = _text(value.get("recoveryReason"), limit=80)
+    if recovery_reason:
+        normalized["recoveryReason"] = recovery_reason
+    return normalized
 
 
 def _session_binding(conversation: dict[str, Any]) -> dict[str, Any]:
@@ -283,9 +287,10 @@ def _binding_payload(
     retry_of_session_id: str,
     created_from_task_id: str,
     created_at: str,
+    recovery_reason: str = "",
 ) -> dict[str, Any]:
     """Return the allowlisted, path/secret-free binding stored with a session."""
-    return {
+    binding = {
         "teamId": _text(team_id),
         "researchProjectId": _text(research_project_id),
         "experimentName": _text(experiment_name, limit=160),
@@ -297,6 +302,10 @@ def _binding_payload(
         "createdFromTaskId": _text(created_from_task_id),
         "createdAt": _text(created_at, limit=120),
     }
+    normalized_recovery_reason = _text(recovery_reason, limit=80)
+    if normalized_recovery_reason:
+        binding["recoveryReason"] = normalized_recovery_reason
+    return binding
 
 
 def _result_payload(
@@ -307,7 +316,7 @@ def _result_payload(
     session_created: bool,
 ) -> dict[str, Any]:
     session_id = _text(attempt.get("sessionId"))
-    return {
+    result = {
         "researchProjectId": _text(project.get("projectId")),
         "experimentName": _text(project.get("name"), limit=160),
         "sessionId": session_id,
@@ -317,6 +326,10 @@ def _result_payload(
         "retryOfSessionId": _text(attempt.get("retryOfSessionId")),
         "chatRoute": f"/chat?{urllib.parse.urlencode({'session': session_id})}",
     }
+    recovery_reason = _text(attempt.get("recoveryReason"), limit=80)
+    if recovery_reason:
+        result["recoveryReason"] = recovery_reason
+    return result
 
 
 def resolve_research_project_agent_session(
@@ -329,6 +342,7 @@ def resolve_research_project_agent_session(
     created_from_task_id: str = "",
     formal_retry: bool = False,
     previous_task: dict[str, Any] | None = None,
+    recover_missing_session: bool = False,
 ) -> dict[str, Any]:
     """Resolve or create the flat session for one Agent in one research project."""
     s = _service()
@@ -350,6 +364,7 @@ def resolve_research_project_agent_session(
         limit=80,
     )
     previous = previous_task if isinstance(previous_task, dict) else {}
+    missing_session_recovery = False
 
     with _REGISTRY_LOCK:
         registry = _read_registry(normalized_team_id, normalized_project_id)
@@ -364,30 +379,34 @@ def resolve_research_project_agent_session(
         if current is not None and not formal_retry:
             detail = s.session_service.get_session_detail(current["sessionId"])
             if not isinstance(detail, dict):
-                raise ResearchProjectAgentSessionError(
-                    "Project Agent session registry points to a missing canonical session: "
-                    f"{current['sessionId']}. A formal retry with terminal task lineage is required."
+                if not recover_missing_session:
+                    raise ResearchProjectAgentSessionError(
+                        "Project Agent session registry points to a missing canonical session: "
+                        f"{current['sessionId']}. A formal retry with terminal task lineage is required."
+                    )
+                formal_retry = True
+                missing_session_recovery = True
+            else:
+                if recovered:
+                    _write_registry(normalized_team_id, normalized_project_id, registry)
+                s.lock_research_project_name(
+                    normalized_team_id,
+                    normalized_project_id,
+                    reason="first_experiment_session",
                 )
-            if recovered:
-                _write_registry(normalized_team_id, normalized_project_id, registry)
-            s.lock_research_project_name(
-                normalized_team_id,
-                normalized_project_id,
-                reason="first_experiment_session",
-            )
-            title = _text(detail.get("title"), limit=120) or _session_title(
-                project["name"],
-                normalized_role_label,
-                int(current["attempt"]),
-            )
-            return _result_payload(
-                project=project,
-                attempt=current,
-                session_title=title,
-                session_created=False,
-            )
+                title = _text(detail.get("title"), limit=120) or _session_title(
+                    project["name"],
+                    normalized_role_label,
+                    int(current["attempt"]),
+                )
+                return _result_payload(
+                    project=project,
+                    attempt=current,
+                    session_title=title,
+                    session_created=False,
+                )
 
-        if current is not None and formal_retry:
+        if current is not None and formal_retry and not missing_session_recovery:
             previous_status = _text(previous.get("status"), limit=80).lower()
             if previous_status in ACTIVE_TASK_STATUSES:
                 raise ResearchProjectAgentSessionError(
@@ -418,6 +437,9 @@ def resolve_research_project_agent_session(
             retry_of_session_id=retry_of_session_id,
             created_from_task_id=created_from_task_id,
             created_at=created_at,
+            recovery_reason=(
+                "missing_canonical_session" if missing_session_recovery else ""
+            ),
         )
         session = s.session_service.create_chat_session(
             title=title,
@@ -435,6 +457,9 @@ def resolve_research_project_agent_session(
                 "retryOfSessionId": retry_of_session_id,
                 "createdFromTaskId": created_from_task_id,
                 "createdAt": created_at,
+                "recoveryReason": (
+                    "missing_canonical_session" if missing_session_recovery else ""
+                ),
             }
         )
         record["roleKey"] = normalized_role_key
