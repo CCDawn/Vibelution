@@ -11,7 +11,8 @@ Graph nodes only transition state; this module owns:
 from __future__ import annotations
 
 import uuid
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from core.research.workflow.iteration_decisions import (
     DEFAULT_ITERATION_BUDGET,
@@ -21,13 +22,12 @@ from core.research.workflow.iteration_decisions import (
     normalize_decision_dict,
     parse_decision_kind,
     promotion_operation_for,
-    route_target_for_decision,
 )
-from core.web.services.team_workflow.research_runtime.handoff_builder import build_handoff_record
+from core.web.services.team_workflow.research_runtime.handoff_builder import (
+    build_handoff_record,
+)
 from core.web.services.team_workflow.research_runtime.handoff_lineage import (
     append_handoff_attempt,
-    existing_active_edge_ids,
-    handoff_edge_id,
 )
 from core.web.services.team_workflow.research_runtime.run_fork import (
     build_child_run_skeleton,
@@ -124,7 +124,6 @@ def apply_iteration_decision_side_effects(
     decision.setdefault("evaluationReportRef", artifacts.get("evaluation_report") or "")
 
     patch: dict[str, Any] = {}
-    handoffs_to_append: list[dict[str, Any]] = []
     human_task: dict[str, Any] | None = None
     child_run: dict[str, Any] | None = None
 
@@ -277,13 +276,44 @@ def apply_iteration_decision_side_effects(
 
     if kind in (IterationDecisionKind.PROMOTE_CANDIDATE, IterationDecisionKind.ROLLBACK_CANDIDATE):
         op = promotion_operation_for(kind) or "promote"
+        target = str(decision.get("selectedCandidateRef") or decision.get("baselineRef") or "")
+        if kind is IterationDecisionKind.ROLLBACK_CANDIDATE and not target:
+            raise IterationDecisionError(
+                "rollback requires existing candidate/baseline ref",
+                code="missing_rollback_target",
+            )
+        governance_handoff = build_handoff_record(
+            run_id=run_id,
+            workflow_id=workflow_id,
+            workflow_version_id=workflow_version_id,
+            from_node_id="iteration_decision",
+            to_node_id="version_governance",
+            status="accepted",
+            artifacts=artifacts,
+            accepted_by=str(decision.get("decidedBy") or "iteration_planner"),
+        )
+        existing = list(record.get("handoffs") or [])
+        _, lineage = append_handoff_attempt(existing, governance_handoff)
+
         if kind is IterationDecisionKind.ROLLBACK_CANDIDATE:
-            target = decision.get("selectedCandidateRef") or decision.get("baselineRef")
-            if not target:
-                raise IterationDecisionError(
-                    "rollback requires existing candidate/baseline ref",
-                    code="missing_rollback_target",
-                )
+            patch = {
+                "status": "succeeded",
+                "completionKind": "rolled_back",
+                "runtimeCurrentNodeIds": [],
+                "promotionOperation": "rollback",
+                "officialCandidateRef": target,
+                "handoffs": lineage,
+            }
+            return {
+                "decision": decision,
+                "patch": patch,
+                "handoffs_to_append": [],
+                "human_task": None,
+                "child_run": None,
+                "error": None,
+                "replace_handoffs": lineage,
+            }
+
         proposal = build_promotion_proposal(
             run_id=run_id, decision=decision, operation=op, utc_now=now_fn
         )
@@ -303,20 +333,17 @@ def apply_iteration_decision_side_effects(
         }
         proposals = list(record.get("promotionProposals") or [])
         proposals.append(proposal)
-        handoff = build_handoff_record(
+        promotion_handoff = build_handoff_record(
             run_id=run_id,
             workflow_id=workflow_id,
             workflow_version_id=workflow_version_id,
-            from_node_id="iteration_decision",
+            from_node_id="version_governance",
             to_node_id="candidate_promotion",
-            status="accepted",
-            artifacts={**artifacts, "promotion_proposal": proposal["proposalId"]},
-            accepted_by=str(decision.get("decidedBy") or "iteration_planner"),
+            status="waiting_human",
+            artifacts={**artifacts, "version_governance_record": proposal["proposalId"]},
             human_task_id=human_task["taskId"],
         )
-        handoff["edgeId"] = "e_decision_promo" if op == "promote" else "e_decision_rollback"
-        existing = list(record.get("handoffs") or [])
-        _, lineage = append_handoff_attempt(existing, handoff)
+        _, lineage = append_handoff_attempt(lineage, promotion_handoff)
         patch = {
             "status": "waiting_human",
             "runtimeCurrentNodeIds": ["candidate_promotion"],
@@ -349,19 +376,29 @@ def apply_iteration_decision_side_effects(
             )
         if not terminal:
             raise IterationDecisionError("stop requires terminalReason", code="missing_terminal_reason")
-        handoff = build_handoff_record(
+        governance_handoff = build_handoff_record(
             run_id=run_id,
             workflow_id=workflow_id,
             workflow_version_id=workflow_version_id,
             from_node_id="iteration_decision",
-            to_node_id="result_package",
+            to_node_id="version_governance",
             status="accepted",
             artifacts=artifacts,
             accepted_by=str(decision.get("decidedBy") or "iteration_planner"),
         )
-        handoff["edgeId"] = "e_decision_stop"
         existing = list(record.get("handoffs") or [])
-        _, lineage = append_handoff_attempt(existing, handoff)
+        _, lineage = append_handoff_attempt(existing, governance_handoff)
+        package_handoff = build_handoff_record(
+            run_id=run_id,
+            workflow_id=workflow_id,
+            workflow_version_id=workflow_version_id,
+            from_node_id="version_governance",
+            to_node_id="result_package",
+            status="accepted",
+            artifacts=artifacts,
+            accepted_by="iteration_versioning",
+        )
+        _, lineage = append_handoff_attempt(lineage, package_handoff)
         # Official candidate unchanged
         official = record.get("officialCandidateRef") or ""
         patch = {

@@ -44,6 +44,7 @@ def artifact_kind_for_gate(from_node_id: str) -> str:
         "controlled_run": "run_artifacts",
         "result_evaluation": "evaluation_report",
         "iteration_decision": "iteration_decision",
+        "version_governance": "version_governance_record",
         "result_package": "research_result_package",
     }
     return mapping.get(from_node_id, "artifact")

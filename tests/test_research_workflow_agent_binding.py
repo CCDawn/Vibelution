@@ -1,12 +1,12 @@
 """Agent binding + session binding closed-loop contracts for research workflow runs.
 
 Covers the acceptance matrix:
-1. research-team's 9 roles resolve into 9 agent-node run snapshots;
+1. research-team's executable roles resolve into all 10 agent-node run snapshots;
 2. missing roles stay unbound (no random fallback);
 3. node > stage > workflow override priority is honored;
 4. run snapshots are frozen — later team-config changes never rewrite history;
 5. starting an agent task writes the full session/task/turn binding;
-6. every one of the 15 nodes serves node detail;
+6. every one of the 16 nodes serves node detail;
 7. with multiple pending HumanTasks only the current node's task resolves;
 8. run list filters by teamId;
 9. rebind keeps lineage and never silently overwrites.
@@ -80,11 +80,11 @@ def runtime_service(tmp_path, monkeypatch):
     return reset_research_workflow_runtime_service_for_tests(run_store=store, checkpoint_path=ckpt)
 
 
-def test_nine_roles_resolve_into_nine_agent_snapshots(runtime_service) -> None:
+def test_executable_roles_resolve_into_all_ten_agent_snapshots(runtime_service) -> None:
     run = runtime_service.create_run(CHALLENGE_CUP_WORKFLOW_ID, team_id="research-team")
     snaps = {s["nodeId"]: s for s in run["bindingSnapshots"]}
     agent_nodes = [n for n in build_challenge_cup_workflow_definition().nodes if n.actorKind is ActorKind.AGENT]
-    assert len(agent_nodes) == 9
+    assert len(agent_nodes) == 10
     for node in agent_nodes:
         snap = snaps[node.nodeId]
         assert snap["agentId"] == ROLE_AGENTS[node.primaryRoleKey], node.nodeId
@@ -244,7 +244,7 @@ def test_controlled_write_rejects_unknown_role_and_node(runtime_service) -> None
     assert exc.value.code == "unknown_node"  # human gate is not an agent node
 
 
-def test_all_fifteen_nodes_serve_node_detail(runtime_service) -> None:
+def test_all_sixteen_nodes_serve_node_detail(runtime_service) -> None:
     run = runtime_service.create_run(CHALLENGE_CUP_WORKFLOW_ID, team_id="research-team")
     definition = build_challenge_cup_workflow_definition()
     for node in definition.nodes:
@@ -253,7 +253,7 @@ def test_all_fifteen_nodes_serve_node_detail(runtime_service) -> None:
         assert detail["primaryRoleKey"] == node.primaryRoleKey
         assert "bindingSnapshot" in detail
         assert "commands" in detail
-    assert len(definition.nodes) == 15
+    assert len(definition.nodes) == 16
 
 
 def test_multiple_pending_human_tasks_only_current_resolves(runtime_service) -> None:

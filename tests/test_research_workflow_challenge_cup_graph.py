@@ -1,4 +1,4 @@
-"""Task 6 extension: full 15-node challenge cup graph with human gates."""
+"""Challenge Cup v2.1 graph with 16 nodes and human gates."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def test_graph_contains_all_definition_nodes() -> None:
     definition = build_challenge_cup_workflow_definition()
     # compile to ensure graph builds
     path = Path(__file__).resolve()  # noqa: F841
-    assert len(definition.nodes) == 15
+    assert len(definition.nodes) == 16
 
 
 def test_run_stops_at_first_human_gate_and_can_progress(tmp_path: Path) -> None:
@@ -24,7 +24,7 @@ def test_run_stops_at_first_human_gate_and_can_progress(tmp_path: Path) -> None:
         graph = compile_challenge_cup_graph(checkpointer)
         cfg = {"configurable": {"thread_id": "cc-1"}}
         # start → auto-run agent nodes until knowledge_handoff interrupt
-        result = graph.invoke({}, cfg)
+        graph.invoke({}, cfg)
         state = graph.get_state(cfg)
         assert state.next
         # First human in order is knowledge_handoff (after 4 agent nodes)
@@ -43,7 +43,7 @@ def test_run_stops_at_first_human_gate_and_can_progress(tmp_path: Path) -> None:
             guard += 1
             nxt = list(state.next or [])
             if "iteration_decision" in nxt:
-                result = graph.invoke(
+                graph.invoke(
                     Command(
                         resume={
                             "decisionKind": "stop",
@@ -54,7 +54,7 @@ def test_run_stops_at_first_human_gate_and_can_progress(tmp_path: Path) -> None:
                     cfg,
                 )
             else:
-                result = graph.invoke(Command(resume={"accept": True}), cfg)
+                graph.invoke(Command(resume={"accept": True}), cfg)
             state = graph.get_state(cfg)
 
         assert state.values.get("knowledge_package_accepted") is True

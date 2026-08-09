@@ -2,19 +2,19 @@
 
 > 本文件是 v2.1 实施、审查和验收的统一交接合同；长期治理规则必须在 T0 提炼到可追踪的 ADR、现行标准和 owning README。
 
-Status: **active-plan**
+Status: **in-progress**
 
 Approval baseline: **v2 修复边界已获用户确认；v2.1 科研效能优化来自本轮成熟项目调研，实施前需按本文件完成一次最终评审**
 
 Planning owner: **Codex Challenge Workflow Plan**
 
-Implementation owner: **待开发任务认领**
+Implementation owner: **Codex Challenge Workflow v2.1 Implementation**
 
-Claim: **claim-c4e6a7e78b6f**
+Claim: **claim-1c38724370fa**（runtime）+ **claim-bc685d6ad7fa**（baseline/ignore）
 
-Branch: **codex/challenge-cup-workflow-v2-repair-plan**
+Branch: **codex/challenge-cup-workflow-v2-implementation**
 
-Worktree: **<project-root-parent>\Vibelution-worktrees\challenge-cup-workflow-v2-repair-plan**
+Worktree: **<project-root-parent>\Vibelution-worktrees\challenge-cup-workflow-v2-implementation**
 
 Scope: **挑战杯 research-team 的科研工作流运行时、Agent/会话、Handoff、科研质量与预算门禁、三阶段单画布、旧页面收敛与正式验收**
 
@@ -24,7 +24,7 @@ Supersedes:
 - docs/archive/plans/2026-08-07/challenge-cup-workflow-implementation-plan.md 的未闭合实施部分；
 - 所有把局部测试、静态画布或兼容跳转视为正式闭环的历史结论。
 
-Implementation link: **待 T0 建立实现 claim 后填写**
+Implementation link: **local branch `codex/challenge-cup-workflow-v2-implementation`；起点 `bcc9577c`**
 
 Validation: **本文件完成后执行 Markdown 结构、内部路径、索引、关键决策锚点与 git diff 检查；业务行为验证按第 15 节执行**
 

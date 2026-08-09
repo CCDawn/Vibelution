@@ -72,7 +72,7 @@ def test_node_detail_degraded_without_session_anchor(runtime_service) -> None:
         )
 
     # Bind an agent first (controlled rebind), then attach the session anchor.
-    rebound = runtime_service.apply_command(
+    runtime_service.apply_command(
         run["runId"],
         "rebind_node",
         payload={"nodeId": "source_finding", "agentId": "agent-1"},
@@ -174,14 +174,13 @@ def test_http_definition_and_create_run(tmp_path: Path, monkeypatch: pytest.Monk
 
     from core.web.app import create_app
     from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-    from fastapi.testclient import TestClient
 
     client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
     defn = client.get(f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/definition")
     assert defn.status_code == 200
     body = defn.json()
     assert body["definition"]["workflowId"] == CHALLENGE_CUP_WORKFLOW_ID
-    assert len(body["definition"]["nodes"]) == 15
+    assert len(body["definition"]["nodes"]) == 16
     assert "selectedNodeId" not in str(body)
 
     created = client.post(

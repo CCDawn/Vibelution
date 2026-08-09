@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "1",
+  "caseId": "challenge-cup-workflow-v21-baseline-001",
+  "purpose": "同题、同数据、同 rubric、同预算的科研工作流基线与 v2.1 对照；不得写入正式团队知识或实验数据",
+  "runInput": {
+    "teamId": "acceptance-research-team",
+    "projectId": "acceptance-energy-anomaly-project",
+    "questionId": "question-energy-anomaly-gate-v1",
+    "workflowVersionId": "challenge-cup-research-v2.1",
+    "researchBriefHash": "7d6fced411fcc0e33a40ca2186a08f4d0d744ab5c7b6851bb4746bb373e3bd2a",
+    "datasetRefs": [
+      "fixture://challenge-cup/energy-anomaly-v1"
+    ],
+    "metricContract": {
+      "primary": "invalid_iteration_rate",
+      "direction": "minimize",
+      "secondary": [
+        "reconstruction_mse",
+        "false_positive_rate"
+      ]
+    },
+    "constraintSnapshot": {
+      "desktopOnly": true,
+      "formalKnowledgeWrites": false,
+      "formalExperimentWrites": false
+    },
+    "competitionRuleRef": "fixture://challenge-cup/rules-v1",
+    "competitionRuleVersion": "fixture-2026-08-09",
+    "trackAndRubricSnapshot": {
+      "track": "科技发明制作类",
+      "dimensions": [
+        "scientificRigor",
+        "innovation",
+        "feasibility",
+        "socialValue",
+        "deliverableQuality"
+      ],
+      "blockingRules": [
+        "claim_without_evidence",
+        "experiment_without_protocol",
+        "unreproducible_primary_result"
+      ]
+    },
+    "researchObjectiveContract": {
+      "question": "在固定园区能耗数据、固定 seed 和同一代理配置下，稀疏重构误差门控能否降低无效迭代，同时不恶化异常检测误报率？",
+      "falsifiableOutcome": "门控方案未降低 invalid_iteration_rate，或 false_positive_rate 超过冻结阈值",
+      "requiredDeliverables": [
+        "claim_evidence_table",
+        "frozen_protocol",
+        "experiment_appendix",
+        "presentation_evidence_map"
+      ]
+    },
+    "sourcePolicy": {
+      "minimumPrimarySources": 3,
+      "requireCounterEvidence": true,
+      "requireCitationLocators": true
+    },
+    "budgetPolicy": {
+      "tokens": 100000,
+      "toolCalls": 120,
+      "wallClockSeconds": 14400,
+      "experiments": 12,
+      "computeUnits": 100,
+      "maxParallelTasks": 3,
+      "maxRetries": 2
+    },
+    "stopPolicy": {
+      "maxNoImprovementRounds": 2,
+      "stopOnBudgetExhaustion": true,
+      "stopOnBlockingEvidenceGap": true
+    },
+    "environmentSnapshotRef": "fixture://challenge-cup/environment-v1",
+    "modelRoutingPolicy": {
+      "reasoning": "fixture-strong-model",
+      "extraction": "fixture-light-model",
+      "allowExplicitEscalation": true
+    },
+    "evaluationContract": {
+      "minimumClaimEvidenceCoverage": 0.9,
+      "minimumPrimarySourceRatio": 0.6,
+      "requiredSeeds": [
+        11,
+        29,
+        47
+      ],
+      "duplicateSideEffectsTarget": 0
+    },
+    "agentBindingSnapshot": [
+      {
+        "nodeId": "source_finding",
+        "agentId": "agent-source-finder"
+      }
+    ],
+    "createdBy": "acceptance-fixture",
+    "createdAt": "2026-08-09T08:00:00Z"
+  },
+  "baselineMetrics": {
+    "sourceHead": "b9b324d4b537fbde4a1629f90f4e059bb1bedd85",
+    "focusedRegression": "103 passed, 1 warning",
+    "currentGraphBehavior": {
+      "nodeCount": 15,
+      "createRunAutoAdvancesAgentNodes": true,
+      "placeholderArtifactPrefix": "hash:",
+      "requiresFrozenRunInput": false,
+      "qualityGateProjection": false,
+      "budgetLedger": false,
+      "taskLeaseHeartbeat": false
+    },
+    "qualityAndEfficiency": {
+      "claimEvidenceCoverage": null,
+      "primarySourceRatio": null,
+      "counterEvidenceCoverage": null,
+      "timeToFirstViableHypothesisMs": null,
+      "timeToFirstValidExperimentMs": null,
+      "humanInterventions": null,
+      "tokenCost": null,
+      "toolCallCost": null,
+      "cacheReuseRate": null,
+      "duplicateSideEffects": null
+    },
+    "interpretation": "当前实现没有真实 Agent/Artifact/quality/budget 计量，不能把缺失值填成 0；只记录为不可测基线。"
+  }
+}

@@ -6,7 +6,8 @@ iteration_decision (see iteration_decisions.ITERATION_ROUTE_TARGETS).
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, TypedDict
+from collections.abc import Callable
+from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -71,10 +72,13 @@ def _can_enter(node_id: str, state: ChallengeCupState) -> tuple[bool, str]:
             return False, "requires_frozen_protocol"
         if not state.get("smoke_accepted"):
             return False, "requires_smoke_accept"
-    if node_id == "result_package":
+    if (
+        node_id == "result_package"
+        and state.get("promotion_operation")
+        and state.get("promotion_accepted") is False
+    ):
         # Must not package while a human promotion task is unresolved (service enforces too).
-        if state.get("promotion_operation") and state.get("promotion_accepted") is False:
-            return False, "promotion_rejected"
+        return False, "promotion_rejected"
     return True, ""
 
 
@@ -157,8 +161,6 @@ def _make_node_fn(node_id: str) -> Callable[[ChallengeCupState], ChallengeCupSta
                     if node_id not in completed:
                         completed.append(node_id)
                     patch["completed_node_ids"] = completed
-                    # Signal router via special kind override
-                    blocked_decision = {**decision, "decisionKind": "stop", "_budgetBlocked": True}
                     # Keep original kind for audit
                     patch["iteration_decision"] = decision
                     patch["last_decision"] = decision
@@ -294,10 +296,9 @@ def _make_node_fn(node_id: str) -> Callable[[ChallengeCupState], ChallengeCupSta
                 elif term:
                     patch["completion_kind"] = "stopped"
 
-        if node_id not in completed or node_id == "controlled_run":
-            # Allow re-entry listing for attempts: track last completion presence
-            if node_id not in completed:
-                completed.append(node_id)
+        # Allow re-entry listing for attempts: track last completion presence.
+        if node_id not in completed:
+            completed.append(node_id)
         patch["completed_node_ids"] = completed
         patch["artifacts"] = artifacts
         patch["handoffs"] = handoffs
@@ -310,7 +311,7 @@ def _make_node_fn(node_id: str) -> Callable[[ChallengeCupState], ChallengeCupSta
 
 def route_after_iteration_decision(
     state: ChallengeCupState,
-) -> Literal["controlled_run", "candidate_promotion", "result_package", "__end__"]:
+) -> Literal["controlled_run", "version_governance", "__end__"]:
     """Conditional router — unknown kinds raise (must never default to promotion)."""
     if state.get("_budget_block_end") or state.get("blocked_reason") == "iteration_budget_exhausted":
         return END  # type: ignore[return-value]
@@ -324,9 +325,33 @@ def route_after_iteration_decision(
     target = route_target_for_decision(kind)
     if target is None:
         raise IterationDecisionError(f"no route for {kind.value}", code="no_route")
-    if target not in {"controlled_run", "candidate_promotion", "result_package"}:
+    if target not in {"controlled_run", "version_governance"}:
         raise IterationDecisionError(f"illegal route target {target}", code="illegal_route")
     return target  # type: ignore[return-value]
+
+
+def route_after_version_governance(
+    state: ChallengeCupState,
+) -> Literal["candidate_promotion", "result_package", "__end__"]:
+    """Route the governed terminal decision without inventing a promotion gate."""
+    decision = state.get("iteration_decision") or {}
+    kind_raw = decision.get("decisionKind")
+    if not kind_raw:
+        raise IterationDecisionError(
+            "missing decisionKind after version_governance",
+            code="missing_decision",
+        )
+    kind = parse_decision_kind(kind_raw)
+    if kind is IterationDecisionKind.PROMOTE_CANDIDATE:
+        return "candidate_promotion"
+    if kind is IterationDecisionKind.STOP:
+        return "result_package"
+    if kind is IterationDecisionKind.ROLLBACK_CANDIDATE:
+        return END  # type: ignore[return-value]
+    raise IterationDecisionError(
+        f"illegal governed decision {kind.value}",
+        code="illegal_governed_decision",
+    )
 
 
 # Linear prefix ends at result_evaluation -> iteration_decision; then conditional.
@@ -343,7 +368,6 @@ _LINEAR_EDGES: list[tuple[str, str]] = [
     ("smoke_gate", "controlled_run"),
     ("controlled_run", "result_evaluation"),
     ("result_evaluation", "iteration_decision"),
-    ("candidate_promotion", "result_package"),
 ]
 
 
@@ -360,11 +384,20 @@ def build_challenge_cup_graph() -> StateGraph:
         route_after_iteration_decision,
         {
             "controlled_run": "controlled_run",
+            "version_governance": "version_governance",
+            END: END,
+        },
+    )
+    builder.add_conditional_edges(
+        "version_governance",
+        route_after_version_governance,
+        {
             "candidate_promotion": "candidate_promotion",
             "result_package": "result_package",
             END: END,
         },
     )
+    builder.add_edge("candidate_promotion", "result_package")
     builder.add_edge("result_package", END)
     return builder
 
@@ -378,7 +411,7 @@ def compiled_iteration_route_map() -> dict[str, str | None]:
     return {k.value: v for k, v in {
         IterationDecisionKind.RERUN_SAME_PROTOCOL: "controlled_run",
         IterationDecisionKind.REVISE_PROTOCOL: None,
-        IterationDecisionKind.PROMOTE_CANDIDATE: "candidate_promotion",
-        IterationDecisionKind.ROLLBACK_CANDIDATE: "candidate_promotion",
-        IterationDecisionKind.STOP: "result_package",
+        IterationDecisionKind.PROMOTE_CANDIDATE: "version_governance",
+        IterationDecisionKind.ROLLBACK_CANDIDATE: "version_governance",
+        IterationDecisionKind.STOP: "version_governance",
     }.items()}
