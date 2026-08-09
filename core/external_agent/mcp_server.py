@@ -10,13 +10,12 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
 import anyio
 from mcp.server.mcpserver import MCPServer
-from mcp.types import Annotations, CallToolResult, TextContent, ToolAnnotations
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from .backend_client import BackendClientError, ManagedAgentBackendClient
 from .contracts import (
@@ -118,29 +117,12 @@ def build_server(
         lifespan=managed_lifespan,
     )
 
-    last_modified = ""
-    if guide_path.is_file():
-        last_modified = (
-            datetime.fromtimestamp(
-                guide_path.stat().st_mtime,
-                tz=timezone.utc,
-            )
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
-
     @server.resource(
         GUIDE_URI,
         name="mcp-managed-agent-gateway-guide",
         title="Vibelution MCP Managed Agent Gateway Guide",
         description="Read before deploying or calling the Vibelution managed Agent gateway.",
         mime_type="text/markdown",
-        annotations=Annotations(
-            audience=["assistant", "user"],
-            priority=1.0,
-            last_modified=last_modified or None,
-        ),
-        meta={"guideVersion": GUIDE_VERSION},
     )
     def managed_agent_guide() -> str:
         if not guide_path.is_file():
