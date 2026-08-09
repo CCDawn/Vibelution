@@ -30,6 +30,21 @@ def _session_context_allows_internal_auto_continue(context: dict[str, Any]) -> b
     explicit = s._normalize_optional_bool(context.get("allow_internal_auto_continue"))
     if explicit is not None:
         return bool(explicit)
+    metadata = (
+        context.get("message_metadata")
+        if isinstance(context.get("message_metadata"), dict)
+        else {}
+    )
+    if (
+        str(context.get("user_message_source") or "").strip()
+        == "external_agent_task"
+        and str(metadata.get("source") or "").strip() == "external_agent_task"
+    ):
+        external_explicit = s._normalize_optional_bool(
+            metadata.get("allowInternalAutoContinue")
+        )
+        if external_explicit is not None:
+            return bool(external_explicit)
     if not s._source_collection_stage_task_context_metadata(context):
         return False
     if str(context.get("user_message_source") or "").strip() == "agent_inbox":
@@ -47,6 +62,16 @@ def _session_context_internal_auto_continue_max_turns(context: dict[str, Any]) -
     if s._source_collection_stage_task_context_metadata(context):
         return s.SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS
     return s.INTERNAL_AUTO_CONTINUE_MAX_TURNS
+
+
+def _external_agent_runtime_permission_profile(context: dict[str, Any]) -> str:
+    if str(context.get("user_message_source") or "").strip() != "external_agent_task":
+        return ""
+    metadata = context.get("message_metadata") if isinstance(context.get("message_metadata"), dict) else {}
+    if str(metadata.get("source") or "").strip() != "external_agent_task":
+        return ""
+    profile = str(metadata.get("effectivePermissionProfile") or "").strip().lower()
+    return profile if profile in {"read_only", "workspace_write", "full_access"} else ""
 
 
 def _wait_for_tool_execution_quiescence(scope: ToolExecutionScope) -> None:
@@ -160,6 +185,18 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         context,
         supervised_runtime_role,
     )
+    runtime_tool_grants = supervised_runtime_tool_grants
+    runtime_tool_source = (
+        "supervised_baseline_self_edit"
+        if supervised_runtime_tool_grants is not None
+        else ""
+    )
+    external_runtime_permission_profile = _external_agent_runtime_permission_profile(context)
+    if external_runtime_permission_profile:
+        from core.web.services.external_agent.policy import external_runtime_tool_grants
+
+        runtime_tool_grants = list(external_runtime_tool_grants(external_runtime_permission_profile))
+        runtime_tool_source = f"external_agent_task:{external_runtime_permission_profile}"
     prepare_timings["agentLookupMs"] = s._elapsed_ms(stage_started_at)
     stage_started_at = s._perf_counter()
     prompt_snapshot_hint = (
@@ -409,6 +446,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 if supervised_runtime_tool_grants is not None
                 else ("supervised_conversation_harness" if supervised_runtime_role else "")
             ),
+            "externalRuntimePermissionProfile": external_runtime_permission_profile,
             **s._session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
             "executorWaitMs": s._elapsed_ms_between(context.get("_executor_submitted_at_monotonic"), prepare_started_at),
             "schedulerToWorkerStartedMs": s._elapsed_ms_between(
@@ -516,12 +554,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 session_id=session_id,
                 turn_id=turn_id,
                 supervised_role=supervised_runtime_role,
-                runtime_tool_grants=supervised_runtime_tool_grants,
-                runtime_tool_source=(
-                    "supervised_baseline_self_edit"
-                    if supervised_runtime_tool_grants is not None
-                    else ""
-                ),
+                runtime_tool_grants=runtime_tool_grants,
+                runtime_tool_source=runtime_tool_source,
             ),
             s.mental_model_enabled_override(mental_model_enabled),
             task_workspace_context,

@@ -19,6 +19,7 @@
 | 领域词汇 | [agents/domain.md](agents/domain.md) |
 | Worktree / claim | [agents/worktree-collaboration.md](agents/worktree-collaboration.md) |
 | 工具授权 | [agents/tool-authorization-entrypoints.md](agents/tool-authorization-entrypoints.md) |
+| **外部 Agent MCP 部署与调用** | [agents/mcp-managed-agent-gateway.md](agents/mcp-managed-agent-gateway.md) |
 | 对话链路图 | [agents/conversation-flow-map.md](agents/conversation-flow-map.md) |
 | GitHub Issue / triage | [agents/issue-tracker.md](agents/issue-tracker.md) · [agents/triage-labels.md](agents/triage-labels.md) |
 | ADR | [adr/](adr/) |

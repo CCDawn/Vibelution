@@ -50,6 +50,7 @@
 | 修「unsupported_wire_protocol」 | 04 → 02(protocols) → [PROTOCOL.md](../../../core/llm/PROTOCOL.md) |
 | 只改 Workbench 窗口 | 07 |
 | 只改 git 提交模型 | 08 |
+| 部署或调用 Vibelution MCP Agent 网关 | [MCP 受管 Agent 网关指南](../../agents/mcp-managed-agent-gateway.md) → 07（Launcher/Runtime） → 09（交付自检） |
 
 ## 配置根表（`config.toml`）
 

@@ -400,7 +400,19 @@ def build_default_operator_config(
             env_reader=env_reader,
             include_unconfigured_providers=include_unconfigured_providers,
             credential_env_overrides=credential_env_overrides,
-        )
+        ),
+        "external_agent_gateway": {
+            "enabled": False,
+            "permission_ceiling": "read_only",
+            "runtime_permission_ceiling": "workspace_write",
+            "approval_persist_enabled": False,
+            "allowed_agent_ids": [],
+            "denied_agent_ids": [],
+            "max_concurrent_tasks_per_owner": 4,
+            "max_concurrent_tasks_per_agent": 1,
+            "max_task_seconds": 1800,
+            "lease_seconds": 30,
+        },
     }
 
 

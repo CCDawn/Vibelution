@@ -836,7 +836,19 @@ def _with_runtime_tool_grants(
 ) -> dict[str, Any]:
     s = _service()
     runtime_source = str(source or "").strip()
-    exclusive_runtime_tools = runtime_source == "self_evolution_autonomous_loop"
+    external_runtime_profile = (
+        runtime_source.partition(":")[2]
+        if runtime_source.startswith("external_agent_task:")
+        else ""
+    )
+    external_runtime_tools = external_runtime_profile in {
+        "read_only",
+        "workspace_write",
+        "full_access",
+    }
+    exclusive_runtime_tools = (
+        runtime_source == "self_evolution_autonomous_loop" or external_runtime_tools
+    )
     runtime_grants = s._tool_name_list(grants or [])
     if not runtime_grants and not exclusive_runtime_tools:
         return policy
@@ -845,13 +857,22 @@ def _with_runtime_tool_grants(
     effective_grants = [tool for tool in runtime_grants if tool and tool not in blocked]
     if exclusive_runtime_tools:
         effective_grant_set = set(effective_grants)
-        allowed = effective_grants
+        allowed = (
+            [tool for tool in persistent_allowed if tool in effective_grant_set]
+            if external_runtime_tools
+            else effective_grants
+        )
+        allowed_set = set(allowed)
         preferred = [
             tool
             for tool in s._tool_name_list(policy.get("preferredTools") or [])
-            if tool in effective_grant_set
+            if tool in allowed_set
         ]
-        added = [tool for tool in effective_grants if tool not in persistent_allowed]
+        added = (
+            []
+            if external_runtime_tools
+            else [tool for tool in effective_grants if tool not in persistent_allowed]
+        )
         temporary_allowed = added
     else:
         allowed = list(persistent_allowed)
@@ -867,7 +888,15 @@ def _with_runtime_tool_grants(
         )
     grants_mutation = any(tool in s.MUTATING_AGENT_TOOL_NAMES for tool in effective_grants)
     mutation_access = str(policy.get("mutationAccess") or "inherit").strip()
-    runtime_mutation_access = "controlled" if grants_mutation and mutation_access == "none" else mutation_access
+    runtime_mutation_access = (
+        "none"
+        if external_runtime_profile == "read_only"
+        else (
+            "controlled"
+            if grants_mutation and mutation_access == "none" and not external_runtime_tools
+            else mutation_access
+        )
+    )
     approval_overrides = dict(policy.get("approvalOverrides") or {})
     max_calls_per_turn = policy.get("maxCallsPerTurn")
     runtime_max_calls_per_turn = max_calls_per_turn
@@ -878,6 +907,13 @@ def _with_runtime_tool_grants(
     }:
         for tool in effective_grants:
             approval_overrides.setdefault(tool, "never")
+    if external_runtime_tools:
+        from core.web.services.tool_catalog import metadata_for_tool
+
+        for tool in allowed:
+            capabilities = set(metadata_for_tool(tool).get("capabilityTags") or [])
+            if "read_only" not in capabilities:
+                approval_overrides[tool] = "always"
     if runtime_source == "self_evolution_autonomous_loop":
         try:
             current_max_calls = int(max_calls_per_turn or 0)

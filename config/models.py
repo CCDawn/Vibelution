@@ -865,6 +865,49 @@ class SessionCatalogConfig(BaseModel):
         return normalized
 
 
+class ExternalAgentGatewayConfig(BaseModel):
+    """Fail-closed operator policy for the local managed MCP gateway."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = False
+    permission_ceiling: str = "read_only"
+    runtime_permission_ceiling: str = "workspace_write"
+    approval_persist_enabled: bool = False
+    allowed_agent_ids: list[str] = Field(default_factory=list)
+    denied_agent_ids: list[str] = Field(default_factory=list)
+    max_concurrent_tasks_per_owner: int = Field(default=4, ge=1, le=32)
+    max_concurrent_tasks_per_agent: int = Field(default=1, ge=1, le=8)
+    max_task_seconds: int = Field(default=1800, ge=5, le=7200)
+    lease_seconds: int = Field(default=30, ge=5, le=300)
+
+    @field_validator("permission_ceiling", "runtime_permission_ceiling")
+    @classmethod
+    def normalize_permission_profile(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"read_only", "workspace_write", "full_access"}:
+            raise ValueError(
+                "external Agent permission profile must be one of: "
+                "read_only, workspace_write, full_access"
+            )
+        return normalized
+
+    @field_validator("allowed_agent_ids", "denied_agent_ids", mode="before")
+    @classmethod
+    def normalize_agent_ids(cls, value: Any) -> list[str]:
+        if not isinstance(value, (list, tuple, set)):
+            return []
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            agent_id = str(item or "").strip()
+            if not agent_id or agent_id in seen:
+                continue
+            seen.add(agent_id)
+            result.append(agent_id)
+        return result
+
+
 # ============================================================================
 # 上下文压缩配置
 # ============================================================================
@@ -2133,6 +2176,9 @@ class AppConfig(BaseModel):
     web_chat: WebChatConfig = Field(default_factory=WebChatConfig)
     session_catalog: SessionCatalogConfig = Field(
         default_factory=SessionCatalogConfig
+    )
+    external_agent_gateway: ExternalAgentGatewayConfig = Field(
+        default_factory=ExternalAgentGatewayConfig
     )
     context_compression: ContextCompressionConfig = Field(
         default_factory=ContextCompressionConfig
