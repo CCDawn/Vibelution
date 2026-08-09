@@ -205,19 +205,29 @@ function runningToolPaintId(item: RunningToolTurnItem) {
 export function selectFirstUnpaintedRunningTool(
   layer: ActiveTurnLayerState | undefined,
   paintedToolIds: readonly string[],
-): { tool: RunningToolTurnItem | undefined; toolId: string; runningToolIds: string[] } {
+): {
+  tool: RunningToolTurnItem | undefined;
+  toolId: string;
+  tools: RunningToolTurnItem[];
+  toolIds: string[];
+  runningToolIds: string[];
+} {
   const painted = new Set(paintedToolIds.map(compactText).filter(Boolean));
   const runningTools = (layer?.turnItems ?? []).filter((item): item is RunningToolTurnItem => (
     item.type === "tool_call" && (item.status === "pending" || item.status === "running")
   ));
   const runningToolIds = runningTools.map(runningToolPaintId).filter(Boolean);
-  const tool = runningTools.find((item) => {
+  const tools = runningTools.filter((item) => {
     const id = runningToolPaintId(item);
     return Boolean(id) && !painted.has(id);
   });
+  const toolIds = tools.map(runningToolPaintId).filter(Boolean);
+  const tool = tools[0];
   return {
     tool,
     toolId: tool ? runningToolPaintId(tool) : "",
+    tools,
+    toolIds,
     runningToolIds,
   };
 }

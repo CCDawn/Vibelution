@@ -1694,26 +1694,26 @@ export function ChatCodingRoute() {
       paintedRunningToolIdsBySessionRef.current[sessionId] ?? [],
     );
     const newlyPaintedRunningTool = paintedToolSelection.tool;
+    const newlyPaintedRunningTools = paintedToolSelection.tools;
     const lastLoggedAt = lastConversationStreamingFrameTelemetryAtRef.current[sessionId] ?? 0;
     if (now - lastLoggedAt < 1_000 && !newlyPaintedRunningTool) {
       return;
     }
-    if (newlyPaintedRunningTool) {
+    if (newlyPaintedRunningTools.length > 0) {
       paintedRunningToolIdsBySessionRef.current = {
         ...paintedRunningToolIdsBySessionRef.current,
         [sessionId]: Array.from(new Set([
           ...(paintedRunningToolIdsBySessionRef.current[sessionId] ?? []),
-          paintedToolSelection.toolId,
+          ...paintedToolSelection.toolIds,
         ])).slice(-64),
       };
     }
     const paintedAtMs = metrics.paintedAtMs || chatStreamPerformanceNowMs();
     const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
-    const toolStartTimestamp = newlyPaintedRunningTool?.updatedAt
-      || newlyPaintedRunningTool?.createdAt
-      || paintedActiveTurn?.updatedAt
-      || "";
-    const toolStartEpochMs = Date.parse(toolStartTimestamp);
+    const toolStartToBrowserPaintMs = newlyPaintedRunningTools.reduce((maximum, tool) => {
+      const toolStartEpochMs = Date.parse(tool.createdAt || tool.updatedAt || paintedActiveTurn?.updatedAt || "");
+      return Number.isFinite(toolStartEpochMs) ? Math.max(maximum, now - toolStartEpochMs) : maximum;
+    }, 0);
     lastConversationStreamingFrameTelemetryAtRef.current = {
       ...lastConversationStreamingFrameTelemetryAtRef.current,
       [sessionId]: now,
@@ -1735,9 +1735,7 @@ export function ChatCodingRoute() {
         applyToPaintMs: lastAssistantDeltaAppliedAtMs
           ? Math.max(0, Math.round(paintedAtMs - lastAssistantDeltaAppliedAtMs))
           : 0,
-        toolStartToBrowserPaintMs: newlyPaintedRunningTool && Number.isFinite(toolStartEpochMs)
-          ? Math.max(0, now - toolStartEpochMs)
-          : 0,
+        toolStartToBrowserPaintMs: Math.max(0, toolStartToBrowserPaintMs),
         activeStatusSource: paintedActiveTurn?.ledgerSeq ? "assistant_delta" : "optimistic_submit",
       },
     });

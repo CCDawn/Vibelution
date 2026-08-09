@@ -73,10 +73,12 @@ describe("chat active turn layer", () => {
 
     expect(selectFirstUnpaintedRunningTool(layer, [])).toMatchObject({
       tool: { callId: "call-a" },
+      toolIds: ["call-a", "call-b"],
       runningToolIds: ["call-a", "call-b"],
     });
     expect(selectFirstUnpaintedRunningTool(layer, ["call-a"])).toMatchObject({
       tool: { callId: "call-b" },
+      toolIds: ["call-b"],
     });
     expect(selectFirstUnpaintedRunningTool(layer, ["call-a", "call-b"]).tool).toBeUndefined();
   });
