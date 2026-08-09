@@ -100,6 +100,16 @@ export async function executeNodeCommand(
   if (!EXECUTABLE.has(command)) {
     throw new Error(`命令 ${command} 尚未接入业务服务`);
   }
+  if (
+    command === "start_agent_task" &&
+    (!capability.payload ||
+      !capability.payload.budgetRequest ||
+      typeof capability.payload.budgetRequest !== "object" ||
+      Array.isArray(capability.payload.budgetRequest) ||
+      Object.keys(capability.payload.budgetRequest).length === 0)
+  ) {
+    throw new Error("启动 Agent 任务缺少后端预算契约");
+  }
 
   if (command === "accept_handoff" || command === "reject_handoff" || command === "revise") {
     const decision =
@@ -123,7 +133,7 @@ export async function executeNodeCommand(
     expectedRunVersion: context.runVersion,
     idempotencyKey: `node:${runId}:${nodeId}:${command}:v${context.runVersion}`,
     command,
-    payload: {},
+    payload: capability.payload ?? {},
   });
   return {
     command,
