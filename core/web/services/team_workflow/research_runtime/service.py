@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from core.research.workflow.bindings import (
 )
 from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
 from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
+from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
@@ -33,15 +35,21 @@ from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
 
 from .binding_config import BindingConfigValidationError, WorkflowBindingConfigStore
+from .checkpoint_lifecycle import prepare_initial_checkpoint
 from .durable_index import DurableWorkflowIndex
-from .handoff_builder import (
-    build_handoff_record,
-    successor_node,
-)
 from .handoff_lineage import (
     build_auto_handoffs_for_completed,
-    existing_active_edge_ids,
-    handoff_edge_id,
+)
+from .handoff_query import (
+    HandoffQueryError,
+    get_handoff_detail,
+    list_handoffs,
+)
+from .human_task_resolution import (
+    HumanTaskResolutionError,
+)
+from .human_task_resolution import (
+    resolve_human_task as resolve_human_task_transition,
 )
 from .iteration_transition import (
     apply_iteration_decision_side_effects,
@@ -53,6 +61,18 @@ from .node_command_adapter import (
     apply_node_command,
     node_command_capabilities,
 )
+from .node_completion import complete_node_execution
+from .node_execution import heartbeat_node_execution, start_node_execution
+from .node_execution_support import NodeExecutionError
+from .node_recovery import reconcile_expired_execution, retry_node_execution
+from .run_lifecycle import (
+    binding_snapshot_payload,
+    build_initial_run_record,
+    create_request_fingerprint,
+    freeze_run_input,
+    run_id_for_create,
+)
+from .run_projection import build_run_canvas_projection
 from .session_binding_bridge import (
     SessionBindingBridge,
     SessionBindingError,
@@ -288,22 +308,24 @@ class ResearchWorkflowRuntimeService:
         self,
         workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID,
         *,
-        team_id: str = "",
-        project_id: str = "",
+        run_input: Mapping[str, Any],
         binding_layers: AgentBindingLayers | None = None,
         idempotency_key: str = "",
     ) -> dict[str, Any]:
         with self._lock:
-            if idempotency_key:
-                existing_id = self._index.get_run_id(f"create:{idempotency_key}")
-                if existing_id:
-                    existing = self._store.get_run(existing_id)
-                    if existing:
-                        return existing
-
             meta = self.get_definition(workflow_id)
-            run_id = f"run-{uuid.uuid4().hex[:12]}"
+            create_input_fingerprint = create_request_fingerprint(run_input)
+            run_id = run_id_for_create(workflow_id, idempotency_key)
+            existing = self._store.get_run(run_id)
+            if existing:
+                if existing.get("createInputFingerprint") != create_input_fingerprint:
+                    raise ResearchWorkflowError(
+                        "idempotencyKey was already used with different run input",
+                        code="idempotency_conflict",
+                    )
+                return existing
             thread_id = f"thread-{run_id}"
+            team_id = str(run_input.get("teamId") or "").strip()
             # Binding resolution: explicit layers > non-empty service-level
             # config > team-role default mapping (per teamId, never random).
             service_config = self._bindings
@@ -323,113 +345,35 @@ class ResearchWorkflowRuntimeService:
                 layers=layers,
                 captured_at=_utc_now(),
             )
-            self._store.create_run(
-                {
-                    "runId": run_id,
-                    "workflowId": workflow_id,
-                    "workflowVersionId": meta["workflowVersionId"],
-                    "structureHash": meta["definition"]["structureHash"],
-                    "teamId": team_id,
-                    "projectId": project_id,
-                    "threadId": thread_id,
-                    "status": "queued",
-                    "runtimeCurrentNodeIds": [],
-                    "bindingSnapshots": [
-                        {
-                            "snapshotId": s.snapshotId,
-                            "nodeId": s.nodeId,
-                            "agentId": s.agentId,
-                            "roleKey": s.roleKey,
-                            "actorKind": s.actorKind.value,
-                            "resolvedFrom": s.resolvedFrom,
-                            "capturedAt": s.capturedAt,
-                        }
-                        for s in snapshots
-                    ],
-                    "events": [],
-                    "humanTasks": [],
-                    "handoffs": [],
-                    "sessionBindings": {},
-                    "iterationDecisions": [],
-                    "nodeAttempts": {},
-                    "iterationBudgetMax": DEFAULT_ITERATION_BUDGET,
-                    "officialCandidateRef": "",
-                    "baselineCandidateRef": "",
-                    "childRunIds": [],
-                    "completionKind": "",
-                    "createIdempotencyKey": idempotency_key,
-                }
-            )
-            if idempotency_key:
-                self._index.put_run_id(f"create:{idempotency_key}", run_id)
+            binding_payloads = [binding_snapshot_payload(snapshot) for snapshot in snapshots]
+            created_at = _utc_now()
+            try:
+                input_snapshot = freeze_run_input(
+                    run_input,
+                    workflow_version_id=meta["workflowVersionId"],
+                    binding_snapshots=binding_payloads,
+                    created_at=created_at,
+                )
+            except ContractValidationError as exc:
+                raise ResearchWorkflowError(str(exc), code="invalid_run_input") from exc
 
-            current_node_ids: list[str] = []
-            lg_snapshot: dict[str, Any] = {}
-            checkpoint_id = ""
-            with open_sqlite_checkpointer(self._checkpoint_path) as checkpointer:
-                graph = compile_challenge_cup_graph(checkpointer)
-                cfg = {"configurable": {"thread_id": thread_id}}
-                graph.invoke({}, cfg)
-                state = graph.get_state(cfg)
-                checkpoint_id = self._checkpoint_id_from_state(state)
-                current_node_ids = [str(n) for n in (state.next or [])]
-                if not current_node_ids and state.values.get("current_node_id"):
-                    current_node_ids = [str(state.values.get("current_node_id"))]
-                completed = list(state.values.get("completed_node_ids") or [])
-                artifacts = dict(state.values.get("artifacts") or {})
-                lg_snapshot = {
-                    "engine": "challenge_cup_graph",
-                    "completedNodeIds": completed,
-                    "knowledgePackageAccepted": bool(state.values.get("knowledge_package_accepted")),
-                    "frozenProtocolAccepted": bool(state.values.get("frozen_protocol_accepted")),
-                    "smokeAccepted": bool(state.values.get("smoke_accepted")),
-                    "artifacts": artifacts,
-                    "checkpointId": checkpoint_id,
-                }
-
-            # Auto handoffs for completed agent pipeline before first gate.
-            self._append_auto_handoffs(
+            checkpoint_id = prepare_initial_checkpoint(self._checkpoint_path, thread_id)
+            record = build_initial_run_record(
                 run_id=run_id,
                 workflow_id=workflow_id,
                 workflow_version_id=meta["workflowVersionId"],
-                completed=completed,
-                artifacts=artifacts,
-                existing_edge_ids=set(),
+                structure_hash=meta["definition"]["structureHash"],
+                thread_id=thread_id,
+                checkpoint_id=checkpoint_id,
+                input_snapshot=input_snapshot,
+                binding_snapshots=binding_payloads,
+                idempotency_key=idempotency_key,
+                create_input_fingerprint=create_input_fingerprint,
+                created_at=created_at,
             )
-
-            status = "waiting_human" if current_node_ids else "running"
-            gate_node = current_node_ids[0] if current_node_ids else ""
-            human_tasks: list[dict[str, Any]] = []
-            if gate_node:
-                human_task = self._new_human_task(
-                    run_id=run_id,
-                    node_id=gate_node,
-                    checkpoint_id=checkpoint_id,
-                )
-                human_tasks = [human_task]
-
-            self._store.update_run(
-                run_id,
-                {
-                    "status": status,
-                    "runtimeCurrentNodeIds": current_node_ids,
-                    "humanTasks": human_tasks,
-                    "langGraph": lg_snapshot,
-                },
-            )
-            if gate_node:
-                self._store.append_event(
-                    run_id,
-                    {
-                        "workflowId": workflow_id,
-                        "workflowVersionId": meta["workflowVersionId"],
-                        "runId": run_id,
-                        "threadId": thread_id,
-                        "nodeId": gate_node,
-                        "type": "node.waiting_human",
-                        "summary": {"taskId": human_tasks[0]["taskId"]},
-                    },
-                )
+            self._store.create_run(record)
+            if idempotency_key:
+                self._index.put_run_id(f"create:{idempotency_key}", run_id)
             return self.get_run(run_id)
 
     def get_run(self, run_id: str) -> dict[str, Any]:
@@ -441,42 +385,7 @@ class ResearchWorkflowRuntimeService:
     def get_canvas_projection(self, run_id: str | None = None) -> dict[str, Any]:
         if not run_id:
             return build_canvas_projection()
-        record = self.get_run(run_id)
-        from core.research.workflow.models import WorkflowRunStatus
-
-        status_raw = str(record.get("status") or "")
-        try:
-            status = WorkflowRunStatus(status_raw)
-        except ValueError:
-            status = None
-        pending = [
-            t
-            for t in (record.get("humanTasks") or [])
-            if str(t.get("status") or "") == "pending"
-        ]
-        node_attempts = dict(record.get("nodeAttempts") or {})
-        node_runs: dict[str, dict[str, Any]] = {}
-        for node_id, attempt in node_attempts.items():
-            node_runs[str(node_id)] = {
-                "nodeId": str(node_id),
-                "status": "succeeded" if int(attempt or 0) > 0 else "pending",
-                "attempt": int(attempt or 0),
-                "nodeRunId": f"nr-{node_id}-a{int(attempt or 0)}",
-            }
-        return build_canvas_projection(
-            run_id=run_id,
-            run_status=status,
-            runtime_current_node_ids=list(record.get("runtimeCurrentNodeIds") or []),
-            node_runs=node_runs,
-            pending_human_tasks=pending,
-            parent_run_id=str(record.get("parentRunId") or "") or None,
-            child_run_ids=list(record.get("childRunIds") or []),
-            completion_kind=str(record.get("completionKind") or "") or None,
-            official_candidate_ref=str(record.get("officialCandidateRef") or "") or None,
-            blocked_reason=str(record.get("blockedReason") or (record.get("langGraph") or {}).get("blockedReason") or "")
-            or None,
-            iteration_budget_max=int(record.get("iterationBudgetMax") or DEFAULT_ITERATION_BUDGET),
-        )
+        return build_run_canvas_projection(self.get_run(run_id))
 
     def get_node_detail(self, run_id: str, node_id: str) -> dict[str, Any]:
         record = self.get_run(run_id)
@@ -521,198 +430,41 @@ class ResearchWorkflowRuntimeService:
             "commands": commands,
         }
 
+    def list_handoffs(self, run_id: str) -> dict[str, Any]:
+        return list_handoffs(self.get_run(run_id))
+
+    def get_handoff_detail(
+        self,
+        run_id: str,
+        handoff_id: str,
+    ) -> dict[str, Any]:
+        try:
+            return get_handoff_detail(self.get_run(run_id), handoff_id)
+        except HandoffQueryError as exc:
+            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+
     def resolve_human_task(
         self,
         run_id: str,
         task_id: str,
         *,
-        accept: bool,
+        decision: str,
         resolved_by: str = "",
+        idempotency_key: str,
     ) -> dict[str, Any]:
         with self._lock:
-            record = self.get_run(run_id)
-            task = self._store.find_human_task(run_id, task_id)
-            if task is None or task.get("runId") != run_id:
-                raise ResearchWorkflowError(f"Unknown human task: {task_id}", code="unknown_human_task")
-            if task.get("status") != "pending":
-                raise ResearchWorkflowError("Human task already resolved", code="human_task_resolved")
-
-            thread_id = str(record.get("threadId") or "")
-            gate_node = str(task.get("nodeId") or "")
-            workflow_id = str(record.get("workflowId") or CHALLENGE_CUP_WORKFLOW_ID)
-            workflow_version_id = str(record.get("workflowVersionId") or "")
-            existing_handoffs = list(record.get("handoffs") or [])
-            # Uniqueness is definition edgeId only (never mix with from->to keys).
-            existing_edge_ids = existing_active_edge_ids(existing_handoffs)
-
-            runtime_nodes: list[str] = []
-            lg_snapshot = dict(record.get("langGraph") or {})
-            checkpoint_id = ""
-            with open_sqlite_checkpointer(self._checkpoint_path) as checkpointer:
-                graph = compile_challenge_cup_graph(checkpointer)
-                cfg = {"configurable": {"thread_id": thread_id}}
-                graph.invoke(Command(resume={"accept": accept}), cfg)
-                state = graph.get_state(cfg)
-                checkpoint_id = self._checkpoint_id_from_state(state)
-                runtime_nodes = [str(n) for n in (state.next or [])]
-                completed = list(state.values.get("completed_node_ids") or [])
-                artifacts = dict(state.values.get("artifacts") or {})
-                lg_snapshot = {
-                    **lg_snapshot,
-                    "engine": "challenge_cup_graph",
-                    "completedNodeIds": completed,
-                    "knowledgePackageAccepted": bool(state.values.get("knowledge_package_accepted")),
-                    "frozenProtocolAccepted": bool(state.values.get("frozen_protocol_accepted")),
-                    "smokeAccepted": bool(state.values.get("smoke_accepted")),
-                    "artifacts": artifacts,
-                    "checkpointId": checkpoint_id,
-                }
-
-            # Resolve current task
-            resolved_status = "resolved_accept" if accept else "resolved_reject"
-            resolved_task = {
-                **task,
-                "status": resolved_status,
-                "resolvedBy": resolved_by or "operator",
-                "resolvedAt": _utc_now(),
-                "checkpointId": checkpoint_id or task.get("checkpointId") or "",
-            }
-            self._store.upsert_human_task(run_id, resolved_task)
-
-            # Handoff for this gate (adjacent definition edge) — human lineage first.
-            handoff_status = "accepted" if accept else "rejected"
-            handoff = build_handoff_record(
-                run_id=run_id,
-                workflow_id=workflow_id,
-                workflow_version_id=workflow_version_id,
-                from_node_id=gate_node,
-                to_node_id=successor_node(gate_node),
-                status=handoff_status,
-                artifacts=lg_snapshot.get("artifacts") if isinstance(lg_snapshot.get("artifacts"), dict) else {},
-                accepted_by=resolved_by or "operator",
-                rejection_reason="" if accept else "rejected_by_human",
-                human_task_id=task_id,
-            )
-            handoff.setdefault("nodeAttempt", 1)
-            self._store.append_handoff(run_id, handoff)
-            human_edge_id = handoff_edge_id(handoff)
-            if human_edge_id:
-                existing_edge_ids.add(human_edge_id)
-
-            # Auto handoffs for newly completed agent nodes after this resume.
-            # Must not re-append the human gate edge (same definition edgeId).
-            if accept:
-                self._append_auto_handoffs(
+            try:
+                return resolve_human_task_transition(
+                    self._store,
+                    self._checkpoint_path,
                     run_id=run_id,
-                    workflow_id=workflow_id,
-                    workflow_version_id=workflow_version_id,
-                    completed=completed,
-                    artifacts=artifacts,
-                    existing_edge_ids=existing_edge_ids,
+                    task_id=task_id,
+                    decision=decision,
+                    resolved_by=resolved_by,
+                    idempotency_key=idempotency_key,
                 )
-
-            # Create next pending HumanTask only for human-gated nodes
-            if accept and runtime_nodes:
-                next_gate = runtime_nodes[0]
-                next_spec = next(
-                    (n for n in build_challenge_cup_workflow_definition().nodes if n.nodeId == next_gate),
-                    None,
-                )
-                is_human_gate = next_spec is not None and next_spec.actorKind is ActorKind.HUMAN
-                # Avoid duplicate pending for same node
-                tasks_now = list(self.get_run(run_id).get("humanTasks") or [])
-                has_pending_next = any(
-                    str(t.get("nodeId")) == next_gate and str(t.get("status")) == "pending"
-                    for t in tasks_now
-                )
-                if is_human_gate and not has_pending_next:
-                    next_task = self._new_human_task(
-                        run_id=run_id,
-                        node_id=next_gate,
-                        checkpoint_id=checkpoint_id,
-                    )
-                    self._store.upsert_human_task(run_id, next_task)
-                    self._store.append_event(
-                        run_id,
-                        {
-                            "workflowId": workflow_id,
-                            "runId": run_id,
-                            "threadId": thread_id,
-                            "nodeId": next_gate,
-                            "type": "node.waiting_human",
-                            "summary": {"taskId": next_task["taskId"]},
-                        },
-                    )
-
-            if not accept:
-                status = "blocked"
-            elif not runtime_nodes:
-                status = "succeeded"
-            else:
-                status = "waiting_human"
-
-            run_patch: dict[str, Any] = {
-                "status": status,
-                "runtimeCurrentNodeIds": runtime_nodes if accept else [gate_node],
-                "langGraph": lg_snapshot,
-            }
-            # Promotion / rollback HumanTask: only on accept update official candidate ref.
-            if gate_node == "candidate_promotion":
-                proposals = list(record.get("promotionProposals") or [])
-                op = str(task.get("promotionOperation") or record.get("promotionOperation") or "promote")
-                proposal_id = str(task.get("proposalId") or "")
-                if accept:
-                    for prop in proposals:
-                        if proposal_id and prop.get("proposalId") == proposal_id:
-                            prop["status"] = "accepted"
-                            target = str(prop.get("targetCandidateRef") or prop.get("selectedCandidateRef") or "")
-                            if op == "promote":
-                                run_patch["officialCandidateRef"] = target or prop.get("selectedCandidateRef") or f"candidate:{proposal_id}"
-                            elif op == "rollback":
-                                run_patch["officialCandidateRef"] = target
-                            break
-                    else:
-                        # No proposal id match — still mark latest
-                        if proposals:
-                            proposals[-1]["status"] = "accepted"
-                            run_patch["officialCandidateRef"] = str(
-                                proposals[-1].get("targetCandidateRef")
-                                or proposals[-1].get("selectedCandidateRef")
-                                or record.get("officialCandidateRef")
-                                or ""
-                            )
-                    run_patch["promotionProposals"] = proposals
-                    if not runtime_nodes:
-                        run_patch["completionKind"] = "promoted" if op == "promote" else "rolled_back"
-                        run_patch["status"] = "succeeded"
-                else:
-                    for prop in proposals:
-                        if proposal_id and prop.get("proposalId") == proposal_id:
-                            prop["status"] = "rejected"
-                    run_patch["promotionProposals"] = proposals
-                    run_patch["status"] = "blocked"
-                    run_patch["blockedReason"] = "promotion_rejected"
-                    # Downstream result_package must remain locked
-                    run_patch["runtimeCurrentNodeIds"] = [gate_node]
-
-            self._store.update_run(run_id, run_patch)
-            self._store.append_event(
-                run_id,
-                {
-                    "workflowId": workflow_id,
-                    "runId": run_id,
-                    "threadId": thread_id,
-                    "nodeId": gate_node,
-                    "type": "human_task.resolved",
-                    "summary": {
-                        "taskId": task_id,
-                        "accept": accept,
-                        "handoffId": handoff["handoffId"],
-                        "toNodeId": handoff.get("toNodeId"),
-                    },
-                },
-            )
-            return self.get_run(run_id)
+            except HumanTaskResolutionError as exc:
+                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
 
     def apply_iteration_decision(
         self,
@@ -1020,6 +772,45 @@ class ResearchWorkflowRuntimeService:
         """Node-level command execution through the real backend adapter."""
         with self._lock:
             record = self.get_run(run_id)
+            try:
+                if command == "start_execution":
+                    return start_node_execution(
+                        self._store,
+                        run_id=run_id,
+                        node_id=node_id,
+                        payload=payload or {},
+                    )
+                if command == "heartbeat_execution":
+                    return heartbeat_node_execution(
+                        self._store,
+                        run_id=run_id,
+                        node_id=node_id,
+                        payload=payload or {},
+                    )
+                if command == "complete_execution":
+                    return complete_node_execution(
+                        self._store,
+                        checkpoint_path=self._checkpoint_path,
+                        run_id=run_id,
+                        node_id=node_id,
+                        payload=payload or {},
+                    )
+                if command == "reconcile_execution":
+                    return reconcile_expired_execution(
+                        self._store,
+                        run_id=run_id,
+                        node_id=node_id,
+                        payload=payload or {},
+                    )
+                if command == "retry_execution":
+                    return retry_node_execution(
+                        self._store,
+                        run_id=run_id,
+                        node_id=node_id,
+                        payload=payload or {},
+                    )
+            except NodeExecutionError as exc:
+                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
             if command == "rebind_node":
                 # Controlled rebind keeps snapshot lineage (apply_command).
                 return self.apply_command(

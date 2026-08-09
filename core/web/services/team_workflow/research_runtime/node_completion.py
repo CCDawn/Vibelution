@@ -1,0 +1,267 @@
+"""Artifact validation and atomic completion of a durable NodeRun."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from typing import Any
+
+from core.research.workflow.contracts import (
+    ArtifactManifest,
+    ContractValidationError,
+)
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+
+from .checkpoint_lifecycle import advance_checkpoint
+from .node_execution_support import (
+    NodeExecutionError,
+    build_event,
+    iso,
+    latest_node_run,
+    replace_by_id,
+    utc_now,
+)
+from .store import WorkflowRunStore
+from .successor_records import build_successor_records
+
+
+def _artifact_snapshot_hash(manifests: list[ArtifactManifest]) -> str:
+    payload = [
+        {"artifactId": item.artifactId, "contentHash": item.contentHash}
+        for item in manifests
+    ]
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _validate_completion(
+    record: dict[str, Any],
+    *,
+    node_id: str,
+    lease_owner: str,
+    raw_manifests: object,
+) -> tuple[dict[str, Any], dict[str, Any], list[ArtifactManifest]]:
+    node_run = latest_node_run(record, node_id)
+    if node_run.get("status") != "running":
+        raise NodeExecutionError("node must be running", code="invalid_node_state")
+    lease = next(
+        (
+            item
+            for item in reversed(record.get("taskLeases") or [])
+            if item.get("nodeRunId") == node_run.get("nodeRunId")
+            and item.get("status") == "running"
+        ),
+        None,
+    )
+    if not lease:
+        raise NodeExecutionError("running lease not found", code="lease_not_found")
+    if lease.get("leaseOwner") != lease_owner:
+        raise NodeExecutionError("lease owner mismatch", code="lease_owner_mismatch")
+    if not isinstance(raw_manifests, list) or not raw_manifests:
+        raise NodeExecutionError(
+            "artifactManifests are required",
+            code="required_artifact_missing",
+        )
+    try:
+        manifests = [ArtifactManifest.from_dict(item) for item in raw_manifests]
+    except (ContractValidationError, TypeError) as exc:
+        raise NodeExecutionError(str(exc), code="invalid_artifact") from exc
+    for manifest in manifests:
+        if (
+            manifest.producerNodeRunId != node_run["nodeRunId"]
+            or manifest.producerAttempt != int(node_run["attempt"])
+            or manifest.inputSnapshotHash != node_run["inputSnapshotHash"]
+        ):
+            raise NodeExecutionError(
+                "artifact provenance does not match NodeRun",
+                code="invalid_artifact",
+            )
+    return node_run, dict(lease), manifests
+
+
+def complete_node_execution(
+    store: WorkflowRunStore,
+    *,
+    checkpoint_path: str,
+    run_id: str,
+    node_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    idempotency_key = str(payload.get("idempotencyKey") or "").strip()
+    lease_owner = str(payload.get("leaseOwner") or "").strip()
+    if not idempotency_key or not lease_owner:
+        raise NodeExecutionError(
+            "complete_execution requires idempotencyKey and leaseOwner",
+            code="invalid_execution_completion",
+        )
+    record = store.get_run(run_id)
+    if record is None:
+        raise NodeExecutionError("run not found", code="unknown_run")
+    prior_receipt = next(
+        (
+            item
+            for item in record.get("commandReceipts") or []
+            if item.get("idempotencyKey") == idempotency_key
+        ),
+        None,
+    )
+    if prior_receipt:
+        if prior_receipt.get("nodeId") != node_id:
+            raise NodeExecutionError(
+                "idempotencyKey conflicts with another completion",
+                code="idempotency_conflict",
+            )
+        return record
+
+    _, lease, manifests = _validate_completion(
+        record,
+        node_id=node_id,
+        lease_owner=lease_owner,
+        raw_manifests=payload.get("artifactManifests"),
+    )
+    definition = build_challenge_cup_workflow_definition()
+    completed_ids = [
+        item["nodeId"]
+        for item in record.get("nodeRuns") or []
+        if item.get("status") == "succeeded"
+    ]
+    if node_id not in completed_ids:
+        completed_ids.append(node_id)
+    checkpoint_id, next_node_ids = advance_checkpoint(
+        checkpoint_path,
+        thread_id=record["threadId"],
+        checkpoint_id=(record.get("langGraph") or {}).get("checkpointId") or "",
+        completed_node_id=node_id,
+        state_patch={
+            "current_node_id": node_id,
+            "completed_node_ids": completed_ids,
+            "artifacts": {
+                item.artifactId.split(":", 1)[0]: item.contentHash for item in manifests
+            },
+        },
+    )
+    input_hash = _artifact_snapshot_hash(manifests)
+    now = iso(utc_now())
+
+    def mutation(current: dict[str, Any]) -> dict[str, Any]:
+        if any(
+            item.get("idempotencyKey") == idempotency_key
+            for item in current.get("commandReceipts") or []
+        ):
+            return current
+        current_node_run = dict(latest_node_run(current, node_id))
+        current_node_run.update(
+            {
+                "status": "succeeded",
+                "finishedAt": now,
+                "artifactRefs": [item.artifactId for item in manifests],
+                "checkpointId": checkpoint_id,
+            }
+        )
+        node_runs = list(current.get("nodeRuns") or [])
+        replace_by_id(
+            node_runs,
+            "nodeRunId",
+            current_node_run["nodeRunId"],
+            current_node_run,
+        )
+        output_refs = [
+            {
+                "artifactId": item.artifactId,
+                "kind": item.artifactId.split(":", 1)[0],
+                "version": item.schemaVersion,
+                "contentHash": item.contentHash,
+            }
+            for item in manifests
+        ]
+        successor_runs, handoff, human_task = build_successor_records(
+            current,
+            definition=definition,
+            from_node_id=node_id,
+            from_node_run_id=current_node_run["nodeRunId"],
+            next_node_ids=next_node_ids,
+            checkpoint_id=checkpoint_id,
+            input_hash=input_hash,
+            output_artifact_refs=output_refs,
+            now=now,
+            accepted_by="system",
+        )
+        node_runs.extend(successor_runs)
+        leases = list(current.get("taskLeases") or [])
+        replace_by_id(
+            leases,
+            "idempotencyKey",
+            str(lease["idempotencyKey"]),
+            {**lease, "status": "succeeded"},
+        )
+        handoffs = list(current.get("handoffs") or [])
+        human_tasks = list(current.get("humanTasks") or [])
+        if handoff is not None:
+            handoffs.append(handoff)
+        if human_task is not None:
+            human_tasks.append(human_task)
+        receipt = {
+            "receiptId": f"receipt-{uuid.uuid4().hex[:10]}",
+            "runId": run_id,
+            "nodeId": node_id,
+            "nodeRunId": current_node_run["nodeRunId"],
+            "command": "complete_execution",
+            "idempotencyKey": idempotency_key,
+            "status": "applied",
+            "recordedAt": now,
+        }
+        event = build_event(
+            current,
+            workflowId=current["workflowId"],
+            workflowVersionId=current["workflowVersionId"],
+            checkpointId=checkpoint_id,
+            nodeId=node_id,
+            nodeRunId=current_node_run["nodeRunId"],
+            attempt=current_node_run["attempt"],
+            type="NodeRunTransitioned",
+            summary={"from": "running", "to": "succeeded"},
+            artifactRefs=[item.artifactId for item in manifests],
+        )
+        return {
+            **current,
+            "status": (
+                "waiting_human"
+                if human_task is not None
+                else "running"
+                if next_node_ids
+                else "succeeded"
+            ),
+            "runtimeCurrentNodeIds": next_node_ids,
+            "completedNodeIds": completed_ids,
+            "nodeRuns": node_runs,
+            "taskLeases": leases,
+            "artifactManifests": [
+                *(current.get("artifactManifests") or []),
+                *(item.to_dict() for item in manifests),
+            ],
+            "handoffs": handoffs,
+            "humanTasks": human_tasks,
+            "commandReceipts": [*(current.get("commandReceipts") or []), receipt],
+            "outbox": [
+                *(current.get("outbox") or []),
+                {
+                    "outboxId": f"outbox-{uuid.uuid4().hex[:10]}",
+                    "runId": run_id,
+                    "nodeRunId": current_node_run["nodeRunId"],
+                    "effectType": "node.completed",
+                    "idempotencyKey": idempotency_key,
+                    "receiptId": receipt["receiptId"],
+                    "status": "delivered",
+                    "recordedAt": now,
+                },
+            ],
+            "events": [*(current.get("events") or []), event],
+            "langGraph": {
+                **(current.get("langGraph") or {}),
+                "checkpointId": checkpoint_id,
+                "completedNodeIds": completed_ids,
+            },
+        }
+
+    return store.mutate_run(run_id, mutation)

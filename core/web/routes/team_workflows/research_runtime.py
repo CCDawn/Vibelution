@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
@@ -28,13 +28,28 @@ class TeamScopedPayload(BaseModel):
 
 
 class CreateRunPayload(TeamScopedPayload):
-    projectId: str = ""
+    projectId: str = Field(..., min_length=1)
+    questionId: str = Field(..., min_length=1)
+    researchBriefHash: str = Field(..., min_length=1)
+    datasetRefs: list[str]
+    metricContract: dict[str, Any]
+    constraintSnapshot: dict[str, Any]
+    competitionRuleRef: str = Field(..., min_length=1)
+    competitionRuleVersion: str = Field(..., min_length=1)
+    trackAndRubricSnapshot: dict[str, Any]
+    researchObjectiveContract: dict[str, Any]
+    sourcePolicy: dict[str, Any]
+    budgetPolicy: dict[str, Any]
+    stopPolicy: dict[str, Any]
+    environmentSnapshotRef: str = Field(..., min_length=1)
+    modelRoutingPolicy: dict[str, Any]
+    evaluationContract: dict[str, Any]
     idempotencyKey: str = ""
 
 
 class HumanTaskResolvePayload(BaseModel):
-    accept: bool
-    resolvedBy: str = ""
+    decision: Literal["accept", "reject", "revise"]
+    idempotencyKey: str = Field(..., min_length=1)
 
 
 class CommandPayload(BaseModel):
@@ -137,8 +152,10 @@ def research_workflow_create_run(workflow_id: str, payload: CreateRunPayload) ->
     try:
         return _svc().create_run(
             workflow_id,
-            team_id=payload.teamId,
-            project_id=payload.projectId,
+            run_input={
+                **payload.model_dump(exclude={"idempotencyKey"}),
+                "createdBy": "operator",
+            },
             idempotency_key=payload.idempotencyKey,
         )
     except ResearchWorkflowError as exc:
@@ -180,6 +197,22 @@ def research_workflow_events(
         raise _map_error(exc) from exc
 
 
+@router.get("/research/workflow-runs/{run_id}/handoffs")
+def research_workflow_handoffs(run_id: str) -> dict:
+    try:
+        return _svc().list_handoffs(run_id)
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+
+
+@router.get("/research/workflow-runs/{run_id}/handoffs/{handoff_id}")
+def research_workflow_handoff_detail(run_id: str, handoff_id: str) -> dict:
+    try:
+        return _svc().get_handoff_detail(run_id, handoff_id)
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+
+
 @router.post("/research/workflow-runs/{run_id}/commands")
 def research_workflow_command(run_id: str, payload: CommandPayload) -> dict:
     try:
@@ -199,8 +232,9 @@ def research_workflow_human_resolve(run_id: str, task_id: str, payload: HumanTas
         return _svc().resolve_human_task(
             run_id,
             task_id,
-            accept=payload.accept,
-            resolved_by=payload.resolvedBy,
+            decision=payload.decision,
+            resolved_by="operator",
+            idempotency_key=payload.idempotencyKey,
         )
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc

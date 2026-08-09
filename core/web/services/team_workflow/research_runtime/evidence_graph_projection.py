@@ -1,6 +1,6 @@
 """Evidence graph projection for workflow runs (read-only).
 
-The workflow graph records artifact REFS (hash:...) rather than graph content,
+The workflow runtime records validated artifact references rather than graph content,
 so the concrete graph is projected from the run's evidence facts:
 
 - primary: `langGraph.artifacts.evidence_relation_graph` when the graph stored
