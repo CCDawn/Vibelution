@@ -16,6 +16,8 @@ import type {
 } from "./types/researchWorkflow";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "./types/researchWorkflow";
 
+const JSON_HEADERS = { "Content-Type": "application/json" } as const;
+
 export type WorkflowDefinitionResponse = {
   workflowId: string;
   workflowVersionId: string;
@@ -140,6 +142,7 @@ export async function putResearchWorkflowAgentBindings(
 ): Promise<EffectiveAgentBindingsResponse> {
   return fetchJson(`/api/research/workflows/${encodeURIComponent(workflowId)}/agent-bindings`, {
     method: "PUT",
+    headers: JSON_HEADERS,
     body: JSON.stringify({ ...payload, teamId: requiredText(payload.teamId, "teamId") }),
   });
 }
@@ -150,6 +153,7 @@ export async function createResearchWorkflowRun(
 ): Promise<WorkflowRunRecord> {
   return fetchJson(`/api/research/workflows/${encodeURIComponent(workflowId)}/runs`, {
     method: "POST",
+    headers: JSON_HEADERS,
     body: JSON.stringify({
       ...input,
       teamId: requiredText(input.teamId, "teamId"),
@@ -195,6 +199,7 @@ export async function resolveResearchWorkflowHumanTask(
     `/api/research/workflow-runs/${encodeURIComponent(runId)}/human-tasks/${encodeURIComponent(taskId)}/resolve`,
     {
       method: "POST",
+      headers: JSON_HEADERS,
       body: JSON.stringify(versionedCommandBody(body, { decision: body.decision })),
     },
   );
@@ -209,6 +214,7 @@ export async function postResearchWorkflowCommand(
 ): Promise<WorkflowRunRecord> {
   return fetchJson(`/api/research/workflow-runs/${encodeURIComponent(runId)}/commands`, {
     method: "POST",
+    headers: JSON_HEADERS,
     body: JSON.stringify(
       versionedCommandBody(body, { command: body.command, payload: body.payload ?? {} }),
     ),
@@ -227,6 +233,7 @@ export async function postResearchWorkflowNodeCommand(
     `/api/research/workflow-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/commands`,
     {
       method: "POST",
+      headers: JSON_HEADERS,
       body: JSON.stringify(
         versionedCommandBody(body, { command: body.command, payload: body.payload ?? {} }),
       ),
@@ -244,6 +251,7 @@ export async function putResearchWorkflowSessionBinding(
     `/api/research/workflow-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/session-binding`,
     {
       method: "PUT",
+      headers: JSON_HEADERS,
       body: JSON.stringify(
         versionedCommandBody(
           { teamId, idempotencyKey, expectedRunVersion },

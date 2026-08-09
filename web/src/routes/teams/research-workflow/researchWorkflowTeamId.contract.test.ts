@@ -151,7 +151,40 @@ describe("researchWorkflow teamId contract", () => {
     for (const call of mockedFetchJson.mock.calls.slice(10)) {
       const init = call[1] as RequestInit;
       const body = JSON.parse(String(init.body));
+      expect(init.headers).toEqual({ "Content-Type": "application/json" });
       expect(body).toMatchObject(command);
     }
+  });
+
+  it("sends create-run payloads as JSON objects", async () => {
+    mockedFetchJson.mockResolvedValue({ runId: "run-1" });
+    await createResearchWorkflowRun({
+      teamId: "research-team",
+      projectId: "research-project",
+      questionId: "question-1",
+      researchBriefHash: "sha256:brief",
+      datasetRefs: [],
+      metricContract: {},
+      constraintSnapshot: {},
+      competitionRuleRef: "rules/ref",
+      competitionRuleVersion: "v1",
+      trackAndRubricSnapshot: {},
+      researchObjectiveContract: {},
+      sourcePolicy: {},
+      budgetPolicy: {},
+      stopPolicy: {},
+      environmentSnapshotRef: "environment/ref",
+      modelRoutingPolicy: {},
+      evaluationContract: {},
+      idempotencyKey: "create-run-1",
+    });
+
+    const init = mockedFetchJson.mock.calls[0][1] as RequestInit;
+    expect(init.headers).toEqual({ "Content-Type": "application/json" });
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      teamId: "research-team",
+      questionId: "question-1",
+      idempotencyKey: "create-run-1",
+    });
   });
 });
