@@ -2271,6 +2271,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("firstPaintedRunningToolAtBySessionRef");
     expect(routeSource).toContain("toolStartToFirstPaintMs");
     expect(routeSource).toContain("runningToolPaintKeys");
+    expect(routeSource).toContain("newlyPaintedFallbackKeys");
     expect(routeSource).toContain("renderedTextLength");
     expect(routeSource).toContain("onStreamingFramePaint: handleConversationStreamingFramePaint");
   });

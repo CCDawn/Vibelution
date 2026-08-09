@@ -261,18 +261,23 @@ export function selectFirstUnpaintedRunningTool(
   runningToolIds: string[];
 } {
   const painted = new Set(paintedToolIds.map(compactText).filter(Boolean));
+  const fallbackKeyByToolId = new Map(
+    runningToolPaintKeys(layer).map(({ toolId, fallbackKey }) => [toolId, fallbackKey]),
+  );
   const runningTools = (layer?.turnItems ?? []).filter((item): item is RunningToolTurnItem => (
     item.type === "tool_call" && (item.status === "pending" || item.status === "running")
   ));
   const runningToolIds = runningTools.map(runningToolPaintId).filter(Boolean);
   const tools = runningTools.filter((item) => {
     const id = runningToolPaintId(item);
+    const fallbackKey = fallbackKeyByToolId.get(id) ?? "";
     // A model-call placeholder can paint before the executor publishes the
     // canonical start revision.  Do not consume the one-shot measurement until
     // that revision carries a usable start time; otherwise the exact start
     // update is incorrectly treated as already painted.
     return Boolean(id)
       && !painted.has(id)
+      && !painted.has(fallbackKey)
       && Number.isFinite(runningToolStartedAtEpochMs(item));
   });
   const toolIds = tools.map(runningToolPaintId).filter(Boolean);

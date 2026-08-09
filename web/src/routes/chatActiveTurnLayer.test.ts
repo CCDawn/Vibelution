@@ -209,6 +209,38 @@ describe("chat active turn layer", () => {
       toolId: "placeholder-id",
       fallbackKey: "tool:grep_search_tool:1",
     }]);
+
+    const regressedFirstTool = {
+      ...base,
+      id: "tool-a-exact:2",
+      itemId: "tool-a-exact",
+      callId: "call-a-exact",
+      status: "running" as const,
+      revision: 2,
+      metadata: { executionStartedAtEpochMs: 1_786_294_801_125 },
+    };
+    const secondTool = {
+      ...base,
+      id: "tool-b:1",
+      itemId: "tool-b",
+      callId: "call-b",
+      toolName: "grep_search_tool",
+      status: "running" as const,
+      sequence: 2,
+      metadata: { executionStartedAtEpochMs: 1_786_294_806_000 },
+    };
+    const regressedLayer = {
+      ...layer,
+      turnItems: [regressedFirstTool, secondTool],
+    } satisfies ActiveTurnLayerState;
+
+    expect(selectFirstUnpaintedRunningTool(
+      regressedLayer,
+      ["placeholder-call-id", "tool:grep_search_tool:0"],
+    )).toMatchObject({
+      toolId: "call-b",
+      toolIds: ["call-b"],
+    });
   });
 
   it("requests one authoritative index refresh only for terminal active layers", () => {

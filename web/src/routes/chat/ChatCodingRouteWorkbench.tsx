@@ -1733,11 +1733,15 @@ export function ChatCodingRoute() {
       return;
     }
     if (newlyPaintedRunningTools.length > 0) {
+      const newlyPaintedFallbackKeys = paintedToolSelection.toolIds
+        .map((toolId) => runningPaintKeys.find((key) => key.toolId === toolId)?.fallbackKey ?? "")
+        .filter(Boolean);
       paintedRunningToolIdsBySessionRef.current = {
         ...paintedRunningToolIdsBySessionRef.current,
         [sessionId]: Array.from(new Set([
           ...(paintedRunningToolIdsBySessionRef.current[sessionId] ?? []),
           ...paintedToolSelection.toolIds,
+          ...newlyPaintedFallbackKeys,
         ])).slice(-64),
       };
     }
