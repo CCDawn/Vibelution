@@ -30,7 +30,12 @@ export function ResearchProcessWorkspace({
   const runState = useResearchWorkflowRun(teamId, location.runId);
   const project = useResearchWorkflowProjectContext(teamId);
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
-  const nodeDetail = useNodeDetailState(teamId, location.runId, location.selectedNodeId);
+  const nodeDetail = useNodeDetailState(
+    teamId,
+    location.runId,
+    location.selectedNodeId,
+    runState.run?.runVersion ?? null,
+  );
   const detail = nodeDetail.state.kind === "ready" ? nodeDetail.state.detail : null;
   const insights = useResearchWorkflowInsights(teamId, location.runId);
   const commands = useResearchWorkflowCommands({

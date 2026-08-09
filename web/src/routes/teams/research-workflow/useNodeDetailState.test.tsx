@@ -21,14 +21,16 @@ function Probe({
   teamId,
   runId,
   nodeId,
+  runVersion = null,
   onValue,
 }: {
   teamId: string;
   runId: string;
   nodeId: string | null;
+  runVersion?: number | null;
   onValue: (state: NodeDetailState, retry: () => void) => void;
 }) {
-  const { state, retry } = useNodeDetailState(teamId, runId, nodeId);
+  const { state, retry } = useNodeDetailState(teamId, runId, nodeId, runVersion);
   onValue(state, retry);
   return null;
 }
@@ -95,6 +97,54 @@ describe("useNodeDetailState", () => {
       "source_finding",
       { teamId: "team-1" },
     );
+  });
+
+  it("refetches the selected node when the authoritative run version changes", async () => {
+    api.fetchResearchWorkflowNodeDetail.mockResolvedValue({
+      runId: "run-1",
+      nodeId: "source_finding",
+      label: "资料寻找",
+      commands: [],
+    });
+    await act(async () => {
+      root.render(
+        <Probe
+          teamId="team-1"
+          runId="run-1"
+          nodeId="source_finding"
+          runVersion={4}
+          onValue={(state, retry) => {
+            latest = state;
+            latestRetry = retry;
+          }}
+        />,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.fetchResearchWorkflowNodeDetail).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.render(
+        <Probe
+          teamId="team-1"
+          runId="run-1"
+          nodeId="source_finding"
+          runVersion={8}
+          onValue={(state, retry) => {
+            latest = state;
+            latestRetry = retry;
+          }}
+        />,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(api.fetchResearchWorkflowNodeDetail).toHaveBeenCalledTimes(2);
+    expect(latest.kind).toBe("ready");
   });
 
   it("surfaces a retryable error state on failure and retries", async () => {
