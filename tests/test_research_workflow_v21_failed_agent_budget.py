@@ -80,7 +80,7 @@ def test_failed_agent_usage_is_settled_exactly_once(
         "core.web.services.session_service.get_session_detail",
         lambda *_args, **_kwargs: {
             "id": "session-failed",
-            "updatedAt": "2026-08-10T08:00:10",
+            "updatedAt": "2026-08-10T00:00:10+00:00",
             "llmUsage": {"totalTokens": 90},
         },
     )
