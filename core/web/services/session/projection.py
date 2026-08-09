@@ -2516,21 +2516,20 @@ def _build_session_context_usage(conversation: dict[str, Any], messages: list[di
         role = str((message or {}).get("role") or "").strip().lower()
         if role == "user":
             user_count += 1
+            character_count += len(str((message or {}).get("content") or ""))
         elif role == "assistant":
             assistant_count += 1
-        content = str((message or {}).get("content") or "")
-        thought = str((message or {}).get("thought") or "")
-        character_count += len(content) + len(thought)
-        tool_calls = (message or {}).get("toolCalls") or (message or {}).get("tool_calls") or []
-        if isinstance(tool_calls, list):
-            tool_call_count += len(tool_calls)
-            for tool_call in tool_calls:
-                if not isinstance(tool_call, dict):
+            for turn_item in list((message or {}).get("turnItems") or []):
+                if not isinstance(turn_item, dict):
                     continue
-                character_count += len(str(tool_call.get("name") or ""))
-                character_count += len(str(tool_call.get("summary") or ""))
-                character_count += len(str(tool_call.get("resultPreview") or tool_call.get("result_preview") or ""))
-                character_count += len(str(tool_call.get("error") or ""))
+                character_count += len(str(turn_item.get("text") or ""))
+                if str(turn_item.get("type") or "").strip() != "tool_call":
+                    continue
+                tool_call_count += 1
+                character_count += len(str(turn_item.get("toolName") or ""))
+                character_count += len(str(turn_item.get("summary") or ""))
+                character_count += len(str(turn_item.get("input") or ""))
+                character_count += len(str(turn_item.get("output") or ""))
     estimated_tokens = s._estimate_session_context_tokens(character_count, tool_call_count)
     limit_payload = s._session_context_limit_payload(conversation)
     limit = s._coerce_nonnegative_int(limit_payload.get("limit") or 0)

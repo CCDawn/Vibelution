@@ -76,6 +76,15 @@ def isolate_evolution_live_state():
         self_evolution_control_service._RUN_SUBSCRIBERS.clear()
 
 
+def _assistant_turn_text(message: dict) -> str:
+    assert message["role"] == "assistant"
+    return "\n".join(
+        str(item.get("text") or "")
+        for item in message.get("turnItems") or []
+        if item.get("type") == "agent_message"
+    ).strip()
+
+
 def test_active_session_route_returns_lightweight_persisted_selection(monkeypatch):
     monkeypatch.setattr(
         session_routes,
@@ -411,12 +420,34 @@ def test_session_detail_exists(tmp_path, monkeypatch):
     payload = response.json()
     assert payload["id"] == "session-live"
     assert payload["messages"]
-    assert payload["messages"][1]["content"] == "已经接到真实状态了。"
-    assert payload["messages"][1]["thought"] == "internal"
-    assert payload["messages"][1]["toolCalls"] == [
-        {"name": "read_file_tool", "status": "done"},
-        {"name": "search_code_tool", "status": "done"},
-    ]
+    assistant = payload["messages"][1]
+    assert assistant["role"] == "assistant"
+    assert all(
+        field not in assistant
+        for field in (
+            "content",
+            "thought",
+            "streaming",
+            "streamStage",
+            "toolCalls",
+            "feedbackEvents",
+            "timelineItems",
+            "codexTranscript",
+        )
+    )
+    assert any(
+        item["type"] == "agent_message" and item["text"] == "已经接到真实状态了。"
+        for item in assistant["turnItems"]
+    )
+    assert any(
+        item["type"] == "reasoning" and item["text"] == "internal"
+        for item in assistant["turnItems"]
+    )
+    assert [
+        item["toolName"]
+        for item in assistant["turnItems"]
+        if item["type"] == "tool_call"
+    ] == ["read_file_tool", "search_code_tool"]
     assert payload["lastTurnError"] is None
     assert payload["taskSummary"] == "已经接到真实状态了。"
     assert payload["previewTabs"] == []
@@ -1868,11 +1899,12 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
         message_source="supervised_evolution",
     )
 
-    assert response["messages"][-1]["content"].startswith(f"seen: {prompt}")
-    assert "open_evolution_transaction_tool" in response["messages"][-1]["content"]
-    assert "close_evolution_transaction_tool" in response["messages"][-1]["content"]
-    assert "python_lint_tool" in response["messages"][-1]["content"]
-    assert "trigger_self_restart_tool" not in response["messages"][-1]["content"]
+    assistant_text = _assistant_turn_text(response["messages"][-1])
+    assert assistant_text.startswith(f"seen: {prompt}")
+    assert "open_evolution_transaction_tool" in assistant_text
+    assert "close_evolution_transaction_tool" in assistant_text
+    assert "python_lint_tool" in assistant_text
+    assert "trigger_self_restart_tool" not in assistant_text
     assert scheduled_contexts[-1]["user_message"] == prompt
     assert scheduled_contexts[-1]["user_message_source"] == "supervised_evolution"
     assert scheduled_contexts[-1]["mental_model_enabled"] is False
@@ -2012,7 +2044,9 @@ def test_supervised_session_workspace_override_routes_tool_workspace_to_candidat
         message_source="supervised_evolution",
     )
 
-    assert response["messages"][-1]["content"].startswith("seen: improve inside candidate worktree")
+    assert _assistant_turn_text(response["messages"][-1]).startswith(
+        "seen: improve inside candidate worktree"
+    )
     assert captured_overrides
     tool_workspace, memory_workspace = captured_overrides[-1]
     assert Path(tool_workspace).resolve() == candidate_path.resolve()
@@ -2122,7 +2156,7 @@ def test_self_observation_message_source_disables_tools(tmp_path, monkeypatch):
         message_metadata={"runKind": "self_observation_run", "mode": "self_observation"},
     )
 
-    assert response["messages"][-1]["content"] == f"seen: {prompt}"
+    assert _assistant_turn_text(response["messages"][-1]) == f"seen: {prompt}"
     assert scheduled_contexts[-1]["user_message"] == prompt
     assert scheduled_contexts[-1]["user_message_source"] == "self_observation"
     assert observed_turn_call["initial_prompt"] == prompt
@@ -2228,7 +2262,7 @@ def test_self_observation_message_source_does_not_route_recent_image_reference(t
         message_metadata={"runKind": "self_observation_run", "mode": "self_observation"},
     )
 
-    assert response["messages"][-1]["content"] == f"seen: {prompt}"
+    assert _assistant_turn_text(response["messages"][-1]) == f"seen: {prompt}"
     assert scheduled_contexts[-1]["user_message"] == prompt
     assert scheduled_contexts[-1]["user_message_source"] == "self_observation"
     assert observed_turn_call["initial_prompt"] == prompt
