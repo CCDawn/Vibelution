@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isStageDrawerPanel, shouldApplyCanvasNodeSelection } from "./researchProcessPanelSelection";
+import { shouldApplyCanvasNodeSelection } from "./researchProcessPanelSelection";
 
 describe("researchProcessPanelSelection", () => {
   it("does not let an empty canvas initialization replace a non-node panel", () => {
@@ -13,11 +13,8 @@ describe("researchProcessPanelSelection", () => {
     expect(shouldApplyCanvasNodeSelection({ nodeId: null, panel: "node" })).toBe(true);
   });
 
-  it("classifies experiment and knowledge as stage drawer panels", () => {
-    expect(isStageDrawerPanel("experiment")).toBe(true);
-    expect(isStageDrawerPanel("knowledge")).toBe(true);
-    expect(isStageDrawerPanel("node")).toBe(false);
-    expect(isStageDrawerPanel("agents")).toBe(false);
-    expect(isStageDrawerPanel("timeline")).toBe(false);
+  it("keeps launch and evidence panels stable during canvas initialization", () => {
+    expect(shouldApplyCanvasNodeSelection({ nodeId: null, panel: "launch" })).toBe(false);
+    expect(shouldApplyCanvasNodeSelection({ nodeId: null, panel: "evidence" })).toBe(false);
   });
 });

@@ -3,9 +3,8 @@ export type ResearchProcessPanel =
   | "agents"
   | "team"
   | "timeline"
-  | "experiment"
-  | "knowledge"
-  | "iteration"
+  | "launch"
+  | "evidence"
   | "progress"
   | "question";
 
@@ -17,8 +16,4 @@ export function shouldApplyCanvasNodeSelection({
   panel: ResearchProcessPanel;
 }): boolean {
   return nodeId !== null || panel === "node";
-}
-
-export function isStageDrawerPanel(panel: ResearchProcessPanel): boolean {
-  return panel === "experiment" || panel === "knowledge" || panel === "iteration";
 }

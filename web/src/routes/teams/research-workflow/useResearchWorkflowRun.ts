@@ -1,20 +1,16 @@
-/**
- * Full WorkflowRun read-model owner (canvas + inspector + agents + timeline).
- * Event merge/polling live in dedicated modules — this hook only orchestrates.
- */
+/** Canonical Run read model: initial HTTP snapshot plus SSE deltas, no polling fallback. */
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   createResearchWorkflowRun,
   fetchResearchWorkflowCanvas,
   fetchResearchWorkflowDefinition,
-  fetchResearchWorkflowEvents,
   fetchResearchWorkflowRun,
   resolveResearchWorkflowHumanTask,
+  type CreateResearchWorkflowRunInput,
   type WorkflowRunRecord,
 } from "../../../api/researchWorkflow";
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
-import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   applyEventBatch,
   applyInitialRunEvents,
@@ -22,264 +18,213 @@ import {
   type EventReadModelState,
   type WorkflowEventLike,
 } from "./researchWorkflowEventReducer";
-import { ResearchWorkflowPollingController } from "./researchWorkflowPollingController";
+import {
+  useResearchWorkflowStream,
+  type ResearchWorkflowStreamState,
+} from "./useResearchWorkflowStream";
 
 export type UseResearchWorkflowRunResult = {
   projection: WorkflowCanvasProjection | null;
   run: WorkflowRunRecord | null;
   error: string | null;
+  streamState: ResearchWorkflowStreamState;
   busy: boolean;
   lastSequence: number;
   refresh: () => Promise<void>;
-  createRun: (teamId: string, projectId?: string) => Promise<WorkflowRunRecord>;
-  resolveHuman: (taskId: string, accept: boolean) => Promise<WorkflowRunRecord>;
+  createRun: (input: CreateResearchWorkflowRunInput) => Promise<WorkflowRunRecord>;
+  resolveHuman: (
+    taskId: string,
+    decision: "accept" | "reject" | "revise",
+  ) => Promise<WorkflowRunRecord>;
 };
 
-const POLLABLE = new Set(["waiting_human", "running", "queued", "blocked"]);
-
-export function useResearchWorkflowRun(runId: string): UseResearchWorkflowRunResult {
+export function useResearchWorkflowRun(
+  teamId: string,
+  runId: string,
+): UseResearchWorkflowRunResult {
   const [projection, setProjection] = useState<WorkflowCanvasProjection | null>(null);
   const [run, setRun] = useState<WorkflowRunRecord | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [lastSequence, setLastSequence] = useState(0);
-
   const mountedRef = useRef(true);
-  const runIdRef = useRef(runId);
+  const scopeRef = useRef({ teamId, runId });
+  const refreshGenerationRef = useRef(0);
   const eventStateRef = useRef<EventReadModelState>(emptyEventReadModel(runId));
-  const pollRef = useRef<ResearchWorkflowPollingController | null>(null);
-  const refreshGenRef = useRef(0);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  runIdRef.current = runId;
-
-  const safeSet = useCallback(<T,>(setter: (value: T) => void, value: T) => {
-    if (mountedRef.current) setter(value);
-  }, []);
-
-  const applyRunRecord = useCallback(
-    (record: WorkflowRunRecord, events: WorkflowEventLike[]) => {
-      if (!mountedRef.current) return;
-      if (record.runId && runIdRef.current && record.runId !== runIdRef.current) return;
-      const withEvents: WorkflowRunRecord = { ...record, events: events as WorkflowRunRecord["events"] };
-      setRun(withEvents);
-      const maxSeq = eventStateRef.current.lastSequence;
-      setLastSequence(maxSeq);
-      pollRef.current?.setAfterSequence(maxSeq);
-    },
-    [],
-  );
+  scopeRef.current = { teamId, runId };
 
   const refresh = useCallback(async () => {
-    const gen = ++refreshGenRef.current;
-    const activeRunId = runIdRef.current;
-    if (!activeRunId) {
-      const def = await fetchResearchWorkflowDefinition();
-      if (!mountedRef.current || gen !== refreshGenRef.current) return;
+    const generation = ++refreshGenerationRef.current;
+    const scope = { ...scopeRef.current };
+    const canonicalTeamId = scope.teamId.trim();
+    if (!canonicalTeamId) {
+      setProjection(null);
+      setRun(null);
+      setLoadError("缺少 teamId，无法读取科研流程");
+      return;
+    }
+    try {
+      if (!scope.runId) {
+        const definition = await fetchResearchWorkflowDefinition();
+        if (!mountedRef.current || generation !== refreshGenerationRef.current) return;
+        setProjection({
+          definition: definition.definition,
+          run: {
+            runId: null,
+            teamId: canonicalTeamId,
+            runVersion: null,
+            status: null,
+            runtimeCurrentNodeIds: [],
+            nodeRuns: {},
+            pendingHumanTasks: [],
+          },
+        });
+        setRun(null);
+        eventStateRef.current = emptyEventReadModel("");
+        setLastSequence(0);
+        setLoadError(null);
+        return;
+      }
+
+      const [record, canvas] = await Promise.all([
+        fetchResearchWorkflowRun(scope.runId, { teamId: canonicalTeamId }),
+        fetchResearchWorkflowCanvas(scope.runId, { teamId: canonicalTeamId }),
+      ]);
+      if (
+        !mountedRef.current ||
+        generation !== refreshGenerationRef.current ||
+        scopeRef.current.runId !== scope.runId ||
+        scopeRef.current.teamId.trim() !== canonicalTeamId
+      ) {
+        return;
+      }
+      const eventState = applyInitialRunEvents(
+        scope.runId,
+        record.events as WorkflowEventLike[] | undefined,
+        eventStateRef.current.runId === scope.runId ? eventStateRef.current.events : [],
+      );
+      eventStateRef.current = eventState;
+      setLastSequence(eventState.lastSequence);
+      setRun({ ...record, events: eventState.events });
       setProjection({
-        definition: def.definition,
+        definition: canvas.definition,
         run: {
-          runId: null,
-          status: null,
-          runtimeCurrentNodeIds: [],
-          nodeRuns: {},
-          pendingHumanTasks: [],
+          ...canvas.run,
+          runId: record.runId,
+          teamId: record.teamId,
+          runVersion: record.runVersion,
+          status: record.status as WorkflowCanvasProjection["run"]["status"],
+          runtimeCurrentNodeIds: record.runtimeCurrentNodeIds ?? [],
+          pendingHumanTasks: (record.humanTasks ?? [])
+            .filter((task) => String(task.status) === "pending")
+            .map((task) => ({
+              taskId: String(task.taskId ?? ""),
+              nodeId: String(task.nodeId ?? ""),
+              status: String(task.status ?? ""),
+              prompt: String(task.prompt ?? ""),
+            })),
         },
       });
-      setRun(null);
-      eventStateRef.current = emptyEventReadModel("");
-      setLastSequence(0);
-      return;
+      setLoadError(null);
+    } catch (error) {
+      if (mountedRef.current && generation === refreshGenerationRef.current) {
+        setLoadError(error instanceof Error ? error.message : String(error));
+      }
     }
+  }, []);
 
-    const [record, canvas] = await Promise.all([
-      fetchResearchWorkflowRun(activeRunId),
-      fetchResearchWorkflowCanvas(activeRunId),
-    ]);
-    if (!mountedRef.current || gen !== refreshGenRef.current || runIdRef.current !== activeRunId) {
-      return;
-    }
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimerRef.current) return;
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void refresh();
+    }, 80);
+  }, [refresh]);
 
-    // Initial / full refresh: record.events is authority; merge any accidental dupes.
-    const eventState = applyInitialRunEvents(
-      activeRunId,
-      (record.events || []) as WorkflowEventLike[],
-      [],
-    );
-    eventStateRef.current = eventState;
-
-    applyRunRecord(record, eventState.events);
-    setProjection({
-      definition: canvas.definition,
-      run: {
-        ...canvas.run,
+  const onStreamDelta = useCallback(
+    (event: WorkflowEventLike) => {
+      const activeRunId = scopeRef.current.runId;
+      if (!activeRunId) return;
+      const next = applyEventBatch(eventStateRef.current, {
         runId: activeRunId,
-        status: (record.status as WorkflowCanvasProjection["run"]["status"]) || canvas.run.status,
-        runtimeCurrentNodeIds: record.runtimeCurrentNodeIds || canvas.run.runtimeCurrentNodeIds,
-        pendingHumanTasks: (record.humanTasks || [])
-          .filter((t) => String(t.status) === "pending")
-          .map((t) => ({
-            taskId: String(t.taskId || ""),
-            nodeId: String(t.nodeId || ""),
-            status: String(t.status || ""),
-            prompt: String(t.prompt || ""),
-          })),
-      },
-    });
-  }, [applyRunRecord]);
+        events: [event],
+      });
+      eventStateRef.current = next;
+      setLastSequence(next.lastSequence);
+      setRun((current) =>
+        current?.runId === activeRunId ? { ...current, events: next.events } : current,
+      );
+      scheduleRefresh();
+    },
+    [scheduleRefresh],
+  );
 
-  // Mount / unmount + runId change
+  const onStreamSnapshot = useCallback(
+    (cursor: number) => {
+      if (cursor > eventStateRef.current.lastSequence) scheduleRefresh();
+    },
+    [scheduleRefresh],
+  );
+
+  const stream = useResearchWorkflowStream({
+    teamId,
+    runId,
+    onDelta: onStreamDelta,
+    onSnapshot: onStreamSnapshot,
+  });
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
-    // Reset event cursor when run switches
     eventStateRef.current = emptyEventReadModel(runId);
     setLastSequence(0);
-    refreshGenRef.current += 1;
-    let cancelled = false;
-    (async () => {
-      try {
-        if (!cancelled) setError(null);
-        await refresh();
-      } catch (err) {
-        if (!cancelled && mountedRef.current) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [runId, refresh]);
+    refreshGenerationRef.current += 1;
+    void refresh();
+  }, [refresh, runId, teamId]);
 
-  // Polling controller lifecycle
-  useEffect(() => {
-    const controller = new ResearchWorkflowPollingController({
-      intervalMs: 2500,
-      fetchEvents: (id, after) => fetchResearchWorkflowEvents(id, after),
-      onEvents: async (id, payload) => {
-        if (!mountedRef.current || runIdRef.current !== id) return;
-        const next = applyEventBatch(eventStateRef.current, {
-          runId: id,
-          events: (payload.events || []) as WorkflowEventLike[],
-        });
-        eventStateRef.current = next;
-        setLastSequence(next.lastSequence);
-        setRun((prev) => {
-          if (!prev || prev.runId !== id) return prev;
-          return { ...prev, events: next.events as WorkflowRunRecord["events"] };
-        });
-      },
-      onNeedsRefresh: async (id) => {
-        if (!mountedRef.current || runIdRef.current !== id) return;
-        // Only re-fetch run + canvas (not blind triple) when new events arrived.
-        try {
-          const [record, canvas] = await Promise.all([
-            fetchResearchWorkflowRun(id),
-            fetchResearchWorkflowCanvas(id),
-          ]);
-          if (!mountedRef.current || runIdRef.current !== id) return;
-          // Keep merged events; update other fields from record.
-          const events = eventStateRef.current.events;
-          applyRunRecord({ ...record, events: events as WorkflowRunRecord["events"] }, events);
-          setProjection({
-            definition: canvas.definition,
-            run: {
-              ...canvas.run,
-              runId: id,
-              status: (record.status as WorkflowCanvasProjection["run"]["status"]) || canvas.run.status,
-              runtimeCurrentNodeIds: record.runtimeCurrentNodeIds || canvas.run.runtimeCurrentNodeIds,
-              pendingHumanTasks: (record.humanTasks || [])
-                .filter((t) => String(t.status) === "pending")
-                .map((t) => ({
-                  taskId: String(t.taskId || ""),
-                  nodeId: String(t.nodeId || ""),
-                  status: String(t.status || ""),
-                  prompt: String(t.prompt || ""),
-                })),
-            },
-          });
-        } catch {
-          // keep last good snapshot
-        }
-      },
-    });
-    pollRef.current = controller;
-    controller.setRun(runId, eventStateRef.current.lastSequence);
-    return () => {
-      controller.dispose();
-      if (pollRef.current === controller) pollRef.current = null;
-    };
-  }, [runId, applyRunRecord]);
-
-  useEffect(() => {
-    const controller = pollRef.current;
-    if (!controller || !runId) return;
-    const status = run?.status || "";
-    if (!POLLABLE.has(status)) {
-      controller.stop();
-      return;
+  const createRun = useCallback(async (input: CreateResearchWorkflowRunInput) => {
+    setBusy(true);
+    try {
+      return await createResearchWorkflowRun(input);
+    } finally {
+      if (mountedRef.current) setBusy(false);
     }
-    controller.setRun(runId, eventStateRef.current.lastSequence);
-    controller.start();
-    return () => {
-      controller.stop();
-    };
-  }, [runId, run?.status]);
-
-  const createRun = useCallback(
-    async (teamId: string, projectId?: string) => {
-      setBusy(true);
-      setError(null);
-      try {
-        const created = await createResearchWorkflowRun({
-          teamId,
-          projectId,
-          workflowId: CHALLENGE_CUP_WORKFLOW_ID,
-          idempotencyKey: `ui-${teamId || "default"}-${Date.now()}`,
-        });
-        if (mountedRef.current) {
-          const events = (created.events || []) as WorkflowEventLike[];
-          eventStateRef.current = applyInitialRunEvents(created.runId, events, []);
-          applyRunRecord(created, eventStateRef.current.events);
-        }
-        return created;
-      } finally {
-        if (mountedRef.current) setBusy(false);
-      }
-    },
-    [applyRunRecord],
-  );
+  }, []);
 
   const resolveHuman = useCallback(
-    async (taskId: string, accept: boolean) => {
-      if (!runId) throw new Error("no run");
+    async (taskId: string, decision: "accept" | "reject" | "revise") => {
+      const current = run;
+      if (!current) throw new Error("当前没有可操作的工作流运行");
       setBusy(true);
-      setError(null);
       try {
-        const next = await resolveResearchWorkflowHumanTask(runId, taskId, { accept });
-        if (mountedRef.current && runIdRef.current === runId) {
-          const events = (next.events || []) as WorkflowEventLike[];
-          eventStateRef.current = applyInitialRunEvents(runId, events, []);
-          applyRunRecord(next, eventStateRef.current.events);
-          await refresh();
-        }
-        return next;
+        const updated = await resolveResearchWorkflowHumanTask(current.runId, taskId, {
+          teamId: current.teamId,
+          expectedRunVersion: current.runVersion,
+          idempotencyKey: `human:${current.runId}:${taskId}:${decision}:v${current.runVersion}`,
+          decision,
+        });
+        await refresh();
+        return updated;
       } finally {
         if (mountedRef.current) setBusy(false);
       }
     },
-    [runId, applyRunRecord, refresh],
+    [refresh, run],
   );
 
   return {
     projection,
     run,
-    error,
+    error: loadError || stream.error,
+    streamState: stream.state,
     busy,
     lastSequence,
     refresh,

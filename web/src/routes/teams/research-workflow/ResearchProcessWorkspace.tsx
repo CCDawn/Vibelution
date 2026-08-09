@@ -1,569 +1,145 @@
-/**
- * Canonical single-canvas research process workspace.
- * Selection is UI-only (URL node); runtime current is server-owned.
- *
- * Layout follows TeamsCanvasComposer + VCanvasWorkbenchPage (not hand-rolled columns):
- * - shell already provides team chrome → hideHeader
- * - actions live in recipe toolbar
- * - canvas host is flex-1 min-h-0; React Flow fills via absolute inset host
- * - inspector is recipe aside (WORKBENCH_LAYOUT_IDS.researchFlow)
- */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useMemo } from "react";
 
-import {
-  fetchEffectiveAgentBindings,
-  listResearchWorkflowRuns,
-} from "../../../api/researchWorkflow";
-import type { EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
-import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
-import {
-  VButton,
-  VCanvasWorkbenchPage,
-  VEmptyState,
-  VPanelHeader,
-  VSelect,
-  VStateSurface,
-  VSurface,
-  VWorkflowCanvas,
-} from "../../../components/vui";
+import { VCanvasWorkbenchPage } from "../../../components/vui";
 import { definitionToCanvasGraph, projectionToCanvasGraph } from "./researchProcessGraphModel";
-import { shouldApplyCanvasNodeSelection, type ResearchProcessPanel } from "./researchProcessPanelSelection";
-import { ResearchProcessDefinitionNodePanel } from "./ResearchProcessDefinitionNodePanel";
-import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
-import { getNodeAdapter } from "./nodeAdapterModel";
-import { executeNodeCommand } from "./nodeCommandAdapter";
+import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
+import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
+import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
 import { useNodeDetailState } from "./useNodeDetailState";
-import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
+import { useResearchWorkflowCatalog } from "./useResearchWorkflowCatalog";
+import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
+import { useResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import { useResearchWorkflowProjectContext } from "./useResearchWorkflowProjectContext";
-import { ResearchAgentBindingPanel } from "./ResearchAgentBindingPanel";
-import { IterationDecisionPanel } from "./IterationDecisionPanel";
-import { EvidenceGraphView } from "./EvidenceGraphView";
-import { ChallengeMvpProgressPanel } from "./ChallengeMvpProgressPanel";
-import { ChallengeQuestionDetailPanel } from "../challenge-cup/ChallengeQuestionDetailPanel";
-import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
-import { queryKeys } from "../../../api/queryKeys";
-import { useQuery } from "@tanstack/react-query";
+import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
+import { useResearchWorkflowWorkspace } from "./useResearchWorkflowWorkspace";
+import styles from "./ResearchProcessWorkspace.styles";
 
 export type ResearchProcessWorkspaceProps = {
-  teamId?: string;
-  /** Stage drawer panel content injected by the shell (reuses existing stage functions). */
-  experimentPanel?: ReactNode;
-  knowledgePanel?: ReactNode;
-  iterationPanel?: ReactNode;
-  /** Knowledge-ingestion completion-flow content injected by the shell. */
-  knowledgeIngestionPanel?: ReactNode;
+  teamId: string;
+  teamName?: string;
+  linkedChatRoomId?: string;
 };
 
 export function ResearchProcessWorkspace({
-  teamId = "",
-  experimentPanel,
-  knowledgePanel,
-  iterationPanel,
-  knowledgeIngestionPanel,
+  teamId,
+  teamName = "",
+  linkedChatRoomId = "",
 }: ResearchProcessWorkspaceProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const runId = searchParams.get("runId") || "";
-  const selectedNodeId = searchParams.get("node") || null;
-  const panel = (searchParams.get("panel") as ResearchProcessPanel | null) || "node";
-  const questionId = (searchParams.get("questionId") || "").trim().toUpperCase();
-
-  const questionDetailQuery = useQuery({
-    queryKey: queryKeys.challengeQuestionRunDetail(teamId, questionId),
-    queryFn: () => getChallengeQuestionRunDetail(teamId, questionId),
-    enabled: Boolean(teamId.trim()) && Boolean(questionId),
-    staleTime: 60_000,
+  const location = useResearchWorkflowWorkspace(teamId);
+  const runState = useResearchWorkflowRun(teamId, location.runId);
+  const project = useResearchWorkflowProjectContext(teamId);
+  const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
+  const nodeDetail = useNodeDetailState(teamId, location.runId, location.selectedNodeId);
+  const detail = nodeDetail.state.kind === "ready" ? nodeDetail.state.detail : null;
+  const insights = useResearchWorkflowInsights(teamId, location.runId);
+  const commands = useResearchWorkflowCommands({
+    teamId,
+    runId: location.runId,
+    selectedNodeId: location.selectedNodeId,
+    run: runState.run,
+    nodeDetail: detail,
+    createRun: runState.createRun,
+    resolveHuman: runState.resolveHuman,
+    refresh: runState.refresh,
+    replaceParams: location.replaceParams,
   });
 
-  const { projection, run, error, busy, createRun, resolveHuman, refresh } = useResearchWorkflowRun(runId);
-  const { activeProjectId, loading: projectLoading, error: projectError } = useResearchWorkflowProjectContext(teamId);
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [runListError, setRunListError] = useState<string | null>(null);
-  const [bindingLoadError, setBindingLoadError] = useState<string | null>(null);
-  const [runOptions, setRunOptions] = useState<Array<{ runId: string; status: string }>>([]);
-  const [effectiveBindings, setEffectiveBindings] = useState<EffectiveAgentBinding[] | null>(null);
-  const [commandBusy, setCommandBusy] = useState(false);
-  const nodeDetailState = useNodeDetailState(runId, selectedNodeId);
-  const nodeDetail = nodeDetailState.state.kind === "ready" ? nodeDetailState.state.detail : null;
-
-  const replaceParams = useCallback(
-    (patch: Record<string, string | null | undefined>) => {
-      const next = new URLSearchParams(searchParams);
-      next.set("researchView", "workflow");
-      next.set("workflowId", CHALLENGE_CUP_WORKFLOW_ID);
-      if (teamId) next.set("team", teamId);
-      for (const [key, value] of Object.entries(patch)) {
-        if (value === null || value === undefined || value === "") next.delete(key);
-        else next.set(key, value);
-      }
-      setSearchParams(next, { replace: true });
-    },
-    [searchParams, setSearchParams, teamId],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!teamId.trim()) {
-      setRunOptions([]);
-      setRunListError("缺少 teamId，无法读取工作流运行");
-      return () => {
-        cancelled = true;
-      };
-    }
-    setRunListError(null);
-    listResearchWorkflowRuns(CHALLENGE_CUP_WORKFLOW_ID, { teamId })
-      .then((payload) => {
-        if (cancelled) return;
-        setRunOptions(
-          (payload.runs || []).map((item) => ({
-            runId: item.runId,
-            status: item.status,
-          })),
-        );
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setRunOptions([]);
-          setRunListError(`运行列表加载失败：${err instanceof Error ? err.message : String(err)}`);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [teamId, runId, run?.status]);
-
-  useEffect(() => {
-    if (!teamId.trim()) {
-      setEffectiveBindings(null);
-      setBindingLoadError("缺少 teamId，无法读取 Agent 绑定");
-      return;
-    }
-    let cancelled = false;
-    setBindingLoadError(null);
-    fetchEffectiveAgentBindings(CHALLENGE_CUP_WORKFLOW_ID, { teamId })
-      .then((payload) => {
-        if (!cancelled) setEffectiveBindings(payload.bindings);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setEffectiveBindings(null);
-          setBindingLoadError(`Agent 绑定加载失败：${err instanceof Error ? err.message : String(err)}`);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [teamId]);
-
   const graph = useMemo(() => {
-    if (!projection) return null;
-    if (runId) return projectionToCanvasGraph(projection);
-    return definitionToCanvasGraph(projection.definition, {
+    if (!runState.projection) return null;
+    if (location.runId) return projectionToCanvasGraph(runState.projection);
+    return definitionToCanvasGraph(runState.projection.definition, {
       primaryAgentIdByNode: new Map(
-        (effectiveBindings ?? [])
+        (catalog.effectiveBindings ?? [])
           .filter((binding) => Boolean(binding.agentId))
           .map((binding) => [binding.nodeId, binding.agentId]),
       ),
     });
-  }, [effectiveBindings, projection, runId]);
-
-  const onSelectNode = useCallback(
-    (nodeId: string | null) => {
-      if (!shouldApplyCanvasNodeSelection({ nodeId, panel })) return;
-      replaceParams({ node: nodeId, panel: "node" });
-    },
-    [panel, replaceParams],
-  );
-
-  const onCreateRun = useCallback(async () => {
-    setLocalError(null);
-    if (projectLoading) {
-      setLocalError("正在读取当前研究项目，请稍后再创建运行");
-      return;
-    }
-    if (!activeProjectId) {
-      setLocalError("当前团队没有活动研究项目，请先创建或选择项目");
-      return;
-    }
-    try {
-      const created = await createRun(teamId, activeProjectId);
-      replaceParams({
-        runId: created.runId,
-        node: created.runtimeCurrentNodeIds?.[0] || "knowledge_handoff",
-      });
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : String(err));
-    }
-  }, [activeProjectId, createRun, projectLoading, replaceParams, teamId]);
-
-  const onResolveHuman = useCallback(
-    async (accept: boolean) => {
-      if (!runId || !run?.humanTasks?.length) return;
-      // Node-scoped: only the CURRENT selected node's pending task may be
-      // resolved — never the global first pending task (multi-gate safety).
-      const pending = (run.humanTasks || []).find(
-        (t) =>
-          String(t.status) === "pending" &&
-          (!selectedNodeId || String(t.nodeId) === selectedNodeId),
-      );
-      if (!pending) {
-        setLocalError("当前节点没有待处理的人工任务");
-        return;
-      }
-      const taskId = String(pending.taskId || "");
-      if (!taskId) {
-        setLocalError("没有待处理的人工任务");
-        return;
-      }
-      setLocalError(null);
-      try {
-        const next = await resolveHuman(taskId, accept);
-        const nextPending = (next.humanTasks || []).find((t) => String(t.status) === "pending");
-        if (nextPending?.nodeId) {
-          replaceParams({ node: String(nextPending.nodeId), panel: "node" });
-        }
-      } catch (err) {
-        setLocalError(err instanceof Error ? err.message : String(err));
-      }
-    },
-    [runId, run, selectedNodeId, resolveHuman, replaceParams],
-  );
+  }, [catalog.effectiveBindings, location.runId, runState.projection]);
 
   const jumpToRuntime = useCallback(() => {
-    const current = projection?.run.runtimeCurrentNodeIds?.[0];
-    if (current) replaceParams({ node: current, panel: "node" });
-  }, [projection, replaceParams]);
+    const current = runState.projection?.run.runtimeCurrentNodeIds?.[0];
+    if (current) location.replaceParams({ node: current, panel: "node" });
+  }, [location, runState.projection]);
 
-  const currentPendingTaskId = useCallback(
-    (nodeId: string): string | null => {
-      const pending = (run?.humanTasks || []).find(
-        (t) => String(t.status) === "pending" && String(t.nodeId) === nodeId,
-      );
-      return pending ? String(pending.taskId || "") || null : null;
-    },
-    [run],
-  );
+  const runtimeNodeId = runState.projection?.run.runtimeCurrentNodeIds?.[0] ?? "";
+  const nextAction = runState.projection?.definition.nodes.find(
+    (node) => node.nodeId === runtimeNodeId,
+  )?.label ?? (location.runId ? "等待运行更新" : "创建运行");
+  const displayError = commands.error || runState.error || catalog.error || project.error;
+  const commandBusy = runState.busy || commands.busy;
 
-  const onInspectorCommand = useCallback(
-    (command: string) => {
-      if (command === "accept_handoff") {
-        void onResolveHuman(true);
-        return;
-      }
-      if (command === "reject_handoff" || command === "revise") {
-        void onResolveHuman(false);
-        return;
-      }
-      if (!runId || !selectedNodeId) return;
-      const capability = nodeDetail?.commands.find((c) => c.command === command);
-      if (!capability) {
-        setLocalError(`命令「${command}」后端未声明能力`);
-        return;
-      }
-      setCommandBusy(true);
-      setLocalError(null);
-      executeNodeCommand(
-        {
-          runId,
-          nodeId: selectedNodeId,
-          teamId,
-          pendingHumanTaskId: currentPendingTaskId(selectedNodeId) || undefined,
-        },
-        capability,
-      )
-        .then(() => void refresh())
-        .catch((err: unknown) => {
-          setLocalError(err instanceof Error ? err.message : String(err));
-        })
-        .finally(() => setCommandBusy(false));
-    },
-    [runId, selectedNodeId, teamId, nodeDetail, onResolveHuman, refresh, currentPendingTaskId],
-  );
-
-  const displayError = localError || error || runListError || bindingLoadError || projectError;
-
-  // Canvas cell: flex column fill; React Flow absolute-fills the remaining host.
-  const canvasBody = (
-    <div
-      className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
-      data-testid="research-process-canvas-host"
-      data-composer="research-process-canvas"
-    >
-      {displayError ? (
-        <div
-          className="shrink-0 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2 text-sm"
-          role="alert"
-        >
-          {displayError}
-        </div>
-      ) : null}
-      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-        {graph ? (
-          <VWorkflowCanvas
-            graph={graph}
-            selectedNodeId={selectedNodeId}
-            runtimeCurrentNodeIds={projection?.run.runtimeCurrentNodeIds || []}
-            onSelectNode={onSelectNode}
-            height="100%"
-            className="!absolute !inset-0 h-full min-h-0 !rounded-none !border-0"
-          />
-        ) : (
-          <VStateSurface tone="loading" title="加载流程定义" fill className="h-full min-h-0" />
-        )}
-      </div>
-    </div>
-  );
-
-  const toolbar = (
-    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-      <div className="min-w-0 text-xs text-[var(--fg-secondary)]">
-        {runId
-          ? `${runId} · ${run?.status || projection?.run.status || ""}`
-          : "创建运行后由工作流引擎驱动"}
-        {activeProjectId ? ` · 项目 ${activeProjectId}` : ""}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {runOptions.length > 0 ? (
-          <VSelect
-            density="compact"
-            className="min-w-[12rem]"
-            aria-label="运行切换"
-            placeholder="选择运行"
-            selectedKey={runId || null}
-            options={[
-              { id: "", label: "选择运行" },
-              ...runOptions.map((item) => ({
-                id: item.runId,
-                label: `${item.runId} · ${item.status}`,
-              })),
-            ]}
-            onSelectionChange={(key) => {
-              const nextId = key == null ? "" : String(key);
-              replaceParams({ runId: nextId || null });
-              if (nextId) void refresh();
-            }}
-          />
-        ) : null}
-        <VButton
-          type="button"
-          variant={panel === "agents" ? "secondary" : "ghost"}
-          onClick={() => replaceParams({ panel: "agents" })}
-        >
-          Agent
-        </VButton>
-        <VButton
-          type="button"
-          variant={panel === "timeline" ? "secondary" : "ghost"}
-          onClick={() => replaceParams({ panel: "timeline" })}
-        >
-          时间线
-        </VButton>
-        <VButton
-          type="button"
-          variant={panel === "team" ? "secondary" : "ghost"}
-          onClick={() => replaceParams({ panel: "team" })}
-        >
-          团队
-        </VButton>
-        <VButton
-          type="button"
-          variant={panel === "progress" || panel === "question" ? "secondary" : "ghost"}
-          onClick={() => replaceParams({ panel: "progress" })}
-        >
-          题目进度
-        </VButton>
-        {projection?.run.runtimeCurrentNodeIds?.length ? (
-          <VButton type="button" variant="ghost" onClick={jumpToRuntime}>
-            当前节点
-          </VButton>
-        ) : null}
-        {!runId ? (
-          <VButton
-            type="button"
-            onClick={onCreateRun}
-            isDisabled={busy || projectLoading || !activeProjectId}
-            title={projectError || (!activeProjectId ? "请先选择活动研究项目" : undefined)}
-          >
-            创建运行
-          </VButton>
-        ) : null}
-      </div>
-    </div>
-  );
-
-  const inspectorBody =
-    panel === "progress" ? (
-      <ChallengeMvpProgressPanel
-        teamId={teamId}
-        onOpenQuestion={(nextQuestionId) =>
-          replaceParams({ panel: "question", questionId: nextQuestionId })
-        }
-      />
-    ) : panel === "question" ? (
-      questionId ? (
-        <div className="h-full min-h-0 overflow-auto">
-          <ChallengeQuestionDetailPanel
-            requestedQuestionId={questionId}
-            detail={questionDetailQuery.data}
-            isLoading={questionDetailQuery.isPending}
-            errorMessage={
-              questionDetailQuery.error instanceof Error
-                ? questionDetailQuery.error.message
-                : questionDetailQuery.isError
-                  ? "challenge_question_run_unavailable"
-                  : ""
-            }
-            onClose={() => replaceParams({ panel: "progress" })}
-          />
-        </div>
-      ) : (
-        <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
-          <VEmptyState title="单题验收" className="h-auto w-full border-0 bg-transparent">
-            从题目进度中选择一道题查看验收详情。
-          </VEmptyState>
-        </div>
-      )
-    ) : panel === "agents" ? (
-      <ResearchAgentBindingPanel
-        teamId={teamId}
-        run={run}
-        effectiveBindings={effectiveBindings}
-        lang="zh"
-      />
-    ) : panel === "experiment" ? (
-      experimentPanel ?? (
-        <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
-          <VEmptyState title="实验设计" className="h-auto w-full border-0 bg-transparent">
-            实验设计面板在此打开。
-          </VEmptyState>
-        </div>
-      )
-    ) : panel === "knowledge" ? (
-      selectedNodeId === "evidence_relations" && runId ? (
-        <EvidenceGraphView runId={runId} nodeId={selectedNodeId} teamId={teamId} />
-      ) : selectedNodeId === "knowledge_ingestion" ? (
-        knowledgeIngestionPanel ?? (
-          <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
-            <VEmptyState title="知识入库" className="h-auto w-full border-0 bg-transparent">
-              知识入库状态面板在此打开。
-            </VEmptyState>
-          </div>
-        )
-      ) : (
-        knowledgePanel ?? (
-          <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
-            <VEmptyState title="知识搜集" className="h-auto w-full border-0 bg-transparent">
-              知识搜集面板在此打开。
-            </VEmptyState>
-          </div>
-        )
-      )
-    ) : panel === "iteration" ? (
-      <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto">
-        <IterationDecisionPanel runId={runId} run={run} busy={Boolean(busy)} onRefresh={refresh} />
-        {iterationPanel}
-      </div>
-    ) : panel === "timeline" ? (
-      <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
-        <VPanelHeader title="运行事件" headingLevel={3} />
-        <ul className="m-0 list-none space-y-1 p-0">
-          {(run?.events || []).map((evt) => (
-            <li
-              key={String(evt.eventId || evt.sequence)}
-              className="rounded border border-[var(--border-subtle)] px-2 py-1"
-            >
-              #{String(evt.sequence)} {String(evt.type)} {String(evt.nodeId || "")}
-            </li>
-          ))}
-          {(run?.events || []).length === 0 ? (
-            <li className="text-[var(--fg-secondary)]">暂无事件</li>
-          ) : null}
-        </ul>
-      </VSurface>
-    ) : panel === "team" ? (
-      <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-2 overflow-auto p-3 text-sm">
-        <VPanelHeader title="团队" headingLevel={3} />
-        <p className="m-0 text-[var(--fg-secondary)]">团队组织与讨论在此面板打开；流程执行仍以画布为准。</p>
-        <p className="m-0">团队 ID：{teamId || "—"}</p>
-        <p className="m-0">运行：{runId || "未创建"}</p>
-      </VSurface>
-    ) : selectedNodeId && !runId && projection ? (
-      <ResearchProcessDefinitionNodePanel
-        nodeId={selectedNodeId}
-        definition={projection.definition}
-        effectiveBindings={effectiveBindings}
-      />
-    ) : selectedNodeId ? (
-      nodeDetailState.state.kind === "loading" ? (
-        <VStateSurface tone="loading" title="加载节点详情" fill className="h-full min-h-0" />
-      ) : nodeDetailState.state.kind === "error" ? (
-        <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3" data-vui="node-detail-error">
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]" role="alert">
-            节点详情加载失败：{nodeDetailState.state.message}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <VButton type="button" onClick={nodeDetailState.retry}>
-              重试
-            </VButton>
-          </div>
-        </VSurface>
-      ) : nodeDetailState.state.kind === "empty" ? (
-        <VSurface tone="panel" className="flex h-full min-h-0 flex-col overflow-auto p-3">
-          <VEmptyState title="暂无节点详情" className="h-auto w-full border-0 bg-transparent">
-            该节点尚未产生运行数据。
-          </VEmptyState>
-        </VSurface>
-      ) : (
-        <ResearchProcessNodeInspector
-          nodeId={selectedNodeId}
-          adapter={getNodeAdapter(selectedNodeId)}
-          detail={nodeDetail}
-          handoffPending={Boolean(currentPendingTaskId(selectedNodeId))}
-          busy={Boolean(busy) || commandBusy}
-          onCommand={onInspectorCommand}
-          onOpenPanel={(drawerPanel) => {
-            replaceParams({ panel: drawerPanel });
-          }}
-        />
-      )
-    ) : (
-      <div className="flex h-full min-h-0 flex-col items-stretch justify-center p-3">
-        <VEmptyState title="选择流程节点" className="h-auto w-full border-0 bg-transparent">
-          在画布上点击任务节点，查看绑定、交接与运行命令。
-        </VEmptyState>
-      </div>
-    );
-
-  // Fill the board primary cell end-to-end (parent already absolute-pins overview).
-  // VCanvasWorkbenchPage owns toolbar + canvas/inspector split; no second outer grid.
   return (
-    <div
-      data-fill="true"
-      data-vui="research-process-workspace-host"
-      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
-    >
+    <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
       <VCanvasWorkbenchPage
         data-vui="research-process-workspace"
         domainRecipe="research-process-workflow"
         ariaLabel="科研流程工作区"
         title="科研流程"
         hideHeader
-        toolbar={toolbar}
+        toolbar={(
+          <ResearchWorkflowToolbar
+            teamName={teamName || teamId}
+            questionId={runState.run?.questionId || location.questionId}
+            runId={location.runId}
+            runStatus={runState.run?.status || runState.projection?.run.status || ""}
+            activeProjectId={project.activeProjectId || ""}
+            nextAction={nextAction}
+            streamState={runState.streamState}
+            runOptions={catalog.runOptions}
+            panel={location.panel}
+            hasRuntimeNode={Boolean(runtimeNodeId)}
+            createDisabled={Boolean(runState.busy || project.loading || !project.activeProjectId)}
+            createDisabledReason={project.error || (!project.activeProjectId ? "请先选择活动研究项目" : undefined)}
+            onSelectRun={(runId) => location.replaceParams({ runId: runId || null, node: null, panel: "node" })}
+            onOpenPanel={(panel) => location.replaceParams({ panel })}
+            onJumpToRuntime={jumpToRuntime}
+          />
+        )}
         layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
-        resize={{
-          aside: {
-            id: "inspector",
-            defaultWidth: 320,
-            minWidth: 260,
-            maxWidth: 480,
-          },
-        }}
-        canvas={canvasBody}
-        inspector={inspectorBody}
-        canvasClassName="!border-0 !rounded-none !h-full min-h-0"
-        inspectorClassName="!border-0 !rounded-none !h-full min-h-0"
-        className="h-full min-h-0 w-full flex-1"
+        resize={{ aside: { id: "inspector", defaultWidth: 360, minWidth: 300, maxWidth: 520 } }}
+        canvas={(
+          <ResearchWorkflowCanvasPane
+            graph={graph}
+            selectedNodeId={location.selectedNodeId}
+            runtimeCurrentNodeIds={runState.projection?.run.runtimeCurrentNodeIds ?? []}
+            error={displayError}
+            onSelectNode={location.selectNode}
+          />
+        )}
+        inspector={(
+          <ResearchProcessInspectorPane
+            scope={{
+              teamId,
+              teamName,
+              linkedChatRoomId,
+              runId: location.runId,
+              selectedNodeId: location.selectedNodeId,
+              questionId: location.questionId,
+              panel: location.panel,
+            }}
+            state={{
+              run: runState.run,
+              projection: runState.projection,
+              effectiveBindings: catalog.effectiveBindings,
+              activeProjectId: project.activeProjectId || "",
+              projectLoading: project.loading,
+              nodeDetail: nodeDetail.state,
+              insights,
+              busy: commandBusy,
+            }}
+            actions={{
+              replaceParams: location.replaceParams,
+              retryNodeDetail: nodeDetail.retry,
+              submitRun: commands.submitRun,
+              pendingTaskId: commands.pendingTaskId,
+              runCommand: commands.runInspectorCommand,
+            }}
+          />
+        )}
+        canvasClassName={styles.canvas}
+        inspectorClassName={styles.inspector}
+        className={styles.page}
         shellTestId="research-process-workspace-shell"
         shellMode="board"
       />
