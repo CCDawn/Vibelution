@@ -2007,7 +2007,7 @@ export function ConversationView({
       }
       // Commentary is process-trail "思考": same chronological lane as tools, capped body.
       if (cell.phase === "commentary") {
-        return renderCodexThoughtScrollCell(message, {
+        return renderCodexThoughtScrollCell({
           cellId: cell.id,
           text,
           status: cell.status,
@@ -2033,7 +2033,7 @@ export function ConversationView({
       );
     }
     if (cell.kind === "reasoning_summary") {
-      return renderCodexReasoningSummaryCell(message, cell);
+      return renderCodexReasoningSummaryCell(cell);
     }
     if (cell.kind === "error_notice") {
       const rawErrorTitle = cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed");
@@ -2224,7 +2224,6 @@ export function ConversationView({
    * with tools; body is height-capped and scrolls when long.
    */
   function renderCodexThoughtScrollCell(
-    message: ConversationMessage,
     input: {
       cellId: string;
       text: string;
@@ -2241,7 +2240,7 @@ export function ConversationView({
     if (!fullText) {
       return null;
     }
-    const isLive = input.status === "running" || input.status === "pending" || assistantTurnIsStreaming(message);
+    const isLive = input.status === "running" || input.status === "pending";
     const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
     return (
       <section
@@ -2281,14 +2280,13 @@ export function ConversationView({
   }
 
   function renderCodexReasoningSummaryCell(
-    message: ConversationMessage,
     cell: CodexTranscriptCell,
   ) {
     const fullText = String(cell.text || cell.summary || "").trim();
     if (!fullText) {
       return null;
     }
-    return renderCodexThoughtScrollCell(message, {
+    return renderCodexThoughtScrollCell({
       cellId: cell.id,
       text: fullText,
       status: cell.status,
@@ -2679,7 +2677,7 @@ export function ConversationView({
           <div className={styles.codexTranscriptReasoningTextButton}>
             <ThoughtScrollBody
               text={item.text}
-              streaming={item.status === "running" || item.status === "pending" || assistantTurnIsStreaming(message)}
+              streaming={item.status === "running" || item.status === "pending"}
             />
           </div>
         ) : null}
