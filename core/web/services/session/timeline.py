@@ -452,6 +452,9 @@ def _normalize_persisted_feedback_events(value: Any) -> list[dict[str, Any]]:
         status = s._normalize_tool_call_status(item.get("status"), default="done")
         entry: dict[str, Any] = {
             "sequence": sequence,
+            "revision": s._coerce_nonnegative_int(item.get("revision")),
+            "createdAt": str(item.get("createdAt") or "").strip(),
+            "updatedAt": str(item.get("updatedAt") or "").strip(),
             "kind": kind,
             "status": status,
         }
@@ -535,6 +538,9 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
     for item in s._normalize_persisted_feedback_events(value):
         entry = {
             "sequence": s._coerce_nonnegative_int(item.get("sequence")),
+            "revision": s._coerce_nonnegative_int(item.get("revision")),
+            "createdAt": str(item.get("createdAt") or "").strip(),
+            "updatedAt": str(item.get("updatedAt") or "").strip(),
             "kind": str(item.get("kind") or "").strip(),
             "status": s._normalize_tool_call_status(item.get("status"), default="done"),
         }

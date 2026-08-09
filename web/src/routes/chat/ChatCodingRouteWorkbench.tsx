@@ -1673,6 +1673,11 @@ export function ChatCodingRoute() {
     const paintedAtMs = metrics.paintedAtMs || chatStreamPerformanceNowMs();
     const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
     const paintedActiveTurn = activeTurnLayersBySessionRef.current[sessionId];
+    const paintedRunningTool = paintedActiveTurn?.turnItems.find((item) => (
+      item.type === "tool_call" && (item.status === "pending" || item.status === "running")
+    ));
+    const toolStartTimestamp = paintedRunningTool?.updatedAt || paintedRunningTool?.createdAt || paintedActiveTurn?.updatedAt || "";
+    const toolStartEpochMs = Date.parse(toolStartTimestamp);
     lastConversationStreamingFrameTelemetryAtRef.current = {
       ...lastConversationStreamingFrameTelemetryAtRef.current,
       [sessionId]: now,
@@ -1694,6 +1699,10 @@ export function ChatCodingRoute() {
         applyToPaintMs: lastAssistantDeltaAppliedAtMs
           ? Math.max(0, Math.round(paintedAtMs - lastAssistantDeltaAppliedAtMs))
           : 0,
+        toolStartToBrowserPaintMs: paintedRunningTool && Number.isFinite(toolStartEpochMs)
+          ? Math.max(0, now - toolStartEpochMs)
+          : 0,
+        activeStatusSource: paintedActiveTurn?.ledgerSeq ? "assistant_delta" : "optimistic_submit",
       },
     });
   }, [activeSessionId]);
@@ -1933,13 +1942,19 @@ export function ChatCodingRoute() {
     [activeSessionId, pendingSessionToolApproval, pendingToolGovernanceApproval],
   );
   const runtimeRunningSessionIds = useMemo(() => {
-    return [
+    const runningSessionIds = new Set([
       ...(runtime?.workRuns?.activeItems?.chat_turn ?? []),
       runtime?.workRuns?.active?.chat_turn,
     ]
       .map((run) => String(run?.sessionId ?? "").trim())
-      .filter(Boolean);
-  }, [runtime?.workRuns?.active?.chat_turn, runtime?.workRuns?.activeItems?.chat_turn]);
+      .filter(Boolean));
+    Object.entries(activeTurnLayersBySession).forEach(([sessionId, layer]) => {
+      if (layer.status === "pending" || layer.status === "running") {
+        runningSessionIds.add(sessionId);
+      }
+    });
+    return [...runningSessionIds];
+  }, [activeTurnLayersBySession, runtime?.workRuns?.active?.chat_turn, runtime?.workRuns?.activeItems?.chat_turn]);
   const pendingToolApprovalLabels = useMemo(
     () => pendingSessionToolApproval
       ? [{

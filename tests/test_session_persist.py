@@ -55,3 +55,44 @@ def test_persist_turn_result_skips_stale_turn(monkeypatch, tmp_path) -> None:
         turn_id="stale",
     )
     assert called == []
+
+
+def test_result_tool_recovery_prefers_call_id_over_same_name_ordinal(monkeypatch) -> None:
+    appended: list[dict] = []
+    monkeypatch.setattr(session_service, "load_conversation_events", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda *_args, **_kwargs: [{
+            "kind": "tool_call",
+            "toolName": "grep_search_tool",
+            "callId": "call-existing",
+        }],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_append_session_conversation_event",
+        lambda *_args, **kwargs: appended.append(kwargs),
+    )
+
+    persist._append_missing_canonical_result_items(
+        "session-1",
+        "turn-1",
+        {
+            "toolCalls": [
+                {"name": "grep_search_tool", "callId": "call-new", "status": "completed", "result": "new"},
+                {"name": "grep_search_tool", "callId": "call-existing", "status": "completed", "result": "old"},
+            ],
+        },
+    )
+
+    assert [item["payload"]["callId"] for item in appended] == ["call-new"]
+
+
+def test_latest_client_submission_id_follows_the_current_user_turn() -> None:
+    messages = [
+        {"role": "user", "metadata": {"turnId": "turn-old", "clientSubmissionId": "submission-old"}},
+        {"role": "user", "metadata": {"turnId": "turn-live", "clientSubmissionId": "submission-live"}},
+    ]
+
+    assert persist._latest_client_submission_id(messages, "turn-live") == "submission-live"

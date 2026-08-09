@@ -726,10 +726,29 @@ class ToolExecutor:
         tool_args = parse_tool_args(tool_args or {})
         call_id = str(tool_call_id or "").strip()
 
+        runtime_identity: dict[str, str] = {}
+        try:
+            from core.web.services.agent_directory_service import current_agent_runtime
+
+            runtime = current_agent_runtime() or {}
+            for source_key, target_key in (
+                ("sessionId", "sessionId"),
+                ("turnId", "turnId"),
+                ("agentId", "agentId"),
+            ):
+                value = str(runtime.get(source_key) or "").strip()
+                if value:
+                    runtime_identity[target_key] = value
+        except Exception:
+            runtime_identity = {}
+
         def publish_tool_event(event_name: str, payload: dict[str, Any]) -> None:
-            event_payload = dict(payload)
-            if call_id:
-                event_payload["callId"] = call_id
+            event_payload = {
+                **runtime_identity,
+                "eventAtEpochMs": int(time.time() * 1000),
+                **payload,
+            }
+            event_payload["callId"] = call_id
             self._event_bus.publish(event_name, event_payload)
 
         started_at = time.monotonic()
@@ -799,6 +818,12 @@ class ToolExecutor:
                 },
                 lifecycle=True,
             )
+
+        # Canonical Agent execution must supply the LLM-issued callId so the
+        # authorization ledger can validate it.  Non-enforced internal tools
+        # still receive an execution-local identity before any lifecycle event.
+        if not call_id:
+            call_id = f"tool-{time.time_ns():x}-{threading.get_ident():x}"
 
         readonly_block = self._check_readonly_subagent_block(tool_name)
         if readonly_block:
@@ -884,7 +909,12 @@ class ToolExecutor:
         # 发布工具开始事件。未知工具不发布 start，避免把错误工具名写入可见事件流。
         publish_tool_event(EventNames.TOOL_START, {
             "name": tool_name,
+            "lifecyclePhase": "started",
+        })
+        publish_tool_event(EventNames.TOOL_START, {
+            "name": tool_name,
             "args": tool_args,
+            "lifecyclePhase": "arguments_ready",
         })
 
         func = self._tool_map[tool_name]

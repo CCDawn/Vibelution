@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+
+from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.web.services import session_service
 from core.web.services.session import stream_capture
 
@@ -39,3 +42,123 @@ def test_text_batcher_done_flushes_response(monkeypatch) -> None:
     assert published
     assert published[-1]["session_id"] == "cap-s2"
     assert "streamed assistant text" in str(published[-1].get("content") or "")
+
+
+def test_tool_start_with_explicit_turn_identity_survives_thread_boundary(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-s3", turn_id="cap-t3")
+    published: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_set_session_live_output",
+        lambda session_id, **kwargs: published.append({"sessionId": session_id, **kwargs}),
+    )
+    monkeypatch.setattr(session_service, "_append_session_conversation_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "_touch_chat_turn_work_run", lambda **kwargs: None)
+
+    def publish_from_worker() -> None:
+        get_event_bus().publish(EventNames.TOOL_START, {
+            "name": "glob_tool",
+            "callId": "call-threaded",
+            "sessionId": "cap-s3",
+            "turnId": "cap-t3",
+            "args": {"pattern": "**/*.py"},
+        })
+
+    with stream_capture._capture_session_ui_stream("cap-s3", capture):
+        worker = threading.Thread(target=publish_from_worker)
+        worker.start()
+        worker.join(timeout=5)
+
+    assert capture.tool_calls[0]["callId"] == "call-threaded"
+    assert capture.tool_calls[0]["status"] == "running"
+    assert published[-1]["tool_calls"][0]["callId"] == "call-threaded"
+
+
+def test_tool_start_revisions_update_one_live_record(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-s3b", turn_id="cap-t3b")
+    published: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_set_session_live_output",
+        lambda session_id, **kwargs: published.append({"sessionId": session_id, **kwargs}),
+    )
+    monkeypatch.setattr(session_service, "_append_session_conversation_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "_touch_chat_turn_work_run", lambda **kwargs: None)
+
+    with stream_capture._capture_session_ui_stream("cap-s3b", capture):
+        for payload in (
+            {"name": "glob_tool", "lifecyclePhase": "started"},
+            {"name": "glob_tool", "lifecyclePhase": "arguments_ready", "args": {"pattern": "**/*.py"}},
+        ):
+            get_event_bus().publish(EventNames.TOOL_START, {
+                **payload,
+                "callId": "call-revision",
+                "sessionId": "cap-s3b",
+                "turnId": "cap-t3b",
+            })
+
+    assert len(capture.tool_calls) == 1
+    assert capture.tool_calls[0]["revision"] == 1
+    assert capture.tool_calls[0]["arguments"] == {"pattern": "**/*.py"}
+    assert published[-1]["tool_calls"][0]["revision"] == 1
+
+
+def test_explicit_wrong_turn_is_dropped_even_inside_capture_context(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-s3c", turn_id="cap-t3c")
+    discarded: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *_args, **kwargs: discarded.append(kwargs),
+    )
+
+    with stream_capture._capture_session_ui_stream("cap-s3c", capture):
+        get_event_bus().publish(EventNames.TOOL_START, {
+            "name": "glob_tool",
+            "callId": "call-wrong-turn",
+            "sessionId": "cap-s3c",
+            "turnId": "other-turn",
+        })
+
+    assert capture.tool_calls == []
+    assert discarded[-1]["fields"]["reason"] == "turn_mismatch"
+
+
+def test_tool_lifecycle_keeps_sequence_and_increments_revision() -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-s4", turn_id="cap-t4")
+
+    capture.note_tool_event("grep_search_tool", "running", call_id="call-1", arguments={"query": "needle"})
+    running = dict(capture.feedback_events[-1])
+    capture.note_tool_event("grep_search_tool", "completed", "found", call_id="call-1", result="found")
+    completed = capture.feedback_events[-1]
+
+    assert completed["callId"] == running["callId"] == "call-1"
+    assert completed["sequence"] == running["sequence"]
+    assert running["revision"] == 0
+    assert completed["revision"] == 1
+
+    capture.note_tool_event("grep_search_tool", "completed", "found again", call_id="call-1", result="found again")
+    assert len(capture.tool_calls) == 1
+    assert capture.tool_calls[0]["revision"] == 2
+    assert capture.feedback_events[-1]["sequence"] == running["sequence"]
+    assert capture.feedback_events[-1]["revision"] == 2
+
+
+def test_live_tool_event_without_call_id_is_dropped_with_reason(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-s5", turn_id="cap-t5")
+    discarded: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *_args, **kwargs: discarded.append(kwargs),
+    )
+
+    with stream_capture._capture_session_ui_stream("cap-s5", capture):
+        get_event_bus().publish(EventNames.TOOL_START, {
+            "name": "glob_tool",
+            "sessionId": "cap-s5",
+            "turnId": "cap-t5",
+        })
+
+    assert capture.tool_calls == []
+    assert discarded[-1]["fields"]["reason"] == "call_id_missing"

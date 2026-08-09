@@ -570,6 +570,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps live assistant output in an active turn layer outside committed session messages", () => {
     expect(routeSource).toContain("activeTurnLayersBySession");
+    expect(routeSource).toContain("Object.entries(activeTurnLayersBySession).forEach");
+    expect(routeSource).toContain("runningSessionIds.add(sessionId)");
+    expect(routeSource).toContain("activeStatusSource: paintedActiveTurn?.ledgerSeq ? \"assistant_delta\" : \"optimistic_submit\"");
     expect(routeSource).toContain("activeTurnMessage,");
     expect(routeAndStreamSource).toContain("planAppliedAssistantDeltaDrain");
     expect(chatStreamApplyControllerSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer");

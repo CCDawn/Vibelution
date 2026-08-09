@@ -93,4 +93,23 @@ describe("conversationMessageOrder", () => {
     ]);
     expect(ordered.map((item) => item.id)).toEqual(["u", "a"]);
   });
+
+  it("keeps a shared optimistic submission in user then assistant order despite clock skew", () => {
+    const ordered = chronologicalConversationMessages([
+      message({
+        id: "assistant-active",
+        role: "assistant",
+        timestamp: "2026-08-10T00:00:00Z",
+        metadata: { clientSubmissionId: "submission-live" },
+      }),
+      message({
+        id: "user-optimistic",
+        role: "user",
+        timestamp: "2026-08-10T00:00:02Z",
+        metadata: { clientSubmissionId: "submission-live" },
+      }),
+    ]);
+
+    expect(ordered.map((item) => item.id)).toEqual(["user-optimistic", "assistant-active"]);
+  });
 });

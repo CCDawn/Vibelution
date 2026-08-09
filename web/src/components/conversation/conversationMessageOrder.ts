@@ -17,6 +17,11 @@ function metadataNumber(message: ConversationMessage, key: string) {
   return undefined;
 }
 
+function clientSubmissionId(message: ConversationMessage) {
+  const value = message.metadata?.clientSubmissionId ?? message.metadata?.client_submission_id;
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function idMessageIndex(message: ConversationMessage) {
   // Prefer trailing -message-N (session journal ids), then any -message-N segment.
   const trailing = /-message-(\d+)$/.exec(message.id);
@@ -58,8 +63,16 @@ export function chronologicalConversationMessages(messages: ConversationMessage[
       message,
       sequenceOrder: messageSequenceOrder(message),
       timestampOrder: timestampOrder(message.timestamp),
+      clientSubmissionId: clientSubmissionId(message),
     }))
     .sort((left, right) => {
+      if (
+        left.clientSubmissionId
+        && left.clientSubmissionId === right.clientSubmissionId
+        && left.message.role !== right.message.role
+      ) {
+        return left.message.role === "user" ? -1 : 1;
+      }
       const leftHasSeq = hasFiniteSequence(left.sequenceOrder);
       const rightHasSeq = hasFiniteSequence(right.sequenceOrder);
       if (leftHasSeq && rightHasSeq) {

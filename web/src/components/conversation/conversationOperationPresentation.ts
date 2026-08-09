@@ -119,11 +119,7 @@ export function shouldRenderCompactActiveTurnPlaceholder(input: {
   return Boolean(
     input.role === "assistant"
     && input.streaming
-    && !input.showResponseBlock
-    && !input.hasFeedbackTimeline
-    && !input.hasActiveProcess
     && !input.turnErrorMessage
-    && !input.hasCodexSurface,
   );
 }
 

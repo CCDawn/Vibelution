@@ -375,6 +375,11 @@ def _codex_transcript_cell_from_operation_source(
             "summary": summary,
             "operationIds": [operation_id] if operation_id else [],
             "sourceItemId": operation_id,
+            "callId": str(source.get("callId") or source.get("toolCallId") or "").strip() or None,
+            "revision": s._coerce_nonnegative_int(source.get("revision")),
+            "sequence": s._coerce_nonnegative_int(source.get("sequence") or source.get("_sequence") or ordinal + 1),
+            "createdAt": str(source.get("createdAt") or source.get("timestamp") or "").strip(),
+            "updatedAt": str(source.get("updatedAt") or source.get("timestamp") or "").strip(),
         }
     )
     if kind != "tool":
@@ -1052,12 +1057,20 @@ def _session_turn_item_from_codex_cell(
     if not item_type:
         return None
     cell_id = str(cell.get("id") or "").strip()
-    suffix = cell_id or f"{item_type}-{index}"
+    call_id = str(cell.get("callId") or "").strip()
+    source_item_id = str(cell.get("sourceItemId") or "").strip()
+    suffix = call_id or source_item_id or cell_id or f"{item_type}-{index}"
+    item_id = f"{s._session_turn_item_base_id(session_id, turn_id)}-{item_type}-{s._short_hash(suffix) or index}"
     return s._compact_codex_record(
         {
-            "id": f"{s._session_turn_item_base_id(session_id, turn_id)}-{item_type}-{s._short_hash(suffix) or index}",
+            "id": item_id,
+            "itemId": item_id,
             "type": item_type,
             "status": str(cell.get("status") or "completed").strip() or "completed",
+            "revision": s._coerce_nonnegative_int(cell.get("revision")),
+            "sequence": s._coerce_nonnegative_int(cell.get("sequence") or index),
+            "createdAt": str(cell.get("createdAt") or "").strip(),
+            "updatedAt": str(cell.get("updatedAt") or "").strip(),
             "turnId": turn_id,
             "messageId": message_id,
             "source": source,
@@ -1066,7 +1079,8 @@ def _session_turn_item_from_codex_cell(
             "title": str(cell.get("title") or "").strip(),
             "summary": str(cell.get("summary") or "").strip(),
             "text": str(cell.get("text") or "").strip(),
-            "sourceItemId": str(cell.get("sourceItemId") or "").strip(),
+            "sourceItemId": source_item_id,
+            "callId": call_id,
             "operationIds": list(cell.get("operationIds") or []),
         }
     )

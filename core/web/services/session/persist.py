@@ -178,27 +178,43 @@ def _append_missing_canonical_result_items(
             source_kind="session_mental_snapshot",
         )
 
-    existing_tool_counts: dict[str, int] = {}
+    existing_call_ids: set[str] = set()
+    existing_legacy_tool_counts: dict[str, int] = {}
     for item in existing:
         if not isinstance(item, dict):
             continue
         if str(item.get("kind") or item.get("type") or "").strip().lower() != "tool_call":
             continue
         name = str(item.get("toolName") or "").strip()
-        if name:
-            existing_tool_counts[name] = existing_tool_counts.get(name, 0) + 1
-    seen_tool_counts: dict[str, int] = {}
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        existing_call_id = str(
+            item.get("callId")
+            or item.get("toolCallId")
+            or metadata.get("callId")
+            or metadata.get("toolCallId")
+            or ""
+        ).strip()
+        if existing_call_id:
+            existing_call_ids.add(existing_call_id)
+        elif name:
+            existing_legacy_tool_counts[name] = existing_legacy_tool_counts.get(name, 0) + 1
+    seen_legacy_tool_counts: dict[str, int] = {}
     for index, tool_call in enumerate(tool_calls, start=1):
         name = str(tool_call.get("name") or tool_call.get("toolName") or "tool").strip() or "tool"
-        seen_tool_counts[name] = seen_tool_counts.get(name, 0) + 1
-        if existing_tool_counts.get(name, 0) >= seen_tool_counts[name]:
-            continue
-        call_id = str(
+        source_call_id = str(
             tool_call.get("callId")
             or tool_call.get("toolCallId")
             or tool_call.get("id")
-            or f"{base_id}-tool-{index}"
         ).strip()
+        if source_call_id:
+            if source_call_id in existing_call_ids:
+                continue
+            call_id = source_call_id
+        else:
+            seen_legacy_tool_counts[name] = seen_legacy_tool_counts.get(name, 0) + 1
+            if existing_legacy_tool_counts.get(name, 0) >= seen_legacy_tool_counts[name]:
+                continue
+            call_id = f"{base_id}-tool-{index}"
         status = str(tool_call.get("status") or "completed").strip().lower() or "completed"
         text = s._sanitize_message_content(
             "assistant",
@@ -242,6 +258,21 @@ def _append_missing_canonical_result_items(
             source_kind="session_tool_result",
         )
     s._invalidate_session_conversation_events_cache(normalized_session_id)
+
+
+def _latest_client_submission_id(messages: list[dict[str, Any]], turn_id: str) -> str:
+    normalized_turn_id = str(turn_id or "").strip().removeprefix("live:")
+    if not normalized_turn_id:
+        return ""
+    for message in reversed(messages):
+        if not isinstance(message, dict) or str(message.get("role") or "").strip() != "user":
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        message_turn_id = str(metadata.get("turnId") or metadata.get("turn_id") or "").strip().removeprefix("live:")
+        if message_turn_id != normalized_turn_id:
+            continue
+        return str(metadata.get("clientSubmissionId") or metadata.get("client_submission_id") or "").strip()
+    return ""
 
 
 def _persist_session_turn_result(
@@ -597,7 +628,12 @@ def _persist_session_turn_result(
                 metadata={"llmUsage": llm_usage} if llm_usage is not None else None,
             )
         assistant_metadata = assistant_entry.get("metadata") if isinstance(assistant_entry.get("metadata"), dict) else {}
-        assistant_entry["metadata"] = {**assistant_metadata, "turnId": turn_id}
+        client_submission_id = _latest_client_submission_id(messages, turn_id)
+        assistant_entry["metadata"] = {
+            **assistant_metadata,
+            "turnId": turn_id,
+            **({"clientSubmissionId": client_submission_id} if client_submission_id else {}),
+        }
         visible_assistant_text = str(assistant_entry.get("content") or assistant_text or "").strip()
         turn_llm_usage = llm_usage if llm_usage is not None else s._missing_llm_usage(
             recorded_at=str(assistant_entry.get("timestamp") or "").strip(),

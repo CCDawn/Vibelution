@@ -34,6 +34,22 @@ function assistantDelta(
 }
 
 describe("chat active turn layer", () => {
+  it("keeps clientSubmissionId when an optimistic layer binds to a canonical turn", () => {
+    const optimistic = createOptimisticActiveTurnLayer({
+      sessionId: "session-1",
+      turnId: "optimistic-submit",
+      clientSubmissionId: "submission-1",
+      updatedAt: "2026-08-10T00:00:00Z",
+    });
+    const bound = mergeAssistantDeltaIntoActiveTurnLayer(
+      optimistic,
+      assistantDelta({ turnId: "turn-accepted" }),
+    );
+
+    expect(bound?.clientSubmissionId).toBe("submission-1");
+    expect(activeTurnLayerToConversationMessage(bound)?.metadata?.clientSubmissionId).toBe("submission-1");
+  });
+
   it("keeps AgentMessage projection behind the shared conversation adapter", () => {
     expect("activeTurnLayerToAgentMessage" in chatActiveTurnLayerModule).toBe(false);
   });it("does not settle the active layer for a process-only same-turn assistant packet", () => {

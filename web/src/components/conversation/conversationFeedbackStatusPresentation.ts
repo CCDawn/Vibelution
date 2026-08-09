@@ -87,11 +87,11 @@ export function operationIsVisibleStatusProgress(operation: AgentMessageOperatio
     || combined.includes("tool loop");
 }
 
-export function shouldUseFeedbackStatusPlaceholder(event: ConversationFeedbackEvent, streaming: boolean) {
+export function shouldUseFeedbackStatusPlaceholder(event: ConversationFeedbackEvent, _streaming: boolean) {
   if (statusEventHasDiagnostic(event)) {
     return true;
   }
-  return feedbackStatusIsLongLoopProgress(event) || isActiveInternalStreamingStatus(event, streaming);
+  return event.type === "retry" || feedbackStatusIsLongLoopProgress(event);
 }
 
 export function isActiveInternalStreamingStatus(event: ConversationFeedbackEvent, streaming: boolean) {

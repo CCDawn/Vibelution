@@ -37,6 +37,34 @@ def test_assistant_session_projection_has_only_a_revisioned_turn_item_package():
     assert assistant["turnItems"][-1]["text"] == "已经完成检查。"
 
 
+def test_live_tool_revision_survives_the_codex_projection() -> None:
+    messages = session_service._normalize_messages(
+        "session-live",
+        [{
+            "role": "assistant",
+            "timestamp": "2026-08-10T00:00:00Z",
+            "streaming": True,
+            "feedback_events": [{
+                "sequence": 4,
+                "revision": 2,
+                "kind": "tool",
+                "status": "completed",
+                "name": "grep_search_tool",
+                "callId": "call-live",
+                "summary": "found",
+                "createdAt": "2026-08-10T00:00:01Z",
+                "updatedAt": "2026-08-10T00:00:02Z",
+            }],
+        }],
+    )
+
+    tool_item = next(item for item in messages[0]["turnItems"] if item["type"] == "tool_call")
+    assert tool_item["callId"] == "call-live"
+    assert tool_item["revision"] == 2
+    assert tool_item["createdAt"] == "2026-08-10T00:00:01Z"
+    assert tool_item["updatedAt"] == "2026-08-10T00:00:02Z"
+
+
 def test_turn_item_protocol_normalizes_legacy_internal_kinds_without_serializing_aliases():
     items = session_service._canonicalize_session_turn_items_for_protocol(
         [

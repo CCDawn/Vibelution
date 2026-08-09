@@ -53,6 +53,15 @@ describe("conversationOperationPresentation", () => {
       turnErrorMessage: false,
     })).toBe(true);
     expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: true,
+      showResponseBlock: true,
+      hasFeedbackTimeline: true,
+      hasActiveProcess: true,
+      turnErrorMessage: false,
+      hasCodexSurface: true,
+    })).toBe(true);
+    expect(shouldRenderCompactActiveTurnPlaceholder({
       role: "user",
       streaming: true,
       showResponseBlock: false,

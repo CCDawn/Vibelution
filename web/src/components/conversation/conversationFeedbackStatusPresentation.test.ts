@@ -17,4 +17,20 @@ describe("conversationFeedbackStatusPresentation canonical status", () => {
     expect(shouldUseFeedbackStatusPlaceholder(retry, true)).toBe(true);
     expect(feedbackStatusPlaceholderLabel(retry, "zh")).toContain("重试");
   });
+
+  it("leaves internal running stages to the single compact active status line", () => {
+    expect(shouldUseFeedbackStatusPlaceholder({
+      id: "status-1-r0",
+      itemId: "status-1",
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "status",
+      code: "model_request",
+      text: "正在请求模型",
+      status: "running",
+      revision: 0,
+      sequence: 2,
+    }, true)).toBe(false);
+  });
 });
