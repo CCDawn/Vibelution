@@ -4,6 +4,7 @@ import type { AgentInstance } from "../api/types";
 import {
   agentDirectorySessionCount,
   agentDirectorySection,
+  isSessionMoreRecent,
   isVisibleDirectoryAgent,
   visibleDirectoryAgents,
 } from "./AgentConversationDirectory";
@@ -62,6 +63,15 @@ describe("AgentConversationDirectory", () => {
     expect(styles.agentActivityApproval).toContain("state-warning");
     expect(styles.agentActivityError).toContain("state-error");
     expect(styles.agentActivityCompleted).toContain("accent-cool");
+  });
+
+  it("orders mixed server-local and optimistic ISO timestamps by actual time", () => {
+    const optimisticLocalTime = new Date(2026, 7, 10, 2, 52, 48).toISOString();
+
+    expect(isSessionMoreRecent(
+      { updatedAt: optimisticLocalTime, lastActive: "" },
+      { updatedAt: "2026-08-10T00:59:41", lastActive: "" },
+    )).toBe(true);
   });
 
   it("nests team chat and member agents under collapsible team blocks", () => {
