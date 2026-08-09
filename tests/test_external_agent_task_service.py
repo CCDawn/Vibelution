@@ -419,6 +419,54 @@ def test_resumable_session_phase_fails_after_bounded_continuations(tmp_path) -> 
     assert len(runtime.submit_calls) == 4
 
 
+def test_succeeded_task_uses_canonical_final_answer_as_result_summary(
+    tmp_path,
+) -> None:
+    runtime = FakeRuntime()
+    service = _service(tmp_path, runtime)
+    started = service.start_task(
+        owner_id="host-a",
+        adapter_connection_id="connection-a",
+        capabilities=set(),
+        agent_id="coder",
+        task="echo a bounded result",
+        permission_profile="read_only",
+        client_request_id="",
+        title="",
+        runtime_revision="rev-1",
+    )
+    task = service.store.get_task(started["taskId"])
+    runtime.details[task["sessionId"]] = {
+        "sessionId": task["sessionId"],
+        "status": "ready",
+        "messages": [
+            {
+                "role": "assistant",
+                "status": "completed",
+                "turnItems": [
+                    {
+                        "type": "reasoning",
+                        "status": "completed",
+                        "text": "internal reasoning must not be projected",
+                    },
+                    {
+                        "type": "agent_message",
+                        "phase": "final_answer",
+                        "status": "completed",
+                        "terminal": True,
+                        "text": "MCP echo result.",
+                    },
+                ],
+            }
+        ],
+    }
+
+    completed = service.get_task(owner_id="host-a", task_id=task["taskId"])
+
+    assert completed["status"] == "succeeded"
+    assert completed["resultSummary"] == "MCP echo result."
+
+
 def test_approval_is_explicit_idempotent_and_accept_always_is_capability_gated(
     tmp_path,
 ) -> None:
