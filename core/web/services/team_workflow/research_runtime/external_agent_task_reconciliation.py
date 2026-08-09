@@ -26,7 +26,9 @@ from .store import WorkflowRunStore
 
 _ACTIVE_TASK_STATUSES = frozenset({"accepted", "queued", "running", "starting"})
 _BLOCKED_TASK_STATUSES = frozenset({"blocked", "incomplete"})
-_FAILED_TASK_STATUSES = frozenset({"cancelled", "canceled", "failed", "stopped"})
+_FAILED_TASK_STATUSES = frozenset(
+    {"cancelled", "canceled", "failed", "interrupted", "stopped"}
+)
 
 
 def _settle_then_block(
