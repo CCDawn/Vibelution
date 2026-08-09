@@ -150,6 +150,36 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     });
   });
 
+  it("ignores repeated selection notifications for the controlled node", async () => {
+    const onSelectNode = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={emptyGraph()}
+          selectedNodeId="source_extraction"
+          onSelectNode={onSelectNode}
+        />,
+      );
+    });
+
+    const onSelectionChange = rfCalls[0].onSelectionChange as (params: {
+      nodes: Array<{ id: string; type?: string }>;
+    }) => void;
+    onSelectionChange({ nodes: [{ id: "source_extraction", type: "agentTask" }] });
+    expect(onSelectNode).not.toHaveBeenCalled();
+
+    onSelectionChange({ nodes: [{ id: "evidence_relations", type: "agentTask" }] });
+    expect(onSelectNode).toHaveBeenCalledWith("evidence_relations");
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+  });
+
   it("shows a degraded banner when the layout hook reports a failure (P1-5)", async () => {
     vi.mocked(useWorkflowAutoLayout).mockReturnValue({
       nodes: [],
