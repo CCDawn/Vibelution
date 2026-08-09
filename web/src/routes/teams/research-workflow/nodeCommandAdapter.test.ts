@@ -23,6 +23,7 @@ import {
 
 const ALL_BACKEND_COMMANDS = [
   "start_agent_task",
+  "retry_execution",
   "run_smoke",
   "start_controlled_run",
   "view_artifacts",
@@ -105,6 +106,33 @@ describe("nodeCommandAdapter", () => {
       expect.objectContaining({
         idempotencyKey: "agent-task:nr-run-1-source_finding-a1",
       }),
+    );
+  });
+
+  it("passes the backend-owned retry key without deriving a replacement", async () => {
+    api.postResearchWorkflowNodeCommand.mockResolvedValue({ status: "queued" });
+
+    await executeNodeCommand(
+      { runId: "run-1", nodeId: "evidence_relations", teamId: "t1", runVersion: 23 },
+      {
+        command: "retry_execution",
+        available: true,
+        reason: "",
+        idempotencyKey: "retry-node:nr-run-1-evidence_relations-a1:a2",
+        payload: {},
+      },
+    );
+
+    expect(api.postResearchWorkflowNodeCommand).toHaveBeenCalledWith(
+      "run-1",
+      "evidence_relations",
+      {
+        teamId: "t1",
+        expectedRunVersion: 23,
+        idempotencyKey: "retry-node:nr-run-1-evidence_relations-a1:a2",
+        command: "retry_execution",
+        payload: {},
+      },
     );
   });
 

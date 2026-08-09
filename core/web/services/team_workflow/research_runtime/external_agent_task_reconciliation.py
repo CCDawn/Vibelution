@@ -21,7 +21,7 @@ from .node_execution_support import NodeExecutionError, iso, utc_now
 from .store import WorkflowRunStore
 
 _ACTIVE_TASK_STATUSES = frozenset({"accepted", "queued", "running", "starting"})
-_BLOCKED_TASK_STATUSES = frozenset({"blocked", "incomplete", "needs_review"})
+_BLOCKED_TASK_STATUSES = frozenset({"blocked", "incomplete"})
 _FAILED_TASK_STATUSES = frozenset({"cancelled", "canceled", "failed", "stopped"})
 
 
@@ -76,7 +76,19 @@ def _reconcile_one(
     status = str(task.get("status") or "").strip().lower()
     if status in _ACTIVE_TASK_STATUSES:
         return record
-    if status in _BLOCKED_TASK_STATUSES | _FAILED_TASK_STATUSES:
+    source_completion_gate = (
+        task.get("completionGate")
+        if node_run.get("nodeId") in SOURCE_NODE_TASKS
+        else None
+    )
+    review_artifact_ready = (
+        status == "needs_review"
+        and isinstance(source_completion_gate, dict)
+        and bool(source_completion_gate.get("passed"))
+    )
+    if status in _BLOCKED_TASK_STATUSES | _FAILED_TASK_STATUSES or (
+        status == "needs_review" and not review_artifact_ready
+    ):
         return block_external_agent_node_run(
             store,
             record=record,
@@ -88,19 +100,20 @@ def _reconcile_one(
                 or f"External Agent task reached {status}."
             ),
         )
-    if status != "completed":
+    if status != "completed" and not review_artifact_ready:
         return record
 
-    if node_run.get("nodeId") in SOURCE_NODE_TASKS:
-        completion_gate = task.get("completionGate")
-        if not isinstance(completion_gate, dict) or not completion_gate.get("passed"):
-            return block_external_agent_node_run(
-                store,
-                record=record,
-                node_run=node_run,
-                failure_code="external_task_completion_gate_failed",
-                failure_summary="Source Agent task completed without passing its artifact gate.",
-            )
+    if node_run.get("nodeId") in SOURCE_NODE_TASKS and (
+        not isinstance(source_completion_gate, dict)
+        or not source_completion_gate.get("passed")
+    ):
+        return block_external_agent_node_run(
+            store,
+            record=record,
+            node_run=node_run,
+            failure_code="external_task_completion_gate_failed",
+            failure_summary="Source Agent task completed without passing its artifact gate.",
+        )
     session_id = str(node_run.get("sessionId") or "")
     if not session_id or session_id != str(task.get("sessionId") or ""):
         return block_external_agent_node_run(

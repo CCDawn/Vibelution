@@ -30,6 +30,7 @@ export type NodeCommandResult = {
 /** Commands whose backend handler exists and can be invoked. */
 const EXECUTABLE = new Set([
   "start_agent_task",
+  "retry_execution",
   "run_smoke",
   "start_controlled_run",
   "view_artifacts",
@@ -44,6 +45,7 @@ const EXECUTABLE = new Set([
 export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string {
   const zh: Record<string, string> = {
     start_agent_task: "启动 Agent 任务",
+    retry_execution: "重试此节点",
     open_session: "打开精确会话",
     open_evidence_graph: "打开证据图",
     accept_handoff: "接受交接",
@@ -57,6 +59,7 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
   };
   const en: Record<string, string> = {
     start_agent_task: "Start agent task",
+    retry_execution: "Retry this node",
     open_session: "Open session anchor",
     open_evidence_graph: "Open evidence graph",
     accept_handoff: "Accept handoff",
@@ -111,6 +114,9 @@ export async function executeNodeCommand(
   ) {
     throw new Error("启动 Agent 任务缺少后端幂等与预算契约");
   }
+  if (command === "retry_execution" && !capability.idempotencyKey?.trim()) {
+    throw new Error("节点重试缺少后端幂等契约");
+  }
 
   if (command === "accept_handoff" || command === "reject_handoff" || command === "revise") {
     const decision =
@@ -133,7 +139,7 @@ export async function executeNodeCommand(
     teamId: context.teamId,
     expectedRunVersion: context.runVersion,
     idempotencyKey:
-      command === "start_agent_task"
+      command === "start_agent_task" || command === "retry_execution"
         ? capability.idempotencyKey!
         : `node:${runId}:${nodeId}:${command}:v${context.runVersion}`,
     command,

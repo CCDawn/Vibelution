@@ -8,6 +8,7 @@ from core.research.workflow.contracts import ArtifactManifest
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.models import WorkflowNodeSpec
 
+from .evidence_relation_artifact import build_evidence_relation_artifact
 from .human_gate_artifacts import canonical_sha256
 from .source_extraction_evidence_cards import (
     build_source_extraction_evidence_cards,
@@ -101,19 +102,7 @@ def _source_extraction_payload(task: dict[str, Any]) -> dict[str, Any]:
 
 def _evidence_relations_payload(task: dict[str, Any]) -> dict[str, Any]:
     result = dict(task.get("result") or {})
-    graph = dict(result.get("candidateGraph") or {})
-    return {
-        **result,
-        **graph,
-        "evidenceGaps": list(
-            result.get("evidenceGaps") or graph.get("evidenceGaps") or []
-        ),
-        "counterEvidenceRefs": list(
-            result.get("counterEvidenceRefs")
-            or graph.get("counterEvidenceRefs")
-            or []
-        ),
-    }
+    return build_evidence_relation_artifact(result)
 
 
 def _payload_for_kind(

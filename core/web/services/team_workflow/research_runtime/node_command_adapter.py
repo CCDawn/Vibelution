@@ -60,6 +60,38 @@ def _snapshot_agent_id(record: dict[str, Any], node_id: str) -> str:
     return ""
 
 
+def _retry_execution_capability(
+    record: dict[str, Any],
+    node_id: str,
+) -> dict[str, Any] | None:
+    node_runs = [
+        dict(item)
+        for item in record.get("nodeRuns") or []
+        if str(item.get("nodeId") or "") == node_id
+    ]
+    if not node_runs:
+        return None
+    latest = node_runs[-1]
+    if str(latest.get("status") or "") not in {"blocked", "failed"}:
+        return None
+    attempt = int(latest.get("attempt") or 0)
+    max_retries = int(
+        ((record.get("inputSnapshot") or {}).get("budgetPolicy") or {}).get(
+            "maxRetries", 0
+        )
+    )
+    available = attempt <= max_retries
+    return {
+        "command": "retry_execution",
+        "available": available,
+        "reason": "" if available else "节点重试预算已耗尽",
+        "idempotencyKey": (
+            f"retry-node:{latest.get('nodeRunId')}:a{attempt + 1}"
+        ),
+        "payload": {},
+    }
+
+
 def node_command_capabilities(
     record: dict[str, Any],
     node_id: str,
@@ -85,6 +117,9 @@ def node_command_capabilities(
                     "reason": reason,
                 }
             ]
+        retry = _retry_execution_capability(record, node_id)
+        if retry is not None:
+            return [*supplemental, retry]
         if node_id not in SOURCE_NODE_TASKS and node_id not in PROJECT_NODE_TASKS:
             return supplemental
         agent_id = _snapshot_agent_id(record, node_id)

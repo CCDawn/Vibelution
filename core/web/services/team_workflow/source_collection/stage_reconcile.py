@@ -2782,6 +2782,13 @@ def _source_collection_stage_session_task_message(
             "- `evidenceRefs[]` 只写页码、PDF 页、段落、章节、引文或受控记录锚点；`claims[]` / `keyFindings[]` / `citations[]` 每项必须包含 `sourceRef`，并至少包含 `page/pageRange/citation/evidenceRef` 之一。",
             "- 对摘要或元数据足以支持的范围，可把 `candidates[].evidenceRefs` 中已有的真实锚点原样写入对应 extraction；如果只有 DOI/URL 或摘要定位，保留 `keep/needs_more_info` 决定，但证据状态必须保持 `missing_evidence_anchor`，不得虚构页码、直接引语或全文结论。",
         ]
+    elif stage_id == "relations":
+        stage_writeback_lines = [
+            "- 证据关系阶段必须在 `missingLinks[]` 逐条写出证据缺口；每项包含稳定 `id`、`description`、`neededEvidence` 和 `blocksConclusion`。",
+            "- 必须显式写 `counterEvidenceRefs[]`：只登记真实限制、反例或否定性证据，每项包含 `evidenceRef`、`claim` 和处置 `disposition`；支持性背景关系不得冒充反证。",
+            "- 如果没有真实反证，`counterEvidenceRefs=[]` 并保持 `status=needs_review`；不得为了通过门禁伪造反证引用。",
+            "- `candidateRelations[]` 的每条边必须绑定真实 `evidenceRefs[]`，关系图只表达候选事实，不得升级为正式结论。",
+        ]
     else:
         stage_writeback_lines = []
     return "\n".join(
