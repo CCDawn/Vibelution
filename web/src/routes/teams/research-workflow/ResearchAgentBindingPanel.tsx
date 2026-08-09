@@ -56,7 +56,7 @@ export function ResearchAgentBindingPanel({
         nodeId: binding.nodeId,
         roleKey: String(snap?.roleKey || binding.roleKey || ""),
         agentId,
-        agentName: String(snap?.displayName || agentId),
+        agentName: String(snap?.displayName || binding.displayName || agentId),
         resolvedFrom: source,
         sessionBound: hasSession,
         lang,

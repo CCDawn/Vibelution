@@ -14,6 +14,7 @@ from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowRuntimeService,
     reset_research_workflow_runtime_service_for_tests,
 )
+from core.web.services.team_workflow.research_runtime import service as runtime_service_module
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
 from tests.test_research_workflow_v21_runtime_lifecycle import run_input_request
 
@@ -42,6 +43,34 @@ def _run(service: ResearchWorkflowRuntimeService) -> dict:
         binding_layers=SOURCE_BINDING,
         idempotency_key="create-team-scope-version",
     )
+
+
+def test_effective_bindings_include_canonical_agent_display_name(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service, _client = _runtime(tmp_path)
+    monkeypatch.setattr(
+        service,
+        "_effective_binding_layers",
+        lambda _workflow_id, _team_id: SOURCE_BINDING,
+    )
+    monkeypatch.setattr(
+        runtime_service_module,
+        "_agent_display_name",
+        lambda agent_id: "资料寻找 Agent" if agent_id == "agent-source-finder" else agent_id,
+    )
+
+    payload = service.get_effective_agent_bindings(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        team_id=TEAM_ID,
+    )
+    source_binding = next(
+        item for item in payload["bindings"] if item["nodeId"] == "source_finding"
+    )
+
+    assert source_binding["agentId"] == "agent-source-finder"
+    assert source_binding["displayName"] == "资料寻找 Agent"
 
 
 def test_run_queries_require_exact_team_scope(tmp_path: Path) -> None:

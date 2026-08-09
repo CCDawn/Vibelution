@@ -185,6 +185,7 @@ class ResearchWorkflowRuntimeService:
                     "nodeId": node.nodeId,
                     "roleKey": node.primaryRoleKey,
                     "agentId": agent_id,
+                    "displayName": _agent_display_name(agent_id) if agent_id else "",
                     "resolvedFrom": resolved_from,
                 }
             )
