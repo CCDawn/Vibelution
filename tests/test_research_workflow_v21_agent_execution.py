@@ -25,6 +25,8 @@ SOURCE_AGENTS = {
     "source_ingestor": "agent-source-ingestor",
 }
 
+BUDGET_REQUEST = {"tokens": 100, "toolCalls": 2, "wallClockSeconds": 30}
+
 
 def test_chat_deep_link_preserves_exact_team_run_node_return_context() -> None:
     href = chat_deep_link(
@@ -75,7 +77,13 @@ def _run_input(team_id: str = "team-agent-execution") -> dict:
         },
         "stopPolicy": {"maxNoImprovementRounds": 2},
         "environmentSnapshotRef": "fixture://environment/agent-execution",
-        "modelRoutingPolicy": {"reasoning": "reasoning-model"},
+        "modelRoutingPolicy": {
+            "source_discovery": "source-model",
+            "extraction": "extraction-model",
+            "reasoning": "reasoning-model",
+            "review": "review-model",
+            "governance": "governance-model",
+        },
         "evaluationContract": {"minimumClaimEvidenceCoverage": 0.9},
         "createdBy": "test-operator",
     }
@@ -190,13 +198,19 @@ def test_each_source_agent_starts_exact_task_and_persists_node_session(
         run["runId"],
         node_id,
         "start_agent_task",
-        payload={"idempotencyKey": f"start-{node_id}"},
+        payload={
+            "idempotencyKey": f"start-{node_id}",
+            "budgetRequest": BUDGET_REQUEST,
+        },
     )
     replay = service.apply_node_command(
         run["runId"],
         node_id,
         "start_agent_task",
-        payload={"idempotencyKey": f"start-{node_id}"},
+        payload={
+            "idempotencyKey": f"start-{node_id}",
+            "budgetRequest": BUDGET_REQUEST,
+        },
     )
 
     persisted = service.get_run(run["runId"])
@@ -210,6 +224,14 @@ def test_each_source_agent_starts_exact_task_and_persists_node_session(
     assert len(task_calls) == 1
     assert len(source_run_calls) == (1 if node_id == "source_finding" else 0)
     assert "teamId=team-agent-execution" in task_calls[0]["payload"]["returnTo"]
+    assert first["modelRoute"]["purpose"] in {
+        "source_discovery",
+        "extraction",
+    }
+    assert first["taskBundle"]["status"] == "running"
+    assert first["taskBundle"]["subtasks"][0]["taskId"] == f"task-{node_id}"
+    assert len(persisted["modelRoutingDecisions"]) == 1
+    assert len(persisted["taskBundles"]) == 1
 
 
 def test_project_agent_task_uses_frozen_agent_and_rejects_mismatch(
@@ -257,11 +279,29 @@ def test_project_agent_task_uses_frozen_agent_and_rejects_mismatch(
         fake_start_project_task,
     )
 
+    with pytest.raises(ResearchWorkflowError) as model_exc:
+        service.apply_node_command(
+            run["runId"],
+            "hypothesis_design",
+            "start_agent_task",
+            payload={
+                "idempotencyKey": "start-hypothesis",
+                "agentId": planner_id,
+                "modelRef": "unapproved-model",
+            },
+        )
+    assert getattr(model_exc.value, "code", "") == "model_route_mismatch"
+    assert calls == []
+
     started = service.apply_node_command(
         run["runId"],
         "hypothesis_design",
         "start_agent_task",
-        payload={"idempotencyKey": "start-hypothesis", "agentId": planner_id},
+        payload={
+            "idempotencyKey": "start-hypothesis",
+            "agentId": planner_id,
+            "budgetRequest": BUDGET_REQUEST,
+        },
     )
     assert started["taskId"] == "task-hypothesis"
     assert len(calls) == 1
@@ -277,4 +317,193 @@ def test_project_agent_task_uses_frozen_agent_and_rejects_mismatch(
             },
         )
     assert getattr(exc.value, "code", "") == "binding_agent_mismatch"
+    assert len(calls) == 1
+
+    stop_calls: list[dict] = []
+
+    def fake_stop(session_id: str, *, expected_turn_id: str = "") -> dict:
+        stop_calls.append(
+            {"sessionId": session_id, "expectedTurnId": expected_turn_id}
+        )
+        return {"ok": True, "sessionId": session_id, "turnId": expected_turn_id}
+
+    monkeypatch.setattr(
+        "core.web.services.session_service.request_stop_session_turn",
+        fake_stop,
+    )
+    expired_bundle = {
+        **started["taskBundle"],
+        "subtasks": [
+            {
+                **started["taskBundle"]["subtasks"][0],
+                "deadlineAt": "2000-01-01T00:00:00Z",
+            }
+        ],
+    }
+    service._store.update_run(run["runId"], {"taskBundles": [expired_bundle]})
+    cancelled = service.reconcile_task_bundles(run["runId"])
+    replay = service.reconcile_task_bundles(run["runId"])
+    assert cancelled["status"] == "blocked"
+    assert cancelled["taskBundles"][0]["status"] == "cancelled"
+    assert cancelled["taskBundles"][0]["subtasks"][0]["status"] == "cancelled"
+    assert cancelled["taskBundles"][0]["cancelReason"] == (
+        "task bundle deadline exceeded"
+    )
+    assert cancelled["nodeRuns"][0]["status"] == "cancelled"
+    assert replay == cancelled
+    assert stop_calls == [
+        {"sessionId": "session-hypothesis", "expectedTurnId": "turn-hypothesis"}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("node_id", "role_key", "task_kind"),
+    (
+        ("protocol_design", "experiment_planner", "experiment_design"),
+        ("protocol_review", "experiment_ledger", "experiment_evidence_review"),
+        ("result_evaluation", "experiment_ledger", "experiment_evidence_review"),
+        ("iteration_decision", "iteration_planner", "iteration_decision"),
+        ("version_governance", "iteration_versioning", "version_governance"),
+    ),
+)
+def test_each_project_agent_node_persists_exact_task_and_session(
+    tmp_path: Path,
+    monkeypatch,
+    node_id: str,
+    role_key: str,
+    task_kind: str,
+) -> None:
+    agent_id = f"agent-{role_key}"
+    service = _service(tmp_path / node_id)
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={role_key: agent_id}
+        ),
+        idempotency_key=f"create-{node_id}",
+    )
+    run = _make_node_ready(
+        service,
+        run,
+        node_id=node_id,
+        agent_id=agent_id,
+    )
+    calls: list[dict] = []
+
+    def fake_start_project_task(team_id: str, project_id: str, payload: dict) -> dict:
+        calls.append(payload)
+        assert payload["taskKind"] == task_kind
+        assert payload["agentId"] == agent_id
+        return {
+            "task": {
+                "taskId": f"task-{node_id}",
+                "agentId": agent_id,
+                "sessionId": f"session-{node_id}",
+                "turn": {"turnId": f"turn-{node_id}"},
+            },
+            "sessionId": f"session-{node_id}",
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks.start_research_project_agent_task",
+        fake_start_project_task,
+    )
+    started = service.apply_node_command(
+        run["runId"],
+        node_id,
+        "start_agent_task",
+        payload={
+            "idempotencyKey": f"start-{node_id}",
+            "budgetRequest": BUDGET_REQUEST,
+        },
+    )
+    persisted = service.get_run(run["runId"])
+    assert started["taskId"] == f"task-{node_id}"
+    assert persisted["nodeRuns"][0]["agentId"] == agent_id
+    assert persisted["nodeRuns"][0]["sessionId"] == f"session-{node_id}"
+    assert persisted["taskBundles"][0]["status"] == "running"
+    assert len(calls) == 1
+
+
+def test_parallel_task_limit_blocks_second_bundle_before_external_dispatch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_input = _run_input()
+    run_input["budgetPolicy"] = {
+        **run_input["budgetPolicy"],
+        "maxParallelTasks": 1,
+    }
+    service = _service(tmp_path / "parallel-limit")
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=run_input,
+        binding_layers=AgentBindingLayers(workflowDefaults=SOURCE_AGENTS),
+        idempotency_key="create-parallel-limit",
+    )
+    run = _make_node_ready(
+        service,
+        run,
+        node_id="source_finding",
+        agent_id=SOURCE_AGENTS["source_finder"],
+    )
+    service._store.update_run(
+        run["runId"],
+        {"sourceCollectionRunId": "source-run-parallel"},
+    )
+    calls: list[dict] = []
+
+    def fake_start_stage_task(team_id: str, source_run_id: str, payload: dict) -> dict:
+        calls.append(payload)
+        node_label = str(payload["stageId"])
+        return {
+            "taskId": f"task-{node_label}",
+            "agentId": payload["agentId"],
+            "sessionId": f"session-{node_label}",
+            "turn": {"turnId": f"turn-{node_label}"},
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_session.start_source_collection_stage_session_task",
+        fake_start_stage_task,
+    )
+    service.apply_node_command(
+        run["runId"],
+        "source_finding",
+        "start_agent_task",
+        payload={
+            "idempotencyKey": "start-first-bundle",
+            "budgetRequest": BUDGET_REQUEST,
+        },
+    )
+    persisted = service.get_run(run["runId"])
+    second = {
+        **persisted["nodeRuns"][0],
+        "nodeRunId": f"nr-{run['runId']}-source_extraction-a1",
+        "nodeId": "source_extraction",
+        "agentId": SOURCE_AGENTS["source_extractor"],
+        "status": "ready",
+        "taskId": "",
+        "sessionId": "",
+    }
+    service._store.update_run(
+        run["runId"],
+        {
+            "runtimeCurrentNodeIds": ["source_extraction"],
+            "nodeRuns": [*persisted["nodeRuns"], second],
+        },
+    )
+
+    with pytest.raises(ResearchWorkflowError) as exc:
+        service.apply_node_command(
+            run["runId"],
+            "source_extraction",
+            "start_agent_task",
+            payload={
+                "idempotencyKey": "start-second-bundle",
+                "budgetRequest": BUDGET_REQUEST,
+            },
+        )
+    assert getattr(exc.value, "code", "") == "parallel_budget_exhausted"
     assert len(calls) == 1

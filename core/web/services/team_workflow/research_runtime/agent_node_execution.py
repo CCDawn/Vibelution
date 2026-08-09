@@ -5,10 +5,21 @@ from __future__ import annotations
 import urllib.parse
 from typing import Any
 
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+
+from .budget_lifecycle import BudgetLifecycleError, reserve_node_budget
+from .model_routing import ModelRoutingError, select_model_route
 from .node_execution import start_node_execution
 from .node_execution_support import NodeExecutionError, latest_node_run
 from .session_binding_bridge import SessionBindingBridge, SessionBindingError
 from .store import WorkflowRunStore
+from .task_bundle_lifecycle import (
+    TaskBundleError,
+    bind_agent_task_bundle,
+    create_agent_task_bundle,
+    ensure_task_bundle_capacity,
+    task_bundle_id,
+)
 
 SOURCE_NODE_TASKS: dict[str, tuple[str, str]] = {
     "source_finding": ("finding", "source_finder"),
@@ -213,11 +224,39 @@ def start_agent_node_execution(
         )
     if node_run.get("status") == "running" and node_run.get("taskId"):
         binding = store.get_session_binding(str(record.get("runId") or ""), node_id)
+        bundle_id = task_bundle_id(str(node_run["nodeRunId"]))
+        bundle = next(
+            (
+                item
+                for item in record.get("taskBundles") or []
+                if item.get("bundleId") == bundle_id
+            ),
+            {},
+        )
+        if bundle and bundle.get("status") == "pending" and binding:
+            bundle = bind_agent_task_bundle(
+                store,
+                run_id=str(record["runId"]),
+                bundle_id=bundle_id,
+                task_id=str(node_run["taskId"]),
+                session_id=str(node_run["sessionId"]),
+                turn_id=str(binding.get("focusTurnId") or ""),
+            )
+        route = next(
+            (
+                item
+                for item in record.get("modelRoutingDecisions") or []
+                if item.get("nodeRunId") == node_run["nodeRunId"]
+            ),
+            {},
+        )
         return {
             "command": "start_agent_task",
             "taskId": str(node_run.get("taskId") or ""),
             "chatRoute": "",
             "sessionBinding": binding or {},
+            "taskBundle": bundle,
+            "modelRoute": route,
             "idempotentReplay": True,
         }
     if node_run.get("status") != "ready":
@@ -230,6 +269,42 @@ def start_agent_node_execution(
     idempotency_key = str(
         payload.get("idempotencyKey") or f"agent-task:{node_run['nodeRunId']}"
     ).strip()
+    node_spec = next(
+        item
+        for item in build_challenge_cup_workflow_definition().nodes
+        if item.nodeId == node_id
+    )
+    try:
+        model_route = select_model_route(record, node_run, payload)
+        ensure_task_bundle_capacity(
+            record,
+            node_run_id=str(node_run["nodeRunId"]),
+        )
+        reservation = reserve_node_budget(
+            store,
+            record=record,
+            node_run=node_run,
+            stage_id=node_spec.stageId.value,
+            request=dict(payload.get("budgetRequest") or {}),
+            idempotency_key=idempotency_key,
+        )
+        record = store.get_run(str(record["runId"])) or record
+        bundle = create_agent_task_bundle(
+            store,
+            record=record,
+            node_run=node_run,
+            node_spec=node_spec,
+            model_route=model_route,
+            budget_reservation_ref=str(reservation["reservationId"]),
+            idempotency_key=idempotency_key,
+            deadline_seconds=int(payload.get("deadlineSeconds") or 1800),
+        )
+    except (BudgetLifecycleError, ModelRoutingError, TaskBundleError) as exc:
+        raise AgentNodeExecutionError(
+            str(exc),
+            code=str(getattr(exc, "code", "agent_task_contract_invalid")),
+        ) from exc
+    record = store.get_run(str(record["runId"])) or record
     record, started = _start_external_task(
         store,
         record,
@@ -286,9 +361,24 @@ def start_agent_node_execution(
                 "deadlineSeconds": int(payload.get("deadlineSeconds") or 1800),
                 "taskId": str(anchor["taskId"]),
                 "sessionId": str(anchor["sessionId"]),
+                "budgetReservationRef": str(
+                    bundle["subtasks"][0]["budgetReservationRef"]
+                ),
+                "modelRef": model_route["modelRef"],
+                "modelPurpose": model_route["purpose"],
+                "estimatedCost": model_route["estimatedCost"],
+                "escalationReason": model_route["escalationReason"],
             },
         )
-    except (SessionBindingError, NodeExecutionError) as exc:
+        bundle = bind_agent_task_bundle(
+            store,
+            run_id=str(record["runId"]),
+            bundle_id=str(bundle["bundleId"]),
+            task_id=str(anchor["taskId"]),
+            session_id=str(anchor["sessionId"]),
+            turn_id=str(anchor["turnId"]),
+        )
+    except (SessionBindingError, NodeExecutionError, TaskBundleError) as exc:
         raise AgentNodeExecutionError(
             str(exc),
             code=str(getattr(exc, "code", "agent_task_persistence_failed")),
@@ -298,5 +388,7 @@ def start_agent_node_execution(
         "taskId": str(anchor["taskId"]),
         "chatRoute": str(started.get("chatRoute") or ""),
         "sessionBinding": binding,
+        "taskBundle": bundle,
+        "modelRoute": model_route,
         "idempotentReplay": False,
     }
