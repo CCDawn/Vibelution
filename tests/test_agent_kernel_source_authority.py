@@ -52,3 +52,12 @@ def test_message_projection_uses_source_session_for_deeplink() -> None:
     assert ref["projectionCanWrite"] is False
     assert ref["canonicalEditRoute"] == "/chat?session=session-alpha&message=message-alpha"
     assert ref["sourceRef"]["canonicalEditRoute"] == "/chat?session=session-alpha&message=message-alpha"
+
+
+def test_team_projection_uses_team_id_as_the_only_route_identity() -> None:
+    contract = projection_edit_contract("team_workflow", "team-alpha")
+
+    assert contract["canWrite"] is False
+    assert contract["sourceOwner"] == "TeamWorkflow"
+    assert contract["canonicalEditRoute"] == "/teams?teamId=team-alpha"
+    assert contract["canonicalMutationApi"] == "/api/teams/team-alpha"

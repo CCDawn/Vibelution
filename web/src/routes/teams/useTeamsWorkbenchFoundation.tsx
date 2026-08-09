@@ -208,8 +208,6 @@ export function useTeamsWorkbenchFoundation({
     setResearchWorkspaceView,
     teamShellMode,
     setTeamShellMode,
-    challengeTeamSurface,
-    setChallengeTeamSurface,
     nodePositionDrafts,
     setNodePositionDrafts,
     canvasFrameSize,
@@ -408,7 +406,7 @@ export function useTeamsWorkbenchFoundation({
     researchWorkflowTeamSelected,
     researchWorkspaceView,
     sourceCollectionStandalone,
-    challengeProgramProgressVisible: challengeCupResearchTeamSelected && (challengeTeamSurface === "progress" || researchWorkspaceView === "overview"),
+    challengeProgramProgressVisible: false,
   });
   const {
     preferredExperimentMethod,
@@ -1110,8 +1108,6 @@ export function useTeamsWorkbenchFoundation({
     setResearchWorkspaceView,
     teamShellMode,
     setTeamShellMode,
-    challengeTeamSurface,
-    setChallengeTeamSurface,
     nodePositionDrafts,
     setNodePositionDrafts,
     canvasFrameSize,

@@ -19,9 +19,8 @@ describe("team research secondary queries contract", () => {
 
   it("is wired via useResearchExperimentWorkspace from TeamsRoute", () => {
     expect(routeSource).toContain("resolveResearchSecondaryStatusQueryEnabled({");
-    expect(routeSource).toMatch(
-      /challengeProgramProgressVisible:\s*challengeCupResearchTeamSelected\s*&&\s*\(challengeTeamSurface === "progress"\s*\|\|\s*researchWorkspaceView === "overview"\)/,
-    );
+    expect(routeSource).toContain("challengeProgramProgressVisible: false");
+    expect(routeSource).not.toContain("challengeTeamSurface");
     // Phase 2: route owns enable gate; experiment workspace composes secondary queries.
     expect(routeSource).toContain("useResearchExperimentWorkspace({");
     expect(routeSource).toMatch(

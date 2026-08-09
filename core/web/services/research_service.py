@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from core.research.agent_templates import (
     RESEARCH_AGENT_DEFAULT_LLM_CONFIG,
@@ -302,27 +300,6 @@ _RESEARCH_FLOW_MODULE_CONTRACTS: dict[str, dict[str, Any]] = {
         "terminal": False,
     },
 }
-_RESEARCH_CAPABILITY_ACTIONS = {
-    "knowledge_lookup",
-    "literature_project_parse",
-    "semantic_cluster",
-    "novelty_reverse_check",
-}
-_RESEARCH_CAPABILITY_NODE_IDS = [
-    "knowledge_lookup",
-    "literature_project_parse",
-    "semantic_cluster",
-    "novelty_reverse_check",
-]
-_PARSE_SIGNAL_KEYWORDS = {
-    "method": ["method", "methods", "model", "algorithm", "framework", "architecture", "agent", "rag", "reasoning", "optimization"],
-    "dataset": ["dataset", "benchmark", "corpus", "data", "evaluation set", "leaderboard"],
-    "implementation": ["github", "repository", "code", "implementation", "package", "library", "api"],
-    "metric": ["metric", "accuracy", "score", "f1", "latency", "throughput", "ablation", "result"],
-    "gap": ["gap", "limitation", "challenge", "future work", "open problem", "unexplored", "bottleneck"],
-}
-
-
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -1508,139 +1485,6 @@ def save_research_flow_canvas(
     })
 
 
-def execute_research_flow_canvas_node(session_id: str, node_id: str | None = None) -> dict[str, Any]:
-    """Legacy flow-canvas execute writer.
-
-    ADR 0006 / Task 8: disabled by default so LangGraph runtime is the sole run writer.
-    Set VIBELUTION_LEGACY_FLOW_CANVAS_EXECUTE=1 only for rollback drills.
-    """
-    import os
-
-    if os.environ.get("VIBELUTION_LEGACY_FLOW_CANVAS_EXECUTE", "").strip() not in {"1", "true", "TRUE", "yes"}:
-        raise ValueError(
-            "Legacy /api/research/flow-canvas/execute is disabled. "
-            "Use LangGraph research workflow runtime APIs "
-            "(/api/research/workflows/.../runs). "
-            "Set VIBELUTION_LEGACY_FLOW_CANVAS_EXECUTE=1 only for emergency rollback."
-        )
-    normalized_session_id = _safe_text(session_id, max_length=128)
-    if not normalized_session_id:
-        raise ValueError("Research flow execution requires a session id.")
-    canvas = _get_saved_research_flow_canvas(sync_agent_instances=False)
-    validation = canvas.get("validation") if isinstance(canvas.get("validation"), dict) else _validate_research_flow_canvas(canvas)
-    if not validation.get("valid", False):
-        _record_research_config_event(
-            "research.flow_canvas.execution_blocked",
-            phase="flow_canvas_execution",
-            message="Research flow canvas execution blocked by contract validation",
-            outcome="blocked",
-            level="warning",
-            fields={
-                "sessionId": normalized_session_id,
-                **_flow_canvas_validation_log_fields(validation),
-            },
-        )
-        raise ValueError(_format_flow_canvas_validation_error(validation))
-    nodes = [dict(node) for node in canvas["nodes"]]
-    edges = [dict(edge) for edge in canvas["edges"]]
-    try:
-        selected = _select_flow_execution_node(nodes, node_id)
-    except ValueError as exc:
-        _record_research_config_event(
-            "research.flow_canvas.execution_blocked",
-            phase="flow_canvas_execution",
-            message="Research flow canvas execution blocked by node state",
-            outcome="blocked",
-            level="warning",
-            fields={
-                "sessionId": normalized_session_id,
-                "nodeId": _safe_token(node_id, default="") if node_id else "",
-                "reason": str(exc)[:500],
-            },
-        )
-        raise
-    if not selected:
-        raise ValueError("No executable research flow node is ready.")
-
-    node_index = next(index for index, node in enumerate(nodes) if node["id"] == selected["id"])
-    rerun = str(selected.get("status") or "") in {"done", "failed", "stale"}
-    stale_downstream: list[dict[str, Any]] = []
-    if rerun:
-        stale_downstream = _mark_flow_downstream_stale(nodes, edges, selected["id"])
-    nodes[node_index] = {**selected, "status": "running"}
-    _persist_research_flow_canvas_state(canvas, nodes, edges)
-
-    action_key = _flow_node_action_key(selected)
-    _record_research_flow_execution_event(
-        "research.flow_canvas.node_started",
-        outcome="started",
-        session_id=normalized_session_id,
-        node=selected,
-        action_key=action_key,
-        fields={
-            "rerun": rerun,
-            "staleDownstreamNodeIds": [node["id"] for node in stale_downstream],
-        },
-    )
-    result: dict[str, Any] | None = None
-    route_outcome = "completed"
-    try:
-        result, route_outcome = _execute_research_flow_action(action_key, normalized_session_id)
-    except Exception as exc:
-        nodes[node_index] = {**nodes[node_index], "status": "failed"}
-        _persist_research_flow_canvas_state(canvas, nodes, edges)
-        _record_research_flow_execution_event(
-            "research.flow_canvas.node_failed",
-            outcome="failed",
-            session_id=normalized_session_id,
-            node=selected,
-            action_key=action_key,
-            fields={"errorType": type(exc).__name__, "error": str(exc)[:500]},
-        )
-        if isinstance(exc, (FileNotFoundError, ValueError)):
-            raise
-        raise ValueError(f"Research flow node execution failed: {type(exc).__name__}: {exc}") from exc
-
-    latest_canvas = _get_saved_research_flow_canvas(sync_agent_instances=False)
-    nodes = [dict(node) for node in latest_canvas["nodes"]]
-    edges = [dict(edge) for edge in latest_canvas["edges"]]
-    node_index = next(index for index, node in enumerate(nodes) if node["id"] == selected["id"])
-    if rerun:
-        stale_downstream = _mark_flow_downstream_stale(nodes, edges, selected["id"])
-    nodes[node_index] = {**nodes[node_index], "status": "done"}
-    activated = _activate_flow_successors(nodes, edges, selected["id"], route_outcome)
-    saved_canvas = _persist_research_flow_canvas_state(latest_canvas, nodes, edges)
-    _record_research_flow_execution_event(
-        "research.flow_canvas.node_executed",
-        outcome="succeeded",
-        session_id=normalized_session_id,
-        node=selected,
-        action_key=action_key,
-        fields={
-            "routeOutcome": route_outcome,
-            "activatedNodeIds": [node["id"] for node in activated],
-            "sourceCount": _safe_summary_count(result, "sourceCount"),
-            "evidenceCount": _safe_summary_count(result, "evidenceCount"),
-            "candidateThemeCount": _safe_summary_count(result, "candidateThemeCount"),
-            "themeCardCount": _safe_summary_count(result, "themeCardCount"),
-        },
-    )
-    return {
-        "canvas": saved_canvas,
-        "session": result,
-        "execution": {
-            "sessionId": normalized_session_id,
-            "nodeId": selected["id"],
-            "nodeLabel": selected["label"],
-            "actionKey": action_key,
-            "status": "done",
-            "routeOutcome": route_outcome,
-            "activatedNodeIds": [node["id"] for node in activated],
-            "message": _flow_execution_message(selected, action_key, route_outcome, activated),
-        },
-    }
-
-
 def get_research_agent_bindings() -> dict[str, Any]:
     return _load_research_agent_config()
 
@@ -1768,58 +1612,6 @@ def _record_research_flow_sync_event(payload: dict[str, Any], changed: list[dict
         )
     except Exception as exc:
         _debug_logger.warning(f"Failed to record research flow sync event. error={exc}")
-def _select_flow_execution_node(nodes: list[dict[str, Any]], node_id: str | None) -> dict[str, Any] | None:
-    requested = _safe_token(node_id, default="") if node_id else ""
-    runnable_statuses = {"ready", "needs_review", "needs_evidence"}
-    explicit_rerun_statuses = {"done", "failed", "stale"}
-    running = next((node for node in nodes if str(node.get("status") or "") == "running"), None)
-    if running:
-        running_id = str(running.get("id") or "")
-        raise ValueError(f"Research flow node is already running: {running_id}")
-    if requested:
-        for node in nodes:
-            if node["id"] == requested:
-                if node["status"] not in runnable_statuses | explicit_rerun_statuses | {"needs_input"}:
-                    raise ValueError(f"Research flow node is not ready to execute: {node_id}")
-                return node
-        raise ValueError(f"Unknown research flow node: {node_id}")
-    for node in nodes:
-        if node["status"] in runnable_statuses:
-            return node
-    return None
-
-
-def _mark_flow_downstream_stale(
-    nodes: list[dict[str, Any]],
-    edges: list[dict[str, Any]],
-    source_node_id: str,
-) -> list[dict[str, Any]]:
-    node_index = {str(node.get("id") or ""): index for index, node in enumerate(nodes)}
-    adjacency: dict[str, list[str]] = {}
-    for edge in edges:
-        source = str(edge.get("source") or "")
-        target = str(edge.get("target") or "")
-        if not source or not target:
-            continue
-        adjacency.setdefault(source, []).append(target)
-
-    changed: list[dict[str, Any]] = []
-    pending = list(adjacency.get(source_node_id, []))
-    visited: set[str] = {source_node_id}
-    staleable_statuses = {"ready", "done", "failed", "needs_review", "needs_input", "needs_evidence", "blocked"}
-    while pending:
-        node_id = pending.pop(0)
-        if node_id in visited:
-            continue
-        visited.add(node_id)
-        index = node_index.get(node_id)
-        if index is not None:
-            current = nodes[index]
-            if str(current.get("status") or "") in staleable_statuses:
-                nodes[index] = {**current, "status": "stale"}
-                changed.append(nodes[index])
-        pending.extend(adjacency.get(node_id, []))
-    return changed
 
 
 def _flow_node_action_key(node: dict[str, Any]) -> str:
@@ -1834,155 +1626,6 @@ def _flow_node_binding_key(node: dict[str, Any]) -> str:
     return _flow_node_action_key(node)
 
 
-def _execute_research_flow_action(action_key: str, session_id: str) -> tuple[dict[str, Any], str]:
-    if action_key == "broad":
-        return run_broad_theme_search(session_id), "completed"
-    if action_key == "knowledge_store":
-        return get_theme_discovery_session(session_id), "completed"
-    if action_key in _RESEARCH_CAPABILITY_ACTIONS:
-        return _run_research_capability_action(action_key, session_id), "completed"
-    if action_key == "deep":
-        return run_deep_theme_search(session_id), "completed"
-    if action_key == "review":
-        result = extract_theme_discovery_evidence(session_id)
-        return result, "needs_evidence" if _latest_missing_evidence_requests(result) else "approved"
-    if action_key == "themes":
-        return generate_candidate_themes(session_id), "completed"
-    if action_key == "human_choice":
-        result = get_theme_discovery_session(session_id)
-        if not result.get("session", {}).get("selectedThemeId"):
-            raise ValueError("Select a candidate theme before advancing the human choice node.")
-        return result, "selected"
-    if action_key == "card":
-        session = get_theme_discovery_session(session_id)
-        theme_id = str(session.get("session", {}).get("selectedThemeId") or "").strip()
-        if not theme_id:
-            raise ValueError("Select a candidate theme before generating a theme card.")
-        return generate_theme_card(session_id, theme_id), "completed"
-    raise ValueError(f"Research flow node action is not executable yet: {action_key}")
-
-
-def _run_research_capability_action(action_key: str, session_id: str) -> dict[str, Any]:
-    payload = get_theme_discovery_session(session_id)
-    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-    agent_report = payload.get("agentReport") if isinstance(payload.get("agentReport"), dict) else {}
-    knowledge_base = get_research_knowledge_base(limit=25)
-    knowledge_summary = knowledge_base.get("summary") if isinstance(knowledge_base.get("summary"), dict) else {}
-    fields = {
-        "agentKey": action_key,
-        "sourceCount": _safe_int(summary.get("sourceCount")),
-        "evidenceCount": _safe_int(summary.get("evidenceCount")),
-        "knowledgeEntryCount": _safe_int(knowledge_summary.get("entryCount")),
-        "knowledgeClaimCount": _safe_int(knowledge_summary.get("claimCount")),
-        "knowledgeGapCount": _safe_int(knowledge_summary.get("gapCount")),
-        "sourceKindCounts": agent_report.get("sourceKindCounts") if isinstance(agent_report.get("sourceKindCounts"), dict) else {},
-        "capabilityMode": "routing_capability",
-    }
-    if action_key == "knowledge_lookup":
-        fields["capabilitySummary"] = "Queried the local research knowledge base before additional deep search."
-    elif action_key == "literature_project_parse":
-        fields.update(_parse_literature_project_sources(payload))
-    elif action_key == "semantic_cluster":
-        fields["capabilitySummary"] = "Prepared source and claim sets for semantic deduplication, clustering, and gap discovery."
-    elif action_key == "novelty_reverse_check":
-        fields["capabilitySummary"] = "Prepared candidate gaps for novelty reverse-check against papers, web pages, and GitHub repositories."
-    _record_research_capability_event(session_id, f"research.capability.{action_key}.completed", fields)
-    return get_theme_discovery_session(session_id)
-
-
-def _parse_literature_project_sources(payload: dict[str, Any]) -> dict[str, Any]:
-    sources = payload.get("sources") if isinstance(payload.get("sources"), list) else []
-    records = [_parse_literature_project_source(source) for source in sources if isinstance(source, dict)]
-    parsed = [record for record in records if record]
-    parse_type_counts = Counter(str(record.get("parsedType") or "unknown") for record in parsed)
-    signal_counts: Counter[str] = Counter()
-    for record in parsed:
-        for signal in record.get("signals") or []:
-            signal_counts[str(signal)] += 1
-    return {
-        "capabilityMode": "metadata_signal_parser",
-        "capabilitySummary": (
-            f"Parsed {len(parsed)} research sources into structured paper/project/dataset/web signal records."
-        ),
-        "parsedSourceCount": len(parsed),
-        "parseTypeCounts": dict(parse_type_counts),
-        "signalCounts": dict(signal_counts),
-        "parsedRecords": parsed[:40],
-    }
-
-
-def _parse_literature_project_source(source: dict[str, Any]) -> dict[str, Any]:
-    kind = str(source.get("kind") or "web").strip().lower()
-    title = _safe_text(source.get("title"), max_length=240)
-    url = _safe_text(source.get("url"), max_length=500)
-    snippet = _safe_text(source.get("snippet"), max_length=600)
-    combined = f"{title}\n{url}\n{snippet}".lower()
-    parsed_type = _parsed_source_type(kind, url)
-    signals = _parse_signal_hits(combined)
-    record: dict[str, Any] = {
-        "sourceId": _safe_text(source.get("sourceId") or source.get("source_id"), max_length=128),
-        "kind": kind,
-        "parsedType": parsed_type,
-        "title": title,
-        "url": url,
-        "reliability": _safe_text(source.get("reliability"), max_length=40),
-        "signals": signals,
-        "extracted": {
-            "methodSignals": _keyword_hits(combined, _PARSE_SIGNAL_KEYWORDS["method"]),
-            "datasetSignals": _keyword_hits(combined, _PARSE_SIGNAL_KEYWORDS["dataset"]),
-            "implementationSignals": _keyword_hits(combined, _PARSE_SIGNAL_KEYWORDS["implementation"]),
-            "metricSignals": _keyword_hits(combined, _PARSE_SIGNAL_KEYWORDS["metric"]),
-            "gapSignals": _keyword_hits(combined, _PARSE_SIGNAL_KEYWORDS["gap"]),
-        },
-    }
-    repo = _github_repo_from_url(url)
-    if repo:
-        record["githubRepo"] = repo
-    if snippet:
-        record["summary"] = snippet[:280]
-    return record
-
-
-def _parsed_source_type(kind: str, url: str) -> str:
-    if kind == "paper":
-        return "paper_or_pdf"
-    if kind == "github" or "github.com" in url.lower():
-        return "github_repository"
-    if kind == "dataset":
-        return "dataset_or_benchmark"
-    return "web_page"
-
-
-def _parse_signal_hits(text: str) -> list[str]:
-    signals: list[str] = []
-    for signal, keywords in _PARSE_SIGNAL_KEYWORDS.items():
-        if _keyword_hits(text, keywords):
-            signals.append(signal)
-    return signals
-
-
-def _keyword_hits(text: str, keywords: list[str]) -> list[str]:
-    hits: list[str] = []
-    for keyword in keywords:
-        pattern = r"\b" + re.escape(keyword.lower()).replace(r"\ ", r"\s+") + r"\b"
-        if re.search(pattern, text) and keyword not in hits:
-            hits.append(keyword)
-    return hits[:8]
-
-
-def _github_repo_from_url(url: str) -> str:
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return ""
-    if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
-        return ""
-    parts = [part for part in parsed.path.strip("/").split("/") if part]
-    if len(parts) < 2:
-        return ""
-    return f"{parts[0]}/{parts[1]}"
-
-
 def _latest_missing_evidence_requests(result: dict[str, Any]) -> list[str]:
     for event in reversed(result.get("events") or []):
         fields = event.get("fields") if isinstance(event, dict) else {}
@@ -1990,50 +1633,6 @@ def _latest_missing_evidence_requests(result: dict[str, Any]) -> list[str]:
         if isinstance(requests, list):
             return [str(item) for item in requests if str(item).strip()]
     return []
-
-
-def _activate_flow_successors(
-    nodes: list[dict[str, Any]],
-    edges: list[dict[str, Any]],
-    source_node_id: str,
-    route_outcome: str,
-) -> list[dict[str, Any]]:
-    activated: list[dict[str, Any]] = []
-    acceptable = {route_outcome}
-    if route_outcome in {"completed", "approved", "selected"}:
-        acceptable.update({"completed", "done", "succeeded"})
-    if route_outcome == "approved":
-        acceptable.add("approved")
-    if route_outcome == "needs_evidence":
-        acceptable.add("needs_evidence")
-    if route_outcome == "selected":
-        acceptable.add("selected")
-
-    node_index = {node["id"]: index for index, node in enumerate(nodes)}
-    for edge in edges:
-        if edge["source"] != source_node_id:
-            continue
-        edge_condition = _safe_text(edge.get("condition"), default="completed", max_length=160).lower()
-        if edge_condition and edge_condition not in acceptable:
-            continue
-        target_index = node_index.get(edge["target"])
-        if target_index is None:
-            continue
-        target = nodes[target_index]
-        target_status = target["status"]
-        feedback_reroute = (
-            route_outcome == "needs_evidence"
-            and edge_condition == "needs_evidence"
-            and target_status == "done"
-        )
-        if target_status == "running" or (target_status in {"done", "failed"} and not feedback_reroute):
-            continue
-        next_status = "needs_evidence" if route_outcome == "needs_evidence" else "ready"
-        if target.get("type") == "human" and route_outcome != "selected":
-            next_status = "needs_input"
-        nodes[target_index] = {**target, "status": next_status}
-        activated.append(nodes[target_index])
-    return activated
 
 
 def _persist_research_flow_canvas_state(
@@ -2052,58 +1651,6 @@ def _persist_research_flow_canvas_state(
         record_event=False,
         sync_agent_instances=False,
     )
-
-
-def _flow_execution_message(
-    node: dict[str, Any],
-    action_key: str,
-    route_outcome: str,
-    activated: list[dict[str, Any]],
-) -> str:
-    next_labels = [item["label"] for item in activated]
-    suffix = f"；已激活：{'、'.join(next_labels)}" if next_labels else "；暂无可自动激活的后继节点"
-    return f"{node['label']} 已执行真实科研动作 {action_key}，路由结果 {route_outcome}{suffix}。"
-
-
-def _safe_summary_count(result: dict[str, Any] | None, key: str) -> int:
-    if not isinstance(result, dict):
-        return 0
-    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
-    try:
-        return int(summary.get(key) or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _record_research_flow_execution_event(
-    event_code: str,
-    *,
-    outcome: str,
-    session_id: str,
-    node: dict[str, Any],
-    action_key: str,
-    fields: dict[str, Any],
-) -> None:
-    try:
-        record_research_scene_event(
-            event_code,
-            phase="flow_canvas_execution",
-            message=f"Research flow canvas node {node.get('id')} execution {outcome}",
-            outcome=outcome,
-            fields={
-                "sessionId": session_id,
-                "nodeId": node.get("id"),
-                "nodeLabel": node.get("label"),
-                "actionKey": action_key,
-                **fields,
-            },
-            session_id=session_id,
-            agent_key=action_key,
-        )
-    except Exception as exc:
-        _debug_logger.warning(
-            f"Failed to record research capability transition event session_id={session_id}, action={action_key}. error={exc}"
-        )
 
 
 def _record_research_capability_event(session_id: str, event_code: str, fields: dict[str, Any]) -> None:
