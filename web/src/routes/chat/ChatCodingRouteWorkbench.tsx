@@ -158,6 +158,7 @@ import {
   activeTurnLayerToConversationMessage,
   activeTurnLayerTextLength,
   isActiveTurnSettledByDetail,
+  runningToolStartedAtEpochMs,
   selectFirstUnpaintedRunningTool,
   setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
@@ -1724,7 +1725,7 @@ export function ChatCodingRoute() {
     const paintedAtMs = metrics.paintedAtMs || chatStreamPerformanceNowMs();
     const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
     const toolStartToBrowserPaintMs = newlyPaintedRunningTools.reduce((maximum, tool) => {
-      const toolStartEpochMs = Date.parse(tool.createdAt || tool.updatedAt || paintedActiveTurn?.updatedAt || "");
+      const toolStartEpochMs = runningToolStartedAtEpochMs(tool);
       return Number.isFinite(toolStartEpochMs) ? Math.max(maximum, now - toolStartEpochMs) : maximum;
     }, 0);
     lastConversationStreamingFrameTelemetryAtRef.current = {
