@@ -204,6 +204,7 @@ function runningToolPaintId(item: RunningToolTurnItem) {
 
 export function runningToolPaintKeys(layer: ActiveTurnLayerState | undefined) {
   const occurrences = new Map<string, number>();
+  let toolOrdinal = 0;
   return (layer?.turnItems ?? []).flatMap((item) => {
     if (item.type !== "tool_call") {
       return [];
@@ -211,12 +212,15 @@ export function runningToolPaintKeys(layer: ActiveTurnLayerState | undefined) {
     const toolName = compactText(item.toolName) || "tool";
     const occurrence = occurrences.get(toolName) ?? 0;
     occurrences.set(toolName, occurrence + 1);
+    const ordinalKey = `tool-ordinal:${toolOrdinal}`;
+    toolOrdinal += 1;
     if (item.status !== "pending" && item.status !== "running") {
       return [];
     }
     return [{
       toolId: runningToolPaintId(item),
       fallbackKey: `tool:${toolName}:${occurrence}`,
+      ordinalKey,
     }];
   });
 }
@@ -261,8 +265,11 @@ export function selectFirstUnpaintedRunningTool(
   runningToolIds: string[];
 } {
   const painted = new Set(paintedToolIds.map(compactText).filter(Boolean));
-  const fallbackKeyByToolId = new Map(
-    runningToolPaintKeys(layer).map(({ toolId, fallbackKey }) => [toolId, fallbackKey]),
+  const paintKeysByToolId = new Map(
+    runningToolPaintKeys(layer).map(({ toolId, fallbackKey, ordinalKey }) => [
+      toolId,
+      [fallbackKey, ordinalKey],
+    ]),
   );
   const runningTools = (layer?.turnItems ?? []).filter((item): item is RunningToolTurnItem => (
     item.type === "tool_call" && (item.status === "pending" || item.status === "running")
@@ -270,14 +277,14 @@ export function selectFirstUnpaintedRunningTool(
   const runningToolIds = runningTools.map(runningToolPaintId).filter(Boolean);
   const tools = runningTools.filter((item) => {
     const id = runningToolPaintId(item);
-    const fallbackKey = fallbackKeyByToolId.get(id) ?? "";
+    const fallbackKeys = paintKeysByToolId.get(id) ?? [];
     // A model-call placeholder can paint before the executor publishes the
     // canonical start revision.  Do not consume the one-shot measurement until
     // that revision carries a usable start time; otherwise the exact start
     // update is incorrectly treated as already painted.
     return Boolean(id)
       && !painted.has(id)
-      && !painted.has(fallbackKey)
+      && fallbackKeys.every((key) => !painted.has(key))
       && Number.isFinite(runningToolStartedAtEpochMs(item));
   });
   const toolIds = tools.map(runningToolPaintId).filter(Boolean);

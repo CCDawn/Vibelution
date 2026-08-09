@@ -208,6 +208,7 @@ describe("chat active turn layer", () => {
     expect(runningToolPaintKeys(layer)).toEqual([{
       toolId: "placeholder-id",
       fallbackKey: "tool:grep_search_tool:1",
+      ordinalKey: "tool-ordinal:1",
     }]);
 
     const regressedFirstTool = {
@@ -237,6 +238,17 @@ describe("chat active turn layer", () => {
     expect(selectFirstUnpaintedRunningTool(
       regressedLayer,
       ["placeholder-call-id", "tool:grep_search_tool:0"],
+    )).toMatchObject({
+      toolId: "call-b",
+      toolIds: ["call-b"],
+    });
+
+    expect(selectFirstUnpaintedRunningTool(
+      {
+        ...regressedLayer,
+        turnItems: [{ ...regressedFirstTool, toolName: "temporary_tool" }, secondTool],
+      },
+      ["tool-ordinal:0"],
     )).toMatchObject({
       toolId: "call-b",
       toolIds: ["call-b"],

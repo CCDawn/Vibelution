@@ -1717,8 +1717,8 @@ export function ChatCodingRoute() {
       ...(firstPaintedRunningToolAtBySessionRef.current[sessionId] ?? {}),
     };
     const runningPaintKeys = runningToolPaintKeys(paintedActiveTurn);
-    runningPaintKeys.forEach(({ toolId, fallbackKey }) => {
-      [toolId, fallbackKey].filter(Boolean).forEach((key) => {
+    runningPaintKeys.forEach(({ toolId, fallbackKey, ordinalKey }) => {
+      [toolId, fallbackKey, ordinalKey].filter(Boolean).forEach((key) => {
         if (!Number.isFinite(firstPaintedToolAtById[key])) {
           firstPaintedToolAtById[key] = now;
         }
@@ -1733,9 +1733,10 @@ export function ChatCodingRoute() {
       return;
     }
     if (newlyPaintedRunningTools.length > 0) {
-      const newlyPaintedFallbackKeys = paintedToolSelection.toolIds
-        .map((toolId) => runningPaintKeys.find((key) => key.toolId === toolId)?.fallbackKey ?? "")
-        .filter(Boolean);
+      const newlyPaintedFallbackKeys = paintedToolSelection.toolIds.flatMap((toolId) => {
+        const keys = runningPaintKeys.find((key) => key.toolId === toolId);
+        return keys ? [keys.fallbackKey, keys.ordinalKey] : [];
+      }).filter(Boolean);
       paintedRunningToolIdsBySessionRef.current = {
         ...paintedRunningToolIdsBySessionRef.current,
         [sessionId]: Array.from(new Set([
@@ -1749,8 +1750,12 @@ export function ChatCodingRoute() {
     const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
     const toolStartToBrowserPaintMs = newlyPaintedRunningTools.reduce((maximum, tool, index) => {
       const toolId = paintedToolSelection.toolIds[index];
-      const fallbackKey = runningPaintKeys.find((key) => key.toolId === toolId)?.fallbackKey ?? "";
-      const firstPaintCandidates = [firstPaintedToolAtById[toolId], firstPaintedToolAtById[fallbackKey]]
+      const paintKeys = runningPaintKeys.find((key) => key.toolId === toolId);
+      const firstPaintCandidates = [
+        firstPaintedToolAtById[toolId],
+        firstPaintedToolAtById[paintKeys?.fallbackKey ?? ""],
+        firstPaintedToolAtById[paintKeys?.ordinalKey ?? ""],
+      ]
         .filter(Number.isFinite);
       const firstPaintedAt = firstPaintCandidates.length > 0 ? Math.min(...firstPaintCandidates) : undefined;
       return Math.max(maximum, toolStartToFirstPaintMs(tool, firstPaintedAt, now));
