@@ -10,18 +10,20 @@ import type {
   EffectiveAgentBinding,
   WorkflowCanvasProjection,
 } from "../../../api/types/researchWorkflow";
-import { VButton, VEmptyState, VStateSurface, VSurface } from "../../../components/vui";
+import { VButton, VStateSurface, VSurface } from "../../../components/vui";
 import { ChallengeQuestionDetailPanel } from "../challenge-cup/ChallengeQuestionDetailPanel";
 import { ChallengeMvpProgressPanel } from "./ChallengeMvpProgressPanel";
 import { EvidenceGraphView } from "./EvidenceGraphView";
 import { getNodeAdapter } from "./nodeAdapterModel";
 import { ResearchAgentBindingPanel } from "./ResearchAgentBindingPanel";
+import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
 import { ResearchProcessDefinitionNodePanel } from "./ResearchProcessDefinitionNodePanel";
 import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import { ResearchRunLaunchPanel } from "./ResearchRunLaunchPanel";
 import { ResearchRunTimeline } from "./ResearchRunTimeline";
 import { ResearchTeamPanel } from "./ResearchTeamPanel";
+import { handoffsForNode } from "./researchNodeHandoffModel";
 import type { NodeDetailState } from "./useNodeDetailState";
 import type { ResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import styles from "./ResearchProcessInspectorPane.styles";
@@ -68,7 +70,7 @@ export function ResearchProcessInspectorPane(props: {
     return <ChallengeMvpProgressPanel teamId={scope.teamId} onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })} />;
   }
   if (scope.panel === "question") {
-    if (!scope.questionId) return <CenteredEmpty title="单题验收" />;
+    if (!scope.questionId) return <ResearchCenteredEmptyState title="单题验收" />;
     return (
       <div className={styles.question}>
         <ChallengeQuestionDetailPanel
@@ -93,7 +95,7 @@ export function ResearchProcessInspectorPane(props: {
   if (scope.panel === "evidence") {
     return state.run && scope.selectedNodeId === "evidence_relations"
       ? <EvidenceGraphView runId={state.run.runId} nodeId={scope.selectedNodeId} teamId={scope.teamId} runVersion={state.run.runVersion} />
-      : <CenteredEmpty title="证据关系尚不可用" />;
+      : <ResearchCenteredEmptyState title="证据关系尚不可用" />;
   }
   if (scope.panel === "timeline") {
     return <ResearchRunTimeline run={state.run} insights={state.insights} />;
@@ -104,7 +106,7 @@ export function ResearchProcessInspectorPane(props: {
   if (scope.selectedNodeId && !scope.runId && state.projection) {
     return <ResearchProcessDefinitionNodePanel nodeId={scope.selectedNodeId} definition={state.projection.definition} effectiveBindings={state.effectiveBindings} />;
   }
-  if (!scope.selectedNodeId) return <CenteredEmpty title="选择流程节点" />;
+  if (!scope.selectedNodeId) return <ResearchCenteredEmptyState title="选择流程节点" />;
   if (state.nodeDetail.kind === "loading" || state.nodeDetail.kind === "idle") {
     return <VStateSurface tone="loading" title="加载节点详情" fill className={styles.fill} />;
   }
@@ -116,23 +118,16 @@ export function ResearchProcessInspectorPane(props: {
       </VSurface>
     );
   }
-  if (state.nodeDetail.kind === "empty") return <CenteredEmpty title="暂无节点详情" />;
+  if (state.nodeDetail.kind === "empty") return <ResearchCenteredEmptyState title="暂无节点详情" />;
   return (
     <ResearchProcessNodeInspector
       nodeId={scope.selectedNodeId}
       adapter={getNodeAdapter(scope.selectedNodeId)}
       detail={state.nodeDetail.detail}
+      handoffs={handoffsForNode(state.insights.handoffs?.handoffs ?? [], scope.selectedNodeId)}
       handoffPending={Boolean(actions.pendingTaskId(scope.selectedNodeId))}
       busy={state.busy}
       onCommand={actions.runCommand}
     />
-  );
-}
-
-function CenteredEmpty({ title }: { title: string }) {
-  return (
-    <div className={styles.centered}>
-      <VEmptyState title={title} className={styles.empty} />
-    </div>
   );
 }

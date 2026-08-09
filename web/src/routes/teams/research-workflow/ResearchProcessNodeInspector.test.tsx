@@ -1,11 +1,15 @@
 import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderReactMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
 import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import { getNodeAdapter } from "./nodeAdapterModel";
+
+function renderToStaticMarkup(node: React.ReactNode) {
+  return renderReactMarkup(<MemoryRouter>{node}</MemoryRouter>);
+}
 
 function makeDetail(
   overrides: Partial<ResearchWorkflowNodeDetail> = {},
@@ -41,6 +45,7 @@ describe("ResearchProcessNodeInspector command rendering", () => {
         nodeId="source_finding"
         adapter={getNodeAdapter("source_finding")}
         detail={detail}
+        handoffs={[]}
         handoffPending={false}
         busy={false}
         onCommand={vi.fn()}
@@ -111,16 +116,14 @@ describe("ResearchProcessNodeInspector command rendering", () => {
       sessionBinding: { bindingId: "b1", runId: "run-1", nodeId: "source_finding", nodeRunId: "nr-1", nodeAttempt: 1, agentId: "agent-1", roleKey: "source_finder", sessionId: "s1", sessionAttempt: 1, taskId: "t1", turnId: "u1", checkpointId: "", status: "bound", boundAt: "" },
     });
     const linkMarkup = renderToStaticMarkup(
-      <MemoryRouter>
-        <ResearchProcessNodeInspector
-          nodeId="source_finding"
-          adapter={getNodeAdapter("source_finding")}
-          detail={bound}
-          handoffPending={false}
-          busy={false}
-          onCommand={vi.fn()}
-        />
-      </MemoryRouter>,
+      <ResearchProcessNodeInspector
+        nodeId="source_finding"
+        adapter={getNodeAdapter("source_finding")}
+        detail={bound}
+        handoffPending={false}
+        busy={false}
+        onCommand={vi.fn()}
+      />,
     );
     expect(linkMarkup).toContain('href="/chat?session=s1');
 

@@ -1,4 +1,4 @@
-import type { ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
+import type { NodeHandoffRecord, ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
 import { VEmptyState, VSurface } from "../../../components/vui";
 import type { NodeAdapterSpec } from "./nodeAdapterModel";
 import { NodeAgentSection } from "./NodeAgentSection";
@@ -12,6 +12,7 @@ export type ResearchProcessNodeInspectorProps = {
   nodeId: string | null;
   adapter: NodeAdapterSpec | null;
   detail: ResearchWorkflowNodeDetail | null;
+  handoffs?: NodeHandoffRecord[];
   handoffPending: boolean;
   busy: boolean;
   onCommand: (command: string) => void;
@@ -49,7 +50,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
       </header>
       {adapter.actorKind === "agent" ? <NodeAgentSection detail={detail} /> : null}
       {adapter.actorKind === "agent" ? <NodeSessionSection detail={detail} /> : null}
-      <NodeHandoffSection pending={props.handoffPending} blockedReason={detail.blockedReason} />
+      <NodeHandoffSection handoffs={props.handoffs ?? []} pending={props.handoffPending} blockedReason={detail.blockedReason} />
       <NodeArtifactSection artifacts={detail.artifacts} />
       <NodeCommandSection capabilities={detail.commands} busy={props.busy} onCommand={props.onCommand} />
     </VSurface>

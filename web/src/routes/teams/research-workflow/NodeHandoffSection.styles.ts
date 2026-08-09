@@ -5,4 +5,5 @@ export default {
   label: "text-[var(--fg-tertiary)]",
   value: "m-0",
   valueBreak: "m-0 break-all",
+  record: "mt-2 grid gap-1 border-t border-[var(--border-subtle)] pt-2",
 } as const;
