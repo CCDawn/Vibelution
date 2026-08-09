@@ -2260,8 +2260,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("paintedAtMs");
     expect(routeSource).toContain("lastAssistantDeltaAppliedAtMs");
     expect(routeSource).toContain("applyToPaintMs");
+    expect(routeSource).toContain("selectFirstUnpaintedRunningTool");
+    expect(routeSource).toContain("paintedRunningToolIdsBySessionRef");
     expect(routeSource).toContain("renderedTextLength");
     expect(routeSource).toContain("onStreamingFramePaint: handleConversationStreamingFramePaint");
+  });
+
+  it("refreshes directory projections once after an active turn reaches terminal state", () => {
+    expect(routeSource).toContain("activeTurnTerminalRefreshKey");
+    expect(routeSource).toContain("terminalIndexRefreshKeysBySessionRef");
+    expect(routeSource).toContain("queryKeys.sessions()");
+    expect(routeSource).toContain("queryKeys.conversations()");
+    expect(routeSource).toContain("queryKeys.runtimeSummary()");
   });
 
   it("backs off index polling when detail streams own live queries", () => {

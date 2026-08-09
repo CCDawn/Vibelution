@@ -154,9 +154,11 @@ import {
   type ConversationIndexDynamicGroupKey,
 } from "../conversationIndexModel";
 import {
+  activeTurnTerminalRefreshKey,
   activeTurnLayerToConversationMessage,
   activeTurnLayerTextLength,
   isActiveTurnSettledByDetail,
+  selectFirstUnpaintedRunningTool,
   setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
@@ -446,6 +448,8 @@ export function ChatCodingRoute() {
   const lastConversationStreamingFrameTelemetryAtRef = useRef<Record<string, number>>({});
   const lastAssistantDeltaAppliedAtRef = useRef<Record<string, number>>({});
   const activeTurnLayersBySessionRef = useRef<Record<string, ActiveTurnLayerState>>({});
+  const paintedRunningToolIdsBySessionRef = useRef<Record<string, string[]>>({});
+  const terminalIndexRefreshKeysBySessionRef = useRef<Record<string, string>>({});
   const desktopConversationNotifierRef = useRef(createDesktopConversationNotifier({
     bridge: browserDesktopNotificationBridge(),
     postTelemetry: postBrowserTelemetry,
@@ -1631,10 +1635,28 @@ export function ChatCodingRoute() {
   ]);
   const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined;
   const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail);
+  const terminalIndexRefreshKey = activeTurnTerminalRefreshKey(activeTurnLayer);
   const activeTurnMessage = useMemo(
     () => activeTurnSettledByDetail ? undefined : activeTurnLayerToConversationMessage(activeTurnLayer),
     [activeTurnLayer, activeTurnSettledByDetail],
   );
+  useEffect(() => {
+    if (!activeSessionId || !terminalIndexRefreshKey) {
+      return;
+    }
+    if (terminalIndexRefreshKeysBySessionRef.current[activeSessionId] === terminalIndexRefreshKey) {
+      return;
+    }
+    terminalIndexRefreshKeysBySessionRef.current = {
+      ...terminalIndexRefreshKeysBySessionRef.current,
+      [activeSessionId]: terminalIndexRefreshKey,
+    };
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.conversations() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
+    ]);
+  }, [activeSessionId, queryClient, terminalIndexRefreshKey]);
   useEffect(() => {
     if (!activeSessionId || !activeTurnLayer || !activeTurnSettledByDetail || !detail) {
       return;
@@ -1666,17 +1688,31 @@ export function ChatCodingRoute() {
       return;
     }
     const now = Date.now();
+    const paintedActiveTurn = activeTurnLayersBySessionRef.current[sessionId];
+    const paintedToolSelection = selectFirstUnpaintedRunningTool(
+      paintedActiveTurn,
+      paintedRunningToolIdsBySessionRef.current[sessionId] ?? [],
+    );
+    const newlyPaintedRunningTool = paintedToolSelection.tool;
     const lastLoggedAt = lastConversationStreamingFrameTelemetryAtRef.current[sessionId] ?? 0;
-    if (now - lastLoggedAt < 1_000) {
+    if (now - lastLoggedAt < 1_000 && !newlyPaintedRunningTool) {
       return;
+    }
+    if (newlyPaintedRunningTool) {
+      paintedRunningToolIdsBySessionRef.current = {
+        ...paintedRunningToolIdsBySessionRef.current,
+        [sessionId]: Array.from(new Set([
+          ...(paintedRunningToolIdsBySessionRef.current[sessionId] ?? []),
+          paintedToolSelection.toolId,
+        ])).slice(-64),
+      };
     }
     const paintedAtMs = metrics.paintedAtMs || chatStreamPerformanceNowMs();
     const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
-    const paintedActiveTurn = activeTurnLayersBySessionRef.current[sessionId];
-    const paintedRunningTool = paintedActiveTurn?.turnItems.find((item) => (
-      item.type === "tool_call" && (item.status === "pending" || item.status === "running")
-    ));
-    const toolStartTimestamp = paintedRunningTool?.updatedAt || paintedRunningTool?.createdAt || paintedActiveTurn?.updatedAt || "";
+    const toolStartTimestamp = newlyPaintedRunningTool?.updatedAt
+      || newlyPaintedRunningTool?.createdAt
+      || paintedActiveTurn?.updatedAt
+      || "";
     const toolStartEpochMs = Date.parse(toolStartTimestamp);
     lastConversationStreamingFrameTelemetryAtRef.current = {
       ...lastConversationStreamingFrameTelemetryAtRef.current,
@@ -1699,7 +1735,7 @@ export function ChatCodingRoute() {
         applyToPaintMs: lastAssistantDeltaAppliedAtMs
           ? Math.max(0, Math.round(paintedAtMs - lastAssistantDeltaAppliedAtMs))
           : 0,
-        toolStartToBrowserPaintMs: paintedRunningTool && Number.isFinite(toolStartEpochMs)
+        toolStartToBrowserPaintMs: newlyPaintedRunningTool && Number.isFinite(toolStartEpochMs)
           ? Math.max(0, now - toolStartEpochMs)
           : 0,
         activeStatusSource: paintedActiveTurn?.ledgerSeq ? "assistant_delta" : "optimistic_submit",
