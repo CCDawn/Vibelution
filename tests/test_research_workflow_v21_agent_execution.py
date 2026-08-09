@@ -9,6 +9,9 @@ import pytest
 
 from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.web.services.team_workflow.research_runtime.node_command_adapter import (
+    node_command_capabilities,
+)
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
     ResearchWorkflowRuntimeService,
@@ -310,7 +313,6 @@ def test_project_agent_task_uses_frozen_agent_and_rejects_mismatch(
     )
     assert started["taskId"] == "task-hypothesis"
     assert len(calls) == 1
-
     with pytest.raises(ResearchWorkflowError) as exc:
         service.apply_node_command(
             run["runId"],
@@ -359,6 +361,101 @@ def test_project_agent_task_uses_frozen_agent_and_rejects_mismatch(
     assert stop_calls == [
         {"sessionId": "session-hypothesis", "expectedTurnId": "turn-hypothesis"}
     ]
+
+
+def test_partial_agent_start_replays_persisted_key_and_budget(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = _service(tmp_path / "partial-replay")
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(workflowDefaults=SOURCE_AGENTS),
+        idempotency_key="create-partial-replay",
+    )
+    run = _make_node_ready(
+        service,
+        run,
+        node_id="source_finding",
+        agent_id=SOURCE_AGENTS["source_finder"],
+    )
+    service._store.update_run(
+        run["runId"],
+        {"sourceCollectionRunId": "source-run-partial-replay"},
+    )
+    task_keys: list[str] = []
+
+    def flaky_start_stage_task(
+        team_id: str,
+        source_run_id: str,
+        payload: dict,
+    ) -> dict:
+        task_keys.append(str(payload["idempotencyKey"]))
+        if len(task_keys) == 1:
+            raise RuntimeError("simulated external start failure")
+        return {
+            "taskId": "task-partial-replay",
+            "agentId": SOURCE_AGENTS["source_finder"],
+            "sessionId": "session-partial-replay",
+            "sessionAttempt": 1,
+            "turn": {"turnId": "turn-partial-replay"},
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_session.start_source_collection_stage_session_task",
+        flaky_start_stage_task,
+    )
+
+    initial_capability = next(
+        item
+        for item in node_command_capabilities(
+            service.get_run(run["runId"]),
+            "source_finding",
+        )
+        if item["command"] == "start_agent_task"
+    )
+    initial_payload = {
+        **initial_capability["payload"],
+        "idempotencyKey": initial_capability["idempotencyKey"],
+    }
+    with pytest.raises(RuntimeError, match="simulated external start failure"):
+        service.apply_node_command(
+            run["runId"],
+            "source_finding",
+            "start_agent_task",
+            payload=initial_payload,
+        )
+
+    partial = service.get_run(run["runId"])
+    retry_capability = next(
+        item
+        for item in node_command_capabilities(partial, "source_finding")
+        if item["command"] == "start_agent_task"
+    )
+    assert retry_capability["idempotencyKey"] == initial_capability["idempotencyKey"]
+    assert retry_capability["payload"] == initial_capability["payload"]
+    assert len(partial["budgetReservations"]) == 1
+    assert len(partial["taskBundles"]) == 1
+
+    started = service.apply_node_command(
+        run["runId"],
+        "source_finding",
+        "start_agent_task",
+        payload={
+            **retry_capability["payload"],
+            "idempotencyKey": retry_capability["idempotencyKey"],
+        },
+    )
+
+    assert started["taskId"] == "task-partial-replay"
+    assert task_keys == [
+        initial_capability["idempotencyKey"],
+        initial_capability["idempotencyKey"],
+    ]
+    persisted = service.get_run(run["runId"])
+    assert len(persisted["budgetReservations"]) == 1
+    assert len(persisted["taskBundles"]) == 1
 
 
 @pytest.mark.parametrize(

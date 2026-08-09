@@ -30,9 +30,9 @@ from .agent_node_execution import (
     AgentNodeExecutionError,
     start_agent_node_execution,
 )
-from .node_budget_allocation import (
-    NodeBudgetAllocationError,
-    build_agent_budget_request,
+from .agent_start_contract import (
+    AgentStartContractError,
+    build_agent_start_contract,
 )
 
 
@@ -107,8 +107,8 @@ def node_command_capabilities(
                 },
             ]
         try:
-            budget_request = build_agent_budget_request(record, node_id)
-        except NodeBudgetAllocationError as exc:
+            start_contract = build_agent_start_contract(record, node_id)
+        except AgentStartContractError as exc:
             return [
                 *supplemental,
                 {
@@ -123,7 +123,7 @@ def node_command_capabilities(
                 "command": "start_agent_task",
                 "available": True,
                 "reason": "",
-                "payload": {"budgetRequest": budget_request},
+                **start_contract,
             },
         ]
 
@@ -266,6 +266,19 @@ def apply_node_command(
             )
         except SystemActionError as exc:
             raise NodeCommandError(str(exc), code=exc.code) from exc
+    # Agent execution owns durable replay validation. Dispatch before the UI
+    # capability check so a repeated, already-committed request can return its
+    # exact task/session anchor after the NodeRun has advanced to running.
+    if command == "start_agent_task":
+        try:
+            return start_agent_node_execution(
+                store,
+                record=record,
+                node_id=node_id,
+                payload=payload,
+            )
+        except AgentNodeExecutionError as exc:
+            raise NodeCommandError(str(exc), code=exc.code) from exc
     capability = next(
         (
             item
@@ -292,16 +305,6 @@ def apply_node_command(
             else "node_command_unavailable"
         )
         raise NodeCommandUnavailable(reason, code=code)
-    if command == "start_agent_task":
-        try:
-            return start_agent_node_execution(
-                store,
-                record=record,
-                node_id=node_id,
-                payload=payload,
-            )
-        except AgentNodeExecutionError as exc:
-            raise NodeCommandError(str(exc), code=exc.code) from exc
     if command == "view_artifacts":
         return _view_artifacts(record, node_id)
     if command == "open_evidence_graph":
