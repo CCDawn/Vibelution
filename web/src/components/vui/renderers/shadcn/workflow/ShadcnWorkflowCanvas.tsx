@@ -291,6 +291,13 @@ function WorkflowCanvasInner({
     [onSelectNode],
   );
 
+  const onNodeClick = useCallback(
+    (_event: unknown, node: Node) => {
+      if (node.type !== "stageRegion") onSelectNode?.(node.id);
+    },
+    [onSelectNode],
+  );
+
   const onPaneClick = useCallback(() => {
     onSelectNode?.(null);
   }, [onSelectNode]);
@@ -323,6 +330,7 @@ function WorkflowCanvasInner({
           elementsSelectable
           panOnScroll
           zoomOnScroll
+          onNodeClick={onNodeClick}
           onSelectionChange={onSelectionChange}
           onPaneClick={onPaneClick}
           proOptions={{ hideAttribution: true }}
