@@ -354,6 +354,42 @@ def test_quality_gate_failure_settles_agent_budget_before_blocking(
     ) == 1
 
 
+def test_interrupted_agent_task_blocks_and_settles_budget(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = ResearchWorkflowRuntimeService(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={"source_finder": "agent-source-finder"}
+        ),
+        idempotency_key="create-agent-interrupted-budget",
+    )
+    terminal = _terminal_source_task()
+    observed_status = {"value": "running"}
+    _start_source_node(service, run, terminal, observed_status, monkeypatch)
+    observed_status["value"] = "interrupted"
+
+    blocked = service.get_run(run["runId"])
+    replay = service.get_run(run["runId"])
+
+    source_run = next(
+        item for item in blocked["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
+    assert blocked["status"] == "blocked"
+    assert source_run["status"] == "blocked"
+    assert source_run["failureCode"] == "external_task_interrupted"
+    assert blocked["budgetReservations"][0]["status"] == "settled"
+    assert len(
+        [event for event in replay["events"] if event["type"] == "BudgetSettled"]
+    ) == 1
+
+
 def test_completed_task_recovers_one_internal_reconciliation_failure(
     tmp_path: Path,
     monkeypatch,
