@@ -47,4 +47,41 @@ describe("conversation timeline scroll signals", () => {
     expect(conversationViewSource).not.toContain("function renderStateForScrollSignal");
     expect(conversationViewSource).not.toContain("export function buildTimelineScrollSignal");
     expect(conversationViewSource).not.toContain("export function buildStreamingTimelineScrollSignal");
-  });});
+  });
+
+  it("changes the streaming signal when an already-visible tool receives its exact start revision", () => {
+    const placeholder: ConversationMessage = {
+      ...baseAssistantMessage,
+      turnId: "turn-a",
+      status: "running",
+      turnItems: [{
+        version: 3,
+        id: "tool-item-a",
+        itemId: "tool-item-a",
+        sessionId: "session-a",
+        turnId: "turn-a",
+        type: "tool_call",
+        status: "pending",
+        sequence: 1,
+        revision: 1,
+        createdAt: "2026-05-22T00:01:01Z",
+        updatedAt: "2026-05-22T00:01:01Z",
+        callId: "call-a",
+        toolName: "glob_tool",
+      }],
+    };
+    const exactStart: ConversationMessage = {
+      ...placeholder,
+      turnItems: [{
+        ...placeholder.turnItems![0],
+        revision: 2,
+        metadata: { executionStartedAtEpochMs: 1779408061500 },
+      }],
+    };
+
+    expect(streamingTimelineSignalFor([placeholder])).not.toBe(
+      streamingTimelineSignalFor([exactStart]),
+    );
+    expect(streamingTimelineSignalFor([exactStart])).toContain("call-a:pending:2:1779408061500");
+  });
+});

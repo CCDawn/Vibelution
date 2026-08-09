@@ -1,4 +1,4 @@
-import type { ConversationMessage } from "../../api/types";
+import type { ConversationMessage, SessionTurnItem } from "../../api/types";
 import { assistantTurnIsStreaming } from "../../routes/chatTurnProtocol";
 import type { AgentMessageRenderState } from "./agentMessageRenderState";
 
@@ -64,7 +64,29 @@ export function buildStreamingTimelineScrollSignal(
       const processSignal = options.includeMentalSignals === false
         ? renderState.processSignalWithoutMental
         : renderState.processSignal;
-      return [message.id, renderState.renderedTextLength, processSignal].join(":");
+      return [
+        message.id,
+        renderState.renderedTextLength,
+        processSignal,
+        streamingToolRevisionSignal(message),
+      ].join(":");
     })
     .join("|");
+}
+
+function streamingToolRevisionSignal(message: ConversationMessage) {
+  if (message.role !== "assistant") {
+    return "";
+  }
+  return message.turnItems
+    .filter((item): item is Extract<SessionTurnItem, { type: "tool_call" }> => (
+      item.type === "tool_call" && (item.status === "pending" || item.status === "running")
+    ))
+    .map((item) => [
+      item.callId || item.itemId || item.id,
+      item.status,
+      item.revision,
+      item.metadata?.executionStartedAtEpochMs ?? "",
+    ].join(":"))
+    .join(",");
 }
