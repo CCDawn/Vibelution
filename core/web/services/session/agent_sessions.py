@@ -1966,6 +1966,23 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
                 target_conversation = item
                 break
         if target_index < 0 or target_conversation is None:
+            # Idempotent delete: a session already marked intentionally deleted
+            # (tombstone present) is treated as deleted success, not a 404.
+            if s._is_session_workspace_intentionally_deleted(conversation_id):
+                s._record_session_delete_event(
+                    "already_deleted",
+                    session_id=conversation_id,
+                    outcome="already_deleted",
+                    fields={
+                        "phase": "deleted",
+                        "agentId": "",
+                        "messageCount": 0,
+                    },
+                )
+                return {
+                    "nextActiveSessionId": str(payload.get("active_conversation_id") or "").strip(),
+                    "replacementDirectSessionId": "",
+                }
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
         s._ensure_session_mutable(
             conversation_id,
