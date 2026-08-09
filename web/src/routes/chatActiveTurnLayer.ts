@@ -229,11 +229,14 @@ export function activeTurnTerminalRefreshKey(
   if (!layer || !layer.turnId) {
     return "";
   }
-  if (layer.status === "completed" || layer.status === "failed") {
-    return `${layer.turnId}:${layer.status}:${layer.ledgerSeq}`;
-  }
+  // A provider terminal frame can arrive before the canonical session summary
+  // is persisted. Give the persisted detail its own later refresh key so the
+  // directory cannot remain stuck on the earlier optimistic running summary.
   if (isActiveTurnSettledByDetail(layer, detail)) {
     return `${layer.turnId}:detail:${normalizedLedgerSeq(detail?.ledgerSeq)}`;
+  }
+  if (layer.status === "completed" || layer.status === "failed") {
+    return `${layer.turnId}:${layer.status}:${layer.ledgerSeq}`;
   }
   return "";
 }
