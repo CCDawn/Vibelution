@@ -449,6 +449,11 @@ export function ChatCodingRoute() {
   const lastConversationStreamingFrameTelemetryAtRef = useRef<Record<string, number>>({});
   const lastAssistantDeltaAppliedAtRef = useRef<Record<string, number>>({});
   const activeTurnLayersBySessionRef = useRef<Record<string, ActiveTurnLayerState>>({});
+  // ConversationView reports its committed frame from a child effect. React
+  // runs that effect before this parent's effects, so effect-based ref syncing
+  // leaves paint telemetry one render behind. Keep the read-through ref current
+  // during render so a newly-started tool is measured on its first painted frame.
+  activeTurnLayersBySessionRef.current = activeTurnLayersBySession;
   const paintedRunningToolIdsBySessionRef = useRef<Record<string, string[]>>({});
   const terminalIndexRefreshKeysBySessionRef = useRef<Record<string, string>>({});
   const desktopConversationNotifierRef = useRef(createDesktopConversationNotifier({
@@ -521,9 +526,6 @@ export function ChatCodingRoute() {
     return () => window.clearTimeout(timer);
   }, [workflowSessionAnchor, activeSessionId]);
   const { chatReturnTarget, chatReturnLabel } = useChatReturnNavigation(location.search, lang);
-  useEffect(() => {
-    activeTurnLayersBySessionRef.current = activeTurnLayersBySession;
-  }, [activeTurnLayersBySession]);
   useEffect(() => {
     if (chatRouteShellMountedLoggedRef.current) {
       return;
