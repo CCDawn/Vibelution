@@ -8,7 +8,6 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA_VERSION = 1
 REGISTRY_FILE_NAME = "research_project_agent_sessions.json"
 ACTIVE_TASK_STATUSES = {"queued", "running"}
@@ -363,6 +362,12 @@ def resolve_research_project_agent_session(
         )
         current = record["attempts"][-1] if record["attempts"] else None
         if current is not None and not formal_retry:
+            detail = s.session_service.get_session_detail(current["sessionId"])
+            if not isinstance(detail, dict):
+                raise ResearchProjectAgentSessionError(
+                    "Project Agent session registry points to a missing canonical session: "
+                    f"{current['sessionId']}. A formal retry with terminal task lineage is required."
+                )
             if recovered:
                 _write_registry(normalized_team_id, normalized_project_id, registry)
             s.lock_research_project_name(
@@ -370,8 +375,7 @@ def resolve_research_project_agent_session(
                 normalized_project_id,
                 reason="first_experiment_session",
             )
-            detail = s.session_service.get_session_detail(current["sessionId"])
-            title = _text((detail or {}).get("title"), limit=120) or _session_title(
+            title = _text(detail.get("title"), limit=120) or _session_title(
                 project["name"],
                 normalized_role_label,
                 int(current["attempt"]),

@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..source_collection_common import project_source_version_families
-
+from .stage_session_replay import (
+    mark_source_collection_stage_task_session_missing,
+    prepare_source_collection_stage_task_replay,
+)
 
 _AUTO_FORMAL_RETRY_STATUSES = {
     "error",
@@ -423,6 +425,8 @@ def start_source_collection_stage_session_task(
         task_id=task_id,
         requested_key=idempotency_key,
     )
+    replay_task: dict[str, Any] | None = None
+    missing_session_recovery = False
     if idempotency_key:
         existing_task = s._find_source_collection_stage_session_task(
             normalized_team_id,
@@ -430,6 +434,21 @@ def start_source_collection_stage_session_task(
             idempotency_key=task_idempotency_key,
         )
         if existing_task is not None:
+            replay = prepare_source_collection_stage_task_replay(
+                normalized_team_id,
+                normalized_run_id,
+                existing_task,
+            )
+            replay_action = str(replay.get("action") or "")
+            replay_task = (
+                replay.get("task") if isinstance(replay.get("task"), dict) else existing_task
+            )
+            if replay_action != "reuse":
+                task_id = s._trim_text(replay_task.get("taskId"), max_length=160)
+                missing_session_recovery = replay_action == "formal_retry_same_task"
+            else:
+                existing_task = replay_task
+        if existing_task is not None and replay_task is not None and replay_action == "reuse":
             existing_session = _source_collection_task_experiment_session_fields(
                 existing_task,
                 research_project=research_project,
@@ -523,6 +542,9 @@ def start_source_collection_stage_session_task(
     )
     formal_retry = formal_retry_requested or auto_formal_retry
     formal_retry_reason = (
+        "missing_canonical_session"
+        if missing_session_recovery
+        else
         "requested"
         if formal_retry_requested
         else "previous_stage_task_failed"
@@ -678,18 +700,23 @@ def start_source_collection_stage_session_task(
             else ""
         ),
         "sessionIsolation": session_isolation,
-        "createdAt": now,
+        "createdAt": (
+            s._trim_text(replay_task.get("createdAt"), max_length=120)
+            if isinstance(replay_task, dict)
+            else now
+        ) or now,
         "updatedAt": now,
     }
     s._upsert_source_collection_stage_session_task(normalized_team_id, normalized_run_id, task_record)
-    turn = s.session_service.submit_session_message(
-        session_id,
-        task_message,
-        mental_model_enabled=False,
-        turn_mode="task",
-        write_intent=False,
-        message_source="agent_inbox",
-        message_metadata={
+    try:
+        turn = s.session_service.submit_session_message(
+            session_id,
+            task_message,
+            mental_model_enabled=False,
+            turn_mode="task",
+            write_intent=False,
+            message_source="agent_inbox",
+            message_metadata={
             "kind": s.SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND,
             "sourceSurface": "team_workflow_stage_task",
             "teamId": normalized_team_id,
@@ -715,10 +742,20 @@ def start_source_collection_stage_session_task(
             "taskToolRequired": False,
             "taskChecklist": task_checklist,
             "checklistBinding": task_record["checklistBinding"],
-        },
-        include_started_turn_id=True,
-        lightweight_response=True,
-    )
+            },
+            include_started_turn_id=True,
+            lightweight_response=True,
+        )
+    except s.session_service.SessionNotFoundError as exc:
+        mark_source_collection_stage_task_session_missing(
+            normalized_team_id,
+            normalized_run_id,
+            task_record,
+        )
+        raise s.TeamWorkflowOrchestrationError(
+            "The canonical Agent session disappeared before the stage task could start. "
+            "Replay the same command to create a lineage-preserving formal retry."
+        ) from exc
     turn_payload = turn if isinstance(turn, dict) else {}
     task_record["status"] = "running" if turn_payload.get("accepted") else "queued"
     task_record["turn"] = {
