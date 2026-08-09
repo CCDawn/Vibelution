@@ -94,9 +94,19 @@ function sessionRecencyTimestamp(session: Pick<SessionSummary, "updatedAt" | "la
 }
 
 export function isSessionMoreRecent(
-  candidate: Pick<SessionSummary, "updatedAt" | "lastActive">,
-  previous: Pick<SessionSummary, "updatedAt" | "lastActive">,
+  candidate: Pick<SessionSummary, "id" | "updatedAt" | "lastActive">,
+  previous: Pick<SessionSummary, "id" | "updatedAt" | "lastActive">,
+  activeSessionId = "",
 ): boolean {
+  const normalizedActiveSessionId = activeSessionId.trim();
+  if (normalizedActiveSessionId) {
+    if (candidate.id === normalizedActiveSessionId && previous.id !== normalizedActiveSessionId) {
+      return true;
+    }
+    if (previous.id === normalizedActiveSessionId) {
+      return false;
+    }
+  }
   const candidateTimestamp = sessionRecencyTimestamp(candidate);
   const previousTimestamp = sessionRecencyTimestamp(previous);
   if (candidateTimestamp !== previousTimestamp) {
@@ -196,7 +206,7 @@ export function AgentConversationDirectory({
     agentSessions.push(session);
     sessionsByAgentId.set(agentId, agentSessions);
     const previous = latestSessionByAgentId.get(agentId);
-    if (!previous || isSessionMoreRecent(session, previous)) {
+    if (!previous || isSessionMoreRecent(session, previous, String(activeSessionId || ""))) {
       latestSessionByAgentId.set(agentId, session);
     }
   }

@@ -69,8 +69,16 @@ describe("AgentConversationDirectory", () => {
     const optimisticLocalTime = new Date(2026, 7, 10, 2, 52, 48).toISOString();
 
     expect(isSessionMoreRecent(
-      { updatedAt: optimisticLocalTime, lastActive: "" },
-      { updatedAt: "2026-08-10T00:59:41", lastActive: "" },
+      { id: "session-current", updatedAt: optimisticLocalTime, lastActive: "" },
+      { id: "session-older", updatedAt: "2026-08-10T00:59:41", lastActive: "" },
+    )).toBe(true);
+  });
+
+  it("keeps the active session as the Agent row projection while its optimistic clock is mixed", () => {
+    expect(isSessionMoreRecent(
+      { id: "session-current", updatedAt: "2026-08-09T19:01:34.000Z", lastActive: "" },
+      { id: "session-older", updatedAt: "2026-08-10T00:59:41", lastActive: "" },
+      "session-current",
     )).toBe(true);
   });
 

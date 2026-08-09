@@ -2272,9 +2272,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.sessions()");
     expect(routeSource).toContain("queryKeys.conversations()");
     expect(routeSource).toContain("queryKeys.runtimeSummary()");
-    expect(routeSource).toContain("updateSessionSummaryCaches(queryClient, (sessions) =>");
-    expect(routeSource).toContain("mergeSessionDetailIntoSummaries(sessions, detail)");
-    expect(routeSource).toContain("reconcileAgentSessionDetailCache(queryClient, detail)");
+    expect(routeSource).toContain("queryClient.refetchQueries({");
+    expect(routeSource).toContain("queryKey: queryKeys.session(activeSessionId)");
+    expect(routeSource).toContain("const canonicalDetail = queryClient.getQueryData<SessionDetail>");
+    expect(routeSource).toContain("mergeSessionDetailIntoSummaries(sessions, canonicalDetail)");
+    expect(routeSource).toContain("reconcileAgentSessionDetailCache(queryClient, canonicalDetail)");
   });
 
   it("backs off index polling when detail streams own live queries", () => {
