@@ -203,9 +203,14 @@ function runningToolPaintId(item: RunningToolTurnItem) {
 }
 
 export function runningToolStartedAtEpochMs(item: RunningToolTurnItem): number {
+  const exactStart = Number(item.metadata?.executionStartedAtEpochMs);
+  if (Number.isFinite(exactStart) && exactStart > 0) {
+    return exactStart;
+  }
   // `createdAt` can precede execution while the model is still streaming the
   // tool call.  The running revision's `updatedAt` is the canonical moment the
-  // executor projected the start into the live turn layer.
+  // executor projected the start into the live turn layer, but remains only a
+  // coarse fallback for legacy packets without the exact epoch value.
   return Date.parse(item.updatedAt || item.createdAt || "");
 }
 

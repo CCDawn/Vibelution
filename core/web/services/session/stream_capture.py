@@ -273,6 +273,7 @@ class SessionTurnCapture:
         result_kind: Any = None,
         truncated: Any = None,
         original_length: Any = None,
+        event_at_epoch_ms: Any = None,
     ) -> None:
         s = _service()
         tool_name = str(name or "").strip()
@@ -288,6 +289,9 @@ class SessionTurnCapture:
         }
         if normalized_call_id:
             entry["callId"] = normalized_call_id
+        exact_start_epoch_ms = s._coerce_tool_number(event_at_epoch_ms)
+        if entry["status"] == "running" and exact_start_epoch_ms is not None:
+            entry["executionStartedAtEpochMs"] = exact_start_epoch_ms
         cleaned_summary = trim_lines(summary or "", max_lines=2)
         if cleaned_summary:
             entry["summary"] = cleaned_summary
@@ -337,6 +341,8 @@ class SessionTurnCapture:
                 if existing.get("name") == tool_name:
                     entry["revision"] = s._coerce_nonnegative_int(existing.get("revision")) + 1
                     entry["createdAt"] = str(existing.get("createdAt") or entry["createdAt"])
+                    if existing.get("executionStartedAtEpochMs") is not None:
+                        entry["executionStartedAtEpochMs"] = existing["executionStartedAtEpochMs"]
                     self.tool_calls[index] = entry
                     self._update_running_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
                     self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name, normalized_call_id)
@@ -449,6 +455,7 @@ class SessionTurnCapture:
             "revision",
             "createdAt",
             "updatedAt",
+            "executionStartedAtEpochMs",
             "arguments",
             "resultPreview",
             "resultType",
@@ -510,6 +517,7 @@ class SessionTurnCapture:
                 for key in (
                     "callId",
                     "revision",
+                    "executionStartedAtEpochMs",
                     "arguments",
                     "resultPreview",
                     "resultType",
@@ -993,6 +1001,7 @@ def _capture_session_ui_stream(
             result_kind=fact_fields["resultKind"],
             truncated=fact_fields["truncated"],
             original_length=fact_fields["originalLength"],
+            event_at_epoch_ms=event_at_epoch_ms,
         )
         tool_call_payload = {
             "name": name,

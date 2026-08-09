@@ -100,9 +100,13 @@ describe("chat active turn layer", () => {
       toolName: "glob_tool",
       createdAt: "2026-08-10T00:00:00.000Z",
       updatedAt: "2026-08-10T00:00:01.250Z",
+      metadata: { executionStartedAtEpochMs: 1_786_294_801_125 },
     } satisfies SessionTurnItem;
 
-    expect(runningToolStartedAtEpochMs(runningTool)).toBe(Date.parse("2026-08-10T00:00:01.250Z"));
+    expect(runningToolStartedAtEpochMs(runningTool)).toBe(1_786_294_801_125);
+    expect(runningToolStartedAtEpochMs({ ...runningTool, metadata: {} })).toBe(
+      Date.parse("2026-08-10T00:00:01.250Z"),
+    );
   });
 
   it("requests one authoritative index refresh only for terminal active layers", () => {

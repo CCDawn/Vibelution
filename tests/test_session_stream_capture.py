@@ -87,7 +87,11 @@ def test_tool_start_revisions_update_one_live_record(monkeypatch) -> None:
 
     with stream_capture._capture_session_ui_stream("cap-s3b", capture):
         for payload in (
-            {"name": "glob_tool", "lifecyclePhase": "started"},
+            {
+                "name": "glob_tool",
+                "lifecyclePhase": "started",
+                "eventAtEpochMs": 1_786_294_801_125,
+            },
             {"name": "glob_tool", "lifecyclePhase": "arguments_ready", "args": {"pattern": "**/*.py"}},
         ):
             get_event_bus().publish(EventNames.TOOL_START, {
@@ -100,7 +104,25 @@ def test_tool_start_revisions_update_one_live_record(monkeypatch) -> None:
     assert len(capture.tool_calls) == 1
     assert capture.tool_calls[0]["revision"] == 1
     assert capture.tool_calls[0]["arguments"] == {"pattern": "**/*.py"}
+    assert capture.tool_calls[0]["executionStartedAtEpochMs"] == 1_786_294_801_125
     assert published[-1]["tool_calls"][0]["revision"] == 1
+    assert published[-1]["tool_calls"][0]["executionStartedAtEpochMs"] == 1_786_294_801_125
+    transcript = session_service._build_codex_transcript_projection(
+        message_id="message-live",
+        feedback_events=capture.feedback_events,
+        tool_calls=capture.tool_calls,
+        streaming=True,
+    )
+    turn_items = session_service._build_session_turn_items_projection(
+        session_id="cap-s3b",
+        turn_id="cap-t3b",
+        message_id="message-live",
+        codex_transcript=transcript,
+        done=False,
+        source="session_live_overlay",
+    )
+    tool_item = next(item for item in turn_items if item["type"] == "tool_call")
+    assert tool_item["metadata"]["executionStartedAtEpochMs"] == 1_786_294_801_125
 
 
 def test_explicit_wrong_turn_is_dropped_even_inside_capture_context(monkeypatch) -> None:

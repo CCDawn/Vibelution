@@ -380,6 +380,9 @@ def _codex_transcript_cell_from_operation_source(
             "sequence": s._coerce_nonnegative_int(source.get("sequence") or source.get("_sequence") or ordinal + 1),
             "createdAt": str(source.get("createdAt") or source.get("timestamp") or "").strip(),
             "updatedAt": str(source.get("updatedAt") or source.get("timestamp") or "").strip(),
+            "executionStartedAtEpochMs": s._coerce_tool_number(
+                source.get("executionStartedAtEpochMs") or source.get("execution_started_at_epoch_ms")
+            ),
         }
     )
     if kind != "tool":
@@ -1071,6 +1074,9 @@ def _session_turn_item_from_codex_cell(
             "sequence": s._coerce_nonnegative_int(cell.get("sequence") or index),
             "createdAt": str(cell.get("createdAt") or "").strip(),
             "updatedAt": str(cell.get("updatedAt") or "").strip(),
+            "executionStartedAtEpochMs": s._coerce_tool_number(
+                cell.get("executionStartedAtEpochMs") or cell.get("execution_started_at_epoch_ms")
+            ),
             "turnId": turn_id,
             "messageId": message_id,
             "source": source,

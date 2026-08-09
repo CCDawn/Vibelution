@@ -377,6 +377,11 @@ def _normalize_persisted_tool_calls(value: Any) -> list[dict[str, Any]]:
             timeout_seconds = s._coerce_tool_number(item.get("timeoutSeconds") or item.get("timeout_seconds"))
             if timeout_seconds is not None:
                 entry["timeoutSeconds"] = timeout_seconds
+            execution_started_at_epoch_ms = s._coerce_tool_number(
+                item.get("executionStartedAtEpochMs") or item.get("execution_started_at_epoch_ms")
+            )
+            if execution_started_at_epoch_ms is not None:
+                entry["executionStartedAtEpochMs"] = execution_started_at_epoch_ms
             trace_path = str(item.get("tracePath") or item.get("trace_path") or "").strip()
             if trace_path:
                 entry["tracePath"] = trace_path
@@ -408,6 +413,7 @@ def _normalize_message_tool_calls(value: Any) -> list[dict[str, Any]]:
             "durationMs",
             "durationSeconds",
             "timeoutSeconds",
+            "executionStartedAtEpochMs",
             "transportStatus",
             "semanticStatus",
             "failureClass",
@@ -518,6 +524,11 @@ def _normalize_persisted_feedback_events(value: Any) -> list[dict[str, Any]]:
         timeout_seconds = s._coerce_tool_number(item.get("timeoutSeconds") or item.get("timeout_seconds"))
         if timeout_seconds is not None:
             entry["timeoutSeconds"] = timeout_seconds
+        execution_started_at_epoch_ms = s._coerce_tool_number(
+            item.get("executionStartedAtEpochMs") or item.get("execution_started_at_epoch_ms")
+        )
+        if execution_started_at_epoch_ms is not None:
+            entry["executionStartedAtEpochMs"] = execution_started_at_epoch_ms
         trace_path = str(item.get("tracePath") or item.get("trace_path") or "").strip()
         if trace_path:
             entry["tracePath"] = trace_path
@@ -557,6 +568,7 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
             "durationMs",
             "durationSeconds",
             "timeoutSeconds",
+            "executionStartedAtEpochMs",
             "transportStatus",
             "semanticStatus",
             "failureClass",
