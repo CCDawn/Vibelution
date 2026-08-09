@@ -60,6 +60,7 @@
 | Windows 无控制台弹窗（cmd/powershell/WT/OpenConsole）红线 | [开发标准 §8.0](docs/standards/development-standard.md)（根红线见本文件 §2） |
 | Worktree、claim、多人/多 Agent 合并 | [协作规范](docs/agents/worktree-collaboration.md) |
 | 工具权限与入口 | [工具授权](docs/agents/tool-authorization-entrypoints.md) |
+| 外部 Agent MCP 部署、自动发现与调用 | [MCP 受管 Agent 网关指南](docs/agents/mcp-managed-agent-gateway.md) |
 | 领域词汇 | [领域文档](docs/agents/domain.md) |
 | ADR | [架构决策索引](docs/adr/README.md) |
 | 产品语境 / UI 注册表 | [产品](docs/product/README.md) · [设计注册表](docs/product/design-register.md) |
