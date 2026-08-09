@@ -1213,9 +1213,46 @@ def test_reconcile_preserves_open_ledger_for_durable_active_work_run(monkeypatch
     ]
 
 
+def test_reconcile_preserves_cross_process_turn_from_recent_work_run(monkeypatch, tmp_path):
+    class CrossProcessWorkRunStore:
+        def load_snapshot(self, _run_kind, _run_id):
+            return None
+
+        def load_active_snapshot(self, _run_kind):
+            return {
+                "runId": "turn-other",
+                "sessionId": "session-other",
+                "status": "running",
+            }
+
+        def list_snapshots(self, _run_kind, *, limit=None):
+            assert limit == 40
+            return [
+                {
+                    "runId": "turn-live",
+                    "sessionId": "session-live",
+                    "status": "running",
+                    "finishedAt": "",
+                }
+            ]
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", CrossProcessWorkRunStore())
+    append_conversation_event(tmp_path, "session-live", "turn-live", EVENT_TURN_STARTED, status="running")
+
+    session_service._reconcile_stale_session_ledger(
+        "session-live",
+        reason="detail_loaded_after_restart",
+    )
+
+    assert [event.event_type for event in load_conversation_events(tmp_path, "session-live")] == [
+        EVENT_TURN_STARTED,
+    ]
+
+
 def test_reconcile_does_not_interrupt_turn_activated_during_ledger_read(monkeypatch, tmp_path):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "_active_chat_turn_work_run_for_session", lambda _session_id: None)
+    monkeypatch.setattr(session_service, "_active_chat_turn_work_run_for_session", lambda *_args, **_kwargs: None)
     append_conversation_event(tmp_path, "session-live", "turn-new", EVENT_TURN_STARTED, status="running")
 
     ledger_read = threading.Event()
