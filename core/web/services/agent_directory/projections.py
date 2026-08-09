@@ -670,10 +670,9 @@ def active_agent_runtime(
         if agent_snapshot
         else s.resolve_supervision_policy_for_agent(agent_id)
     )
-    permission_preset = (
-        normalize_permission_preset(agent_snapshot.get("permissionPreset"))
-        if agent_snapshot
-        else ""
+    permission_preset = _runtime_permission_preset(
+        agent_snapshot.get("permissionPreset") if agent_snapshot else "",
+        runtime_tool_source=str(runtime_tool_source or "").strip(),
     )
     context = {
         "agentId": str(agent_id or "").strip(),
@@ -704,6 +703,16 @@ def active_agent_runtime(
         yield context
     finally:
         s._CURRENT_AGENT_RUNTIME.reset(token)
+
+
+def _runtime_permission_preset(
+    value: Any,
+    *,
+    runtime_tool_source: str = "",
+) -> str:
+    if str(runtime_tool_source or "").strip().startswith("external_agent_task:"):
+        return "request_approval"
+    return normalize_permission_preset(value) if str(value or "").strip() else ""
 
 
 def _format_task_profile_context(profile: Any) -> list[str]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from contextlib import asynccontextmanager, suppress
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+
+logger = logging.getLogger(__name__)
 
 
 def initialize_session_catalog_on_startup() -> object:
@@ -31,6 +34,32 @@ def shutdown_session_catalog_on_shutdown() -> None:
     from .services.session.catalog_runtime import shutdown_session_catalog_runtime
 
     shutdown_session_catalog_runtime()
+
+
+def reconcile_external_agent_tasks_once() -> list[dict[str, Any]]:
+    """Recover and reconcile durable external task projections once."""
+
+    from .services.external_agent.service import get_default_service
+
+    project_root = Path(__file__).resolve().parents[2]
+    return list(get_default_service(project_root).reconcile())
+
+
+async def reconcile_external_agent_tasks_forever(*, interval_seconds: float = 5.0) -> None:
+    """Keep lease expiry and stop acknowledgement live without a child process."""
+
+    interval = max(0.01, float(interval_seconds))
+    while True:
+        try:
+            await asyncio.to_thread(reconcile_external_agent_tasks_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - one bad pass must not disable leases
+            logger.warning(
+                "External Agent task reconciliation iteration failed (%s); retrying.",
+                type(exc).__name__,
+            )
+        await asyncio.sleep(interval)
 
 
 def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
@@ -94,6 +123,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_inbox_recovery_task = asyncio.create_task(
         asyncio.to_thread(recover_wakeable_agent_inbox_messages_on_startup)
     )
+    startup_external_agent_reconcile_task = asyncio.create_task(
+        reconcile_external_agent_tasks_forever()
+    )
 
     def consume_startup_task_result(task: asyncio.Task[Any], *, message: str) -> None:
         try:
@@ -126,6 +158,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_inbox_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
     )
+    startup_external_agent_reconcile_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="External Agent task reconciliation stopped unexpectedly."
+        )
+    )
     startup_code_fingerprint_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="Running-code fingerprint snapshot failed during startup."
@@ -153,6 +190,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                         "ui_cache_prewarm",
                         "session_catalog",
                         "agent_inbox_recovery",
+                        "external_agent_task_reconcile",
                     ],
                 },
                 lifecycle=True,
@@ -168,6 +206,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_cache_prewarm_task,
             startup_catalog_task,
             startup_agent_inbox_recovery_task,
+            startup_external_agent_reconcile_task,
             startup_code_fingerprint_task,
         ):
             if startup_task is None:

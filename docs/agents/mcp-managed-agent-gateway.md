@@ -1,8 +1,8 @@
 # Vibelution MCP 受管 Agent 网关部署与调用指南
 
 > **Document Status:** Current operational contract
-> **Gateway Status:** `PLANNED_NOT_DEPLOYABLE`
-> **Guide Version:** `0.1.0`
+> **Gateway Status:** `DEPLOYABLE`
+> **Guide Version:** `0.3.0`
 > **Canonical MCP Name:** `vibelution`
 > **Canonical Resource URI:** `vibelution://guide/mcp-managed-agent-gateway`
 > **Target stdio Entry:** `<project-root>\.venv\Scripts\python.exe <project-root>\scripts\project_agent_tool.py mcp --project-root <project-root>`
@@ -21,7 +21,7 @@
 - `DEPLOYABLE`：完成下文 readiness check 后可以注册。
 - `DISABLED`：停止新任务，仅允许诊断、查询和受管取消。
 
-当前状态是 `PLANNED_NOT_DEPLOYABLE`。现有 `core/external_agent/mcp_stdio_server.py` 是不符合正式协议与审批边界的历史原型，**不得部署或注册到 Host**。
+当前实现已完成 M0-M5 自动化、MCP Inspector 与原生 Codex Host 隔离验收，因此状态为 `DEPLOYABLE`。这表示实现可以在 readiness check 通过后受控注册，不表示已经修改用户的 operator 配置或 Host 持久配置；这两类写入仍需当前操作者明确授权。`core/external_agent/mcp_stdio_server.py` 仅保留兼容导入，不是注册入口。
 
 ### 1.2 已连接到 MCP Server
 
@@ -71,6 +71,48 @@ MCP Host
 5. M0-M5 自动化测试和真实 Host 验收已通过。
 6. Windows Host 启动 stdio 子进程不会弹出可见控制台。
 
+### 3.1 Operator 配置
+
+权威配置是 `%USERPROFILE%\Documents\Vibelution\config\config.toml`。首次启用前先备份原文件，只修改 `[external_agent_gateway]`；不要把该配置复制到 Codex MCP 注册中。
+
+```toml
+[external_agent_gateway]
+enabled = true
+permission_ceiling = "read_only"
+runtime_permission_ceiling = "workspace_write"
+approval_persist_enabled = false
+allowed_agent_ids = []
+denied_agent_ids = []
+max_concurrent_tasks_per_owner = 4
+max_concurrent_tasks_per_agent = 1
+max_task_seconds = 1800
+lease_seconds = 30
+```
+
+- `enabled=false` 是默认值，也是紧急停止新任务的开关。
+- `permission_ceiling` 只能缩小外部请求权限；首轮部署保持 `read_only`。
+- `allowed_agent_ids` 和 `denied_agent_ids` 是 operator 附加收窄，不会让团队 Agent 变成可调用对象。
+- `approval_persist_enabled=false` 时，即使 Host 请求 `acceptAlways` 也会被拒绝。
+- 配置变更后只通过 Launcher 受管重启；不直接启动第二套 backend。
+
+权限不是由 Host 单方面决定。有效权限是以下上限的交集，只能缩小，不能扩大：
+
+```text
+requested profile
+  ∩ operator permission_ceiling
+  ∩ Agent externalMaximumPermissionProfile
+  ∩ runtime_permission_ceiling
+  = effectivePermissionProfile
+```
+
+| Profile | 外部任务可用范围 | 始终禁止 |
+| --- | --- | --- |
+| `read_only` | 只读工具 | Team workflow、Team knowledge、跨 Session 历史、Agent 协作、写入与清理 |
+| `workspace_write` | 只读 + workspace/code-quality 写工具；非只读调用仍需显式审批 | 上述团队/跨会话能力、项目回滚、删除/清理类高风险工具 |
+| `full_access` | 仅表示调用方请求；仍被前三个服务端上限夹紧 | 不能绕过任何固定禁区或审批 |
+
+外部任务统一使用 `request_approval` 语义。即使有效权限为 `workspace_write`，也不会自动接受 Tool approval；`acceptAlways` 还必须同时满足 operator `approval_persist_enabled=true`、调用主体拥有 `approval.persist`、Agent policy 允许且 config revision 未变化。
+
 目标 readiness 输出至少包含：
 
 ```json
@@ -80,9 +122,10 @@ MCP Host
   "sourceRevision": "git-sha",
   "projectRoot": "absolute-path",
   "backend": "healthy",
+  "serverVersion": "0.3.0",
   "protocolEras": ["legacy", "modern"],
   "guideUri": "vibelution://guide/mcp-managed-agent-gateway",
-  "guideVersion": "0.1.0",
+  "guideVersion": "0.3.0",
   "tools": [
     "list_project_agents",
     "start_project_agent_task",
@@ -97,7 +140,7 @@ MCP Host
 
 ## 4. Codex 本机部署步骤
 
-以下命令是实施必须维持稳定的目标入口；当前 Gateway 状态下不要执行注册。
+以下命令是已验证入口。只有用户明确授权持久 Host 配置写入，且 4.2 自检返回 `deployable=true` 时，才执行注册步骤。
 
 ### 4.1 解析项目入口
 
@@ -129,27 +172,77 @@ Test-Path -LiteralPath $mcpLauncher
 
 保持现场并等待，不使用 `taskkill`、裸 PowerShell lifecycle 或第二套 backend 绕过 active-work guard。
 
-### 4.3 检查现有 Codex 注册
+### 4.3 解析官方原生 Codex CLI
+
+Windows 上不要直接信任 PATH 中的 `codex`：它可能解析到其他产品的 `codex.cmd` 包装器并引入额外 `cmd.exe`/Node 进程。Codex Desktop 的原生 CLI 可按安装目录解析：
 
 ```powershell
-codex mcp get vibelution
+$codexBinRoot = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
+$codexExe = Get-ChildItem -LiteralPath $codexBinRoot -Recurse -Filter codex.exe -File |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1 -ExpandProperty FullName
+
+if (-not $codexExe) { throw 'Official Codex native CLI was not found.' }
+& $codexExe --version
+```
+
+验收过的进程路径是原生 `codex.exe → 项目 .venv\Scripts\python.exe → project_agent_tool.py mcp`；任务所属进程树不得出现 `cmd.exe`、PowerShell、Windows Terminal、OpenConsole 或 Node 包装器。
+
+### 4.4 检查现有 Codex 注册
+
+```powershell
+& $codexExe mcp get vibelution --json
 ```
 
 - 不存在：可以继续注册。
 - 已存在且命令完全一致：不要重复注册，直接进入验证。
 - 已存在但命令、项目根或解释器不同：停止并向用户报告；不要自动覆盖或删除。
 
-### 4.4 注册 stdio Server
+### 4.5 注册 stdio Server
 
 ```powershell
-codex mcp add vibelution -- $mcpPython $mcpEntry mcp --project-root $mcpProjectRoot
-codex mcp get vibelution
-codex mcp list
+& $codexExe mcp add vibelution -- $mcpPython $mcpEntry mcp --project-root $mcpProjectRoot
+& $codexExe mcp get vibelution --json
+& $codexExe mcp list
 ```
 
 不要把 secret、backend token 或完整 operator config 写入命令行和 Host 配置。adapter 通过受管 runtime descriptor 获取本地 backend 身份与认证材料。
 
-### 4.5 其他兼容 Host
+### 4.6 隔离验证（不写持久注册）
+
+实现者或验收 Agent 应优先使用 Codex 的 `-c` 临时配置覆盖，不修改用户级 `~/.codex/config.toml`。以下形式已在 Windows 原生 Codex CLI 上验证：
+
+```powershell
+$commandToml = $mcpPython | ConvertTo-Json -Compress
+$argsToml = @($mcpEntry, 'mcp', '--project-root', $mcpProjectRoot) |
+  ConvertTo-Json -Compress
+$acceptancePrompt = @'
+你是首次接入 Vibelution MCP 的调用 Agent。仅使用 vibelution MCP，
+先依据 server instructions 与可发现 Resource 判断 readiness，
+再按指南列出非团队 Agent 并完成一个只读任务。最后返回紧凑 JSON。
+'@
+
+& $codexExe exec --ephemeral --ignore-user-config --ignore-rules `
+  --color never --sandbox read-only `
+  -c "mcp_servers.vibelution.command=$commandToml" `
+  -c "mcp_servers.vibelution.args=$argsToml" `
+  -c 'mcp_servers.vibelution.enabled=true' `
+  $acceptancePrompt
+```
+
+`resolve_project_agent_approval` 与 `cancel_project_agent_task` 可能同时触发 Codex Host 自身的高影响工具调用门。非交互验收可把 `--sandbox read-only` 替换为 `--approve-for-me`；Codex CLI 不允许两者同时使用。`--approve-for-me` 只通过 Host 工具调用门，backend 仍要求模型显式调用 `resolve_project_agent_approval` 并提交 `decision`、`approval_id` 与 `expected_revision`，不会变成自动审批。
+
+临时 command、args 和 enabled 只在该进程内生效；退出后不保留 MCP 注册。实际参数仍以当前 `& $codexExe exec --help` 与 `& $codexExe mcp --help` 为准。
+
+### 4.7 禁用与回滚
+
+1. 将 operator 配置中的 `enabled` 改回 `false`，通过 Launcher 受管重启，阻止新任务。
+2. 查询现有非终态任务；显式取消并等待真实停止确认，不能只结束 adapter 进程。
+3. 只有用户明确授权删除持久注册时，才执行 `& $codexExe mcp remove vibelution`。
+4. 恢复此前备份的 operator 配置，再通过 Launcher 受管重启。
+5. 用 `& $codexExe mcp list`、`self-check --json`、进程树和桌面观察确认无残留 adapter、孤儿任务或可见控制台。
+
+### 4.8 其他兼容 Host
 
 只有该 Host 已在兼容矩阵中通过真实验收时，才使用其 stdio 配置。通用结构为：
 
@@ -240,7 +333,7 @@ Server 必须暴露以下固定 Resource：
 }
 ```
 
-尊重返回的 `pollAfterMs`，不要高频轮询。终态前持续保存同一不透明 `taskId`，不要转换成内部 Session/Turn ID。
+尊重返回的 `pollAfterMs`，不要高频轮询。终态前持续保存同一不透明 `taskId`，不要转换成内部 Session/Turn ID。终态在当前 adapter 连接内可重复查询；adapter 正常退出后 capability 被清理，新的连接不能仅凭旧 `taskId` 接管任务。
 
 ### 6.4 显式处理审批
 
@@ -294,7 +387,7 @@ Server 必须暴露以下固定 Resource：
 | `failed` | 读取稳定错误码，判断是否可重试新任务 |
 | `cancelled` / `timed_out` | 终止轮询并报告原因 |
 
-Host 声明 `io.modelcontextprotocol/tasks` 时，可以接收原生 Task handle 并使用 `tasks/get`/`tasks/cancel`；未声明时始终使用上述五工具兼容流程。
+当前固定依赖 `mcp==2.0.0` 未提供 MCP Tasks extension 的服务端 API，因此本版本始终使用上述五工具兼容流程，`self-check` 明确返回 `tasksExtension=not_available_in_mcp_sdk_2.0.0`。Host 即使声明 Tasks capability，也不会获得原生 Task handle；升级 SDK 后必须先补双协商测试与真实 Host 验收，才能改变这一边界。
 
 ## 8. 常见错误与恢复
 
@@ -303,7 +396,10 @@ Host 声明 `io.modelcontextprotocol/tasks` 时，可以接收原生 Task handle
 | `GATEWAY_NOT_READY` | 检查本文状态和 `self-check`；不得注册历史原型 |
 | `BACKEND_UNAVAILABLE` | 只通过 Launcher 检查受管 backend；不启动第二套服务 |
 | `RUNTIME_IDENTITY_MISMATCH` | 停止调用，核对 project root/source revision；不忽略 |
+| `BACKEND_PROTOCOL_ERROR` | 停止调用并检查 backend/adapter 版本，不按业务错误重试 |
 | `AGENT_NOT_FOUND` | 重新调用 `list_project_agents`；该错误也用于隐藏团队 Agent |
+| `TASK_NOT_FOUND` | 只使用当前 adapter 返回并保存的 task ID；不要猜测 Session/Turn ID |
+| `TASK_CONFLICT` | 重新查询或等待已有任务；不要绕过并发与幂等门 |
 | `APPROVAL_FORBIDDEN` | 不提权；重新读取任务、调用主体和审批 capability |
 | `APPROVAL_CONFLICT` | 重新查询任务，接受已存在决策或报告冲突 |
 | `STOP_UNCONFIRMED` | 继续有界查询并保留告警，不伪造 cancelled |
@@ -326,9 +422,25 @@ Host 声明 `io.modelcontextprotocol/tasks` 时，可以接收原生 Task handle
 
 只有以上项目都有当前 source/runtime/config 证据时，调用 Agent 才能报告部署完成。
 
+### 9.1 2026-08-09 首版验收基线
+
+本节记录“哪些边界已经被真实执行过”，不替代部署当时的 `self-check`：
+
+- 依赖：Python MCP 官方 SDK `mcp==2.0.0`；MCP Inspector 使用官方 `@modelcontextprotocol/inspector` CLI。
+- Host：Windows 原生 `codex.exe`，`codex-cli 0.147.0-alpha.6.5`；隔离 `-c` 配置，没有写入用户级 Codex MCP 注册。
+- 身份：每次验收均要求 `self-check.sourceRevision == git rev-parse HEAD == backend.runtimeSourceRevision`；部署时必须重新满足，指南不固定可能过期的 SHA。
+- 协议与发现：官方 SDK 进程测试覆盖 legacy `initialize` 与 modern `server/discover`；Inspector/Codex 均发现五个工具和唯一固定指南 Resource。Codex CLI 不展示最终协商的 wire protocol version，因此不能把 Host 版本号当作具体 era 证明。
+- 隔离：外部列表只返回 A001/A005 两个非团队 Agent；猜测内部 Agent ID 返回 `AGENT_NOT_FOUND`，不创建 task/session。
+- 任务：真实 Codex Host 完成只读成功、终态重复查询、显式 `accept` 后继续执行、真实取消、`full_access → workspace_write` 夹紧。
+- 负向审批：错误 task capability 返回 `TASK_NOT_FOUND`；无 `approval.persist` 时 `acceptAlways` 返回 `APPROVAL_FORBIDDEN`。
+- 资格撤销：运行中 Agent 加入 active Team 后任务进入 `stop_unconfirmed`，真实 Turn 停止后落为 `cancelled`；临时 Team 在移除成员后归档。
+- 会话与 lease：外部 Session 为 hidden，active conversation 保持不变；强制结束 adapter 后任务经 lease 进入 `timed_out`，Turn journal 以 `turn_interrupted:stopped_by_user` 收口。
+- Windows：任务所属进程树只出现原生 Codex 与 Python adapter，没有 `cmd.exe`/PowerShell/Terminal/Node 包装器；正常退出无 adapter 子进程，故障注入后的 Host 也按精确 PID 清理。
+- 能力边界：SDK 2.0.0 没有服务端 MCP Tasks extension，首版只承诺五工具闭环；Agent/Session/Turn/审批/取消均走真实 backend，LLM provider 使用隔离 loopback 确定性 fixture，因此这不是外部模型厂商兼容性证明。
+
 ## 10. 禁止事项
 
-- 不注册 `core/external_agent/mcp_stdio_server.py` 历史原型。
+- 不把 `core/external_agent/mcp_stdio_server.py` 兼容导入模块作为 Host 注册入口。
 - 不绕过 backend client 直接导入 Session、Turn 或审批写 service。
 - 不暴露或猜测 active team 成员和团队专用 Agent。
 - 不自动批准 pending approvals。
@@ -347,6 +459,6 @@ Host 声明 `io.modelcontextprotocol/tasks` 时，可以接收原生 Task handle
 - protocol era、Resources 或 Tasks capability。
 - Launcher/backend 身份、诊断或回滚步骤。
 
-本文进入 `DEPLOYABLE` 前，M4 必须把所有目标命令替换为真实可执行命令并逐条演练；M5 必须由真实 Codex Host 从自动发现指南开始完成完整调用，而不是由实现者跳过指南直接调用。
+本文已按 M4/M5 完成首版命令演练与真实 Codex Host 调用。后续任何入口、权限、Host 或协议变化都必须重新降级状态并复验，不能沿用本节旧证据自动宣称兼容。
 
 协议依据：[MCP Resources](https://modelcontextprotocol.io/specification/draft/server/resources)、[MCP Discovery](https://modelcontextprotocol.io/specification/draft/server/discover)、[MCP Versioning](https://modelcontextprotocol.io/specification/draft/basic/versioning)。

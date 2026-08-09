@@ -173,6 +173,60 @@ def test_instance_environment_and_state_are_private(runtime, tmp_path, monkeypat
     assert "API_KEY" not in json.dumps(persisted)
 
 
+def test_backend_only_instance_never_allocates_or_spawns_frontend(
+    runtime, tmp_path, monkeypatch
+):
+    project = _project(tmp_path)
+    runtime_home = tmp_path / "acceptance"
+    captured_commands: list[list[str]] = []
+    captured_envs: list[dict[str, str]] = []
+
+    class FakeProcess:
+        pid = 4200
+
+        def poll(self):
+            return None
+
+    def fake_spawn(command, **kwargs):
+        captured_commands.append(list(command))
+        captured_envs.append(dict(kwargs["env"]))
+        return FakeProcess()
+
+    monkeypatch.setattr(runtime, "_spawn", fake_spawn)
+    monkeypatch.setattr(runtime, "_wait_ready", lambda **_kwargs: None)
+    monkeypatch.setattr(runtime, "_process_create_time", lambda pid: float(pid))
+    monkeypatch.setattr(runtime, "_process_matches", lambda pid, create_time: pid == 4200)
+    monkeypatch.setattr(runtime, "_port_available", lambda port, host="127.0.0.1": True)
+    monkeypatch.setattr(runtime, "_source_commit", lambda project_root: "abc123")
+    monkeypatch.setattr(
+        runtime,
+        "_frontend_command",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("frontend requested")),
+    )
+
+    state = runtime.start_instance(
+        instance_id="task-backend-only",
+        project_root=project,
+        runtime_home=runtime_home,
+        backend_only=True,
+    )
+    status = runtime.status_instance(
+        instance_id="task-backend-only",
+        runtime_home=runtime_home,
+    )
+
+    assert len(captured_commands) == 1
+    assert len(captured_envs) == 1
+    assert "VIBELUTION_FRONTEND_PORT" not in captured_envs[0]
+    assert "AGENT_WORKBENCH_FRONTEND_PORT" not in captured_envs[0]
+    assert state["backendOnly"] is True
+    assert state["ports"] == {"backend": 8100}
+    assert "frontendUrl" not in state
+    assert set(state["processes"]) == {"backend"}
+    assert status["status"] == "running"
+    assert status["processAlive"] == {"backend": True}
+
+
 def test_unsafe_instance_and_formal_runtime_roots_are_rejected(runtime, tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="instance-id"):
         runtime._instance_paths(instance_id="../escape", runtime_home=tmp_path)
