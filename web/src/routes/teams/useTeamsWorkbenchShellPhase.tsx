@@ -157,7 +157,6 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     setShowCommunicationEdges,
     setResearchCanvasLayoutMode,
     teamShellMode,
-    challengeTeamSurface,
     canvasFrameRef,
     teamDetailLoadMode,
     selectedTeamReference,
@@ -725,10 +724,6 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     && !researchCanvasVisible
     && !isProcessWorkflowView
     && !boardInspectorNarrow;
-
-  // Legacy experiment/iteration query is normalized at TeamsLegacyResearchBoundary
-  // to workflow + node before this shell phase. Do not mount ResearchStageStandalonePage
-  // from the canonical /teams main entry.
 
   return renderTeamsWorkbenchBoardPage({
     lang,

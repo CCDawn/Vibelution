@@ -97,7 +97,6 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
       // End-user research home is board shell hosting the process workspace.
       ?? "board",
   );
-  const [challengeTeamSurface, setChallengeTeamSurface] = useState<"workspace" | "progress">("workspace");
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({
     width: CANVAS_VIEWPORT_WIDTH,
@@ -115,8 +114,6 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
       return;
     }
     if (requestedResearchWorkspaceView) {
-      // Legacy aliases / stage views: process workflow is the only primary surface.
-      // URL normalization happens in TeamsLegacyResearchBoundary; keep shell state aligned.
       if (
         requestedResearchWorkspaceView === "overview"
         || requestedResearchWorkspaceView === "canvas"
@@ -204,8 +201,6 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
     setResearchWorkspaceView,
     teamShellMode,
     setTeamShellMode,
-    challengeTeamSurface,
-    setChallengeTeamSurface,
     nodePositionDrafts,
     setNodePositionDrafts,
     canvasFrameSize,

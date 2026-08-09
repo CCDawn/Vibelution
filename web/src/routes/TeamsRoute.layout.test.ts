@@ -224,10 +224,9 @@ describe("research project workspace", () => {
     expect(panel).toContain("Open Agent chat");
   });
 
-  it("loads the current experiment projection on the Challenge research overview", () => {
-    expect(routeSource).toContain(
-      'challengeProgramProgressVisible: challengeCupResearchTeamSelected && (challengeTeamSurface === "progress" || researchWorkspaceView === "overview")',
-    );
+  it("does not enable legacy experiment projections from the Challenge workflow shell", () => {
+    expect(routeSource).toContain("challengeProgramProgressVisible: false");
+    expect(routeSource).not.toContain("challengeTeamSurface");
   });
 
   it("anchors experiment mutations to the stable route team while details are deferred", () => {
@@ -1778,9 +1777,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).not.toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain("ChallengeCupOperationsWorkspace");
     expect(routeSource).toContain("challengeCupResearchTeamSelected");
-    expect(routeSource).toContain('useState<"workspace" | "progress">("workspace")');
-    expect(routeSource).toContain('challengeTeamSurface === "progress"');
-    // Board/canvas shell owns mode chrome; challenge surface remains state for progress queries.
+    expect(routeSource).not.toContain('useState<"workspace" | "progress">("workspace")');
+    expect(routeSource).not.toContain("challengeTeamSurface");
+    // Board/canvas shell owns mode chrome; Challenge progress is URL-panel state in the canonical workspace.
     expect(routeSource).toContain("TeamShellToolbar");
     expect(routeSource).not.toContain("<TeamShellModeSwitch");
     expect(routeSource).toContain("challengeWorkspaceContextHidden");

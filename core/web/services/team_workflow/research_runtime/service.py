@@ -13,23 +13,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from langgraph.types import Command
-
 from core.research.workflow.bindings import (
     AgentBindingLayers,
     build_run_binding_snapshots,
     resolve_effective_agent_id,
 )
-from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
-from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
     build_challenge_cup_workflow_definition,
-)
-from core.research.workflow.iteration_decisions import (
-    DEFAULT_ITERATION_BUDGET,
-    IterationDecisionError,
 )
 from core.research.workflow.models import ActorKind
 from core.research.workflow.projection import build_canvas_projection
@@ -52,10 +44,6 @@ from .human_task_resolution import (
     resolve_human_task as resolve_human_task_transition,
 )
 from .iteration_revision_fork import fork_iteration_revision
-from .iteration_transition import (
-    apply_iteration_decision_side_effects,
-    find_decision_by_idempotency,
-)
 from .node_command_adapter import (
     NodeCommandError,
     NodeCommandUnavailable,
@@ -288,13 +276,6 @@ class ResearchWorkflowRuntimeService:
             "resolvedAt": "",
             "resolvedBy": "",
         }
-
-    def _checkpoint_id_from_state(self, state: Any) -> str:
-        try:
-            cfg = state.config.get("configurable") or {}
-            return str(cfg.get("checkpoint_id") or "")
-        except (AttributeError, KeyError, TypeError, ValueError):
-            return ""
 
     def _append_auto_handoffs(
         self,
@@ -582,200 +563,6 @@ class ResearchWorkflowRuntimeService:
                 )
             except HumanTaskResolutionError as exc:
                 raise ResearchWorkflowError(str(exc), code=exc.code) from exc
-
-    def apply_iteration_decision(
-        self,
-        run_id: str,
-        decision: dict[str, Any],
-        *,
-        idempotency_key: str = "",
-        decided_by: str = "",
-    ) -> dict[str, Any]:
-        """Apply one of the five structured iteration decisions (durable + graph resume)."""
-        with self._lock:
-            record = self.get_run(run_id)
-            key = idempotency_key or str(decision.get("idempotencyKey") or "")
-            if key:
-                prior = find_decision_by_idempotency(record, key)
-                if prior:
-                    return self.get_run(run_id)
-                durable_key = f"iterdec:{run_id}:{key}"
-                if self._index.get_run_id(durable_key):
-                    return self.get_run(run_id)
-
-            payload = dict(decision)
-            if key:
-                payload["idempotencyKey"] = key
-            if decided_by:
-                payload["decidedBy"] = decided_by
-            payload.setdefault("budgetMax", int(record.get("iterationBudgetMax") or DEFAULT_ITERATION_BUDGET))
-
-            thread_id = str(record.get("threadId") or "")
-            workflow_id = str(record.get("workflowId") or CHALLENGE_CUP_WORKFLOW_ID)
-            workflow_version_id = str(record.get("workflowVersionId") or "")
-            checkpoint_id = ""
-            lg_snapshot = dict(record.get("langGraph") or {})
-            runtime_nodes: list[str] = []
-
-            try:
-                with open_sqlite_checkpointer(self._checkpoint_path) as checkpointer:
-                    graph = compile_challenge_cup_graph(checkpointer)
-                    cfg = {"configurable": {"thread_id": thread_id}}
-                    # Resume iteration_decision interrupt with structured decision
-                    graph.invoke(Command(resume=payload), cfg)
-                    state = graph.get_state(cfg)
-                    checkpoint_id = self._checkpoint_id_from_state(state)
-                    runtime_nodes = [str(n) for n in (state.next or [])]
-                    values = dict(state.values or {})
-                    lg_snapshot = {
-                        **lg_snapshot,
-                        "engine": "challenge_cup_graph",
-                        "completedNodeIds": list(values.get("completed_node_ids") or []),
-                        "knowledgePackageAccepted": bool(values.get("knowledge_package_accepted")),
-                        "frozenProtocolAccepted": bool(values.get("frozen_protocol_accepted")),
-                        "smokeAccepted": bool(values.get("smoke_accepted")),
-                        "promotionAccepted": values.get("promotion_accepted"),
-                        "artifacts": dict(values.get("artifacts") or {}),
-                        "checkpointId": checkpoint_id,
-                        "controlledRunAttempt": int(values.get("controlled_run_attempt") or 0),
-                        "iterationDecision": values.get("iteration_decision") or payload,
-                        "nodeAttempts": dict(values.get("node_attempts") or {}),
-                        "officialCandidateRef": values.get("official_candidate_ref")
-                        or record.get("officialCandidateRef")
-                        or "",
-                        "terminalReason": values.get("terminal_reason") or "",
-                        "completionKind": values.get("completion_kind") or "",
-                        "blockedReason": values.get("blocked_reason") or "",
-                        "promotionOperation": values.get("promotion_operation") or "",
-                    }
-            except IterationDecisionError as exc:
-                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
-            except Exception as exc:
-                # Graph may raise on unknown kind during routing
-                msg = str(exc)
-                if "Unknown iteration" in msg or "unknown_decision" in msg.lower():
-                    raise ResearchWorkflowError(msg, code="unknown_decision_kind") from exc
-                raise
-
-            def _create_child(skeleton: dict[str, Any]) -> dict[str, Any]:
-                # Persist child run shell; start child graph from protocol_design via empty invoke
-                # with pre-seeded state is complex — store shell and mark start node.
-                child_id = str(skeleton["runId"])
-                if key:
-                    existing_child = self._index.get_run_id(f"fork:{run_id}:{key}")
-                    if existing_child:
-                        existing = self._store.get_run(existing_child)
-                        if existing:
-                            return existing
-                self._store.create_run(skeleton)
-                # Seed child checkpoint by compiling and updating state is optional for shell;
-                # mark runtime at protocol_design for canvas.
-                self._store.update_run(
-                    child_id,
-                    {
-                        "status": "running",
-                        "runtimeCurrentNodeIds": ["protocol_design"],
-                        "langGraph": {
-                            **(skeleton.get("langGraph") or {}),
-                            "startNodeId": "protocol_design",
-                            "engine": "challenge_cup_graph",
-                        },
-                    },
-                )
-                if key:
-                    self._index.put_run_id(f"fork:{run_id}:{key}", child_id)
-                return self.get_run(child_id)
-
-            try:
-                effects = apply_iteration_decision_side_effects(
-                    record=record,
-                    decision_raw=payload,
-                    graph_state={
-                        "artifacts": lg_snapshot.get("artifacts") or {},
-                        "controlled_run_attempt": lg_snapshot.get("controlledRunAttempt") or 0,
-                        "iteration_budget_max": record.get("iterationBudgetMax") or DEFAULT_ITERATION_BUDGET,
-                        "blocked_reason": lg_snapshot.get("blockedReason") or "",
-                    },
-                    checkpoint_id=checkpoint_id,
-                    workflow_id=workflow_id,
-                    workflow_version_id=workflow_version_id,
-                    utc_now=_utc_now,
-                    create_child_run=_create_child,
-                )
-            except IterationDecisionError as exc:
-                raise ResearchWorkflowError(str(exc), code=exc.code) from exc
-
-            decision_rec = effects["decision"]
-            decisions = list(record.get("iterationDecisions") or [])
-            decisions.append(decision_rec)
-
-            patch = dict(effects.get("patch") or {})
-            # Merge graph snapshot
-            if "langGraph" in patch:
-                lg_snapshot = {**lg_snapshot, **patch.pop("langGraph")}
-            if effects.get("replace_handoffs") is not None:
-                patch["handoffs"] = effects["replace_handoffs"]
-            if effects.get("error"):
-                patch.setdefault("status", "blocked")
-                patch.setdefault("blockedReason", effects["error"].get("code") or "iteration_error")
-
-            # Prefer graph runtime nodes when not forking/stopping
-            if patch.get("status") not in {"succeeded", "blocked"} and runtime_nodes:
-                patch.setdefault("runtimeCurrentNodeIds", runtime_nodes)
-            if effects.get("controlled_run_attempt"):
-                lg_snapshot["controlledRunAttempt"] = effects["controlled_run_attempt"]
-                na = dict(patch.get("nodeAttempts") or record.get("nodeAttempts") or {})
-                na["controlled_run"] = effects["controlled_run_attempt"]
-                patch["nodeAttempts"] = na
-
-            # Budget block from graph
-            if lg_snapshot.get("blockedReason") == "iteration_budget_exhausted" or (
-                effects.get("error") or {}
-            ).get("code") == "iteration_budget_exhausted":
-                patch["status"] = "blocked"
-                patch["blockedReason"] = "iteration_budget_exhausted"
-                patch["runtimeCurrentNodeIds"] = ["iteration_decision"]
-
-            # Preserve frozen protocol on parent after revise
-            if effects.get("child_run"):
-                # parent patch already from link_parent_after_fork
-                pass
-
-            if effects.get("human_task"):
-                tasks = list(record.get("humanTasks") or [])
-                tasks.append(effects["human_task"])
-                patch["humanTasks"] = tasks
-
-            patch["iterationDecisions"] = decisions
-            patch["langGraph"] = lg_snapshot
-
-            # Official candidate fields
-            if "officialCandidateRef" not in patch and lg_snapshot.get("officialCandidateRef"):
-                patch["officialCandidateRef"] = lg_snapshot["officialCandidateRef"]
-            if lg_snapshot.get("completionKind") and not patch.get("completionKind"):
-                patch["completionKind"] = lg_snapshot["completionKind"]
-            if lg_snapshot.get("terminalReason") and not patch.get("terminalReason"):
-                patch["terminalReason"] = lg_snapshot["terminalReason"]
-
-            self._store.update_run(run_id, patch)
-            self._store.append_event(
-                run_id,
-                {
-                    "workflowId": workflow_id,
-                    "runId": run_id,
-                    "nodeId": "iteration_decision",
-                    "type": "iteration.decision_applied",
-                    "summary": {
-                        "decisionId": decision_rec.get("decisionId"),
-                        "decisionKind": decision_rec.get("decisionKind"),
-                        "childRunId": (effects.get("child_run") or {}).get("runId"),
-                        "error": effects.get("error"),
-                    },
-                },
-            )
-            if key:
-                self._index.put_run_id(f"iterdec:{run_id}:{key}", run_id)
-            return self.get_run(run_id)
 
     def apply_command(
         self,

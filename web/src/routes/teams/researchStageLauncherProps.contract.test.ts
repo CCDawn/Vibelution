@@ -24,7 +24,6 @@ function sampleProps(): TeamResearchStageLauncherPanelProps {
       knowledgeExpansionSelected: false,
       selected: null,
       memoryMembers: [],
-      challengeSurface: "workspace",
       detailDegraded: false,
       detailLoading: false,
       detailQuery: { isFetching: false, refetch: () => undefined },
@@ -105,6 +104,7 @@ describe("research stage launcher grouped props", () => {
     const flat = flattenResearchStageLauncherProps(sampleProps());
     expect(flat.researchWorkflowTeamSelected).toBe(true);
     expect(flat.challengeCupResearchTeamSelected).toBe(true);
+    expect(flat).not.toHaveProperty("challengeTeamSurface");
     expect(flat.presentationMode).toBe("interactive");
     expect(flat.sourceCollectionCanStart).toBe(false);
     expect(flat.sourceCollectionLoopActionLabel).toBe("loop");
