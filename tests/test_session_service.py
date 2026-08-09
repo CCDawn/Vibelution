@@ -939,6 +939,36 @@ def test_session_live_progress_and_tool_updates_do_not_publish_full_snapshot(mon
     assert events[-1]["ledgerSeq"] == 11
 
 
+def test_session_live_tool_delta_publishes_before_recovery_checkpoint(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    call_order = []
+    monkeypatch.setattr(
+        session_service,
+        "_publish_session_assistant_delta",
+        lambda *_args, **_kwargs: call_order.append("publish"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_write_session_live_output_checkpoint",
+        lambda *_args, **_kwargs: call_order.append("checkpoint"),
+    )
+    session_id = "session-tool-first-paint"
+    turn_id = "turn-tool-first-paint"
+    session_service._set_session_running(session_id, True, turn_id=turn_id)
+    try:
+        session_service._set_session_live_output(
+            session_id,
+            turn_id=turn_id,
+            tool_calls=[{"callId": "call-1", "name": "glob_tool", "status": "running"}],
+        )
+    finally:
+        with session_service._SESSION_LIVE_OUTPUTS_LOCK:
+            session_service._SESSION_LIVE_OUTPUTS.pop(session_id, None)
+        session_service._set_session_running(session_id, False, turn_id=turn_id)
+
+    assert call_order == ["publish", "checkpoint"]
+
+
 def test_clearing_matching_live_turn_emits_terminal_assistant_delta(monkeypatch, tmp_path):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_write_session_live_output_checkpoint", lambda *_args, **_kwargs: None)

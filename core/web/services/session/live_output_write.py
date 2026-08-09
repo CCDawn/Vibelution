@@ -374,16 +374,22 @@ def _set_session_live_output(
                 llm_payload_trace=dict(state.llm_payload_trace or {}) if isinstance(state.llm_payload_trace, dict) else None,
                 updated_at=state.updated_at,
             )
-    if delete_checkpoint:
-        s._delete_session_live_output_checkpoint(session_id)
-    elif checkpoint_snapshot is not None:
-        s._write_session_live_output_checkpoint(session_id, checkpoint_snapshot)
-    if assistant_delta_state is not None:
-        s._publish_session_assistant_delta(
-            session_id,
-            assistant_delta_state,
-            include_feedback_events=feedback_events_changed,
-        )
+    # Publish the live delta before the recovery checkpoint write.  The
+    # checkpoint can touch a busy filesystem and must not delay the browser's
+    # first running-tool frame.  The finally block preserves the recovery
+    # guarantee even if a subscriber publish unexpectedly raises.
+    try:
+        if assistant_delta_state is not None:
+            s._publish_session_assistant_delta(
+                session_id,
+                assistant_delta_state,
+                include_feedback_events=feedback_events_changed,
+            )
+    finally:
+        if delete_checkpoint:
+            s._delete_session_live_output_checkpoint(session_id)
+        elif checkpoint_snapshot is not None:
+            s._write_session_live_output_checkpoint(session_id, checkpoint_snapshot)
     if publish_full_snapshot:
         s._publish_session_detail_snapshot(session_id)
 
