@@ -12,6 +12,7 @@ import {
   isActiveTurnSettledByDetail,
   mergeAssistantDeltaIntoActiveTurnLayer,
   runningToolStartedAtEpochMs,
+  toolStartToFirstPaintMs,
 } from "./chatActiveTurnLayer";
 
 function assistantDelta(
@@ -150,6 +151,26 @@ describe("chat active turn layer", () => {
       tool: { callId: "call-a" },
       toolIds: ["call-a"],
     });
+  });
+
+  it("measures from the placeholder row's first paint when exact start arrives later", () => {
+    const tool = {
+      id: "tool-late:1",
+      itemId: "tool-late",
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "tool_call",
+      status: "running",
+      revision: 1,
+      sequence: 2,
+      callId: "call-late",
+      toolName: "grep_search_tool",
+      metadata: { executionStartedAtEpochMs: 1_000 },
+    } satisfies SessionTurnItem;
+
+    expect(toolStartToFirstPaintMs(tool, 1_055, 6_000)).toBe(55);
+    expect(toolStartToFirstPaintMs(tool, 999, 6_000)).toBe(1);
   });
 
   it("requests one authoritative index refresh only for terminal active layers", () => {
