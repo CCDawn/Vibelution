@@ -150,29 +150,15 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     });
   });
 
-  it("ignores repeated selection notifications for the controlled node", async () => {
-    const onSelectNode = vi.fn();
+  it("does not expose React Flow selection-change callbacks that can replay stale nodes", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root: Root = createRoot(container);
     await act(async () => {
-      root.render(
-        <ShadcnWorkflowCanvas
-          graph={emptyGraph()}
-          selectedNodeId="source_extraction"
-          onSelectNode={onSelectNode}
-        />,
-      );
+      root.render(<ShadcnWorkflowCanvas graph={emptyGraph()} selectedNodeId="source_extraction" />);
     });
 
-    const onSelectionChange = rfCalls[0].onSelectionChange as (params: {
-      nodes: Array<{ id: string; type?: string }>;
-    }) => void;
-    onSelectionChange({ nodes: [{ id: "source_extraction", type: "agentTask" }] });
-    expect(onSelectNode).not.toHaveBeenCalled();
-
-    onSelectionChange({ nodes: [{ id: "evidence_relations", type: "agentTask" }] });
-    expect(onSelectNode).toHaveBeenCalledWith("evidence_relations");
+    expect(rfCalls[0].onSelectionChange).toBeUndefined();
 
     await act(async () => {
       root.unmount();
