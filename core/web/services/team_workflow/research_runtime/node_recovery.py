@@ -14,6 +14,7 @@ from .node_execution_support import (
     replace_by_id,
     utc_now,
 )
+from .retry_policy import retry_is_available, retry_kind_for
 from .store import WorkflowRunStore
 
 
@@ -125,13 +126,16 @@ def retry_node_execution(
                 "only failed or blocked NodeRun can be retried",
                 code="invalid_node_state",
             )
-        max_retries = int(
-            ((record.get("inputSnapshot") or {}).get("budgetPolicy") or {}).get(
-                "maxRetries", 0
+        retry_kind = retry_kind_for(prior_run)
+        requested_retry_kind = str(payload.get("retryKind") or retry_kind).strip()
+        if requested_retry_kind != retry_kind:
+            raise NodeExecutionError(
+                "retryKind does not match the durable failure classification",
+                code="invalid_retry_kind",
             )
-        )
+        available, _ = retry_is_available(record, node_id, prior_run)
         attempt = int(prior_run.get("attempt") or 0) + 1
-        if attempt - 1 > max_retries:
+        if not available:
             raise NodeExecutionError(
                 "retry budget exhausted",
                 code="retry_budget_exhausted",
@@ -144,12 +148,24 @@ def retry_node_execution(
             "taskId": "",
             "sessionId": "",
             "idempotencyKey": f"{run_id}:{node_id}:{attempt}",
+            "modelRef": "",
+            "modelPurpose": "",
+            "estimatedCost": 0.0,
+            "escalationReason": "",
+            "budgetLedgerRef": "",
             "artifactRefs": [],
             "startedAt": "",
             "finishedAt": "",
             "failureCode": "",
             "failureSummary": "",
             "supersedesNodeRunId": prior_run["nodeRunId"],
+            "retryKind": retry_kind,
+            "countsAgainstRetryBudget": retry_kind != "infrastructure_recovery",
+            "recoveryOfNodeRunId": (
+                prior_run["nodeRunId"]
+                if retry_kind == "infrastructure_recovery"
+                else ""
+            ),
         }
         receipt = {
             "receiptId": f"receipt-{uuid.uuid4().hex[:10]}",
@@ -172,7 +188,15 @@ def retry_node_execution(
                 nodeRunId=next_run["nodeRunId"],
                 attempt=attempt,
                 type="NodeRunTransitioned",
-                summary={"from": prior_run["status"], "to": "ready", "retry": True},
+                summary={
+                    "from": prior_run["status"],
+                    "to": "ready",
+                    "retry": True,
+                    "retryKind": retry_kind,
+                    "countsAgainstRetryBudget": (
+                        retry_kind != "infrastructure_recovery"
+                    ),
+                },
             )
         )
         return {
