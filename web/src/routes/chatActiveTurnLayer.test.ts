@@ -109,6 +109,49 @@ describe("chat active turn layer", () => {
     );
   });
 
+  it("does not consume first-paint telemetry before a start timestamp arrives", () => {
+    const placeholder = {
+      id: "tool-a:0",
+      itemId: "tool-a",
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "tool_call",
+      status: "running",
+      revision: 0,
+      sequence: 2,
+      terminal: false,
+      callId: "call-a",
+      toolName: "glob_tool",
+    } satisfies SessionTurnItem;
+    const layer = {
+      id: "active",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      updatedAt: "2026-08-10T00:00:00Z",
+      status: "running",
+      turnItems: [placeholder],
+      ledgerSeq: 2,
+    } satisfies ActiveTurnLayerState;
+
+    expect(selectFirstUnpaintedRunningTool(layer, [])).toMatchObject({
+      tool: undefined,
+      toolIds: [],
+      runningToolIds: ["call-a"],
+    });
+    expect(selectFirstUnpaintedRunningTool({
+      ...layer,
+      turnItems: [{
+        ...placeholder,
+        revision: 1,
+        metadata: { executionStartedAtEpochMs: 1_786_294_801_125 },
+      }],
+    }, [])).toMatchObject({
+      tool: { callId: "call-a" },
+      toolIds: ["call-a"],
+    });
+  });
+
   it("requests one authoritative index refresh only for terminal active layers", () => {
     const layer = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,

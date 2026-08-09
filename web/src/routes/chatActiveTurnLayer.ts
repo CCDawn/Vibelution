@@ -231,7 +231,13 @@ export function selectFirstUnpaintedRunningTool(
   const runningToolIds = runningTools.map(runningToolPaintId).filter(Boolean);
   const tools = runningTools.filter((item) => {
     const id = runningToolPaintId(item);
-    return Boolean(id) && !painted.has(id);
+    // A model-call placeholder can paint before the executor publishes the
+    // canonical start revision.  Do not consume the one-shot measurement until
+    // that revision carries a usable start time; otherwise the exact start
+    // update is incorrectly treated as already painted.
+    return Boolean(id)
+      && !painted.has(id)
+      && Number.isFinite(runningToolStartedAtEpochMs(item));
   });
   const toolIds = tools.map(runningToolPaintId).filter(Boolean);
   const tool = tools[0];
