@@ -92,7 +92,7 @@ export function ResearchProcessWorkspace({
             createDisabled={Boolean(runState.busy || project.loading || !project.activeProjectId)}
             createDisabledReason={project.error || (!project.activeProjectId ? "请先选择活动研究项目" : undefined)}
             onSelectRun={(runId) => location.replaceParams({ runId: runId || null, node: null, panel: "node" })}
-            onOpenPanel={(panel) => location.replaceParams({ panel })}
+            onOpenPanel={location.openPanel}
             onJumpToRuntime={jumpToRuntime}
           />
         )}
