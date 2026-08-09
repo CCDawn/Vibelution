@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 
@@ -19,8 +21,13 @@ def _script_module():
 
 
 class FakeBackend:
+    heartbeat_seconds = 10.0
+
     def __init__(self) -> None:
         self.get_calls = 0
+
+    async def heartbeat_once(self) -> None:
+        return None
 
     async def list_agents(self, *, limit: int = 50):
         return {
@@ -41,6 +48,27 @@ class FakeBackend:
             "status": "awaiting_approval",
             "shouldPoll": True,
             "pendingApprovals": [{"approvalId": "approval-1"}],
+        }
+
+
+class CompletingFakeBackend(FakeBackend):
+    heartbeat_seconds = 10.0
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.heartbeat_calls = 0
+
+    async def heartbeat_once(self) -> None:
+        self.heartbeat_calls += 1
+
+    async def get_task(self, *, task_id: str):
+        self.get_calls += 1
+        assert task_id == "eat-1"
+        return {
+            "taskId": task_id,
+            "status": "succeeded",
+            "shouldPoll": False,
+            "resultSummary": "done",
         }
 
 
@@ -88,12 +116,80 @@ def test_run_wrapper_returns_task_when_explicit_approval_is_required() -> None:
     assert "compatibilityWrapper" in result
 
 
+def test_run_wrapper_honors_caller_timeout_beyond_legacy_30_second_cap(
+    monkeypatch,
+) -> None:
+    module = _script_module()
+    backend = CompletingFakeBackend()
+    monotonic_values = iter([0.0, 0.0, 31.0, 32.0])
+
+    monkeypatch.setattr(
+        module,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(monotonic_values, 32.0)),
+    )
+
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(module.anyio, "sleep", no_wait)
+
+    result = anyio.run(
+        partial(
+            module.run_via_backend,
+            backend,
+            agent_id="coder",
+            agent_code="",
+            task="review a bounded change",
+            permission_profile="read_only",
+            client_request_id="request-longer-than-legacy-cap",
+            title="",
+            timeout_seconds=60,
+        )
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["resultSummary"] == "done"
+    assert backend.get_calls == 1
+    assert backend.heartbeat_calls == 1
+
+
 def test_cli_parser_defaults_to_read_only_and_managed_mcp() -> None:
     module = _script_module()
     parser = module.build_parser()
 
     run_args = parser.parse_args(["run", "--agent-id", "coder", "--task", "hello"])
+    custom_wait_args = parser.parse_args(
+        [
+            "run",
+            "--agent-id",
+            "coder",
+            "--task",
+            "hello",
+            "--timeout-seconds",
+            "60",
+        ]
+    )
     mcp_args = parser.parse_args(["mcp", "--project-root", str(PROJECT_ROOT)])
 
     assert run_args.permission_profile == "read_only"
+    assert run_args.timeout_seconds == 10.0
+    assert custom_wait_args.timeout_seconds == 60.0
     assert mcp_args.project_root == PROJECT_ROOT
+
+
+def test_cli_preserves_agent_result_json_on_legacy_windows_stdout(
+    monkeypatch,
+) -> None:
+    module = _script_module()
+    output = io.BytesIO()
+    legacy_stdout = io.TextIOWrapper(output, encoding="gbk")
+    warning = chr(0x26A0)
+    monkeypatch.setattr(module.sys, "stdout", legacy_stdout)
+
+    module._print({"resultSummary": f"{warning} review complete"})
+    legacy_stdout.flush()
+
+    rendered = output.getvalue().decode("gbk")
+    assert "\\u26a0 review complete" in rendered
+    assert module.json.loads(rendered)["resultSummary"] == f"{warning} review complete"

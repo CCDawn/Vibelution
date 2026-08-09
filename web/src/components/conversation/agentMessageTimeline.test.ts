@@ -7,6 +7,7 @@ import type { AgentMessage } from "../../agent-thread";
 import { buildAgentMessageOperations } from "./agentMessageOperations";
 import agentMessageTimelineSource from "./agentMessageTimeline.ts?raw";
 import { buildAgentMessageTimelineItems, type AgentMessageTimelineOptions } from "./agentMessageTimeline";
+import { activeAgentMessageTimelineItemId } from "./agentMessageTimelineActiveItem";
 
 const labels = {
   thought: "思考",
@@ -55,6 +56,43 @@ describe("agentMessageTimeline", () => {
     expect(agentMessageTimelineSource).not.toContain("../../api/types");
     expect(agentMessageTimelineSource).not.toContain("ApiConversationTimelineItem");
     expect(agentMessageTimelineSource).not.toContain("ConversationTimelineItem as");
+  });
+
+  it("keeps a pending legacy thought active while the assistant turn is streaming", () => {
+    const message: AgentMessage = {
+      id: "agent-message-pending-thought",
+      role: "assistant",
+      createdAt: "2026-08-10T00:20:00Z",
+      streaming: true,
+      source: { kind: "conversation-message", id: "agent-message-pending-thought" },
+      parts: [
+        {
+          id: "agent-message-pending-thought-part",
+          type: "thought",
+          status: "pending",
+          text: "等待执行的 legacy 思考。",
+          sequence: 1,
+        },
+      ],
+    };
+
+    const items = buildAgentMessageTimelineItems(
+      message,
+      buildAgentMessageOperations(message, labels),
+      { lang: "zh" },
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: "agent-message-pending-thought-part-timeline-thought",
+      kind: "thought",
+      status: "running",
+      text: "等待执行的 legacy 思考。",
+      defaultExpanded: true,
+    });
+    expect(activeAgentMessageTimelineItemId({ streaming: true }, items)).toBe(
+      "agent-message-pending-thought-part-timeline-thought",
+    );
   });
 
   it("anchors fallback answer after process rows and keeps that slot when streaming ends", () => {

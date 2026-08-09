@@ -55,7 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--agent-code", default="")
     run_parser.add_argument("--task", required=True)
     run_parser.add_argument("--client-request-id", default="")
-    run_parser.add_argument("--timeout-seconds", type=float, default=10.0)
+    run_parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=10.0,
+        help=(
+            "Caller-selected synchronous wait window; task execution remains "
+            "bounded by the managed gateway policy."
+        ),
+    )
     run_parser.add_argument(
         "--permission-profile",
         default="read_only",
@@ -229,10 +237,15 @@ async def run_via_backend(
         title=title,
     )
     task_id = str(result.get("taskId") or "")
-    deadline = time.monotonic() + max(0.0, min(float(timeout_seconds), 30.0))
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    heartbeat_interval = max(1.0, float(backend.heartbeat_seconds))
+    last_heartbeat = time.monotonic()
     while task_id and result.get("shouldPoll", True) and time.monotonic() < deadline:
         if str(result.get("status") or "") == "awaiting_approval":
             break
+        if time.monotonic() - last_heartbeat >= heartbeat_interval:
+            await backend.heartbeat_once()
+            last_heartbeat = time.monotonic()
         await anyio.sleep(0.5)
         result = await backend.get_task(task_id=task_id)
     if result.get("shouldPoll", False):
@@ -244,7 +257,13 @@ async def run_via_backend(
 
 
 def _print(payload: dict[str, Any]) -> None:
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
+    stdout_encoding = str(getattr(sys.stdout, "encoding", None) or "utf-8")
+    try:
+        rendered.encode(stdout_encoding)
+    except (LookupError, UnicodeEncodeError):
+        rendered = json.dumps(payload, ensure_ascii=True, indent=2)
+    print(rendered)
 
 
 def main(argv: list[str] | None = None) -> int:
