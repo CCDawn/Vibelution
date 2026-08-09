@@ -38,7 +38,7 @@ def _project(tmp_path: Path, *, gateway_status: str) -> Path:
             [
                 "# Guide",
                 f"> **Gateway Status:** `{gateway_status}`",
-                "> **Guide Version:** `0.3.0`",
+                "> **Guide Version:** `0.3.1`",
             ]
         ),
         encoding="utf-8",

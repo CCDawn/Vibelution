@@ -43,7 +43,7 @@ def test_shared_contract_exposes_fixed_guide_and_five_tools() -> None:
     assert contracts.GUIDE_URI == GUIDE_URI
     assert set(contracts.MCP_TOOL_NAMES) == EXPECTED_TOOL_NAMES
     assert "run_project_agent" not in contracts.MCP_TOOL_NAMES
-    assert contracts.GUIDE_VERSION == "0.3.0"
+    assert contracts.GUIDE_VERSION == "0.3.1"
 
 
 def test_mcp_server_metadata_contains_discovery_fallback() -> None:
@@ -141,7 +141,7 @@ def test_mcp_backend_business_error_is_structured_tool_error() -> None:
         "code": "TASK_NOT_FOUND",
         "message": "The managed task is not available.",
         "guideUri": GUIDE_URI,
-        "guideVersion": "0.3.0",
+        "guideVersion": "0.3.1",
     }
     assert "Traceback" not in result.content[0].text
 

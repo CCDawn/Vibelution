@@ -2,7 +2,7 @@
 
 > **Document Status:** Current operational contract
 > **Gateway Status:** `DEPLOYABLE`
-> **Guide Version:** `0.3.0`
+> **Guide Version:** `0.3.1`
 > **Canonical MCP Name:** `vibelution`
 > **Canonical Resource URI:** `vibelution://guide/mcp-managed-agent-gateway`
 > **Target stdio Entry:** `<project-root>\.venv\Scripts\python.exe <project-root>\scripts\project_agent_tool.py mcp --project-root <project-root>`
@@ -125,7 +125,7 @@ requested profile
   "serverVersion": "0.3.0",
   "protocolEras": ["legacy", "modern"],
   "guideUri": "vibelution://guide/mcp-managed-agent-gateway",
-  "guideVersion": "0.3.0",
+  "guideVersion": "0.3.1",
   "tools": [
     "list_project_agents",
     "start_project_agent_task",
@@ -274,21 +274,18 @@ Server 必须暴露以下固定 Resource：
   "name": "mcp-managed-agent-gateway-guide",
   "title": "Vibelution MCP Managed Agent Gateway Guide",
   "description": "Read before deploying or calling the Vibelution managed Agent gateway.",
-  "mimeType": "text/markdown",
-  "annotations": {
-    "audience": ["assistant", "user"],
-    "priority": 1.0
-  }
+  "mimeType": "text/markdown"
 }
 ```
 
 实现约束：
 
+- 首版 Resource descriptor 只返回上述跨协议稳定字段；`annotations`、`_meta`、`lastModified` 等可选字段在当前 Codex Host 上未通过兼容验收，不得在缺少真实 Host 复验时重新加入。
 - `resources/read` 只读取仓库中这一个 allowlisted 权威文件，不接受任意文件路径或 URI template。
 - 返回内容必须对应 server 当前 `sourceRevision`；运行时旧于文档时 fail closed，不把新指南用于旧 server。
 - legacy `initialize` 与 modern `server/discover` 都声明 `resources` capability 和同一 instructions。
 - Host 不支持 Resources 时，工具 description 和结构化结果中的 `guideUri`/`guideVersion` 仍能引导调用 Agent。
-- 指南变化时同步更新 `Guide Version`、Resource `lastModified` 和相关契约测试。
+- 指南内容或 Resource schema 变化时同步更新 `Guide Version` 和相关契约测试；只有兼容 Host 实测通过后才增加新的可选 descriptor 字段。
 
 ## 6. 五个工具的标准调用顺序
 
