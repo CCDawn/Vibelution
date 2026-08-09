@@ -161,6 +161,7 @@ import {
   selectFirstUnpaintedRunningTool,
   setActiveTurnLayerForSession,
   toolStartToFirstPaintMs,
+  runningToolPaintKeys,
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
 import {
@@ -1715,10 +1716,13 @@ export function ChatCodingRoute() {
     const firstPaintedToolAtById = {
       ...(firstPaintedRunningToolAtBySessionRef.current[sessionId] ?? {}),
     };
-    paintedToolSelection.runningToolIds.forEach((toolId) => {
-      if (!Number.isFinite(firstPaintedToolAtById[toolId])) {
-        firstPaintedToolAtById[toolId] = now;
-      }
+    const runningPaintKeys = runningToolPaintKeys(paintedActiveTurn);
+    runningPaintKeys.forEach(({ toolId, fallbackKey }) => {
+      [toolId, fallbackKey].filter(Boolean).forEach((key) => {
+        if (!Number.isFinite(firstPaintedToolAtById[key])) {
+          firstPaintedToolAtById[key] = now;
+        }
+      });
     });
     firstPaintedRunningToolAtBySessionRef.current = {
       ...firstPaintedRunningToolAtBySessionRef.current,
@@ -1741,7 +1745,11 @@ export function ChatCodingRoute() {
     const lastAssistantDeltaAppliedAtMs = lastAssistantDeltaAppliedAtRef.current[sessionId] ?? 0;
     const toolStartToBrowserPaintMs = newlyPaintedRunningTools.reduce((maximum, tool, index) => {
       const toolId = paintedToolSelection.toolIds[index];
-      return Math.max(maximum, toolStartToFirstPaintMs(tool, firstPaintedToolAtById[toolId], now));
+      const fallbackKey = runningPaintKeys.find((key) => key.toolId === toolId)?.fallbackKey ?? "";
+      const firstPaintCandidates = [firstPaintedToolAtById[toolId], firstPaintedToolAtById[fallbackKey]]
+        .filter(Number.isFinite);
+      const firstPaintedAt = firstPaintCandidates.length > 0 ? Math.min(...firstPaintCandidates) : undefined;
+      return Math.max(maximum, toolStartToFirstPaintMs(tool, firstPaintedAt, now));
     }, 0);
     lastConversationStreamingFrameTelemetryAtRef.current = {
       ...lastConversationStreamingFrameTelemetryAtRef.current,
