@@ -70,7 +70,11 @@ def build_handoff_record(
     edge = definition_edge(from_node_id, target) if target else None
     kind = artifact_kind_for_gate(from_node_id)
     artifacts = artifacts or {}
-    content_hash = str(artifacts.get(kind) or artifacts.get("knowledge_package") or f"hash:{kind}:{run_id}")
+    content_hash = str(artifacts.get(kind) or artifacts.get("knowledge_package") or "")
+    if status == "accepted" and not content_hash:
+        raise ValueError(f"accepted handoff requires a real {kind} artifact")
+    if content_hash.startswith("hash:"):
+        raise ValueError("placeholder artifact hashes are forbidden")
     refs = [
         {
             "artifactId": f"{kind}:{run_id}:{from_node_id}",
@@ -78,7 +82,7 @@ def build_handoff_record(
             "version": "1",
             "contentHash": content_hash,
         }
-    ]
+    ] if content_hash else []
     # Smoke handoff also carries frozen protocol ref when present.
     if from_node_id == "smoke_gate" and artifacts.get("frozen_protocol"):
         refs.append(

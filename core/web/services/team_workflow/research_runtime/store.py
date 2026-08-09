@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -74,6 +76,25 @@ class WorkflowRunStore:
             if current is None:
                 raise KeyError(run_id)
             next_record = {**current, **patch, "runId": run_id, "updatedAt": _utc_now()}
+            self._write_record(self._run_path(run_id), next_record)
+            return next_record
+
+    def mutate_run(
+        self,
+        run_id: str,
+        mutation: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Apply one in-memory mutation and publish one atomic record replacement."""
+        with self._lock:
+            current = self.get_run(run_id)
+            if current is None:
+                raise KeyError(run_id)
+            mutated = mutation(copy.deepcopy(current))
+            next_record = {
+                **mutated,
+                "runId": run_id,
+                "updatedAt": _utc_now(),
+            }
             self._write_record(self._run_path(run_id), next_record)
             return next_record
 

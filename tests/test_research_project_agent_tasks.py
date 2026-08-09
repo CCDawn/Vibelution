@@ -15,6 +15,9 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service,
 )
+from core.web.services.team_workflow.experiment_kernel import (
+    _select_experiment_stage_round,
+)
 from core.web.services.team_workflow.research_project_agent_tasks import (
     ResearchProjectAgentTaskError,
     get_research_project_agent_task_context,
@@ -22,9 +25,6 @@ from core.web.services.team_workflow.research_project_agent_tasks import (
     research_project_iteration_readiness,
     start_research_project_agent_task,
     update_research_project_agent_task_status,
-)
-from core.web.services.team_workflow.experiment_kernel import (
-    _select_experiment_stage_round,
 )
 
 
@@ -123,9 +123,7 @@ def _client() -> TestClient:
     )
 
 
-def test_task_start_resolves_fixed_role_and_replays_idempotently(
-    tmp_path, monkeypatch
-):
+def test_task_start_resolves_fixed_role_and_replays_idempotently(tmp_path, monkeypatch):
     team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
     calls = _accepted_submitter(monkeypatch)
 
@@ -160,6 +158,38 @@ def test_task_start_resolves_fixed_role_and_replays_idempotently(
     assert replay["idempotentReplay"] is True
     assert replay["task"]["taskId"] == first["task"]["taskId"]
     assert replay["task"]["sessionId"] == first["task"]["sessionId"]
+    assert len(calls) == 1
+
+
+def test_task_start_requires_explicit_agent_to_match_team_role_snapshot(
+    tmp_path, monkeypatch
+):
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    calls = _accepted_submitter(monkeypatch)
+
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "agentId": agents["experiment_planner"]["agentId"],
+            "idempotencyKey": "exact-agent-design-1",
+        },
+    )
+    assert started["task"]["agentId"] == agents["experiment_planner"]["agentId"]
+    assert len(calls) == 1
+
+    with pytest.raises(ResearchProjectAgentTaskError) as exc:
+        start_research_project_agent_task(
+            team["teamId"],
+            project["projectId"],
+            {
+                "taskKind": "experiment_design",
+                "agentId": agents["experiment_ledger"]["agentId"],
+                "idempotencyKey": "wrong-agent-design-1",
+            },
+        )
+    assert exc.value.code == "explicit_agent_mismatch"
     assert len(calls) == 1
 
 
@@ -249,7 +279,10 @@ def test_iteration_task_requires_frozen_design_and_registered_result(
     assert started["task"]["status"] == "running"
     assert len(calls) == 1
     assert calls[0]["kwargs"]["turn_mode"] == "task"
-    assert calls[0]["kwargs"]["message_metadata"]["researchProjectId"] == project["projectId"]
+    assert (
+        calls[0]["kwargs"]["message_metadata"]["researchProjectId"]
+        == project["projectId"]
+    )
 
 
 def test_different_project_roles_use_distinct_flat_sessions(tmp_path, monkeypatch):
@@ -434,7 +467,9 @@ def test_experiment_design_task_materializes_candidate_graph_hypotheses_once(
         )
     )
     candidate_store_path = project_root / "candidate_store" / "index.json"
-    team_workflow_orchestration_service._write_json(candidate_store_path, candidate_store)
+    team_workflow_orchestration_service._write_json(
+        candidate_store_path, candidate_store
+    )
 
     first = start_research_project_agent_task(
         team["teamId"],
@@ -463,13 +498,20 @@ def test_experiment_design_task_materializes_candidate_graph_hypotheses_once(
     assert first["task"]["status"] == "running"
     assert replay["idempotentReplay"] is True
     assert len(projected) == 2
-    assert {item["metadata"]["projection"]["graphHypothesisId"] for item in projected} == {
+    assert {
+        item["metadata"]["projection"]["graphHypothesisId"] for item in projected
+    } == {
         "H1",
         "H2",
     }
-    assert all(item["sourceKind"] == "candidate_graph_hypothesis_projection" for item in projected)
+    assert all(
+        item["sourceKind"] == "candidate_graph_hypothesis_projection"
+        for item in projected
+    )
     assert all(item["qualityStatus"] == "needs_revision" for item in projected)
-    assert all(item["metadata"]["output"]["requiresReview"] is True for item in projected)
+    assert all(
+        item["metadata"]["output"]["requiresReview"] is True for item in projected
+    )
     assert all(item["sourceRefs"] and item["evidenceRefs"] for item in projected)
 
 
@@ -692,12 +734,12 @@ def test_agent_task_routes_expose_typed_start_and_status_payloads(
     assert started.json()["task"]["taskKind"] == "experiment_design"
     assert started.json()["task"]["turn"]["turnId"] == "turn-1"
     assert status_response.status_code == 200
-    assert status_response.json()["tasks"][0]["taskId"] == started.json()["task"]["taskId"]
+    assert (
+        status_response.json()["tasks"][0]["taskId"] == started.json()["task"]["taskId"]
+    )
 
 
-def test_experiment_task_context_is_project_scoped_and_bounded(
-    tmp_path, monkeypatch
-):
+def test_experiment_task_context_is_project_scoped_and_bounded(tmp_path, monkeypatch):
     team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
     _accepted_submitter(monkeypatch)
     started = start_research_project_agent_task(

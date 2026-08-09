@@ -6,6 +6,7 @@ checkpoint, interrupt/resume, handoff fields, and restart recovery.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -32,7 +33,7 @@ def _start_node(state: VerticalSliceState) -> VerticalSliceState:
     return {
         "step": "start",
         "upstream_artifact": f"artifact:{key}:v1",
-        "input_snapshot_hash": f"hash:{key}:v1",
+        "input_snapshot_hash": hashlib.sha256(f"{key}:v1".encode()).hexdigest(),
         "handoff_status": "pending",
         "side_effect_count": count,
         "idempotency_key": key,

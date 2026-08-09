@@ -13,6 +13,7 @@ Owns the NodeAgentSessionBinding write contract:
 
 from __future__ import annotations
 
+import urllib.parse
 import uuid
 from typing import Any
 
@@ -25,7 +26,12 @@ from .store import WorkflowRunStore
 def _utc_now() -> str:
     from datetime import datetime, timezone
 
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 class SessionBindingError(Exception):
@@ -39,18 +45,34 @@ def chat_deep_link(
     session_id: str,
     task_id: str,
     turn_id: str,
+    team_id: str,
     run_id: str,
     node_id: str,
 ) -> str | None:
     """Exact anchor deep link; None when any anchor field is missing."""
-    if not str(session_id or "").strip() or not str(task_id or "").strip() or not str(turn_id or "").strip():
+    if (
+        not str(session_id or "").strip()
+        or not str(task_id or "").strip()
+        or not str(turn_id or "").strip()
+    ):
         return None
-    return (
-        f"/chat?session={session_id}"
-        f"&focusTask={task_id}"
-        f"&focusTurn={turn_id}"
-        f"&returnTo=/teams?researchView=workflow&runId={run_id}&node={node_id}"
-        f"&returnLabel=workflow"
+    return_to = "/teams?" + urllib.parse.urlencode(
+        {
+            "teamId": team_id,
+            "researchView": "workflow",
+            "runId": run_id,
+            "node": node_id,
+            "panel": "node",
+        }
+    )
+    return "/chat?" + urllib.parse.urlencode(
+        {
+            "session": session_id,
+            "focusTask": task_id,
+            "focusTurn": turn_id,
+            "returnTo": return_to,
+            "returnLabel": "workflow",
+        }
     )
 
 
@@ -98,16 +120,26 @@ class SessionBindingBridge:
         missing = [k for k in required if not str(binding.get(k) or "").strip()]
         run_id = str(record.get("runId") or "")
         previous = self._store.get_session_binding(run_id, node_id)
+        if previous and all(
+            str(previous.get(key) or "") == str(binding.get(key) or "")
+            for key in ("nodeRunId", "agentId", "sessionId", "taskId", "turnId")
+        ):
+            return previous
         previous_binding_id = str(previous.get("bindingId") or "") if previous else ""
-        supersedes = str(binding.get("supersedesBindingId") or previous_binding_id or "")
+        supersedes = str(
+            binding.get("supersedesBindingId") or previous_binding_id or ""
+        )
         new_binding = {
-            "bindingId": str(binding.get("bindingId") or f"nsb-{uuid.uuid4().hex[:10]}"),
+            "bindingId": str(
+                binding.get("bindingId") or f"nsb-{uuid.uuid4().hex[:10]}"
+            ),
             "runId": run_id,
             "nodeId": node_id,
             "nodeRunId": str(binding.get("nodeRunId") or f"nr-{node_id}"),
             "nodeAttempt": int(binding.get("nodeAttempt") or 1),
             "agentId": agent_id,
-            "roleKey": str(binding.get("roleKey") or "") or str(node.primaryRoleKey or ""),
+            "roleKey": str(binding.get("roleKey") or "")
+            or str(node.primaryRoleKey or ""),
             "sessionId": str(binding.get("sessionId") or ""),
             "sessionAttempt": int(binding.get("sessionAttempt") or 1),
             "taskId": str(binding.get("taskId") or ""),
@@ -132,15 +164,20 @@ class SessionBindingBridge:
                 self._store.update_run(run_id, {"bindingHistory": history})
         return new_binding
 
-    def deep_link_for(self, record: dict[str, Any], node_id: str) -> tuple[str | None, bool]:
+    def deep_link_for(
+        self, record: dict[str, Any], node_id: str
+    ) -> tuple[str | None, bool]:
         """Return (href, degraded). Fail-closed: missing anchor => no href + degraded."""
-        binding = self._store.get_session_binding(str(record.get("runId") or ""), node_id)
+        binding = self._store.get_session_binding(
+            str(record.get("runId") or ""), node_id
+        )
         if not binding:
             return None, True
         href = chat_deep_link(
             session_id=str(binding.get("sessionId") or ""),
             task_id=str(binding.get("taskId") or ""),
             turn_id=str(binding.get("turnId") or ""),
+            team_id=str(record.get("teamId") or ""),
             run_id=str(record.get("runId") or ""),
             node_id=node_id,
         )

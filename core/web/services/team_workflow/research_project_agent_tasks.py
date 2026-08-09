@@ -9,7 +9,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA_VERSION = 1
 TASK_STORE_FILE_NAME = "research_project_agent_tasks.json"
 MAX_TASKS = 500
@@ -86,7 +85,9 @@ TASK_KIND_CONTRACTS: dict[str, dict[str, Any]] = {
 class ResearchProjectAgentTaskError(RuntimeError):
     """Raised when a project-scoped Agent task cannot start safely."""
 
-    def __init__(self, message: str, *, code: str = "research_project_agent_task_error"):
+    def __init__(
+        self, message: str, *, code: str = "research_project_agent_task_error"
+    ):
         super().__init__(message)
         self.code = code
 
@@ -115,7 +116,11 @@ def _safe_route(value: Any) -> str:
     normalized = _text(value, limit=1000)
     if not normalized:
         return ""
-    if not normalized.startswith("/") or normalized.startswith("//") or "://" in normalized:
+    if (
+        not normalized.startswith("/")
+        or normalized.startswith("//")
+        or "://" in normalized
+    ):
         raise ResearchProjectAgentTaskError(
             "returnTo must be an internal application route.",
             code="invalid_return_route",
@@ -255,6 +260,8 @@ def _write_store(
 def _resolve_role_agent(
     team_id: str,
     contract: dict[str, Any],
+    *,
+    requested_agent_id: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     s = _service()
     team = s.team_service.get_team(team_id)
@@ -276,6 +283,12 @@ def _resolve_role_agent(
             code="agent_role_unbound",
         )
     agent_id = _text(member.get("agentId"))
+    normalized_requested_agent_id = _text(requested_agent_id)
+    if normalized_requested_agent_id and normalized_requested_agent_id != agent_id:
+        raise ResearchProjectAgentTaskError(
+            f"Explicit Agent {normalized_requested_agent_id} does not match the Agent bound to research team role {expected_team_role}.",
+            code="explicit_agent_mismatch",
+        )
     agent = s.agent_directory_service.get_agent(agent_id)
     if not isinstance(agent, dict):
         raise ResearchProjectAgentTaskError(
@@ -299,9 +312,7 @@ def _task_message(
     checklist = "\n".join(
         f"- {item}" for item in list(contract.get("checklist") or [])[:8]
     )
-    target_line = (
-        f"\n目标记录：{task['targetRef']}" if task.get("targetRef") else ""
-    )
+    target_line = f"\n目标记录：{task['targetRef']}" if task.get("targetRef") else ""
     retry_line = (
         f"\n本任务是正式重试，上一任务：{task['retrySourceTaskId']}。"
         if task.get("formalRetry")
@@ -467,7 +478,11 @@ def _compact_smoke_run(value: Any) -> dict[str, Any] | None:
         if len(bounded_metrics) >= 32:
             break
     seed_value = record.get("seed")
-    seed = seed_value if isinstance(seed_value, int) and not isinstance(seed_value, bool) else None
+    seed = (
+        seed_value
+        if isinstance(seed_value, int) and not isinstance(seed_value, bool)
+        else None
+    )
     return {
         "resultId": result_id,
         "status": _text(record.get("status"), limit=80),
@@ -497,9 +512,7 @@ def _compact_experiment_plan(plan: dict[str, Any]) -> dict[str, Any]:
         if isinstance(plan.get("experimentPlan"), dict)
         else {}
     )
-    readiness = (
-        plan.get("readiness") if isinstance(plan.get("readiness"), dict) else {}
-    )
+    readiness = plan.get("readiness") if isinstance(plan.get("readiness"), dict) else {}
     validation = (
         plan.get("contractValidation")
         if isinstance(plan.get("contractValidation"), dict)
@@ -519,9 +532,7 @@ def _compact_experiment_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "status": _text(plan.get("status"), limit=80),
         "revision": _positive_int(plan.get("revision")),
         "researchQuestion": _text(
-            contract.get("researchQuestion")
-            or plan.get("goal")
-            or plan.get("topic"),
+            contract.get("researchQuestion") or plan.get("goal") or plan.get("topic"),
             limit=1200,
         ),
         "researchMode": _text(contract.get("researchMode"), limit=120),
@@ -791,7 +802,11 @@ def start_research_project_agent_task(
                 readiness["reason"],
                 code=readiness["code"],
             )
-    _member, agent = _resolve_role_agent(normalized_team_id, contract)
+    _member, agent = _resolve_role_agent(
+        normalized_team_id,
+        contract,
+        requested_agent_id=_text(request_payload.get("agentId")),
+    )
     agent_id = _text(agent.get("agentId"))
     target_ref = _safe_ref(request_payload.get("targetRef"), field_name="targetRef")
     idempotency_key = _text(request_payload.get("idempotencyKey"), limit=240)
@@ -822,8 +837,7 @@ def start_research_project_agent_task(
         active_for_agent = [
             item
             for item in tasks
-            if item.get("agentId") == agent_id
-            and item.get("status") in ACTIVE_STATUSES
+            if item.get("agentId") == agent_id and item.get("status") in ACTIVE_STATUSES
         ]
         previous_task: dict[str, Any] | None = None
         if formal_retry:
@@ -858,7 +872,10 @@ def start_research_project_agent_task(
             same_agent_tasks = [
                 item for item in tasks if item.get("agentId") == agent_id
             ]
-            if not same_agent_tasks or same_agent_tasks[-1].get("taskId") != retry_task_id:
+            if (
+                not same_agent_tasks
+                or same_agent_tasks[-1].get("taskId") != retry_task_id
+            ):
                 raise ResearchProjectAgentTaskError(
                     "Formal retry must reference the latest task for this project Agent.",
                     code="invalid_retry_source",
@@ -1056,11 +1073,7 @@ def update_research_project_agent_task_status(
         task["status"] = normalized_status
         task["resultRefs"] = normalized_refs
         task["failureCode"] = _text(failure_code, limit=120)
-        turn = (
-            task.get("turn")
-            if isinstance(task.get("turn"), dict)
-            else {}
-        )
+        turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
         if normalized_status in TERMINAL_STATUSES and turn:
             turn["status"] = normalized_status
             task["turn"] = turn
@@ -1103,14 +1116,11 @@ def get_research_project_agent_task_status(
             changed = False
             for task in store["tasks"]:
                 terminal = reconciled.get(task.get("taskId"))
-                if terminal is None or not _task_needs_session_reconciliation(
-                    task
-                ):
+                if terminal is None or not _task_needs_session_reconciliation(task):
                     continue
                 if (
                     task.get("status") == terminal["status"]
-                    and list(task.get("resultRefs") or [])
-                    == terminal["resultRefs"]
+                    and list(task.get("resultRefs") or []) == terminal["resultRefs"]
                     and _text(task.get("failureCode"), limit=120)
                     == terminal["failureCode"]
                 ):
@@ -1118,11 +1128,7 @@ def get_research_project_agent_task_status(
                 task["status"] = terminal["status"]
                 task["resultRefs"] = terminal["resultRefs"]
                 task["failureCode"] = terminal["failureCode"]
-                turn = (
-                    task.get("turn")
-                    if isinstance(task.get("turn"), dict)
-                    else {}
-                )
+                turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
                 turn["status"] = terminal["status"]
                 task["turn"] = turn
                 task["updatedAt"] = s.utc_now_iso()
@@ -1158,8 +1164,7 @@ def get_research_project_agent_task_status(
 def _task_needs_session_reconciliation(task: dict[str, Any]) -> bool:
     return task.get("status") in ACTIVE_STATUSES or (
         task.get("status") == "incomplete"
-        and _text(task.get("failureCode"), limit=120)
-        == "task_result_not_recorded"
+        and _text(task.get("failureCode"), limit=120) == "task_result_not_recorded"
     )
 
 
@@ -1257,9 +1262,7 @@ def _project_agent_task_result_refs(
         and _text(item.get("planId"))
     ]
     matching = [
-        item
-        for item in plans
-        if _text(item.get("createdFromTaskId")) == task_id
+        item for item in plans if _text(item.get("createdFromTaskId")) == task_id
     ]
     if not matching:
         with _TASK_LOCK:
@@ -1269,13 +1272,10 @@ def _project_agent_task_result_refs(
             for item in task_store["tasks"]
             if _text(item.get("agentId")) == agent_id
             and _text(item.get("taskId")) != task_id
-            and s._workflow_timestamp_sort_key(item.get("createdAt"))
-            > created_at
+            and s._workflow_timestamp_sort_key(item.get("createdAt")) > created_at
         ]
         next_task_created_at = (
-            min(later_same_agent_task_times)
-            if later_same_agent_task_times
-            else None
+            min(later_same_agent_task_times) if later_same_agent_task_times else None
         )
         matching = [
             item

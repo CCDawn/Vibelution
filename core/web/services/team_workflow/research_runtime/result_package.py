@@ -1,6 +1,6 @@
 """Durable research result package builder for workflow runs.
 
-The workflow graph records artifact refs (hash:...) but not package content.
+The workflow runtime records validated ArtifactManifest references, not package content.
 This module assembles the human-readable result package from the run record:
 decision history, promotion proposals, evaluation report refs and the official
 candidate. Building is idempotent (one package per run) and read-only on the

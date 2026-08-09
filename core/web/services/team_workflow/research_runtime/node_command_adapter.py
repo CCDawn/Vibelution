@@ -19,13 +19,17 @@ Current wiring:
 
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.models import ActorKind
 
-from .session_binding_bridge import SessionBindingBridge
+from .agent_node_execution import (
+    PROJECT_NODE_TASKS,
+    SOURCE_NODE_TASKS,
+    AgentNodeExecutionError,
+    start_agent_node_execution,
+)
 
 
 class NodeCommandUnavailable(Exception):
@@ -39,14 +43,6 @@ class NodeCommandError(Exception):
         super().__init__(message)
         self.code = code
 
-
-# research-project Agent task kinds per workflow primary role.
-TASK_KIND_BY_ROLE: dict[str, str] = {
-    "experiment_planner": "experiment_design",
-    "experiment_ledger": "experiment_evidence_review",
-    "iteration_planner": "iteration_decision",
-    "iteration_versioning": "version_governance",
-}
 
 def _node_spec(node_id: str) -> dict[str, Any] | None:
     definition = build_challenge_cup_workflow_definition()
@@ -71,33 +67,47 @@ def node_command_capabilities(
     actor_kind = str(node.get("actorKind") or "")
 
     if actor_kind == ActorKind.AGENT.value:
+        supplemental: list[dict[str, Any]] = []
         if node_id == "evidence_relations":
             from .evidence_graph_projection import evidence_graph_availability
 
             available, reason = evidence_graph_availability(record)
-            return [
-                {"command": "open_evidence_graph", "available": available, "reason": reason}
+            supplemental = [
+                {
+                    "command": "open_evidence_graph",
+                    "available": available,
+                    "reason": reason,
+                }
             ]
-        role = str(node.get("primaryRoleKey") or "")
-        if role not in TASK_KIND_BY_ROLE:
-            return []
+        if node_id not in SOURCE_NODE_TASKS and node_id not in PROJECT_NODE_TASKS:
+            return supplemental
         agent_id = _snapshot_agent_id(record, node_id)
         if not agent_id:
-            return [{
-                "command": "start_agent_task",
-                "available": False,
-                "reason": "节点尚未绑定 Agent，先完成绑定",
-            }]
+            return [
+                *supplemental,
+                {
+                    "command": "start_agent_task",
+                    "available": False,
+                    "reason": "节点尚未绑定 Agent，先完成绑定",
+                },
+            ]
         if not str(record.get("projectId") or "").strip():
-            return [{
-                "command": "start_agent_task",
-                "available": False,
-                "reason": "运行尚无 research project 上下文（缺少 projectId）",
-            }]
-        return [{"command": "start_agent_task", "available": True, "reason": ""}]
+            return [
+                *supplemental,
+                {
+                    "command": "start_agent_task",
+                    "available": False,
+                    "reason": "运行尚无 research project 上下文（缺少 projectId）",
+                },
+            ]
+        return [
+            *supplemental,
+            {"command": "start_agent_task", "available": True, "reason": ""},
+        ]
 
     if actor_kind == ActorKind.HUMAN.value and any(
-        str(task.get("nodeId") or "") == node_id and str(task.get("status") or "") == "pending"
+        str(task.get("nodeId") or "") == node_id
+        and str(task.get("status") or "") == "pending"
         for task in record.get("humanTasks") or []
         if isinstance(task, dict)
     ):
@@ -131,15 +141,25 @@ def apply_node_command(
     if node is None:
         raise NodeCommandError(f"Unknown nodeId: {node_id}", code="unknown_node")
     if command == "open_session":
-        raise NodeCommandUnavailable("会话入口必须通过节点详情中的精确链接打开", code="navigation_only")
+        raise NodeCommandUnavailable(
+            "会话入口必须通过节点详情中的精确链接打开", code="navigation_only"
+        )
     if command in {"accept_handoff", "reject_handoff", "revise"}:
-        raise NodeCommandUnavailable("人工任务必须通过人工任务接口处理", code="human_task_resolution_required")
+        raise NodeCommandUnavailable(
+            "人工任务必须通过人工任务接口处理", code="human_task_resolution_required"
+        )
     capability = next(
-        (item for item in node_command_capabilities(record, node_id) if item["command"] == command),
+        (
+            item
+            for item in node_command_capabilities(record, node_id)
+            if item["command"] == command
+        ),
         None,
     )
     if capability is None:
-        raise NodeCommandUnavailable("该命令不适用于当前节点", code="command_not_allowed_for_node")
+        raise NodeCommandUnavailable(
+            "该命令不适用于当前节点", code="command_not_allowed_for_node"
+        )
     if not capability["available"]:
         reason = str(capability["reason"] or "该命令当前不可用")
         code = (
@@ -151,7 +171,15 @@ def apply_node_command(
         )
         raise NodeCommandUnavailable(reason, code=code)
     if command == "start_agent_task":
-        return _start_agent_task(store, record, node, payload)
+        try:
+            return start_agent_node_execution(
+                store,
+                record=record,
+                node_id=node_id,
+                payload=payload,
+            )
+        except AgentNodeExecutionError as exc:
+            raise NodeCommandError(str(exc), code=exc.code) from exc
     if command == "run_smoke":
         return _run_smoke(record, payload)
     if command == "start_controlled_run":
@@ -170,7 +198,9 @@ def apply_node_command(
     raise NodeCommandError(f"Unknown node command: {command}", code="unknown_command")
 
 
-def _require_project(record: dict[str, Any], payload: dict[str, Any]) -> tuple[str, str]:
+def _require_project(
+    record: dict[str, Any], payload: dict[str, Any]
+) -> tuple[str, str]:
     team_id = str(record.get("teamId") or "").strip()
     # Project scope is frozen on the WorkflowRun. A command payload cannot
     # smuggle a different project into an existing run.
@@ -181,73 +211,6 @@ def _require_project(record: dict[str, Any], payload: dict[str, Any]) -> tuple[s
             code="no_project_context",
         )
     return team_id, project_id
-
-
-def _start_agent_task(
-    store: Any,
-    record: dict[str, Any],
-    node: dict[str, Any],
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    role = str(node.get("primaryRoleKey") or "")
-    task_kind = TASK_KIND_BY_ROLE.get(role)
-    if not task_kind:
-        raise NodeCommandUnavailable(
-            f"角色 {role} 尚无对应的 research project Agent task kind",
-            code="no_task_kind",
-        )
-    team_id, project_id = _require_project(record, payload)
-    node_id = str(node.get("nodeId") or "")
-    if not _snapshot_agent_id(record, node_id):
-        raise NodeCommandUnavailable(
-            f"节点 {node_id} 未绑定 Agent，无法启动任务",
-            code="unbound_node",
-        )
-
-    from core.web.services.team_workflow.research_project_agent_tasks import (
-        start_research_project_agent_task,
-    )
-
-    started = start_research_project_agent_task(
-        team_id,
-        project_id,
-        {
-            "taskKind": task_kind,
-            "idempotencyKey": str(payload.get("idempotencyKey") or f"wf-{node_id}-{uuid.uuid4().hex[:8]}"),
-            "returnTo": f"/teams?researchView=workflow&runId={record.get('runId')}&node={node_id}&returnLabel=workflow",
-            "returnLabel": "workflow",
-            "targetRef": str(payload.get("targetRef") or "") or f"run:{record.get('runId')}:node:{node_id}",
-        },
-    )
-    task = started.get("task") or {}
-    turn = task.get("turn") or {}
-    turn_id = str(turn.get("turnId") or started.get("startedTurnId") or "")
-
-    bridge = SessionBindingBridge(store)
-    node_attempts = record.get("nodeAttempts") if isinstance(record.get("nodeAttempts"), dict) else {}
-    binding = bridge.put(
-        record,
-        node_id,
-        {
-            "agentId": str(task.get("agentId") or ""),
-            "roleKey": role,
-            "nodeRunId": f"nr-{node_id}",
-            "nodeAttempt": int(node_attempts.get(node_id) or 1),
-            "sessionId": str(started.get("sessionId") or task.get("sessionId") or ""),
-            "sessionAttempt": int(started.get("sessionAttempt") or task.get("sessionAttempt") or 1),
-            "taskId": str(task.get("taskId") or ""),
-            "turnId": turn_id,
-            "checkpointId": str(payload.get("checkpointId") or ""),
-            "supersedesBindingId": str(payload.get("supersedesBindingId") or ""),
-        },
-    )
-    return {
-        "command": "start_agent_task",
-        "taskId": str(task.get("taskId") or ""),
-        "taskKind": task_kind,
-        "chatRoute": started.get("chatRoute") or "",
-        "sessionBinding": binding,
-    }
 
 
 def _run_smoke(record: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -266,7 +229,9 @@ def _run_smoke(record: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any
     return {"command": "run_smoke", "smoke": result}
 
 
-def _start_controlled_run(record: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def _start_controlled_run(
+    record: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
     team_id, _project_id = _require_project(record, payload)
     plan_id = str(payload.get("planId") or "").strip()
     if not plan_id:
@@ -301,7 +266,9 @@ def _build_package(
     package = build_result_package(record)
     run_id = str(record.get("runId") or "")
     stored = record.get("resultPackage")
-    if not (isinstance(stored, dict) and stored.get("packageId") == package["packageId"]):
+    if not (
+        isinstance(stored, dict) and stored.get("packageId") == package["packageId"]
+    ):
         store.update_run(
             run_id,
             {
