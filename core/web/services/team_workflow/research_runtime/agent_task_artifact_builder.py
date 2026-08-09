@@ -9,6 +9,9 @@ from core.research.workflow.definition import build_challenge_cup_workflow_defin
 from core.research.workflow.models import WorkflowNodeSpec
 
 from .human_gate_artifacts import canonical_sha256
+from .source_extraction_evidence_cards import (
+    build_source_extraction_evidence_cards,
+)
 
 
 def _unique_text(values: list[object]) -> list[str]:
@@ -90,43 +93,10 @@ def _source_finding_payload(
 
 def _source_extraction_payload(task: dict[str, Any]) -> dict[str, Any]:
     result = dict(task.get("result") or {})
-    extractions = [
-        dict(item)
-        for key in ("candidateExtractions", "recordExtractions")
-        for item in result.get(key) or []
-        if isinstance(item, dict)
-    ]
-    cards: list[dict[str, Any]] = []
-    for item in extractions:
-        locator = item.get("citationLocator")
-        if not isinstance(locator, dict):
-            raw_locator = (
-                item.get("evidenceRef")
-                or item.get("sourceRef")
-                or item.get("locator")
-                or item.get("doi")
-                or ""
-            )
-            locator = {"locator": str(raw_locator)} if raw_locator else {}
-        cards.append(
-            {
-                **item,
-                "sourceId": str(
-                    item.get("candidateId")
-                    or item.get("recordId")
-                    or item.get("sourceId")
-                    or ""
-                ),
-                "claim": str(
-                    item.get("claim")
-                    or item.get("conclusion")
-                    or item.get("summary")
-                    or ""
-                ),
-                "citationLocator": locator,
-            }
-        )
-    return {**result, "evidenceCards": cards}
+    return {
+        **result,
+        "evidenceCards": build_source_extraction_evidence_cards(result),
+    }
 
 
 def _evidence_relations_payload(task: dict[str, Any]) -> dict[str, Any]:
@@ -203,7 +173,7 @@ def build_agent_task_artifacts(
     tool_hash = canonical_sha256(
         {
             "adapter": "external_agent_task_reconciliation",
-            "adapterVersion": 1,
+            "adapterVersion": 2,
             "workflowVersionId": record["workflowVersionId"],
         }
     )
