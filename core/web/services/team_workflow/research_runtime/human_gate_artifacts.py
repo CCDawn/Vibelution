@@ -30,6 +30,7 @@ def build_human_gate_artifacts(
     decision: str,
     resolved_by: str,
     created_at: str,
+    gate_context: dict[str, Any] | None = None,
 ) -> tuple[list[ArtifactManifest], dict[str, dict[str, Any]]]:
     payload_base = {
         "runId": record["runId"],
@@ -39,6 +40,7 @@ def build_human_gate_artifacts(
         "decision": decision,
         "resolvedBy": resolved_by,
         "sourceArtifactIds": source_artifact_ids,
+        **(gate_context or {}),
     }
     config_hash = canonical_sha256(
         {

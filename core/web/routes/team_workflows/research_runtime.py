@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import HTTPException, Query
+from fastapi import Header, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from core.web.services.team_workflow.research_runtime.event_stream import (
+    iter_workflow_sse,
+    parse_last_event_id,
+)
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
     get_research_workflow_runtime_service,
@@ -200,6 +205,34 @@ def research_workflow_events(
         return _svc().list_events(run_id, after_sequence=after_sequence)
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
+
+
+@router.get("/research/workflow-runs/{run_id}/stream")
+def research_workflow_event_stream(
+    run_id: str,
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    try:
+        parse_last_event_id(last_event_id)
+        _svc().get_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_event_cursor", "message": str(exc)},
+        ) from exc
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+    return StreamingResponse(
+        iter_workflow_sse(
+            lambda: _svc().get_run(run_id),
+            last_event_id=last_event_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/research/workflow-runs/{run_id}/handoffs")

@@ -51,6 +51,7 @@ from .human_task_resolution import (
 from .human_task_resolution import (
     resolve_human_task as resolve_human_task_transition,
 )
+from .iteration_revision_fork import fork_iteration_revision
 from .iteration_transition import (
     apply_iteration_decision_side_effects,
     find_decision_by_idempotency,
@@ -409,7 +410,14 @@ class ResearchWorkflowRuntimeService:
         display_name = ""
         if snap.get("agentId"):
             display_name = _agent_display_name(str(snap["agentId"]))
-        commands = node_command_capabilities(record, node_id)
+        research_ledger = (
+            self.get_research_ledger(run_id) if node_id == "result_package" else None
+        )
+        commands = node_command_capabilities(
+            record,
+            node_id,
+            research_ledger=research_ledger,
+        )
         if node.actorKind is ActorKind.AGENT:
             commands.append(
                 {
@@ -745,13 +753,6 @@ class ResearchWorkflowRuntimeService:
                 return self.get_run(run_id)
 
         payload = payload or {}
-        if command == "iteration_decision":
-            return self.apply_iteration_decision(
-                run_id,
-                payload,
-                idempotency_key=idempotency_key or str(payload.get("idempotencyKey") or ""),
-                decided_by=str(payload.get("decidedBy") or ""),
-            )
         if command == "cancel":
             record = self._store.update_run(run_id, {"status": "cancelled", "runtimeCurrentNodeIds": []})
         elif command == "retry_node":
@@ -857,13 +858,36 @@ class ResearchWorkflowRuntimeService:
                         payload=payload or {},
                     )
                 if command == "complete_execution":
-                    return complete_node_execution(
+                    completed = complete_node_execution(
                         self._store,
                         checkpoint_path=self._checkpoint_path,
                         run_id=run_id,
                         node_id=node_id,
                         payload=payload or {},
                     )
+                    if node_id == "iteration_decision":
+                        decision = next(
+                            (
+                                dict(item)
+                                for item in reversed(
+                                    completed.get("iterationDecisions") or []
+                                )
+                                if isinstance(item, dict)
+                            ),
+                            None,
+                        )
+                        if (
+                            decision is not None
+                            and decision.get("decisionKind") == "revise_protocol"
+                        ):
+                            fork_iteration_revision(
+                                self._store,
+                                self._checkpoint_path,
+                                parent=completed,
+                                decision=decision,
+                            )
+                            return self.get_run(run_id)
+                    return completed
                 if command == "reconcile_execution":
                     return reconcile_expired_execution(
                         self._store,
@@ -888,12 +912,19 @@ class ResearchWorkflowRuntimeService:
                     payload={**(payload or {}), "nodeId": node_id},
                 )
             try:
+                research_ledger = (
+                    self.get_research_ledger(run_id)
+                    if command == "build_package"
+                    else None
+                )
                 result = apply_node_command(
                     store=self._store,
+                    checkpoint_path=self._checkpoint_path,
                     record=record,
                     node_id=node_id,
                     command=command,
                     payload=payload,
+                    research_ledger=research_ledger,
                 )
             except NodeCommandUnavailable as exc:
                 raise ResearchWorkflowError(str(exc), code=exc.code) from exc

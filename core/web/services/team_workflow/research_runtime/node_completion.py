@@ -30,12 +30,12 @@ from .successor_records import build_successor_records
 from .task_bundle_lifecycle import complete_task_bundle_records
 
 
-def _artifact_snapshot_hash(manifests: list[ArtifactManifest]) -> str:
-    payload = [
-        {"artifactId": item.artifactId, "contentHash": item.contentHash}
-        for item in manifests
-    ]
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+def _artifact_ref_snapshot_hash(refs: list[dict[str, Any]]) -> str:
+    raw = json.dumps(
+        refs,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -200,28 +200,31 @@ def complete_node_execution(
         raise NodeExecutionError(str(exc), code=exc.code) from exc
 
     definition = build_challenge_cup_workflow_definition()
-    completed_ids = [
-        item["nodeId"]
-        for item in record.get("nodeRuns") or []
-        if item.get("status") == "succeeded"
-    ]
+    completed_ids = list(record.get("completedNodeIds") or [])
+    for item in record.get("nodeRuns") or []:
+        if item.get("status") == "succeeded" and item.get("nodeId") not in completed_ids:
+            completed_ids.append(item["nodeId"])
     if node_id not in completed_ids:
         completed_ids.append(node_id)
+    state_patch: dict[str, Any] = {
+        "current_node_id": node_id,
+        "completed_node_ids": completed_ids,
+        "artifact_refs": [item.artifactId for item in manifests],
+        "artifacts": {
+            item.artifactId.split(":", 1)[0]: item.contentHash for item in manifests
+        },
+    }
+    if "iterationDecision" in quality_records:
+        state_patch["iteration_decision"] = quality_records["iterationDecision"]
+    if node_id == "controlled_run":
+        state_patch["controlled_run_attempt"] = int(validated_node_run["attempt"])
     checkpoint_id, next_node_ids = advance_checkpoint(
         checkpoint_path,
         thread_id=record["threadId"],
         checkpoint_id=(record.get("langGraph") or {}).get("checkpointId") or "",
         completed_node_id=node_id,
-        state_patch={
-            "current_node_id": node_id,
-            "completed_node_ids": completed_ids,
-            "artifacts": {
-                item.artifactId.split(":", 1)[0]: item.contentHash for item in manifests
-            },
-        },
+        state_patch=state_patch,
     )
-    input_hash = _artifact_snapshot_hash(manifests)
-
     def mutation(current: dict[str, Any]) -> dict[str, Any]:
         if any(
             item.get("idempotencyKey") == idempotency_key
@@ -253,6 +256,47 @@ def complete_node_execution(
             }
             for item in manifests
         ]
+        outgoing_edge = next(
+            (
+                edge
+                for edge in definition.edges
+                if edge.fromNodeId == node_id and edge.toNodeId in next_node_ids
+            ),
+            None,
+        )
+        all_manifests = [
+            *(dict(item) for item in current.get("artifactManifests") or []),
+            *(item.to_dict() for item in manifests),
+        ]
+        if outgoing_edge is not None:
+            existing_kinds = {item["kind"] for item in output_refs}
+            for required_kind in outgoing_edge.requiredArtifactKinds:
+                if required_kind in existing_kinds:
+                    continue
+                source = next(
+                    (
+                        item
+                        for item in reversed(all_manifests)
+                        if str(item.get("artifactId") or "").split(":", 1)[0]
+                        == required_kind
+                    ),
+                    None,
+                )
+                if source is None:
+                    raise NodeExecutionError(
+                        f"outgoing handoff requires {required_kind}",
+                        code="required_artifact_missing",
+                    )
+                output_refs.append(
+                    {
+                        "artifactId": source["artifactId"],
+                        "kind": required_kind,
+                        "version": source["schemaVersion"],
+                        "contentHash": source["contentHash"],
+                    }
+                )
+                existing_kinds.add(required_kind)
+        successor_input_hash = _artifact_ref_snapshot_hash(output_refs)
         successor_runs, handoff, human_task = build_successor_records(
             current,
             definition=definition,
@@ -260,7 +304,7 @@ def complete_node_execution(
             from_node_run_id=current_node_run["nodeRunId"],
             next_node_ids=next_node_ids,
             checkpoint_id=checkpoint_id,
-            input_hash=input_hash,
+            input_hash=successor_input_hash,
             output_artifact_refs=output_refs,
             now=now,
             accepted_by="system",
@@ -286,6 +330,31 @@ def complete_node_execution(
             completed_at=now,
         )
         transition_events: list[dict[str, Any]] = []
+        for manifest in manifests:
+            event_record = {
+                **current,
+                "events": [
+                    *(current.get("events") or []),
+                    *transition_events,
+                ],
+            }
+            transition_events.append(
+                build_event(
+                    event_record,
+                    workflowId=current["workflowId"],
+                    workflowVersionId=current["workflowVersionId"],
+                    checkpointId=checkpoint_id,
+                    nodeId=node_id,
+                    nodeRunId=current_node_run["nodeRunId"],
+                    attempt=current_node_run["attempt"],
+                    type="ArtifactProduced",
+                    summary={
+                        "artifactId": manifest.artifactId,
+                        "contentHash": manifest.contentHash,
+                    },
+                    artifactRefs=[manifest.artifactId],
+                )
+            )
         for reuse_record in reuse_records:
             event_record = {
                 **current,
@@ -387,6 +456,59 @@ def complete_node_execution(
                 artifactRefs=[item.artifactId for item in manifests],
             )
         )
+        iteration_decisions = list(current.get("iterationDecisions") or [])
+        if "iterationDecision" in quality_records and not any(
+            item.get("decisionId")
+            == quality_records["iterationDecision"].get("decisionId")
+            for item in iteration_decisions
+        ):
+            iteration_decisions.append(quality_records["iterationDecision"])
+        governance_records = list(current.get("versionGovernanceRecords") or [])
+        official_version = dict(current.get("officialVersion") or {})
+        proposed_version = dict(current.get("proposedVersion") or {})
+        promotion_proposals = list(current.get("promotionProposals") or [])
+        official_candidate_ref = str(current.get("officialCandidateRef") or "")
+        completion_kind = str(current.get("completionKind") or "")
+        terminal_reason = str(current.get("terminalReason") or "")
+        if "versionGovernance" in quality_records:
+            governance = dict(quality_records["versionGovernance"])
+            governance_records.append(governance)
+            governed_version = {
+                "versionId": governance["versionId"],
+                "candidateRef": governance["candidateRef"],
+                "status": governance["status"],
+                "operation": governance["operation"],
+                "decisionId": governance["decisionId"],
+                "governedAt": governance.get("governedAt") or now,
+            }
+            if governance["status"] == "official":
+                official_version = governed_version
+                official_candidate_ref = governance["candidateRef"]
+                completion_kind = (
+                    "rolled_back"
+                    if governance["operation"] == "rollback"
+                    else "stopped"
+                )
+                terminal_reason = str(governance.get("terminalReason") or "")
+            else:
+                proposed_version = governed_version
+                proposal_id = f"proposal:{governed_version['versionId']}"
+                if not any(
+                    item.get("proposalId") == proposal_id
+                    for item in promotion_proposals
+                ):
+                    promotion_proposals.append(
+                        {
+                            "proposalId": proposal_id,
+                            "runId": run_id,
+                            "decisionId": governance["decisionId"],
+                            "operation": "promote",
+                            "targetCandidateRef": governance["candidateRef"],
+                            "versionId": governance["versionId"],
+                            "status": "pending_human",
+                            "createdAt": governance.get("governedAt") or now,
+                        }
+                    )
         return {
             **current,
             "status": (
@@ -436,6 +558,14 @@ def complete_node_execution(
                     else []
                 ),
             ],
+            "iterationDecisions": iteration_decisions,
+            "versionGovernanceRecords": governance_records,
+            "officialVersion": official_version,
+            "proposedVersion": proposed_version,
+            "promotionProposals": promotion_proposals,
+            "officialCandidateRef": official_candidate_ref,
+            "completionKind": completion_kind,
+            "terminalReason": terminal_reason,
             "handoffs": handoffs,
             "humanTasks": human_tasks,
             "taskBundles": task_bundles,
@@ -460,6 +590,16 @@ def complete_node_execution(
                 **(current.get("langGraph") or {}),
                 "checkpointId": checkpoint_id,
                 "completedNodeIds": completed_ids,
+                **(
+                    {"iterationDecision": quality_records["iterationDecision"]}
+                    if "iterationDecision" in quality_records
+                    else {}
+                ),
+                **(
+                    {"controlledRunAttempt": int(validated_node_run["attempt"])}
+                    if node_id == "controlled_run"
+                    else {}
+                ),
             },
         }
 
