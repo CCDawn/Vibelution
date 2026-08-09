@@ -283,6 +283,63 @@ def test_source_task_review_disposition_defers_to_passed_artifact_gates(
     assert completed["runtimeCurrentNodeIds"] == ["source_extraction"]
 
 
+def test_quality_gate_failure_settles_agent_budget_before_blocking(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = ResearchWorkflowRuntimeService(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={"source_finder": "agent-source-finder"}
+        ),
+        idempotency_key="create-agent-quality-failure-budget",
+    )
+    terminal = _terminal_source_task()
+    terminal["result"]["candidateLeads"] = terminal["result"][
+        "candidateLeads"
+    ][:1]
+    terminal["result"]["materializedSources"].update(
+        {
+            "sourceLeadCount": 1,
+            "createdRecordCount": 1,
+            "createdRecords": terminal["result"]["materializedSources"][
+                "createdRecords"
+            ][:1],
+            "importedCandidateCount": 1,
+            "importedCandidates": terminal["result"]["materializedSources"][
+                "importedCandidates"
+            ][:1],
+        }
+    )
+    terminal["materializedSources"] = terminal["result"]["materializedSources"]
+    observed_status = {"value": "running"}
+    _start_source_node(service, run, terminal, observed_status, monkeypatch)
+    observed_status["value"] = "needs_review"
+
+    blocked = service.get_run(run["runId"])
+    replay = service.get_run(run["runId"])
+
+    source_run = next(
+        item for item in blocked["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
+    assert source_run["status"] == "blocked"
+    assert source_run["failureCode"] == "quality_gate_failed"
+    assert blocked["budgetReservations"][0]["status"] == "settled"
+    assert blocked["budgetReservations"][0]["actual"] == {
+        "tokens": 90,
+        "toolCalls": 2,
+        "wallClockSeconds": 10,
+    }
+    assert len(
+        [event for event in replay["events"] if event["type"] == "BudgetSettled"]
+    ) == 1
+
+
 def test_completed_task_recovers_one_internal_reconciliation_failure(
     tmp_path: Path,
     monkeypatch,
