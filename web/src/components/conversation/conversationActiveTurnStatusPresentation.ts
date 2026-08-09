@@ -1,7 +1,6 @@
-/**
- * Compact active-turn stage labels + heartbeat copy (W1).
- * Pure helpers only: no React / timers.
- */
+import type { SessionTurnItem } from "../../api/types";
+
+/** Compact active-turn stage labels + heartbeat copy. Pure helpers only. */
 
 export type ActiveTurnStageBarPhase = "sent" | "prepare" | "request" | "thinking";
 
@@ -13,12 +12,7 @@ export const ACTIVE_TURN_STAGE_BAR_PHASES: readonly ActiveTurnStageBarPhase[] = 
 ] as const;
 
 export type ActiveTurnStatusMessageLike = {
-  streamStage?: string | null;
-  feedbackEvents?: Array<{
-    kind?: string | null;
-    name?: string | null;
-    status?: string | null;
-  }> | null;
+  turnItems?: readonly SessionTurnItem[] | null;
 };
 
 function compactText(value: unknown) {
@@ -30,19 +24,18 @@ function normalizeStage(value: unknown) {
 }
 
 export function resolveActiveTurnProgressStage(message: ActiveTurnStatusMessageLike): string {
-  const streamStage = normalizeStage(message.streamStage);
-  if (streamStage) {
-    return streamStage;
-  }
-  const events = message.feedbackEvents ?? [];
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (normalizeStage(event?.kind) !== "status") {
-      continue;
+  const items = [...(message.turnItems ?? [])]
+    .sort((left, right) => left.sequence - right.sequence || left.revision - right.revision);
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item?.type === "status" && normalizeStage(item.code)) {
+      return normalizeStage(item.code);
     }
-    const name = normalizeStage(event?.name);
-    if (name) {
-      return name;
+    if (item?.type === "retry") {
+      return "model_retry";
+    }
+    if (item?.type === "tool_call" && item.status === "running") {
+      return "tool_running";
     }
   }
   return "running";
@@ -128,7 +121,7 @@ export function activeTurnStageLabel(stage: string, lang: "zh" | "en" | string) 
   }
 }
 
-/** Short durable-ish summary for optimistic feedbackEvents. */
+/** Short durable summary for the optimistic status TurnItem. */
 export function activeTurnOptimisticStageSummary(stage: string, lang: "zh" | "en" | string = "zh") {
   const zh = lang !== "en";
   switch (normalizeStage(stage)) {

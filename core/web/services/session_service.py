@@ -250,6 +250,7 @@ from .session.worker import (
     _session_context_internal_auto_continue_max_turns,
 )
 from .session.persist import (
+    _append_missing_canonical_result_items,
     _ensure_session_turn_terminal_fallback,
     _persist_session_turn_failure,
     _persist_session_turn_result,
@@ -263,6 +264,7 @@ from core.web.services.session.control import (
     _build_stopped_turn_result,
 )
 from core.web.services.session.agent_sessions import (
+    reset_all_agent_test_conversations,
     stage_agent_session_purge,
     commit_staged_agent_session_purge,
     restore_staged_agent_session_purge,
@@ -892,6 +894,7 @@ from core.web.services.session.projection import (
     _session_detail_messages_with_window,
     _session_detail_window_requested,
     _build_session_turn_items_projection,
+    _canonicalize_session_turn_items_for_protocol,
     _stamp_turn_items_message_id,
     _slim_session_turn_items_for_window_payload,
     _build_codex_transcript_from_turn_items,
@@ -950,8 +953,6 @@ from core.web.services.session.publish import (
     _publish_session_assistant_delta,
     _merge_session_assistant_delta_events,
     _coalesce_session_assistant_delta_queue,
-    _session_assistant_delta_feedback_event_key,
-    _merge_session_assistant_delta_feedback_events,
     _put_session_stream_event,
     _drop_session_stream_event_for_room,
     _assistant_delta_recovery_stream_event,
@@ -1001,6 +1002,9 @@ retry_pending_agent_session_purge_cleanup = session_agent_lifecycle_serialized(
     retry_pending_agent_session_purge_cleanup
 )
 commit_staged_agent_session_purge = session_agent_lifecycle_serialized(commit_staged_agent_session_purge)
+reset_all_agent_test_conversations = session_agent_lifecycle_serialized(
+    reset_all_agent_test_conversations
+)
 
 
 _RUNNING_SESSIONS_LOCK = threading.Lock()

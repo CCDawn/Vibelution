@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
+import { assistantTurnIsStreaming } from "../../routes/chatTurnProtocol";
 import type { AgentMessageRenderState } from "./agentMessageRenderState";
 
 function renderStateForScrollSignal(
@@ -27,7 +28,8 @@ export function buildTimelineScrollSignal(
       const processSignal = options.includeMentalSignals === false
         ? renderState.processSignalWithoutMental
         : renderState.processSignal;
-      const contentSignal = message.streaming
+      const streaming = assistantTurnIsStreaming(message);
+      const contentSignal = streaming
         ? ""
         : renderState.renderedTextLength;
       const metadataSignal = message.metadata
@@ -44,7 +46,7 @@ export function buildTimelineScrollSignal(
         contentSignal,
         processSignal,
         metadataSignal,
-        message.streaming ? 1 : 0,
+        streaming ? 1 : 0,
       ].join(":");
     })
     .join("|");
@@ -56,7 +58,7 @@ export function buildStreamingTimelineScrollSignal(
   options: TimelineScrollSignalOptions = {},
 ) {
   return messages
-    .filter((message) => message.streaming)
+    .filter(assistantTurnIsStreaming)
     .map((message) => {
       const renderState = renderStateForScrollSignal(message, agentRenderStatesByMessageId);
       const processSignal = options.includeMentalSignals === false

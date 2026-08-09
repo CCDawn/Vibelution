@@ -129,62 +129,6 @@ describe("AgentThreadView", () => {
     expect(html).toContain("历史会话");
     expect(html).toContain("分析 Agent");
   });
-
-  it("renders model retry status in the process section without exposing setup noise", () => {
-    const assistantMessage: ConversationMessage = {
-      id: "assistant-pipeline-status",
-      role: "assistant",
-      content: "最终回答",
-      timestamp: "2026-07-08T09:10:00Z",
-      feedbackEvents: [
-        {
-          sequence: 1,
-          kind: "status",
-          status: "running",
-          name: "context_prepare",
-          summary: "正在准备对话上下文...",
-        },
-        {
-          sequence: 2,
-          kind: "status",
-          status: "running",
-          name: "model_request",
-          summary: "正在请求模型，等待首个响应片段...",
-        },
-        {
-          sequence: 3,
-          kind: "status",
-          status: "running",
-          name: "retrying",
-          summary: "模型连接正在重试...",
-          resultPreview: "第 2/5 次；原因：server_error。本轮仍在继续，请不要重复提交。",
-        },
-        {
-          sequence: 4,
-          kind: "tool",
-          status: "done",
-          name: "read_file_tool",
-          summary: "读取 AgentThreadView",
-        },
-      ],
-    };
-    const html = renderThread({
-      id: "thread-pipeline-status",
-      source: { kind: "session", id: "session-pipeline-status" },
-      status: "streaming",
-      messages: [conversationMessageToAgentMessage(assistantMessage)],
-    });
-
-    expect(html).toContain("read_file_tool");
-    expect(html).toContain("最终回答");
-    expect(html).not.toContain("context_prepare");
-    expect(html).not.toContain("model_request");
-    expect(html).toContain("retrying");
-    expect(html).not.toContain("正在准备对话上下文");
-    expect(html).not.toContain("正在请求模型");
-    expect(html).toContain("模型连接正在重试");
-  });
-
   it("renders message parts through stable process, content, and context sections", () => {
     const html = renderThread({
       id: "thread-sections",

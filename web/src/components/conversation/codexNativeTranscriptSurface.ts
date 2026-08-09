@@ -25,14 +25,10 @@ import {
   settleCodexTranscriptActiveStatuses,
 } from "./codexTranscriptCells";
 import {
-  nativeAnswerOwnsProjectedContent,
-  visibleNativeFinalAnswerText,
+  codexTranscriptFromTurnItems,
+  finalAnswerTextFromTurnItems,
 } from "../../routes/chatTurnProtocol";
 import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
-import {
-  answerProjectionContent,
-  isNoFinalAnswerStatusContent,
-} from "./conversationInternalStatus";
 import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
 
 export type CodexTranscriptSurfaceMode = "native" | "empty";
@@ -49,7 +45,7 @@ export type CodexTranscriptProjectionGap = {
 
 export type CodexTranscriptSurface = {
   mode: CodexTranscriptSurfaceMode;
-  source: "message.codexTranscript" | "none";
+  source: "turnItems" | "none";
   cells: CodexTranscriptCell[];
   hasAssistantMarkdown: boolean;
   suppressProjectedProcess: boolean;
@@ -64,14 +60,7 @@ type NativeToolLifecycleModelInput = Partial<
 >;
 
 export function hasUsableNativeCodexTranscript(message: ConversationMessage) {
-  const transcript = message.codexTranscript;
-  return Boolean(
-    message.role === "assistant"
-    && transcript
-    && String(transcript.source ?? "").trim() === "native"
-    && Array.isArray(transcript.cells)
-    && transcript.cells.length > 0,
-  );
+  return message.role === "assistant" && message.turnItems.length > 0;
 }
 
 /** True when native assistant_markdown already owns a displayable final answer. */
@@ -84,43 +73,30 @@ export function nativeAssistantMarkdownCoversProjectedAnswer(
     && Boolean(cell.text?.trim())
     && String(cell.phase ?? "").trim().toLowerCase() !== "commentary"
   ));
-  const hasExplicitFinalCell = answerCells.some((cell) => {
-    const phase = String(cell.phase ?? "").trim().toLowerCase();
-    return phase === "final_answer" || cell.terminal === true;
-  });
   const nativeAnswer = answerCells
     .map((cell) => String(cell.text ?? "").trim())
     .filter(Boolean)
     .join("\n\n");
-  return nativeAnswerOwnsProjectedContent(nativeAnswer, projectedAnswer, { hasExplicitFinalCell });
+  return Boolean(nativeAnswer) && (
+    !projectedAnswer
+    || nativeAnswer === projectedAnswer
+    || nativeAnswer.includes(projectedAnswer)
+    || projectedAnswer.includes(nativeAnswer)
+  );
 }
 
 export function resolveCodexTranscriptSurface(
   message: ConversationMessage,
   projectedCells: CodexTranscriptCell[] = [],
 ): CodexTranscriptSurface {
-  if (hasUsableNativeCodexTranscript(message)) {
-    const transcript = message.codexTranscript as CodexTranscriptProjection;
+  if (message.role === "assistant" && hasUsableNativeCodexTranscript(message)) {
+    const transcript = codexTranscriptFromTurnItems(message.turnItems);
     const cells = codexNativeTranscriptToCells(transcript, {
-      turnStreaming: Boolean(message.streaming),
+      turnStreaming: message.status === "running",
     });
     const hasAssistantMarkdown = cells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim()));
-    const projectedAnswer = String(answerProjectionContent(message) ?? "").trim();
-    const nativeFinalAnswer = visibleNativeFinalAnswerText(transcript);
-    const hasExplicitFinalCell = cells.some((cell) => (
-      cell.kind === "assistant_markdown"
-      && Boolean(cell.text?.trim())
-      && (
-        String(cell.phase ?? "").trim().toLowerCase() === "final_answer"
-        || cell.terminal === true
-      )
-    ));
-    const nativeCoversProjectedAnswer = nativeAnswerOwnsProjectedContent(
-      nativeFinalAnswer,
-      projectedAnswer,
-      { hasExplicitFinalCell },
-    );
-    const hasNoFinalAnswerStatus = isNoFinalAnswerStatusContent(String(message.content ?? ""));
+    const projectedAnswer = finalAnswerTextFromTurnItems(message.turnItems);
+    const nativeCoversProjectedAnswer = nativeAssistantMarkdownCoversProjectedAnswer(cells, projectedAnswer);
     // Only suppress the outer process rail when process is actually rendered as cells.
     // Lifecycle metadata alone must not hide feedback/timeline tools (would drop the process UI).
     const hasNativeProcessProjection = hasNativeProcessCells(cells);
@@ -135,7 +111,7 @@ export function resolveCodexTranscriptSurface(
       || (hasAssistantMarkdown && nativeCoversProjectedAnswer);
     return {
       mode: "native",
-      source: "message.codexTranscript",
+      source: "turnItems",
       cells,
       hasAssistantMarkdown,
       // Codex order: process cells then final inside the surface. Outer processNode is
@@ -143,7 +119,7 @@ export function resolveCodexTranscriptSurface(
       suppressProjectedProcess: hasNativeProcessProjection,
       suppressProjectedResponse,
       suppressProjectedTurnStatus: suppressProjectedError
-        || (hasNoFinalAnswerStatus ? false : suppressProjectedResponse || hasNativeProcessProjection || hasLifecycleHints),
+        || suppressProjectedResponse || hasNativeProcessProjection || hasLifecycleHints,
       suppressProjectedError,
     };
   }
@@ -377,14 +353,8 @@ function normalizeLifecycleStatus(status: string | undefined): CodexToolLifecycl
 }
 
 function nativeTranscriptProjectionGapReason(message: ConversationMessage): CodexTranscriptProjectionGapReason {
-  if (!message.codexTranscript) {
+  if (message.role !== "assistant" || message.turnItems.length === 0) {
     return "native_missing";
   }
-  if (message.role !== "assistant" || String(message.codexTranscript.source ?? "").trim() !== "native") {
-    return "native_unusable";
-  }
-  if (!Array.isArray(message.codexTranscript.cells) || message.codexTranscript.cells.length === 0) {
-    return "native_empty";
-  }
-  return "native_unusable";
+  return "native_empty";
 }

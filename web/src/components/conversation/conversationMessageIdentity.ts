@@ -15,6 +15,9 @@ export function conversationMessageMetadataText(
 }
 
 export function conversationMessageTurnId(message: ConversationMessage) {
+  if (message.role === "assistant" && message.turnId.trim()) {
+    return message.turnId.trim();
+  }
   return conversationMessageMetadataText(message.metadata, "turnId").replace(/^live:/, "");
 }
 

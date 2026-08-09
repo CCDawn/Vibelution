@@ -826,8 +826,12 @@ def test_session_conversation_event_append_failure_is_not_silent(monkeypatch):
         raise OSError("ledger unavailable")
 
     recorded: list[tuple[tuple, dict]] = []
-    monkeypatch.setattr(session_service, "append_conversation_event", fail_append)
-    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+    monkeypatch.setattr(session_service._journal_bridge, "append_conversation_event", fail_append)
+    monkeypatch.setattr(
+        session_service._journal_bridge,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
 
     with pytest.raises(OSError, match="ledger unavailable"):
         session_service._append_session_conversation_event(
@@ -861,7 +865,16 @@ def test_session_detail_messages_replay_ledger_before_legacy_messages(tmp_path, 
     )
 
     messages = session_service._messages_with_live_output("session-visible")
-    contents = [str(item.get("content") or "") for item in messages]
+    contents = [
+        "\n".join(
+            str(turn_item.get("text") or "")
+            for turn_item in list(item.get("turnItems") or [])
+            if str(turn_item.get("type") or "") in {"agent_message", "error"}
+        )
+        if item.get("role") == "assistant"
+        else str(item.get("content") or "")
+        for item in messages
+    ]
 
     assert "ledger 用户事实" in contents
     assert "ledger 助手事实" in contents
@@ -911,10 +924,21 @@ def test_session_detail_live_overlay_replaces_open_ledger_partial(tmp_path, monk
             session_service._SESSION_LIVE_OUTPUTS.clear()
             session_service._SESSION_LIVE_OUTPUTS.update(previous_live_outputs)
 
-    contents = [str(item.get("content") or "") for item in messages]
+    contents = [
+        str(item.get("content") or "")
+        if item.get("role") == "user"
+        else "\n".join(
+            str(turn_item.get("text") or "")
+            for turn_item in item.get("turnItems") or []
+            if turn_item.get("type") == "agent_message"
+        )
+        for item in messages
+    ]
     assert "开始执行" in contents
     assert "live 执行中内容" in contents
     assert "ledger 执行中内容" not in contents
+    live_message = next(item for item in messages if item.get("role") == "assistant")
+    assert all(field not in live_message for field in ("content", "thought", "streaming", "streamStage", "toolCalls", "feedbackEvents", "timelineItems", "codexTranscript"))
     assert len(
         [
             item

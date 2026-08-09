@@ -359,6 +359,200 @@ def commit_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> d
     return result
 
 
+def reset_all_agent_test_conversations() -> dict[str, Any]:
+    """Permanently clear every Agent-owned test conversation without deleting Agents.
+
+    This is an explicit maintenance boundary, not an archive workflow: the caller has
+    already declared the conversation domain disposable.  Agent definitions, model
+    bindings, team membership, knowledge, and research artifacts are intentionally
+    left in place.  The operation refuses active turns, removes every Agent-owned
+    root/child conversation, clears direct-session bindings and inbox wake records,
+    then destroys only the matching session workspaces.
+    """
+    s = _service()
+    timestamp = s._now_timestamp()
+    agents = s.agent_directory_service.list_agents(include_archived=True, detail="full")
+    agent_ids = {
+        str(agent.get("agentId") or "").strip()
+        for agent in agents
+        if str(agent.get("agentId") or "").strip()
+    }
+    direct_session_ids = {
+        str(agent.get("directSessionId") or "").strip()
+        for agent in agents
+        if str(agent.get("directSessionId") or "").strip()
+    }
+    session_ids: list[str] = []
+    payload_before: dict[str, Any] | None = None
+    direct_bindings_before: dict[str, str] = {}
+
+    with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            conversations = []
+        selected = set(direct_session_ids)
+        for conversation in conversations:
+            if not isinstance(conversation, dict):
+                continue
+            session_id = str(conversation.get("conversation_id") or "").strip()
+            agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+            if session_id and agent_id in agent_ids:
+                selected.add(session_id)
+        changed = True
+        while changed:
+            changed = False
+            for conversation in conversations:
+                if not isinstance(conversation, dict):
+                    continue
+                session_id = str(conversation.get("conversation_id") or "").strip()
+                if not session_id or session_id in selected:
+                    continue
+                parent_id = str(conversation.get("parent_session_id") or conversation.get("parentSessionId") or "").strip()
+                root_id = str(conversation.get("root_session_id") or conversation.get("rootSessionId") or "").strip()
+                if parent_id in selected or root_id in selected:
+                    selected.add(session_id)
+                    changed = True
+        session_ids = [
+            str(conversation.get("conversation_id") or "").strip()
+            for conversation in conversations
+            if isinstance(conversation, dict)
+            and str(conversation.get("conversation_id") or "").strip() in selected
+        ]
+        for session_id in session_ids:
+            normalized = s._normalize_conversation(
+                next(
+                    item
+                    for item in conversations
+                    if isinstance(item, dict)
+                    and str(item.get("conversation_id") or "").strip() == session_id
+                ),
+                ensure_workspace=False,
+                lightweight=True,
+            ) or {"id": session_id}
+            if s._conversation_phase(session_id, normalized) in {"queued", "running", "stopping", "paused"}:
+                raise s.SessionBusyError(
+                    f"Session {session_id} is still active; finish or stop it before resetting test conversations."
+                )
+        payload_before = s.copy.deepcopy(payload)
+        payload["conversations"] = [
+            item
+            for item in conversations
+            if not isinstance(item, dict)
+            or str(item.get("conversation_id") or "").strip() not in selected
+        ]
+        remaining_ids = [
+            str(item.get("conversation_id") or "").strip()
+            for item in payload["conversations"]
+            if isinstance(item, dict) and str(item.get("conversation_id") or "").strip()
+        ]
+        payload["active_conversation_id"] = remaining_ids[0] if remaining_ids else ""
+        payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
+        payload["updated_at"] = timestamp
+        s.save_chat_state(s.PROJECT_ROOT, payload)
+
+    workspace_moves: list[dict[str, str]] = []
+    staging_roots: list[Path] = []
+    inbox_paths: list[Path] = []
+    try:
+        for session_id in session_ids:
+            s._set_session_running(session_id, False)
+            s._clear_session_turn_control(session_id)
+            s._clear_session_live_output(session_id)
+            s._invalidate_session_agent_runtime_cache(session_id)
+            s._invalidate_session_conversation_events_cache(session_id)
+        for agent in agents:
+            agent_id = str(agent.get("agentId") or "").strip()
+            direct_session_id = str(agent.get("directSessionId") or "").strip()
+            # A direct binding is conversation-domain state even when an old
+            # catalog/index row was already missing.  Leaving it would let the
+            # directory materialize that disposable session again on first read.
+            if agent_id and direct_session_id:
+                direct_bindings_before[agent_id] = direct_session_id
+                s.update_agent_instance(agent_id, direct_session_id="")
+            inbox_path = s.agent_directory_service._agent_workspace_event_path(
+                agent,
+                "agent_inbox_messages.jsonl",
+            )
+            if inbox_path.exists():
+                inbox_paths.append(inbox_path)
+
+        nonce = s.secrets.token_hex(6)
+        for sessions_root in s._agent_session_workspace_roots():
+            staging_root = s._agent_session_purge_staging_root(
+                sessions_root,
+                agent_id="all-agent-test-conversations",
+                nonce=nonce,
+            )
+            staging_roots.append(staging_root)
+            s._write_agent_session_purge_manifest(
+                staging_root,
+                {
+                    "version": 1,
+                    "transactionId": nonce,
+                    "agentId": "all-agent-test-conversations",
+                    "state": "staged",
+                    "sessionIds": session_ids,
+                    "workspaceMoves": [],
+                    "updatedAt": s._now_timestamp(),
+                },
+            )
+            for session_id in session_ids:
+                source = (sessions_root / s._safe_session_workspace_token(session_id)).resolve()
+                if not source.is_relative_to(sessions_root) or not source.exists():
+                    continue
+                staging_root.mkdir(parents=True, exist_ok=True)
+                destination = (staging_root / source.name).resolve()
+                if not destination.is_relative_to(staging_root):
+                    raise s.SessionValidationError(f"Invalid staged session workspace path: {destination}")
+                shutil.move(str(source), str(destination))
+                workspace_moves.append({"source": str(source), "staged": str(destination)})
+        for inbox_path in inbox_paths:
+            inbox_path.unlink()
+    except Exception:
+        for move in reversed(workspace_moves):
+            try:
+                s._restore_staged_agent_workspace_move(move)
+            except Exception:
+                pass
+        for agent_id, direct_session_id in direct_bindings_before.items():
+            try:
+                s.update_agent_instance(agent_id, direct_session_id=direct_session_id)
+            except Exception:
+                pass
+        if payload_before is not None:
+            with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+                s.save_chat_state(s.PROJECT_ROOT, payload_before)
+        raise
+
+    cleanup = s.commit_staged_agent_session_purge({
+        "agentId": "all-agent-test-conversations",
+        "sessionIds": session_ids,
+        "workspaceMoves": workspace_moves,
+        "stagingRoots": [str(path) for path in staging_roots],
+    })
+    s._invalidate_session_list_cache()
+    result = {
+        **cleanup,
+        "agentBindingsCleared": len(direct_bindings_before),
+        "inboxRecordsCleared": len(inbox_paths),
+        "historyRetention": "deleted",
+    }
+    s._record_agent_session_lifecycle_event(
+        "agent_test_conversations_reset",
+        "conversation.agent_sessions.test_domain_reset",
+        outcome="partial" if bool(result.get("cleanupPending")) else "succeeded",
+        level="warning" if bool(result.get("cleanupPending")) else "info",
+        fields={
+            "deletedSessionCount": len(session_ids),
+            "agentBindingsCleared": len(direct_bindings_before),
+            "inboxRecordsCleared": len(inbox_paths),
+            "workspaceDeletedCount": int(result.get("workspaceDeletedCount") or 0),
+        },
+    )
+    return result
+
+
 def restore_staged_agent_session_purge(restore_token: dict[str, Any] | None) -> dict[str, Any]:
     s = _service()
     token = restore_token if isinstance(restore_token, dict) else {}

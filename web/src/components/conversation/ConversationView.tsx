@@ -72,9 +72,12 @@ import {
 } from "./conversationSlashCommandSuggestions";
 import { buildAgentMessageRenderState, type AgentMessageRenderState } from "./agentMessageRenderState";
 import {
-  filterServerTimelineItemsForDisplayPlan,
   resolveAssistantDisplayPlan,
 } from "./assistantDisplayPlan";
+import {
+  assistantFinalAnswerText,
+  assistantTurnIsStreaming,
+} from "../../routes/chatTurnProtocol";
 import {
   compactStreamingStatusPlaceholder,
   isInternalStreamingStatusStage,
@@ -748,21 +751,17 @@ export function ConversationView({
     const itemsByMessageId = new Map<string, AgentMessageTimelineItem[]>();
     for (const agentMessage of agentThread.messages) {
       const operations = agentOperationGroupsByMessageId.get(agentMessage.id)?.timeline ?? [];
-      const sourceMessage = activeConversationMessagesById.get(agentMessage.source.id);
-      const serverTimelineItems = sourceMessage?.timelineItems;
-      const timelineHasAssistantText = (serverTimelineItems ?? []).some((item) => item.kind === "assistant_text");
       itemsByMessageId.set(
         agentMessage.id,
         buildAgentMessageTimelineItems(
           agentMessage,
           operations,
-          { lang, includeAssistantText: timelineHasAssistantText },
-          serverTimelineItems,
+          { lang, includeAssistantText: false },
         ),
       );
     }
     return itemsByMessageId;
-  }, [activeConversationMessagesById, agentOperationGroupsByMessageId, agentThread, lang]);
+  }, [agentOperationGroupsByMessageId, agentThread, lang]);
   const agentCodexSurfacesByMessageId = useMemo(() => {
     const surfacesByMessageId = new Map<string, CodexTranscriptSurface>();
     for (const agentMessage of agentThread.messages) {
@@ -1362,7 +1361,7 @@ export function ConversationView({
         (message) => {
           const agentRenderState = agentRenderStatesByMessageId.get(message.id);
           return message.role === "assistant"
-            && !message.streaming
+            && !assistantTurnIsStreaming(message)
             && Boolean(agentRenderState?.sectionState.hasResponseBlock);
         },
       )
@@ -1379,7 +1378,7 @@ export function ConversationView({
       }
       const message = prewarmMessages[index];
       if (message) {
-        getCachedResponseSegments(message.content);
+        getCachedResponseSegments(assistantFinalAnswerText(message));
       }
       index += 1;
       if (index < prewarmMessages.length) {
@@ -1861,7 +1860,7 @@ export function ConversationView({
     if (items.length === 0) {
       return null;
     }
-    const activeItemId = activeAgentMessageTimelineItemId(message, items);
+    const activeItemId = activeAgentMessageTimelineItemId({ streaming: assistantTurnIsStreaming(message) }, items);
     return (
       <div
         className={styles.conversationCellTimeline}
@@ -1882,7 +1881,7 @@ export function ConversationView({
     const visibleCells = dedupeCodexTranscriptCellsForDisplay(
       settleCodexTranscriptActiveStatuses(
         cells.filter((cell) => cell.kind !== "user"),
-        { turnStreaming: Boolean(message.streaming) },
+        { turnStreaming: assistantTurnIsStreaming(message) },
       ),
     );
     if (visibleCells.length === 0) {
@@ -1949,7 +1948,7 @@ export function ConversationView({
             language={lang === "en" ? "en" : "zh"}
             messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
-            turnStreaming={Boolean(message.streaming)}
+            turnStreaming={assistantTurnIsStreaming(message)}
           >
             {/* Approvals stay composer-adjacent only (toolApprovalFallback); never re-attach into process rows. */}
             {renderTimelineNodes(processCells, { attachToolApproval: false })}
@@ -1987,7 +1986,7 @@ export function ConversationView({
   ) {
     return resolveShouldRenderCompactActiveTurnPlaceholder({
       role: message.role,
-      streaming: Boolean(message.streaming),
+      streaming: assistantTurnIsStreaming(message),
       showResponseBlock: options.showResponseBlock,
       hasFeedbackTimeline: options.hasFeedbackTimeline,
       hasActiveProcess: options.hasActiveProcess,
@@ -2029,7 +2028,7 @@ export function ConversationView({
           data-codex-transcript-cell-phase={cell.phase ?? ""}
           data-conversation-part-key={cell.id}
         >
-          {message.streaming ? renderStreamingResponseText(text) : renderResponseText(text, imageArtifactUrlsBeforeMessage.get(message.id))}
+          {assistantTurnIsStreaming(message) ? renderStreamingResponseText(text) : renderResponseText(text, imageArtifactUrlsBeforeMessage.get(message.id))}
         </section>
       );
     }
@@ -2242,7 +2241,7 @@ export function ConversationView({
     if (!fullText) {
       return null;
     }
-    const isLive = input.status === "running" || input.status === "pending" || Boolean(message.streaming);
+    const isLive = input.status === "running" || input.status === "pending" || assistantTurnIsStreaming(message);
     const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
     return (
       <section
@@ -2680,7 +2679,7 @@ export function ConversationView({
           <div className={styles.codexTranscriptReasoningTextButton}>
             <ThoughtScrollBody
               text={item.text}
-              streaming={item.status === "running" || item.status === "pending" || Boolean(message.streaming)}
+              streaming={item.status === "running" || item.status === "pending" || assistantTurnIsStreaming(message)}
             />
           </div>
         ) : null}
@@ -3353,7 +3352,7 @@ export function ConversationView({
   }
 
   function shouldExpandToolGroupByDefault(message: ConversationMessage, operations: AgentMessageOperation[]) {
-    return Boolean(message.streaming)
+    return assistantTurnIsStreaming(message)
       || operations.some((operation) => operation.kind === "tool" && (operation.rawLabel ?? operation.label) === COMPUTER_USE_TOOL_NAME);
   }
 
@@ -3485,7 +3484,7 @@ export function ConversationView({
       hasResponseBlock: sectionState.hasResponseBlock,
       answerText: sectionState.answerText,
       hasFeedbackTimeline,
-      streaming: Boolean(message.streaming),
+      streaming: assistantTurnIsStreaming(message),
       segments: getCachedResponseSegments(sectionState.answerText),
     });
   }
@@ -3825,24 +3824,20 @@ export function ConversationView({
             const displayPlanSeed = resolveAssistantDisplayPlan({
               message,
               surface: codexTranscriptSurface,
-              serverTimelineItems: message.timelineItems,
             });
             const shouldRenderLegacyTurnError = Boolean(
               turnErrorMessage && !displayPlanSeed.suppressProjectedError,
             );
             const timelineOptions = {
               lang,
-              includeAssistantText: displayPlanSeed.includeTimelineAssistantText,
+              // The assistant body always comes from the canonical cell surface.
+              // Do not manufacture a second answer row in the process timeline.
+              includeAssistantText: false,
             };
-            const timelineServerItems = filterServerTimelineItemsForDisplayPlan(
-              message.timelineItems,
-              displayPlanSeed,
-            );
             const agentMessageTimelineItems = buildAgentMessageTimelineItems(
               agentMessage,
               operationGroups.timeline,
               timelineOptions,
-              timelineServerItems as typeof message.timelineItems | undefined,
             );
             const hasAgentMessageTimeline =
               message.role === "assistant"
@@ -3854,23 +3849,17 @@ export function ConversationView({
             const displayPlan = resolveAssistantDisplayPlan({
               message,
               surface: codexTranscriptSurface,
-              serverTimelineItems: message.timelineItems,
-              builtTimelineItems: agentMessageTimelineItems,
-              hasAgentMessageTimeline,
             });
-            // Package/native ownership never lets timeline re-own the final body.
-            const timelineRendersAssistantText = displayPlan.renderMode === "legacy"
-              && displayPlan.timelineOwnsFinalAnswer;
-            const shouldRenderNativeProcessTimeline = displayPlan.shouldRenderNativeProcessAlongsideAnswer;
+            const timelineRendersAssistantText = false;
             const showUserContent = agentSections.hasUserContent;
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
-            const isStreamingStatusPlaceholder = Boolean(message.streaming)
+            const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
               && showResponseBlock
               && answerOnlyProcessMode
               && isStreamingStatusPlaceholderContent(responseText);
-            const isResponseStreaming = Boolean(message.streaming) && showResponseBlock && !isStreamingStatusPlaceholder;
+            const isResponseStreaming = assistantTurnIsStreaming(message) && showResponseBlock && !isStreamingStatusPlaceholder;
             const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
-            const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
+            const defaultResponseExpanded = assistantTurnIsStreaming(message) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
             const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming
               ? getCachedResponseSegments(responseText)
@@ -3923,13 +3912,13 @@ export function ConversationView({
                   message.id,
                   "thought",
                   operationGroups.thoughts,
-                  defaultExpandedOverride ?? Boolean(message.streaming),
+                  defaultExpandedOverride ?? assistantTurnIsStreaming(message),
                 )}
                 {renderAgentMentalPanel(
                   message.id,
                   latestAgentMentalPart(processSections),
                   defaultExpandedOverride,
-                  Boolean(message.streaming) && operationGroups.tools.length === 0 && !agentSections.hasResponseBlock,
+                  assistantTurnIsStreaming(message) && operationGroups.tools.length === 0 && !agentSections.hasResponseBlock,
                 )}
                 {renderOperationGroup(
                   message.id,
@@ -3948,70 +3937,24 @@ export function ConversationView({
               }
               return renderAgentProcessDetails(true);
             };
-            // package_cells / native_transcript: final body lives in codex cells only.
-            const responseSectionNode = (
-              displayPlan.renderMode === "legacy"
-              && !displayPlan.suppressProjectedResponse
-              && showResponseBlock
-              && !isStreamingStatusPlaceholder
-              && !timelineRendersAssistantText
-            ) ? (
-              <AgentResponseSectionView
-                answerKey={rowIdentity.answerKey}
-                answerContentSectionIds={agentRenderState.answerContentSectionIds}
-                expanded={responseExpanded}
-                label={t("responseLabel")}
-                expandedTitle={t("responseHidden")}
-                collapsedTitle={t("responseVisible")}
-                showSpinner={showResponseSpinner}
-                forceBodyVisible={shouldForceResponseBodyVisible}
-                onToggle={() => toggleSection(message.id, "response", defaultResponseExpanded)}
-              >
-                {isResponseStreaming
-                  ? renderStreamingResponseText(responseText)
-                  : responseSegments.map((segment) =>
-                    renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)),
-                  )}
-              </AgentResponseSectionView>
-            ) : null;
-            // Process rail: suppressed when cells already carry tools; otherwise timeline/legacy.
+            // One assistant turn has one display source: its local turnItems cell surface.
+            const responseSectionNode = null;
+            // The fallback process rail is only useful while a future producer has
+            // not emitted a canonical cell yet. It never receives assistant text.
             const processNode = displayPlan.suppressProjectedProcess
               ? null
-              : shouldRenderNativeProcessTimeline
-                ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
-                : displayPlan.renderMode === "package_cells"
-                  // Package answer is in cells; only render non-answer process timeline if any.
-                  ? (
-                    hasAgentMessageTimeline
-                      ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
-                      : hasFeedbackTimeline
-                        ? renderFeedbackTimelineGroup(
-                          message.id,
-                          operationGroups.timeline,
-                          false,
-                          agentRenderState.processSectionIds,
-                        )
-                        : null
-                  )
-                  : answerOnlyProcessMode && !timelineRendersAssistantText
-                    ? renderAnswerOnlyProcessGroup(
+              : displayPlan.renderMode === "turn_items"
+                ? null
+                : hasAgentMessageTimeline
+                  ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
+                  : hasFeedbackTimeline
+                    ? renderFeedbackTimelineGroup(
                       message.id,
                       operationGroups.timeline,
-                      processDefaultExpanded,
-                      renderProcessDetails,
-                      isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(responseText, compactPreview) : undefined,
+                      false,
                       agentRenderState.processSectionIds,
                     )
-                    : hasAgentMessageTimeline
-                      ? renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
-                      : hasFeedbackTimeline
-                        ? renderFeedbackTimelineGroup(
-                          message.id,
-                          operationGroups.timeline,
-                          false,
-                          agentRenderState.processSectionIds,
-                        )
-                        : renderAgentProcessDetails();
+                    : null;
             const turnStatusNode = !displayPlan.suppressProjectedTurnStatus && noFinalAnswerStatusText ? (
               <div className={styles.turnStatusNote} role="status" aria-live="polite">
                 <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
@@ -4117,7 +4060,7 @@ export function ConversationView({
                         {agentInboxPreview ? <span className={styles.agentInboxPreview}>{agentInboxPreview}</span> : null}</VButton>
                       {agentInboxExpanded ? (
                         <div className={styles.agentInboxMessageBody}>
-                          {renderResponseText(message.content)}
+                          {renderResponseText(assistantFinalAnswerText(message))}
                         </div>
                       ) : null}
                     </section>
@@ -4127,7 +4070,7 @@ export function ConversationView({
                     </AgentUserContentSectionView>
                   ) : null}
                   {groupTranscriptMessage ? (
-                    <div className={styles.groupTranscriptBody}>{renderResponseText(message.content)}</div>
+                    <div className={styles.groupTranscriptBody}>{renderResponseText(assistantFinalAnswerText(message))}</div>
                   ) : null}
                   {contextNode}
 
@@ -4151,7 +4094,7 @@ export function ConversationView({
                           <span>{lang === "zh" ? "运行提示" : "Runtime notice"}</span>
                           {resolveConversationTurnErrorType(message) ? <span>{resolveConversationTurnErrorType(message)}</span> : null}
                         </div>
-                        <div className={styles.turnErrorNoticeText}>{renderResponseText(message.content)}</div>
+                        <div className={styles.turnErrorNoticeText}>{renderResponseText(assistantFinalAnswerText(message))}</div>
                         {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
                           <details className={styles.turnErrorDiagnostics}>
                             <summary className={styles.turnErrorDiagnosticsSummary}>

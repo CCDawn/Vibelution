@@ -950,6 +950,15 @@ def session_turn_items_from_events(
             item["callId"] = call_id
         if str(payload.get("toolName") or ""):
             item["toolName"] = str(payload.get("toolName"))
+        if str(payload.get("code") or ""):
+            item["code"] = str(payload.get("code"))
+        item_metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        if item_metadata:
+            item["metadata"] = dict(item_metadata)
+        if str(payload.get("input") or ""):
+            item["input"] = str(payload.get("input"))
+        if str(payload.get("output") or ""):
+            item["output"] = str(payload.get("output"))
         if call_id and tool_summaries.get(call_id) and not str(item.get("summary") or "").strip():
             item["summary"] = tool_summaries[call_id]
         diagnostic_summary = dict(payload.get("diagnosticSummary") or {})

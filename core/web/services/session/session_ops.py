@@ -400,8 +400,11 @@ def _codex_transcript_operation_sources(
     sources: list[dict[str, Any]] = []
     for event in feedback_events:
         source = dict(event)
-        if s._is_non_diagnostic_runtime_status_source(source):
-            continue
+        # A status is not presentation-only anymore: the public assistant
+        # contract exposes one ordered TurnItem stream.  Retaining this event
+        # here lets a live ``context_prepare``/``model_request`` transition
+        # travel through that same stream instead of disappearing with the
+        # retired feedbackEvents envelope.
         source["_operationId"] = s._codex_operation_id(message_id, source, len(sources) + 1)
         source["_sourceKind"] = "feedback"
         sources.append(source)

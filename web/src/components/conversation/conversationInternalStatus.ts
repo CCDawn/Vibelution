@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
+import { assistantFinalAnswerText, assistantStatusTurnItems } from "../../routes/chatTurnProtocol";
 
 const STREAMING_STATUS_CONTENT_MARKERS = [
   "正在准备对话上下文",
@@ -88,14 +89,15 @@ export function isInternalStreamingStatusStage(stage: unknown) {
 }
 
 export function messageHasInternalStreamingStatusContent(message: ConversationMessage) {
-  if (message.role !== "assistant" || !message.content) {
-    return false;
-  }
-  return isInternalStreamingStatusContent(message.content);
+  return assistantStatusTurnItems(message)
+    .some((item) => isInternalStreamingStatusContent(item.type === "retry" ? item.reason : item.text));
 }
 
 export function answerProjectionContent(message: ConversationMessage) {
-  return messageHasInternalStreamingStatusContent(message) ? "" : message.content;
+  if (message.role === "user") {
+    return message.content;
+  }
+  return messageHasInternalStreamingStatusContent(message) ? "" : assistantFinalAnswerText(message);
 }
 
 function compactProjectionKey(value: unknown) {

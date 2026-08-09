@@ -204,43 +204,12 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
         timestamp = str(state.updated_at or "").strip() or s._now_timestamp()
     if not thought and not content and mental_snapshot is None and not tool_calls and not feedback_events:
         return None
-    message: dict[str, Any] = {
-        "id": s._live_assistant_message_id(session_id, turn_id),
-        "role": "assistant",
-        "content": content,
-        "timestamp": timestamp,
-        "streaming": True,
-        "metadata": {
-            "kind": "session_live_overlay",
-            "turnId": turn_id,
-            "ledgerSeq": s._session_ledger_sequence(session_id),
-        },
-    }
-    if stage:
-        message["streamStage"] = stage
-    if thought:
-        message["thought"] = thought
-    if mental_snapshot is not None:
-        message["mentalSnapshot"] = mental_snapshot
-    if tool_calls:
-        message["toolCalls"] = tool_calls
-    if feedback_events:
-        message["feedbackEvents"] = feedback_events
-    timeline_items = s._build_message_timeline_items(
-        message_id=message["id"],
-        content=content,
-        feedback_events=feedback_events,
-        streaming=True,
-        include_assistant_text=not any(
-            str(event.get("kind") or "").strip() == "assistant_text"
-            for event in feedback_events
-        ),
-    )
-    if timeline_items:
-        message["timelineItems"] = timeline_items
-    # Build process transcript first; turnItems package then owns the answer cells track.
+    message_id = s._live_assistant_message_id(session_id, turn_id)
+    # Input capture may still be incremental while a provider is streaming, but
+    # its public projection is one assistant turn package, never a parallel
+    # content/thought/tool/timeline envelope.
     codex_transcript = s._build_codex_transcript_projection(
-        message_id=message["id"],
+        message_id=message_id,
         content=content,
         feedback_events=feedback_events,
         tool_calls=tool_calls,
@@ -249,28 +218,28 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
     turn_items = s._build_session_turn_items_projection(
         session_id=session_id,
         turn_id=turn_id,
-        message_id=message["id"],
+        message_id=message_id,
         content=content,
         thought=thought,
+        mental_snapshot=mental_snapshot,
         codex_transcript=codex_transcript,
         done=False,
         source="session_live_overlay",
         stage=stage,
     )
-    if turn_items:
-        message["turnItems"] = turn_items
-        derived_transcript = s._build_codex_transcript_from_turn_items(
-            message_id=message["id"],
-            turn_items=turn_items,
-            streaming=True,
-        )
-        if derived_transcript:
-            message["codexTranscript"] = derived_transcript
-        elif codex_transcript:
-            message["codexTranscript"] = codex_transcript
-    elif codex_transcript:
-        message["codexTranscript"] = codex_transcript
-    return message
+    return {
+        "id": message_id,
+        "role": "assistant",
+        "timestamp": timestamp,
+        "turnId": turn_id,
+        "status": "running",
+        "turnItems": turn_items,
+        "metadata": {
+            "kind": "session_live_overlay",
+            "turnId": turn_id,
+            "ledgerSeq": s._session_ledger_sequence(session_id),
+        },
+    }
 
 
 def _set_session_live_output(

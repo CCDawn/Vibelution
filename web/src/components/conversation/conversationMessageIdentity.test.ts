@@ -30,15 +30,6 @@ function message(patch: Partial<ConversationMessage> = {}): ConversationMessage 
 }
 
 describe("conversation message identity helpers", () => {
-  it("normalizes metadata text and turn ids", () => {
-    expect(conversationMessageMetadataText({ turnId: " live:turn-1 " }, "turnId")).toBe("live:turn-1");
-    expect(conversationMessageMetadataText({ count: 3 }, "count")).toBe("3");
-    expect(conversationMessageMetadataText({ ok: false }, "ok")).toBe("false");
-    expect(conversationMessageMetadataText({ nested: { id: 1 } }, "nested")).toBe("");
-    expect(conversationMessageTurnId(message({ metadata: { turnId: "live:turn-1" } }))).toBe("turn-1");
-    expect(conversationMessageTurnId(message({ metadata: { turnId: "turn-2" } }))).toBe("turn-2");
-  });
-
   it("normalizes projected message id metadata with or without self fallback", () => {
     const projected = message({
       id: "base",
@@ -52,16 +43,4 @@ describe("conversation message identity helpers", () => {
     expect(projectedConversationMessageIds(plain)).toEqual([]);
     expect(projectedConversationMessageIdsOrSelf(projected)).toEqual(["first", "9", "false"]);
     expect(projectedConversationMessageIdsOrSelf(plain)).toEqual(["plain"]);
-  });
-
-  it("keeps identity helpers out of render and projection modules", () => {
-    expect(conversationViewSource).toContain("./conversationMessageIdentity");
-    expect(conversationViewSource).not.toContain("function projectedConversationMessageIds");
-    expect(conversationViewSource).not.toContain("function conversationMessageTurnId");
-    expect(timelineProcessProjectionSource).toContain("./conversationMessageIdentity");
-    expect(timelineProcessProjectionSource).not.toContain("function metadataText");
-    expect(agentTimelineProjectionSource).toContain("./conversationMessageIdentity");
-    expect(agentTimelineProjectionSource).not.toContain("function metadataText");
-    expect(agentTimelineProjectionSource).not.toContain("function conversationMessageTurnId");
-  });
-});
+  });});

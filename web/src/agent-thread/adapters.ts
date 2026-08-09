@@ -1,15 +1,14 @@
-import type { ConversationMessage } from "../api/types";
-import { answerProjectionContent } from "../components/conversation/conversationInternalStatus";
-import { shouldDisplayRuntimeStatus } from "../components/conversation/conversationDisplayProtocol";
-import { mergeAgentFeedbackEvents, type AgentFeedbackEvent } from "./agentFeedbackEvents";
+import type { ConversationMessage, SessionTurnItem } from "../api/types";
 import type {
   AgentMentalPart,
+  AgentMentalSnapshot,
   AgentMessage,
   AgentMessagePart,
   AgentRuntimeEventPart,
   AgentThoughtPart,
   AgentToolCallPart,
 } from "./types";
+import { isInternalStreamingStatusContent, isInternalStreamingStatusStage } from "../components/conversation/conversationInternalStatus";
 
 export function conversationMessageToAgentMessage(message: ConversationMessage): AgentMessage {
   const parts = conversationMessageToAgentParts(message);
@@ -17,8 +16,8 @@ export function conversationMessageToAgentMessage(message: ConversationMessage):
     id: message.id,
     role: message.role,
     createdAt: message.timestamp,
-    streaming: Boolean(message.streaming),
-    turnId: messageTurnId(message),
+    streaming: message.role === "assistant" && message.status === "running",
+    turnId: message.role === "assistant" ? message.turnId : messageTurnId(message),
     source: {
       kind: "conversation-message",
       id: message.id,
@@ -38,178 +37,137 @@ export function conversationMessageToAgentParts(message: ConversationMessage): A
     ];
   }
 
-  return [
-    ...processPartsForAssistantMessage(message),
-    ...textPartForMessage(message),
-    ...attachmentPartsForMessage(message),
-    ...referencePartsForMessage(message),
-  ];
+  return assistantTurnItemsToAgentParts(message.turnItems);
 }
 
-function processPartsForAssistantMessage(message: ConversationMessage): AgentMessagePart[] {
-  if (message.role !== "assistant") {
-    return [];
-  }
-  const feedbackParts = feedbackPartsForMessage(message);
-  return [
-    ...feedbackParts,
-    ...activeTurnThoughtPartForMessage(message, feedbackParts),
-  ];
-}
-
-function feedbackPartsForMessage(message: ConversationMessage): AgentMessagePart[] {
-  return mergeAgentFeedbackEvents(message.feedbackEvents)
-    .sort((left, right) => normalizedSequence(left.sequence) - normalizedSequence(right.sequence))
-    .map((event, index) => feedbackEventToAgentPart(message, event, index))
-    .filter((part): part is AgentMessagePart => part !== null);
-}
-
-function activeTurnThoughtPartForMessage(
-  message: ConversationMessage,
-  feedbackParts: AgentMessagePart[],
-): AgentThoughtPart[] {
-  if (message.metadata?.kind !== "session_active_turn_layer") {
-    return [];
-  }
-  if (feedbackParts.some((part) => part.type === "thought")) {
-    return [];
-  }
-  const thought = compactText(message.thought);
-  if (!thought || isInternalThoughtPlaceholder(thought, thought)) {
-    return [];
-  }
-  return [{
-    id: `${message.id}-thought`,
-    type: "thought",
-    text: thought,
-    summary: thought,
-    status: assistantStatus(message),
-  }];
-}
-
-function feedbackEventToAgentPart(
-  message: ConversationMessage,
-  event: AgentFeedbackEvent,
-  index: number,
-): AgentMessagePart | null {
-  const id = `${message.id}-feedback-${event.sequence || index + 1}`;
-  if (event.kind === "thought") {
-    const text = compactText(event.resultPreview ?? event.summary);
-    const summary = compactText(event.summary);
-    if (!text || isInternalThoughtPlaceholder(text, summary)) {
-      return null;
-    }
-    return text
-      ? {
-          id,
+function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): AgentMessagePart[] {
+  return [...items]
+    .sort((left, right) => left.sequence - right.sequence || left.revision - right.revision)
+    .flatMap((item): AgentMessagePart[] => {
+      if (item.type === "status" && (
+        isInternalStreamingStatusStage(item.code)
+        || isInternalStreamingStatusContent(item.text)
+      )) {
+        return [];
+      }
+      if (item.type === "agent_message") {
+        return item.text.trim() ? [{
+          id: item.id,
+          type: "text",
+          channel: "answer",
+          text: item.text,
+        }] : [];
+      }
+      if (item.type === "reasoning") {
+        return item.text.trim() && !isInternalThoughtPlaceholder(item.text, item.summary ?? "") ? [{
+          id: item.id,
           type: "thought",
-          text,
-          summary,
-          status: event.status || assistantStatus(message),
-          sequence: event.sequence || undefined,
-          timestamp: event.timestamp,
-        }
-      : null;
-  }
-  if (event.kind === "mental") {
-    return {
-      id,
-      type: "mental",
-      status: event.status || assistantStatus(message),
-      summary: compactText(event.summary ?? event.resultPreview),
-      sequence: event.sequence || undefined,
-      timestamp: event.timestamp,
-    } satisfies AgentMentalPart;
-  }
-  if (event.kind === "tool") {
-    return toolEventToAgentPart(id, event);
-  }
-  return runtimeEventToAgentPart(message, id, event);
+          text: item.text,
+          summary: item.summary,
+          status: item.status,
+          sequence: item.sequence,
+          timestamp: item.updatedAt ?? item.createdAt,
+        } satisfies AgentThoughtPart] : [];
+      }
+      if (item.type === "status" && item.code === "mental_snapshot") {
+        return [{
+          id: item.id,
+          type: "mental",
+          status: item.status,
+          snapshot: mentalSnapshotFromTurnItem(item.metadata?.mentalSnapshot),
+          summary: item.text || item.summary || "",
+          sequence: item.sequence,
+          timestamp: item.updatedAt ?? item.createdAt,
+        } satisfies AgentMentalPart];
+      }
+      if (item.type === "tool_call") {
+        return [{
+          id: item.id,
+          type: "tool-call",
+          name: item.toolName,
+          status: item.status,
+          summary: item.summary,
+          resultPreview: item.output,
+          sequence: item.sequence,
+          timestamp: item.updatedAt ?? item.createdAt,
+          source: "feedback-event",
+        } satisfies AgentToolCallPart];
+      }
+      const retry = item.type === "retry";
+      return [{
+        id: item.id,
+        type: "runtime-event",
+        kind: "status",
+        name: retry ? "model_retry" : item.type === "error" ? item.code : item.code,
+        status: item.status,
+        summary: retry ? item.reason : item.text,
+        error: item.type === "error" ? item.text : undefined,
+        sequence: item.sequence,
+        timestamp: item.updatedAt ?? item.createdAt,
+      } satisfies AgentRuntimeEventPart];
+    });
 }
 
-function runtimeEventToAgentPart(
-  message: ConversationMessage,
-  id: string,
-  event: AgentFeedbackEvent,
-): AgentRuntimeEventPart | null {
-  if (!shouldDisplayRuntimeStatus({
-    kind: event.kind,
-    name: event.name,
-    status: event.status,
-    summary: event.summary,
-    resultPreview: event.resultPreview,
-    error: event.error,
-    failureClass: event.failureClass,
-    timedOut: event.timedOut,
-  })) {
-    return null;
+function mentalSnapshotFromTurnItem(value: unknown): AgentMentalSnapshot | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
   }
-  return {
-    id,
-    type: "runtime-event",
-    kind: event.kind,
-    name: event.name,
-    status: event.status || "running",
-    summary: compactText(event.summary),
-    resultPreview: event.resultPreview,
-    error: event.error,
-    failureClass: event.failureClass,
-    transportStatus: event.transportStatus,
-    sequence: event.sequence || undefined,
-    timestamp: event.timestamp,
-    tracePath: event.tracePath,
+  const snapshot = value as Record<string, unknown>;
+  const number = (raw: unknown) => {
+    const parsed = Number(raw ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
   };
-}
-
-function toolEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentToolCallPart {
   return {
-    id,
-    type: "tool-call",
-    name: event.name?.trim() || "tool",
-    status: event.status || "done",
-    summary: compactText(event.summary),
-    arguments: event.arguments,
-    resultPreview: event.resultPreview,
-    resultType: event.resultType,
-    resultLength: event.resultLength,
-    error: event.error,
-    durationMs: event.durationMs,
-    durationSeconds: event.durationSeconds,
-    timeoutSeconds: event.timeoutSeconds,
-    transportStatus: event.transportStatus,
-    semanticStatus: event.semanticStatus,
-    exitCode: event.exitCode,
-    timedOut: event.timedOut,
-    failureClass: event.failureClass,
-    resultKind: event.resultKind,
-    truncated: event.truncated,
-    originalLength: event.originalLength,
-    terminalSessionId: event.terminalSessionId,
-    terminalStatus: event.terminalStatus,
-    sessionOpen: event.sessionOpen,
-    formattedOutput: event.formattedOutput,
-    tracePath: event.tracePath,
-    sequence: event.sequence || undefined,
-    timestamp: event.timestamp,
-    relatedThoughtSequence: event.relatedThoughtSequence,
-    source: "feedback-event",
+    mood: String(snapshot.mood ?? ""),
+    feeling: String(snapshot.feeling ?? ""),
+    whisper: String(snapshot.whisper ?? ""),
+    summary: String(snapshot.summary ?? ""),
+    cognitiveState: String(snapshot.cognitiveState ?? ""),
+    confidence: number(snapshot.confidence),
+    sampleSize: number(snapshot.sampleSize),
+    interventionCount: number(snapshot.interventionCount),
+    updatedAt: String(snapshot.updatedAt ?? ""),
+    source: String(snapshot.source ?? ""),
+    intervention: typeof snapshot.intervention === "string" ? snapshot.intervention : undefined,
+    metrics: snapshot.metrics && typeof snapshot.metrics === "object" && !Array.isArray(snapshot.metrics)
+      ? snapshot.metrics as Record<string, unknown>
+      : undefined,
+    historyTail: Array.isArray(snapshot.historyTail)
+      ? snapshot.historyTail.flatMap((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          return [];
+        }
+        const item = entry as Record<string, unknown>;
+        return [{
+          cognitiveState: String(item.cognitiveState ?? ""),
+          confidence: number(item.confidence),
+          timestamp: String(item.timestamp ?? ""),
+        }];
+      })
+      : undefined,
   };
 }
 
 function textPartForMessage(message: ConversationMessage): AgentMessagePart[] {
-  const text = String(message.role === "assistant" ? answerProjectionContent(message) : message.content).trim();
+  if (message.role !== "user") {
+    return [];
+  }
+  const text = message.content.trim();
   if (!text) {
     return [];
   }
   return [{
     id: `${message.id}-text`,
     type: "text",
-    channel: message.role === "assistant" ? "answer" : "user",
+    channel: "user",
     text,
   }];
 }
 
 function attachmentPartsForMessage(message: ConversationMessage): AgentMessagePart[] {
+  if (message.role !== "user") {
+    return [];
+  }
   return (message.attachments ?? []).map((attachment, index) => ({
     id: `${message.id}-attachment-${attachment.artifactId || index}`,
     type: "attachment",
@@ -218,15 +176,14 @@ function attachmentPartsForMessage(message: ConversationMessage): AgentMessagePa
 }
 
 function referencePartsForMessage(message: ConversationMessage): AgentMessagePart[] {
+  if (message.role !== "user") {
+    return [];
+  }
   return (message.references ?? []).map((reference, index) => ({
     id: `${message.id}-reference-${reference.referenceId || reference.sessionId || index}`,
     type: "reference",
     reference,
   }));
-}
-
-function assistantStatus(message: ConversationMessage) {
-  return message.streaming ? "running" : "done";
 }
 
 function messageTurnId(message: ConversationMessage) {

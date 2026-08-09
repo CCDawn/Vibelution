@@ -219,22 +219,54 @@ def _session_stream_preview_message_components(raw: Any) -> dict[str, Any] | Non
     role = str(raw.get("role") or "").strip().lower()
     if role not in {"user", "assistant"}:
         return None
-    content = s._sanitize_message_content(role, raw.get("content") or "")
-    thought = s._sanitize_thought_text(raw.get("thought") or "")
-    feedback_events = s._normalize_message_feedback_events(
-        raw.get("feedbackEvents") or raw.get("feedback_events") or []
-    )
-    tool_calls = s._normalize_message_tool_calls(raw.get("toolCalls") or raw.get("tool_calls") or [])
-    streaming = bool(raw.get("streaming"))
-    if not content and not thought and not feedback_events and not tool_calls and not streaming:
+    if role == "assistant":
+        if not isinstance(raw.get("turnItems"), list):
+            return None
+        turn_items = [item for item in raw["turnItems"] if isinstance(item, dict)]
+        content = "\n".join(
+            s._sanitize_message_content("assistant", item.get("text") or "")
+            for item in turn_items
+            if str(item.get("type") or "").strip() in {"agent_message", "error"}
+            and str(item.get("text") or "").strip()
+        ).strip()
+        thought = "\n".join(
+            s._sanitize_thought_text(item.get("text") or "")
+            for item in turn_items
+            if str(item.get("type") or "").strip() == "reasoning"
+            and str(item.get("text") or "").strip()
+        ).strip()
+        feedback_events = [
+            item
+            for item in turn_items
+            if str(item.get("type") or "").strip() in {"status", "retry", "error"}
+        ]
+        tool_calls = [
+            item for item in turn_items if str(item.get("type") or "").strip() == "tool_call"
+        ]
+        streaming = str(raw.get("status") or "").strip().lower() == "running" or any(
+            str(item.get("status") or "").strip().lower() in {"pending", "running"}
+            for item in turn_items
+        )
+        if not content and not thought and not feedback_events and not tool_calls and not streaming:
+            return None
+        return {
+            "role": role,
+            "content": content,
+            "thought": thought,
+            "feedbackEvents": feedback_events,
+            "toolCalls": tool_calls,
+            "streaming": streaming,
+        }
+    content = s._sanitize_message_content("user", raw.get("content") or "")
+    if not content:
         return None
     return {
         "role": role,
         "content": content,
-        "thought": thought,
-        "feedbackEvents": feedback_events,
-        "toolCalls": tool_calls,
-        "streaming": streaming,
+        "thought": "",
+        "feedbackEvents": [],
+        "toolCalls": [],
+        "streaming": False,
     }
 
 
@@ -381,17 +413,11 @@ def _publish_session_assistant_delta(
         "turnId": str(state.turn_id or "").strip(),
         "ledgerSeq": s._session_ledger_sequence(session_id),
         "stage": str(state.stage or "").strip(),
-        "content": "",
-        "thought": "",
-        "contentDelta": str(state.content_delta or ""),
-        "thoughtDelta": str(state.thought_delta or ""),
-        "replaceContent": bool(state.replace_content),
-        "replaceThought": bool(state.replace_thought),
         "updatedAt": str(state.updated_at or "").strip() or s._now_timestamp(),
         "done": bool(done),
     }
-    if include_feedback_events:
-        event["feedbackEvents"] = list(state.feedback_events or [])
+    # `include_feedback_events` is retained only as a caller compatibility
+    # parameter. Feedback is represented by status/tool/retry TurnItems now.
     codex_transcript = s._build_codex_transcript_projection(
         message_id=s._live_assistant_message_id(session_id, state.turn_id),
         content=state.content,
@@ -399,40 +425,20 @@ def _publish_session_assistant_delta(
         tool_calls=state.tool_calls,
         streaming=not done,
     )
-    if codex_transcript:
-        event["codexTranscript"] = codex_transcript
     turn_items = s._build_session_turn_items_projection(
         session_id=session_id,
         turn_id=state.turn_id,
         message_id=s._live_assistant_message_id(session_id, state.turn_id),
         content=state.content,
         thought=state.thought,
+        mental_snapshot=state.mental_snapshot,
         codex_transcript=codex_transcript,
         done=done,
         source="assistant_delta",
         stage=state.stage,
     )
-    if turn_items:
-        event["itemId"] = next(
-            (
-                item.get("itemId") or item["id"]
-                for item in turn_items
-                if str(item.get("type") or item.get("kind") or "") in {
-                    "agent_message",
-                    "assistant_message",
-                }
-                and (item.get("itemId") or item.get("id"))
-            ),
-            turn_items[0].get("itemId") or turn_items[0]["id"],
-        )
-        event["turnItems"] = turn_items
-    recovery_event = s._assistant_delta_recovery_stream_event(
-        {
-            **event,
-            "content": str(state.content or ""),
-            "thought": str(state.thought or ""),
-        }
-    )
+    event["turnItems"] = turn_items
+    recovery_event = s._assistant_delta_recovery_stream_event(event)
     delivered_count = 0
     dropped_count = 0
     for subscriber in subscribers:
@@ -455,9 +461,9 @@ def _publish_session_assistant_delta(
         subscriber_count=len(subscribers),
         delivered_count=delivered_count,
         dropped_count=dropped_count,
-        content_chars=len(str(state.content_delta or "")),
-        thought_chars=len(str(state.thought_delta or "")),
-        item_id=str(event.get("itemId") or ""),
+        content_chars=0,
+        thought_chars=0,
+        item_id=str((turn_items[0] or {}).get("itemId") or "") if turn_items else "",
         turn_item_count=len(event.get("turnItems") or []),
         done=done,
     )
@@ -469,37 +475,6 @@ def _merge_session_assistant_delta_events(
 ) -> dict[str, Any]:
     s = _service()
     merged = dict(current)
-    previous_content_delta = str(previous.get("contentDelta") or "")
-    current_content_delta = str(current.get("contentDelta") or "")
-    previous_thought_delta = str(previous.get("thoughtDelta") or "")
-    current_thought_delta = str(current.get("thoughtDelta") or "")
-    previous_replace_content = bool(previous.get("replaceContent"))
-    current_replace_content = bool(current.get("replaceContent"))
-    previous_replace_thought = bool(previous.get("replaceThought"))
-    current_replace_thought = bool(current.get("replaceThought"))
-    if current_replace_content:
-        merged["contentDelta"] = current_content_delta
-    else:
-        merged["contentDelta"] = previous_content_delta + current_content_delta
-        merged["replaceContent"] = previous_replace_content
-    if current_replace_thought:
-        merged["thoughtDelta"] = current_thought_delta
-    else:
-        merged["thoughtDelta"] = previous_thought_delta + current_thought_delta
-        merged["replaceThought"] = previous_replace_thought
-    feedback_events = s._merge_session_assistant_delta_feedback_events(
-        previous.get("feedbackEvents"),
-        current.get("feedbackEvents"),
-    )
-    if feedback_events:
-        merged["feedbackEvents"] = feedback_events
-    else:
-        merged.pop("feedbackEvents", None)
-    codex_transcript = current.get("codexTranscript") or previous.get("codexTranscript")
-    if codex_transcript:
-        merged["codexTranscript"] = codex_transcript
-    else:
-        merged.pop("codexTranscript", None)
     # Prefer the newest turnItems snapshot (full rebuild from live state). Fall back
     # to the previous package only when the current frame omitted items entirely.
     current_turn_items = current.get("turnItems")
@@ -512,25 +487,8 @@ def _merge_session_assistant_delta_events(
         turn_items = []
     if turn_items:
         merged["turnItems"] = turn_items
-        merged["itemId"] = (
-            current.get("itemId")
-            or previous.get("itemId")
-            or next(
-                (
-                    str(item.get("itemId") or item.get("id") or "").strip()
-                    for item in turn_items
-                    if isinstance(item, dict)
-                    and str(item.get("kind") or item.get("type") or "") in {
-                        "assistant_message",
-                        "agent_message",
-                    }
-                ),
-                str((turn_items[0] or {}).get("itemId") or (turn_items[0] or {}).get("id") or "").strip(),
-            )
-        )
     else:
         merged.pop("turnItems", None)
-        merged.pop("itemId", None)
     return merged
 
 
@@ -564,63 +522,6 @@ def _coalesce_session_assistant_delta_queue(
         except queue.Full:
             dropped_count += 1
     return merged_event, dropped_count
-
-
-def _session_assistant_delta_feedback_event_key(event: dict[str, Any]) -> str:
-    s = _service()
-    call_id = str(event.get("callId") or event.get("toolCallId") or event.get("tool_call_id") or "").strip()
-    if call_id:
-        return f"call:{call_id}"
-    sequence = s._coerce_nonnegative_int(event.get("sequence"))
-    if sequence > 0:
-        return f"seq:{sequence}"
-    kind = str(event.get("kind") or "").strip()
-    name = str(event.get("name") or "").strip()
-    related_thought_sequence = s._coerce_nonnegative_int(event.get("relatedThoughtSequence"))
-    try:
-        arguments_signal = json.dumps(event.get("arguments") or {}, sort_keys=True, ensure_ascii=False)
-    except TypeError:
-        arguments_signal = str(event.get("arguments") or "")
-    if name:
-        return ":".join(("named", kind, name, str(related_thought_sequence or ""), arguments_signal))
-    transport_status = str(event.get("transportStatus") or event.get("semanticStatus") or "").strip()
-    if kind == "status" and transport_status:
-        return ":".join(("status", transport_status, str(related_thought_sequence or "")))
-    trace_path = str(event.get("tracePath") or "").strip()
-    if trace_path:
-        return f"trace:{trace_path}"
-    timestamp = str(event.get("timestamp") or "").strip()
-    if timestamp:
-        return ":".join(("timestamp", kind, timestamp))
-    return ":".join(
-        str(event.get(key) or "")
-        for key in ("kind", "summary", "resultPreview", "error")
-    )
-
-
-def _merge_session_assistant_delta_feedback_events(
-    previous: Any,
-    current: Any,
-) -> list[dict[str, Any]]:
-    s = _service()
-    merged: dict[str, tuple[int, dict[str, Any]]] = {}
-    for index, event in enumerate(list(previous or []) + list(current or [])):
-        if not isinstance(event, dict):
-            continue
-        key = s._session_assistant_delta_feedback_event_key(event)
-        first_index, previous_event = merged.get(key, (index, {}))
-        merged[key] = (first_index, {**previous_event, **dict(event)})
-    return [
-        event
-        for _, event in sorted(
-            merged.values(),
-            key=lambda item: (
-                0 if s._coerce_nonnegative_int(item[1].get("sequence")) > 0 else 1,
-                s._coerce_nonnegative_int(item[1].get("sequence")) or item[0],
-                item[0],
-            ),
-        )
-    ]
 
 
 def _put_session_stream_event(
@@ -684,15 +585,7 @@ def _drop_session_stream_event_for_room(
 
 
 def _assistant_delta_recovery_stream_event(event: dict[str, Any]) -> dict[str, Any]:
-    s = _service()
-    recovered_event = dict(event)
-    recovered_event["contentDelta"] = str(event.get("content") or "")
-    recovered_event["thoughtDelta"] = str(event.get("thought") or "")
-    recovered_event["content"] = ""
-    recovered_event["thought"] = ""
-    recovered_event["replaceContent"] = True
-    recovered_event["replaceThought"] = True
-    return recovered_event
+    return dict(event)
 
 
 def _coalesce_session_stream_queue(

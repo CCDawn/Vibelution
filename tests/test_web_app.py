@@ -55,6 +55,77 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 CONTEXT_PREPARE_LIVE_MESSAGE = "正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。"
 
 
+_RETIRED_ASSISTANT_ENVELOPE_FIELDS = (
+    "content",
+    "thought",
+    "streaming",
+    "streamStage",
+    "toolCalls",
+    "feedbackEvents",
+    "timelineItems",
+    "codexTranscript",
+)
+
+
+def _assistant_turn_items(message: dict, item_type: str = "") -> list[dict]:
+    assert message["role"] == "assistant"
+    items = list(message.get("turnItems") or [])
+    if not item_type:
+        return items
+    return [item for item in items if str(item.get("type") or "") == item_type]
+
+
+def _assistant_visible_text(message: dict) -> str:
+    return "\n".join(
+        str(item.get("text") or "").strip()
+        for item in _assistant_turn_items(message)
+        if str(item.get("type") or "") in {"agent_message", "error"}
+        if str(item.get("text") or "").strip()
+    )
+
+
+def _conversation_message_text(message: dict) -> str:
+    if str(message.get("role") or "").strip().lower() == "assistant":
+        return _assistant_visible_text(message)
+    return str(message.get("content") or "")
+
+
+def _assistant_status_metadata(message: dict, code: str) -> dict:
+    for item in _assistant_turn_items(message, "status"):
+        if str(item.get("code") or "").strip() != code:
+            continue
+        metadata = item.get("metadata")
+        return dict(metadata) if isinstance(metadata, dict) else {}
+    return {}
+
+
+def _assistant_tool_summaries(message: dict) -> list[dict[str, str]]:
+    return [
+        {
+            "name": str(item.get("toolName") or ""),
+            "status": str(item.get("status") or ""),
+        }
+        for item in _assistant_turn_items(message, "tool_call")
+    ]
+
+
+def _assert_v3_assistant_message(message: dict) -> None:
+    assert message["role"] == "assistant"
+    assert isinstance(message.get("turnItems"), list)
+    assert all(field not in message for field in _RETIRED_ASSISTANT_ENVELOPE_FIELDS)
+
+
+def _assert_context_prepare_overlay(message: dict) -> None:
+    _assert_v3_assistant_message(message)
+    assert message["status"] == "running"
+    assert any(
+        item.get("type") == "status"
+        and item.get("code") == "context_prepare"
+        and item.get("text") == CONTEXT_PREPARE_LIVE_MESSAGE
+        for item in message["turnItems"]
+    )
+
+
 def _append_test_ledger_messages(project_root: Path, session_id: str, messages: list[dict], *, prefix: str = "test") -> None:
     for index, message in enumerate(messages, start=1):
         if not isinstance(message, dict):
@@ -1146,13 +1217,14 @@ def test_session_detail_exposes_pre_model_progress_stage(tmp_path, monkeypatch):
     payload = response.json()
     live_message = payload["messages"][-1]
     assert live_message["id"] == "session-live-message-live-turn-progress"
-    assert live_message["streaming"] is True
-    assert live_message["streamStage"] == "context_prepare"
-    assert live_message["content"] == ""
-    assert live_message["feedbackEvents"][0]["kind"] == "status"
-    assert live_message["feedbackEvents"][0]["name"] == "context_prepare"
-    assert live_message["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
-    assert "assistant_text" not in [item.get("kind") for item in live_message.get("timelineItems", [])]
+    assert live_message["status"] == "running"
+    assert any(
+        item.get("type") == "status"
+        and item.get("code") == "context_prepare"
+        and item.get("text") == CONTEXT_PREPARE_LIVE_MESSAGE
+        for item in live_message["turnItems"]
+    )
+    assert all(field not in live_message for field in ("content", "thought", "streaming", "streamStage", "toolCalls", "feedbackEvents", "timelineItems", "codexTranscript"))
     assert live_message["metadata"]["kind"] == "session_live_overlay"
     assert live_message["metadata"]["turnId"] == "turn-progress"
     assert live_message["metadata"]["ledgerSeq"] >= 0
@@ -1184,11 +1256,14 @@ def test_session_detail_live_overlay_identity_matches_assistant_delta_turn_id(tm
         "turnId": "turn-live-identity",
         "ledgerSeq": live_message["metadata"]["ledgerSeq"],
     }
-    assert live_message["content"] == "正在输出。"
-    assert live_message["thought"] == "正在思考。"
-    assert live_message["feedbackEvents"][0]["name"] == "model_response"
-    assert live_message["timelineItems"][0]["kind"] == "assistant_text"
-    assert live_message["timelineItems"][0]["text"] == "正在输出。"
+    _assert_v3_assistant_message(live_message)
+    assert _assistant_visible_text(live_message) == "正在输出。"
+    reasoning_items = _assistant_turn_items(live_message, "reasoning")
+    assert [item["text"] for item in reasoning_items] == ["正在思考。"]
+    assert any(
+        item.get("type") == "status" and item.get("code") == "model_response"
+        for item in live_message["turnItems"]
+    )
     # C3: live overlay must carry turnItems package so reconnect paints on package_cells track.
     turn_items = live_message.get("turnItems") or []
     assert turn_items
@@ -1203,13 +1278,8 @@ def test_session_detail_live_overlay_identity_matches_assistant_delta_turn_id(tm
     ]
     assert final_items
     assert final_items[0]["text"] == "正在输出。"
-    assert final_items[0].get("provisional") is True
-    assert final_items[0].get("terminal") is False
-    assert live_message["codexTranscript"]["source"] == "native"
-    assert any(
-        cell.get("kind") == "assistant_markdown" and cell.get("text") == "正在输出。"
-        for cell in live_message["codexTranscript"].get("cells") or []
-    )
+    assert final_items[0]["status"] == "running"
+    assert final_items[0]["terminal"] is False
 
 
 def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tmp_path, monkeypatch):
@@ -1243,19 +1313,17 @@ def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tm
     assert response.status_code == 200
     payload = response.json()
     live_message = payload["messages"][-1]
-    assert live_message["streamStage"] == "model_request"
-    assert live_message["content"] == ""
-    assert [item["kind"] for item in live_message["feedbackEvents"]] == ["status", "status", "status"]
-    assert [item["name"] for item in live_message["feedbackEvents"]] == [
+    _assert_v3_assistant_message(live_message)
+    status_items = _assistant_turn_items(live_message, "status")
+    assert [item["code"] for item in status_items] == [
         "context_prepare",
         "agent_prepare",
         "model_request",
     ]
-    assert "assistant_text" not in [item.get("kind") for item in live_message.get("timelineItems", [])]
+    assert status_items[-1]["status"] == "running"
     work_run = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", "turn-progress-events")
     assert work_run is not None
     assert work_run["updatedAt"] != "2026-06-05T00:00:00"
-    assert "正在请求模型" in work_run["summary"]
 
 
 def test_session_detail_prefers_running_turn_context_composition(tmp_path, monkeypatch):
@@ -1432,7 +1500,9 @@ def test_session_events_stream_initial_detail(tmp_path, monkeypatch):
     assert payload["type"] == "session_detail"
     assert payload["sessionId"] == "session-live"
     assert payload["detail"]["id"] == "session-live"
-    assert payload["detail"]["messages"][1]["content"] == "已经接到真实状态了。"
+    assistant_message = payload["detail"]["messages"][1]
+    _assert_v3_assistant_message(assistant_message)
+    assert _assistant_visible_text(assistant_message) == "已经接到真实状态了。"
 
 
 def test_session_events_stream_initial_lightweight_payload_avoids_full_detail(tmp_path, monkeypatch):
@@ -1654,22 +1724,25 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
     assert event["sessionId"] == "session-live"
     assert event["turnId"] == "turn-running"
     assert event["ledgerSeq"] >= 0
-    assert all(item["content"] == "" for item in events)
-    assert all(item["thought"] == "" for item in events)
-    assert any(item["contentDelta"] == "hello" for item in events)
-    assert any(item["thoughtDelta"] == "thinking" for item in events)
-    assert "feedbackEvents" not in content_delta_event
-    assert all(item["replaceContent"] is False for item in events)
-    assert all(item["replaceThought"] is False for item in events)
-    assert any((item.get("feedbackEvents") or [{}])[0].get("kind") == "thought" for item in events)
-    assert "timelineItems" not in event
+    assert all("content" not in item and "thought" not in item for item in events)
+    assert all(isinstance(item.get("turnItems"), list) for item in events)
+    assert any(
+        any(turn_item.get("type") == "agent_message" and turn_item.get("text") == "hello" for turn_item in item["turnItems"])
+        for item in events
+    )
+    assert any(
+        any(turn_item.get("type") == "reasoning" and turn_item.get("text") == "thinking" for turn_item in item["turnItems"])
+        for item in events
+    )
+    assert all("feedbackEvents" not in item and "timelineItems" not in item for item in events)
     assert event["done"] is False
     delta_events = [item for item in recorded_events if item[0][2] == "session.assistant_delta.published"]
     snapshot_events = [item for item in recorded_events if item[0][2] == "session.detail_snapshot.published"]
     assert len(delta_events) == 2
     assert not snapshot_events
-    assert any(item[1]["fields"]["contentChars"] == 5 for item in delta_events)
-    assert any(item[1]["fields"]["thoughtChars"] == 8 for item in delta_events)
+    assert all(item[1]["fields"]["contentChars"] == 0 for item in delta_events)
+    assert all(item[1]["fields"]["thoughtChars"] == 0 for item in delta_events)
+    assert any(item[1]["fields"]["turnItemCount"] >= 1 for item in delta_events)
     fields = delta_events[-1][1]["fields"]
     assert fields["subscriberCount"] == 1
 
@@ -1705,8 +1778,8 @@ def test_session_live_output_does_not_append_token_level_partials_to_ledger(tmp_
     assert subscriber.qsize() == 1
     event = subscriber.get_nowait()
     assert event["type"] == "assistant_delta"
-    assert event["contentDelta"] == "chunk 99"
-    assert event["thoughtDelta"] == "thought 99"
+    assert any(item.get("type") == "agent_message" and item.get("text") == "chunk 99" for item in event["turnItems"])
+    assert any(item.get("type") == "reasoning" and item.get("text") == "thought 99" for item in event["turnItems"])
 
 
 def test_session_detail_recovers_interrupted_live_output_from_checkpoint(tmp_path, monkeypatch):
@@ -1731,13 +1804,17 @@ def test_session_detail_recovers_interrupted_live_output_from_checkpoint(tmp_pat
     assert response.status_code == 200
     events = load_conversation_events(tmp_path, "session-live")
     event_types = [event.event_type for event in events]
-    assert event_types[-3:] == [EVENT_TURN_STARTED, EVENT_ASSISTANT_MESSAGE, EVENT_TURN_INTERRUPTED]
+    assert EVENT_TURN_STARTED in event_types
+    assert event_types[-3:] == [session_service.EVENT_ASSISTANT_ITEM_COMMITTED, EVENT_ASSISTANT_MESSAGE, EVENT_TURN_INTERRUPTED]
+    reasoning_event = events[-3]
+    assert reasoning_event.payload["kind"] == "reasoning"
+    assert reasoning_event.payload["text"] == "临时思考。"
     assistant_event = events[-2]
     assert assistant_event.payload["content"] == "已生成但尚未完成的内容。"
     assert assistant_event.payload["thought"] == "临时思考。"
     assert assistant_event.payload["feedbackEvents"][0]["name"] == "model_response"
     assert any(
-        message["role"] == "assistant" and message["content"] == "已生成但尚未完成的内容。"
+        message["role"] == "assistant" and _assistant_visible_text(message) == "已生成但尚未完成的内容。"
         for message in response.json()["messages"]
     )
 
@@ -1768,13 +1845,13 @@ def test_session_detail_recovers_live_checkpoint_without_open_turn_started_event
     messages = response.json()["messages"]
     assert any(
         message["role"] == "assistant"
-        and message["content"] == "全部候选已读完，尚未执行阶段回写。"
+        and _assistant_visible_text(message) == "全部候选已读完，尚未执行阶段回写。"
         and message.get("metadata", {}).get("interrupted") is True
         for message in messages
     )
     assert not any(
         message.get("metadata", {}).get("kind") == "session_live_overlay"
-        or message.get("streaming") is True
+        or message.get("status") == "running"
         for message in messages
     )
 
@@ -2059,7 +2136,7 @@ def test_run_session_turn_blocks_if_agent_archived_after_scheduling(tmp_path, mo
     next_detail = session_service.get_session_detail(detail["id"])
     assert next_detail["currentPhase"] == "failed"
     assert next_detail["messages"][-1]["role"] == "assistant"
-    assert "已归档" in next_detail["messages"][-1]["content"]
+    assert "已归档" in _assistant_visible_text(next_detail["messages"][-1])
     blocked_events = [item for item in events if item[0][2] == "conversation.turn.blocked_archived_agent"]
     assert len(blocked_events) == 1
     assert blocked_events[0][1]["fields"]["agentId"] == detail["agentId"]
@@ -2150,13 +2227,17 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     assert payload["messages"][-2]["content"] == "请继续修复 web/src/routes/ChatCodingRoute.tsx 并验证"
     assert payload["messages"][-2]["metadata"]["clientSubmissionId"] == "submission-web-app-1"
     assert payload["messages"][-1]["role"] == "assistant"
-    assert payload["messages"][-1]["content"] == "已完成网页对话提交接线。"
-    assert payload["messages"][-1]["thought"] == "先确认消息模型，再把思考与心智快照一起落盘。"
-    assert payload["messages"][-1]["mentalSnapshot"]["mood"] == "专注"
-    assert payload["messages"][-1]["mentalSnapshot"]["cognitiveState"] == "productive"
-    assert payload["messages"][-1]["toolCalls"] == [
-        {"name": "read_file_tool", "status": "done"},
-        {"name": "apply_patch_tool", "status": "done"},
+    _assert_v3_assistant_message(payload["messages"][-1])
+    assert _assistant_visible_text(payload["messages"][-1]) == "已完成网页对话提交接线。"
+    assert [item["text"] for item in _assistant_turn_items(payload["messages"][-1], "reasoning")] == [
+        "先确认消息模型，再把思考与心智快照一起落盘。"
+    ]
+    mental_snapshot = _assistant_status_metadata(payload["messages"][-1], "mental_snapshot").get("mentalSnapshot") or {}
+    assert mental_snapshot["mood"] == "专注"
+    assert mental_snapshot["cognitiveState"] == "productive"
+    assert _assistant_tool_summaries(payload["messages"][-1]) == [
+        {"name": "read_file_tool", "status": "completed"},
+        {"name": "apply_patch_tool", "status": "completed"},
     ]
     assert payload["taskSummary"] == "已完成网页对话提交接线。"
     assert payload["currentPhase"] == "ready"
@@ -2776,7 +2857,7 @@ def test_session_user_image_attachment_vision_intent_blocks_unsupported_agent(tm
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in payload["messages"][-1]["content"]
+    assert "明确不支持图像输入" in _assistant_visible_text(payload["messages"][-1])
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["last_turn_status"] == "failed"
 
@@ -2821,7 +2902,7 @@ def test_session_user_image_attachment_picture_content_phrase_stays_vision_inten
     )
 
     assert response.status_code == 202
-    assert "明确不支持图像输入" in response.json()["messages"][-1]["content"]
+    assert "明确不支持图像输入" in _assistant_visible_text(response.json()["messages"][-1])
 
 
 def test_session_user_image_attachment_vision_intent_reaches_supported_agent(tmp_path, monkeypatch):
@@ -3308,7 +3389,7 @@ def test_session_user_image_attachment_edit_intent_blocks_when_agent_cannot_read
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in payload["messages"][-1]["content"]
+    assert "明确不支持图像输入" in _assistant_visible_text(payload["messages"][-1])
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
         if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
@@ -3383,7 +3464,7 @@ def test_session_recent_image_reference_blocks_when_agent_cannot_read_images(tmp
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in payload["messages"][-1]["content"]
+    assert "明确不支持图像输入" in _assistant_visible_text(payload["messages"][-1])
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
         if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
@@ -3607,7 +3688,7 @@ def test_session_recent_image_reference_without_history_asks_for_image(tmp_path,
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-2]["metadata"]["resolvedRecentImageReference"]["status"] == "missing"
-    assert "没有在当前会话里找到" in payload["messages"][-1]["content"]
+    assert "没有在当前会话里找到" in _assistant_visible_text(payload["messages"][-1])
 
 
 def test_session_user_image_attachment_empty_text_with_unknown_capability_reaches_dialogue_llm(tmp_path, monkeypatch):
@@ -3664,7 +3745,7 @@ def test_session_user_image_attachment_empty_text_with_unknown_capability_reache
     assert payload["currentPhase"] == "ready"
     assert seen["initial_prompt"] == ""
     assert seen["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
-    assert payload["messages"][-1]["content"] == "LLM 已查看图片。"
+    assert _assistant_visible_text(payload["messages"][-1]) == "LLM 已查看图片。"
     assert all(
         "你想让我分析这张图片" not in str(message.get("content") or "")
         for message in payload["messages"]
@@ -3778,7 +3859,7 @@ def test_submit_session_message_preserves_chinese_content_round_trip(tmp_path, m
     assert payload["messages"][-2]["role"] == "user"
     assert payload["messages"][-2]["content"] == content
     assert payload["messages"][-1]["role"] == "assistant"
-    assert payload["messages"][-1]["streaming"] is True
+    _assert_context_prepare_overlay(payload["messages"][-1])
 
     state = load_chat_state(tmp_path)
     assert "messages" not in state["conversations"][0]
@@ -3842,10 +3923,7 @@ def test_submit_session_message_shows_waiting_live_message_while_turn_runs(tmp_p
         assert payload["currentPhase"] == "running"
         live_message = payload["messages"][-1]
         assert live_message["role"] == "assistant"
-        assert live_message["streaming"] is True
-        assert live_message["content"] == ""
-        assert live_message["streamStage"] == "context_prepare"
-        assert live_message["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
+        _assert_context_prepare_overlay(live_message)
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -3870,9 +3948,7 @@ def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_p
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-2]["content"] == content
-    assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == ""
-    assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    _assert_context_prepare_overlay(payload["messages"][-1])
     state = load_chat_state(tmp_path)
     assert "messages" not in state["conversations"][0]
     assert session_service.get_session_detail("session-live")["messages"][-2]["content"] == content
@@ -3895,7 +3971,10 @@ def test_submit_session_message_rejects_encoding_replacement_pollution(tmp_path,
     assert "编码损坏" in response.json()["detail"]
     state = load_chat_state(tmp_path)
     assert "messages" not in state["conversations"][0]
-    assert [item["content"] for item in session_service.get_session_detail("session-live")["messages"]] == [
+    assert [
+        _conversation_message_text(item)
+        for item in session_service.get_session_detail("session-live")["messages"]
+    ] == [
         "继续前端开发",
         "已经接到真实状态了。",
     ]
@@ -4767,9 +4846,7 @@ def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallbac
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-2]["content"] == content
-    assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == ""
-    assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    _assert_context_prepare_overlay(payload["messages"][-1])
     state = load_chat_state(tmp_path)
     assert "messages" not in state["conversations"][0]
     assert session_service.get_session_detail("session-live")["messages"][-2]["content"] == content
@@ -4829,18 +4906,19 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "running"
-    assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑后的需求"]
-    assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == ""
-    assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    assert [_conversation_message_text(item) for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑后的需求"]
+    _assert_context_prepare_overlay(payload["messages"][-1])
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑后的需求"
-    assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
+    assert [_conversation_message_text(item) for item in scheduled_contexts[0]["history_messages"]] == [
+        "原始需求",
+        "原始回答",
+    ]
     assert scheduled_contexts[0]["mental_model_enabled"] is False
     state = load_chat_state(tmp_path)
     assert "messages" not in state["conversations"][0]
     stored_messages = session_service.get_session_detail("session-live")["messages"][:-1]
-    assert [item["content"] for item in stored_messages] == ["原始需求", "原始回答", "编辑后的需求"]
+    assert [_conversation_message_text(item) for item in stored_messages] == ["原始需求", "原始回答", "编辑后的需求"]
     assert stored_messages[0]["role"] == "user"
     assert stored_messages[0]["timestamp"] == "2026-05-18T12:00:00"
     assert stored_messages[1]["role"] == "assistant"
@@ -4907,13 +4985,14 @@ def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monk
 
     assert response.status_code == 202
     payload = response.json()
-    assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑最新的需求"]
-    assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == ""
-    assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    assert [_conversation_message_text(item) for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑最新的需求"]
+    _assert_context_prepare_overlay(payload["messages"][-1])
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑最新的需求"
-    assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
+    assert [_conversation_message_text(item) for item in scheduled_contexts[0]["history_messages"]] == [
+        "原始需求",
+        "原始回答",
+    ]
     assert any(event["eventCode"] == "conversation.message_edited_resubmitted" for event in events)
 
     session_service._set_session_running("session-live", False)
@@ -4955,7 +5034,7 @@ def test_edit_resubmit_session_message_supersedes_running_turn(tmp_path, monkeyp
     assert new_turn_id != old_turn_id
     assert payload["messages"][-2]["role"] == "user"
     assert payload["messages"][-2]["content"] == "改成执行新任务"
-    assert payload["messages"][-1]["streaming"] is True
+    _assert_context_prepare_overlay(payload["messages"][-1])
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["runId"] == new_turn_id
     old_run = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", old_turn_id)
@@ -5190,9 +5269,10 @@ def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, m
 
     conversation = load_chat_state(tmp_path)["conversations"][0]
     detail = session_service.get_session_detail("session-live")
+    assert sum(message.get("turnId") == "turn-segments" for message in detail["messages"]) == 1
     message = detail["messages"][-1]
     assert message["role"] == "assistant"
-    assert "没有实际生成新的图片" in message["content"]
+    assert "没有实际生成新的图片" in _conversation_message_text(message)
     assert not message.get("tool_calls")
     assert message.get("metadata", {}).get("kind") == "turn_error"
     assert message.get("metadata", {}).get("turnId") == turn_id
@@ -5259,8 +5339,8 @@ def test_different_agent_sessions_run_chat_turns_concurrently(tmp_path, monkeypa
         release.set()
         executor.shutdown(wait=True, cancel_futures=True)
 
-    assert session_service.get_session_detail(alpha["id"])["messages"][-1]["content"] == f"{alpha['id']} done"
-    assert session_service.get_session_detail(beta["id"])["messages"][-1]["content"] == f"{beta['id']} done"
+    assert _assistant_visible_text(session_service.get_session_detail(alpha["id"])["messages"][-1]) == f"{alpha['id']} done"
+    assert _assistant_visible_text(session_service.get_session_detail(beta["id"])["messages"][-1]) == f"{beta['id']} done"
 
 
 @pytest.mark.slow
@@ -5327,8 +5407,8 @@ def test_same_agent_different_sessions_run_chat_turns_concurrently(tmp_path, mon
 
     assert len(prompts) == 2
     assert set(prompts) == {"alpha 并行任务", "beta 并行任务"}
-    assert session_service.get_session_detail(alpha["id"])["messages"][-1]["content"] == f"{alpha['id']} done"
-    assert session_service.get_session_detail(beta["id"])["messages"][-1]["content"] == f"{beta['id']} done"
+    assert _assistant_visible_text(session_service.get_session_detail(alpha["id"])["messages"][-1]) == f"{alpha['id']} done"
+    assert _assistant_visible_text(session_service.get_session_detail(beta["id"])["messages"][-1]) == f"{beta['id']} done"
 
 
 @pytest.mark.slow
@@ -5414,8 +5494,8 @@ def test_same_agent_sessions_queue_when_agent_concurrency_limit_is_reached(tmp_p
         executor.shutdown(wait=True, cancel_futures=True)
 
     assert prompts == ["alpha 串行任务", "beta 串行任务"]
-    assert session_service.get_session_detail(alpha["id"])["messages"][-1]["content"] == "alpha done"
-    assert session_service.get_session_detail(beta["id"])["messages"][-1]["content"] == "beta done"
+    assert _assistant_visible_text(session_service.get_session_detail(alpha["id"])["messages"][-1]) == "alpha done"
+    assert _assistant_visible_text(session_service.get_session_detail(beta["id"])["messages"][-1]) == "beta done"
 
 
 @pytest.mark.slow
@@ -5489,7 +5569,7 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
         stopped = session_service.request_stop_session_turn(beta["id"])
         assert stopped["currentPhase"] == "ready"
         assert stopped["messages"][-1]["role"] == "user"
-        assert "beta 串行任务" in stopped["messages"][-1]["content"]
+        assert "beta 串行任务" in _assistant_visible_text(stopped["messages"][-1])
         assert stopped["runtimeNotices"][-1]["kind"] == "turn_stopped"
         assert "尚未开始执行" in stopped["runtimeNotices"][-1]["message"]
 
@@ -5503,8 +5583,8 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
     assert prompts == ["alpha 串行任务"]
     beta_detail = session_service.get_session_detail(beta["id"])
     assert beta_detail["messages"][-1]["role"] == "user"
-    assert "beta 串行任务" in beta_detail["messages"][-1]["content"]
-    assert all("本轮已按请求停止" not in message["content"] for message in beta_detail["messages"])
+    assert "beta 串行任务" in _assistant_visible_text(beta_detail["messages"][-1])
+    assert all("本轮已按请求停止" not in _conversation_message_text(message) for message in beta_detail["messages"])
     assert beta_detail["runtimeNotices"][-1]["kind"] == "turn_stopped"
 
 
@@ -6405,7 +6485,9 @@ def test_capture_session_ui_stream_surfaces_llm_retry_status(tmp_path, monkeypat
     assert live_state.stage == "model_retry"
     assert "模型连接正在重试" in live_state.content
     assert "2/5" in live_state.content
-    assert published == ["session-live"]
+    # Retry progress is delivered through the lightweight assistant_delta
+    # turnItems stream; it must not force a full session-detail snapshot.
+    assert published == []
     assert any(item["phase"] == "llm_status_retrying" for item in lifecycle_events)
 
 
@@ -7213,14 +7295,12 @@ def test_capture_session_ui_stream_commits_response_segments_at_tool_boundaries(
         source="persist_session_turn_result",
     )
     detail = session_service.get_session_detail("session-live")
+    assert sum(message.get("turnId") == "turn-interleaved" for message in detail["messages"]) == 1
     message = detail["messages"][-1]
-    timeline_items = message["timelineItems"]
-    assert [item["kind"] for item in timeline_items] == ["operation", "assistant_text"]
-    assert [item.get("text") for item in timeline_items if item["kind"] == "assistant_text"] == [
-        "再根据日志给出结论。",
-    ]
-    assert message["codexTranscript"]["cells"][-1]["kind"] == "assistant_markdown"
-    assert message["codexTranscript"]["cells"][-1]["text"] == "先给出初步判断。"
+    _assert_v3_assistant_message(message)
+    assert [item["type"] for item in message["turnItems"]] == ["tool_call", "agent_message"]
+    assert message["turnItems"][0]["toolName"] == "read_log"
+    assert _assistant_visible_text(message) == "先给出初步判断。再根据日志给出结论。"
 
 
 def test_session_detail_interleaves_committed_assistant_segments_with_tool_events(tmp_path, monkeypatch):
@@ -7287,14 +7367,10 @@ def test_session_detail_interleaves_committed_assistant_segments_with_tool_event
 
     detail = session_service.get_session_detail("session-live")
     message = detail["messages"][-1]
-    timeline_items = message["timelineItems"]
-
-    assert message["content"] == "先给出初步判断。\n\n再根据日志给出结论。"
-    assert [item["kind"] for item in timeline_items] == ["operation"]
-    assert all(item.get("kind") != "assistant_text" for item in timeline_items)
-    assert timeline_items[0]["title"] == "读取"
-    assert message["codexTranscript"]["cells"][-1]["kind"] == "assistant_markdown"
-    assert message["codexTranscript"]["cells"][-1]["text"] == "先给出初步判断。\n\n再根据日志给出结论。"
+    _assert_v3_assistant_message(message)
+    assert [item["type"] for item in message["turnItems"]] == ["tool_call", "agent_message"]
+    assert message["turnItems"][0]["toolName"] == "read_log"
+    assert _assistant_visible_text(message) == "先给出初步判断。\n\n再根据日志给出结论。"
 
 
 def test_capture_session_ui_stream_does_not_mark_returned_degraded_tool_running(tmp_path, monkeypatch):
@@ -7444,7 +7520,7 @@ def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypa
     assert payload["messages"][-2]["role"] == "user"
     assert payload["messages"][-2]["content"] == "继续检查调度失败恢复"
     assert payload["messages"][-1]["role"] == "assistant"
-    assert "scheduler unavailable" in payload["messages"][-1]["content"]
+    assert "scheduler unavailable" in _assistant_visible_text(payload["messages"][-1])
     assert payload["lastTurnError"]["errorType"] == "RuntimeError"
     assert "scheduler unavailable" in payload["lastTurnError"]["message"]
     assert session_service._is_session_running("session-live") is False
@@ -7526,7 +7602,7 @@ def test_request_stop_session_turn_persists_stop_snapshot_and_releases_session(t
         assert payload["currentPhase"] == "ready"
         assert payload["stopRequested"] is False
         assert payload["messages"][-1]["role"] == "assistant"
-        assert "本轮已按请求停止" in payload["messages"][-1]["content"]
+        assert "本轮已按请求停止" in _assistant_visible_text(payload["messages"][-1])
         stop_signals = _read_next_state_signals(tmp_path, session_id="session-live")
         assert any(item["kind"] == "user_stops" and item["turnId"] for item in stop_signals)
 
@@ -7602,7 +7678,7 @@ def test_submit_session_interrupt_guidance_records_signal_and_stops(tmp_path, mo
         payload = guidance_response.json()
         assert payload["currentPhase"] == "ready"
         assert payload["stopRequested"] is False
-        assert "本轮已按请求停止" in payload["messages"][-1]["content"]
+        assert "本轮已按请求停止" in _assistant_visible_text(payload["messages"][-1])
         signals = _read_next_state_signals(tmp_path, session_id="session-live")
         assert any(
             item["kind"] == "user_interrupt_guidance"
@@ -7661,7 +7737,7 @@ def test_request_stop_session_turn_reuses_active_work_run_when_controller_is_mis
         payload = stop_response.json()
         assert payload["currentPhase"] == "ready"
         assert payload["stopRequested"] is False
-        assert "本轮已按请求停止" in payload["messages"][-1]["content"]
+        assert "本轮已按请求停止" in _assistant_visible_text(payload["messages"][-1])
         assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is None
         latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
         assert latest_run["runId"] == "existing-chat-turn"
@@ -7772,7 +7848,7 @@ def test_stop_requested_turn_persists_visible_stop_message(tmp_path, monkeypatch
     assert payload["currentPhase"] == "ready"
     assert payload["stopRequested"] is False
     assert payload["messages"][-1]["role"] == "assistant"
-    assert "本轮已按请求停止" in payload["messages"][-1]["content"]
+    assert "本轮已按请求停止" in _assistant_visible_text(payload["messages"][-1])
 
 
 @pytest.mark.slow
@@ -7927,10 +8003,13 @@ def test_stop_queued_session_turn_persists_partial_snapshot_and_allows_immediate
     stopped_payload = stop_response.json()
     assert stopped_payload["currentPhase"] == "ready"
     assert stopped_payload["stopRequested"] is False
-    assert "已完成一部分" in stopped_payload["messages"][-1]["content"]
-    assert "本轮已按请求停止" in stopped_payload["messages"][-1]["content"]
-    assert stopped_payload["messages"][-1]["thought"] == "我已经定位到 stop checker。"
-    assert stopped_payload["messages"][-1]["toolCalls"][0]["name"] == "read_file_tool"
+    stopped_message = stopped_payload["messages"][-1]
+    assert "已完成一部分" in _assistant_visible_text(stopped_message)
+    assert "本轮已按请求停止" in _assistant_visible_text(stopped_message)
+    assert [item["text"] for item in _assistant_turn_items(stopped_message, "reasoning")] == [
+        "我已经定位到 stop checker。"
+    ]
+    assert _assistant_tool_summaries(stopped_message)[0]["name"] == "read_file_tool"
     assert stopped_payload["messages"][-1]["metadata"]["turnId"] == old_control.turn_id
     ledger_events = load_conversation_events(tmp_path, "session-live")
     assert any(event.event_type == EVENT_TURN_INTERRUPTED and event.turn_id == old_control.turn_id for event in ledger_events)
@@ -8081,9 +8160,7 @@ def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monk
         assert payload["messages"][-2]["role"] == "user"
         assert payload["messages"][-2]["content"] == "第二轮已经开始"
         assert payload["messages"][-1]["role"] == "assistant"
-        assert payload["messages"][-1]["streaming"] is True
-        assert payload["messages"][-1]["content"] == ""
-        assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
+        _assert_context_prepare_overlay(payload["messages"][-1])
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -8152,8 +8229,8 @@ def test_stop_during_agent_call_does_not_record_late_completed_result(tmp_path, 
         payload = detail_response.json()
         assert latest_run["status"] == "stopped_by_user"
         assert payload["currentPhase"] == "ready"
-        assert "本轮已按请求停止" in payload["messages"][-1]["content"]
-        assert "迟到完成结果" not in payload["messages"][-1]["content"]
+        assert "本轮已按请求停止" in _assistant_visible_text(payload["messages"][-1])
+        assert "迟到完成结果" not in _assistant_visible_text(payload["messages"][-1])
         assert not any(
             event["phase"] in {"agent_turn_returned", "terminal_result"} and event["outcome"] == "completed"
             for event in lifecycle_events
@@ -8215,8 +8292,8 @@ def test_stale_turn_live_output_does_not_overwrite_new_turn(tmp_path, monkeypatc
         detail_response = client.get("/api/sessions/session-live")
         assert detail_response.status_code == 200
         payload = detail_response.json()
-        assert payload["messages"][-1]["streaming"] is True
-        assert payload["messages"][-1]["content"] == "新轮正在输出。"
+        assert payload["messages"][-1]["status"] == "running"
+        assert _assistant_visible_text(payload["messages"][-1]) == "新轮正在输出。"
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -8246,14 +8323,14 @@ def test_stale_turn_live_output_clear_does_not_remove_new_turn(tmp_path, monkeyp
     response = client.get("/api/sessions/session-live")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "新轮正在输出。"
+    assert payload["messages"][-1]["status"] == "running"
+    assert _assistant_visible_text(payload["messages"][-1]) == "新轮正在输出。"
 
     session_service._clear_session_live_output("session-live", turn_id="turn-new")
     session_service._set_session_running("session-live", False, turn_id="turn-new")
     response_after_clear = client.get("/api/sessions/session-live")
     assert response_after_clear.status_code == 200
-    assert not response_after_clear.json()["messages"][-1].get("streaming")
+    assert response_after_clear.json()["messages"][-1]["status"] == "completed"
 
 
 def test_session_detail_includes_live_thought_draft(tmp_path, monkeypatch):
@@ -8288,12 +8365,18 @@ def test_session_detail_includes_live_thought_draft(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["thought"] == "先把这轮的思考过程挂进消息卡片。"
-    assert payload["messages"][-1]["feedbackEvents"][0]["kind"] == "thought"
-    assert payload["messages"][-1]["timelineItems"][0]["kind"] == "thought"
-    assert payload["messages"][-1]["timelineItems"][0]["text"] == "先把这轮的思考过程挂进消息卡片。"
-    assert payload["messages"][-1]["mentalSnapshot"]["mood"] == "专注"
+    live_message = payload["messages"][-1]
+    _assert_v3_assistant_message(live_message)
+    assert live_message["status"] == "running"
+    assert [item["text"] for item in _assistant_turn_items(live_message, "reasoning")] == [
+        "先把这轮的思考过程挂进消息卡片。"
+    ]
+    assert any(
+        item.get("type") == "status"
+        and item.get("code") == "mental_snapshot"
+        and (item.get("metadata") or {}).get("mentalSnapshot", {}).get("mood") == "专注"
+        for item in live_message["turnItems"]
+    )
 
 
 def test_session_detail_hides_partial_state_live_answer(tmp_path, monkeypatch):
@@ -8314,9 +8397,9 @@ def test_session_detail_hides_partial_state_live_answer(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == ""
-    assert payload["messages"][-1]["toolCalls"] == [
+    assert payload["messages"][-1]["status"] == "running"
+    assert _assistant_visible_text(payload["messages"][-1]) == ""
+    assert _assistant_tool_summaries(payload["messages"][-1]) == [
         {"name": "read_file_tool", "status": "running"}
     ]
 
@@ -8340,10 +8423,10 @@ def test_session_detail_hides_dsml_and_lone_angle_live_answer(tmp_path, monkeypa
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == ""
+    assert payload["messages"][-1]["status"] == "running"
+    assert _assistant_visible_text(payload["messages"][-1]) == ""
     assert "thought" not in payload["messages"][-1]
-    assert payload["messages"][-1]["toolCalls"] == [
+    assert _assistant_tool_summaries(payload["messages"][-1]) == [
         {"name": "spawn_agent_tool", "status": "running"}
     ]
 
@@ -8367,10 +8450,10 @@ def test_session_detail_hides_parameter_live_answer(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "连续被拦截。让我尝试拆分写入。"
+    assert payload["messages"][-1]["status"] == "running"
+    assert _assistant_visible_text(payload["messages"][-1]) == "连续被拦截。让我尝试拆分写入。"
     assert "thought" not in payload["messages"][-1]
-    assert payload["messages"][-1]["toolCalls"] == [
+    assert _assistant_tool_summaries(payload["messages"][-1]) == [
         {"name": "cli_tool", "status": "running"}
     ]
 
@@ -8424,7 +8507,7 @@ def test_session_detail_sanitizes_persisted_protocol_messages_and_active_task(tm
         load_chat_state(tmp_path)["conversations"][0]["active_task"]
     )
     assistant = payload["messages"][-1]
-    assert assistant["content"] == "继续检查。"
+    assert _assistant_visible_text(assistant) == "继续检查。"
     assert "thought" not in assistant
     assert payload["taskSummary"] == "继续检查。"
     assert payload["activeTask"]["latestSummary"] == "继续检查。"
@@ -8470,8 +8553,8 @@ def test_session_detail_ignores_old_chat_state_runtime_notice_messages(tmp_path,
 
     assert response.status_code == 200, response.json()
     payload = response.json()
-    assert [message["content"] for message in payload["messages"]][-1:] == ["继续分析日志。"]
-    assert all("已被中断" not in message["content"] for message in payload["messages"])
+    assert [_conversation_message_text(message) for message in payload["messages"]][-1:] == ["继续分析日志。"]
+    assert all("已被中断" not in _conversation_message_text(message) for message in payload["messages"])
     assert payload["runtimeNotices"] == []
 
 
@@ -8505,7 +8588,7 @@ def test_session_detail_keeps_runtime_notice_outside_ledger_messages(tmp_path, m
     assert response.status_code == 200, response.json()
     payload = response.json()
     assert payload["messages"][-1]["role"] == "user"
-    assert all("本轮已进入队列" not in message["content"] for message in payload["messages"])
+    assert all("本轮已进入队列" not in _conversation_message_text(message) for message in payload["messages"])
     assert len(payload["runtimeNotices"]) == 1
     assert payload["runtimeNotices"][0]["kind"] == "runtime_notice"
     assert "本轮已进入队列" in payload["runtimeNotices"][0]["message"]
@@ -8578,7 +8661,7 @@ def test_session_detail_recovers_stale_running_legacy_messages(tmp_path, monkeyp
 
     assert response.status_code == 200, response.json()
     payload = response.json()
-    assert [message["content"] for message in payload["messages"]] == [
+    assert [_conversation_message_text(message) for message in payload["messages"]] == [
         "旧会话里只有 legacy 消息",
         "legacy 历史回复应继续显示",
     ]
@@ -8616,7 +8699,7 @@ def test_submit_session_message_persists_lease_conflict_notice_without_llm_call(
     assert response.status_code == 409
     assert "worktree_write" in response.json()["detail"]
     detail = client.get("/api/sessions/session-live").json()
-    assert detail["messages"][-1]["content"] != "修复这个前端显示问题"
+    assert _assistant_visible_text(detail["messages"][-1]) != "修复这个前端显示问题"
     assert detail["runtimeNotices"][-1]["kind"] == "turn_rejected"
     assert "HTTP 409" in detail["runtimeNotices"][-1]["message"]
     assert "web-supervised-busy" in detail["runtimeNotices"][-1]["message"]
@@ -8662,7 +8745,7 @@ def test_session_detail_recovers_stale_running_state(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["currentPhase"] == "ready"
-    assert all("已被中断" not in message["content"] for message in payload["messages"])
+    assert all("已被中断" not in _conversation_message_text(message) for message in payload["messages"])
     assert payload["runtimeNotices"][-1]["kind"] == "turn_recovered"
     assert payload["runtimeNotices"][-1]["source"] == "conversation.turn_recovered"
     assert "已被中断" in payload["runtimeNotices"][-1]["message"]
@@ -8722,7 +8805,7 @@ def test_submit_session_message_allows_follow_up_when_previous_turn_finished(tmp
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-1]["role"] == "assistant"
-    assert payload["messages"][-1]["content"] == "继续推进并给出下一步建议。"
+    assert _assistant_visible_text(payload["messages"][-1]) == "继续推进并给出下一步建议。"
     assert payload["currentPhase"] == "ready"
     assert payload["activeTask"] is None
 
@@ -8773,7 +8856,7 @@ def test_submit_session_message_keeps_streamed_reply_when_final_result_is_contro
     assert response.status_code == 202, response.json()
     payload = response.json()
     assistant = payload["messages"][-1]
-    assert assistant["content"] == "项目审查完成：核心问题集中在会话持久化和前端状态冗余。"
+    assert _assistant_visible_text(assistant) == "项目审查完成：核心问题集中在会话持久化和前端状态冗余。"
     assert "[outcome=done]" not in json.dumps(payload, ensure_ascii=False)
     assert payload["activeTask"] is None
 
@@ -8821,7 +8904,7 @@ def test_submit_session_message_keeps_fallback_streamed_reply_when_final_result_
     assert response.status_code == 202, response.json()
     payload = response.json()
     assistant = payload["messages"][-1]
-    assert assistant["content"] == "非流式回答已返回：这是最终可见正文。"
+    assert _assistant_visible_text(assistant) == "非流式回答已返回：这是最终可见正文。"
     assert payload["activeTask"] is None
 
 
@@ -8884,7 +8967,7 @@ def test_submit_session_message_marks_completed_file_artifact_task_done(tmp_path
     assert payload["activeTask"]["status"] == "done"
     assert payload["activeTask"]["changedFiles"] == ["workspace/agents/agent-a/outputs/presentation_structure.html"]
     assert payload["activeTask"]["nextAction"] == ""
-    assert payload["messages"][-1]["content"].startswith("文件已成功创建")
+    assert _assistant_visible_text(payload["messages"][-1]).startswith("文件已成功创建")
     persisted_events = [
         kwargs
         for args, kwargs in recorded_scene_events
@@ -8955,7 +9038,7 @@ def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypa
     payload = response.json()
     assert len(calls) == 1
     assert "继续完成同一个用户目标" not in str(calls)
-    assert payload["messages"][-1]["content"] == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
+    assert _assistant_visible_text(payload["messages"][-1]) == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
     assert payload["currentPhase"] == "needs_continue"
 
 
@@ -9016,7 +9099,7 @@ def test_submit_session_message_continues_after_bookkeeping_progress(tmp_path, m
     payload = response.json()
     assert len(calls) == 1
     assert "继续完成同一个用户目标" not in str(calls)
-    assert payload["messages"][-1]["content"] == "下一步：继续读取证据或直接给出结论。"
+    assert _assistant_visible_text(payload["messages"][-1]) == "下一步：继续读取证据或直接给出结论。"
     assert payload["currentPhase"] == "needs_continue"
 
 
@@ -9080,7 +9163,7 @@ def test_submit_session_message_keeps_tools_available_after_tool_progress(tmp_pa
     assert len(calls) == 1
     assert calls[0]["disable_tools"] is False
     assert "继续完成同一个用户目标" not in str(calls)
-    assert payload["messages"][-1]["content"] == "已读取 core/web/services/runtime_scene_service.py，下一步继续校准 runtime scene 摘要。"
+    assert _assistant_visible_text(payload["messages"][-1]) == "已读取 core/web/services/runtime_scene_service.py，下一步继续校准 runtime scene 摘要。"
     assert payload["currentPhase"] == "needs_continue"
 
 
@@ -9140,7 +9223,7 @@ def test_submit_session_message_keeps_previous_continuation_reply_when_done_mark
     payload = response.json()
     assistant = payload["messages"][-1]
     assert len(calls) == 1
-    assert assistant["content"] == "已审查当前项目。以下是汇报结果。\n\n核心问题是回答持久化和 UI 区分度。"
+    assert _assistant_visible_text(assistant) == "已审查当前项目。以下是汇报结果。\n\n核心问题是回答持久化和 UI 区分度。"
     assert "[outcome=done]" not in json.dumps(payload, ensure_ascii=False)
     assert payload["activeTask"] is None
 
@@ -9186,14 +9269,14 @@ def test_submit_session_message_never_persists_empty_assistant_reply(tmp_path, m
     payload = response.json()
     assistant = payload["messages"][-1]
     assert assistant["role"] == "assistant"
-    assert assistant["content"].strip()
-    assert assistant["content"] == "本轮没有产生可见回复。"
+    assert _assistant_visible_text(assistant).strip()
+    assert _assistant_visible_text(assistant) == "本轮没有产生可见回复。"
 
     state = load_chat_state(tmp_path)
     detail = session_service.get_session_detail("session-live")
     persisted_assistant = detail["messages"][-1]
     assert persisted_assistant["role"] == "assistant"
-    assert persisted_assistant["content"] == "本轮没有产生可见回复。"
+    assert _assistant_visible_text(persisted_assistant) == "本轮没有产生可见回复。"
     assert "messages" not in state["conversations"][0]
 
 
@@ -9280,7 +9363,7 @@ def test_submit_session_message_does_not_persist_xml_protocol_as_reply_or_task(t
     assert response.status_code == 202, response.json()
     payload = response.json()
     assistant = payload["messages"][-1]
-    assert assistant["content"] == "继续检查文件。"
+    assert _assistant_visible_text(assistant) == "继续检查文件。"
     state = load_chat_state(tmp_path)
     persisted_json = json.dumps(state, ensure_ascii=False)
     assert "<invoke" not in persisted_json
@@ -9348,8 +9431,8 @@ def test_submit_session_message_pauses_progress_without_internal_auto_continue(t
     assert response.status_code == 202
     payload = response.json()
     assert len(calls) == 1
-    assert "任务级持续上限" not in payload["messages"][-1]["content"]
-    assert payload["messages"][-1]["content"] == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
+    assert "任务级持续上限" not in _assistant_visible_text(payload["messages"][-1])
+    assert _assistant_visible_text(payload["messages"][-1]) == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
     assert payload["currentPhase"] == "needs_continue"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
     assert latest_run["status"] == "needs_continue"
@@ -9409,8 +9492,8 @@ def test_submit_session_message_preserves_visible_progress_without_limit_prompt(
     payload = response.json()
     assistant = payload["messages"][-1]
     assert len(calls) == 1
-    assert assistant["content"] == "我已经完成第一项优化，并通过基础验证。下一步继续收口剩余日志路径。"
-    assert "任务级持续上限" not in assistant["content"]
+    assert _assistant_visible_text(assistant) == "我已经完成第一项优化，并通过基础验证。下一步继续收口剩余日志路径。"
+    assert "任务级持续上限" not in _assistant_visible_text(assistant)
     assert payload["currentPhase"] == "needs_continue"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
     assert latest_run["status"] == "needs_continue"
@@ -9472,9 +9555,9 @@ def test_submit_session_message_preserves_repeated_visible_progress_once_without
     payload = response.json()
     assistant = payload["messages"][-1]
     assert len(calls) == 1
-    assert assistant["content"] == repeated_reply
-    assert assistant["content"].count(repeated_reply) == 1
-    assert "任务级持续上限" not in assistant["content"]
+    assert _assistant_visible_text(assistant) == repeated_reply
+    assert _assistant_visible_text(assistant).count(repeated_reply) == 1
+    assert "任务级持续上限" not in _assistant_visible_text(assistant)
     assert payload["currentPhase"] == "needs_continue"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
     assert latest_run["status"] == "needs_continue"
@@ -9532,7 +9615,7 @@ def test_submit_session_message_stops_on_inferred_progress_visible_conclusion(tm
     assert response.status_code == 202
     payload = response.json()
     assert len(calls) == 1
-    assert payload["messages"][-1]["content"] == conclusion
+    assert _assistant_visible_text(payload["messages"][-1]) == conclusion
     assert payload["currentPhase"] == "ready"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
     assert latest_run["status"] == "completed"
@@ -9577,8 +9660,8 @@ def test_submit_session_message_completed_turn_ignores_low_configured_limit(tmp_
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["content"] == "已经完成优化并验证通过。"
-    assert "任务级持续上限" not in payload["messages"][-1]["content"]
+    assert _assistant_visible_text(payload["messages"][-1]) == "已经完成优化并验证通过。"
+    assert "任务级持续上限" not in _assistant_visible_text(payload["messages"][-1])
     assert payload["currentPhase"] == "ready"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
     assert latest_run["status"] == "completed"
@@ -9805,9 +9888,9 @@ def test_submit_session_continue_keeps_raw_prompt_when_active_task_is_continue(t
     payload = response.json()
     assert len(prompts) == 1
     assert "继续完成同一个用户目标" not in str(prompts)
-    assert payload["messages"][-1]["content"] == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
-    assert "任务级持续上限" not in payload["messages"][-1]["content"]
-    assert "<state" not in payload["messages"][-1]["content"]
+    assert _assistant_visible_text(payload["messages"][-1]) == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
+    assert "任务级持续上限" not in _assistant_visible_text(payload["messages"][-1])
+    assert "<state" not in _assistant_visible_text(payload["messages"][-1])
     state = load_chat_state(tmp_path)
     active_task = state["conversations"][0]["active_task"]
     assert active_task["goal"] == "做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报"
@@ -9854,8 +9937,8 @@ def test_persist_turn_result_cleans_parameter_and_requires_real_stop(tmp_path, m
     detail = session_service.get_session_detail("session-live")
     message = detail["messages"][-1]
     assert message["role"] == "assistant"
-    assert message["content"] == "连续被拦截。让我尝试拆分写入。"
-    assert message["content"] != "本轮已按请求停止。"
+    assert _assistant_visible_text(message) == "连续被拦截。让我尝试拆分写入。"
+    assert _assistant_visible_text(message) != "本轮已按请求停止。"
     assert "messages" not in state["conversations"][0]
     active_task = state["conversations"][0]["active_task"]
     assert active_task["latest_summary"] == "连续被拦截。让我尝试拆分写入。"
@@ -9901,8 +9984,9 @@ def test_submit_session_message_persists_visible_failure(tmp_path, monkeypatch):
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-1]["role"] == "assistant"
-    assert "失败" in payload["messages"][-1]["content"] or "failed" in payload["messages"][-1]["content"].lower()
-    assert "LLM unavailable" in payload["messages"][-1]["content"]
+    error_text = _assistant_visible_text(payload["messages"][-1])
+    assert "失败" in error_text or "failed" in error_text.lower()
+    assert "LLM unavailable" in error_text
     assert payload["currentPhase"] == "failed"
 
 
@@ -9942,7 +10026,7 @@ def test_submit_session_message_surfaces_failed_result_error(tmp_path, monkeypat
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-1]["role"] == "assistant"
-    assert "LiteLLM 未安装" in payload["messages"][-1]["content"]
+    assert "LiteLLM 未安装" in _assistant_visible_text(payload["messages"][-1])
     assert payload["currentPhase"] == "failed"
 
 
@@ -9994,8 +10078,8 @@ def test_submit_session_message_surfaces_provider_error_inside_messages(tmp_path
     assert payload["messages"][-2]["role"] == "user"
     assert payload["messages"][-2]["content"] == "继续当前对话"
     assert payload["messages"][-1]["role"] == "assistant"
-    assert "模型服务上游暂时失败" in payload["messages"][-1]["content"]
-    assert "provider 上游服务不可用或网关失败" in payload["messages"][-1]["content"]
+    assert "模型服务上游暂时失败" in _assistant_visible_text(payload["messages"][-1])
+    assert "provider 上游服务不可用或网关失败" in _assistant_visible_text(payload["messages"][-1])
     assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
     assert payload["messages"][-1]["metadata"]["providerFailure"] is True
     assert payload["messages"][-1]["metadata"]["reasonCode"] == "upstream_unavailable"
@@ -10005,9 +10089,9 @@ def test_submit_session_message_surfaces_provider_error_inside_messages(tmp_path
     assert "provider 上游服务不可用或网关失败" in payload["lastTurnError"]["reasonSummary"]
     assert payload["lastTurnError"]["reasonDetail"] == "Upstream request failed"
     assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
-    assert "Upstream request failed" in payload["messages"][-1]["content"]
+    assert "Upstream request failed" in _assistant_visible_text(payload["messages"][-1])
     assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
-    assert "litellm.BadGatewayError" not in payload["messages"][-1]["content"]
+    assert "litellm.BadGatewayError" not in _assistant_visible_text(payload["messages"][-1])
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["errorType"] == "provider_upstream_error"
     assert "litellm.BadGatewayError" in latest_run["error"]
@@ -10046,8 +10130,8 @@ def test_submit_session_message_surfaces_local_runtime_exception_as_turn_error(t
     assert error_message["metadata"]["kind"] == "turn_error"
     assert error_message["metadata"]["providerFailure"] is False
     assert error_message["metadata"]["errorType"] == "ValueError"
-    assert "网页工作台这一轮执行失败" in error_message["content"]
-    assert "未设置 API Key" in error_message["content"]
+    assert "网页工作台这一轮执行失败" in _assistant_visible_text(error_message)
+    assert "未设置 API Key" in _assistant_visible_text(error_message)
     assert payload["lastTurnError"]["errorType"] == "ValueError"
     assert payload["lastTurnError"]["recoverable"] is False
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
@@ -10116,13 +10200,20 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
     assert error_message["metadata"]["eventCode"] == "llm.turn_outcome.missing"
     assert error_message["metadata"]["traceId"] == "trace-runtime-1"
     assert error_message["metadata"]["protocol"] == "responses"
-    assert error_message["content"].startswith("模型响应未完成规范化")
-    assert "当前模型不支持图片输入" in error_message["content"]
-    assert error_message["thought"] == "Need a vision-capable model before continuing."
-    assert error_message["toolCalls"] == [
-        {"name": "image2_generate_tool", "status": "failed", "summary": "unsupported"}
+    assert _assistant_visible_text(error_message).startswith("模型响应未完成规范化")
+    assert "当前模型不支持图片输入" in _assistant_visible_text(error_message)
+    assert [item["text"] for item in _assistant_turn_items(error_message, "reasoning")] == [
+        "Need a vision-capable model before continuing."
     ]
-    assert error_message["feedbackEvents"][0]["status"] == "failed"
+    assert _assistant_tool_summaries(error_message) == [
+        {"name": "image2_generate_tool", "status": "failed"}
+    ]
+    tool_item = _assistant_turn_items(error_message, "tool_call")[0]
+    assert "unsupported" in {
+        str(tool_item.get("text") or ""),
+        str(tool_item.get("output") or ""),
+        str(tool_item.get("summary") or ""),
+    }
     assert payload["lastTurnError"]["errorType"] == "runtime_error"
     assert payload["lastTurnError"]["reasonCode"] == "canonical_turn_outcome_missing"
     assert payload["lastTurnError"]["traceId"] == "trace-runtime-1"
@@ -10191,8 +10282,8 @@ def test_submit_session_message_surfaces_provider_http_diagnostics(tmp_path, mon
     assert payload["lastTurnError"]["httpStatus"] == 503
     assert payload["lastTurnError"]["providerErrorType"] == "api_error"
     assert payload["lastTurnError"]["providerErrorMessage"] == "No available accounts: no available accounts"
-    assert "HTTP 503" in payload["messages"][-1]["content"]
-    assert "No available accounts" in payload["messages"][-1]["content"]
+    assert "HTTP 503" in _assistant_visible_text(payload["messages"][-1])
+    assert "No available accounts" in _assistant_visible_text(payload["messages"][-1])
 
 
 def test_submit_session_message_surfaces_prompt_cache_unsupported_inside_messages(tmp_path, monkeypatch):
@@ -10236,10 +10327,11 @@ def test_submit_session_message_surfaces_prompt_cache_unsupported_inside_message
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-1]["role"] == "assistant"
-    assert "模型配置不满足本轮 prompt cache 要求" in payload["messages"][-1]["content"]
-    assert "当前模型配置声明不支持 prompt cache" in payload["messages"][-1]["content"]
-    assert "prompt_cache.mode 配置为 automatic 或 explicit_cache_control" in payload["messages"][-1]["content"]
-    assert "模型服务上游暂时失败" not in payload["messages"][-1]["content"]
+    error_text = _assistant_visible_text(payload["messages"][-1])
+    assert "模型配置不满足本轮 prompt cache 要求" in error_text
+    assert "当前模型配置声明不支持 prompt cache" in error_text
+    assert "prompt_cache.mode 配置为 automatic 或 explicit_cache_control" in error_text
+    assert "模型服务上游暂时失败" not in error_text
     assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
     assert payload["messages"][-1]["metadata"]["reasonCode"] == "prompt_cache_unsupported"
     assert payload["lastTurnError"]["errorType"] == "prompt_cache_unsupported"
@@ -10286,8 +10378,8 @@ def test_submit_session_message_surfaces_provider_quota_reason_inside_messages(t
 
     assert response.status_code == 202
     payload = response.json()
-    assert "API Key 额度或当日限额已用完" in payload["messages"][-1]["content"]
-    assert "api key 7天限额已用完" in payload["messages"][-1]["content"]
+    assert "API Key 额度或当日限额已用完" in _assistant_visible_text(payload["messages"][-1])
+    assert "api key 7天限额已用完" in _assistant_visible_text(payload["messages"][-1])
     assert payload["messages"][-1]["metadata"]["reasonCode"] == "quota_exhausted"
     assert payload["messages"][-1]["metadata"]["reasonDetail"] == "api key 7天限额已用完"
     assert payload["lastTurnError"]["reasonCode"] == "quota_exhausted"
@@ -10341,8 +10433,8 @@ def test_submit_session_message_prefers_llm_failure_message_for_provider_detail(
 
     assert response.status_code == 202
     payload = response.json()
-    assert "provider 正在限流" in payload["messages"][-1]["content"]
-    assert "group requests-per-minute limit exceeded" in payload["messages"][-1]["content"]
+    assert "provider 正在限流" in _assistant_visible_text(payload["messages"][-1])
+    assert "group requests-per-minute limit exceeded" in _assistant_visible_text(payload["messages"][-1])
     assert payload["messages"][-1]["metadata"]["reasonCode"] == "rate_limited"
     assert payload["messages"][-1]["metadata"]["reasonDetail"] == "group requests-per-minute limit exceeded"
     assert payload["lastTurnError"]["reasonDetail"] == "group requests-per-minute limit exceeded"
@@ -10385,8 +10477,8 @@ def test_submit_session_message_surfaces_deprecated_parameter_reason_inside_mess
 
     assert response.status_code == 202
     payload = response.json()
-    assert "模型不接受当前采样参数，例如 temperature" in payload["messages"][-1]["content"]
-    assert "`temperature` is deprecated" in payload["messages"][-1]["content"]
+    assert "模型不接受当前采样参数，例如 temperature" in _assistant_visible_text(payload["messages"][-1])
+    assert "`temperature` is deprecated" in _assistant_visible_text(payload["messages"][-1])
     assert payload["messages"][-1]["metadata"]["reasonCode"] == "deprecated_sampling_parameter"
     assert payload["messages"][-1]["metadata"]["reasonDetail"] == "`temperature` is deprecated for this model."
     assert payload["lastTurnError"]["reasonCode"] == "deprecated_sampling_parameter"
@@ -10433,8 +10525,10 @@ def test_submit_session_message_omits_mental_snapshot_when_disabled(tmp_path, mo
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["thought"] == "先保留思考，再让心智快照按开关退场。"
-    assert "mentalSnapshot" not in payload["messages"][-1]
+    assert [item["text"] for item in _assistant_turn_items(payload["messages"][-1], "reasoning")] == [
+        "先保留思考，再让心智快照按开关退场。"
+    ]
+    assert not _assistant_status_metadata(payload["messages"][-1], "mental_snapshot")
 
 
 def test_submit_session_message_uses_per_turn_mental_model_override(tmp_path, monkeypatch):
@@ -10488,7 +10582,7 @@ def test_submit_session_message_uses_per_turn_mental_model_override(tmp_path, mo
     assert disabled_response.status_code == 202, disabled_response.json()
     disabled_payload = disabled_response.json()
     assert created_agents[-1].override is False
-    assert "mentalSnapshot" not in disabled_payload["messages"][-1]
+    assert not _assistant_status_metadata(disabled_payload["messages"][-1], "mental_snapshot")
 
     enabled_response = client.post(
         "/api/sessions/session-live/messages",
@@ -10498,7 +10592,7 @@ def test_submit_session_message_uses_per_turn_mental_model_override(tmp_path, mo
     assert enabled_response.status_code == 202, enabled_response.json()
     enabled_payload = enabled_response.json()
     assert created_agents[-1].override is True
-    assert enabled_payload["messages"][-1]["mentalSnapshot"]["mood"] == "专注"
+    assert _assistant_status_metadata(enabled_payload["messages"][-1], "mental_snapshot")["mentalSnapshot"]["mood"] == "专注"
 
 
 def test_turn_mental_snapshot_prefers_current_state_info_over_runtime_summary(monkeypatch):
@@ -10625,19 +10719,15 @@ def test_submit_session_message_includes_stream_friendly_tool_and_mental_payload
     assert response.status_code == 202
     payload = response.json()
     assistant = payload["messages"][-1]
-    assert assistant["content"] == "最终回答内容。"
-    assert assistant["thought"] == "这是一段可见思考。"
-    assert assistant["mentalSnapshot"]["cognitiveState"] == "productive"
-    assert assistant["mentalSnapshot"]["intervention"] == "继续保持当前路径。"
-    assert assistant["mentalSnapshot"]["metrics"]["sample_size"] == 3
-    assert assistant["toolCalls"] == [
-        {"name": "read_file_tool", "status": "done", "summary": "read ok", "resultPreview": "read ok"},
-        {
-            "name": "run_test_for_tool",
-            "status": "done",
-            "summary": "tests passed",
-            "resultPreview": "tests passed",
-        },
+    assert _assistant_visible_text(assistant) == "最终回答内容。"
+    assert [item["text"] for item in _assistant_turn_items(assistant, "reasoning")] == ["这是一段可见思考。"]
+    mental_snapshot = _assistant_status_metadata(assistant, "mental_snapshot")["mentalSnapshot"]
+    assert mental_snapshot["cognitiveState"] == "productive"
+    assert mental_snapshot["intervention"] == "继续保持当前路径。"
+    assert mental_snapshot["metrics"]["sample_size"] == 3
+    assert _assistant_tool_summaries(assistant) == [
+        {"name": "read_file_tool", "status": "completed"},
+        {"name": "run_test_for_tool", "status": "completed"},
     ]
     assert payload["currentPhase"] == "ready"
 

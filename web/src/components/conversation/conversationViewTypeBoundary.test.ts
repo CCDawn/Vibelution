@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import chatApiTypesSource from "../../api/types/chat.ts?raw";
 import chatCodingRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import conversationStreamingMetricsSource from "./conversationStreamingMetrics.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
@@ -7,10 +8,28 @@ import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
 import lazyConversationViewSource from "./LazyConversationView.tsx?raw";
 
 describe("conversation view public type boundary", () => {
-  it("keeps route-level types out of the heavy ConversationView module", () => {
-    expect(chatCodingRouteSource).not.toContain('from "../components/conversation/ConversationView"');
-    expect(chatCodingRouteSource).toContain('from "../components/conversation/conversationStreamingMetrics"');
-    expect(chatCodingRouteSource).toContain('from "../components/conversation/conversationTurnAvatar"');
+  it("keeps assistant messages on the canonical turnItems envelope", () => {
+    const assistantTurn = chatApiTypesSource.match(
+      /export type AssistantConversationTurn = ConversationMessageBase & \{([\s\S]*?)\n\};/,
+    )?.[1];
+
+    expect(assistantTurn).toBeTruthy();
+    expect(assistantTurn).toContain('role: "assistant";');
+    expect(assistantTurn).toContain("turnId: string;");
+    expect(assistantTurn).toContain("status: SessionTurnItemStatus;");
+    expect(assistantTurn).toContain("turnItems: SessionTurnItem[];");
+    for (const retiredField of [
+      "content:",
+      "thought:",
+      "streaming:",
+      "streamStage:",
+      "toolCalls:",
+      "feedbackEvents:",
+      "timelineItems:",
+      "codexTranscript:",
+    ]) {
+      expect(assistantTurn).not.toContain(retiredField);
+    }
   });
 
   it("keeps streaming frame metrics in a public helper module", () => {

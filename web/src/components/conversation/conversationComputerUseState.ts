@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
+import { assistantToolCallTurnItems } from "../../routes/chatTurnProtocol";
 import type { AgentMessageOperation } from "./agentMessageOperations";
 
 export const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
@@ -63,11 +64,11 @@ export function computerUseSessionIdsForMessage(message: ConversationMessage) {
     return [];
   }
   const sessionIds = new Set<string>();
-  for (const event of message.feedbackEvents ?? []) {
-    if (event.kind !== "tool" || event.name !== COMPUTER_USE_TOOL_NAME) {
+  for (const toolCall of assistantToolCallTurnItems(message)) {
+    if (toolCall.toolName !== COMPUTER_USE_TOOL_NAME) {
       continue;
     }
-    const sessionId = computerUseSessionIdFromPreview(event.resultPreview);
+    const sessionId = computerUseSessionIdFromPreview(toolCall.output);
     if (sessionId) {
       sessionIds.add(sessionId);
     }

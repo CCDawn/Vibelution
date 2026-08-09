@@ -1,501 +1,225 @@
-import type { ConversationMessage } from "../api/types";
-import { shouldDisplayTranscriptCell } from "../components/conversation/conversationDisplayProtocol";
-import { answerProjectionContent } from "../components/conversation/conversationInternalStatus";
+import type {
+  CodexTranscriptProjection,
+  ConversationMessage,
+  SessionTurnItem,
+} from "../api/types/chat";
 
-export type ChatTurnRenderProtocol =
-  | "canonical_turn_items_v2"
-  | "legacy_assistant_delta"
-  | "native_codex_transcript"
-  | "process_feedback";
+/** The transport label is retained; the render protocol is now only TurnItems. */
+export type ChatTurnRenderProtocol = "turn_items" | "empty";
 
 export type ChatTurnProtocolSurface = {
-  answerContent?: unknown;
-  thoughtContent?: unknown;
-  feedbackEventCount?: number;
-  codexTranscript?: ConversationMessage["codexTranscript"];
-  turnItems?: ConversationMessage["turnItems"];
+  turnItems?: readonly SessionTurnItem[];
+};
+
+type CanonicalTurnRenderSurface = {
+  protocol: ChatTurnRenderProtocol;
+  answerContent: string;
+  thoughtContent: string;
+  codexTranscript: CodexTranscriptProjection;
+  turnItems: SessionTurnItem[];
 };
 
 function compactText(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function nativeTranscriptCells(transcript: ConversationMessage["codexTranscript"] | undefined) {
-  if (
-    !transcript
-    || String(transcript.source ?? "").trim() !== "native"
-    || !Array.isArray(transcript.cells)
-  ) {
-    return [];
-  }
-  return transcript.cells.filter(shouldDisplayTranscriptCell);
-}
+const canonicalItemIdentity = (item: SessionTurnItem): string => [
+  item.sessionId,
+  item.turnId,
+  item.type === "tool_call" ? `call:${item.callId}` : `item:${item.itemId}`,
+].join("\u001f");
 
-function compactProjectionKey(value: unknown) {
-  return String(value ?? "").replace(/\s+/g, "").trim();
-}
-
-function isCommentaryPhase(value: unknown) {
-  const phase = compactText(value).toLowerCase();
-  return phase === "commentary" || phase === "interim";
-}
-
-function isExplicitFinalAnswerCell(cell: { phase?: unknown; terminal?: unknown; provisional?: unknown }) {
-  if (cell.provisional === true) {
-    return false;
-  }
-  const phase = compactText(cell.phase).toLowerCase();
-  return phase === "final_answer" || cell.terminal === true;
-}
-
-function isCommittedNativeAssistantCell(cell: {
-  phase?: unknown;
-  status?: unknown;
-  provisional?: unknown;
-  terminal?: unknown;
-}) {
-  if (cell.provisional === true || isCommentaryPhase(cell.phase)) {
-    return false;
-  }
-  const status = compactText(cell.status).toLowerCase();
-  if (["pending", "running", "in_progress", "streaming"].includes(status)) {
-    return false;
-  }
-  return Boolean(
-    isExplicitFinalAnswerCell(cell)
-    || !status
-    || ["completed", "done"].includes(status),
-  );
-}
-
-/** Prefer explicit final_answer / terminal cells; otherwise all non-commentary markdown. */
-export function visibleNativeFinalAnswerText(
-  transcript: ConversationMessage["codexTranscript"] | undefined,
-) {
-  const cells = nativeTranscriptCells(transcript)
-    .filter((cell) => String(cell.kind ?? "").trim() === "assistant_markdown")
-    .filter((cell) => compactText(cell.text))
-    .filter((cell) => !isCommentaryPhase(cell.phase));
-  const explicit = cells.filter((cell) => isExplicitFinalAnswerCell(cell));
-  const chosen = explicit.length > 0 ? explicit : cells;
-  return chosen.map((cell) => compactText(cell.text)).filter(Boolean).join("\n\n");
-}
-
-export function visibleNativeAssistantMarkdownText(
-  transcript: ConversationMessage["codexTranscript"] | undefined,
-) {
-  return nativeTranscriptCells(transcript)
-    .filter((cell) => String(cell.kind ?? "").trim() === "assistant_markdown")
-    .map((cell) => compactText(cell.text))
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-/**
- * True when native answer text already owns the committed final answer body.
- * Short orphan capture fragments (e.g. "存。") must not win over long content.
- */
-export function nativeAnswerOwnsProjectedContent(
-  nativeAnswer: string,
-  projectedAnswer: string,
-  options?: { hasExplicitFinalCell?: boolean },
-) {
-  const nativeKey = compactProjectionKey(nativeAnswer);
-  const contentKey = compactProjectionKey(projectedAnswer);
-  if (!nativeKey) {
-    return false;
-  }
-  if (options?.hasExplicitFinalCell) {
-    return true;
-  }
-  if (!contentKey) {
-    return true;
-  }
-  if (contentKey === nativeKey || nativeKey.includes(contentKey)) {
-    return true;
-  }
-  if (
-    contentKey.includes(nativeKey)
-    && nativeKey.length >= Math.max(24, Math.floor(contentKey.length * 0.8))
-  ) {
-    return true;
-  }
-  if (nativeKey.length < Math.max(8, Math.floor(contentKey.length * 0.5))) {
-    return false;
-  }
-  return true;
-}
-
-export function hasVisibleNativeCodexTranscript(
-  transcript: ConversationMessage["codexTranscript"] | undefined,
-) {
-  return nativeTranscriptCells(transcript).length > 0;
-}
-
-export function activeTurnProtocolTextLength(surface: ChatTurnProtocolSurface) {
-  const canonicalItems = consolidateSessionTurnItemsV2(surface.turnItems);
-  if (canonicalItems.length > 0) {
-    return canonicalFinalAnswer(canonicalItems).length;
-  }
-  const projected = compactText(surface.answerContent);
-  const nativeFinal = visibleNativeFinalAnswerText(surface.codexTranscript);
-  // Prefer the longer of projected content vs native final to avoid orphan-only length.
-  const answerLen = Math.max(projected.length, nativeFinal.length);
-  return answerLen + compactText(surface.thoughtContent).length;
-}
-
-export function resolveAssistantTurnRenderProtocol(surface: ChatTurnProtocolSurface): ChatTurnRenderProtocol {
-  return resolveAssistantTurnRenderSurface({
-    answerProjectionContent: surface.answerContent == null ? undefined : String(surface.answerContent),
-    thoughtContent: surface.thoughtContent == null ? undefined : String(surface.thoughtContent),
-    feedbackEvents: surface.feedbackEventCount ? Array.from({ length: surface.feedbackEventCount }) : [],
-    codexTranscript: surface.codexTranscript,
-    turnItems: surface.turnItems,
-  }).protocol;
-}
-
-export function hasVisibleActiveTurnProtocolContent(surface: ChatTurnProtocolSurface) {
-  return Boolean(
-    consolidateSessionTurnItemsV2(surface.turnItems).length > 0
-    || activeTurnProtocolTextLength(surface) > 0
-    || (surface.feedbackEventCount ?? 0) > 0
-    || hasVisibleNativeCodexTranscript(surface.codexTranscript)
-  );
-}
-
-function isNonTerminalAssistantProjection(message: ConversationMessage) {
-  const kind = compactText(message.metadata?.kind).toLowerCase();
-  return Boolean(
-    message.streaming
-    || kind === "journal_assistant_partial"
-    || kind === "session_live_overlay"
-    || kind === "session_active_turn_layer"
-  );
-}
-
-export function hasCommittedAssistantProtocolAnswer(message: ConversationMessage) {
-  if (message.role !== "assistant" || isNonTerminalAssistantProjection(message)) {
-    return false;
-  }
-  const canonicalItems = consolidateSessionTurnItemsV2(message.turnItems);
-  if (canonicalItems.length > 0) {
-    return hasCommittedCanonicalAnswer(canonicalItems);
-  }
-  const projected = compactText(answerProjectionContent(message));
-  const nativeAssistantCells = nativeTranscriptCells(message.codexTranscript)
-    .filter((cell) => String(cell.kind ?? "").trim() === "assistant_markdown")
-    .filter((cell) => compactText(cell.text));
-  const explicitFinalCells = nativeAssistantCells.filter((cell) => isExplicitFinalAnswerCell(cell));
-  if (explicitFinalCells.length > 0) {
-    return true;
-  }
-  const committedNative = nativeAssistantCells.filter((cell) => isCommittedNativeAssistantCell(cell));
-  if (committedNative.length > 0) {
-    const nativeText = committedNative.map((cell) => compactText(cell.text)).filter(Boolean).join("\n\n");
-    // Orphan completed fragments must not count as "committed answer" when content is the real body.
-    if (nativeAnswerOwnsProjectedContent(nativeText, projected)) {
-      return true;
-    }
-  }
-  return Boolean(projected);
-}
-import type {
-  ConversationMessage as CanonicalConversationMessage,
-  SessionTurnItem as CanonicalSessionTurnItem,
-} from "../api/types/chat";
-
-type CanonicalTurnRenderSurface = {
-  protocol: "canonical_turn_items_v2" | "native_codex_transcript" | "legacy_assistant_delta" | "process_feedback";
-  answerContent: string;
-  thoughtContent: string;
-  feedbackEvents: unknown[];
-  codexTranscript?: CanonicalConversationMessage["codexTranscript"];
-  turnItems?: CanonicalSessionTurnItem[];
-};
-
-const canonicalItemIdentity = (item: CanonicalSessionTurnItem): string => {
-  const callId = compactText(item.callId);
-  const itemId = compactText(item.itemId ?? item.id);
-  return [
-    item.sessionId ?? "",
-    item.turnId ?? "",
-    callId ? "call:" + callId : "item:" + itemId,
-  ].join("\u001f");
-};
-
-const canonicalItemRevision = (item: CanonicalSessionTurnItem): number => item.revision ?? 0;
-const canonicalItemSequence = (item: CanonicalSessionTurnItem): number => item.sequence ?? 0;
-
-const shouldReplaceCanonicalItem = (
-  current: CanonicalSessionTurnItem,
-  candidate: CanonicalSessionTurnItem,
-) => (
-  canonicalItemRevision(candidate) > canonicalItemRevision(current)
-  || (
-    canonicalItemRevision(candidate) === canonicalItemRevision(current)
-    && canonicalItemSequence(candidate) >= canonicalItemSequence(current)
-  )
+const shouldReplaceCanonicalItem = (current: SessionTurnItem, candidate: SessionTurnItem) => (
+  candidate.revision > current.revision
+  || (candidate.revision === current.revision && candidate.sequence >= current.sequence)
 );
 
-export const isSessionTurnItemV2 = (item: CanonicalSessionTurnItem): boolean =>
-  item.version === 2 && Boolean(item.itemId);
+export const isSessionTurnItemV2 = (item: SessionTurnItem): boolean => (
+  item.version === 3
+  && Boolean(item.id)
+  && Boolean(item.itemId)
+  && Boolean(item.sessionId)
+  && Boolean(item.turnId)
+);
 
+/**
+ * Merge stream frames by stable item identity.  A later revision replaces one
+ * item only; no text field is concatenated outside the item that owns it.
+ */
 export const consolidateSessionTurnItemsV2 = (
-  ...groups: Array<readonly CanonicalSessionTurnItem[] | undefined>
-): CanonicalSessionTurnItem[] => {
-  const byIdentity = new Map<string, {
-    item: CanonicalSessionTurnItem;
-    firstSequence: number;
-    firstIndex: number;
-  }>();
-  const candidates = groups.flatMap((group) => group ?? []).filter(isSessionTurnItemV2);
-  candidates.forEach((item, firstIndex) => {
+  ...groups: Array<readonly SessionTurnItem[] | undefined>
+): SessionTurnItem[] => {
+  const byIdentity = new Map<string, { item: SessionTurnItem; firstIndex: number }>();
+  groups.flatMap((group) => group ?? []).filter(isSessionTurnItemV2).forEach((item, index) => {
     const identity = canonicalItemIdentity(item);
     const current = byIdentity.get(identity);
-    if (!current) {
-      byIdentity.set(identity, {
-        item,
-        firstSequence: canonicalItemSequence(item),
-        firstIndex,
-      });
-      return;
+    if (!current || shouldReplaceCanonicalItem(current.item, item)) {
+      byIdentity.set(identity, { item, firstIndex: current?.firstIndex ?? index });
     }
-    const firstSequence = Math.min(current.firstSequence, canonicalItemSequence(item));
-    byIdentity.set(identity, {
-      ...current,
-      item: shouldReplaceCanonicalItem(current.item, item) ? item : current.item,
-      firstSequence,
-    });
   });
   return [...byIdentity.entries()]
-    .sort(([leftIdentity, left], [rightIdentity, right]) =>
-      left.firstSequence - right.firstSequence
+    .sort(([leftIdentity, left], [rightIdentity, right]) => (
+      left.item.sequence - right.item.sequence
       || left.firstIndex - right.firstIndex
       || leftIdentity.localeCompare(rightIdentity)
-    )
+    ))
     .map(([, entry]) => entry.item);
 };
 
-const itemText = (item: CanonicalSessionTurnItem): string =>
-  (item.text ?? item.summary ?? item.title ?? "").trim();
+export const isFinalAnswerTurnItem = (
+  item: SessionTurnItem,
+): item is Extract<SessionTurnItem, { type: "agent_message" }> => (
+  item.type === "agent_message" && item.phase === "final_answer"
+);
 
-const isCanonicalAnswer = (item: CanonicalSessionTurnItem): boolean =>
-  item.kind === "assistant_message"
-  && item.channel === "answer"
-  && item.phase === "final_answer";
+export const finalAnswerTextFromTurnItems = (items: readonly SessionTurnItem[]) => (
+  items
+    .filter(isFinalAnswerTurnItem)
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join("\n\n")
+);
 
-const canonicalFinalAnswer = (items: readonly CanonicalSessionTurnItem[]): string =>
-  items.filter(isCanonicalAnswer).map(itemText).filter(Boolean).join("\n\n");
+export const reasoningTextFromTurnItems = (items: readonly SessionTurnItem[]) => (
+  items
+    .filter((item) => item.type === "reasoning")
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join("\n\n")
+);
 
-const isCanonicalReasoning = (item: CanonicalSessionTurnItem): boolean =>
-  item.kind === "reasoning"
-  || item.kind === "analysis"
-  || item.channel === "analysis"
-  || item.channel === "reasoning"
-  || item.phase === "reasoning";
+/** The only ConversationMessage selector for assistant-owned process data. */
+export const assistantTurnItemsForMessage = (message: ConversationMessage): SessionTurnItem[] => (
+  message.role === "assistant" ? consolidateSessionTurnItemsV2(message.turnItems) : []
+);
 
-/** Prefer package reasoning text; keeps thought rails aligned with reasoning_summary cells. */
-const canonicalThoughtContent = (items: readonly CanonicalSessionTurnItem[]): string =>
-  items.filter(isCanonicalReasoning).map(itemText).filter(Boolean).join("\n\n");
+export const assistantTurnIsStreaming = (message: ConversationMessage): boolean => (
+  message.role === "assistant" && message.status === "running"
+);
 
-const isCanonicalCommentary = (item: CanonicalSessionTurnItem): boolean =>
-  item.kind === "commentary"
-  || item.channel === "commentary"
-  || item.channel === "interim"
-  || item.phase === "commentary"
-  || item.phase === "interim";
+export const assistantFinalAnswerText = (message: ConversationMessage): string => (
+  message.role === "assistant" ? finalAnswerTextFromTurnItems(message.turnItems) : ""
+);
 
-const canonicalDisplayChannel = (item: CanonicalSessionTurnItem) =>
-  isCanonicalCommentary(item) ? "commentary" : item.channel;
+export const assistantReasoningText = (message: ConversationMessage): string => (
+  message.role === "assistant" ? reasoningTextFromTurnItems(message.turnItems) : ""
+);
 
-const canonicalDisplayPhase = (item: CanonicalSessionTurnItem) =>
-  isCanonicalCommentary(item) ? "commentary" : item.phase;
+export const assistantStatusTurnItems = (message: ConversationMessage): Array<Extract<SessionTurnItem, { type: "status" | "retry" | "error" }>> => (
+  assistantTurnItemsForMessage(message).filter((item): item is Extract<SessionTurnItem, { type: "status" | "retry" | "error" }> => (
+    item.type === "status" || item.type === "retry" || item.type === "error"
+  ))
+);
 
-const canonicalRenderItemId = (item: CanonicalSessionTurnItem) =>
-  compactText(item.callId)
-  || compactText(item.itemId)
-  || compactText(item.id);
+export const assistantToolCallTurnItems = (message: ConversationMessage): Array<Extract<SessionTurnItem, { type: "tool_call" }>> => (
+  assistantTurnItemsForMessage(message).filter((item): item is Extract<SessionTurnItem, { type: "tool_call" }> => item.type === "tool_call")
+);
 
-const hasCommittedCanonicalAnswer = (items: readonly CanonicalSessionTurnItem[]): boolean =>
-  items.some((item) => (
-    isCanonicalAnswer(item)
-    && item.provisional !== true
-    && (item.terminal === true || item.status === "completed")
-    && Boolean(itemText(item))
-  ));
+function cellTone(item: SessionTurnItem): "neutral" | "running" | "warning" | "error" {
+  if (item.status === "failed" || item.type === "error") return "error";
+  if (item.status === "pending" || item.status === "running") return "running";
+  return "neutral";
+}
 
-const canonicalCellTone = (item: CanonicalSessionTurnItem) => {
-  if (item.status === "failed") return "error" as const;
-  if (item.status === "degraded") return "warning" as const;
-  if (
-    item.status === "running"
-    || item.status === "in_progress"
-    || item.status === "pending"
-  ) {
-    return "running" as const;
-  }
-  return "neutral" as const;
-};
-
-export const hasTerminalCanonicalTurnOutcome = (
-  message: CanonicalConversationMessage,
-): boolean =>
-  consolidateSessionTurnItemsV2(message.turnItems).some((item) => (
-    item.terminal === true
-    && item.provisional !== true
-    && (item.status === "completed" || item.status === "failed")
-  ));
-
-const canonicalTranscript = (
-  items: readonly CanonicalSessionTurnItem[],
-): CanonicalConversationMessage["codexTranscript"] => ({
-  version: 1,
-  source: "native",
-  messageId: items[0]?.messageId || (items[0] ? canonicalRenderItemId(items[0]) : "canonical-turn-items-v2"),
-  cells: items.flatMap<NonNullable<CanonicalConversationMessage["codexTranscript"]>["cells"][number]>((item) => {
-    const text = itemText(item);
-    if (!text) return [];
-    const renderItemId = canonicalRenderItemId(item);
-    const cellBase = {
-      id: renderItemId,
-      messageId: item.messageId ?? renderItemId,
+/** A local renderer projection. It is never stored back on ConversationMessage. */
+export function codexTranscriptFromTurnItems(
+  items: readonly SessionTurnItem[],
+): CodexTranscriptProjection {
+  const cells = items.flatMap<CodexTranscriptProjection["cells"][number]>((item) => {
+    const base = {
+      id: item.id,
+      messageId: item.itemId,
       status: item.status,
-      tone: canonicalCellTone(item),
-      channel: canonicalDisplayChannel(item),
-      phase: canonicalDisplayPhase(item),
+      tone: cellTone(item),
+      phase: item.type === "agent_message" ? item.phase : undefined,
       terminal: item.terminal,
-      provisional: item.provisional,
       diagnosticSummary: item.diagnosticSummary,
-      sourceItemId: item.sourceItemId ?? renderItemId,
+      sourceItemId: item.itemId,
     };
-    if (isCanonicalAnswer(item)) {
-      return [{ ...cellBase, kind: "assistant_markdown", text }];
+    if (item.type === "agent_message") {
+      return item.text.trim() ? [{ ...base, kind: "assistant_markdown", text: item.text }] : [];
     }
-    if (item.kind === "reasoning" || item.channel === "analysis") {
-      return [{ ...cellBase, kind: "reasoning_summary", text }];
+    if (item.type === "reasoning") {
+      return item.text.trim() ? [{ ...base, kind: "reasoning_summary", text: item.text }] : [];
     }
-    if (item.kind === "tool_call") {
+    if (item.type === "tool_call") {
       return [{
-        ...cellBase,
+        ...base,
         kind: "tool_call",
-        title: item.toolName ?? item.title ?? "Tool",
-        text,
+        title: item.toolName,
+        text: item.output,
         summary: item.summary,
       }];
     }
-    if (item.kind === "error" || item.type === "error") {
-      return [{
-        ...cellBase,
-        kind: "error_notice",
-        tone: "error",
-        text,
-        terminal: true,
-      }];
+    if (item.type === "retry") {
+      return [{ ...base, kind: "status", title: "model_retry", text: item.reason, summary: item.reason }];
     }
-    if (item.kind === "status" || item.type === "status") {
-      return [{ ...cellBase, kind: "status", text }];
+    if (item.type === "status") {
+      return [{ ...base, kind: "status", title: item.code, text: item.text, summary: item.summary }];
     }
-    if (isCanonicalCommentary(item)) {
-      return [{ ...cellBase, kind: "assistant_markdown", text }];
-    }
-    return [];
-  }),
-  toolCalls: [],
-  terminalOperations: [],
-  terminalSessions: [],
-  modelObservations: [],
-});
+    return [{ ...base, kind: "error_notice", tone: "error", title: item.code, text: item.text, summary: item.summary }];
+  });
+  return {
+    version: 1,
+    source: "native",
+    messageId: items[0]?.itemId || "turn-items",
+    cells,
+    toolCalls: [],
+    terminalOperations: [],
+    terminalSessions: [],
+    modelObservations: [],
+  };
+}
 
-export const resolveAssistantTurnRenderSurface = (input: {
-  answerProjectionContent?: string;
-  thoughtContent?: string;
-  feedbackEvents?: unknown[];
-  codexTranscript?: CanonicalConversationMessage["codexTranscript"];
-  turnItems?: CanonicalSessionTurnItem[];
-}): CanonicalTurnRenderSurface => {
+export const resolveAssistantTurnRenderSurface = (
+  input: ChatTurnProtocolSurface,
+): CanonicalTurnRenderSurface => {
   const turnItems = consolidateSessionTurnItemsV2(input.turnItems);
-  if (turnItems.length > 0) {
-    const packageThought = canonicalThoughtContent(turnItems);
-    return {
-      protocol: "canonical_turn_items_v2",
-      answerContent: canonicalFinalAnswer(turnItems),
-      // Package reasoning owns thought when present; otherwise keep live/legacy thought
-      // so an answer-only journal commit cannot wipe a still-streaming thought field.
-      thoughtContent: packageThought || compactText(input.thoughtContent) || "",
-      feedbackEvents: input.feedbackEvents ?? [],
-      codexTranscript: canonicalTranscript(turnItems),
-      turnItems,
-    };
-  }
-  const projectedAnswer = compactText(input.answerProjectionContent);
-  const thoughtContent = compactText(input.thoughtContent);
-  const nativeCells = nativeTranscriptCells(input.codexTranscript);
-  const hasExplicitFinalCell = nativeCells.some((cell) => (
-    String(cell.kind ?? "").trim() === "assistant_markdown"
-    && compactText(cell.text)
-    && isExplicitFinalAnswerCell(cell)
-  ));
-  const nativeFinalAnswer = visibleNativeFinalAnswerText(input.codexTranscript);
-  // Prefer explicit final / covering native answer. Orphan fragments lose to projected content.
-  if (
-    nativeFinalAnswer
-    && nativeAnswerOwnsProjectedContent(nativeFinalAnswer, projectedAnswer, { hasExplicitFinalCell })
-  ) {
-    return {
-      protocol: "native_codex_transcript",
-      answerContent: nativeFinalAnswer,
-      thoughtContent: "",
-      feedbackEvents: input.feedbackEvents ?? [],
-      codexTranscript: input.codexTranscript,
-    };
-  }
-  if (projectedAnswer || thoughtContent) {
-    return {
-      protocol: "legacy_assistant_delta",
-      answerContent: projectedAnswer || (input.answerProjectionContent ?? ""),
-      thoughtContent: thoughtContent || (input.thoughtContent ?? ""),
-      feedbackEvents: input.feedbackEvents ?? [],
-      // Keep native transcript for process rendering; answer body comes from content.
-      codexTranscript: input.codexTranscript,
-    };
-  }
-  if (hasVisibleNativeCodexTranscript(input.codexTranscript)) {
-    return {
-      protocol: "native_codex_transcript",
-      answerContent: nativeFinalAnswer,
-      thoughtContent: "",
-      feedbackEvents: input.feedbackEvents ?? [],
-      codexTranscript: input.codexTranscript,
-    };
-  }
   return {
-    protocol: "process_feedback",
-    answerContent: "",
-    thoughtContent: "",
-    feedbackEvents: input.feedbackEvents ?? [],
-    codexTranscript: input.codexTranscript,
+    protocol: turnItems.length > 0 ? "turn_items" : "empty",
+    answerContent: finalAnswerTextFromTurnItems(turnItems),
+    thoughtContent: reasoningTextFromTurnItems(turnItems),
+    codexTranscript: codexTranscriptFromTurnItems(turnItems),
+    turnItems,
   };
 };
 
-/**
- * Project an existing SessionTurnItem v2 package into content + codexTranscript.
- *
- * Legacy messages without turnItems are left unchanged: backend detail/window now
- * attaches turnItems (including content fallback). Remaining package-less rows are
- * process-only / status placeholders and intentionally use legacy rails.
- */
-export const projectConversationMessageFromTurnItemsV2 = <T extends CanonicalConversationMessage>(message: T): T => {
-  const turnItems = consolidateSessionTurnItemsV2(message.turnItems);
-  if (turnItems.length === 0) return message;
-  const packageThought = canonicalThoughtContent(turnItems);
-  const legacyThought = compactText(message.thought);
-  return {
-    ...message,
-    content: canonicalFinalAnswer(turnItems),
-    // Never hard-clear thought when the package is present: derive from reasoning
-    // rows, else keep the live/settled thought field for dual-rail safety.
-    thought: packageThought || legacyThought || undefined,
-    turnItems,
-    codexTranscript: canonicalTranscript(turnItems),
-  };
-};
+export function resolveAssistantTurnRenderProtocol(surface: ChatTurnProtocolSurface): ChatTurnRenderProtocol {
+  return resolveAssistantTurnRenderSurface(surface).protocol;
+}
+
+export function activeTurnProtocolTextLength(surface: ChatTurnProtocolSurface) {
+  const resolved = resolveAssistantTurnRenderSurface(surface);
+  return resolved.answerContent.length + resolved.thoughtContent.length;
+}
+
+export function hasVisibleActiveTurnProtocolContent(surface: ChatTurnProtocolSurface) {
+  return consolidateSessionTurnItemsV2(surface.turnItems).length > 0;
+}
+
+export function hasCommittedAssistantProtocolAnswer(message: ConversationMessage) {
+  if (message.role !== "assistant" || message.status !== "completed") return false;
+  return consolidateSessionTurnItemsV2(message.turnItems).some((item) => (
+    isFinalAnswerTurnItem(item)
+    && item.status === "completed"
+    && item.terminal === true
+    && Boolean(item.text.trim())
+  ));
+}
+
+export const hasTerminalCanonicalTurnOutcome = (message: ConversationMessage): boolean => (
+  message.role === "assistant"
+  && (message.status === "completed" || message.status === "failed")
+  && consolidateSessionTurnItemsV2(message.turnItems).some((item) => (
+    item.terminal === true && (item.status === "completed" || item.status === "failed")
+  ))
+);
+
+/** Normalize only the canonical item sequence; never create legacy display fields. */
+export const projectConversationMessageFromTurnItemsV2 = (
+  message: ConversationMessage,
+): ConversationMessage => (
+  message.role === "assistant"
+    ? { ...message, turnItems: consolidateSessionTurnItemsV2(message.turnItems) }
+    : message
+);

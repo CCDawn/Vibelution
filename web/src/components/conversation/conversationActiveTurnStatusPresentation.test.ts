@@ -11,17 +11,6 @@ import {
 } from "./conversationActiveTurnStatusPresentation";
 
 describe("conversationActiveTurnStatusPresentation", () => {
-  it("resolves stage from streamStage then latest status feedback", () => {
-    expect(resolveActiveTurnProgressStage({ streamStage: "model_thinking" })).toBe("model_thinking");
-    expect(resolveActiveTurnProgressStage({
-      feedbackEvents: [
-        { kind: "status", name: "agent_prepare", status: "running" },
-        { kind: "status", name: "model_request", status: "running" },
-      ],
-    })).toBe("model_request");
-    expect(resolveActiveTurnProgressStage({})).toBe("running");
-  });
-
   it("maps stage labels and optimistic summaries", () => {
     expect(activeTurnStageLabel("user_submit", "zh")).toBe("已发送");
     expect(activeTurnStageLabel("model_thinking", "zh")).toBe("思考中");

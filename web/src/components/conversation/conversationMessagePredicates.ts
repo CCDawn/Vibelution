@@ -1,4 +1,9 @@
 import type { ConversationMessage } from "../../api/types";
+import {
+  assistantFinalAnswerText,
+  assistantStatusTurnItems,
+  assistantTurnIsStreaming,
+} from "../../routes/chatTurnProtocol";
 
 function metadataString(message: ConversationMessage, key: string) {
   const value = message.metadata?.[key];
@@ -23,7 +28,9 @@ export function isTurnErrorMessage(message: ConversationMessage) {
   if (metadataString(message, "kind") === "turn_error") {
     return true;
   }
-  if (isProviderFailureSummaryText(message.content)) {
+  if (assistantStatusTurnItems(message).some((item) => (
+    item.type === "error" && isProviderFailureSummaryText(item.text)
+  ))) {
     return true;
   }
   return metadataString(message, "kind") === "image2_generation"
@@ -39,7 +46,8 @@ export function isRuntimeNoticeText(text: unknown) {
 }
 
 export function isRuntimeNoticeMessage(message: ConversationMessage) {
-  return message.role === "assistant" && isRuntimeNoticeText(message.content);
+  return message.role === "assistant" && assistantStatusTurnItems(message)
+    .some((item) => isRuntimeNoticeText(item.type === "retry" ? item.reason : item.text));
 }
 
 function normalizeRuntimeStatusText(text: unknown) {
@@ -48,8 +56,12 @@ function normalizeRuntimeStatusText(text: unknown) {
 
 function isStreamingRuntimeStatusCarrier(message: ConversationMessage) {
   const kind = String(message.metadata?.kind ?? "").trim();
-  const stage = String(message.streamStage ?? "").trim().toLowerCase();
-  return Boolean(message.streaming)
+  const stage = assistantStatusTurnItems(message)
+    .map((item) => item.type === "status" ? item.code : item.type)
+    .at(-1)
+    ?.trim()
+    .toLowerCase();
+  return assistantTurnIsStreaming(message)
     || kind === "session_live_overlay"
     || kind === "session_active_turn_layer"
     || stage === "model_thinking"
@@ -79,7 +91,7 @@ export function isRuntimeStatusContent(message: ConversationMessage) {
   if (message.role !== "assistant") {
     return false;
   }
-  const content = String(message.content ?? "").trim();
+  const content = assistantFinalAnswerText(message);
   if (!content) {
     return false;
   }
@@ -97,7 +109,7 @@ export function isAgentInboxMessage(message: ConversationMessage) {
   if (kind === "agent_inbox_message") {
     return true;
   }
-  return String(message.content ?? "").trim().startsWith("[Agent 私信");
+  return assistantFinalAnswerText(message).startsWith("[Agent 私信");
 }
 
 export function isGroupRoomTranscriptMessage(message: ConversationMessage) {
@@ -105,7 +117,7 @@ export function isGroupRoomTranscriptMessage(message: ConversationMessage) {
   if (kind === "group_room_transcript") {
     return true;
   }
-  return String(message.content ?? "").trim().startsWith("[群聊同步]");
+  return assistantFinalAnswerText(message).startsWith("[群聊同步]");
 }
 
 export function isCliAgentLifecycleMessage(message: ConversationMessage) {
