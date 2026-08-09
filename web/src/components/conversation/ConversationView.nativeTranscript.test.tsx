@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
 import { ConversationView } from "./ConversationView";
+import conversationViewSource from "./ConversationView.tsx?raw";
 import toolActivityStyles from "./ConversationToolActivity.styles";
 import styles from "./ConversationView.styles";
 
@@ -41,7 +42,8 @@ function renderConversation(messages: ConversationMessage[], processDisplayMode:
   );
 }
 
-describe("ConversationView native Codex transcript surface", () => {it("does not render internal pipeline text when native transcripts carry it as assistant markdown", () => {
+describe("ConversationView native Codex transcript surface", () => {
+  it("does not render internal pipeline text when native transcripts carry it as assistant markdown", () => {
     const statusText = "context_prepare\n正在准备对话上下文...\n\nagent_prepare\n正在唤起对话 agent...\n\nmodel_request\n正在请求模型，等待首个响应片段...\n\nretrying\n模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
     const html = renderConversation([
       {
@@ -111,4 +113,70 @@ describe("ConversationView native Codex transcript surface", () => {it("does not
     expect(html.match(/用户消息不应重复显示/g)).toHaveLength(1);
     expect(html).not.toContain('data-codex-transcript-surface="true"');
     expect(html).not.toContain('data-codex-transcript-cell-kind="assistant_markdown"');
-  });});
+  });
+
+  it("keeps completed thought cells terminal while the overall turn is still streaming", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-thought-lifecycle",
+        role: "assistant",
+        timestamp: "2026-08-09T17:14:00Z",
+        turnId: "turn-thought-lifecycle",
+        status: "running",
+        turnItems: [
+          {
+            id: "thought-completed-r1",
+            itemId: "thought-completed",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-thought-lifecycle",
+            type: "agent_message",
+            phase: "commentary",
+            status: "completed",
+            revision: 1,
+            sequence: 1,
+            terminal: true,
+            text: "已经完成的历史思考。",
+          },
+          {
+            id: "thought-running-r1",
+            itemId: "thought-running",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-thought-lifecycle",
+            type: "reasoning",
+            status: "running",
+            revision: 1,
+            sequence: 2,
+            terminal: false,
+            text: "当前仍在进行的思考。",
+          },
+        ],
+      },
+    ]);
+
+    const completedText = html.indexOf("已经完成的历史思考。");
+    const runningText = html.indexOf("当前仍在进行的思考。");
+    const completedStart = html.lastIndexOf("<section", completedText);
+    const completedEnd = html.indexOf("</section>", completedText);
+    const runningStart = html.lastIndexOf("<section", runningText);
+    const runningEnd = html.indexOf("</section>", runningText);
+    expect(completedText).toBeGreaterThan(-1);
+    expect(runningText).toBeGreaterThan(-1);
+    expect(completedStart).toBeGreaterThan(-1);
+    expect(completedEnd).toBeGreaterThan(completedStart);
+    expect(runningStart).toBeGreaterThan(-1);
+    expect(runningEnd).toBeGreaterThan(runningStart);
+    expect(html.slice(completedStart, completedEnd)).not.toContain(styles.statusSpinner);
+    expect(html.slice(runningStart, runningEnd)).toContain(styles.statusSpinner);
+  });
+
+  it("does not derive individual thought streaming from the whole assistant turn", () => {
+    expect(conversationViewSource).not.toContain(
+      'input.status === "running" || input.status === "pending" || assistantTurnIsStreaming(message)',
+    );
+    expect(conversationViewSource).not.toContain(
+      'item.status === "running" || item.status === "pending" || assistantTurnIsStreaming(message)',
+    );
+  });
+});
