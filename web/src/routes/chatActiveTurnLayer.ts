@@ -222,11 +222,20 @@ export function selectFirstUnpaintedRunningTool(
   };
 }
 
-export function activeTurnTerminalRefreshKey(layer: ActiveTurnLayerState | undefined) {
-  if (!layer || !layer.turnId || (layer.status !== "completed" && layer.status !== "failed")) {
+export function activeTurnTerminalRefreshKey(
+  layer: ActiveTurnLayerState | undefined,
+  detail?: SessionDetail,
+) {
+  if (!layer || !layer.turnId) {
     return "";
   }
-  return `${layer.turnId}:${layer.status}:${layer.ledgerSeq}`;
+  if (layer.status === "completed" || layer.status === "failed") {
+    return `${layer.turnId}:${layer.status}:${layer.ledgerSeq}`;
+  }
+  if (isActiveTurnSettledByDetail(layer, detail)) {
+    return `${layer.turnId}:detail:${normalizedLedgerSeq(detail?.ledgerSeq)}`;
+  }
+  return "";
 }
 
 export function isActiveTurnSettledByDetail(

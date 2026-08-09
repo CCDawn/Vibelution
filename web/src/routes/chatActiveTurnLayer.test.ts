@@ -91,6 +91,41 @@ describe("chat active turn layer", () => {
     expect(activeTurnTerminalRefreshKey(undefined)).toBe("");
   });
 
+  it("requests an authoritative index refresh when persisted detail settles a still-running layer", () => {
+    const layer = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({ done: false, ledgerSeq: 8 }),
+    );
+    const detail = {
+      id: "session-1",
+      ledgerSeq: 10,
+      messages: [{
+        id: "assistant-final",
+        role: "assistant",
+        status: "completed",
+        turnId: "turn-1",
+        timestamp: "2026-08-10T00:00:01Z",
+        turnItems: [{
+          id: "answer:1",
+          itemId: "answer",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-1",
+          type: "final_answer",
+          status: "completed",
+          revision: 1,
+          sequence: 10,
+          terminal: true,
+          text: "DONE",
+          createdAt: "2026-08-10T00:00:01Z",
+          updatedAt: "2026-08-10T00:00:01Z",
+        }],
+      }],
+    } as SessionDetail;
+
+    expect(activeTurnTerminalRefreshKey(layer, detail)).toBe("turn-1:detail:10");
+  });
+
   it("keeps clientSubmissionId when an optimistic layer binds to a canonical turn", () => {
     const optimistic = createOptimisticActiveTurnLayer({
       sessionId: "session-1",
