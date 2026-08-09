@@ -2,7 +2,7 @@
 
 > **Document Status:** Current operational contract
 > **Gateway Status:** `DEPLOYABLE`
-> **Guide Version:** `0.3.1`
+> **Guide Version:** `0.3.2`
 > **Canonical MCP Name:** `vibelution`
 > **Canonical Resource URI:** `vibelution://guide/mcp-managed-agent-gateway`
 > **Target stdio Entry:** `<project-root>\.venv\Scripts\python.exe <project-root>\scripts\project_agent_tool.py mcp --project-root <project-root>`
@@ -122,10 +122,10 @@ requested profile
   "sourceRevision": "git-sha",
   "projectRoot": "absolute-path",
   "backend": "healthy",
-  "serverVersion": "0.3.0",
+  "serverVersion": "0.3.1",
   "protocolEras": ["legacy", "modern"],
   "guideUri": "vibelution://guide/mcp-managed-agent-gateway",
-  "guideVersion": "0.3.1",
+  "guideVersion": "0.3.2",
   "tools": [
     "list_project_agents",
     "start_project_agent_task",
@@ -383,6 +383,8 @@ Server 必须暴露以下固定 Resource：
 | `succeeded` | 使用有界结构化结果 |
 | `failed` | 读取稳定错误码，判断是否可重试新任务 |
 | `cancelled` / `timed_out` | 终止轮询并报告原因 |
+
+隐藏会话若以 `needs_continue` 或 `paused_limit` 收口，backend 会用固定、无任务正文的提示在同一隐藏会话中自动开启下一回合，并保留原权限夹紧与审批规则。该跨回合续跑最多执行 3 次；仍不能形成可信终态时返回 `failed`，错误码为 `TURN_CONTINUATION_LIMIT`，不会继续占用 `running` 直到 lease 超时。调用 Host 只轮询受管 task，不自行向隐藏 Session 发送“继续”。
 
 当前固定依赖 `mcp==2.0.0` 未提供 MCP Tasks extension 的服务端 API，因此本版本始终使用上述五工具兼容流程，`self-check` 明确返回 `tasksExtension=not_available_in_mcp_sdk_2.0.0`。Host 即使声明 Tasks capability，也不会获得原生 Task handle；升级 SDK 后必须先补双协商测试与真实 Host 验收，才能改变这一边界。
 

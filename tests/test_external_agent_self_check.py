@@ -24,7 +24,7 @@ class HealthyBackend:
         return {
             "status": "healthy",
             "apiProtocolVersion": "1.0",
-            "serverVersion": "0.3.0",
+            "serverVersion": "0.3.1",
             "projectRoot": str(self.root.resolve()),
             "runtimeSourceRevision": "abc123",
             "enabled": True,
@@ -38,7 +38,7 @@ def _project(tmp_path: Path, *, gateway_status: str) -> Path:
             [
                 "# Guide",
                 f"> **Gateway Status:** `{gateway_status}`",
-                "> **Guide Version:** `0.3.1`",
+                "> **Guide Version:** `0.3.2`",
             ]
         ),
         encoding="utf-8",
