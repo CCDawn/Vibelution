@@ -28,10 +28,14 @@ def _inferred_task_timezone(
     if local_updated is None or local_updated.tzinfo is not None:
         return None
     utc_finished = finished.astimezone(timezone.utc).replace(tzinfo=None)
-    offset = local_updated - utc_finished
-    if abs(offset) > timedelta(hours=14) or offset.total_seconds() % 900:
+    raw_offset_seconds = (local_updated - utc_finished).total_seconds()
+    rounded_offset_seconds = round(raw_offset_seconds / 900) * 900
+    if (
+        abs(rounded_offset_seconds) > timedelta(hours=14).total_seconds()
+        or abs(raw_offset_seconds - rounded_offset_seconds) > 300
+    ):
         return None
-    return timezone(offset)
+    return timezone(timedelta(seconds=rounded_offset_seconds))
 
 
 def _elapsed_seconds(

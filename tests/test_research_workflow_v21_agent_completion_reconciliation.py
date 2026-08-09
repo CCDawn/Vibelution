@@ -168,7 +168,7 @@ def _start_source_node(
         lambda *_args, **_kwargs: {
             "id": terminal["sessionId"],
             "currentPhase": "ready",
-            "updatedAt": "2026-08-09T10:00:12",
+            "updatedAt": "2026-08-09T10:00:10",
             "llmUsage": {"totalTokens": 90},
         },
     )

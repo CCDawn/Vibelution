@@ -21,7 +21,7 @@ RECOVERABLE_EXTERNAL_RECONCILIATION_FAILURES = frozenset(
         "agent_usage_invalid",
     }
 )
-_RECOVERY_VERSION = "v1"
+_RECOVERY_VERSION = "v2"
 
 
 def is_recoverable_external_reconciliation_failure(
