@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import queue
@@ -1588,6 +1589,53 @@ def test_session_events_stream_none_yields_only_incremental_events(monkeypatch):
 
     assert "event: session_probe" in first_event
     assert '"sessionId": "session-bootstrap-owned"' in first_event
+
+
+def test_async_session_stream_delivers_with_more_idle_streams_than_executor_capacity():
+    async def exercise() -> str:
+        streams = [
+            session_service.stream_session_events_async(f"session-idle-{index}", initial="none")
+            for index in range(12)
+        ]
+        pending = [asyncio.create_task(anext(stream)) for stream in streams]
+        try:
+            for _ in range(50):
+                with session_service._SESSION_STREAM_SUBSCRIBERS_LOCK:
+                    registered = sum(
+                        len(session_service._SESSION_STREAM_SUBSCRIBERS.get(f"session-idle-{index}") or ())
+                        for index in range(12)
+                    )
+                if registered == 12:
+                    break
+                await asyncio.sleep(0.005)
+            assert registered == 12
+
+            with session_service._SESSION_STREAM_SUBSCRIBERS_LOCK:
+                target = next(iter(session_service._SESSION_STREAM_SUBSCRIBERS["session-idle-11"]))
+            delivered, dropped = session_service._put_session_stream_event(
+                target,
+                {"type": "session_probe", "sessionId": "session-idle-11"},
+            )
+            assert delivered is True
+            assert dropped == 0
+            return await asyncio.wait_for(pending[11], timeout=0.3)
+        finally:
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for stream in streams:
+                await stream.aclose()
+
+    raw_event = asyncio.run(exercise())
+
+    assert "event: session_probe" in raw_event
+    assert '"sessionId": "session-idle-11"' in raw_event
+    with session_service._SESSION_STREAM_SUBSCRIBERS_LOCK:
+        assert all(
+            not session_service._SESSION_STREAM_SUBSCRIBERS.get(f"session-idle-{index}")
+            for index in range(12)
+        )
 
 
 def test_web_app_entrypoint_uses_extracted_app_chain_helpers():

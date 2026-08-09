@@ -943,6 +943,7 @@ from core.web.services.session.projection import (
 )
 from core.web.services.session.publish import (
     stream_session_events,
+    stream_session_events_async,
     get_session_stream_initial_state,
     resolve_session_stream_initial_payload,
     normalize_session_stream_initial_mode,

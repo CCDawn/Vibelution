@@ -322,35 +322,23 @@ def test_session_tool_approval_routes_map_not_found_and_conflict(monkeypatch):
     assert conflict.status_code == 409
 
 
-def test_session_events_runs_initial_and_iterator_on_dedicated_executor(monkeypatch):
+def test_session_events_runs_only_initial_projection_on_dedicated_executor(monkeypatch):
     thread_names: list[str] = []
     closed = threading.Event()
 
-    class SingleEventIterator:
-        def __init__(self):
-            self.sent = False
-
-        def __iter__(self):
-            return self
-
-        def __next__(self):
+    async def single_event_stream(*_args, **_kwargs):
+        try:
             thread_names.append(threading.current_thread().name)
-            if self.sent:
-                raise StopIteration
-            self.sent = True
-            return "event: session_initial\ndata: {}\n\n"
-
-        def close(self):
-            thread_names.append(threading.current_thread().name)
+            yield "event: session_initial\ndata: {}\n\n"
+        finally:
             closed.set()
 
     def resolve_initial(session_id: str, initial: str):
         thread_names.append(threading.current_thread().name)
         return initial, None, {"type": "session_initial", "sessionId": session_id}
 
-    iterator = SingleEventIterator()
     monkeypatch.setattr(session_routes, "resolve_session_stream_initial_payload", resolve_initial)
-    monkeypatch.setattr(session_routes, "stream_session_events", lambda *args, **kwargs: iterator)
+    monkeypatch.setattr(session_routes, "stream_session_events_async", single_event_stream)
 
     async def consume_first_event():
         response = await session_routes.session_events("session-active", "light")
@@ -363,46 +351,8 @@ def test_session_events_runs_initial_and_iterator_on_dedicated_executor(monkeypa
     assert inspect.iscoroutinefunction(session_routes.session_events)
     assert event == "event: session_initial\ndata: {}\n\n"
     assert closed.wait(timeout=1)
-    assert thread_names
-    assert all(name.startswith("session-stream") for name in thread_names)
-
-
-def test_session_stream_executor_admits_fifth_blocking_iterator():
-    release = threading.Event()
-    entered = [threading.Event() for _ in range(5)]
-
-    class BlockingIterator:
-        def __init__(self, index: int):
-            self.index = index
-
-        def __iter__(self):
-            return self
-
-        def __next__(self):
-            entered[self.index].set()
-            release.wait(timeout=2)
-            raise StopIteration
-
-        def close(self):
-            return None
-
-    async def consume(iterator):
-        async for _item in session_routes._iterate_session_stream(iterator):
-            pass
-
-    async def exercise_stream_capacity() -> bool:
-        tasks = [asyncio.create_task(consume(BlockingIterator(index))) for index in range(5)]
-        try:
-            for _ in range(20):
-                if entered[4].is_set():
-                    break
-                await asyncio.sleep(0.01)
-            return entered[4].is_set()
-        finally:
-            release.set()
-            await asyncio.wait_for(asyncio.gather(*tasks), timeout=2)
-
-    assert asyncio.run(exercise_stream_capacity()) is True
+    assert thread_names[0].startswith("session-stream")
+    assert not thread_names[1].startswith("session-stream")
 
 
 def test_session_detail_exists(tmp_path, monkeypatch):
