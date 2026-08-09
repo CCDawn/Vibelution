@@ -160,6 +160,11 @@ def test_each_source_agent_starts_exact_task_and_persists_node_session(
 
     def fake_start_source_run(team_id: str, payload: dict) -> dict:
         source_run_calls.append({"teamId": team_id, "payload": payload})
+        assert "questionId" not in payload
+        assert payload["scope"] == {
+            "workflowRunId": run["runId"],
+            "researchProjectId": "project-agent-execution",
+        }
         return {"run": {"runId": "source-run-1"}}
 
     def fake_start_stage_task(team_id: str, source_run_id: str, payload: dict) -> dict:

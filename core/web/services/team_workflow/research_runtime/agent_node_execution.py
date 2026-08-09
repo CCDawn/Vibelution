@@ -110,11 +110,9 @@ def _ensure_source_collection_run(
                 "inputRefs": list(input_snapshot.get("datasetRefs") or []),
                 "agentRoles": list(_source_agent_ids(record)),
                 "agentIds": _source_agent_ids(record),
-                "questionId": str(record.get("questionId") or ""),
                 "scope": {
                     "workflowRunId": str(record.get("runId") or ""),
                     "researchProjectId": str(record.get("projectId") or ""),
-                    "questionId": str(record.get("questionId") or ""),
                 },
             },
         )
