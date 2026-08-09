@@ -135,7 +135,7 @@ export function challengeCupDefinition(): WorkflowLayoutInput {
   const stages = [
     { stageId: "knowledge_collection", label: "知识搜集", nodeIds: ["source_finding", "source_extraction", "evidence_relations", "knowledge_ingestion", "knowledge_handoff"] },
     { stageId: "experiment_design", label: "实验设计", nodeIds: ["hypothesis_design", "protocol_design", "protocol_review", "protocol_freeze", "smoke_gate"] },
-    { stageId: "execution_iteration", label: "执行迭代", nodeIds: ["controlled_run", "result_evaluation", "iteration_decision", "candidate_promotion", "result_package"] },
+    { stageId: "execution_iteration", label: "执行迭代", nodeIds: ["controlled_run", "result_evaluation", "iteration_decision", "version_governance", "candidate_promotion", "result_package"] },
   ];
 
   const nodes = [
@@ -152,6 +152,7 @@ export function challengeCupDefinition(): WorkflowLayoutInput {
     node("controlled_run", "execution_iteration", "受控运行", "system", "system_task"),
     node("result_evaluation", "execution_iteration", "结果评价", "agent", "agent_task"),
     node("iteration_decision", "execution_iteration", "迭代决策", "agent", "decision"),
+    node("version_governance", "execution_iteration", "版本治理", "agent", "agent_task"),
     node("candidate_promotion", "execution_iteration", "候选晋升", "human", "human_gate"),
     node("result_package", "execution_iteration", "结果打包", "system", "system_task"),
   ];
@@ -170,9 +171,11 @@ export function challengeCupDefinition(): WorkflowLayoutInput {
     edge("e_run_eval", "controlled_run", "result_evaluation", "运行产物"),
     edge("e_eval_decision", "result_evaluation", "iteration_decision", "评价报告"),
     edge("e_decision_rerun", "iteration_decision", "controlled_run", "同协议重跑", "rerun", "rerun"),
-    edge("e_decision_promo", "iteration_decision", "candidate_promotion", "晋升提案", "promote", "promote"),
-    edge("e_decision_rollback", "iteration_decision", "candidate_promotion", "回滚提案", "rollback", "rollback"),
-    edge("e_decision_stop", "iteration_decision", "result_package", "停止并打包", "stop", "stop"),
+    edge("e_decision_promote", "iteration_decision", "version_governance", "晋升版本", "promote", "promote"),
+    edge("e_decision_rollback", "iteration_decision", "version_governance", "回滚版本", "rollback", "rollback"),
+    edge("e_decision_stop", "iteration_decision", "version_governance", "停止迭代", "stop", "stop"),
+    edge("e_version_promotion", "version_governance", "candidate_promotion", "晋升提案"),
+    edge("e_version_package", "version_governance", "result_package", "停止并打包"),
     edge("e_promo_package", "candidate_promotion", "result_package", "确认晋升/回滚"),
   ];
 

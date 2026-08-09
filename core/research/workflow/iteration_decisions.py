@@ -48,9 +48,9 @@ ITERATION_ROUTE_TARGETS: dict[IterationDecisionKind, str | None] = {
 ITERATION_DEFINITION_EDGE_IDS: dict[IterationDecisionKind, str | None] = {
     IterationDecisionKind.RERUN_SAME_PROTOCOL: "e_decision_rerun",
     IterationDecisionKind.REVISE_PROTOCOL: None,
-    IterationDecisionKind.PROMOTE_CANDIDATE: "e_decision_version",
-    IterationDecisionKind.ROLLBACK_CANDIDATE: "e_decision_version",
-    IterationDecisionKind.STOP: "e_decision_version",
+    IterationDecisionKind.PROMOTE_CANDIDATE: "e_decision_promote",
+    IterationDecisionKind.ROLLBACK_CANDIDATE: "e_decision_rollback",
+    IterationDecisionKind.STOP: "e_decision_stop",
 }
 
 DEFAULT_ITERATION_BUDGET = 3

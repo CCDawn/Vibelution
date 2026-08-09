@@ -19,6 +19,10 @@ from core.research.workflow.handoff import (
     plan_alone_does_not_unlock_controlled_run,
     progress_alone_does_not_unlock_experiment,
 )
+from core.research.workflow.iteration_decisions import (
+    ITERATION_DEFINITION_EDGE_IDS,
+    IterationDecisionKind,
+)
 from core.research.workflow.models import (
     ActorKind,
     AgentBindingLayers,
@@ -81,6 +85,26 @@ def test_actor_kinds_match_adr0007() -> None:
     assert by_id["result_package"].actorKind is ActorKind.SYSTEM
     assert by_id["version_governance"].actorKind is ActorKind.AGENT
     assert by_id["candidate_promotion"].actorKind is ActorKind.HUMAN
+
+
+def test_iteration_outcomes_have_distinct_definition_edges() -> None:
+    definition = build_challenge_cup_workflow_definition()
+    edges = {edge.edgeId: edge for edge in definition.edges}
+    expected = {
+        IterationDecisionKind.RERUN_SAME_PROTOCOL: "e_decision_rerun",
+        IterationDecisionKind.PROMOTE_CANDIDATE: "e_decision_promote",
+        IterationDecisionKind.ROLLBACK_CANDIDATE: "e_decision_rollback",
+        IterationDecisionKind.STOP: "e_decision_stop",
+    }
+
+    assert {kind: ITERATION_DEFINITION_EDGE_IDS[kind] for kind in expected} == expected
+    for edge_id in expected.values():
+        edge = edges[edge_id]
+        assert edge.fromNodeId == "iteration_decision"
+    assert edges["e_decision_rerun"].toNodeId == "controlled_run"
+    assert edges["e_decision_promote"].toNodeId == "version_governance"
+    assert edges["e_decision_rollback"].toNodeId == "version_governance"
+    assert edges["e_decision_stop"].toNodeId == "version_governance"
 
 
 def test_binding_resolution_order_node_over_stage_over_workflow() -> None:
