@@ -90,7 +90,7 @@ def test_gateway_info_requires_control_token_and_reports_disabled_default(
     assert response.status_code == 200
     assert response.json()["enabled"] is False
     assert response.json()["apiProtocolVersion"] == "1.0"
-    assert response.json()["serverVersion"] == "0.3.0"
+    assert response.json()["serverVersion"] == "0.3.1"
 
 
 def test_adapter_connection_and_shutdown_are_auditable(monkeypatch) -> None:

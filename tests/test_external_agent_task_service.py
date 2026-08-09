@@ -64,7 +64,7 @@ class FakeRuntime:
         self.submit_calls.append(
             {"sessionId": session_id, "content": content, **kwargs}
         )
-        return {"turnId": "turn-1"}
+        return {"turnId": f"turn-{len(self.submit_calls)}"}
 
     def get_detail(self, session_id: str, **_kwargs: Any) -> dict[str, Any] | None:
         return self.details.get(session_id)
@@ -324,6 +324,99 @@ def test_get_sanitizes_approvals_and_enforces_owner(tmp_path) -> None:
     assert "sessionId" not in result
     with pytest.raises(ExternalAgentAccessError, match="not found"):
         service.get_task(owner_id="host-b", task_id=started["taskId"])
+
+
+@pytest.mark.parametrize("resumable_status", ["needs_continue", "paused_limit"])
+def test_get_continues_resumable_session_phase_before_succeeding(
+    tmp_path, resumable_status: str
+) -> None:
+    runtime = FakeRuntime()
+    service = _service(tmp_path, runtime)
+    started = service.start_task(
+        owner_id="host-a",
+        adapter_connection_id="connection-a",
+        capabilities=set(),
+        agent_id="coder",
+        task="finish the managed task",
+        permission_profile="read_only",
+        client_request_id="",
+        title="",
+        runtime_revision="rev-1",
+    )
+    task = service.store.get_task(started["taskId"])
+    runtime.details[task["sessionId"]] = {
+        "sessionId": task["sessionId"],
+        "status": resumable_status,
+        "messages": [
+            {"role": "assistant", "content": "已取得进展，但还需要继续。"}
+        ],
+    }
+
+    continued = service.get_task(owner_id="host-a", task_id=task["taskId"])
+
+    assert continued["status"] == "running"
+    assert len(runtime.submit_calls) == 2
+    assert runtime.submit_calls[1]["content"] == (
+        "继续完成当前外部 Agent 任务；复用已有上下文，完成剩余工作并给出最终结果。"
+    )
+    assert runtime.submit_calls[1]["message_source"] == "external_agent_task"
+    assert runtime.submit_calls[1]["message_metadata"] == {
+        "source": "external_agent_task",
+        "taskId": task["taskId"],
+        "effectivePermissionProfile": "read_only",
+        "allowInternalAutoContinue": True,
+        "runtimeRevision": "rev-1",
+        "continuationIndex": 1,
+    }
+    continued_record = service.store.get_task(task["taskId"])
+    assert continued_record["turnId"] == "turn-2"
+    assert continued_record["continuationCount"] == 1
+
+    runtime.details[task["sessionId"]] = {
+        "sessionId": task["sessionId"],
+        "status": "ready",
+        "messages": [{"role": "assistant", "content": "任务完成。"}],
+    }
+    completed = service.get_task(owner_id="host-a", task_id=task["taskId"])
+
+    assert completed["status"] == "succeeded"
+    assert completed["resultSummary"] == "任务完成。"
+
+
+def test_resumable_session_phase_fails_after_bounded_continuations(tmp_path) -> None:
+    runtime = FakeRuntime()
+    service = _service(tmp_path, runtime)
+    started = service.start_task(
+        owner_id="host-a",
+        adapter_connection_id="connection-a",
+        capabilities=set(),
+        agent_id="coder",
+        task="finish the managed task",
+        permission_profile="read_only",
+        client_request_id="",
+        title="",
+        runtime_revision="rev-1",
+    )
+    task = service.store.get_task(started["taskId"])
+    runtime.details[task["sessionId"]] = {
+        "sessionId": task["sessionId"],
+        "status": "needs_continue",
+        "messages": [{"role": "assistant", "content": "仍需继续。"}],
+    }
+
+    for _ in range(3):
+        result = service.get_task(owner_id="host-a", task_id=task["taskId"])
+        assert result["status"] == "running"
+
+    failed = service.get_task(owner_id="host-a", task_id=task["taskId"])
+
+    assert failed["status"] == "failed"
+    assert failed["error"] == {
+        "code": "TURN_CONTINUATION_LIMIT",
+        "message": "Agent task reached the managed continuation limit.",
+    }
+    assert failed["resultSummary"] == "仍需继续。"
+    assert len(runtime.submit_calls) == 4
 
 
 def test_approval_is_explicit_idempotent_and_accept_always_is_capability_gated(

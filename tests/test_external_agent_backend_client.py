@@ -35,7 +35,7 @@ def _transport(
     calls: list[httpx.Request],
     *,
     get_status: str = "running",
-    server_version: str = "0.3.0",
+    server_version: str = "0.3.1",
 ) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
@@ -254,7 +254,7 @@ async def test_client_rejects_non_loopback_or_mismatched_runtime(tmp_path) -> No
             200,
             json={
                 "apiProtocolVersion": "1.0",
-                "serverVersion": "0.3.0",
+                "serverVersion": "0.3.1",
                 "projectRoot": str((tmp_path / "other").resolve()),
                 "runtimeSourceRevision": "rev-1",
             },
@@ -319,7 +319,7 @@ async def test_client_preserves_backend_stable_error_code(tmp_path) -> None:
                 200,
                 json={
                     "apiProtocolVersion": "1.0",
-                    "serverVersion": "0.3.0",
+                    "serverVersion": "0.3.1",
                     "projectRoot": str(tmp_path.resolve()),
                     "runtimeSourceRevision": "rev-1",
                 },

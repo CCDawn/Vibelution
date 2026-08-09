@@ -76,11 +76,16 @@ _TERMINAL_PHASES = frozenset(
 _RUNNING_PHASES = frozenset(
     {"queued", "running", "working", "busy", "stopping", "cancelling"}
 )
+_RESUMABLE_PHASES = frozenset({"needs_continue", "paused_limit"})
 _APPROVAL_DECISIONS = frozenset(
     {"accept", "acceptForSession", "acceptAlways", "decline", "cancel"}
 )
 _MAX_TASK_CHARS = 64_000
 _MAX_RESULT_CHARS = 8_000
+_MAX_MANAGED_CONTINUATIONS = 3
+_MANAGED_CONTINUATION_PROMPT = (
+    "继续完成当前外部 Agent 任务；复用已有上下文，完成剩余工作并给出最终结果。"
+)
 _POLL_AFTER_MS = 500
 
 
@@ -171,6 +176,7 @@ class ExternalAgentTaskService:
             if str(item or "").strip()
         )
         self.approval_persist_enabled = bool(approval_persist_enabled)
+        self._refresh_lock = threading.RLock()
 
     def list_agents(self, *, limit: int = 50) -> dict[str, Any]:
         self._require_gateway_enabled()
@@ -365,8 +371,9 @@ class ExternalAgentTaskService:
         return self._public_task(record, include_private=include_private)
 
     def get_task(self, *, owner_id: str, task_id: str) -> dict[str, Any]:
-        record = self._owned_task(owner_id, task_id)
-        record, approvals = self._refresh(record)
+        with self._refresh_lock:
+            record = self._owned_task(owner_id, task_id)
+            record, approvals = self._refresh(record)
         return self._public_task(record, pending_approvals=approvals)
 
     def resolve_approval(
@@ -631,7 +638,8 @@ class ExternalAgentTaskService:
                 )
                 updated.append(current)
                 continue
-            refreshed, _ = self._refresh(current)
+            with self._refresh_lock:
+                refreshed, _ = self._refresh(current)
             if refreshed != current:
                 updated.append(refreshed)
         return updated
@@ -752,6 +760,8 @@ class ExternalAgentTaskService:
                 )
             return latest, []
         phase = self._session_phase(detail)
+        if phase in _RESUMABLE_PHASES:
+            return self._continue_resumable_task(latest, detail), []
         if phase in _TERMINAL_PHASES:
             failed = phase in {"failed", "error"}
             result_summary = self._result_summary(detail or {})
@@ -773,6 +783,101 @@ class ExternalAgentTaskService:
                 },
             )
         return latest, []
+
+    def _continue_resumable_task(
+        self,
+        record: dict[str, Any],
+        detail: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        try:
+            continuation_count = max(0, int(record.get("continuationCount") or 0))
+        except (TypeError, ValueError):
+            continuation_count = 0
+        result_summary = self._result_summary(detail or {})
+        if continuation_count >= _MAX_MANAGED_CONTINUATIONS:
+            failed = self._transition(
+                record["taskId"],
+                status="failed",
+                expected_revision=int(record["revision"]),
+                reason_code="turn_continuation_limit",
+                fields={
+                    "resultSummary": result_summary,
+                    "error": {
+                        "code": "TURN_CONTINUATION_LIMIT",
+                        "message": "Agent task reached the managed continuation limit.",
+                    },
+                },
+            )
+            self._record_event(
+                "external_agent.task.continuation_limit_reached",
+                failed,
+                fields={"continuationCount": continuation_count},
+            )
+            return failed
+
+        continuation_index = continuation_count + 1
+        session_id = str(record.get("sessionId") or "").strip()
+        try:
+            submitted = self.dependencies.submit_message(
+                session_id,
+                _MANAGED_CONTINUATION_PROMPT,
+                message_source="external_agent_task",
+                message_metadata={
+                    "source": "external_agent_task",
+                    "taskId": record["taskId"],
+                    "effectivePermissionProfile": str(
+                        record.get("effectivePermissionProfile") or "read_only"
+                    ),
+                    "allowInternalAutoContinue": True,
+                    "runtimeRevision": str(record.get("runtimeRevision") or ""),
+                    "continuationIndex": continuation_index,
+                },
+                lightweight_response=True,
+                include_started_turn_id=True,
+            )
+            turn_id = str(
+                submitted.get("turnId")
+                or submitted.get("startedTurnId")
+                or submitted.get("activeTurnId")
+                or ""
+            ).strip()
+            if not turn_id:
+                raise RuntimeError("managed continuation returned no turnId")
+        except Exception:  # noqa: BLE001 - project a stable boundary, never raw internals
+            latest = self.store.get_task(record["taskId"])
+            failed = self._transition(
+                latest["taskId"],
+                status="failed",
+                expected_revision=int(latest["revision"]),
+                reason_code="turn_continuation_failed",
+                fields={
+                    "resultSummary": result_summary,
+                    "error": {
+                        "code": "TURN_CONTINUATION_FAILED",
+                        "message": "Agent task continuation could not be started.",
+                    },
+                },
+            )
+            self._record_event("external_agent.task.continuation_failed", failed)
+            return failed
+
+        latest = self.store.get_task(record["taskId"])
+        continued = self._transition(
+            latest["taskId"],
+            status="running",
+            expected_revision=int(latest["revision"]),
+            reason_code="turn_continued",
+            fields={
+                "turnId": turn_id,
+                "continuationCount": continuation_index,
+            },
+        )
+        self._record_event(
+            "external_agent.task.continued",
+            continued,
+            fields={"continuationCount": continuation_index},
+        )
+        return continued
 
     def _owned_task(self, owner_id: str, task_id: str) -> dict[str, Any]:
         try:
