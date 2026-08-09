@@ -97,9 +97,9 @@ def _node_attempt(record: dict[str, Any], node_id: str) -> int:
 
 def _agent_display_name(agent_id: str) -> str:
     try:
-        from core.web.services.agent_directory_service import get_agent_config
+        from core.web.services.agent_directory_service import get_agent
 
-        agent = get_agent_config(agent_id)
+        agent = get_agent(agent_id)
         if isinstance(agent, dict):
             return str(agent.get("displayName") or agent.get("agentName") or agent_id)
     except (ImportError, KeyError, OSError, TypeError, ValueError):
