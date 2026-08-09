@@ -78,6 +78,20 @@ def _source_finding_payload(
     explicit_perspectives = _unique_text(
         [item.get("perspective") or item.get("perspectiveId") for item in leads]
     )
+    search_trace = [
+        dict(item)
+        for item in result.get("searchTrace") or []
+        if isinstance(item, dict)
+    ]
+    counter_perspectives = {"limitation_or_null", "falsification"}
+    counter_candidates = [
+        dict(item)
+        for item in candidate_sources
+        if str(item.get("perspective") or item.get("perspectiveId") or "")
+        .strip()
+        .lower()
+        in counter_perspectives
+    ]
     return {
         "runId": record["runId"],
         "nodeRunId": node_run["nodeRunId"],
@@ -86,6 +100,8 @@ def _source_finding_payload(
         "perspectives": explicit_perspectives or queries,
         "queries": queries,
         "candidateSources": candidate_sources,
+        "counterEvidenceCandidateSources": counter_candidates,
+        "searchTrace": search_trace,
         "materializedSources": materialized,
         "evidenceRefs": list(task.get("evidenceRefs") or []),
         "summary": str(task.get("summary") or ""),
