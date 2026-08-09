@@ -286,9 +286,10 @@ function WorkflowCanvasInner({
   const onSelectionChange = useCallback(
     (params: OnSelectionChangeParams) => {
       const task = params.nodes.find((n: Node) => n.type !== "stageRegion");
-      onSelectNode?.(task?.id ?? null);
+      const nextNodeId = task?.id ?? null;
+      if (nextNodeId !== selectedNodeId) onSelectNode?.(nextNodeId);
     },
-    [onSelectNode],
+    [onSelectNode, selectedNodeId],
   );
 
   const onNodeClick = useCallback(
