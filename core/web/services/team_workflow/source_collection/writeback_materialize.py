@@ -1064,6 +1064,17 @@ def _source_collection_stage_writeback_closure_summary(
     )
     if not artifact_complete and excluded_source_count > 0 and (not coverage or complete):
         artifact_complete = True
+    evidence_fetch_progress = s._source_collection_evidence_fetch_progress(
+        task,
+        writeback.get("result") if isinstance(writeback.get("result"), dict) else {},
+    )
+    if evidence_fetch_progress.get("required") and not evidence_fetch_progress.get("complete"):
+        artifact_complete = False
+        artifact_status = "evidence_fetch_incomplete"
+        retry_instruction = (
+            "必须对 remediation scope 中每个候选的既有 DOI/URL 执行 web_fetch_tool，"
+            "并用 evidenceFetchAttempts[] 记录 fetched 或带 failureCode 的 failed 结果。"
+        )
     task_checklist = [
         item for item in list(task.get("taskChecklist") or [])
         if isinstance(item, dict)
@@ -1157,6 +1168,7 @@ def _source_collection_stage_writeback_closure_summary(
         "completionGatePassed": bool(completion_gate.get("passed")),
         "completionGate": completion_gate,
         "taskToolProgress": task_tool_progress,
+        "evidenceFetchProgress": evidence_fetch_progress,
         "progressLabel": f"{action_label} {processed}/{total}" if coverage and total else "",
         "successCount": success_count,
         "excludedSourceCount": excluded_source_count,
@@ -2641,6 +2653,17 @@ def _merge_source_collection_stage_writeback_result_pair(
         merged,
         previous_result,
         incoming,
+        canonical_key="evidenceFetchAttempts",
+        aliases=("evidenceFetchAttempts", "evidence_fetch_attempts"),
+        containers=("contentExtraction", "content_extraction", "outputs", "summary"),
+        item_id=lambda item: item.get("candidateId") or item.get("candidate_id"),
+        valid_existing_ids=valid_candidate_ids,
+        max_items=300,
+    )
+    s._merge_source_collection_stage_writeback_array_group(
+        merged,
+        previous_result,
+        incoming,
         canonical_key="themeNodes",
         aliases=("themeNodes", "theme_nodes", "topicNodes", "topic_nodes"),
         containers=("candidateGraph", "candidate_graph", "relationGraph", "relation_graph", "outputs", "summary"),
@@ -2780,6 +2803,8 @@ def _normalize_source_collection_stage_writeback_result_payload(value: Any) -> d
             "candidate_decisions",
             "recordExtractions",
             "record_extractions",
+            "evidenceFetchAttempts",
+            "evidence_fetch_attempts",
             "candidateLeads",
             "candidate_leads",
             "sourceRecords",
@@ -2846,6 +2871,7 @@ def _source_collection_stage_writeback_result_metadata_max_items(key: str, defau
     if key in {
         "candidateExtractions",
         "recordExtractions",
+        "evidenceFetchAttempts",
         "sourceThemeEdges",
         "sourceTopicEdges",
         "source_theme_edges",

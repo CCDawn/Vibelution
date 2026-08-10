@@ -339,7 +339,13 @@ def get_source_collection_stage_task_context(
     retry_focus = {}
     retry_source_task = task
     retry_source_task_id = s._trim_text(task.get("retrySourceTaskId"), max_length=160)
-    if retry_source_task_id:
+    completed_remediation_writeback = bool(
+        isinstance(task.get("evidenceRemediationContract"), dict)
+        and task.get("evidenceRemediationContract")
+        and isinstance(task.get("writeback"), dict)
+        and task.get("writeback")
+    )
+    if retry_source_task_id and not completed_remediation_writeback:
         found_retry_task, found_retry_run_id = s._find_source_collection_stage_session_task_by_id(
             normalized_team_id,
             retry_source_task_id,
@@ -370,6 +376,25 @@ def get_source_collection_stage_task_context(
         evidence_gap_ids = set(
             s._normalize_text_list(retry_focus.get("evidenceGapCandidateIds"), max_items=500, max_length=160)
         )
+        remediation_contract = (
+            task.get("evidenceRemediationContract")
+            if isinstance(task.get("evidenceRemediationContract"), dict)
+            else {}
+        )
+        remediation_scope_ids = set(
+            s._normalize_text_list(
+                remediation_contract.get("scopeCandidateIds"),
+                max_items=500,
+                max_length=160,
+            )
+        )
+        if remediation_scope_ids:
+            evidence_gap_ids &= remediation_scope_ids
+            if evidence_gap_ids:
+                retry_focus["evidenceGapCandidateIds"] = sorted(evidence_gap_ids)
+                retry_focus["missingEvidenceAnchorCount"] = len(evidence_gap_ids)
+            else:
+                retry_focus = {}
         pageable_candidates = [
             item
             for item in pageable_candidates
@@ -447,6 +472,11 @@ def get_source_collection_stage_task_context(
         "allUnassessedCandidateCount": sum(1 for item in source_candidates if s._source_quality_bucket(item) == "pending"),
         "storageArtifacts": storage_artifacts,
         "writebackContract": task.get("writebackContract") if isinstance(task.get("writebackContract"), dict) else {},
+        "evidenceRemediationContract": (
+            task.get("evidenceRemediationContract")
+            if isinstance(task.get("evidenceRemediationContract"), dict)
+            else {}
+        ),
         "boundaries": s._source_collection_stage_session_task_boundaries(
             stage_id=normalized_stage_id,
             agent_role=task_agent_role,

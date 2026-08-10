@@ -105,6 +105,10 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert "不能根据截断上下文猜结果" in source_extractor["content"]
     assert "普通 assistant commentary" in source_extractor["content"]
     assert "不是隐藏 reasoning 或思维链" in source_extractor["content"]
+    assert "evidenceRemediationContract" in source_extractor["content"]
+    assert "evidenceFetchAttempts[]" in source_extractor["content"]
+    assert "web_fetch_tool" in source_extractor["content"]
+    assert "没有完成全部尝试前不得直接写 needs_review" in source_extractor["content"]
     source_relation_mapper = prompt_template_service.get_prompt_template("prompt-source-relation-mapper")
     assert source_relation_mapper is not None
     assert source_relation_mapper["metadata"]["roleKey"] == "source_relation_mapper"

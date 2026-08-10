@@ -64,6 +64,7 @@ class WorkflowRunInputSnapshot:
     agentBindingSnapshot: tuple[dict[str, Any], ...]
     createdBy: str
     createdAt: str
+    evidenceRemediationContract: dict[str, Any]
     snapshotHash: str
 
     @classmethod
@@ -104,6 +105,11 @@ class WorkflowRunInputSnapshot:
             "createdBy": require_text(payload, "createdBy"),
             "createdAt": require_text(payload, "createdAt"),
         }
+        if "evidenceRemediationContract" in payload:
+            canonical["evidenceRemediationContract"] = require_mapping(
+                payload,
+                "evidenceRemediationContract",
+            )
         if any(
             not isinstance(item, Mapping) for item in canonical["agentBindingSnapshot"]
         ):
@@ -135,11 +141,14 @@ class WorkflowRunInputSnapshot:
             ),
             createdBy=canonical["createdBy"],
             createdAt=canonical["createdAt"],
+            evidenceRemediationContract=copy.deepcopy(
+                canonical.get("evidenceRemediationContract") or {}
+            ),
             snapshotHash=snapshot_hash,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "teamId": self.teamId,
             "projectId": self.projectId,
             "questionId": self.questionId,
@@ -163,3 +172,8 @@ class WorkflowRunInputSnapshot:
             "createdAt": self.createdAt,
             "snapshotHash": self.snapshotHash,
         }
+        if self.evidenceRemediationContract:
+            payload["evidenceRemediationContract"] = copy.deepcopy(
+                self.evidenceRemediationContract
+            )
+        return payload

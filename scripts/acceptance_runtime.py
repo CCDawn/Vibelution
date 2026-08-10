@@ -302,6 +302,12 @@ def _child_environment(
             "AGENT_WORKBENCH_FRONTEND_PORT": str(int(frontend_port)),
             "VIBELUTION_DATA_HOME": str(data_root),
             "VIBELUTION_CONFIG_HOME": str(config_root),
+            "VIBELUTION_RESEARCH_WORKFLOW_RUN_STORE": str(
+                data_root / "research_workflows" / "runs"
+            ),
+            "VIBELUTION_RESEARCH_WORKFLOW_CHECKPOINT_PATH": str(
+                data_root / "research_workflows" / "checkpoints.sqlite"
+            ),
             "VIBELUTION_ACCEPTANCE_INSTANCE_ID": instance_id,
             "VIBELUTION_ACCEPTANCE_MODE": MODE,
             # Prevent the isolated backend from importing operator-scoped API-key files.

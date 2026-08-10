@@ -164,8 +164,10 @@ def block_external_agent_node_run(
     node_run: dict[str, Any],
     failure_code: str,
     failure_summary: str,
+    failure_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now = iso(utc_now())
+    normalized_failure_context = dict(failure_context or {})
 
     def mutation(current: dict[str, Any]) -> dict[str, Any]:
         current_node_run = dict(latest_node_run(current, str(node_run["nodeId"])))
@@ -177,6 +179,7 @@ def block_external_agent_node_run(
                 "finishedAt": now,
                 "failureCode": failure_code,
                 "failureSummary": failure_summary,
+                "failureContext": normalized_failure_context,
             }
         )
         node_runs = [dict(item) for item in current.get("nodeRuns") or []]
@@ -220,6 +223,7 @@ def block_external_agent_node_run(
                 "status": "blocked",
                 "failureCode": failure_code,
                 "failureSummary": failure_summary,
+                "failureContext": normalized_failure_context,
             },
         )
         return {

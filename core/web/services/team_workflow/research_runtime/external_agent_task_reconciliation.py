@@ -31,6 +31,37 @@ _FAILED_TASK_STATUSES = frozenset(
 )
 
 
+def _evidence_failure_context(task: dict[str, Any]) -> dict[str, Any]:
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    closure = (
+        result.get("closureSummary")
+        if isinstance(result.get("closureSummary"), dict)
+        else {}
+    )
+    coverage = (
+        writeback.get("coverageSummary")
+        if isinstance(writeback.get("coverageSummary"), dict)
+        else closure.get("coverageSummary")
+        if isinstance(closure.get("coverageSummary"), dict)
+        else {}
+    )
+    candidate_ids = sorted(
+        {
+            str(item).strip()
+            for item in list(coverage.get("blockedCandidateIds") or [])
+            if str(item).strip()
+        }
+    )
+    if not candidate_ids:
+        return {}
+    return {
+        "kind": "evidence_quality_gap",
+        "sourceTaskId": str(task.get("taskId") or ""),
+        "evidenceGapCandidateIds": candidate_ids,
+    }
+
+
 def _settle_then_block(
     store: WorkflowRunStore,
     *,
@@ -38,6 +69,7 @@ def _settle_then_block(
     node_run: dict[str, Any],
     failure_code: str,
     failure_summary: str,
+    failure_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist consumed Agent usage before making its terminal failure visible."""
     try:
@@ -56,6 +88,7 @@ def _settle_then_block(
                 f"{failure_code}: {failure_summary} "
                 f"Budget settlement failed: {exc}"
             ),
+            failure_context=failure_context,
         )
     return block_external_agent_node_run(
         store,
@@ -63,6 +96,7 @@ def _settle_then_block(
         node_run=node_run,
         failure_code=failure_code,
         failure_summary=failure_summary,
+        failure_context=failure_context,
     )
 
 
@@ -140,6 +174,7 @@ def _reconcile_one(
                 or task.get("summary")
                 or f"External Agent task reached {status}."
             ),
+            failure_context=_evidence_failure_context(task),
         )
     if status != "completed" and not review_artifact_ready:
         return record

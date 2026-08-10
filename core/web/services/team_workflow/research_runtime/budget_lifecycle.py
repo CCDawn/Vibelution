@@ -21,6 +21,34 @@ _POLICY_LIMIT_KEYS = {
 }
 
 
+def remaining_budget_policy(
+    record: dict[str, Any],
+    *,
+    stage_additions: dict[str, dict[str, int]] | None = None,
+) -> dict[str, Any]:
+    """Freeze remaining parent capacity, optionally adding approved stage budget."""
+    additions = stage_additions or {}
+    stage_budgets: dict[str, dict[str, int]] = {}
+    for ledger in record.get("budgetLedgers") or []:
+        stage_id = str(ledger.get("stageId") or "")
+        limits = dict(ledger.get("limits") or {})
+        consumed = dict(ledger.get("consumed") or {})
+        reserved = dict(ledger.get("reserved") or {})
+        approved = dict(additions.get(stage_id) or {})
+        stage_budgets[stage_id] = {
+            key: max(
+                0,
+                int(limits.get(key) or 0)
+                - int(consumed.get(key) or 0)
+                - int(reserved.get(key) or 0),
+            )
+            + int(approved.get(key) or 0)
+            for key in limits
+        }
+    original = dict((record.get("inputSnapshot") or {}).get("budgetPolicy") or {})
+    return {**original, "stageBudgets": stage_budgets}
+
+
 class BudgetLifecycleError(ValueError):
     def __init__(self, message: str, *, code: str):
         super().__init__(message)

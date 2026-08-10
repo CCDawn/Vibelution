@@ -55,7 +55,7 @@ export function ResearchProcessInspectorPane(props: {
     retryNodeDetail: () => void;
     submitRun: (input: CreateResearchWorkflowRunInput) => Promise<void>;
     pendingTaskId: (nodeId: string) => string | null;
-    runCommand: (command: string) => void;
+    runCommand: (command: string, payload?: Record<string, unknown>) => Promise<void>;
   };
 }) {
   const { scope, state, actions } = props;

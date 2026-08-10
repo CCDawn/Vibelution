@@ -29,6 +29,10 @@ from core.research.workflow.projection import build_canvas_projection
 from .binding_config import BindingConfigValidationError, WorkflowBindingConfigStore
 from .checkpoint_lifecycle import prepare_initial_checkpoint
 from .durable_index import DurableWorkflowIndex
+from .evidence_remediation_fork import (
+    EvidenceRemediationForkError,
+    fork_evidence_remediation,
+)
 from .external_agent_task_reconciliation import (
     has_reconcilable_external_agent_tasks,
     reconcile_external_agent_tasks,
@@ -757,7 +761,23 @@ class ResearchWorkflowRuntimeService:
                         node_id=node_id,
                         payload=payload or {},
                     )
-            except (FailedAgentBudgetError, NodeExecutionError) as exc:
+                if command == "fork_evidence_remediation":
+                    if node_id != "source_extraction":
+                        raise EvidenceRemediationForkError(
+                            "evidence remediation is only valid for source_extraction",
+                            code="evidence_remediation_not_available",
+                        )
+                    return fork_evidence_remediation(
+                        self._store,
+                        self._checkpoint_path,
+                        parent=record,
+                        payload=payload or {},
+                    )
+            except (
+                EvidenceRemediationForkError,
+                FailedAgentBudgetError,
+                NodeExecutionError,
+            ) as exc:
                 raise ResearchWorkflowError(str(exc), code=exc.code) from exc
             if command == "rebind_node":
                 # Controlled rebind keeps snapshot lineage (apply_command).

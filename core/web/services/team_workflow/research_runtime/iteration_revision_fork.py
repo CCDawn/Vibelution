@@ -8,7 +8,7 @@ from typing import Any
 
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 
-from .budget_lifecycle import build_initial_budget_ledgers
+from .budget_lifecycle import build_initial_budget_ledgers, remaining_budget_policy
 from .checkpoint_lifecycle import fork_checkpoint_at_node
 from .human_gate_artifacts import canonical_sha256
 from .node_execution_support import build_event, iso, utc_now
@@ -19,28 +19,6 @@ from .successor_records import build_node_run
 def _child_run_id(parent_run_id: str, decision_id: str) -> str:
     identity = f"{parent_run_id}:revise_protocol:{decision_id}".encode()
     return f"run-{hashlib.sha256(identity).hexdigest()[:12]}"
-
-
-def _remaining_budget_policy(parent: dict[str, Any]) -> dict[str, Any]:
-    stage_budgets: dict[str, dict[str, int]] = {}
-    for ledger in parent.get("budgetLedgers") or []:
-        limits = dict(ledger.get("limits") or {})
-        consumed = dict(ledger.get("consumed") or {})
-        reserved = dict(ledger.get("reserved") or {})
-        stage_budgets[str(ledger.get("stageId") or "")] = {
-            key: max(
-                0,
-                int(limits.get(key) or 0)
-                - int(consumed.get(key) or 0)
-                - int(reserved.get(key) or 0),
-            )
-            for key in limits
-        }
-    original = dict((parent.get("inputSnapshot") or {}).get("budgetPolicy") or {})
-    return {
-        **original,
-        "stageBudgets": stage_budgets,
-    }
 
 
 def fork_iteration_revision(
@@ -123,7 +101,7 @@ def fork_iteration_revision(
             "hypothesis_design",
         ]
         created_at = iso(utc_now())
-        budget_policy = _remaining_budget_policy(parent)
+        budget_policy = remaining_budget_policy(parent)
         child = store.create_run(
             {
                 "runId": child_run_id,

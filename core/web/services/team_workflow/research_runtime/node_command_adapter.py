@@ -88,6 +88,52 @@ def _retry_execution_capability(
     }
 
 
+def _evidence_remediation_capability(
+    record: dict[str, Any],
+    node_id: str,
+) -> dict[str, Any] | None:
+    if node_id != "source_extraction":
+        return None
+    node_runs = [
+        dict(item)
+        for item in record.get("nodeRuns") or []
+        if str(item.get("nodeId") or "") == node_id
+    ]
+    if not node_runs:
+        return None
+    latest = node_runs[-1]
+    if (
+        str(latest.get("status") or "") != "blocked"
+        or str(latest.get("failureCode") or "") != "external_task_needs_review"
+    ):
+        return None
+    failure_context = (
+        latest.get("failureContext")
+        if isinstance(latest.get("failureContext"), dict)
+        else {}
+    )
+    candidate_ids = sorted(
+        {
+            str(item).strip()
+            for item in list(failure_context.get("evidenceGapCandidateIds") or [])
+            if str(item).strip()
+        }
+    )
+    available = bool(candidate_ids)
+    return {
+        "command": "fork_evidence_remediation",
+        "available": available,
+        "reason": "" if available else "失败任务没有固化可审计的证据缺口候选",
+        "idempotencyKey": (
+            f"fork-evidence-remediation:{latest.get('nodeRunId')}"
+        ),
+        "payload": {
+            "evidenceGapCandidateIds": candidate_ids,
+            "scopeCandidateIds": candidate_ids,
+        },
+    }
+
+
 def node_command_capabilities(
     record: dict[str, Any],
     node_id: str,
@@ -115,7 +161,12 @@ def node_command_capabilities(
             ]
         retry = _retry_execution_capability(record, node_id)
         if retry is not None:
-            return [*supplemental, retry]
+            remediation = (
+                _evidence_remediation_capability(record, node_id)
+                if not retry.get("available")
+                else None
+            )
+            return [*supplemental, retry, *([remediation] if remediation else [])]
         if node_id not in SOURCE_NODE_TASKS and node_id not in PROJECT_NODE_TASKS:
             return supplemental
         agent_id = _snapshot_agent_id(record, node_id)

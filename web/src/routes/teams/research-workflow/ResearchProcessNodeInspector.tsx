@@ -16,7 +16,7 @@ export type ResearchProcessNodeInspectorProps = {
   handoffs?: NodeHandoffRecord[];
   handoffPending: boolean;
   busy: boolean;
-  onCommand: (command: string) => void;
+  onCommand: (command: string, payload?: Record<string, unknown>) => Promise<void>;
 };
 
 export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspectorProps) {

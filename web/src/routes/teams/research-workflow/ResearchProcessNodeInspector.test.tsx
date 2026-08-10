@@ -78,6 +78,35 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     expect(markup).toContain("启动 Agent 任务");
   });
 
+  it("renders the remediation action only when the backend declares it", () => {
+    const markup = renderToStaticMarkup(
+      <ResearchProcessNodeInspector
+        nodeId="source_extraction"
+        adapter={getNodeAdapter("source_extraction")}
+        detail={makeDetail({
+          nodeId: "source_extraction",
+          label: "资料提炼",
+          commands: [
+            {
+              command: "fork_evidence_remediation",
+              available: true,
+              reason: "",
+              idempotencyKey: "fork-evidence-remediation:nr-extraction-a3",
+              payload: {
+                evidenceGapCandidateIds: ["candidate-a"],
+                scopeCandidateIds: ["candidate-a"],
+              },
+            },
+          ],
+        })}
+        handoffPending={false}
+        busy={false}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("创建证据补救运行");
+  });
+
   it("disables commands the backend reports unavailable with the reason", () => {
     const detail = makeDetail({
       commands: [

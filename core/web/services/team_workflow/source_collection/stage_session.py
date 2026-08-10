@@ -332,6 +332,15 @@ def start_source_collection_stage_session_task(
     requested_by = s._trim_text(request_payload.get("requestedByAgent"), max_length=160)
     idempotency_key = s._trim_text(request_payload.get("idempotencyKey"), max_length=240)
     formal_retry_requested = bool(request_payload.get("formalRetry"))
+    evidence_remediation_contract = (
+        s._normalize_metadata(request_payload.get("evidenceRemediationContract"))
+        if isinstance(request_payload.get("evidenceRemediationContract"), dict)
+        else {}
+    )
+    if evidence_remediation_contract and stage_id != "extraction":
+        raise s.TeamWorkflowOrchestrationError(
+            "Evidence remediation contract is only valid for extraction tasks."
+        )
     if stage_id not in s.SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
         raise s.TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {stage_id}")
     if not agent_id:
@@ -444,6 +453,8 @@ def start_source_collection_stage_session_task(
             replay_task = (
                 replay.get("task") if isinstance(replay.get("task"), dict) else existing_task
             )
+            if replay_action == "resume_same_task":
+                replay_action = "reuse"
             if replay_action != "reuse":
                 task_id = s._trim_text(replay_task.get("taskId"), max_length=160)
                 missing_session_recovery = replay_action == "formal_retry_same_task"
@@ -617,9 +628,15 @@ def start_source_collection_stage_session_task(
         agent_id=agent_id,
         agent_role=agent_role,
     )
-    task_checklist = s._source_collection_stage_task_checklist(stage_id, agent_role)
+    task_checklist = s._source_collection_stage_task_checklist(
+        stage_id,
+        agent_role,
+        evidence_remediation_contract=evidence_remediation_contract,
+    )
     writeback_contract["taskToolRequired"] = False
     writeback_contract["taskChecklist"] = task_checklist
+    if evidence_remediation_contract:
+        writeback_contract["evidenceRemediationContract"] = evidence_remediation_contract
     task_message = s._source_collection_stage_session_task_message(
         team=team,
         agent=agent,
@@ -660,6 +677,7 @@ def start_source_collection_stage_session_task(
         "formalRetry": formal_retry,
         "formalRetryRequested": formal_retry_requested,
         "formalRetryReason": formal_retry_reason,
+        "evidenceRemediationContract": evidence_remediation_contract,
         "status": "queued",
         "title": s._source_collection_stage_task_title(stage_id),
         "summary": "",
