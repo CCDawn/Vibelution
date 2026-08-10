@@ -73,6 +73,7 @@ def test_usage_ledger_records_provider_usage_and_rolls_up(tmp_path, monkeypatch)
             context_window=128000,
             latency_ms=250,
             provider_usage_keys=["prompt_tokens", "completion_tokens", "total_tokens"],
+            cache_usage_observed=True,
         )
     )
     record_usage_event(
@@ -96,7 +97,8 @@ def test_usage_ledger_records_provider_usage_and_rolls_up(tmp_path, monkeypatch)
     assert summary["lastTokenUsage"]["totalTokens"] == 25
     assert summary["sessionTokenUsage"]["inputTokens"] == 120
     assert summary["sessionTokenUsage"]["cachedInputTokens"] == 40
-    assert summary["sessionTokenUsage"]["uncachedInputTokens"] == 80
+    assert summary["sessionTokenUsage"]["uncachedInputTokens"] == 60
+    assert summary["sessionTokenUsage"]["cacheObservedInputTokens"] == 100
     assert summary["sessionTokenUsage"]["outputTokens"] == 35
     assert summary["sessionTokenUsage"]["reasoningOutputTokens"] == 7
     assert summary["sessionTokenUsage"]["totalTokens"] == 155
@@ -108,6 +110,54 @@ def test_usage_ledger_records_provider_usage_and_rolls_up(tmp_path, monkeypatch)
     assert summary["modelContextWindow"] == 128000
     assert summary["diagnostics"]["source"] == "usage_ledger"
     assert summary["diagnostics"]["ledgerPath"].endswith("/workspace/usage/usage_ledger.sqlite3")
+
+
+def test_usage_ledger_excludes_unobserved_cache_samples_from_hit_rate(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.llm.usage_ledger.PROJECT_ROOT", tmp_path)
+    record_usage_event(
+        UsageLedgerEvent(
+            recorded_at=iso_at(-2),
+            source="provider_usage",
+            input_tokens=100,
+            output_tokens=10,
+            total_tokens=110,
+            cache_usage_observed=False,
+            cache_usage_missing_reason="provider_cache_usage_missing",
+        )
+    )
+    record_usage_event(
+        UsageLedgerEvent(
+            recorded_at=iso_at(-1),
+            source="provider_usage",
+            input_tokens=200,
+            uncached_input_tokens=200,
+            total_tokens=200,
+            cache_usage_observed=True,
+        )
+    )
+    record_usage_event(
+        UsageLedgerEvent(
+            recorded_at=iso_at(),
+            source="provider_usage",
+            input_tokens=100,
+            cached_input_tokens=50,
+            cache_read_input_tokens=50,
+            uncached_input_tokens=50,
+            total_tokens=100,
+            cache_usage_observed=True,
+        )
+    )
+
+    summary = build_usage_summary()
+    usage = summary["globalTokenUsage"]["allTime"]
+
+    assert usage["inputTokens"] == 400
+    assert usage["cacheObservedInputTokens"] == 300
+    assert usage["cachedInputTokens"] == 50
+    assert usage["uncachedInputTokens"] == 250
+    assert usage["cacheObservedCallCount"] == 2
+    assert usage["cacheUnobservedCallCount"] == 1
+    assert usage["cacheHitRate"] == pytest.approx(0.1667)
 
 
 def test_usage_ledger_rolls_up_today_last7_days_and_all_time(tmp_path, monkeypatch):

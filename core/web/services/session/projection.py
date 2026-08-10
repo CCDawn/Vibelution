@@ -217,6 +217,19 @@ def _coerce_include_secondary(value: Any) -> bool:
     return True
 
 
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
 def get_active_session_detail() -> dict | None:
     """Return the current active conversation detail when available."""
     s = _service()
@@ -2533,7 +2546,14 @@ def _build_session_cache_usage(
     s = _service()
     usage = s._normalize_turn_llm_usage(llm_usage)
     usage_source = str((usage or {}).get("source") or "").strip()
-    observed = usage is not None and usage_source == "provider_usage"
+    observed = (
+        usage is not None
+        and usage_source == "provider_usage"
+        and bool(usage.get("cacheUsageObserved"))
+    )
+    cache_usage_missing_reason = str(
+        (usage or {}).get("cacheUsageMissingReason") or ""
+    ).strip()
     last_input_tokens = s._coerce_nonnegative_int((usage or {}).get("inputTokens") or 0) if observed else 0
     last_cached_input_tokens = min(
         s._coerce_nonnegative_int((usage or {}).get("cachedInputTokens") or 0),
@@ -2587,6 +2607,8 @@ def _build_session_cache_usage(
         "totalUncachedInputTokens": total_uncached_input_tokens,
         "totalCacheHitRate": (total_cached_input_tokens / total_input_tokens) if total_input_tokens > 0 else 0.0,
         "totalObservedTurnCount": aggregate_turn_count or (1 if observed else 0),
+        "cacheUsageObserved": observed,
+        "cacheUsageMissingReason": cache_usage_missing_reason if not observed else "",
         "updatedAt": str((usage or {}).get("recordedAt") or "").strip(),
         "source": "provider_usage" if observed else "not_called" if usage_source == "not_called" else "missing",
     }
@@ -2601,12 +2623,21 @@ def _build_session_cache_composition(
 ) -> dict[str, Any]:
     s = _service()
     usage = s._normalize_turn_llm_usage(llm_usage)
-    if usage is None or usage.get("source") != "provider_usage":
+    if (
+        usage is None
+        or usage.get("source") != "provider_usage"
+        or not bool(usage.get("cacheUsageObserved"))
+    ):
         return s._enrich_session_cache_composition(
             {
                 "turnId": turn_id,
                 "recordedAt": s._now_timestamp(),
                 "source": "missing",
+                "cacheUsageObserved": False,
+                "cacheUsageMissingReason": str(
+                    (usage or {}).get("cacheUsageMissingReason")
+                    or "provider_cache_usage_missing"
+                ).strip(),
             },
             context_composition=context_composition,
             average_cache=average_cache,
@@ -2620,6 +2651,8 @@ def _build_session_cache_composition(
             "turnId": turn_id,
             "recordedAt": usage.get("recordedAt") or s._now_timestamp(),
             "source": "provider_usage",
+            "cacheUsageObserved": True,
+            "cacheUsageMissingReason": "",
             "provider": usage.get("provider") or "",
             "model": usage.get("model") or "",
             "llmModelId": usage.get("llmModelId") or "",
@@ -2818,10 +2851,26 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         or value.get("provider_extra_cached_input_tokens")
         or 0
     )
+    explicit_cache_usage_observed = _coerce_optional_bool(
+        value.get("cacheUsageObserved")
+        if "cacheUsageObserved" in value
+        else value.get("cache_usage_observed")
+    )
+    cache_usage_observed = (
+        explicit_cache_usage_observed
+        if explicit_cache_usage_observed is not None
+        else cached_tokens > 0 or cache_creation_tokens > 0
+    )
     return {
         "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
         "recordedAt": str(value.get("recordedAt") or value.get("recorded_at") or "").strip(),
         "source": source,
+        "cacheUsageObserved": cache_usage_observed,
+        "cacheUsageMissingReason": str(
+            value.get("cacheUsageMissingReason")
+            or value.get("cache_usage_missing_reason")
+            or ("provider_cache_usage_missing" if source == "provider_usage" and not cache_usage_observed else "")
+        ).strip(),
         "provider": str(value.get("provider") or "").strip(),
         "model": str(value.get("model") or "").strip(),
         "llmModelId": str(value.get("llmModelId") or value.get("llm_model_id") or "").strip(),
@@ -3563,10 +3612,23 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
         ),
         input_tokens,
     ) if input_tokens else 0
+    explicit_cache_observed = value.get("cache_usage_observed")
+    if explicit_cache_observed is None:
+        explicit_cache_observed = value.get("cacheUsageObserved")
+    parsed_cache_observed = _coerce_optional_bool(explicit_cache_observed)
+    if parsed_cache_observed is None:
+        cache_usage_observed = cached_input_tokens > 0 or cache_creation_input_tokens > 0
+    else:
+        cache_usage_observed = parsed_cache_observed
+    cache_usage_missing_reason = str(
+        value.get("cache_usage_missing_reason")
+        or value.get("cacheUsageMissingReason")
+        or ("provider_cache_usage_missing" if source == "provider_usage" and not cache_usage_observed else "")
+    ).strip()
     uncached_input_tokens = s._coerce_nonnegative_int(
         value.get("uncached_input_tokens") or value.get("uncachedInputTokens") or 0
     )
-    if input_tokens:
+    if cache_usage_observed and input_tokens:
         uncached_input_tokens = max(0, input_tokens - cached_input_tokens)
     else:
         uncached_input_tokens = 0
@@ -3580,6 +3642,8 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
         "cacheCreationInputTokens": cache_creation_input_tokens,
         "uncachedInputTokens": uncached_input_tokens,
         "cacheHitRate": (cached_input_tokens / input_tokens) if input_tokens > 0 else 0.0,
+        "cacheUsageObserved": cache_usage_observed,
+        "cacheUsageMissingReason": cache_usage_missing_reason if not cache_usage_observed else "",
         "provider": s.compact_repeated_metadata_text(value.get("provider") or ""),
         "model": s.compact_repeated_metadata_text(value.get("model") or ""),
         "promptCacheScope": str(value.get("prompt_cache_scope") or value.get("promptCacheScope") or "").strip(),
