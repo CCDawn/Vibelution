@@ -11,6 +11,7 @@ import {
   reattachLauncherSupervisor,
   resetLauncherControlOriginForTests,
   restartLauncherBundle,
+  requestWorkbenchWindowCloseOnPageHide,
   saveLauncherWorkbenchWindowMode,
   startLauncherBundle,
   stopLauncherBundle,
@@ -242,6 +243,34 @@ describe("launcher api helpers", () => {
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
     expect((requestInit.headers as Headers).get("X-Vibelution-Launcher-Trigger")).toBe("app_shell_shutdown_button");
+  });
+
+  it("queues an idle window close through the same-origin adapter with keepalive", () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(requestWorkbenchWindowCloseOnPageHide("stop")).toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/stop");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+      keepalive: true,
+    });
+    expect((fetchMock.mock.calls[0][1].headers as Headers).get("X-Vibelution-Launcher-Trigger"))
+      .toBe("app_shell_window_close");
+  });
+
+  it("queues confirmed active-work closes through guarded force-stop", () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(requestWorkbenchWindowCloseOnPageHide("force-stop")).toBe(true);
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/force-stop");
+    expect((fetchMock.mock.calls[0][1].headers as Headers).get("X-Vibelution-Launcher-Trigger"))
+      .toBe("app_shell_window_close_confirmed_active_work");
   });
 
   it("falls back to the workbench launcher adapter when direct launcher control is unreachable", async () => {

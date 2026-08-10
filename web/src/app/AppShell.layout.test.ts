@@ -589,14 +589,17 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("shutdownFailed");
   });
 
-  it("keeps browser unload guards from stopping the workbench backend", () => {
+  it("routes accepted browser window closes through controlled Launcher lifecycle", () => {
     const beforeUnloadBody = shellSource.match(/useStableBeforeUnload\(\(event\) => \{[\s\S]*?\n  \}\);/)?.[0] ?? "";
 
-    expect(beforeUnloadBody).toContain("applyBeforeUnloadProjectCloseGuard(event, guard.workbenchCloseGuardMessage)");
+    expect(beforeUnloadBody).toContain("prepareWorkbenchWindowCloseIntent");
     expect(beforeUnloadBody).toContain("consumeNextWorkbenchWindowUnloadAllowance");
     expect(beforeUnloadBody).toContain("projectCloseGuardRef");
     expect(shellSource).toContain("useStableBeforeUnload");
-    expect(beforeUnloadBody).not.toContain("markControlledProjectLifecycleOperation(\"stop\")");
+    expect(shellSource).toContain("consumePendingWorkbenchWindowCloseIntent");
+    expect(shellSource).toContain("requestWorkbenchWindowCloseOnPageHide");
+    expect(shellSource).toContain("event.persisted");
+    expect(shellSource).toContain("isWorkbenchRefreshShortcut");
     expect(beforeUnloadBody).not.toContain("beginShutdown");
   });
 

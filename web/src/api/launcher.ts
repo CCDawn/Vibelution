@@ -169,6 +169,24 @@ export function stopLauncherBundle(trigger = "launcher_route_stop_button") {
   });
 }
 
+export function requestWorkbenchWindowCloseOnPageHide(operation: "stop" | "force-stop") {
+  const trigger = operation === "force-stop"
+    ? "app_shell_window_close_confirmed_active_work"
+    : "app_shell_window_close";
+  try {
+    const request = globalThis.fetch(relativeLauncherEndpoint(operation), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: new Headers({ "X-Vibelution-Launcher-Trigger": trigger }),
+      keepalive: true,
+    });
+    void request.catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function forceStopLauncherBundle(trigger = "launcher_route_force_stop_button") {
   return fetchLauncherJson<LauncherControlResponse>("force-stop", {
     method: "POST",
