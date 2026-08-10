@@ -42,7 +42,10 @@ export function conversationMessageToAgentParts(message: ConversationMessage): A
 
 function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): AgentMessagePart[] {
   return [...items]
-    .sort((left, right) => left.sequence - right.sequence || left.revision - right.revision)
+    .sort((left, right) => (
+      normalizedSequence(left.sequence) - normalizedSequence(right.sequence)
+      || normalizedSequence(left.revision) - normalizedSequence(right.revision)
+    ))
     .flatMap((item): AgentMessagePart[] => {
       if (item.type === "status" && (
         isInternalStreamingStatusStage(item.code)
@@ -51,19 +54,22 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
         return [];
       }
       if (item.type === "agent_message") {
-        return item.text.trim() ? [{
+        const text = compactText(item.text);
+        return text ? [{
           id: item.id,
           type: "text",
           channel: "answer",
-          text: item.text,
+          text,
         }] : [];
       }
       if (item.type === "reasoning") {
-        return item.text.trim() && !isInternalThoughtPlaceholder(item.text, item.summary ?? "") ? [{
+        const text = compactText(item.text);
+        const summary = compactText(item.summary);
+        return text && !isInternalThoughtPlaceholder(text, summary) ? [{
           id: item.id,
           type: "thought",
-          text: item.text,
-          summary: item.summary,
+          text,
+          summary,
           status: item.status,
           sequence: item.sequence,
           timestamp: item.updatedAt ?? item.createdAt,
@@ -75,7 +81,7 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
           type: "mental",
           status: item.status,
           snapshot: mentalSnapshotFromTurnItem(item.metadata?.mentalSnapshot),
-          summary: item.text || item.summary || "",
+          summary: compactText(item.text || item.summary),
           sequence: item.sequence,
           timestamp: item.updatedAt ?? item.createdAt,
         } satisfies AgentMentalPart];
@@ -84,10 +90,10 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
         return [{
           id: item.id,
           type: "tool-call",
-          name: item.toolName,
+          name: compactText(item.toolName) || "tool",
           status: item.status,
-          summary: item.summary,
-          resultPreview: item.output,
+          summary: compactText(item.summary),
+          resultPreview: compactText(item.output),
           sequence: item.sequence,
           timestamp: item.updatedAt ?? item.createdAt,
           source: "feedback-event",
@@ -152,7 +158,7 @@ function textPartForMessage(message: ConversationMessage): AgentMessagePart[] {
   if (message.role !== "user") {
     return [];
   }
-  const text = message.content.trim();
+  const text = compactText(message.content);
   if (!text) {
     return [];
   }

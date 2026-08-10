@@ -6,7 +6,10 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.routes import team_workflows
+from core.web.routes.team_workflows import experiment as team_workflow_experiment_routes
+from core.web.routes.team_workflows import knowledge as team_workflow_knowledge_routes
+from core.web.routes.team_workflows import research_ops as team_workflow_research_ops_routes
+from core.web.routes.team_workflows import source_collection as team_workflow_source_collection_routes
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -891,7 +894,9 @@ def test_team_workflow_route_returns_source_collection_summary(tmp_path, monkeyp
             "stageCardSummary": {"sourceCandidateCount": 1},
         }
 
-    monkeypatch.setattr(team_workflows, "get_source_collection_summary", fake_summary)
+    # The package root only owns router registration; the endpoint resolves
+    # its service symbol in the focused source-collection route module.
+    monkeypatch.setattr(team_workflow_source_collection_routes, "get_source_collection_summary", fake_summary)
     client = _client()
     team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
 
@@ -1507,7 +1512,7 @@ def test_team_workflow_routes_complete_scientific_hypothesis_from_design(
         }
 
     monkeypatch.setattr(
-        team_workflows,
+        team_workflow_experiment_routes,
         "complete_experiment_hypothesis_from_design",
         fake_complete,
     )
@@ -1875,8 +1880,8 @@ def test_team_workflow_routes_delegate_explicit_formal_run_prepare_and_execute(t
         calls.append(("execute", team_id, plan_id, payload))
         return {"execution": {"status": "completed"}, "boundaries": {"requiresResultReview": True}}
 
-    monkeypatch.setattr(team_workflows, "prepare_experiment_full_run", fake_prepare)
-    monkeypatch.setattr(team_workflows, "execute_experiment_full_run", fake_execute)
+    monkeypatch.setattr(team_workflow_experiment_routes, "prepare_experiment_full_run", fake_prepare)
+    monkeypatch.setattr(team_workflow_experiment_routes, "execute_experiment_full_run", fake_execute)
     payload = {
         "recordedByAgent": "Experiment Runner Agent",
         "executionConfig": {
@@ -2325,7 +2330,7 @@ def test_team_workflow_route_returns_knowledge_ingestion_status(tmp_path, monkey
             "knowledgeBases": [],
         }
 
-    monkeypatch.setattr(team_workflows, "get_knowledge_ingestion_status", fake_status)
+    monkeypatch.setattr(team_workflow_knowledge_routes, "get_knowledge_ingestion_status", fake_status)
     client = _client()
     team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
 
@@ -2369,7 +2374,7 @@ def test_team_workflow_route_runs_knowledge_ingestion_precheck(tmp_path, monkeyp
             "workflow": {"workflowId": "workflow-1"},
         }
 
-    monkeypatch.setattr(team_workflows, "run_knowledge_ingestion_precheck", fake_precheck)
+    monkeypatch.setattr(team_workflow_knowledge_routes, "run_knowledge_ingestion_precheck", fake_precheck)
     client = _client()
     team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
 
@@ -2437,7 +2442,7 @@ def test_team_workflow_route_returns_coordination_status(tmp_path, monkeypatch):
             },
         }
 
-    monkeypatch.setattr(team_workflows, "get_team_workflow_coordination_status", fake_status)
+    monkeypatch.setattr(team_workflow_knowledge_routes, "get_team_workflow_coordination_status", fake_status)
     client = _client()
     team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
 
@@ -3017,7 +3022,7 @@ def test_team_workflow_route_completes_knowledge_collection_in_background(tmp_pa
             },
         }
 
-    monkeypatch.setattr(team_workflows, "start_knowledge_collection_completion_background", fake_start_completion, raising=False)
+    monkeypatch.setattr(team_workflow_knowledge_routes, "start_knowledge_collection_completion_background", fake_start_completion)
     team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
 
     response = client.post(
@@ -3066,7 +3071,7 @@ def test_team_workflow_routes_extract_source_collection_candidates(monkeypatch):
             "failedCount": 0,
         }
 
-    monkeypatch.setattr(team_workflows, "extract_source_collection_candidates", fake_extract)
+    monkeypatch.setattr(team_workflow_knowledge_routes, "extract_source_collection_candidates", fake_extract)
 
     response = client.post(
         "/api/teams/research-team/workflow-orchestration/knowledge-collection/extract",
@@ -3100,7 +3105,7 @@ def test_team_workflow_route_invokes_local_research_model(tmp_path, monkeypatch)
             "workflow": {"teamId": team_id, "candidateStore": {"candidateCount": 1}},
         }
 
-    monkeypatch.setattr(team_workflows, "invoke_local_research_model", fake_invoke)
+    monkeypatch.setattr(team_workflow_research_ops_routes, "invoke_local_research_model", fake_invoke)
     client = _client()
     team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
 
@@ -3133,7 +3138,7 @@ def test_team_workflow_route_autodrafts_paper_note_from_source_candidate(tmp_pat
             "workflow": {"teamId": team_id, "candidateStore": {"candidateCount": 2}},
         }
 
-    monkeypatch.setattr(team_workflows, "draft_paper_note_from_source_candidate", fake_autodraft)
+    monkeypatch.setattr(team_workflow_knowledge_routes, "draft_paper_note_from_source_candidate", fake_autodraft)
     client = _client()
     team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
 

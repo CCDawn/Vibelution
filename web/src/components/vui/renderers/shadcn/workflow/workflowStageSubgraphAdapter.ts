@@ -14,11 +14,10 @@ import type {
   WorkflowCanvasNodeInput,
   WorkflowCanvasEdgeInput,
 } from "../../../product/workflow/workflowCanvasTypes";
+import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 import { resolveElkPorts } from "./workflowElkPorts";
 import {
   WORKFLOW_DECISION_DESIGN_HEIGHT,
-  WORKFLOW_EDGE_LABEL_HEIGHT,
-  WORKFLOW_EDGE_LABEL_WIDTH,
   WORKFLOW_ELK_STAGE_INTERNAL_OPTIONS,
   WORKFLOW_NODE_DESIGN_HEIGHT,
   WORKFLOW_NODE_DESIGN_WIDTH,
@@ -114,9 +113,7 @@ export function buildStageSubgraphs(
           edge.label.length > 0
             ? [
                 {
-                  text: edge.label,
-                  width: WORKFLOW_EDGE_LABEL_WIDTH,
-                  height: WORKFLOW_EDGE_LABEL_HEIGHT,
+                  ...resolveEdgeLabelSpec(edge.label),
                   layoutOptions: { "elk.edgeLabels.placement": "CENTER" },
                 },
               ]

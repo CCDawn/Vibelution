@@ -12,8 +12,6 @@ export const WORKFLOW_NODE_DESIGN_HEIGHT = 88;
 export const WORKFLOW_DECISION_DESIGN_HEIGHT = 112;
 export const WORKFLOW_NODE_LABEL_WIDTH = WORKFLOW_NODE_DESIGN_WIDTH - 24;
 export const WORKFLOW_NODE_LABEL_HEIGHT = 20;
-export const WORKFLOW_EDGE_LABEL_WIDTH = 152;
-export const WORKFLOW_EDGE_LABEL_HEIGHT = 26;
 
 /** Stage title reserved band height; geometry tests assert edges avoid it. */
 export const WORKFLOW_STAGE_TITLE_HEIGHT = 40;
