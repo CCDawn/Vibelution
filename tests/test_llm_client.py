@@ -14,6 +14,7 @@ from core.llm.client import (
     _default_responses_backend,
     _llm_provider_proxy_env,
     _ensure_no_proxy_for_local_base_url,
+    _retry_policy_backoff_seconds,
     _retry_policy_max_attempts,
     _safe_prompt_cache_payload_summary,
     _safe_responses_continuation_summary,
@@ -42,6 +43,25 @@ def test_compression_role_disables_provider_retry_amplification() -> None:
 
     assert _retry_policy_max_attempts(profile) == 5
     assert _retry_policy_max_attempts(profile, role="compression") == 1
+
+
+def test_connection_category_backoff_is_capped_short() -> None:
+    profile = SimpleNamespace(retry_policy=SimpleNamespace(backoff_base_seconds=2.0))
+
+    for category in ("network_error", "timeout", "server_error"):
+        assert _retry_policy_backoff_seconds(profile, 1, category=category) == 2.0
+        assert _retry_policy_backoff_seconds(profile, 2, category=category) == 3.0
+        assert _retry_policy_backoff_seconds(profile, 3, category=category) == 3.0
+        assert _retry_policy_backoff_seconds(profile, 4, category=category) == 3.0
+
+
+def test_other_categories_keep_exponential_backoff() -> None:
+    profile = SimpleNamespace(retry_policy=SimpleNamespace(backoff_base_seconds=2.0))
+
+    assert _retry_policy_backoff_seconds(profile, 1, category="rate_limit") == 2.0
+    assert _retry_policy_backoff_seconds(profile, 2, category="rate_limit") == 4.0
+    assert _retry_policy_backoff_seconds(profile, 3, category="rate_limit") == 8.0
+    assert _retry_policy_backoff_seconds(profile, 4, category="") == 16.0
 
 
 def test_responses_continuation_summary_uses_websocket_delta_without_exposing_id() -> None:

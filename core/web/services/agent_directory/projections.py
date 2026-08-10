@@ -356,8 +356,9 @@ def list_agents(*, include_archived: bool = False, detail: str = "full") -> list
         timings["hydrate"] = 0.0
         stage_started = time.perf_counter()
         avatar_url_cache: dict[str, str] = {}
+        available_avatars = s._available_agent_avatar_filenames()
         agents = [
-            s._agent_to_api_summary(item, avatar_url_cache=avatar_url_cache)
+            s._agent_to_api_summary(item, avatar_url_cache=avatar_url_cache, available_avatar_filenames=available_avatars)
             for item in raw_agents
         ]
         timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
@@ -405,11 +406,15 @@ def _agent_to_api_summary(
     agent: dict[str, Any],
     *,
     avatar_url_cache: dict[str, str] | None = None,
+    available_avatar_filenames: list[str] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     workspace = str(agent.get("workspacePath") or "").strip()
     metadata = dict(agent.get("metadata") or {})
-    avatar_path = s.resolve_agent_avatar_path_for_projection({**agent, "metadata": metadata})
+    avatar_path = s.resolve_agent_avatar_path_for_projection(
+        {**agent, "metadata": metadata},
+        available_avatar_filenames=available_avatar_filenames,
+    )
     profileless_session_agent = s._is_profileless_session_agent({**agent, "metadata": metadata})
     if profileless_session_agent:
         metadata.pop("personaProfile", None)
