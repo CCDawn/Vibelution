@@ -10125,21 +10125,19 @@ def test_submit_session_message_surfaces_provider_error_inside_messages(tmp_path
     payload = response.json()
     assert payload["messages"][-2]["role"] == "user"
     assert payload["messages"][-2]["content"] == "继续当前对话"
-    assert payload["messages"][-1]["role"] == "assistant"
-    assert "模型服务上游暂时失败" in _assistant_visible_text(payload["messages"][-1])
-    assert "provider 上游服务不可用或网关失败" in _assistant_visible_text(payload["messages"][-1])
-    assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
-    assert payload["messages"][-1]["metadata"]["providerFailure"] is True
-    assert payload["messages"][-1]["metadata"]["reasonCode"] == "upstream_unavailable"
-    assert payload["messages"][-1]["metadata"]["reasonDetail"] == "Upstream request failed"
+    # Non-tool failures are no longer persisted as journal messages (model context
+    # stays clean); the visible error is carried by lastTurnError only.
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert payload["messages"][-1]["role"] == "user"
     assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
     assert payload["lastTurnError"]["reasonCode"] == "upstream_unavailable"
     assert "provider 上游服务不可用或网关失败" in payload["lastTurnError"]["reasonSummary"]
     assert payload["lastTurnError"]["reasonDetail"] == "Upstream request failed"
     assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
-    assert "Upstream request failed" in _assistant_visible_text(payload["messages"][-1])
     assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
-    assert "litellm.BadGatewayError" not in _assistant_visible_text(payload["messages"][-1])
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["errorType"] == "provider_upstream_error"
     assert "litellm.BadGatewayError" in latest_run["error"]
@@ -10173,15 +10171,14 @@ def test_submit_session_message_surfaces_local_runtime_exception_as_turn_error(t
 
     assert response.status_code == 202
     payload = response.json()
-    error_message = payload["messages"][-1]
-    assert error_message["role"] == "assistant"
-    assert error_message["metadata"]["kind"] == "turn_error"
-    assert error_message["metadata"]["providerFailure"] is False
-    assert error_message["metadata"]["errorType"] == "ValueError"
-    assert "网页工作台这一轮执行失败" in _assistant_visible_text(error_message)
-    assert "未设置 API Key" in _assistant_visible_text(error_message)
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert payload["messages"][-1]["role"] == "user"
     assert payload["lastTurnError"]["errorType"] == "ValueError"
     assert payload["lastTurnError"]["recoverable"] is False
+    assert "未设置 API Key" in payload["lastTurnError"]["message"]
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["errorType"] == "ValueError"
     assert "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY" in latest_run["error"]
@@ -10241,30 +10238,19 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
         session_service._set_session_running("session-live", False, turn_id="turn-runtime-failure")
     payload = session_service.get_session_detail("session-live")
 
-    error_message = payload["messages"][-1]
-    assert error_message["metadata"]["kind"] == "turn_error"
-    assert error_message["metadata"]["providerFailure"] is False
-    assert error_message["metadata"]["chainStage"] == "llm_response_normalization"
-    assert error_message["metadata"]["eventCode"] == "llm.turn_outcome.missing"
-    assert error_message["metadata"]["traceId"] == "trace-runtime-1"
-    assert error_message["metadata"]["protocol"] == "responses"
-    assert _assistant_visible_text(error_message).startswith("模型响应未完成规范化")
-    assert "当前模型不支持图片输入" in _assistant_visible_text(error_message)
-    assert [item["text"] for item in _assistant_turn_items(error_message, "reasoning")] == [
-        "Need a vision-capable model before continuing."
-    ]
-    assert _assistant_tool_summaries(error_message) == [
-        {"name": "image2_generate_tool", "status": "failed"}
-    ]
-    tool_item = _assistant_turn_items(error_message, "tool_call")[0]
-    assert "unsupported" in {
-        str(tool_item.get("text") or ""),
-        str(tool_item.get("output") or ""),
-        str(tool_item.get("summary") or ""),
-    }
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert payload["messages"][-1]["role"] == "user"
     assert payload["lastTurnError"]["errorType"] == "runtime_error"
     assert payload["lastTurnError"]["reasonCode"] == "canonical_turn_outcome_missing"
+    assert payload["lastTurnError"]["chainStage"] == "llm_response_normalization"
+    assert payload["lastTurnError"]["eventCode"] == "llm.turn_outcome.missing"
     assert payload["lastTurnError"]["traceId"] == "trace-runtime-1"
+    assert payload["lastTurnError"]["protocol"] == "responses"
+    assert "模型响应未完成规范化" in payload["lastTurnError"]["reasonSummary"]
+    assert "当前模型不支持图片输入" in payload["lastTurnError"]["message"]
     assert payload["currentPhase"] == "failed"
     turn_error_scene = next(item for item in scene_events if item["eventCode"] == "conversation.turn_error")
     assert turn_error_scene["fields"]["chainStage"] == "llm_response_normalization"
@@ -10374,16 +10360,15 @@ def test_submit_session_message_surfaces_prompt_cache_unsupported_inside_message
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["role"] == "assistant"
-    error_text = _assistant_visible_text(payload["messages"][-1])
-    assert "模型配置不满足本轮 prompt cache 要求" in error_text
-    assert "当前模型配置声明不支持 prompt cache" in error_text
-    assert "prompt_cache.mode 配置为 automatic 或 explicit_cache_control" in error_text
-    assert "模型服务上游暂时失败" not in error_text
-    assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
-    assert payload["messages"][-1]["metadata"]["reasonCode"] == "prompt_cache_unsupported"
+    assert payload["messages"][-1]["role"] == "user"
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert "模型服务上游暂时失败" not in payload["lastTurnError"]["message"]
     assert payload["lastTurnError"]["errorType"] == "prompt_cache_unsupported"
     assert payload["lastTurnError"]["reasonCode"] == "prompt_cache_unsupported"
+    assert "当前模型配置声明不支持 prompt cache" in payload["lastTurnError"]["message"]
 
 
 def test_submit_session_message_surfaces_provider_quota_reason_inside_messages(tmp_path, monkeypatch):
