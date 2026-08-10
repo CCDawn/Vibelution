@@ -2340,12 +2340,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("chatPollingVisible || options.routeSwitchGraceActive");
     expect(routeSource).not.toContain("pageVisible || directSessionBackgroundSyncActive || sessionStreamRouteSwitchGraceActive");
     expect(routeSource).toContain("&& (chatPollingVisible || groupBackgroundSyncActive)");
-    expect(routeAndStreamSource).toContain("if (!sessionStreamShouldConnect || typeof EventSource === \"undefined\")");
+    expect(routeAndStreamSource).toContain("const shouldConnect = sessionStreamDecisionSnapshotRef.current.shouldConnect");
+    expect(routeAndStreamSource).toContain("if (!shouldConnect || typeof EventSource === \"undefined\")");
     expect(routeSource).toContain("sessionStreamDecisionSnapshotRef");
+    expect(sessionStreamEffectSource).not.toContain("sessionStreamShouldConnect,");
     expect(sessionStreamEffectSource).not.toContain("sessionStreamRouteSwitchGraceActive,");
     expect(sessionStreamEffectSource).not.toContain("chatStartupWarmupActive,");
     expect(sessionStreamEffectSource).not.toContain("directSessionBackgroundSyncActive,");
     expect(sessionStreamEffectSource).not.toContain("pageVisible,");
+    expect(routeAndStreamSource).toContain("forceCloseStreamRef.current = forceCloseStream");
+    expect(routeAndStreamSource).toContain("SESSION_STREAM_ROUTE_SWITCH_GRACE_MS");
     expect(routeAndStreamSource).toContain("if (!groupStreamShouldConnect || typeof EventSource === \"undefined\")");
     expect(routeSource).toContain("refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground");
     expect(routeSource).toContain("refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground");
