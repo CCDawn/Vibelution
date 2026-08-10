@@ -1551,7 +1551,7 @@ export function ConversationView({
   }
 
   function operationStatusIcon(operation: AgentMessageOperation, animateRunning = true) {
-    const status = operation.status.trim().toLowerCase();
+    const status = String(operation.status ?? "").trim().toLowerCase();
     switch (operationStatusIconKind(status, isRunningOperationStatus(status), animateRunning)) {
       case "done":
         return <CheckCircle2 size={14} />;
@@ -1564,8 +1564,8 @@ export function ConversationView({
     }
   }
 
-  function operationStatusText(status: string) {
-    return operationStatusFallbackText(status, lang, statusLabel);
+  function operationStatusText(status: string | null | undefined) {
+    return operationStatusFallbackText(String(status ?? ""), lang, statusLabel);
   }
 
   function rolloutTraceEventLabel(kind: CodexRolloutTraceEvent["kind"]) {
@@ -2905,9 +2905,10 @@ export function ConversationView({
     if (isLowValueToolLoopStatusOperation(operation)) {
       return null;
     }
-    const rawTimelineTitle = item.title.trim();
+    const rawTimelineTitle = String(item.title ?? "").trim();
+    const itemSummary = String(item.summary ?? "").trim();
     const rawOperationLabel = String(operation.rawLabel ?? "").trim();
-    const rawToolName = rawOperationLabel || rawTimelineTitle || operation.label;
+    const rawToolName = rawOperationLabel || rawTimelineTitle || String(operation.label ?? "").trim();
     const semanticToolTitle = conversationToolPresentationLabel(rawToolName, lang);
     const visibleTitle = isRetryOperation(operation)
       ? lang === "zh" ? "请求重试" : "Retrying"
@@ -2926,7 +2927,7 @@ export function ConversationView({
     const readableResult = operation.kind === "tool" || isCompactInternalStatusOperation(operation)
       ? ""
       : readableOperationResult(operation, operationDetailLabels.structuredResultFallback);
-    const showReadableResult = Boolean(operation.kind !== "tool" && readableResult && readableResult !== item.summary.trim());
+    const showReadableResult = Boolean(operation.kind !== "tool" && readableResult && readableResult !== itemSummary);
     const visibleStatus = timelineStatusText(item);
     const statusTone = operationStatusToneClassName(operation);
     const timelineToneClassName = styles[`timelineOperationCell_${statusTone}` as keyof typeof styles] ?? "";
@@ -2937,21 +2938,21 @@ export function ConversationView({
     const visibleSummary = operation.kind === "tool"
       ? completedToolPresentationSummary({
           toolSummary: operation.error,
-          cellSummary: operation.summary,
+          cellSummary: String(operation.summary ?? ""),
           resultPreview: operation.resultPreview,
-          cellText: item.summary,
+          cellText: itemSummary,
           toolName: rawToolName,
           status: item.status,
           language: lang,
         })
       : statusTone === "failed" && operation.error?.trim()
-        ? [item.summary, operation.error.trim()].filter(Boolean).join(" · ")
-        : item.summary;
+        ? [itemSummary, operation.error.trim()].filter(Boolean).join(" · ")
+        : itemSummary;
     const toolPills = operation.kind === "tool"
       ? buildLegacyToolActivityPills(operation, {
           status: item.status,
           title: rawToolName,
-          summary: item.summary || visibleSummary,
+          summary: itemSummary || visibleSummary,
           durationLabel: duration,
         })
       : null;
