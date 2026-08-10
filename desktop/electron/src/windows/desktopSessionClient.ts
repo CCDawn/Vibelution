@@ -5,6 +5,18 @@ export type DesktopSessionRegistration = {
   revision: number;
 };
 
+export class DesktopSessionConflictError extends Error {
+  readonly code: string;
+  readonly actualRevision: number;
+
+  constructor(message: string, code: string, actualRevision = 0) {
+    super(message);
+    this.name = "DesktopSessionConflictError";
+    this.code = code;
+    this.actualRevision = actualRevision;
+  }
+}
+
 export async function registerDesktopSession(input: {
   launcherOrigin: string;
   controlToken: string;
@@ -37,6 +49,7 @@ export async function heartbeatDesktopSession(input: {
   launcherOrigin: string;
   controlToken: string;
   desktopSessionId: string;
+  revision: number;
   fetchImpl?: typeof fetch;
 }): Promise<DesktopSessionRegistration> {
   const fetcher = input.fetchImpl ?? fetch;
@@ -45,13 +58,13 @@ export async function heartbeatDesktopSession(input: {
     {
       method: "POST",
       headers: {
+        "content-type": "application/json",
         "X-Vibelution-Control-Token": input.controlToken
-      }
+      },
+      body: JSON.stringify({ revision: input.revision })
     }
   );
-  if (!response.ok) {
-    throw new Error(`desktop session heartbeat failed: ${response.status}`);
-  }
+  await throwDesktopSessionRequestError(response, "heartbeat");
   return (await response.json()) as DesktopSessionRegistration;
 }
 
@@ -59,6 +72,7 @@ export async function closeDesktopSession(input: {
   launcherOrigin: string;
   controlToken: string;
   desktopSessionId: string;
+  revision: number;
   fetchImpl?: typeof fetch;
 }): Promise<DesktopSessionRegistration> {
   const fetcher = input.fetchImpl ?? fetch;
@@ -67,13 +81,13 @@ export async function closeDesktopSession(input: {
     {
       method: "DELETE",
       headers: {
+        "content-type": "application/json",
         "X-Vibelution-Control-Token": input.controlToken
-      }
+      },
+      body: JSON.stringify({ revision: input.revision })
     }
   );
-  if (!response.ok) {
-    throw new Error(`desktop session close failed: ${response.status}`);
-  }
+  await throwDesktopSessionRequestError(response, "close");
   return (await response.json()) as DesktopSessionRegistration;
 }
 
@@ -106,8 +120,30 @@ export async function reportDesktopWindowState(input: {
       })
     }
   );
-  if (!response.ok) {
-    throw new Error(`desktop session window update failed: ${response.status}`);
-  }
+  await throwDesktopSessionRequestError(response, "window update");
   return (await response.json()) as DesktopSessionRegistration;
+}
+
+async function throwDesktopSessionRequestError(response: Response, operation: string): Promise<void> {
+  if (response.ok) {
+    return;
+  }
+  let payload: Record<string, unknown> = {};
+  try {
+    const candidate = await response.json();
+    const detail = candidate && typeof candidate === "object" ? (candidate as { detail?: unknown }).detail : null;
+    payload = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : {};
+  } catch {
+    payload = {};
+  }
+  const code = String(payload.code ?? "desktop_session_request_failed");
+  const actualRevision = Number(payload.actualDesktopSessionRevision ?? 0);
+  if (response.status === 409) {
+    throw new DesktopSessionConflictError(
+      String(payload.message ?? `desktop session ${operation} conflict`),
+      code,
+      Number.isFinite(actualRevision) ? actualRevision : 0
+    );
+  }
+  throw new Error(`desktop session ${operation} failed: ${response.status}`);
 }

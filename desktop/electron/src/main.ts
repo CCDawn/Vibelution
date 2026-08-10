@@ -12,6 +12,11 @@ import {
 } from "./launch/desktopLaunchSettings.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
 import {
+  DesktopLifecycleCoordinator,
+  DesktopSessionMutationQueue,
+  type DesktopCloseReason
+} from "./lifecycle/desktopLifecycleCoordinator.js";
+import {
   createConversationNotificationService,
   type ConversationNotificationService,
   type DesktopConversationCompletionNotification,
@@ -60,6 +65,7 @@ const DESKTOP_ACTION_LEASE_SECONDS = 30;
 const RUNTIME_SCENE_MAX_BUFFERED_EVENTS = 50;
 const DESKTOP_SESSION_HEARTBEAT_MS = 15000;
 const DESKTOP_SESSIONS_HEARTBEAT_CAPABILITY = "desktop_sessions.heartbeat";
+const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
 
 let windowProvider: ElectronWindowProvider | null = null;
 let launcherBootstrap: LauncherBootstrapResult | null = null;
@@ -72,7 +78,8 @@ let runtimeSceneBridge: RuntimeSceneBridge | null = null;
 let desktopSessionRegistered = false;
 let desktopSessionRevision = 0;
 let shutdownApproved = false;
-let shutdownRequestRunning = false;
+const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
+const desktopSessionMutations = new DesktopSessionMutationQueue();
 let conversationNotificationService: ConversationNotificationService | null = null;
 const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
@@ -178,6 +185,19 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       onWorkbenchFocusAttentionClear: () => {
         conversationNotificationService?.clearAttention();
       },
+      onOsSessionEnd: (event, role) => {
+        const recovery = desktopLifecycleCoordinator.recordSessionEnd();
+        void recordElectronSupervisorEvent(bootstrap, {
+          eventCode: "electron.lifecycle.os_session_end",
+          message: "Electron received a Windows session-end lifecycle signal.",
+          fields: {
+            event,
+            role,
+            closeReason: recovery.closeReason,
+            recoveryReason: recovery.recoveryReason
+          }
+        });
+      }
     }
   );
 }
@@ -320,25 +340,30 @@ async function reportManagedWindowState(
   if (bootstrap === null) {
     return;
   }
+  if (!desktopSessionMutations.accepts("window")) {
+    return;
+  }
   try {
-    const context = await resolveDesktopActionLoopContext(bootstrap);
-    if (!desktopSessionRegistered) {
-      const registration = await registerDesktopSession({
+    await desktopSessionMutations.enqueue("window", async () => {
+      const context = await resolveDesktopActionLoopContext(bootstrap);
+      if (!desktopSessionRegistered) {
+        const registration = await registerDesktopSession({
+          ...context,
+          workspaceRoot: paths.workspaceRoot,
+          capabilities: bootstrap.capabilities
+        });
+        desktopSessionRevision = registration.revision;
+        desktopSessionRegistered = true;
+        startDesktopSessionHeartbeatIfNeeded(bootstrap);
+      }
+      const result = await reportDesktopWindowState({
         ...context,
-        workspaceRoot: paths.workspaceRoot,
-        capabilities: bootstrap.capabilities
+        role: state.role,
+        revision: desktopSessionRevision,
+        state
       });
-      desktopSessionRevision = registration.revision;
-      desktopSessionRegistered = true;
-      startDesktopSessionHeartbeatIfNeeded(bootstrap);
-    }
-    const result = await reportDesktopWindowState({
-      ...context,
-      role: state.role,
-      revision: desktopSessionRevision,
-      state
+      desktopSessionRevision = result.revision;
     });
-    desktopSessionRevision = result.revision;
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
   }
@@ -366,10 +391,19 @@ function startDesktopSessionHeartbeatIfNeeded(bootstrap: LauncherBootstrapResult
       stopDesktopSessionHeartbeat();
       return;
     }
+    if (!desktopSessionMutations.accepts("heartbeat")) {
+      stopDesktopSessionHeartbeat();
+      return;
+    }
     desktopSessionHeartbeatRunning = true;
     try {
-      const result = await heartbeatDesktopSession(await resolveDesktopActionLoopContext(currentBootstrap));
-      desktopSessionRevision = result.revision;
+      await desktopSessionMutations.enqueue("heartbeat", async () => {
+        const result = await heartbeatDesktopSession({
+          ...(await resolveDesktopActionLoopContext(currentBootstrap)),
+          revision: desktopSessionRevision
+        });
+        desktopSessionRevision = result.revision;
+      });
     } catch (error: unknown) {
       console.warn(error instanceof Error ? error.message : String(error));
     } finally {
@@ -482,7 +516,7 @@ function currentDesktopSessionId(
     return "";
   }
   const bootstrapId = String(bootstrap.launcherInstanceId || bootstrap.workspaceId || process.pid).trim();
-  return `electron-${bootstrapId}`;
+  return `electron-${bootstrapId}-${DESKTOP_SESSION_GENERATION}`;
 }
 
 function stopDesktopActionLoop(): void {
@@ -498,10 +532,17 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
   if (!desktopSessionRegistered || launcherBootstrap === null) {
     return;
   }
+  const bootstrap = launcherBootstrap;
+  stopDesktopSessionHeartbeat();
   try {
-    await closeDesktopSession(await resolveDesktopActionLoopContext(launcherBootstrap));
-    desktopSessionRegistered = false;
-    stopDesktopSessionHeartbeat();
+    await desktopSessionMutations.enqueue("close", async () => {
+      const result = await closeDesktopSession({
+        ...(await resolveDesktopActionLoopContext(bootstrap)),
+        revision: desktopSessionRevision
+      });
+      desktopSessionRevision = result.revision;
+      desktopSessionRegistered = false;
+    });
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
   }
@@ -654,12 +695,10 @@ function trustedIpcOrigins(): string[] {
   );
 }
 
-async function requestDesktopShellExit(): Promise<ShutdownDecision> {
-  if (shutdownRequestRunning) {
-    return { allowed: false, reason: "active_work_running", message: "Desktop shell exit is already being evaluated." };
-  }
-  shutdownRequestRunning = true;
-  try {
+async function requestDesktopShellExit(
+  closeReason: DesktopCloseReason = "desktop_shell_quit"
+): Promise<ShutdownDecision> {
+  return desktopLifecycleCoordinator.request(closeReason, async () => {
     const decision = await decideShutdown({
       ownershipMode: launcherBootstrap?.mode ?? "attached",
       activeWorkStatus: async () => {
@@ -678,6 +717,7 @@ async function requestDesktopShellExit(): Promise<ShutdownDecision> {
           await recordElectronSupervisorEvent(launcherBootstrap, {
             ...event,
             fields: {
+              closeReason,
               ownershipMode: launcherBootstrap?.mode ?? "attached",
               ...(event.fields ?? {})
             }
@@ -694,9 +734,7 @@ async function requestDesktopShellExit(): Promise<ShutdownDecision> {
       });
     }
     return decision;
-  } finally {
-    shutdownRequestRunning = false;
-  }
+  });
 }
 
 ipcMain.handle(IPC_CHANNELS.getVersion, (event) => {
@@ -815,7 +853,7 @@ app.on("before-quit", (event) => {
 });
 
 app.on("window-all-closed", () => {
-  void requestDesktopShellExit().catch((error: unknown) => {
+  void requestDesktopShellExit("workbench_window_close").catch((error: unknown) => {
     console.warn(error instanceof Error ? error.message : String(error));
   });
 });

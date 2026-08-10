@@ -14,6 +14,22 @@ DESKTOP_SESSION_HEARTBEAT_LEASE_SECONDS = 45
 WINDOW_ROLES = {"launcher", "workbench"}
 
 
+class DesktopSessionRevisionConflict(ValueError):
+    def __init__(self, expected_revision: int, actual_revision: int) -> None:
+        super().__init__(
+            f"desktop session revision conflict: expected {expected_revision}, actual {actual_revision}"
+        )
+        self.expected_revision = expected_revision
+        self.actual_revision = actual_revision
+
+
+class DesktopSessionClosed(ValueError):
+    def __init__(self, desktop_session_id: str, actual_revision: int) -> None:
+        super().__init__(f"desktop session is closed: {desktop_session_id}")
+        self.desktop_session_id = desktop_session_id
+        self.actual_revision = actual_revision
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -86,6 +102,9 @@ def register_desktop_session(payload: dict[str, Any]) -> dict[str, Any]:
                 ),
             )
         else:
+            if str(existing["status"] or "") == "closed":
+                conn.execute("ROLLBACK")
+                raise DesktopSessionClosed(desktop_session_id, int(existing["revision"] or 0))
             conn.execute(
                 """
                 UPDATE desktop_sessions
@@ -125,13 +144,13 @@ def update_desktop_session_window(desktop_session_id: str, role: str, payload: d
     with _connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = _ensure_session_row(conn, normalized_id, now)
+        _require_open_revision(row, payload)
         windows = json.loads(str(row["windows_json"] or "{}"))
         windows[normalized_role] = _window_payload(normalized_role, payload)
         conn.execute(
             """
             UPDATE desktop_sessions
-            SET status = 'active',
-                revision = revision + 1,
+            SET revision = revision + 1,
                 windows_json = ?,
                 updated_at = ?,
                 last_heartbeat_at = ?
@@ -147,17 +166,17 @@ def update_desktop_session_window(desktop_session_id: str, role: str, payload: d
     return _public_session(updated)
 
 
-def heartbeat_desktop_session(desktop_session_id: str) -> dict[str, Any]:
+def heartbeat_desktop_session(desktop_session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     normalized_id = _safe_text(desktop_session_id, max_length=160)
     now = _now_iso()
     with _connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        _ensure_session_row(conn, normalized_id, now)
+        row = _ensure_session_row(conn, normalized_id, now)
+        _require_open_revision(row, payload)
         conn.execute(
             """
             UPDATE desktop_sessions
-            SET status = 'active',
-                revision = revision + 1,
+            SET revision = revision + 1,
                 updated_at = ?,
                 last_heartbeat_at = ?
             WHERE desktop_session_id = ?
@@ -172,12 +191,23 @@ def heartbeat_desktop_session(desktop_session_id: str) -> dict[str, Any]:
     return _public_session(updated)
 
 
-def close_desktop_session(desktop_session_id: str) -> dict[str, Any]:
+def close_desktop_session(desktop_session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     normalized_id = _safe_text(desktop_session_id, max_length=160)
     now = _now_iso()
     with _connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        _ensure_session_row(conn, normalized_id, now)
+        row = _ensure_session_row(conn, normalized_id, now)
+        actual_revision = int(row["revision"] or 0)
+        expected_revision = _expected_revision(payload)
+        if str(row["status"] or "") == "closed":
+            if expected_revision != actual_revision:
+                conn.execute("ROLLBACK")
+                raise DesktopSessionRevisionConflict(expected_revision, actual_revision)
+            conn.execute("COMMIT")
+            return _public_session(row)
+        if expected_revision != actual_revision:
+            conn.execute("ROLLBACK")
+            raise DesktopSessionRevisionConflict(expected_revision, actual_revision)
         conn.execute(
             """
             UPDATE desktop_sessions
@@ -273,6 +303,24 @@ def _ensure_session_row(conn: sqlite3.Connection, desktop_session_id: str, now: 
         "SELECT * FROM desktop_sessions WHERE desktop_session_id = ?",
         (desktop_session_id,),
     ).fetchone()
+
+
+def _expected_revision(payload: dict[str, Any]) -> int:
+    if not isinstance(payload, dict):
+        raise ValueError("desktop session revision is required")
+    revision = _safe_int(payload.get("revision"))
+    if revision <= 0:
+        raise ValueError("desktop session revision is required")
+    return revision
+
+
+def _require_open_revision(row: sqlite3.Row, payload: dict[str, Any]) -> None:
+    actual_revision = int(row["revision"] or 0)
+    if str(row["status"] or "") == "closed":
+        raise DesktopSessionClosed(str(row["desktop_session_id"] or ""), actual_revision)
+    expected_revision = _expected_revision(payload)
+    if expected_revision != actual_revision:
+        raise DesktopSessionRevisionConflict(expected_revision, actual_revision)
 
 
 def _window_payload(role: str, payload: dict[str, Any]) -> dict[str, Any]:

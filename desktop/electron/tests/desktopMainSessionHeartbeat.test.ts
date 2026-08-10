@@ -10,7 +10,9 @@ describe("Electron main desktop session heartbeat", () => {
 
     expect(source).toContain("heartbeatDesktopSession,");
     expect(source).toContain('from "./windows/desktopSessionClient.js"');
-    expect(source).toContain('heartbeatDesktopSession(await resolveDesktopActionLoopContext(currentBootstrap))');
+    expect(source).toContain('desktopSessionMutations.enqueue("heartbeat", async () => {');
+    expect(source).toContain("...(await resolveDesktopActionLoopContext(currentBootstrap))");
+    expect(source).toContain("revision: desktopSessionRevision");
   });
 
   it("starts the heartbeat only after registration when the launcher declares the capability", () => {

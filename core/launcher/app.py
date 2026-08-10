@@ -17,6 +17,7 @@ from .api_contract import (
     DesktopActionClaimPayload,
     DesktopActionResultPayload,
     DesktopSessionPayload,
+    DesktopSessionRevisionPayload,
     DesktopSessionWindowPayload,
     DeveloperCleanupApplyPayload,
     DeveloperCleanupPreviewPayload,
@@ -28,6 +29,7 @@ from .api_contract import (
     LifecycleIntentPayload,
     WorkbenchWindowModePayload,
 )
+from .desktop_session_store import DesktopSessionClosed, DesktopSessionRevisionConflict
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -40,6 +42,35 @@ INDEX_CACHE_HEADERS = {
 }
 
 router = APIRouter()
+
+
+def _desktop_session_mutation_response(operation, *, invalid_code: str = "invalid_desktop_session_mutation"):
+    try:
+        return operation()
+    except DesktopSessionRevisionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "desktop_session_revision_conflict",
+                "message": str(exc),
+                "expectedDesktopSessionRevision": exc.expected_revision,
+                "actualDesktopSessionRevision": exc.actual_revision,
+            },
+        ) from exc
+    except DesktopSessionClosed as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "desktop_session_closed",
+                "message": str(exc),
+                "actualDesktopSessionRevision": exc.actual_revision,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": invalid_code, "message": str(exc)},
+        ) from exc
 
 
 @router.get("/api/health")
@@ -276,25 +307,30 @@ def launcher_update_desktop_session_window(
     payload: DesktopSessionWindowPayload,
 ) -> dict:
     _ensure_control_request(request)
-    try:
-        return launcher_service.update_desktop_session_window(desktop_session_id, role, payload.model_dump())
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "invalid_desktop_session_window", "message": str(exc)},
-        ) from exc
+    return _desktop_session_mutation_response(
+        lambda: launcher_service.update_desktop_session_window(desktop_session_id, role, payload.model_dump()),
+        invalid_code="invalid_desktop_session_window",
+    )
 
 
 @router.post("/api/launcher/desktop-sessions/{desktop_session_id}/heartbeat")
-def launcher_heartbeat_desktop_session(request: Request, desktop_session_id: str) -> dict:
+def launcher_heartbeat_desktop_session(
+    request: Request, desktop_session_id: str, payload: DesktopSessionRevisionPayload
+) -> dict:
     _ensure_control_request(request)
-    return launcher_service.heartbeat_desktop_session(desktop_session_id)
+    return _desktop_session_mutation_response(
+        lambda: launcher_service.heartbeat_desktop_session(desktop_session_id, payload.model_dump())
+    )
 
 
 @router.delete("/api/launcher/desktop-sessions/{desktop_session_id}")
-def launcher_close_desktop_session(request: Request, desktop_session_id: str) -> dict:
+def launcher_close_desktop_session(
+    request: Request, desktop_session_id: str, payload: DesktopSessionRevisionPayload
+) -> dict:
     _ensure_control_request(request)
-    return launcher_service.close_desktop_session(desktop_session_id)
+    return _desktop_session_mutation_response(
+        lambda: launcher_service.close_desktop_session(desktop_session_id, payload.model_dump())
+    )
 
 
 @router.post("/api/launcher/runtime-scene/events", status_code=202)

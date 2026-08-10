@@ -252,8 +252,12 @@ def test_desktop_session_store_records_revisioned_window_state(tmp_path, monkeyp
             "url": "http://127.0.0.1:8000/",
         },
     )
-    heartbeat = launcher_service.heartbeat_desktop_session("desktop-session-1")
-    closed = launcher_service.close_desktop_session("desktop-session-1")
+    heartbeat = launcher_service.heartbeat_desktop_session(
+        "desktop-session-1", {"revision": updated["revision"]}
+    )
+    closed = launcher_service.close_desktop_session(
+        "desktop-session-1", {"revision": heartbeat["revision"]}
+    )
 
     assert created["desktopSessionId"] == "desktop-session-1"
     assert created["revision"] == 1
@@ -262,6 +266,71 @@ def test_desktop_session_store_records_revisioned_window_state(tmp_path, monkeyp
     assert heartbeat["revision"] == 3
     assert closed["status"] == "closed"
     assert closed["revision"] == 4
+
+
+def test_desktop_session_store_rejects_stale_revisions_and_late_heartbeats(tmp_path, monkeypatch):
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
+    created = launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "desktop-session-1",
+            "provider": "electron",
+            "workspaceRoot": str(tmp_path),
+            "capabilities": [],
+        }
+    )
+    updated = launcher_service.update_desktop_session_window(
+        "desktop-session-1",
+        "workbench",
+        {
+            "revision": created["revision"],
+            "provider": "electron",
+            "open": True,
+            "focused": True,
+            "windowId": 42,
+            "rendererProcessId": 4242,
+            "url": "http://127.0.0.1:8000/",
+        },
+    )
+
+    with pytest.raises(desktop_session_store.DesktopSessionRevisionConflict) as stale:
+        launcher_service.update_desktop_session_window(
+            "desktop-session-1",
+            "workbench",
+            {
+                "revision": created["revision"],
+                "provider": "electron",
+                "open": True,
+                "focused": True,
+                "windowId": 43,
+                "rendererProcessId": 4343,
+                "url": "http://127.0.0.1:8000/",
+            },
+        )
+    assert stale.value.expected_revision == created["revision"]
+    assert stale.value.actual_revision == updated["revision"]
+
+    closed = launcher_service.close_desktop_session(
+        "desktop-session-1", {"revision": updated["revision"]}
+    )
+    with pytest.raises(desktop_session_store.DesktopSessionClosed):
+        launcher_service.heartbeat_desktop_session(
+            "desktop-session-1", {"revision": closed["revision"]}
+        )
+    with pytest.raises(desktop_session_store.DesktopSessionClosed):
+        launcher_service.register_desktop_session(
+            {
+                "desktopSessionId": "desktop-session-1",
+                "provider": "electron",
+                "workspaceRoot": str(tmp_path),
+                "capabilities": [],
+            }
+        )
 
 
 def test_desktop_session_store_exposes_active_window_only_while_lease_valid(tmp_path, monkeypatch):
@@ -399,13 +468,13 @@ def test_standalone_launcher_app_exposes_desktop_session_routes(monkeypatch):
     monkeypatch.setattr(
         launcher_service,
         "heartbeat_desktop_session",
-        lambda desktop_session_id: calls.append(("heartbeat", desktop_session_id))
+        lambda desktop_session_id, payload: calls.append(("heartbeat", desktop_session_id, payload))
         or {"desktopSessionId": desktop_session_id, "revision": 3, "status": "active"},
     )
     monkeypatch.setattr(
         launcher_service,
         "close_desktop_session",
-        lambda desktop_session_id: calls.append(("close", desktop_session_id))
+        lambda desktop_session_id, payload: calls.append(("close", desktop_session_id, payload))
         or {"desktopSessionId": desktop_session_id, "revision": 4, "status": "closed"},
     )
     client = TestClient(launcher_app.create_launcher_app())
@@ -421,8 +490,17 @@ def test_standalone_launcher_app_exposes_desktop_session_routes(monkeypatch):
         headers=token_headers,
         json={"revision": 1, "provider": "electron", "open": True, "focused": True, "windowId": 42, "rendererProcessId": 4242, "url": "http://127.0.0.1:8000/"},
     )
-    heartbeat = client.post("/api/launcher/desktop-sessions/desktop-session-1/heartbeat", headers=token_headers)
-    closed = client.delete("/api/launcher/desktop-sessions/desktop-session-1", headers=token_headers)
+    heartbeat = client.post(
+        "/api/launcher/desktop-sessions/desktop-session-1/heartbeat",
+        headers=token_headers,
+        json={"revision": 2},
+    )
+    closed = client.request(
+        "DELETE",
+        "/api/launcher/desktop-sessions/desktop-session-1",
+        headers=token_headers,
+        json={"revision": 3},
+    )
 
     assert registered.status_code == 201
     assert window.status_code == 200
@@ -433,7 +511,36 @@ def test_standalone_launcher_app_exposes_desktop_session_routes(monkeypatch):
         {"desktopSessionId": "desktop-session-1", "provider": "electron", "capabilities": ["desktop_actions.claim"], "workspaceRoot": ""},
     )
     assert calls[1][0:3] == ("window", "desktop-session-1", "workbench")
-    assert calls[2:] == [("heartbeat", "desktop-session-1"), ("close", "desktop-session-1")]
+    assert calls[2:] == [
+        ("heartbeat", "desktop-session-1", {"revision": 2}),
+        ("close", "desktop-session-1", {"revision": 3}),
+    ]
+
+
+def test_standalone_launcher_app_maps_desktop_session_revision_conflict_to_409(monkeypatch):
+    from core.launcher.desktop_session_store import DesktopSessionRevisionConflict
+
+    monkeypatch.setattr(
+        launcher_service,
+        "update_desktop_session_window",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(DesktopSessionRevisionConflict(1, 2)),
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+    token_headers = {"X-Vibelution-Control-Token": client.get("/api/control-token").json()["controlToken"]}
+
+    conflict = client.put(
+        "/api/launcher/desktop-sessions/desktop-session-1/windows/workbench",
+        headers=token_headers,
+        json={"revision": 1, "provider": "electron", "open": True},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == {
+        "code": "desktop_session_revision_conflict",
+        "message": "desktop session revision conflict: expected 1, actual 2",
+        "expectedDesktopSessionRevision": 1,
+        "actualDesktopSessionRevision": 2,
+    }
 
 
 def test_standalone_launcher_runtime_scene_event_route_requires_control_token(monkeypatch):
