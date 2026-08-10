@@ -227,7 +227,10 @@ def get_runtime_summary() -> dict:
     cache_usage = _runtime_cache_usage(runtime_state)
     last_llm_usage = _runtime_last_llm_usage(runtime_state)
     last_context_composition = _runtime_last_context_composition(runtime_state)
-    last_cache_composition = _runtime_last_cache_composition(runtime_state)
+    last_cache_composition = _runtime_last_cache_composition(
+        runtime_state,
+        last_llm_usage=last_llm_usage,
+    )
     context_compression = _context_compression_summary(runtime_state, context_usage, active_session)
     runtime_manager = _load_runtime_manager_snapshot()
     work_runs = _work_run_summary()
@@ -1899,9 +1902,39 @@ def _runtime_last_context_composition(runtime_state: dict) -> dict[str, object] 
     return dict(value) if isinstance(value, dict) and value else None
 
 
-def _runtime_last_cache_composition(runtime_state: dict) -> dict[str, object] | None:
+def _runtime_last_cache_composition(
+    runtime_state: dict,
+    *,
+    last_llm_usage: dict[str, object] | None = None,
+) -> dict[str, object] | None:
     value = runtime_state.get("last_cache_composition") or runtime_state.get("lastCacheComposition")
-    return dict(value) if isinstance(value, dict) and value else None
+    if not isinstance(value, dict) or not value:
+        return None
+    usage = last_llm_usage or _runtime_last_llm_usage(runtime_state) or {}
+    if usage.get("source") == "provider_usage" and not bool(
+        usage.get("cacheUsageObserved")
+    ):
+        return {
+            "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
+            "recordedAt": str(value.get("recordedAt") or value.get("recorded_at") or "").strip(),
+            "source": "missing",
+            "cacheUsageObserved": False,
+            "cacheUsageMissingReason": str(
+                usage.get("cacheUsageMissingReason")
+                or "provider_cache_usage_missing"
+            ),
+            "inputTokens": 0,
+            "cachedInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "uncachedInputTokens": 0,
+            "cacheHitRate": 0.0,
+            "segments": [
+                {"key": "missing", "label": "missing", "tokens": 1, "status": "missing"}
+            ],
+            "computedSegments": [],
+            "calibratedSegments": [],
+        }
+    return dict(value)
 
 
 def _runtime_cache_usage(runtime_state: dict) -> dict[str, object]:
@@ -1930,12 +1963,16 @@ def _runtime_cache_usage(runtime_state: dict) -> dict[str, object]:
         if last_input_tokens > 0 or turn_input_tokens > 0
         else "missing"
     )
-    current_usage_observed = source == "provider_usage"
+    current_usage_observed = source == "provider_usage" and bool(
+        last_usage.get("cacheUsageObserved")
+    )
     if not current_usage_observed:
         last_input_tokens = 0
         last_cached_input_tokens = 0
         turn_input_tokens = 0
         turn_cached_input_tokens = 0
+        if source == "provider_usage":
+            source = "missing"
     last_cache_composition = _runtime_last_cache_composition(runtime_state) or {}
     total_observed_turn_count = max(
         0,
@@ -1947,7 +1984,8 @@ def _runtime_cache_usage(runtime_state: dict) -> dict[str, object]:
             or 0
         ),
     )
-    total_source = "provider_usage" if total_input_tokens > 0 else (
+    total_cache_usage_observed = total_observed_turn_count > 0
+    total_source = "provider_usage" if total_cache_usage_observed else (
         "not_called" if source == "not_called" else "missing"
     )
     return {
@@ -1966,8 +2004,16 @@ def _runtime_cache_usage(runtime_state: dict) -> dict[str, object]:
         "totalInputTokens": total_input_tokens,
         "totalCachedInputTokens": total_cached_input_tokens,
         "totalCacheReadInputTokens": total_cached_input_tokens,
-        "totalUncachedInputTokens": max(0, total_input_tokens - total_cached_input_tokens),
-        "totalCacheHitRate": (total_cached_input_tokens / total_input_tokens) if total_input_tokens > 0 else None,
+        "totalUncachedInputTokens": (
+            max(0, total_input_tokens - total_cached_input_tokens)
+            if total_cache_usage_observed
+            else 0
+        ),
+        "totalCacheHitRate": (
+            (total_cached_input_tokens / total_input_tokens)
+            if total_cache_usage_observed and total_input_tokens > 0
+            else None
+        ),
         "totalObservedTurnCount": total_observed_turn_count,
         "totalSource": total_source,
         "source": source,
