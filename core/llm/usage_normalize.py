@@ -23,6 +23,42 @@ DEFAULT_RUST_BIN_CANDIDATES = (
     PROJECT_ROOT / "crates" / "vibelution-usage-normalize" / "target" / "debug" / "vibelution-usage-normalize",
 )
 
+CACHE_USAGE_COUNTER_KEYS = frozenset(
+    {
+        "cache_read_input_tokens",
+        "cacheReadInputTokens",
+        "cached_input_tokens",
+        "cachedInputTokens",
+        "cached_tokens",
+        "cachedTokens",
+        "prompt_cache_hit_tokens",
+        "promptCacheHitTokens",
+        "prompt_cache_miss_tokens",
+        "promptCacheMissTokens",
+        "cache_creation_input_tokens",
+        "cacheCreationInputTokens",
+        "cache_write_input_tokens",
+        "cacheWriteInputTokens",
+        "prompt_cache_creation_tokens",
+        "promptCacheCreationTokens",
+    }
+)
+TOKEN_USAGE_COUNTER_KEYS = frozenset(
+    {
+        "prompt_tokens",
+        "promptTokens",
+        "input_tokens",
+        "inputTokens",
+        "input_token_count",
+        "completion_tokens",
+        "output_tokens",
+        "outputTokens",
+        "output_token_count",
+        "total_tokens",
+        "totalTokens",
+    }
+)
+
 
 def _as_u64(value: Any) -> int:
     if value in (None, ""):
@@ -35,6 +71,61 @@ def _as_u64(value: Any) -> int:
         except (TypeError, ValueError):
             return 0
     return max(0, number)
+
+
+def _as_optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value or "").strip().lower()
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    return None
+
+
+def _contains_counter(container: Mapping[str, Any] | None, keys: frozenset[str]) -> bool:
+    if not isinstance(container, Mapping):
+        return False
+    for key, value in container.items():
+        if str(key) in keys and value not in (None, ""):
+            return True
+        if isinstance(value, Mapping) and _contains_counter(value, keys):
+            return True
+    return False
+
+
+def cache_usage_observation(raw: Mapping[str, Any] | None) -> tuple[bool, str]:
+    """Return whether provider cache counters were actually present.
+
+    Counter presence, rather than a positive value, distinguishes a real zero
+    cache hit from an OpenAI-compatible relay that omitted cache telemetry.
+    """
+
+    usage = dict(raw or {})
+    explicit = _as_optional_bool(
+        usage.get("cacheUsageObserved")
+        if "cacheUsageObserved" in usage
+        else usage.get("cache_usage_observed")
+    )
+    if explicit is not None:
+        if explicit:
+            return True, ""
+        reason = str(
+            usage.get("cacheUsageMissingReason")
+            or usage.get("cache_usage_missing_reason")
+            or "provider_cache_usage_missing"
+        ).strip()
+        return False, reason or "provider_cache_usage_missing"
+    if _contains_counter(usage, CACHE_USAGE_COUNTER_KEYS):
+        return True, ""
+    if not usage:
+        return False, "provider_usage_missing"
+    if _contains_counter(usage, TOKEN_USAGE_COUNTER_KEYS):
+        return False, "provider_cache_usage_missing"
+    return False, "provider_usage_without_token_counts"
 
 
 def _read_keys(container: Mapping[str, Any] | None, *keys: str) -> int:
@@ -127,8 +218,9 @@ def normalize_usage_dict(raw: Mapping[str, Any] | None, *, engine: str = "python
 
     cached = min(cache_read, input_tokens) if input_tokens else cache_read
     creation = min(cache_creation, input_tokens) if input_tokens else cache_creation
-    uncached = max(0, input_tokens - cached)
-    hit = round(cached / input_tokens, 4) if input_tokens else 0.0
+    cache_usage_observed, cache_usage_missing_reason = cache_usage_observation(usage)
+    uncached = max(0, input_tokens - cached) if cache_usage_observed else 0
+    hit = round(cached / input_tokens, 4) if cache_usage_observed and input_tokens else 0.0
     if not total_tokens:
         total_tokens = input_tokens + output_tokens
 
@@ -141,6 +233,8 @@ def normalize_usage_dict(raw: Mapping[str, Any] | None, *, engine: str = "python
         "cacheCreationInputTokens": creation,
         "uncachedInputTokens": uncached,
         "cacheHitRate": hit,
+        "cacheUsageObserved": cache_usage_observed,
+        "cacheUsageMissingReason": cache_usage_missing_reason,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
@@ -149,6 +243,8 @@ def normalize_usage_dict(raw: Mapping[str, Any] | None, *, engine: str = "python
         "cache_creation_input_tokens": creation,
         "uncached_input_tokens": uncached,
         "cache_hit_rate": hit,
+        "cache_usage_observed": cache_usage_observed,
+        "cache_usage_missing_reason": cache_usage_missing_reason,
         "engine": engine,
     }
 
@@ -198,12 +294,17 @@ def normalize_usage_payload_via_rust(raw: Mapping[str, Any], *, timeout_s: float
     cached = _as_u64(payload.get("cachedInputTokens") or payload.get("cacheReadInputTokens"))
     creation = _as_u64(payload.get("cacheCreationInputTokens"))
     uncached = _as_u64(payload.get("uncachedInputTokens"))
-    if input_tokens and not uncached and cached <= input_tokens:
+    cache_usage_observed, cache_usage_missing_reason = cache_usage_observation(raw)
+    if cache_usage_observed and input_tokens and not uncached and cached <= input_tokens:
         uncached = max(0, input_tokens - cached)
+    if not cache_usage_observed:
+        uncached = 0
     try:
         hit = float(payload.get("cacheHitRate") or 0.0)
     except (TypeError, ValueError):
         hit = round(cached / input_tokens, 4) if input_tokens else 0.0
+    if not cache_usage_observed:
+        hit = 0.0
     return {
         "inputTokens": input_tokens,
         "outputTokens": output_tokens,
@@ -213,6 +314,8 @@ def normalize_usage_payload_via_rust(raw: Mapping[str, Any], *, timeout_s: float
         "cacheCreationInputTokens": creation,
         "uncachedInputTokens": uncached,
         "cacheHitRate": hit,
+        "cacheUsageObserved": cache_usage_observed,
+        "cacheUsageMissingReason": cache_usage_missing_reason,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
@@ -221,6 +324,8 @@ def normalize_usage_payload_via_rust(raw: Mapping[str, Any], *, timeout_s: float
         "cache_creation_input_tokens": creation,
         "uncached_input_tokens": uncached,
         "cache_hit_rate": hit,
+        "cache_usage_observed": cache_usage_observed,
+        "cache_usage_missing_reason": cache_usage_missing_reason,
         "engine": "rust",
     }
 

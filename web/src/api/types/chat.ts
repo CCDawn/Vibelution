@@ -772,6 +772,8 @@ export type SessionCacheComposition = {
   cacheCreationInputTokens: number;
   uncachedInputTokens: number;
   cacheHitRate: number;
+  cacheUsageObserved?: boolean;
+  cacheUsageMissingReason?: string;
   segments: SessionCacheCompositionSegment[];
   computedInputTokens?: number;
   computedCachedInputTokens?: number;
@@ -889,6 +891,8 @@ export type SessionDetail = SessionSummary & {
     totalUncachedInputTokens?: number;
     totalCacheHitRate: number;
     totalObservedTurnCount?: number;
+    cacheUsageObserved?: boolean;
+    cacheUsageMissingReason?: string;
     updatedAt: string;
     source: string;
   };
@@ -919,6 +923,8 @@ export type SessionLlmUsage = {
   cacheCreationInputTokens: number;
   uncachedInputTokens: number;
   cacheHitRate: number;
+  cacheUsageObserved?: boolean;
+  cacheUsageMissingReason?: string;
   provider: string;
   model: string;
   recordedAt: string;

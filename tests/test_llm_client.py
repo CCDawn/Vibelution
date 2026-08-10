@@ -2439,6 +2439,64 @@ def test_stream_marks_cache_creation_only_usage_as_observed(monkeypatch):
     assert fields["cacheHitRate"] == 0.0
 
 
+def test_stream_marks_missing_provider_cache_fields_as_unknown(monkeypatch):
+    config = supported_relay_chat_config()
+    recorded = []
+
+    def backend(_payload):
+        return iter(
+            [
+                {"choices": [{"delta": {"content": "ok"}}]},
+                {"usage": {"input_tokens": 200, "output_tokens": 20}},
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert events[-1].usage is not None
+    fields = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")[1]["fields"]
+    assert fields["usageObserved"] is True
+    assert fields["cacheUsageObserved"] is False
+    assert fields["cacheUsageMissingReason"] == "provider_cache_usage_missing"
+    assert fields["cachedInputTokens"] == 0
+    assert fields["uncachedInputTokens"] == 0
+    assert fields["cacheHitRate"] == 0.0
+
+
+def test_stream_preserves_explicit_deepseek_zero_cache_hit(monkeypatch):
+    config = supported_relay_chat_config()
+    recorded = []
+
+    def backend(_payload):
+        return iter(
+            [
+                {"choices": [{"delta": {"content": "ok"}}]},
+                {
+                    "usage": {
+                        "prompt_tokens": 200,
+                        "completion_tokens": 20,
+                        "prompt_cache_hit_tokens": 0,
+                        "prompt_cache_miss_tokens": 200,
+                    },
+                },
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    fields = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")[1]["fields"]
+    assert fields["cacheUsageObserved"] is True
+    assert fields["cacheUsageMissingReason"] == ""
+    assert fields["uncachedInputTokens"] == 200
+    assert fields["cacheHitRate"] == 0.0
+
+
 def test_stream_logs_prompt_cache_design_for_automatic_mode(monkeypatch):
     config = make_config(
         **{

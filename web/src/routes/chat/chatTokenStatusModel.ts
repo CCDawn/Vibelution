@@ -118,7 +118,20 @@ export function buildChatTokenStatusViewModel(options: {
   const sessionContextUsage = detail?.contextUsage;
   const sessionLlmUsage = detail?.llmUsage ?? null;
   const hasProviderLlmUsage = sessionLlmUsage?.source === "provider_usage";
-  const hasProviderCacheUsage = sessionCacheUsage?.source === "provider_usage";
+  const hasProviderLlmCacheUsage = hasProviderLlmUsage && Boolean(
+    sessionLlmUsage?.cacheUsageObserved
+    ?? ((sessionLlmUsage?.cachedInputTokens ?? 0) > 0
+      || (sessionLlmUsage?.cacheCreationInputTokens ?? 0) > 0),
+  );
+  const hasProviderCacheUsage = sessionCacheUsage?.source === "provider_usage" && Boolean(
+    sessionCacheUsage.cacheUsageObserved
+    ?? ((sessionCacheUsage.turnCachedInputTokens ?? 0) > 0),
+  );
+  const hasObservedLastCacheComposition = lastCacheComposition?.source === "provider_usage" && Boolean(
+    lastCacheComposition.cacheUsageObserved
+    ?? ((lastCacheComposition.cachedInputTokens ?? 0) > 0
+      || (lastCacheComposition.cacheCreationInputTokens ?? 0) > 0),
+  );
   const llmUsageNotCalled = sessionLlmUsage?.source === "not_called" || sessionCacheUsage?.source === "not_called";
   const cacheHitRatePercent = Math.round(Math.max(0, Math.min(1, sessionCacheUsage?.turnCacheHitRate ?? 0)) * 100);
   const cacheHitLine = hasProviderCacheUsage && sessionCacheUsage
@@ -128,19 +141,29 @@ export function buildChatTokenStatusViewModel(options: {
       : t("cacheHitMissing");
   const llmUsageLine = hasProviderLlmUsage
     ? lang === "zh"
-      ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} · 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}`
-      : `${numberFormatter.format(sessionLlmUsage.inputTokens)} in · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`
+      ? hasProviderLlmCacheUsage
+        ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} · 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}`
+        : `${numberFormatter.format(sessionLlmUsage.inputTokens)} · ${t("cacheHitMissing")}`
+      : hasProviderLlmCacheUsage
+        ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} in · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`
+        : `${numberFormatter.format(sessionLlmUsage.inputTokens)} in · ${t("cacheHitMissing")}`
     : llmUsageNotCalled
       ? t("llmUsageNotCalled")
       : t("llmUsageMissing");
   const llmUsageTitle = hasProviderLlmUsage
-    ? [
-      `${numberFormatter.format(sessionLlmUsage.inputTokens)} in`,
-      `${numberFormatter.format(sessionLlmUsage.outputTokens)} out`,
-      `${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`,
-      `${numberFormatter.format(sessionLlmUsage.cacheCreationInputTokens ?? 0)} write`,
-      `${numberFormatter.format(sessionLlmUsage.uncachedInputTokens ?? 0)} uncached`,
-    ].join(" · ")
+    ? hasProviderLlmCacheUsage
+      ? [
+        `${numberFormatter.format(sessionLlmUsage.inputTokens)} in`,
+        `${numberFormatter.format(sessionLlmUsage.outputTokens)} out`,
+        `${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`,
+        `${numberFormatter.format(sessionLlmUsage.cacheCreationInputTokens ?? 0)} write`,
+        `${numberFormatter.format(sessionLlmUsage.uncachedInputTokens ?? 0)} uncached`,
+      ].join(" · ")
+      : [
+        `${numberFormatter.format(sessionLlmUsage.inputTokens)} in`,
+        `${numberFormatter.format(sessionLlmUsage.outputTokens)} out`,
+        t("cacheHitMissing"),
+      ].join(" · ")
     : llmUsageNotCalled
       ? t("llmUsageNotCalled")
       : t("llmUsageMissing");
@@ -187,9 +210,9 @@ export function buildChatTokenStatusViewModel(options: {
   const modelCachedInputTokens = Math.max(
     0,
     Math.min(
-      lastCacheComposition?.calibratedCachedInputTokens
-        ?? (hasProviderLlmUsage ? sessionLlmUsage.cachedInputTokens : undefined)
-        ?? lastCacheComposition?.cachedInputTokens
+      (hasObservedLastCacheComposition ? lastCacheComposition?.calibratedCachedInputTokens : undefined)
+        ?? (hasProviderLlmCacheUsage ? sessionLlmUsage.cachedInputTokens : undefined)
+        ?? (hasObservedLastCacheComposition ? lastCacheComposition?.cachedInputTokens : undefined)
         ?? (hasProviderCacheUsage ? sessionCacheUsage?.turnCachedInputTokens : undefined)
         ?? 0,
       modelInputTokens,

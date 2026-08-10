@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from .types import UsageStats
-from .usage_normalize import normalize_usage_dict, normalize_usage_payload
+from .usage_normalize import cache_usage_observation, normalize_usage_dict, normalize_usage_payload
 
 
 def usage_to_dict(usage: Any) -> Dict[str, Any]:
@@ -236,5 +236,11 @@ def usage_diagnostic_summary_from_payload(usage: Any) -> Dict[str, Any]:
         "cacheCreationInputTokens": int(normalized["cacheCreationInputTokens"]),
         "uncachedInputTokens": int(normalized["uncachedInputTokens"]),
         "cacheHitRate": float(normalized["cacheHitRate"]),
+        "cacheUsageObserved": bool(normalized["cacheUsageObserved"]),
+        "cacheUsageMissingReason": str(normalized["cacheUsageMissingReason"] or ""),
         "engine": str(normalized.get("engine") or "python"),
     }
+
+
+def cache_usage_observation_from_payload(usage: Any) -> tuple[bool, str]:
+    return cache_usage_observation(usage_to_dict(usage))

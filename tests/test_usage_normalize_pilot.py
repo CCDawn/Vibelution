@@ -65,6 +65,42 @@ def test_existing_openai_style_input_total_contract():
     assert n["cacheHitRate"] == pytest.approx(0.4)
 
 
+def test_missing_provider_cache_counters_are_unknown_instead_of_zero_hit():
+    raw = {
+        "prompt_tokens": 200,
+        "completion_tokens": 10,
+        "total_tokens": 210,
+    }
+
+    normalized = normalize_usage_dict(raw)
+    diagnostic = usage_diagnostic_summary_from_payload(raw)
+
+    assert normalized["cacheUsageObserved"] is False
+    assert normalized["cacheUsageMissingReason"] == "provider_cache_usage_missing"
+    assert normalized["uncachedInputTokens"] == 0
+    assert normalized["cacheHitRate"] == 0.0
+    assert diagnostic["cacheUsageObserved"] is False
+    assert diagnostic["cacheUsageMissingReason"] == "provider_cache_usage_missing"
+
+
+def test_explicit_deepseek_zero_hit_remains_an_observed_zero():
+    raw = {
+        "prompt_tokens": 200,
+        "completion_tokens": 10,
+        "total_tokens": 210,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 200,
+    }
+
+    normalized = normalize_usage_dict(raw)
+
+    assert normalized["cacheUsageObserved"] is True
+    assert normalized["cacheUsageMissingReason"] == ""
+    assert normalized["cachedInputTokens"] == 0
+    assert normalized["uncachedInputTokens"] == 200
+    assert normalized["cacheHitRate"] == 0.0
+
+
 def test_relay_prompt_tokens_dominates_tail_input():
     raw = {
         "prompt_tokens": 4700,

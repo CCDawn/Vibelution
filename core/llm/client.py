@@ -40,7 +40,7 @@ from .semantic_messages import SemanticGenerationSettings
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
 from .types import LLMCapabilities, LLMError, LLMProtocolEvent, StreamChunk, ToolCall, TurnOutcome, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
-from .usage import usage_stats_from_payload, usage_to_dict
+from .usage import cache_usage_observation_from_payload, usage_stats_from_payload, usage_to_dict
 from .wire.registry import build_default_wire_adapter_registry
 from .wire.responses import STREAM_EXHAUSTED_WITHOUT_TERMINAL
 
@@ -893,13 +893,20 @@ def _usage_cache_observation_fields(usage: UsageStats) -> Dict[str, Any]:
     if input_tokens:
         cache_read_tokens = min(cache_read_tokens, input_tokens)
         cache_creation_tokens = min(cache_creation_tokens, input_tokens)
-    uncached_tokens = max(0, input_tokens - cache_read_tokens)
+    cache_usage_observed, cache_usage_missing_reason = cache_usage_observation_from_payload(
+        getattr(usage, "provider_raw_usage", {})
+    )
+    uncached_tokens = max(0, input_tokens - cache_read_tokens) if cache_usage_observed else 0
     return {
         "cachedInputTokens": cache_read_tokens,
         "cacheReadInputTokens": cache_read_tokens,
         "cacheCreationInputTokens": cache_creation_tokens,
         "uncachedInputTokens": uncached_tokens,
-        "cacheHitRate": round(cache_read_tokens / input_tokens, 4) if input_tokens > 0 else 0.0,
+        "cacheHitRate": round(cache_read_tokens / input_tokens, 4)
+        if cache_usage_observed and input_tokens > 0
+        else 0.0,
+        "cacheUsageObserved": cache_usage_observed,
+        "cacheUsageMissingReason": cache_usage_missing_reason,
     }
 
 
@@ -915,6 +922,8 @@ def _usage_observation_metadata(usage: UsageStats) -> Dict[str, Any]:
         "cache_creation_input_tokens": cache_fields["cacheCreationInputTokens"],
         "uncached_input_tokens": cache_fields["uncachedInputTokens"],
         "cache_hit_rate": cache_fields["cacheHitRate"],
+        "cache_usage_observed": cache_fields["cacheUsageObserved"],
+        "cache_usage_missing_reason": cache_fields["cacheUsageMissingReason"],
     }
 
 
@@ -1016,6 +1025,9 @@ def _record_usage_ledger_event(
     if input_tokens:
         cached_input_tokens = min(cached_input_tokens, input_tokens)
         cache_creation_tokens = min(cache_creation_tokens, input_tokens)
+    cache_usage_observed, cache_usage_missing_reason = cache_usage_observation_from_payload(
+        provider_usage
+    )
     event = _usage_ledger_event(
         source=source,
         scope_kind=_usage_scope_kind(meta),
@@ -1032,7 +1044,11 @@ def _record_usage_ledger_event(
         cached_input_tokens=cached_input_tokens,
         cache_read_input_tokens=cached_input_tokens,
         cache_creation_input_tokens=cache_creation_tokens,
-        uncached_input_tokens=max(0, input_tokens - cached_input_tokens),
+        uncached_input_tokens=(
+            max(0, input_tokens - cached_input_tokens)
+            if cache_usage_observed
+            else 0
+        ),
         output_tokens=output_tokens,
         reasoning_output_tokens=max(0, int(getattr(usage, "reasoning_output_tokens", 0) or 0)),
         total_tokens=total_tokens or input_tokens + output_tokens,
@@ -1040,6 +1056,8 @@ def _record_usage_ledger_event(
         latency_ms=max(0, int(getattr(usage, "latency_ms", 0) or 0)),
         runtime_scene_id=_usage_metadata_value(meta, "runtimeSceneId", "runtime_scene_id"),
         provider_usage_keys=provider_usage_keys,
+        cache_usage_observed=cache_usage_observed,
+        cache_usage_missing_reason=cache_usage_missing_reason,
     )
     try:
         record_usage_event(event)
@@ -2428,6 +2446,7 @@ class LLMClient:
             usage_summary = dict(usage_event.diagnostic_summary)
             input_tokens = int(usage_summary.get("inputTokens") or 0)
             cached_input_tokens = int(usage_summary.get("cachedInputTokens") or 0)
+            cache_usage_observed = bool(usage_summary.get("cacheUsageObserved"))
             usage_observation = {
                 "input_tokens": input_tokens,
                 "output_tokens": int(usage_summary.get("outputTokens") or 0),
@@ -2437,12 +2456,18 @@ class LLMClient:
                 "cache_read_input_tokens": int(usage_summary.get("cacheReadInputTokens") or 0),
                 "cache_creation_input_tokens": int(usage_summary.get("cacheCreationInputTokens") or 0),
                 "uncached_input_tokens": int(
-                    usage_summary.get("uncachedInputTokens")
-                    or max(0, input_tokens - cached_input_tokens)
+                    (usage_summary.get("uncachedInputTokens") or 0)
+                    if cache_usage_observed
+                    else 0
                 ),
                 "cache_hit_rate": float(
-                    usage_summary.get("cacheHitRate")
-                    or (cached_input_tokens / input_tokens if input_tokens else 0.0)
+                    (usage_summary.get("cacheHitRate") or 0.0)
+                    if cache_usage_observed
+                    else 0.0
+                ),
+                "cache_usage_observed": cache_usage_observed,
+                "cache_usage_missing_reason": str(
+                    usage_summary.get("cacheUsageMissingReason") or ""
                 ),
             }
             response_metadata["usage_observation"] = usage_observation
@@ -3096,13 +3121,13 @@ class LLMClient:
                         "reasoningOutputTokens": usage_observation.reasoning_output_tokens,
                         "totalTokens": usage_observation.total_tokens,
                         **cache_observation_fields,
-                        "latencyMs": usage_observation.latency_ms,
                         **{
                             key: event_metadata[key]
                             for key in ("turnId", "sessionId", "invocationId")
                             if event_metadata.get(key)
                         },
                         **responses_continuation_summary,
+                        "latencyMs": usage_observation.latency_ms,
                         "messageCount": message_count,
                         "toolCount": tool_count,
                         **event_metadata,

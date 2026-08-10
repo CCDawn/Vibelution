@@ -18,6 +18,19 @@ def _coerce_nonnegative_int(value: Any) -> int:
         return 0
 
 
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in {"true", "yes", "on", "1"}:
+        return True
+    if text in {"false", "no", "off", "0"}:
+        return False
+    return None
+
+
 def _now_timestamp() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -410,9 +423,26 @@ def normalize_runtime_llm_usage(value: Any) -> dict[str, Any] | None:
         _coerce_nonnegative_int(value.get("cacheCreationInputTokens") or value.get("cache_creation_input_tokens") or 0),
         input_tokens,
     ) if input_tokens else 0
+    explicit_cache_observed = _coerce_optional_bool(
+        value.get("cacheUsageObserved")
+        if "cacheUsageObserved" in value
+        else value.get("cache_usage_observed")
+    )
+    cache_usage_observed = (
+        explicit_cache_observed
+        if explicit_cache_observed is not None
+        else cached_tokens > 0 or cache_creation_tokens > 0
+    )
+    cache_usage_missing_reason = str(
+        value.get("cacheUsageMissingReason")
+        or value.get("cache_usage_missing_reason")
+        or ("" if cache_usage_observed else "provider_cache_usage_missing")
+    ).strip()
     uncached_tokens = _coerce_nonnegative_int(value.get("uncachedInputTokens") or value.get("uncached_input_tokens") or 0)
-    if input_tokens and not uncached_tokens:
+    if cache_usage_observed and input_tokens and not uncached_tokens:
         uncached_tokens = max(0, input_tokens - cached_tokens)
+    if not cache_usage_observed:
+        uncached_tokens = 0
     source = str(value.get("source") or "").strip() or ("provider_usage" if input_tokens else "missing")
     return {
         "source": source,
@@ -423,7 +453,9 @@ def normalize_runtime_llm_usage(value: Any) -> dict[str, Any] | None:
         "cacheReadInputTokens": cached_tokens,
         "cacheCreationInputTokens": cache_creation_tokens,
         "uncachedInputTokens": uncached_tokens,
-        "cacheHitRate": (cached_tokens / input_tokens) if input_tokens > 0 else 0.0,
+        "cacheHitRate": (cached_tokens / input_tokens) if cache_usage_observed and input_tokens > 0 else 0.0,
+        "cacheUsageObserved": cache_usage_observed,
+        "cacheUsageMissingReason": cache_usage_missing_reason,
         "provider": compact_repeated_metadata_text(value.get("provider") or ""),
         "model": compact_repeated_metadata_text(value.get("model") or ""),
         "llmModelId": str(value.get("llmModelId") or value.get("llm_model_id") or "").strip(),
@@ -510,7 +542,11 @@ def build_runtime_cache_composition(
     average_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     usage = normalize_runtime_llm_usage(llm_usage)
-    if usage is None or usage.get("source") != "provider_usage":
+    if (
+        usage is None
+        or usage.get("source") != "provider_usage"
+        or not bool(usage.get("cacheUsageObserved"))
+    ):
         return {
             "turnId": str(turn_id or "").strip(),
             "recordedAt": _now_timestamp(),
