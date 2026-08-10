@@ -179,7 +179,12 @@ const routeShellTargets = [
   },
   {
     path: "routes/teams/research-workflow/ResearchProcessWorkspace.tsx",
-    expected: ["VWorkflowCanvas", "VPanelHeader"],
+    expected: ["VCanvasWorkbenchPage", "ResearchWorkflowCanvasPane"],
+    forbidden: ["ChallengeCupStageRail", "ChallengeCupOperationsWorkspace"],
+  },
+  {
+    path: "routes/teams/research-workflow/ResearchWorkflowCanvasPane.tsx",
+    expected: ["VWorkflowCanvas", "VStateSurface"],
     forbidden: ["ChallengeCupStageRail", "ChallengeCupOperationsWorkspace"],
   },
   {
