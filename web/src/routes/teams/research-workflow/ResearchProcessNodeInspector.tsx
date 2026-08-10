@@ -7,6 +7,7 @@ import { NodeCommandSection } from "./NodeCommandSection";
 import { NodeExecutionSection } from "./NodeExecutionSection";
 import { NodeHandoffSection } from "./NodeHandoffSection";
 import { NodeSessionSection } from "./NodeSessionSection";
+import { researchActorLabel, researchStageLabel } from "./researchNodePresentation";
 import styles from "./ResearchProcessNodeInspector.styles";
 
 export type ResearchProcessNodeInspectorProps = {
@@ -41,10 +42,10 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
   return (
     <VSurface tone="panel" className={styles.root} data-vui="node-inspector">
       <header>
-        <div className={styles.stage}>{adapter.stageId.replace(/_/g, " ")}</div>
+        <div className={styles.stage}>{researchStageLabel(adapter.stageId)}</div>
         <h3 className={styles.title}>{detail.label || adapter.label}</h3>
         <div className={styles.meta}>
-          {adapter.actorKind}
+          {researchActorLabel(adapter.actorKind)}
           {detail.runtimeCurrent ? " · 运行当前" : ""}
           {detail.nodeAttempt ? ` · 第 ${detail.nodeAttempt} 次尝试` : ""}
         </div>
