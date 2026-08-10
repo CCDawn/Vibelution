@@ -1081,6 +1081,8 @@ ICON_SMALL = 0
 ICON_BIG = 1
 IMAGE_ICON = 1
 LR_LOADFROMFILE = 0x00000010
+_MANAGED_BROWSER_IDENTITY_TIMEOUT_SECONDS = 0.8
+_MANAGED_BROWSER_IDENTITY_POLL_SECONDS = 0.1
 
 
 def _window_process_id(hwnd: int) -> int:
@@ -1104,6 +1106,76 @@ def _visible_windows_for_process(pid: int) -> list[int]:
 
     user32.EnumWindows(callback, 0)
     return handles
+
+
+def _managed_browser_pids_for_profile(profile_dir: Path) -> list[int]:
+    """Return Edge processes that explicitly belong to this managed profile.
+
+    Chromium commonly hands the app window to a child PID rather than the PID
+    returned by ``Popen``. Restrict the fallback to the dedicated workbench
+    profile so another Edge window can never receive Vibelution identity.
+    """
+
+    if os.name != "nt":
+        return []
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return []
+
+    profile_text = str(profile_dir).lower()
+    profile_text_alt = profile_text.replace("\\", "/")
+    pids: list[int] = []
+    for process in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            name = str(process.info.get("name") or "").lower()
+            if name not in {"msedge.exe", "msedgewebview2.exe"}:
+                continue
+            command_line = " ".join(str(item) for item in (process.info.get("cmdline") or [])).lower()
+            command_line_alt = command_line.replace("\\", "/")
+            if profile_text not in command_line and profile_text_alt not in command_line_alt:
+                continue
+            pid = int(process.info.get("pid") or 0)
+            if pid > 0 and pid not in pids:
+                pids.append(pid)
+        except (psutil.Error, OSError, TypeError, ValueError):
+            continue
+    return pids
+
+
+def _managed_browser_window_candidates(browser_pid: int, role: str) -> list[dict[str, object]]:
+    """Find only visible windows owned by this exact managed browser profile."""
+
+    candidates: list[dict[str, object]] = []
+    seen: set[int] = set()
+
+    for hwnd in _visible_windows_for_process(int(browser_pid)):
+        if hwnd in seen:
+            continue
+        seen.add(hwnd)
+        candidates.append({
+            "hwnd": int(hwnd),
+            "processId": _window_process_id(int(hwnd)),
+            "resolvedBy": "launch_pid",
+        })
+
+    # Common case: Edge retained the initial app process as its window owner.
+    # Do not scan every system Edge process after this exact match succeeds.
+    if candidates:
+        return candidates
+
+    profile_dir = WORKBENCH_BROWSER_PROFILE_DIR
+    for pid in _managed_browser_pids_for_profile(profile_dir):
+        for hwnd in _visible_windows_for_process(int(pid)):
+            if hwnd in seen:
+                continue
+            seen.add(hwnd)
+            candidates.append({
+                "hwnd": int(hwnd),
+                "processId": _window_process_id(int(hwnd)),
+                "resolvedBy": "workbench_profile",
+            })
+    return candidates
 
 
 def _set_property_store_string(store_ptr: int, key: _PROPERTYKEY, value: str) -> None:
@@ -1189,27 +1261,33 @@ def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str
     icon_resource = f"{LAUNCHER_ICON_PATH},0" if LAUNCHER_ICON_PATH.exists() else ""
     if os.name != "nt":
         return {"applied": False, "windowPid": int(browser_pid), "appUserModelId": app_id, "iconResource": icon_resource, "reason": "non_windows"}
-    deadline = time.monotonic() + 5.0
+    deadline = time.monotonic() + _MANAGED_BROWSER_IDENTITY_TIMEOUT_SECONDS
     last_error = ""
+    last_candidates: list[dict[str, object]] = []
     while time.monotonic() < deadline:
-        candidates = _visible_windows_for_process(int(browser_pid))
-        for hwnd in candidates:
+        candidates = _managed_browser_window_candidates(int(browser_pid), role)
+        last_candidates = candidates
+        for candidate in candidates:
+            hwnd = int(candidate.get("hwnd") or 0)
+            if hwnd <= 0:
+                continue
             try:
                 with contextlib.suppress(OSError):
                     ctypes.windll.ole32.CoInitialize(None)
-                _set_window_app_identity(int(hwnd), app_id, display_name, icon_resource)
+                _set_window_app_identity(hwnd, app_id, display_name, icon_resource)
                 window_icon_applied = _apply_window_icon(int(hwnd), LAUNCHER_ICON_PATH)
                 return {
                     "applied": True,
                     "windowIconApplied": bool(window_icon_applied),
-                    "windowPid": _window_process_id(int(hwnd)),
+                    "windowPid": _window_process_id(hwnd),
                     "appUserModelId": app_id,
                     "iconResource": icon_resource,
-                    "hwnd": int(hwnd),
+                    "hwnd": hwnd,
+                    "resolvedBy": str(candidate.get("resolvedBy") or ""),
                 }
             except Exception as exc:  # pragma: no cover - Windows shell integration is smoke-tested manually.
                 last_error = str(exc)
-        time.sleep(0.2)
+        time.sleep(_MANAGED_BROWSER_IDENTITY_POLL_SECONDS)
     return {
         "applied": False,
         "windowIconApplied": False,
@@ -1218,6 +1296,8 @@ def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str
         "iconResource": icon_resource,
         "reason": "window_not_found_or_identity_failed",
         "error": last_error,
+        "candidateCount": len(last_candidates),
+        "candidateSources": [str(candidate.get("resolvedBy") or "") for candidate in last_candidates],
     }
 
 

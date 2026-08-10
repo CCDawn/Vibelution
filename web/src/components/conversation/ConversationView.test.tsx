@@ -758,6 +758,12 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationText_warning).toContain("!text-[var(--state-warning)]");
   });
 
+  it("normalizes incomplete live timeline fields at the render boundary", () => {
+    expect(conversationViewSource).toContain('const status = String(operation.status ?? "").trim().toLowerCase();');
+    expect(conversationViewSource).toContain('const rawTimelineTitle = String(item.title ?? "").trim();');
+    expect(conversationViewSource).toContain('const itemSummary = String(item.summary ?? "").trim();');
+  });
+
   it("keeps successful child tool rows neutral inside a failed process group", () => {
     expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
     expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
