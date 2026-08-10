@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
-import { cancelRuntimeLifecycleCommand } from "../api/launcher";
+import { cancelRuntimeLifecycleCommand, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
@@ -78,11 +78,15 @@ import {
   allowNextWorkbenchWindowUnload,
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
+  clearPendingWorkbenchWindowCloseIntent,
+  consumePendingWorkbenchWindowCloseIntent,
   consumeNextWorkbenchWindowUnloadAllowance,
   hasRecentControlledProjectLifecycleOperation,
   isElectronDesktopShell,
+  isWorkbenchRefreshShortcut,
   markControlledProjectLifecycleOperation,
   projectWindowCloseGuardMessage,
+  prepareWorkbenchWindowCloseIntent,
   shouldArmBrowserProjectCloseGuard,
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
@@ -1614,6 +1618,7 @@ export function AppShell() {
   // Stable beforeunload via useStableBeforeUnload (ref + no polled deps).
   // Re-binding on status poll makes Edge flash "重新加载应用?" then dismiss it.
   const projectCloseGuardRef = useRef({
+    activeWorkCount: activeWorkIndicator?.count ?? 0,
     emitBrowserTelemetry,
     frontendRefreshRequested,
     restartRequested,
@@ -1622,6 +1627,7 @@ export function AppShell() {
     workbenchCloseGuardMessage,
   });
   projectCloseGuardRef.current = {
+    activeWorkCount: activeWorkIndicator?.count ?? 0,
     emitBrowserTelemetry,
     frontendRefreshRequested,
     restartRequested,
@@ -1633,9 +1639,11 @@ export function AppShell() {
   useStableBeforeUnload((event) => {
     // Intentional refresh / chunk recovery — skip prompt (sync one-shot flag).
     if (consumeNextWorkbenchWindowUnloadAllowance()) {
+      clearPendingWorkbenchWindowCloseIntent();
       return;
     }
     if (hasRecentControlledProjectLifecycleOperation()) {
+      clearPendingWorkbenchWindowCloseIntent();
       return;
     }
     const guard = projectCloseGuardRef.current;
@@ -1650,17 +1658,36 @@ export function AppShell() {
       closeBlocked,
       electronDesktopShell: false,
     })) {
+      clearPendingWorkbenchWindowCloseIntent();
       return;
     }
-    guard.emitBrowserTelemetry(
-      buildProjectWindowCloseBlockedTelemetry({
-        surface: "workbench",
-        runtimeControllerState: guard.runtimeControllerState,
-      }),
-      { preferBeacon: true },
-    );
-    applyBeforeUnloadProjectCloseGuard(event, guard.workbenchCloseGuardMessage);
+    const closeIntent = prepareWorkbenchWindowCloseIntent({
+      activeWorkCount: guard.activeWorkCount,
+      confirmationAvailable: navigator.userActivation?.hasBeenActive !== false,
+    });
+    if (closeIntent.requiresConfirmation) {
+      guard.emitBrowserTelemetry(
+        buildProjectWindowCloseBlockedTelemetry({
+          surface: "workbench",
+          runtimeControllerState: guard.runtimeControllerState,
+        }),
+        { preferBeacon: true },
+      );
+      applyBeforeUnloadProjectCloseGuard(event, guard.workbenchCloseGuardMessage);
+    }
   });
+
+  useEffect(() => {
+    function handleReloadShortcut(event: KeyboardEvent) {
+      if (isWorkbenchRefreshShortcut(event)) {
+        allowNextWorkbenchWindowUnload();
+        clearPendingWorkbenchWindowCloseIntent();
+      }
+    }
+
+    window.addEventListener("keydown", handleReloadShortcut);
+    return () => window.removeEventListener("keydown", handleReloadShortcut);
+  }, []);
 
   const toggleTheme = useCallback(() => {
     setTheme((current) => {
@@ -1824,6 +1851,10 @@ export function AppShell() {
 
     function handlePageHide(event: PageTransitionEvent) {
       pagehideAtMsRef.current = Date.now();
+      const windowCloseIntent = consumePendingWorkbenchWindowCloseIntent();
+      if (!event.persisted && windowCloseIntent) {
+        requestWorkbenchWindowCloseOnPageHide(windowCloseIntent);
+      }
       emitBrowserTelemetry(
         {
           phase: "lifecycle",
@@ -1831,6 +1862,7 @@ export function AppShell() {
           message: `Page hide at ${window.location.pathname || "/"}`,
           fields: {
             persisted: event.persisted,
+            windowCloseIntent: windowCloseIntent ?? "",
           },
         },
         { preferBeacon: true },

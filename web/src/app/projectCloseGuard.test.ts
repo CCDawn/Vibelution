@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { LauncherStatus } from "../api/types";
 import {
@@ -7,10 +7,14 @@ import {
   buildProjectWindowCloseBlockedTelemetry,
   clearControlledProjectLifecycleOperation,
   clearNextWorkbenchWindowUnloadAllowance,
+  clearPendingWorkbenchWindowCloseIntent,
+  consumePendingWorkbenchWindowCloseIntent,
   consumeNextWorkbenchWindowUnloadAllowance,
   hasRecentControlledProjectLifecycleOperation,
   isNextWorkbenchWindowUnloadAllowed,
+  isWorkbenchRefreshShortcut,
   markControlledProjectLifecycleOperation,
+  prepareWorkbenchWindowCloseIntent,
   projectWindowCloseGuardMessage,
   shouldArmBrowserProjectCloseGuard,
   shouldBlockProjectWindowClose,
@@ -125,6 +129,10 @@ function makeLauncherStatus(overrides: Partial<LauncherStatus["projectBundle"]> 
 }
 
 describe("project close guard", () => {
+  afterEach(() => {
+    clearPendingWorkbenchWindowCloseIntent();
+  });
+
   it("blocks Launcher window closing while the project backend or browser is running", () => {
     expect(shouldBlockProjectWindowClose(makeLauncherStatus())).toBe(true);
   });
@@ -206,6 +214,41 @@ describe("project close guard", () => {
         runtimeControllerState: "managed",
       }),
     ).toBe(false);
+  });
+
+  it("stages a normal stop for an idle window close without requiring confirmation", () => {
+    expect(prepareWorkbenchWindowCloseIntent({ activeWorkCount: 0 })).toEqual({
+      intent: "stop",
+      requiresConfirmation: false,
+    });
+    expect(consumePendingWorkbenchWindowCloseIntent()).toBe("stop");
+    expect(consumePendingWorkbenchWindowCloseIntent()).toBeNull();
+  });
+
+  it("stages a force stop only after the browser confirms an active-work close", () => {
+    expect(prepareWorkbenchWindowCloseIntent({ activeWorkCount: 2 })).toEqual({
+      intent: "force-stop",
+      requiresConfirmation: true,
+    });
+    expect(consumePendingWorkbenchWindowCloseIntent()).toBe("force-stop");
+  });
+
+  it("falls back to protected normal stop when the browser cannot show a confirmation", () => {
+    expect(prepareWorkbenchWindowCloseIntent({
+      activeWorkCount: 1,
+      confirmationAvailable: false,
+    })).toEqual({
+      intent: "stop",
+      requiresConfirmation: true,
+    });
+    expect(consumePendingWorkbenchWindowCloseIntent()).toBe("stop");
+  });
+
+  it("recognizes keyboard reload shortcuts so they do not become close intents", () => {
+    expect(isWorkbenchRefreshShortcut({ key: "F5", ctrlKey: false, metaKey: false })).toBe(true);
+    expect(isWorkbenchRefreshShortcut({ key: "r", ctrlKey: true, metaKey: false })).toBe(true);
+    expect(isWorkbenchRefreshShortcut({ key: "R", ctrlKey: false, metaKey: true })).toBe(true);
+    expect(isWorkbenchRefreshShortcut({ key: "w", ctrlKey: true, metaKey: false })).toBe(false);
   });
 
   it("shares short-lived controlled lifecycle intent with the workbench window", () => {
@@ -338,6 +381,6 @@ describe("project close guard", () => {
       },
     });
     expect(projectWindowCloseGuardMessage("zh", "launcher")).toContain("请先点击");
-    expect(projectWindowCloseGuardMessage("en", "workbench")).toContain("power menu");
+    expect(projectWindowCloseGuardMessage("en", "workbench")).toContain("force-stop");
   });
 });

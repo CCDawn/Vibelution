@@ -23,6 +23,14 @@ type DesktopShellLike = {
   vibelutionLauncher?: unknown;
 };
 
+export type WorkbenchWindowCloseIntent = "stop" | "force-stop";
+
+type WorkbenchRefreshShortcutLike = {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+};
+
 const CONTROLLED_LIFECYCLE_COOKIE = "vibelution_lifecycle_operation";
 const CONTROLLED_LIFECYCLE_WINDOW_MS = 120_000;
 /**
@@ -37,6 +45,7 @@ const CONTROLLED_LIFECYCLE_WINDOW_MS = 120_000;
  */
 let allowNextWorkbenchUnload = false;
 let allowNextWorkbenchUnloadToken = 0;
+let pendingWorkbenchWindowCloseIntent: WorkbenchWindowCloseIntent | null = null;
 const ALLOW_NEXT_UNLOAD_EXPIRE_MS = 5_000;
 const ALLOW_NEXT_UNLOAD_STORAGE_KEY = "vibelution.allow_next_window_unload";
 
@@ -186,6 +195,35 @@ export function shouldBlockWorkbenchWindowClose(options: WorkbenchCloseGuardOpti
   return normalizeState(options.runtimeControllerState) !== "closing";
 }
 
+export function prepareWorkbenchWindowCloseIntent(options: {
+  activeWorkCount: number;
+  confirmationAvailable?: boolean;
+}) {
+  const requiresConfirmation = Number.isFinite(options.activeWorkCount) && options.activeWorkCount > 0;
+  pendingWorkbenchWindowCloseIntent = requiresConfirmation && options.confirmationAvailable !== false
+    ? "force-stop"
+    : "stop";
+  return {
+    intent: pendingWorkbenchWindowCloseIntent,
+    requiresConfirmation,
+  };
+}
+
+export function consumePendingWorkbenchWindowCloseIntent() {
+  const intent = pendingWorkbenchWindowCloseIntent;
+  pendingWorkbenchWindowCloseIntent = null;
+  return intent;
+}
+
+export function clearPendingWorkbenchWindowCloseIntent() {
+  pendingWorkbenchWindowCloseIntent = null;
+}
+
+export function isWorkbenchRefreshShortcut(event: WorkbenchRefreshShortcutLike) {
+  const key = String(event.key || "").toLowerCase();
+  return key === "f5" || (key === "r" && (event.ctrlKey || event.metaKey));
+}
+
 /** Arm a one-shot pass so the next navigation/reload skips the project-close guard. */
 export function allowNextWorkbenchWindowUnload() {
   allowNextWorkbenchUnload = true;
@@ -285,11 +323,11 @@ export function projectWindowCloseGuardMessage(lang: "zh" | "en" | string, surfa
   if (lang === "en") {
     return surface === "launcher"
       ? "The project is still running. Stop the workbench first, then close the Launcher."
-      : "The project is still running. Use the workbench power menu to stop it before closing this window.";
+      : "Active tasks are running. Closing this window will interrupt them and force-stop the workbench.";
   }
   return surface === "launcher"
     ? "项目仍在运行，不能直接关闭 Launcher。请先点击「停止」，等待项目关闭后再关闭窗口。"
-    : "项目仍在运行，不能直接关闭工作台窗口。请先通过电源菜单停止工作台。";
+    : "仍有任务正在运行。继续关闭会中断这些任务并强制停止工作台。";
 }
 
 export function applyBeforeUnloadProjectCloseGuard(event: BeforeUnloadEvent, message: string) {
