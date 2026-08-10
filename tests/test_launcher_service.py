@@ -2435,7 +2435,11 @@ def test_launcher_supervisor_reattach_queues_guarded_open_workbench(tmp_path, mo
         },
     )
     monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
-    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: calls.append(("ensure",)))
+    monkeypatch.setattr(
+        launcher_service,
+        "ensure_runtime_manager_daemon_alive",
+        lambda: calls.append(("ensure",)),
+    )
     monkeypatch.setattr(
         launcher_service,
         "submit_command",

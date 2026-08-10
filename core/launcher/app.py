@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
@@ -330,40 +328,6 @@ def _ensure_control_request(request: Request) -> None:
         raise HTTPException(status_code=error.status_code, detail=error.detail)
 
 
-_DAEMON_WATCHDOG_INTERVAL_SECONDS = 10.0
-
-
-async def _daemon_watchdog_loop() -> None:
-    """Periodically revive a dead runtime-manager daemon and stuck commands.
-
-    The runtime-manager daemon is the single worker that claims commands from
-    the inbox; if it dies mid-command (e.g. while force-closing the workbench),
-    the claimed command stays stuck in the processing directory and lifecycle
-    requests hang. This loop recovers the queue and restarts the daemon so a
-    later force-stop / restart can complete instead of waiting forever.
-    """
-
-    while True:
-        try:
-            launcher_service.ensure_runtime_manager_daemon_alive()
-        except Exception:  # pragma: no cover - watchdog must never die
-            pass
-        await asyncio.sleep(_DAEMON_WATCHDOG_INTERVAL_SECONDS)
-
-
-@asynccontextmanager
-async def _launcher_control_lifespan(_app: FastAPI):
-    watchdog_task = asyncio.create_task(_daemon_watchdog_loop())
-    try:
-        yield
-    finally:
-        watchdog_task.cancel()
-        try:
-            await watchdog_task
-        except asyncio.CancelledError:
-            pass
-
-
 def _request_audit(request: Request, *, operation: str) -> launcher_service.LauncherRequestAudit:
     client = request.client.host if request.client else ""
     return launcher_service.launcher_request_audit(
@@ -383,7 +347,6 @@ def create_launcher_app() -> FastAPI:
         title="Vibelution Launcher",
         version=get_product_version(),
         description="Standalone lifecycle control plane for the Vibelution project bundle.",
-        lifespan=_launcher_control_lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
