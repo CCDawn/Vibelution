@@ -34,12 +34,15 @@ export type StartupProgressState = {
 
 export function shouldRenderStartupOverlay(
   progress: StartupProgressState,
-  desktopShell: boolean,
+  _desktopShell: boolean,
 ): boolean {
   if (!progress.active) {
     return false;
   }
-  return desktopShell || progress.tone !== "caution";
+  // A partial/browser-missing projection is advisory once this shell is
+  // already mounted. Blocking the visible page on that signal can deadlock the
+  // user behind an overlay when Windows merely minimized the managed window.
+  return progress.tone !== "caution";
 }
 
 type RuntimeSnapshot = Pick<RuntimeSummary, "runtimeManager" | "workbench">;

@@ -59,7 +59,7 @@ function runtimeWithActiveWork(active: {
 }
 
 describe("systemStatus", () => {
-  it("keeps browser workbench interactive when only the desktop window is missing", () => {
+  it("keeps a mounted workbench interactive when only the desktop window is missing", () => {
     const partial = {
       active: true,
       title: "工作台窗口未打开",
@@ -69,8 +69,9 @@ describe("systemStatus", () => {
     };
 
     expect(shouldRenderStartupOverlay(partial, false)).toBe(false);
-    expect(shouldRenderStartupOverlay(partial, true)).toBe(true);
+    expect(shouldRenderStartupOverlay(partial, true)).toBe(false);
     expect(shouldRenderStartupOverlay({ ...partial, tone: "running" }, false)).toBe(true);
+    expect(shouldRenderStartupOverlay({ ...partial, tone: "running" }, true)).toBe(true);
     expect(shouldRenderStartupOverlay({ ...partial, active: false }, false)).toBe(false);
   });
 
