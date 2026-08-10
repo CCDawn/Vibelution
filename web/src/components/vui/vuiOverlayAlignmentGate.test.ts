@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
  * Intentional keep (do not force onto VDialog/VPopover):
  * - ChatToolApprovalDialog: banner/inline in-session confirm (not a modal stack)
  * - ChatCodingRoute.styles overlayBackdrop: responsive side-panel dimmer (VButton)
- * - challenge-cup-platform-home-preview-tooltips: design preview only
+ * - challenge-cup-platform-home-preview-tooltips: ignored design preview only;
+ *   the allowlist remains stable without requiring the local preview artifact
  * - ShadcnDialog overlay: renderer implementation of VDialog
  * - VNativeSelect / VNative*: reserved dense dual track; product routes currently
  *   prefer VStringSelect for form-like selects
@@ -184,7 +185,6 @@ describe("VUI overlay alignment gate", () => {
     expect(read("routes/chat/ChatToolApprovalDialog.tsx")).toContain('variant === "banner"');
     expect(read("routes/ChatCodingRoute.styles.ts")).toContain("overlayBackdrop");
     expect(read("routes/ChatCodingRoute.styles.ts")).toContain("fixed inset-0");
-    expect(existsSync(resolve(sourceRoot, "design/challenge-cup-platform-home-preview-tooltips.tsx"))).toBe(true);
     expect(existsSync(resolve(sourceRoot, "components/vui/forms/VNativeSelect.tsx"))).toBe(true);
   });
 });
