@@ -59,8 +59,11 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     expect(markup).toContain("Finder Agent");
     expect(markup).toContain("agent-1");
     expect(markup).toContain("团队/工作流默认");
+    expect(markup).toContain("知识搜集");
+    expect(markup).toContain("Agent 执行");
     expect(markup).toContain("第 2 次尝试");
     expect(markup).not.toContain("source_finder");
+    expect(markup).not.toContain("knowledge collection");
   });
 
   it("renders backend-declared available commands as buttons", () => {
