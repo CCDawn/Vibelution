@@ -26,6 +26,9 @@ from typing import Any, Iterable
 # Local default for signature evaluation (facade remains SSOT).
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
 
+_source_authority_ref_fn = None
+_projection_edit_contract_fn = None
+
 
 def _service():
     from core.web.services import agent_directory_service
@@ -586,9 +589,12 @@ def _path_is_within(path: Path, root: Path) -> bool:
 
 def _projection_edit_contract(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
-    from core.agent_kernel.source_authority import projection_edit_contract
+    global _projection_edit_contract_fn
+    if _projection_edit_contract_fn is None:
+        from core.agent_kernel.source_authority import projection_edit_contract
 
-    return projection_edit_contract(kind, source_id, metadata)
+        _projection_edit_contract_fn = projection_edit_contract
+    return _projection_edit_contract_fn(kind, source_id, metadata)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -811,9 +817,12 @@ def _slowest_timing_stage(timings: dict[str, float]) -> str:
 
 def _source_authority_ref(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
-    from core.agent_kernel.source_authority import source_ref
+    global _source_authority_ref_fn
+    if _source_authority_ref_fn is None:
+        from core.agent_kernel.source_authority import source_ref
 
-    return source_ref(kind, source_id, metadata)
+        _source_authority_ref_fn = source_ref
+    return _source_authority_ref_fn(kind, source_id, metadata)
 
 
 def _tool_governance_requests_for_agent(

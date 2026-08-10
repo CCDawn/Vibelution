@@ -69,6 +69,7 @@ class SessionTurnCapture:
     _tool_loop_last_failure: str = ""
     _committed_content_length: int = 0
     _latest_tool_feedback_sequence: int = 0
+    _turn_mismatch_discard_recorded: bool = False
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False, compare=False)
 
     def note_thought(self, text: str) -> None:
@@ -911,6 +912,10 @@ def _capture_session_ui_stream(
             not explicit_identity_present and not context_matches
         ):
             reason = "turn_mismatch" if explicit_identity_present else "capture_missing"
+            if reason == "turn_mismatch" and capture._turn_mismatch_discard_recorded:
+                return
+            if reason == "turn_mismatch":
+                capture._turn_mismatch_discard_recorded = True
             try:
                 s.record_runtime_scene_event(
                     "conversation",

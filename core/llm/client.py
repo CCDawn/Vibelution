@@ -341,13 +341,20 @@ def _retry_policy_max_attempts(profile: Any, *, role: str = "") -> int:
         return 5
 
 
-def _retry_policy_backoff_seconds(profile: Any, attempt: int) -> float:
+_RETRY_BACKOFF_CONNECTION_CAP_SECONDS = 3.0
+
+
+def _retry_policy_backoff_seconds(profile: Any, attempt: int, *, category: str = "") -> float:
     retry_policy = getattr(profile, "retry_policy", None)
     try:
         base = float(getattr(retry_policy, "backoff_base_seconds", 2.0) or 2.0)
     except Exception:
         base = 2.0
-    return max(0.1, base) * (2 ** max(0, attempt - 1))
+    base = max(0.1, base)
+    normalized_category = str(category or "").strip().lower()
+    if normalized_category in {"network_error", "timeout", "server_error"}:
+        return min(base * (2 ** max(0, attempt - 1)), _RETRY_BACKOFF_CONNECTION_CAP_SECONDS)
+    return base * (2 ** max(0, attempt - 1))
 
 
 def _llm_retry_event_fields(
@@ -2599,7 +2606,11 @@ class LLMClient:
                         lifecycle=True,
                     )
                     raise llm_error from exc
-                wait_seconds = _retry_policy_backoff_seconds(self.profile, attempt)
+                wait_seconds = _retry_policy_backoff_seconds(
+                    self.profile,
+                    attempt,
+                    category=llm_error.category,
+                )
                 _record_llm_scene_event(
                     phase,
                     f"{event_code}.retrying",
@@ -2660,7 +2671,11 @@ class LLMClient:
                 retryable=llm_error.retryable,
             )
             return False
-        wait_seconds = _retry_policy_backoff_seconds(self.profile, attempt)
+        wait_seconds = _retry_policy_backoff_seconds(
+            self.profile,
+            attempt,
+            category=llm_error.category,
+        )
         _record_llm_scene_event(
             phase,
             f"{event_code}.retrying",

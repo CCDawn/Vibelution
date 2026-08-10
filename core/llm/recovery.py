@@ -69,6 +69,8 @@ def _retry_wait_seconds(error: LLMError, attempt: int, max_attempts: int) -> int
         return 0
     if error.category == "rate_limit":
         return min(10 * max(attempt, 1), 60)
+    if error.category in {"network_error", "timeout", "server_error"}:
+        return min(2 ** max(attempt, 1), 8)
     return min(2 ** max(attempt, 1), 30)
 
 

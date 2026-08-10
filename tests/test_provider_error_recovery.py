@@ -100,6 +100,31 @@ def test_ssl_eof_is_retryable_network_error():
     assert decision.action == "retry_with_backoff"
 
 
+def test_network_error_backoff_is_capped_short():
+    error = Exception(
+        "litellm.InternalServerError: InternalServerError: OpenAIException - "
+        "[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1010)"
+    )
+
+    assert plan_recovery(error, attempt=1, max_attempts=5).wait_seconds == 2
+    assert plan_recovery(error, attempt=2, max_attempts=5).wait_seconds == 4
+    assert plan_recovery(error, attempt=3, max_attempts=5).wait_seconds == 8
+    assert plan_recovery(error, attempt=4, max_attempts=5).wait_seconds == 8
+    assert plan_recovery(error, attempt=5, max_attempts=5).wait_seconds == 0
+
+
+def test_server_error_backoff_is_capped_short():
+    error = Exception(
+        'litellm.BadGatewayError: BadGatewayError: OpenAIException - '
+        '{"error":{"message":"Upstream request failed","type":"upstream_error"}}'
+    )
+
+    assert plan_recovery(error, attempt=1, max_attempts=5).wait_seconds == 2
+    assert plan_recovery(error, attempt=2, max_attempts=5).wait_seconds == 4
+    assert plan_recovery(error, attempt=3, max_attempts=5).wait_seconds == 8
+    assert plan_recovery(error, attempt=5, max_attempts=5).wait_seconds == 0
+
+
 def test_incomplete_chunked_read_is_retryable_network_error():
     error = Exception(
         "litellm.MidStreamFallbackError: litellm.APIConnectionError: "
