@@ -1,80 +1,46 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildCanonicalWorkflowSearch,
-  canonicalHref,
-  resolveLegacyResearchLocation,
-} from "./researchLegacyRouteResolver";
 import { CHALLENGE_CUP_NODE_IDS } from "../../../api/types/researchWorkflow";
+import {
+  researchWorkspaceStageRoute,
+  teamWorkspaceRoute,
+} from "../researchWorkspaceModel";
+import { patchResearchProcessSearch } from "./researchProcessLocation";
 
 describe("researchWorkflowNavigation", () => {
-  it("canonical teams workflow is reachable shape", () => {
-    const href = buildCanonicalWorkflowSearch({
-      teamId: "research-team",
-      runId: "run-1",
-      node: "source_finding",
-      panel: "node",
-    });
-    expect(href).toContain("researchView=workflow");
-    expect(href).toContain("team=research-team");
-    expect(href).toContain("node=source_finding");
+  it("emits teamId as the only team scope", () => {
+    const href = teamWorkspaceRoute("research-team");
+    expect(href).toContain("teamId=research-team");
+    expect(href).not.toMatch(/[?&]team=/);
+    expect(href).not.toContain("team_id=");
   });
 
-  it("maps every collectionStage alias used in disposition table", () => {
-    const aliases: Array<[string, string]> = [
-      ["search", "source_finding"],
-      ["collection", "source_finding"],
-      ["finding", "source_finding"],
-      ["review", "source_extraction"],
-      ["candidate", "source_extraction"],
-      ["screening", "source_extraction"],
-      ["extraction", "source_extraction"],
-      ["graph", "evidence_relations"],
-      ["relations", "evidence_relations"],
-      ["ingest", "knowledge_ingestion"],
-      ["memory", "knowledge_ingestion"],
-      ["ingestion", "knowledge_ingestion"],
-    ];
-    for (const [alias, node] of aliases) {
-      const resolved = resolveLegacyResearchLocation({
-        pathname: "/teams",
-        search: `?collectionStage=${alias}&team=t1`,
-      });
-      expect(resolved.searchParams.get("node"), alias).toBe(node);
-      expect(resolved.searchParams.get("researchView")).toBe("workflow");
-    }
+  it("stage entry helpers target fixed nodes on the single workflow canvas", () => {
+    expect(researchWorkspaceStageRoute("team-1", "knowledge_collection")).toContain(
+      "node=source_finding",
+    );
+    expect(researchWorkspaceStageRoute("team-1", "experiment")).toContain(
+      "node=hypothesis_design",
+    );
+    expect(researchWorkspaceStageRoute("team-1", "iteration")).toContain(
+      "node=controlled_run",
+    );
   });
 
-  it("maps stage researchViews to fixed nodes", () => {
-    expect(
-      resolveLegacyResearchLocation({
-        pathname: "/teams",
-        search: "?researchView=experiment",
-      }).searchParams.get("node"),
-    ).toBe("hypothesis_design");
-    expect(
-      resolveLegacyResearchLocation({
-        pathname: "/teams",
-        search: "?researchView=iteration",
-      }).searchParams.get("node"),
-    ).toBe("controlled_run");
-  });
-
-  it("only allows fixed challenge cup nodes in canonical search", () => {
-    const bad = buildCanonicalWorkflowSearch({ node: "not-real" });
-    expect(bad).not.toContain("node=not-real");
+  it("keeps every fixed workflow node addressable", () => {
     for (const node of CHALLENGE_CUP_NODE_IDS) {
-      expect(buildCanonicalWorkflowSearch({ node })).toContain(`node=${node}`);
+      const params = patchResearchProcessSearch({
+        current: new URLSearchParams(),
+        teamId: "team-1",
+        patch: { node },
+      });
+      expect(params.get("node")).toBe(node);
+      expect(params.get("teamId")).toBe("team-1");
     }
   });
 
-  it("flow-canvas path becomes agents panel on teams", () => {
-    const loc = resolveLegacyResearchLocation({
-      pathname: "/research/flow-canvas",
-      search: "?team=research-team",
-    });
-    expect(canonicalHref(loc)).toContain("/teams?");
-    expect(loc.searchParams.get("panel")).toBe("agents");
-    expect(loc.searchParams.get("researchView")).toBe("workflow");
+  it("fails instead of selecting a default team", () => {
+    expect(() => teamWorkspaceRoute("")).toThrow("teamId 不能为空");
+    expect(() => researchWorkspaceStageRoute("", "experiment")).toThrow("teamId 不能为空");
   });
 });

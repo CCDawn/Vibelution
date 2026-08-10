@@ -12,6 +12,7 @@ import {
   type ChatSelectionProjection,
 } from "../routes/chat/chatSelectionProjection";
 import "./chat-selection-persistence-preview.css";
+import { chatSelectionPersistencePreviewStyles as styles } from "./chat-selection-persistence-preview.styles";
 
 type Agent = { id: string; name: string; model: string; sessions: Array<{ id: string; title: string }> };
 
@@ -46,41 +47,41 @@ function App() {
   }
 
   return (
-    <main className="selection-preview">
-      <header className="selection-topbar">
+    <main className={styles.selectionPreview}>
+      <header className={styles.selectionTopbar}>
         <div>
-          <p className="eyebrow">CHAT · 选择投影预览</p>
+          <p className={styles.eyebrow}>CHAT · 选择投影预览</p>
           <h1>Agent 与会话切换</h1>
-          <p className="subtitle">选中状态同时投影到 Agent、会话和 Tab；刷新时保持当前项，不回落到第一项。</p>
+          <p className={styles.subtitle}>选中状态同时投影到 Agent、会话和 Tab；刷新时保持当前项，不回落到第一项。</p>
         </div>
-        <div className="top-actions">
+        <div className={styles.topActions}>
           <VButton variant="secondary" density="compact" onPress={refreshWithoutJump} isPending={isRefreshing}>
             模拟后台刷新
           </VButton>
-          <span className="source-chip">URL 优先 · 本地回退</span>
+          <span className={styles.sourceChip}>URL 优先 · 本地回退</span>
         </div>
       </header>
 
-      <nav className="conversation-tab-strip" aria-label="打开的会话" role="tablist">
+      <nav className={styles.conversationTabStrip} aria-label="打开的会话" role="tablist">
         {currentAgent.sessions.map((session) => {
           const active = selection.sessionId === session.id;
           return (
-            <div key={session.id} className={["conversation-tab", active ? "conversation-tab-active" : ""].join(" ")} data-selected={active ? "true" : "false"}>
+            <div key={session.id} className={[styles.conversationTab, active ? styles.conversationTabActive : ""].join(" ")} data-selected={active ? "true" : "false"}>
               <VButton
                 variant="ghost"
                 contentLayout="plain"
-                className="conversation-tab-main"
+                className={styles.conversationTabMain}
                 role="tab"
                 aria-selected={active}
                 onPress={() => commit(selectChatSession(selection, session.id, currentAgent.id))}
               >
-                <span className="conversation-tab-icon" aria-hidden="true">▣</span>
-                <span className="conversation-tab-title">{session.title}</span>
+                <span className={styles.conversationTabIcon} aria-hidden="true">▣</span>
+                <span className={styles.conversationTabTitle}>{session.title}</span>
               </VButton>
               <VButton
                 variant="ghost"
                 contentLayout="plain"
-                className="conversation-tab-close"
+                className={styles.conversationTabClose}
                 aria-label={`关闭 ${session.title}`}
                 onPress={() => undefined}
               >
@@ -92,7 +93,7 @@ function App() {
         <VButton
           variant="ghost"
           contentLayout="plain"
-          className="conversation-tab-new"
+          className={styles.conversationTabNew}
           aria-label="新建会话"
           onPress={() => undefined}
         >
@@ -100,10 +101,10 @@ function App() {
         </VButton>
       </nav>
 
-      <div className="selection-grid">
-        <VSurface as="aside" tone="card" elevation="panel" padding="none" className="directory-panel" aria-label="Agent 目录">
-          <div className="panel-heading"><strong>Agent</strong><span>{agents.length}</span></div>
-          <div className="rows">
+      <div className={styles.selectionGrid}>
+        <VSurface as="aside" tone="card" elevation="panel" padding="none" className={styles.directoryPanel} aria-label="Agent 目录">
+          <div className={styles.panelHeading}><strong>Agent</strong><span>{agents.length}</span></div>
+          <div className={styles.rows}>
             {agents.map((agent) => {
               const active = selection.agentId === agent.id;
               return (
@@ -111,23 +112,23 @@ function App() {
                   key={agent.id}
                   variant="ghost"
                   contentLayout="plain"
-                  className={["selection-row", active ? "selection-row-active" : ""].join(" ")}
+                  className={[styles.selectionRow, active ? styles.selectionRowActive : ""].join(" ")}
                   aria-current={active ? "page" : undefined}
                   data-selected={active ? "true" : "false"}
                   onPress={() => commit(selectChatAgent(selection, agent.id, agent.sessions[0]?.id))}
                 >
-                  <span className="avatar">{agent.name.slice(0, 1).toUpperCase()}</span>
-                  <span className="row-copy"><strong>{agent.name}</strong><small>{agent.model} · {agent.sessions.length} 个会话</small></span>
-                  <span className="row-check" aria-hidden="true">{active ? "✓" : ""}</span>
+                  <span className={styles.avatar}>{agent.name.slice(0, 1).toUpperCase()}</span>
+                  <span className={styles.rowCopy}><strong>{agent.name}</strong><small>{agent.model} · {agent.sessions.length} 个会话</small></span>
+                  <span className={styles.rowCheck} aria-hidden="true">{active ? "✓" : ""}</span>
                 </VButton>
               );
             })}
           </div>
         </VSurface>
 
-        <VSurface as="section" tone="panel" elevation="panel" padding="none" className="session-panel" aria-label="会话列表">
-          <div className="panel-heading"><strong>{currentAgent.name} 的会话</strong><span>{currentAgent.sessions.length}</span></div>
-          <div className="rows">
+        <VSurface as="section" tone="panel" elevation="panel" padding="none" className={styles.sessionPanel} aria-label="会话列表">
+          <div className={styles.panelHeading}><strong>{currentAgent.name} 的会话</strong><span>{currentAgent.sessions.length}</span></div>
+          <div className={styles.rows}>
             {currentAgent.sessions.map((session) => {
               const active = selection.sessionId === session.id;
               return (
@@ -135,34 +136,34 @@ function App() {
                   key={session.id}
                   variant="ghost"
                   contentLayout="plain"
-                  className={["selection-row", "session-selection-row", active ? "selection-row-active" : ""].join(" ")}
+                  className={[styles.selectionRow, styles.sessionSelectionRow, active ? styles.selectionRowActive : ""].join(" ")}
                   aria-current={active ? "page" : undefined}
                   data-selected={active ? "true" : "false"}
                   onPress={() => commit(selectChatSession(selection, session.id, currentAgent.id))}
                 >
-                  <span className="session-mark">◷</span>
-                  <span className="row-copy"><strong>{session.title}</strong><small>{session.id}</small></span>
-                  <span className="row-check" aria-hidden="true">{active ? "✓" : ""}</span>
+                  <span className={styles.sessionMark}>◷</span>
+                  <span className={styles.rowCopy}><strong>{session.title}</strong><small>{session.id}</small></span>
+                  <span className={styles.rowCheck} aria-hidden="true">{active ? "✓" : ""}</span>
                 </VButton>
               );
             })}
           </div>
         </VSurface>
 
-        <VSurface as="section" tone="glass" elevation="panel" padding="normal" className="projection-panel" aria-label="当前选择投影">
-          <p className="eyebrow">当前持久投影</p>
+        <VSurface as="section" tone="glass" elevation="panel" padding="normal" className={styles.projectionPanel} aria-label="当前选择投影">
+          <p className={styles.eyebrow}>当前持久投影</p>
           <h2>{selection.roomId ? "团队房间" : currentSession?.title ?? currentAgent.name}</h2>
-          <dl className="projection-list">
+          <dl className={styles.projectionList}>
             <div><dt>Agent</dt><dd>{selection.agentId ?? "—"}</dd></div>
             <div><dt>Session</dt><dd>{selection.sessionId ?? "—"}</dd></div>
             <div><dt>URL</dt><dd>{projectedSearch}</dd></div>
           </dl>
-          <div className="tab-strip" role="tablist" aria-label="会话 Tab">
+          <div className={styles.tabStrip} role="tablist" aria-label="会话 Tab">
             <VButton variant="secondary" density="compact" role="tab" aria-selected={selection.tabId === "agent"} data-selected={selection.tabId === "agent" ? "true" : "false"} onPress={() => commit({ ...selection, tabId: "agent" })}>Agent 对话</VButton>
             <VButton variant="secondary" density="compact" role="tab" aria-selected={selection.tabId === "files"} data-selected={selection.tabId === "files" ? "true" : "false"} onPress={() => commit({ ...selection, tabId: "files" })}>文件预览</VButton>
           </div>
           <VButton variant="secondary" density="compact" onPress={() => commit(selectChatRoom(selection, "room-research"))}>切换到团队房间</VButton>
-          <p className="preview-note">这是隔离设计预览，未连接正式 API；选中行的灰色洗色、URL 更新和后台刷新保持是本次正式实现契约。</p>
+          <p className={styles.previewNote}>这是隔离设计预览，未连接正式 API；选中行的灰色洗色、URL 更新和后台刷新保持是本次正式实现契约。</p>
         </VSurface>
       </div>
     </main>

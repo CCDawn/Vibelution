@@ -16,6 +16,7 @@ export type NodeCommandContext = {
   runId: string;
   nodeId: string;
   teamId: string;
+  runVersion: number;
   /** Node-scoped pending HumanTask id (never the global first task). */
   pendingHumanTaskId?: string;
 };
@@ -26,9 +27,23 @@ export type NodeCommandResult = {
   raw?: Record<string, unknown>;
 };
 
+export function childRunIdFromCommandResult(
+  result: NodeCommandResult,
+  parentRunId: string,
+): string | null {
+  if (result.command !== "fork_evidence_remediation") return null;
+  const childRunIds = result.raw?.childRunIds;
+  if (!Array.isArray(childRunIds)) return null;
+  const candidates = childRunIds
+    .map((item) => String(item).trim())
+    .filter((item) => item && item !== parentRunId);
+  return candidates.at(-1) ?? null;
+}
+
 /** Commands whose backend handler exists and can be invoked. */
 const EXECUTABLE = new Set([
   "start_agent_task",
+  "retry_execution",
   "run_smoke",
   "start_controlled_run",
   "view_artifacts",
@@ -38,11 +53,13 @@ const EXECUTABLE = new Set([
   "revise",
   "build_package",
   "open_evidence_graph",
+  "fork_evidence_remediation",
 ]);
 
 export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string {
   const zh: Record<string, string> = {
     start_agent_task: "启动 Agent 任务",
+    retry_execution: "重试此节点",
     open_session: "打开精确会话",
     open_evidence_graph: "打开证据图",
     accept_handoff: "接受交接",
@@ -53,9 +70,11 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
     view_artifacts: "查看产物",
     build_package: "生成结果包",
     rebind_node: "受控换绑",
+    fork_evidence_remediation: "创建证据补救运行",
   };
   const en: Record<string, string> = {
     start_agent_task: "Start agent task",
+    retry_execution: "Retry this node",
     open_session: "Open session anchor",
     open_evidence_graph: "Open evidence graph",
     accept_handoff: "Accept handoff",
@@ -66,6 +85,7 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
     view_artifacts: "View artifacts",
     build_package: "Build result package",
     rebind_node: "Controlled rebind",
+    fork_evidence_remediation: "Create evidence remediation run",
   };
   return (lang === "zh" ? zh : en)[command] || command;
 }
@@ -99,21 +119,53 @@ export async function executeNodeCommand(
   if (!EXECUTABLE.has(command)) {
     throw new Error(`命令 ${command} 尚未接入业务服务`);
   }
+  if (
+    command === "start_agent_task" &&
+    (!capability.idempotencyKey?.trim() ||
+      !capability.payload ||
+      !capability.payload.budgetRequest ||
+      typeof capability.payload.budgetRequest !== "object" ||
+      Array.isArray(capability.payload.budgetRequest) ||
+      Object.keys(capability.payload.budgetRequest).length === 0)
+  ) {
+    throw new Error("启动 Agent 任务缺少后端幂等与预算契约");
+  }
+  if (
+    (command === "retry_execution" || command === "fork_evidence_remediation")
+    && !capability.idempotencyKey?.trim()
+  ) {
+    throw new Error("节点命令缺少后端幂等契约");
+  }
 
   if (command === "accept_handoff" || command === "reject_handoff" || command === "revise") {
-    const accept = command === "accept_handoff";
+    const decision =
+      command === "accept_handoff" ? "accept" : command === "revise" ? "revise" : "reject";
     const task = await resolveResearchWorkflowHumanTask(runId, contextPendingTaskId(context), {
-      accept,
-      resolvedBy: "operator",
+      teamId: context.teamId,
+      expectedRunVersion: context.runVersion,
+      idempotencyKey: `node:${runId}:${nodeId}:${command}:v${context.runVersion}`,
+      decision,
     });
     return {
       command,
-      message: accept ? "已接受交接" : "已拒绝交接",
+      message:
+        decision === "accept" ? "已接受交接" : decision === "revise" ? "已要求修订" : "已拒绝交接",
       raw: { task },
     };
   }
 
-  const raw = await postResearchWorkflowNodeCommand(runId, nodeId, command, {});
+  const raw = await postResearchWorkflowNodeCommand(runId, nodeId, {
+    teamId: context.teamId,
+    expectedRunVersion: context.runVersion,
+    idempotencyKey:
+      command === "start_agent_task"
+        || command === "retry_execution"
+        || command === "fork_evidence_remediation"
+        ? capability.idempotencyKey!
+        : `node:${runId}:${nodeId}:${command}:v${context.runVersion}`,
+    command,
+    payload: capability.payload ?? {},
+  });
   return {
     command,
     message: `${commandLabel(command)}已提交`,

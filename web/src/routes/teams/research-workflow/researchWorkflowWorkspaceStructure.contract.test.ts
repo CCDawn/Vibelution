@@ -1,0 +1,42 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+const root = import.meta.dirname;
+
+describe("research workflow workspace responsibility contract", () => {
+  it("keeps every workspace responsibility in its owning file", () => {
+    const requiredFiles = [
+      "useResearchWorkflowWorkspace.ts",
+      "useResearchWorkflowCatalog.ts",
+      "useResearchWorkflowCommands.ts",
+      "ResearchWorkflowToolbar.tsx",
+      "ResearchWorkflowCanvasPane.tsx",
+      "ResearchRunTimeline.tsx",
+      "ResearchTeamPanel.tsx",
+      "ResearchProcessInspectorPane.tsx",
+      "DefinitionNodeAgentSection.tsx",
+      "NodeAgentSection.tsx",
+      "NodeSessionSection.tsx",
+      "NodeHandoffSection.tsx",
+      "NodeArtifactSection.tsx",
+      "NodeCommandSection.tsx",
+    ];
+
+    for (const file of requiredFiles) {
+      expect(existsSync(resolve(root, file)), `${file} must exist`).toBe(true);
+    }
+  });
+
+  it("keeps ResearchProcessWorkspace as composition only", () => {
+    const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
+    expect(source).not.toContain("useState(");
+    expect(source).not.toContain("useEffect(");
+    expect(source).not.toContain("fetchEffectiveAgentBindings");
+    expect(source).not.toContain("listResearchWorkflowRuns");
+    expect(source).not.toContain("executeNodeCommand");
+    expect(source).toContain("useResearchWorkflowWorkspace");
+    expect(source).toContain("ResearchProcessInspectorPane");
+  });
+});

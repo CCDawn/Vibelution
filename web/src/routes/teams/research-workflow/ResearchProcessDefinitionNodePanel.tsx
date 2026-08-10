@@ -1,5 +1,6 @@
 import type { EffectiveAgentBinding, WorkflowDefinition } from "../../../api/types/researchWorkflow";
 import { VEmptyState, VPanelHeader, VSurface } from "../../../components/vui";
+import { DefinitionNodeAgentSection } from "./DefinitionNodeAgentSection";
 import styles from "./ResearchProcessDefinitionNodePanel.styles";
 
 export type ResearchProcessDefinitionNodePanelProps = {
@@ -18,7 +19,6 @@ export function ResearchProcessDefinitionNodePanel({
     return <VEmptyState title="节点不存在">工作流定义中没有找到该节点。</VEmptyState>;
   }
   const binding = effectiveBindings?.find((item) => item.nodeId === nodeId) ?? null;
-  const agentId = binding?.agentId || "未绑定";
 
   return (
     <VSurface tone="panel" className={styles.panel} data-vui="definition-node-detail">
@@ -28,9 +28,8 @@ export function ResearchProcessDefinitionNodePanel({
         <dd className={styles.dd}>{node.actorKind}</dd>
         <dt className={styles.dt}>角色</dt>
         <dd className={styles.dd}>{node.primaryRoleKey}</dd>
-        <dt className={styles.dt}>Agent</dt>
-        <dd className={styles.ddBreak}>{agentId}</dd>
       </dl>
+      {node.actorKind === "agent" ? <DefinitionNodeAgentSection binding={binding} /> : null}
       {node.description ? <p className={styles.description}>{node.description}</p> : null}
     </VSurface>
   );

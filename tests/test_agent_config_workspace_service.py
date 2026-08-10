@@ -2163,13 +2163,13 @@ def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, mon
     compact_team = next(item for item in payload["teams"] if item["teamId"] == team["teamId"])
     assert compact_team["sourceRef"]["owner"] == "TeamWorkflow"
     assert compact_team["projectionCanWrite"] is False
-    assert compact_team["projectionEdit"]["canonicalEditRoute"] == f"/teams?team={team['teamId']}"
+    assert compact_team["projectionEdit"]["canonicalEditRoute"] == f"/teams?teamId={team['teamId']}"
     alpha_refs = payload["references"][alpha["agentId"]]
     assert any(item["kind"] == "chat_room" and item["sourceLabel"] == "配置中心群聊" for item in alpha_refs)
     team_ref = next(item for item in alpha_refs if item["kind"] == "team" and item["sourceLabel"] == "配置中心团队")
     assert team_ref["sourceRef"]["owner"] == "TeamWorkflow"
     assert team_ref["projectionEdit"]["canWrite"] is False
-    assert team_ref["projectionEdit"]["canonicalEditRoute"] == f"/teams?team={team['teamId']}"
+    assert team_ref["projectionEdit"]["canonicalEditRoute"] == f"/teams?teamId={team['teamId']}"
     team_indexes = payload["teamIndexes"]
     assert any(
         item["section"] == "team_index"

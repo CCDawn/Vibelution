@@ -164,7 +164,7 @@ export function useTeamsWorkbenchFoundation({
   // Late-bound: mutations hook is declared above scroll helper; keep stable identity via ref.
   const scrollSourceCollectionPanelIntoViewRef = useRef<(panelId: string) => void>(() => {});
 
-  const requestedTeamId = searchParams.get("team") ?? "";
+  const requestedTeamId = searchParams.get("teamId") ?? "";
   const requestedAgentId = searchParams.get("agent") ?? "";
   const {
     teamsQuery,
@@ -208,8 +208,6 @@ export function useTeamsWorkbenchFoundation({
     setResearchWorkspaceView,
     teamShellMode,
     setTeamShellMode,
-    challengeTeamSurface,
-    setChallengeTeamSurface,
     nodePositionDrafts,
     setNodePositionDrafts,
     canvasFrameSize,
@@ -408,7 +406,7 @@ export function useTeamsWorkbenchFoundation({
     researchWorkflowTeamSelected,
     researchWorkspaceView,
     sourceCollectionStandalone,
-    challengeProgramProgressVisible: challengeCupResearchTeamSelected && (challengeTeamSurface === "progress" || researchWorkspaceView === "overview"),
+    challengeProgramProgressVisible: false,
   });
   const {
     preferredExperimentMethod,
@@ -1110,8 +1108,6 @@ export function useTeamsWorkbenchFoundation({
     setResearchWorkspaceView,
     teamShellMode,
     setTeamShellMode,
-    challengeTeamSurface,
-    setChallengeTeamSurface,
     nodePositionDrafts,
     setNodePositionDrafts,
     canvasFrameSize,

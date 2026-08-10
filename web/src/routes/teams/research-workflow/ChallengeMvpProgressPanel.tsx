@@ -38,7 +38,7 @@ export function ChallengeMvpProgressPanel({
 
   if (statusQuery.isPending) {
     return (
-      <VSurface tone="panel" className={styles.panel}>
+      <VSurface tone="panel" className={styles.root}>
         <VStateSurface tone="loading" title={zh ? "读取题目进度" : "Loading question progress"} fill className={styles.fill} />
       </VSurface>
     );
@@ -46,9 +46,9 @@ export function ChallengeMvpProgressPanel({
 
   if (statusQuery.isError || !statusQuery.data) {
     return (
-      <VSurface tone="panel" className={styles.panel}>
+      <VSurface tone="panel" className={styles.root}>
         <div
-          className={styles.alert}
+          className={styles.error}
           role="alert"
         >
           {statusQuery.error instanceof Error ? statusQuery.error.message : String(statusQuery.error)}
@@ -64,32 +64,32 @@ export function ChallengeMvpProgressPanel({
   const results = summary.validatedQuestionResults ?? [];
 
   return (
-    <VSurface tone="panel" className={styles.panel} data-vui="mvp-progress-panel">
-      <div className={styles.headerRow}>
-        <div className={styles.sectionLabel}>
+    <VSurface tone="panel" className={styles.root} data-vui="mvp-progress-panel">
+      <div className={styles.header}>
+        <div className={styles.eyebrow}>
           {zh ? "MVP 验收进度" : "MVP acceptance"}
         </div>
         <VButton type="button" variant="ghost" onClick={() => void statusQuery.refetch()}>
           {zh ? "刷新" : "Refresh"}
         </VButton>
       </div>
-      <div className={styles.statGrid}>
-        <div className={styles.statCell}>
-          <div className={styles.statLabel}>{zh ? "有效候选" : "Valid"}</div>
-          <div className={styles.statValue}>{summary.validCandidateCount}</div>
+      <div className={styles.metrics}>
+        <div className={styles.metric}>
+          <div className={styles.metricLabel}>{zh ? "有效候选" : "Valid"}</div>
+          <div className={styles.metricValue}>{summary.validCandidateCount}</div>
         </div>
-        <div className={styles.statCell}>
-          <div className={styles.statLabel}>{zh ? "已验证题" : "Validated"}</div>
-          <div className={styles.statValue}>{summary.validatedQuestionCount}</div>
+        <div className={styles.metric}>
+          <div className={styles.metricLabel}>{zh ? "已验证题" : "Validated"}</div>
+          <div className={styles.metricValue}>{summary.validatedQuestionCount}</div>
         </div>
-        <div className={styles.statCell}>
-          <div className={styles.statLabel}>{zh ? "已批准" : "Approved"}</div>
-          <div className={styles.statValue}>{summary.completedCount}</div>
+        <div className={styles.metric}>
+          <div className={styles.metricLabel}>{zh ? "已批准" : "Approved"}</div>
+          <div className={styles.metricValue}>{summary.completedCount}</div>
         </div>
       </div>
 
       {results.length === 0 ? (
-        <VEmptyState title={zh ? "暂无已验证题目" : "No validated questions"} className={styles.emptyState}>
+        <VEmptyState title={zh ? "暂无已验证题目" : "No validated questions"} className={styles.empty}>
           {zh ? "完成受控运行与候选晋升后，题目结果会出现在这里。" : "Question results appear here after controlled runs and candidate promotion."}
         </VEmptyState>
       ) : (
@@ -97,11 +97,11 @@ export function ChallengeMvpProgressPanel({
           {results.map((item) => (
             <li
               key={item.questionId}
-              className={styles.row}
+              className={styles.item}
             >
-              <div className={styles.rowMain}>
-                <div className={styles.nodeTitle}>{item.questionId}</div>
-                <div className={styles.nodeMeta}>
+              <div className={styles.itemText}>
+                <div className={styles.itemTitle}>{item.questionId}</div>
+                <div className={styles.itemMeta}>
                   {item.runId} · {item.status}
                 </div>
               </div>

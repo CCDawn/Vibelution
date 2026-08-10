@@ -13,7 +13,6 @@ After Phase 1 SC + Phase 2 experiment workspace hooks.
 | researchCanvasLayoutMode | auto vs source layout |
 | researchWorkspaceView | board research surface routing |
 | teamShellMode | board \| canvas |
-| challengeTeamSurface | workspace \| progress |
 | nodePositionDrafts / canvasFrameSize / lockedCanvasViewportStyle | canvas chrome |
 
 Refs: `canvasFrameRef`, `dragStateRef`, `dragFrameRef`.

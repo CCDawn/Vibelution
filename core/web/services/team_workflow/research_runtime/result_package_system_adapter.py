@@ -1,0 +1,158 @@
+"""Final System adapter that commits the deterministic research result package."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .node_completion import complete_node_execution
+from .node_execution import start_node_execution
+from .node_execution_support import NodeExecutionError, latest_node_run
+from .result_package import (
+    ResultPackageError,
+    build_result_package,
+    terminal_package_candidate,
+)
+from .store import WorkflowRunStore
+from .system_action_records import (
+    SystemActionError,
+    begin_system_action,
+    complete_system_action,
+    fail_system_action,
+    find_system_action,
+)
+from .system_artifact_builder import build_system_artifact
+
+
+def execute_result_package_action(
+    store: WorkflowRunStore,
+    *,
+    checkpoint_path: str,
+    record: dict[str, Any],
+    research_ledger: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    idempotency_key = str(payload.get("idempotencyKey") or "").strip()
+    if not idempotency_key:
+        raise SystemActionError(
+            "build_package requires idempotencyKey",
+            code="invalid_system_action",
+        )
+    existing = find_system_action(
+        record,
+        node_id="result_package",
+        command="build_package",
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None and existing.get("status") == "succeeded":
+        return {
+            "command": "build_package",
+            "systemAction": existing,
+            "resultPackage": record.get("resultPackage"),
+        }
+    node_run = latest_node_run(record, "result_package")
+    if node_run.get("status") != "ready":
+        raise SystemActionError(
+            "result_package must be ready",
+            code="invalid_node_state",
+        )
+    candidate = terminal_package_candidate(record)
+    try:
+        package = build_result_package(candidate, research_ledger=research_ledger)
+    except ResultPackageError as exc:
+        raise SystemActionError(str(exc), code=exc.code) from exc
+    action, created = begin_system_action(
+        store,
+        record=record,
+        node_id="result_package",
+        node_run_id=str(node_run["nodeRunId"]),
+        attempt=int(node_run["attempt"]),
+        command="build_package",
+        idempotency_key=idempotency_key,
+        input_summary={
+            "factChainHash": package["factChainHash"],
+            "officialVersionId": package["officialVersion"]["versionId"],
+        },
+    )
+    if not created:
+        return {
+            "command": "build_package",
+            "systemAction": action,
+            "resultPackage": record.get("resultPackage"),
+        }
+    lease_owner = "system:result_package"
+    try:
+        start_node_execution(
+            store,
+            run_id=str(record["runId"]),
+            node_id="result_package",
+            payload={
+                "idempotencyKey": f"{idempotency_key}:lease",
+                "leaseOwner": lease_owner,
+                "leaseSeconds": 300,
+                "deadlineSeconds": 1800,
+            },
+        )
+        manifest = build_system_artifact(
+            record=record,
+            node_run=node_run,
+            artifact_kind="research_result_package",
+            payload=package,
+            source_artifact_ids=[
+                str(item.get("artifactId") or "")
+                for item in record.get("artifactManifests") or []
+                if str(item.get("artifactId") or "")
+            ],
+            adapter_name="result_package_system_adapter",
+        )
+        completed_run = complete_node_execution(
+            store,
+            checkpoint_path=checkpoint_path,
+            run_id=str(record["runId"]),
+            node_id="result_package",
+            payload={
+                "idempotencyKey": f"{idempotency_key}:complete",
+                "leaseOwner": lease_owner,
+                "artifactManifests": [manifest.to_dict()],
+                "artifactPayloads": {manifest.artifactId: package},
+            },
+        )
+        if completed_run.get("status") != "succeeded" or completed_run.get(
+            "runtimeCurrentNodeIds"
+        ):
+            raise SystemActionError(
+                "result package did not reach terminal WorkflowRun state",
+                code="result_package_not_terminal",
+            )
+        store.update_run(
+            str(record["runId"]),
+            {
+                "resultPackage": package,
+                "resultPackageRef": manifest.artifactId,
+            },
+        )
+    except (NodeExecutionError, SystemActionError) as exc:
+        fail_system_action(
+            store,
+            run_id=str(record["runId"]),
+            action=action,
+            error_code=str(getattr(exc, "code", "result_package_failed")),
+            message=str(exc),
+        )
+        raise
+    observation = {
+        "status": "completed",
+        "observationRef": manifest.artifactId,
+        "packageId": package["packageId"],
+        "factChainHash": package["factChainHash"],
+    }
+    completed_action = complete_system_action(
+        store,
+        run_id=str(record["runId"]),
+        action=action,
+        observation=observation,
+    )
+    return {
+        "command": "build_package",
+        "systemAction": completed_action,
+        "resultPackage": package,
+    }

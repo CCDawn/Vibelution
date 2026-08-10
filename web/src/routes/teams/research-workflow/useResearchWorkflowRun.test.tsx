@@ -1,6 +1,6 @@
 /**
  * Behavioral tests for useResearchWorkflowRun orchestration (not source-string checks).
- * Reducer/polling edge cases live in their dedicated test files.
+ * Reducer/SSE edge cases live in their dedicated test files.
  * @vitest-environment happy-dom
  */
 import React, { act } from "react";
@@ -18,6 +18,10 @@ const api = vi.hoisted(() => ({
   fetchResearchWorkflowDefinition: vi.fn(),
   createResearchWorkflowRun: vi.fn(),
   resolveResearchWorkflowHumanTask: vi.fn(),
+  researchWorkflowStreamUrl: vi.fn(
+    (runId: string, options: { teamId: string }) =>
+      `/api/research/workflow-runs/${runId}/stream?teamId=${options.teamId}`,
+  ),
 }));
 
 vi.mock("../../../api/researchWorkflow", () => api);
@@ -37,6 +41,10 @@ function makeRun(runId: string, events = makeEvents(3)): WorkflowRunRecord {
     runId,
     workflowId: "challenge-cup-research",
     workflowVersionId: "wv-x",
+    teamId: "research-team",
+    projectId: "project-1",
+    questionId: "question-1",
+    runVersion: 3,
     status: "waiting_human",
     runtimeCurrentNodeIds: ["knowledge_handoff"],
     events: events as WorkflowRunRecord["events"],
@@ -60,6 +68,8 @@ function makeCanvas(runId: string) {
     },
     run: {
       runId,
+      teamId: "research-team",
+      runVersion: 3,
       status: "waiting_human" as const,
       runtimeCurrentNodeIds: ["knowledge_handoff"],
       nodeRuns: {},
@@ -70,6 +80,21 @@ function makeCanvas(runId: string) {
 
 type HookValue = ReturnType<typeof useResearchWorkflowRun>;
 
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  readonly url: string;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  close = vi.fn();
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener() {}
+}
+
 function HookProbe({
   runId,
   onValue,
@@ -77,7 +102,7 @@ function HookProbe({
   runId: string;
   onValue: (v: HookValue) => void;
 }) {
-  const value = useResearchWorkflowRun(runId);
+  const value = useResearchWorkflowRun("research-team", runId);
   onValue(value);
   return null;
 }
@@ -89,6 +114,8 @@ describe("useResearchWorkflowRun behavior", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    FakeEventSource.instances = [];
+    vi.stubGlobal("EventSource", FakeEventSource);
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -106,6 +133,7 @@ describe("useResearchWorkflowRun behavior", () => {
       root.unmount();
     });
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   async function renderWith(runId: string) {
@@ -129,9 +157,6 @@ describe("useResearchWorkflowRun behavior", () => {
     const events = makeEvents(3);
     api.fetchResearchWorkflowRun.mockResolvedValue(makeRun("run-a", events));
     api.fetchResearchWorkflowCanvas.mockResolvedValue(makeCanvas("run-a"));
-    // If someone still polled events on load with same batch, dedupe must hold via refresh path.
-    api.fetchResearchWorkflowEvents.mockResolvedValue({ events, snapshot: null });
-
     await renderWith("run-a");
     expect(latest?.run?.events).toHaveLength(3);
     expect(latest?.lastSequence).toBe(3);

@@ -18,6 +18,14 @@ const inspectorSource = readFileSync(
   resolve(import.meta.dirname, "ResearchProcessNodeInspector.tsx"),
   "utf8",
 );
+const inspectorPaneSource = readFileSync(
+  resolve(import.meta.dirname, "ResearchProcessInspectorPane.tsx"),
+  "utf8",
+);
+const commandSectionSource = readFileSync(
+  resolve(import.meta.dirname, "NodeCommandSection.tsx"),
+  "utf8",
+);
 const renderersSource = readFileSync(
   resolve(import.meta.dirname, "../teamResearchPrimarySurfaceRenderers.tsx"),
   "utf8",
@@ -50,22 +58,24 @@ describe("researchWorkflowAgentBinding.contract", () => {
   });
 
   it("workspace agents panel reads effective bindings + run snapshot", () => {
-    expect(workspaceSource).toContain("ResearchAgentBindingPanel");
+    expect(inspectorPaneSource).toContain("ResearchAgentBindingPanel");
     expect(workspaceSource).toContain("effectiveBindings");
     expect(workspaceSource).toContain("useResearchWorkflowRun");
   });
 
-  it("stage drawers embed existing functions (Task 6): workspace mounts injected panels", () => {
-    expect(workspaceSource).toContain('panel === "experiment"');
-    expect(workspaceSource).toContain("experimentPanel");
-    expect(workspaceSource).toContain('panel === "knowledge"');
-    expect(workspaceSource).toContain("knowledgePanel");
-    expect(renderersSource).toContain("TeamSourceCollectionSearchBriefPanel");
-    expect(renderersSource).toContain("renderExperimentPlanningLedgerPanel()");
+  it("removes legacy stage writers from the canonical workflow workspace", () => {
+    expect(workspaceSource).not.toContain('panel === "experiment"');
+    expect(workspaceSource).not.toContain("experimentPanel");
+    expect(workspaceSource).not.toContain('panel === "knowledge"');
+    expect(workspaceSource).not.toContain("knowledgePanel");
+    expect(renderersSource).not.toContain("TeamSourceCollectionSearchBriefPanel");
+    expect(renderersSource).not.toContain("experimentPanel=");
   });
 
-  it("node inspector opens stage drawers from adapters with drawerPanel", () => {
-    expect(inspectorSource).toContain("onOpenPanel");
-    expect(inspectorSource).toContain("adapter.drawerPanel");
+  it("node inspector exposes only backend-declared node commands", () => {
+    expect(inspectorSource).toContain("detail.commands");
+    expect(commandSectionSource).toContain("capabilities");
+    expect(inspectorSource).not.toContain("onOpenPanel");
+    expect(inspectorSource).not.toContain("drawerPanel");
   });
 });

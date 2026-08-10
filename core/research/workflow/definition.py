@@ -17,7 +17,7 @@ from .models import (
 )
 
 CHALLENGE_CUP_WORKFLOW_ID = "challenge-cup-research"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "2.1.0"
 
 # Canonical fixed node order within each stage (ADR 0006 / PRD / ADR 0007).
 _KNOWLEDGE_NODES: tuple[WorkflowNodeSpec, ...] = (
@@ -137,6 +137,14 @@ _ITERATION_NODES: tuple[WorkflowNodeSpec, ...] = (
         producesArtifactKinds=("iteration_decision",),
     ),
     WorkflowNodeSpec(
+        nodeId="version_governance",
+        stageId=WorkflowStageId.EXECUTION_ITERATION,
+        label="版本治理",
+        actorKind=ActorKind.AGENT,
+        primaryRoleKey="iteration_versioning",
+        producesArtifactKinds=("version_governance_record",),
+    ),
+    WorkflowNodeSpec(
         nodeId="candidate_promotion",
         stageId=WorkflowStageId.EXECUTION_ITERATION,
         label="候选晋升",
@@ -226,30 +234,45 @@ def _edges() -> tuple[WorkflowEdgeSpec, ...]:
             ("iteration_decision", "frozen_protocol"),
         ),
         WorkflowEdgeSpec(
-            "e_decision_promo",
+            "e_decision_promote",
             "iteration_decision",
-            "candidate_promotion",
-            "晋升提案",
-            GateKind.PROMOTION,
+            "version_governance",
+            "晋升版本",
+            auto,
             ("iteration_decision",),
-            requiresHumanAccept=True,
         ),
         WorkflowEdgeSpec(
             "e_decision_rollback",
             "iteration_decision",
-            "candidate_promotion",
-            "回滚提案",
-            GateKind.PROMOTION,
+            "version_governance",
+            "回滚版本",
+            auto,
             ("iteration_decision",),
-            requiresHumanAccept=True,
         ),
         WorkflowEdgeSpec(
             "e_decision_stop",
             "iteration_decision",
+            "version_governance",
+            "停止迭代",
+            auto,
+            ("iteration_decision",),
+        ),
+        WorkflowEdgeSpec(
+            "e_version_promotion",
+            "version_governance",
+            "candidate_promotion",
+            "晋升提案",
+            GateKind.PROMOTION,
+            ("version_governance_record",),
+            requiresHumanAccept=True,
+        ),
+        WorkflowEdgeSpec(
+            "e_version_package",
+            "version_governance",
             "result_package",
             "停止并打包",
             auto,
-            ("iteration_decision",),
+            ("version_governance_record",),
         ),
         WorkflowEdgeSpec(
             "e_promo_package",

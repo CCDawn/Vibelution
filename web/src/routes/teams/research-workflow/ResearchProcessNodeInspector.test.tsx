@@ -1,10 +1,15 @@
 import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderReactMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
 import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import { getNodeAdapter } from "./nodeAdapterModel";
+
+function renderToStaticMarkup(node: React.ReactNode) {
+  return renderReactMarkup(<MemoryRouter>{node}</MemoryRouter>);
+}
 
 function makeDetail(
   overrides: Partial<ResearchWorkflowNodeDetail> = {},
@@ -24,6 +29,11 @@ function makeDetail(
     nodeAttempt: 1,
     blockedReason: "",
     artifacts: {},
+    executionEnvelope: null,
+    taskLease: null,
+    qualityGateEvaluation: null,
+    artifactManifests: [],
+    artifactReuseCount: 0,
     commands: [
       { command: "start_agent_task", available: true, reason: "" },
       { command: "open_session", available: true, reason: "" },
@@ -40,6 +50,7 @@ describe("ResearchProcessNodeInspector command rendering", () => {
         nodeId="source_finding"
         adapter={getNodeAdapter("source_finding")}
         detail={detail}
+        handoffs={[]}
         handoffPending={false}
         busy={false}
         onCommand={vi.fn()}
@@ -65,6 +76,35 @@ describe("ResearchProcessNodeInspector command rendering", () => {
       />,
     );
     expect(markup).toContain("启动 Agent 任务");
+  });
+
+  it("renders the remediation action only when the backend declares it", () => {
+    const markup = renderToStaticMarkup(
+      <ResearchProcessNodeInspector
+        nodeId="source_extraction"
+        adapter={getNodeAdapter("source_extraction")}
+        detail={makeDetail({
+          nodeId: "source_extraction",
+          label: "资料提炼",
+          commands: [
+            {
+              command: "fork_evidence_remediation",
+              available: true,
+              reason: "",
+              idempotencyKey: "fork-evidence-remediation:nr-extraction-a3",
+              payload: {
+                evidenceGapCandidateIds: ["candidate-a"],
+                scopeCandidateIds: ["candidate-a"],
+              },
+            },
+          ],
+        })}
+        handoffPending={false}
+        busy={false}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("创建证据补救运行");
   });
 
   it("disables commands the backend reports unavailable with the reason", () => {
@@ -152,6 +192,30 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     expect(markup).toContain("knowledge_package_rejected");
   });
 
+  it("shows lease, quality gate and artifact reuse from node detail", () => {
+    const detail = makeDetail({
+      executionEnvelope: { status: "running" },
+      taskLease: { status: "running", leaseOwner: "worker-1" },
+      qualityGateEvaluation: { status: "passed" },
+      artifactManifests: [{ artifactId: "artifact-1" }],
+      artifactReuseCount: 1,
+    });
+    const markup = renderToStaticMarkup(
+      <ResearchProcessNodeInspector
+        nodeId="source_finding"
+        adapter={getNodeAdapter("source_finding")}
+        detail={detail}
+        handoffPending={false}
+        busy={false}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("运行治理");
+    expect(markup).toContain("worker-1");
+    expect(markup).toContain("passed");
+    expect(markup).toContain("复用命中");
+  });
+
   it("shows an empty state when no node is selected", () => {
     const markup = renderToStaticMarkup(
       <ResearchProcessNodeInspector
@@ -166,36 +230,7 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     expect(markup).toContain("选择流程节点");
   });
 
-  it("renders a stage drawer entry for adapters with drawerPanel and calls onOpenPanel", () => {
-    const onOpenPanel = vi.fn();
-    const hypothesisMarkup = renderToStaticMarkup(
-      <ResearchProcessNodeInspector
-        nodeId="hypothesis_design"
-        adapter={getNodeAdapter("hypothesis_design")}
-        detail={makeDetail({ nodeId: "hypothesis_design", label: "假设设计" })}
-        handoffPending={false}
-        busy={false}
-        onCommand={vi.fn()}
-        onOpenPanel={onOpenPanel}
-      />,
-    );
-    expect(hypothesisMarkup).toContain("打开实验设计面板");
-
-    const findingMarkup = renderToStaticMarkup(
-      <ResearchProcessNodeInspector
-        nodeId="source_finding"
-        adapter={getNodeAdapter("source_finding")}
-        detail={makeDetail()}
-        handoffPending={false}
-        busy={false}
-        onCommand={vi.fn()}
-        onOpenPanel={onOpenPanel}
-      />,
-    );
-    expect(findingMarkup).toContain("打开知识搜集面板");
-  });
-
-  it("hides the drawer entry when onOpenPanel is not provided", () => {
+  it("does not render a legacy stage drawer entry", () => {
     const markup = renderToStaticMarkup(
       <ResearchProcessNodeInspector
         nodeId="hypothesis_design"

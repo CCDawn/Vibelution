@@ -12,18 +12,19 @@ import {
 } from "./researchWorkspaceModel";
 
 describe("researchWorkspaceModel", () => {
-  it("maps legacy source_collection deep links onto knowledge collection", () => {
-    expect(parseResearchWorkspaceView("source_collection")).toBe("knowledge_collection");
-    expect(parseResearchWorkspaceView("experiment")).toBe("experiment");
-    // canvas is not a separate page — maps to workflow shell.
-    expect(parseResearchWorkspaceView("canvas")).toBe("workflow");
+  it("accepts only current workspace views and rejects legacy aliases", () => {
+    expect(parseResearchWorkspaceView("source_collection")).toBeNull();
+    expect(parseResearchWorkspaceView("experiment")).toBeNull();
+    expect(parseResearchWorkspaceView("canvas")).toBeNull();
     expect(parseResearchWorkspaceView("workflow")).toBe("workflow");
+    expect(parseResearchWorkspaceView("overview")).toBe("overview");
     expect(parseResearchWorkspaceView("not-a-view")).toBeNull();
   });
 
   it("builds stable Teams deep-link routes onto workflow canvas", () => {
     const home = teamWorkspaceRoute(RESEARCH_TEAM_ID);
-    expect(home).toContain(`team=${encodeURIComponent(RESEARCH_TEAM_ID)}`);
+    expect(home).toContain(`teamId=${encodeURIComponent(RESEARCH_TEAM_ID)}`);
+    expect(home).not.toMatch(/[?&]team=/);
     expect(home).toContain("researchView=workflow");
     expect(home).toContain("workflowId=challenge-cup-research");
     expect(researchSourceCollectionRoute(RESEARCH_TEAM_ID)).toContain("researchView=workflow");
@@ -39,7 +40,7 @@ describe("researchWorkspaceModel", () => {
   it("builds an explicit challenge question route without opening the active project workspace", () => {
     const route = challengeQuestionDetailRoute(RESEARCH_TEAM_ID, "SCI-096", "stage1-sci-096-v3");
 
-    expect(route).toContain("team=research-team");
+    expect(route).toContain("teamId=research-team");
     expect(route).toContain("challengeQuestion=SCI-096");
     expect(route).toContain("challengeRun=stage1-sci-096-v3");
     expect(route).not.toContain("researchView=knowledge_collection");

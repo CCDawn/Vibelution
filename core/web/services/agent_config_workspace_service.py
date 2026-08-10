@@ -449,6 +449,8 @@ def _derive_references(
 
     for team in teams:
         team_id = str(team.get("teamId") or "").strip()
+        if not team_id:
+            raise ValueError("Agent workspace team reference requires teamId")
         team_name = str(team.get("name") or team_id).strip()
         team_status = str(team.get("status") or "active").strip()
         for member in list(team.get("members") or []):
@@ -463,7 +465,7 @@ def _derive_references(
                     source_id=team_id,
                     source_label=team_name,
                     field=str(member.get("role") or member.get("memberId") or ""),
-                    route=f"/teams?team={team_id}" if team_id else "/teams",
+                    route=f"/teams?teamId={team_id}",
                     status="active" if team_status != "archived" and agent_id in active_agent_ids else "stale",
                     source_kind="team",
                 )

@@ -130,6 +130,91 @@ def test_same_project_agent_reuses_flat_session_without_touching_direct_session(
     assert session_service.get_session_detail(legacy_direct_session["id"]) is not None
 
 
+def test_missing_canonical_project_agent_session_fails_closed_and_requires_formal_retry(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    first = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="资料寻找",
+        created_from_task_id="task-1",
+    )
+    session_service.delete_chat_session(first["sessionId"])
+
+    with pytest.raises(
+        ResearchProjectAgentSessionError,
+        match="missing canonical session",
+    ):
+        resolve_research_project_agent_session(
+            team["teamId"],
+            research_project_id=project["projectId"],
+            agent_id=agent["agentId"],
+            role_key="source_finder",
+            role_label="资料寻找",
+            created_from_task_id="task-2",
+        )
+
+    retry = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="资料寻找",
+        created_from_task_id="task-2",
+        formal_retry=True,
+        previous_task={
+            "taskId": "task-1",
+            "sessionId": first["sessionId"],
+            "status": "failed",
+        },
+    )
+
+    assert retry["sessionCreated"] is True
+    assert retry["sessionAttempt"] == 2
+    assert retry["retryOfSessionId"] == first["sessionId"]
+    assert retry["sessionId"] != first["sessionId"]
+    assert session_service.get_session_detail(retry["sessionId"]) is not None
+
+
+def test_managed_new_task_recovers_missing_session_with_explicit_lineage(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    first = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_extractor",
+        role_label="资料提炼",
+        created_from_task_id="task-old",
+    )
+    session_service.delete_chat_session(first["sessionId"])
+
+    recovered = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_extractor",
+        role_label="资料提炼",
+        created_from_task_id="task-new",
+        recover_missing_session=True,
+    )
+
+    assert recovered["sessionCreated"] is True
+    assert recovered["sessionAttempt"] == 2
+    assert recovered["retryOfSessionId"] == first["sessionId"]
+    assert recovered["recoveryReason"] == "missing_canonical_session"
+    assert recovered["sessionId"] != first["sessionId"]
+    assert session_service.get_session_detail(recovered["sessionId"]) is not None
+
+
 def test_project_or_agent_change_creates_a_different_flat_session(
     tmp_path, monkeypatch
 ):
@@ -320,6 +405,213 @@ def test_retry_title_keeps_role_and_attempt_suffix_within_limit(tmp_path, monkey
 
     assert len(retry["sessionTitle"]) == 120
     assert retry["sessionTitle"].endswith("｜资料寻找｜重试 2")
+
+
+def test_source_stage_exact_replay_recovers_pre_submit_missing_session_without_duplicate_task(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        _fake_local_research_public_config,
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="资料寻找",
+        role_key="source_finder",
+    )
+    team = team_service.create_team(
+        name="科研团队",
+        members=[
+            {
+                "agentId": agent["agentId"],
+                "agentName": "资料寻找",
+                "role": "source_finder",
+            }
+        ],
+    )
+    project = team_workflow_orchestration_service.update_research_project(
+        team["teamId"],
+        team_workflow_orchestration_service.LEGACY_PROJECT_ID,
+        {"name": "会话恢复实验"},
+    )["project"]
+    run = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "session recovery",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": agent["agentId"]},
+            "querySeeds": ["session recovery"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )["run"]
+    first_session = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="资料寻找",
+        created_from_task_id="stagetask-pre-submit",
+    )
+    session_service.delete_chat_session(first_session["sessionId"])
+
+    requested_key = "agent-task:node-run-source-finding"
+    task_id = "stagetask-pre-submit"
+    canonical_key = (
+        team_workflow_orchestration_service._source_collection_stage_task_idempotency_key(
+            team_id=team["teamId"],
+            run_id=run["runId"],
+            stage_id="finding",
+            agent_id=agent["agentId"],
+            agent_role="source_finder",
+            task_id=task_id,
+            requested_key=requested_key,
+        )
+    )
+    now = team_workflow_orchestration_service.utc_now_iso()
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run["runId"],
+        {
+            "schemaVersion": 1,
+            "taskKind": "source_collection_stage_session_task",
+            "taskId": task_id,
+            "idempotencyKey": canonical_key,
+            "teamId": team["teamId"],
+            "runId": run["runId"],
+            "stageId": "finding",
+            "agentId": agent["agentId"],
+            "agentRole": "source_finder",
+            "sessionId": first_session["sessionId"],
+            "researchProjectId": project["projectId"],
+            "experimentName": project["name"],
+            "sessionTitle": first_session["sessionTitle"],
+            "sessionAttempt": 1,
+            "sessionCreated": False,
+            "retryOfSessionId": "",
+            "status": "queued",
+            "turn": {},
+            "createdAt": now,
+            "updatedAt": now,
+        },
+    )
+
+    submitted_sessions: list[str] = []
+
+    def fake_submit(session_id, _content, **_kwargs):
+        submitted_sessions.append(session_id)
+        return {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-recovered",
+            "status": "running",
+        }
+
+    monkeypatch.setattr(session_service, "submit_session_message", fake_submit)
+    recovered = (
+        team_workflow_orchestration_service.start_source_collection_stage_session_task(
+            team["teamId"],
+            run["runId"],
+            {
+                "stageId": "finding",
+                "agentId": agent["agentId"],
+                "agentRole": "source_finder",
+                "idempotencyKey": requested_key,
+            },
+        )
+    )
+
+    tasks = team_workflow_orchestration_service._source_collection_stage_session_tasks(
+        team["teamId"], run["runId"]
+    )
+    assert recovered["alreadyPresent"] is False
+    assert recovered["taskId"] == task_id
+    assert recovered["sessionAttempt"] == 2
+    assert recovered["retryOfSessionId"] == first_session["sessionId"]
+    assert recovered["sessionId"] != first_session["sessionId"]
+    assert submitted_sessions == [recovered["sessionId"]]
+    assert len(tasks) == 1
+    assert tasks[0]["taskId"] == task_id
+    assert tasks[0]["status"] == "running"
+    assert tasks[0]["turn"]["turnId"] == "turn-recovered"
+
+
+def test_source_stage_new_task_records_missing_project_session_recovery(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        _fake_local_research_public_config,
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="资料寻找",
+        role_key="source_finder",
+    )
+    team = team_service.create_team(
+        name="科研团队",
+        members=[
+            {
+                "agentId": agent["agentId"],
+                "agentName": "资料寻找",
+                "role": "source_finder",
+            }
+        ],
+    )
+    project = team_workflow_orchestration_service.update_research_project(
+        team["teamId"],
+        team_workflow_orchestration_service.LEGACY_PROJECT_ID,
+        {"name": "新任务会话恢复实验"},
+    )["project"]
+    run = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "new task session recovery",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": agent["agentId"]},
+            "querySeeds": ["new task session recovery"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )["run"]
+    first_session = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="资料寻找",
+        created_from_task_id="old-project-task",
+    )
+    session_service.delete_chat_session(first_session["sessionId"])
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, _content, **_kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-new-task-recovery",
+            "status": "running",
+        },
+    )
+
+    recovered = (
+        team_workflow_orchestration_service.start_source_collection_stage_session_task(
+            team["teamId"],
+            run["runId"],
+            {
+                "stageId": "finding",
+                "agentId": agent["agentId"],
+                "agentRole": "source_finder",
+                "idempotencyKey": "new-task-missing-session-recovery",
+            },
+        )
+    )
+
+    assert recovered["sessionAttempt"] == 2
+    assert recovered["retryOfSessionId"] == first_session["sessionId"]
+    assert recovered["task"]["formalRetry"] is True
+    assert recovered["task"]["formalRetryReason"] == "missing_canonical_session"
+    assert recovered["task"]["turn"]["turnId"] == "turn-new-task-recovery"
 
 
 def test_source_stage_tasks_use_project_session_without_direct_session_and_retry_idempotently(

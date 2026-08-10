@@ -32,11 +32,6 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         return
     if s._is_session_running(normalized_session_id):
         return
-    # Process-local session state can briefly be absent while a submitted turn is
-    # already durable and running. The persisted WorkRun is the cross-request
-    # authority in that window; detail projection must not terminate its ledger.
-    if s._active_chat_turn_work_run_for_session(normalized_session_id) is not None:
-        return
     recovered_from_checkpoint_only = False
     event_turn_id = ""
     try:
@@ -58,6 +53,11 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
             s._discard_session_live_output_state(normalized_session_id)
             return
         if active_turn_id and turn_id == str(active_turn_id or "").strip():
+            return
+        # Detail hydration can run in a process that does not own the worker.
+        # The exact persisted chat-turn WorkRun is the cross-process authority;
+        # a single global activeRunId cannot represent concurrent sessions.
+        if s._active_chat_turn_work_run_for_session(normalized_session_id, turn_id=turn_id) is not None:
             return
         if checkpoint is not None and (not checkpoint.turn_id or checkpoint.turn_id == turn_id):
             payload = checkpoint_payload
@@ -1034,14 +1034,23 @@ def _resolve_session_references(
     return resolved
 
 
-def _active_chat_turn_work_run_for_session(session_id: str) -> dict[str, Any] | None:
+def _active_chat_turn_work_run_for_session(
+    session_id: str,
+    *,
+    turn_id: str = "",
+) -> dict[str, Any] | None:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
     if not normalized_session_id:
         return None
     with s._RUNNING_SESSIONS_LOCK:
         active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
     candidates: list[dict[str, Any]] = []
+    if normalized_turn_id:
+        snapshot = s._WORK_RUN_STORE.load_snapshot("chat_turn", normalized_turn_id)
+        if isinstance(snapshot, dict):
+            candidates.append(snapshot)
     if active_turn_id:
         snapshot = s._WORK_RUN_STORE.load_snapshot("chat_turn", active_turn_id)
         if isinstance(snapshot, dict):
@@ -1049,11 +1058,25 @@ def _active_chat_turn_work_run_for_session(session_id: str) -> dict[str, Any] | 
     active = s._WORK_RUN_STORE.load_active_snapshot("chat_turn")
     if isinstance(active, dict):
         candidates.append(active)
+    try:
+        candidates.extend(s._WORK_RUN_STORE.list_snapshots("chat_turn", limit=40))
+    except (OSError, ValueError):
+        pass
+    seen_run_ids: set[str] = set()
     for snapshot in candidates:
+        if not isinstance(snapshot, dict):
+            continue
+        run_id = str(snapshot.get("runId") or snapshot.get("roundId") or snapshot.get("id") or "").strip()
+        if not run_id or run_id in seen_run_ids:
+            continue
+        seen_run_ids.add(run_id)
         if str(snapshot.get("sessionId") or "").strip() != normalized_session_id:
             continue
+        if normalized_turn_id and run_id != normalized_turn_id:
+            continue
         status = str(snapshot.get("status") or snapshot.get("currentPhase") or "").strip().lower()
-        if status in {"queued", "running", "stopping", "paused"}:
+        finished_at = str(snapshot.get("finishedAt") or snapshot.get("endedAt") or "").strip()
+        if status in {"queued", "running", "stopping", "paused"} and not finished_at:
             return dict(snapshot)
     return None
 

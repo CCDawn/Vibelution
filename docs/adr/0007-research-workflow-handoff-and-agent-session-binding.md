@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（方案复审，2026-08-07）。
+Accepted（v2.1 复审，2026-08-09）。
 
 ## Context
 
@@ -36,7 +36,7 @@ system
 human
 ```
 
-v1 推荐分工：
+v2.1 固定分工：
 
 | 节点 | actorKind | 主责 |
 | --- | --- | --- |
@@ -53,7 +53,8 @@ v1 推荐分工：
 | `controlled_run` | system | formal runner；不得由 Agent 会话自动启动训练 |
 | `result_evaluation` | agent | `experiment_ledger` |
 | `iteration_decision` | agent | `iteration_planner` |
-| `candidate_promotion` | human | `iteration_versioning` 先产出提案，人工确认 |
+| `version_governance` | agent | `iteration_versioning`；版本、谱系、拒绝归档 |
+| `candidate_promotion` | human | 仅确认已经过版本治理的 promote proposal |
 | `result_package` | system | package builder |
 
 `research_coordination` 是 workflow-level coordinator，不占用每个业务节点的主责位置；它可作为协作 Agent 或人工升级对象。
@@ -213,8 +214,9 @@ failed
 | `result_evaluation` → `iteration_decision` | `EvaluationReportRef` | baseline 对比、失败、置信边界和 artifact 引用完整 |
 | `iteration_decision` → `controlled_run` | `IterationDecisionRef` | `rerun_same_protocol`；绑定同一 `FrozenProtocolRef` 和新 run attempt |
 | `iteration_decision` → `protocol_design` | `IterationDecisionRef` | `revise_protocol`；从实验设计 checkpoint fork 新 run |
-| `iteration_decision` → `candidate_promotion` | `IterationDecisionRef` | 已选择可晋升 candidate，且评价报告引用完整 |
-| `iteration_decision` → `result_package` | `IterationDecisionRef` | `stop` 或明确 no-promotion；终止原因完整 |
+| `iteration_decision` → `version_governance` | `IterationDecisionRef` | promote/rollback/stop；评价、版本目标和理由完整 |
+| `version_governance` → `candidate_promotion` | `VersionGovernanceRef` | 仅 promote；候选版本和 lineage 完整 |
+| `version_governance` → `result_package` | `VersionGovernanceRef` | 仅 stop；终止原因和当前版本完整 |
 | `candidate_promotion` → `result_package` | `PromotionProposalRef` | 人工 accepted 或明确 no-promotion 终止 |
 
 `result_package` 生成终端 `ResearchResultPackageRef`，不再通过隐藏自动边继续运行。
@@ -227,8 +229,8 @@ failed
 | --- | --- |
 | `rerun_same_protocol` | 同一 `WorkflowRun` 中创建新的 `controlled_run` attempt，复用同一 `FrozenProtocolRef` |
 | `revise_protocol` | 从实验设计 checkpoint fork 新 `WorkflowRun`，生成新的 protocol artifact lineage |
-| `rollback_candidate` | 引用既有 baseline/candidate，不覆盖任何历史 artifact |
-| `stop` | 进入 `result_package` |
+| `rollback_candidate` | 进入 `version_governance`，引用既有 baseline/candidate，不进入 promotion gate，不覆盖历史 artifact |
+| `stop` | 经 `version_governance` 记录终止版本后进入 `result_package` |
 
 `candidate_promotion` 只生成 promotion proposal。人工接受后才更新正式候选引用，且不得直接覆盖 baseline。
 
@@ -295,7 +297,7 @@ POST /api/research/workflow-runs/{runId}/handoffs/{handoffId}/resolve
 - workflow DTO、binding service 和投影需要新增实体；
 - 现有 stage-level binding 必须迁移成 node-effective binding；
 - 当前前端的进度式解锁模型需要改为 handoff/gate 投影；
-- 旧任务只有 session、没有 task/turn 时需要明确 degraded 兼容展示。
+- 缺少 `taskId` 或 `turnId` 的历史记录保持只读且明确不可精确跳转；不得回退到 Agent 默认会话或伪造兼容锚点。
 
 ## Related
 

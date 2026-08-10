@@ -126,9 +126,6 @@ export function fallbackReturnRoute(location: RouteLocationLike): string {
   if (pathname.startsWith("/supervised-evolution/")) {
     return "/supervised-evolution";
   }
-  if (pathname === "/research/flow-canvas") {
-    return "/teams";
-  }
   return "";
 }
 
