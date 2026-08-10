@@ -58,13 +58,13 @@ const conversationComposerCodexShell = cv(
   "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-workspace))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_7%,transparent)] max-[719px]:rounded-[16px]",
 );
 const composerNativeFieldTargets =
-  "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[72px] [&_textarea]:max-h-[220px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
+  "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[72px] [&_textarea]:max-h-[220px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [@media(max-height:520px)]:[&_textarea]:min-h-[44px]";
 const composerFieldBase = `min-w-0 grid gap-1 [font-size:var(--vui-type-caption-size)] text-[var(--fg-secondary)] ${composerNativeFieldTargets}`;
 const composerFieldShell = cv("composerField", composerFieldBase);
 const composerFieldCodexShell = cv(
   "composerFieldCodex",
   composerFieldBase,
-  "grid min-h-[120px] min-w-0 grid-rows-[auto_minmax(56px,1fr)_auto] gap-1.5 px-3.5 py-3 max-[719px]:min-h-[112px] max-[719px]:px-3 max-[719px]:py-2.5",
+  "grid min-h-[120px] min-w-0 grid-rows-[auto_minmax(56px,1fr)_auto] gap-1.5 px-3.5 py-3 max-[719px]:min-h-[112px] max-[719px]:px-3 max-[719px]:py-2.5 [@media(max-height:520px)]:min-h-[84px] [@media(max-height:520px)]:grid-rows-[auto_minmax(36px,1fr)_auto] [@media(max-height:520px)]:py-2",
 );
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerToolbarCodexShell = cv(
