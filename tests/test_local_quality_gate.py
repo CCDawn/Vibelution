@@ -455,6 +455,25 @@ def test_execute_command_runs_allowed_argv_without_a_shell(git_repo: Path) -> No
     assert result.status == "passed"
 
 
+def test_run_process_uses_utf8_and_failure_summary_tolerates_missing_streams(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args=list(args[0]), returncode=1, stdout=None, stderr=None)
+
+    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+
+    completed = gate.run_process(["tool"], git_repo)
+
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
+    assert gate.summarize_failure(completed, "tool") == "tool: command failed"
+
+
 def test_main_worktree_falls_back_to_single_repository(git_repo: Path) -> None:
     git(git_repo, "branch", "-M", "main")
     git(git_repo, "switch", "-c", "codex/test-task")
