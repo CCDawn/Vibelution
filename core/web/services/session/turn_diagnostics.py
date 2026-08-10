@@ -1596,6 +1596,20 @@ def _make_session_turn_error(
     provider_diagnostics = s._provider_error_diagnostics(raw_error, llm_failure=llm_failure)
     structured_failure = dict(llm_failure or {})
     payload_trace = dict(llm_payload_trace or {})
+    # A terse raw_error (e.g. a bare "provider_protocol_error" code) yields no
+    # concrete reason; fall back to parsing the llm_failure message which usually
+    # carries the provider detail.
+    llm_failure_message = str(structured_failure.get("message") or "").strip()
+    if (
+        llm_failure_message
+        and (
+            not provider_reason.get("code")
+            or str(provider_reason.get("code") or "").strip() in {"", "provider_error"}
+        )
+    ):
+        fallback_reason = s._provider_error_user_reason(llm_failure_message, lang=lang)
+        if fallback_reason.get("code"):
+            provider_reason = fallback_reason
 
     def _failure_text(snake_key: str, camel_key: str, *, max_lines: int = 2) -> str:
         value = structured_failure.get(snake_key, structured_failure.get(camel_key, ""))
@@ -1630,8 +1644,18 @@ def _make_session_turn_error(
         "network_error",
     }
     return {
-        "message": structured_message
-        or s._user_visible_failure_summary(raw_error, lang=lang, provider_reason=provider_reason),
+        # User-visible failure text (raw_error already human-readable, e.g. an
+        # image-route failure) wins over the internal llm_failure diagnostic so
+        # the operator sees the actual problem first; llm_failure details stay
+        # in reason_summary/reason_detail/chainStage diagnostics fields.
+        # An empty raw_error yields no user-visible text, so the structured
+        # llm_failure message still surfaces.
+        "message": (
+            s._user_visible_failure_summary(raw_error, lang=lang, provider_reason=provider_reason)
+            if str(raw_error or "").strip()
+            else ""
+        )
+        or structured_message,
         "error_type": normalized_error_type,
         "reason_code": reason_code,
         "reason_summary": reason_summary,

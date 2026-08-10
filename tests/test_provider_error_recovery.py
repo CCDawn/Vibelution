@@ -234,15 +234,13 @@ def test_session_failed_result_sanitizes_provider_upstream_error(tmp_path, monke
     _assert_sanitized_provider_failure(payload)
     assert payload["lastTurnError"]["recoverable"] is True
     assert payload["currentPhase"] == "failed"
-    assistant_messages = [message for message in payload["messages"] if message.get("role") == "assistant"]
-    latest_assistant = assistant_messages[-1]
-    assert latest_assistant["metadata"]["kind"] == "turn_error"
-    assert len(latest_assistant["turnItems"]) == 1
-    assert latest_assistant["turnItems"][0]["type"] == "error"
-    assert latest_assistant["turnItems"][0]["terminal"] is True
-    assert latest_assistant["turnItems"][0]["status"] == "failed"
-    assert latest_assistant["turnItems"][0]["text"] == latest_assistant["content"]
-    assert "litellm.BadGatewayError" not in str(latest_assistant["turnItems"])
+    # Provider failures no longer persist error assistant messages to the journal;
+    # the sanitized failure surfaces through lastTurnError only.
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert "litellm.BadGatewayError" not in str(payload["lastTurnError"])
 
 
 def test_session_llm_runtime_diagnostics_fill_provider_failure_metadata():

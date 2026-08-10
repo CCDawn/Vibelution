@@ -958,9 +958,14 @@ def test_persist_turn_result_does_not_project_failed_legacy_feedback_statuses(tm
     )
 
     detail = session_service.get_session_detail("session-live")
-    assistant = detail["messages"][-1]
-    assert "feedbackEvents" not in assistant
-    assert any(item["type"] == "error" and item["status"] == "failed" for item in assistant["turnItems"])
+    # Failed turns no longer project an error assistant message to the journal;
+    # the failure surfaces through lastTurnError only.
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in detail["messages"]
+    )
+    assert detail["lastTurnError"] is not None
+    assert all("feedbackEvents" not in message for message in detail["messages"])
 
 
 def test_persist_tool_trace_without_conclusion_stays_resumable(tmp_path, monkeypatch):
@@ -1454,18 +1459,14 @@ def test_provider_failure_persists_previous_context_composition_with_missing_cac
     assert detail["lastContextComposition"]["segments"][0]["key"] == "current_user"
     assert detail["lastCacheComposition"]["source"] == "missing"
     assert detail["lastCacheComposition"]["segments"][0]["key"] == "missing"
-    error_messages = [
-        message
+    # Provider failures no longer persist error assistant messages to the journal;
+    # the sanitized failure surfaces through lastTurnError only.
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
         for message in detail["messages"]
-        if message.get("metadata", {}).get("kind") == "turn_error"
-    ]
-    assert len(error_messages) == 1
-    error_message = error_messages[0]
-    assert len(error_message["turnItems"]) == 1
-    assert error_message["turnItems"][0]["type"] == "error"
-    assert error_message["turnItems"][0]["terminal"] is True
-    assert error_message["turnItems"][0]["text"]
-    assert all(field not in error_message for field in ("content", "codexTranscript", "feedbackEvents", "timelineItems"))
+    )
+    assert detail["lastTurnError"] is not None
+    assert detail["lastTurnError"]["errorType"] == "provider_upstream_error"
 
 
 def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, monkeypatch):
