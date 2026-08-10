@@ -83,9 +83,19 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 | U4 | Research pack split: `teamResearchPanels` (core) / `teamResearchExperimentPanels` / `teamResearchSearchPanels`; prefetch by path |
 | U5 | Conversation timeline window policy extracted; initial/batch **12**; soft DOM ceiling **72** prefers server earlier-load |
 
-### D1–D3 (deferred risks, measured)
+### V1 (2026-08-10) — direct-session stream lifecycle stability
+
+Runtime scene `20260810T112626Z` showed 49 stream opens / 58 closes in 24 min,
+request abort storms (`signal is aborted without reason` on session detail),
+16 chat-route long tasks (one 1213ms), and JS heap 66→181MB in 30s.
 
 | Item | Change |
+|---|---|
+| V1 | `sessionStreamShouldConnect` removed from `useSessionDetailStream` effect deps; decision read via `sessionStreamDecisionSnapshotRef` (perf: route-settle flapping no longer close/reopen EventSource, which stopped polling-policy toggle → detail request churn) |
+| V1+ | Grace close: stream closes only when `shouldConnect` stays false beyond `SESSION_STREAM_ROUTE_SWITCH_GRACE_MS`; recovers via reconnect tick after a grace close |
+| V1++ | Behavior contract `useSessionDetailStream.stability.test.tsx` locks flap/no-reopen, grace close, reconnect, cleanup-vs-error invalidate |
+
+### D1–D3 (deferred risks, measured)| Item | Change |
 |---|---|
 | D1 | `dictionary.ts` → domain slices under `i18n/domains/*`; merge façade keeps `TranslationKey` |
 | D1+ | `useAppI18n({ domains })` dynamic domain loaders; primary routes pass scoped packs (chat/evolution/tools/…) |

@@ -25,6 +25,7 @@ import { createSessionAssistantDeltaScheduler } from "../sessionAssistantDeltaSc
 import { chatStreamPerformanceNowMs, isBusyPhase } from "./chatCodingRouteViewModel";
 import {
   SESSION_STREAM_MIN_APPLY_INTERVAL_MS,
+  SESSION_STREAM_ROUTE_SWITCH_GRACE_MS,
   type SessionStreamDecisionSnapshot,
 } from "./chatSessionStreamConnect";
 
@@ -70,14 +71,53 @@ export function useSessionDetailStream({
   sessionTitleForNotifications,
 }: UseSessionDetailStreamOptions): { sessionStreamConnected: boolean } {
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
+  const [streamReconnectTick, setStreamReconnectTick] = useState(0);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, SessionStreamApplyStats>>({});
   const sessionTitleForNotificationsRef = useRef(sessionTitleForNotifications);
   sessionTitleForNotificationsRef.current = sessionTitleForNotifications;
 
+  // Perf root cause: sessionStreamShouldConnect flaps while the route settles.
+  // Keeping it out of the stream effect's dependency list stops close/reopen
+  // storms; a grace timer closes the stream only after the decision stays false.
+  const shouldConnectRef = useRef(sessionStreamShouldConnect);
+  const prevShouldConnectRef = useRef<boolean | null>(null);
+  const graceCloseTimerRef = useRef<number | null>(null);
+  const graceClosedSessionRef = useRef(false);
+  const activeStreamRef = useRef<{ stream: EventSource; sessionId: string } | null>(null);
+  const forceCloseStreamRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
-    if (!sessionStreamShouldConnect || typeof EventSource === "undefined") {
+    const prev = prevShouldConnectRef.current;
+    prevShouldConnectRef.current = sessionStreamShouldConnect;
+    shouldConnectRef.current = sessionStreamShouldConnect;
+    if (sessionStreamShouldConnect) {
+      if (graceCloseTimerRef.current !== null) {
+        window.clearTimeout(graceCloseTimerRef.current);
+        graceCloseTimerRef.current = null;
+      }
+      if (prev === false && graceClosedSessionRef.current) {
+        graceClosedSessionRef.current = false;
+        setStreamReconnectTick((tick) => tick + 1);
+      }
+      return;
+    }
+    if (graceCloseTimerRef.current !== null) {
+      return;
+    }
+    graceCloseTimerRef.current = window.setTimeout(() => {
+      graceCloseTimerRef.current = null;
+      if (shouldConnectRef.current || !activeStreamRef.current) {
+        return;
+      }
+      forceCloseStreamRef.current?.();
+    }, SESSION_STREAM_ROUTE_SWITCH_GRACE_MS);
+  }, [sessionStreamShouldConnect]);
+
+  useEffect(() => {
+    const shouldConnect = sessionStreamDecisionSnapshotRef.current.shouldConnect;
+    if (!shouldConnect || typeof EventSource === "undefined") {
       const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
       setSessionStreamConnected(false);
       postBrowserTelemetry({
@@ -144,6 +184,33 @@ export function useSessionDetailStream({
       },
     });
     const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`);
+    activeStreamRef.current = { stream, sessionId: streamSessionId };
+    let closeTelemetryFired = false;
+
+    const forceCloseStream = () => {
+      if (closeTelemetryFired || disposed) {
+        return;
+      }
+      closeTelemetryFired = true;
+      activeStreamRef.current = null;
+      applyPendingAssistantDeltas("close");
+      applyPendingDetail("close");
+      setSessionStreamConnected(false);
+      stream.close();
+      graceClosedSessionRef.current = true;
+      postBrowserTelemetry({
+        phase: "session_stream",
+        eventCode: "browser.session_stream.closed",
+        message: "Session detail stream closed.",
+        fields: {
+          sessionId: streamSessionId,
+          readyState: stream.readyState,
+          reason: "grace_timeout",
+        },
+      });
+      setStreamReconnectTick((tick) => tick + 1);
+    };
+    forceCloseStreamRef.current = forceCloseStream;
 
     function logRejectedSessionStreamRoute(trace: SessionStreamProtocolTrace, message: string) {
       if (trace.rejectReason === "parse_error") {
@@ -489,6 +556,12 @@ export function useSessionDetailStream({
       applyPendingDetail("close");
       disposed = true;
       setSessionStreamConnected(false);
+      if (activeStreamRef.current?.stream === stream) {
+        activeStreamRef.current = null;
+      }
+      if (forceCloseStreamRef.current === forceCloseStream) {
+        forceCloseStreamRef.current = null;
+      }
       if (applyTimer) {
         window.clearTimeout(applyTimer);
         applyTimer = null;
@@ -501,21 +574,23 @@ export function useSessionDetailStream({
       stream.removeEventListener("session_initial", handleSessionInitial as EventListener);
       stream.removeEventListener("assistant_delta", handleAssistantDelta as EventListener);
       stream.close();
-      postBrowserTelemetry({
-        phase: "session_stream",
-        eventCode: "browser.session_stream.closed",
-        message: "Session detail stream closed.",
-        fields: {
-          sessionId: streamSessionId,
-          readyState: readyStateBeforeClose,
-        },
-      });
+      if (!closeTelemetryFired) {
+        postBrowserTelemetry({
+          phase: "session_stream",
+          eventCode: "browser.session_stream.closed",
+          message: "Session detail stream closed.",
+          fields: {
+            sessionId: streamSessionId,
+            readyState: readyStateBeforeClose,
+          },
+        });
+      }
     };
   }, [
     activeSessionId,
     queryClient,
-    sessionStreamShouldConnect,
     syncSessionDetail,
+    streamReconnectTick,
   ]);
 
   return { sessionStreamConnected };
