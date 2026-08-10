@@ -45,6 +45,8 @@ export type WorkflowRunRecord = {
   blockedReason?: string;
   officialCandidateRef?: string;
   resultPackage?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type RequiredTeamScope = {

@@ -28,11 +28,12 @@ describe("NodeAgentSection", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("当前步骤 Agent 配置");
+    expect(markup).toContain("Agent 配置");
     expect(markup).toContain("资料寻找");
     expect(markup).toContain("资料检索 Agent");
     expect(markup).toContain("会话已绑定");
     expect(markup).toContain("pane=config");
     expect(markup).toContain("agent=agent-finder");
+    expect(markup).not.toContain("source_finder");
   });
 });

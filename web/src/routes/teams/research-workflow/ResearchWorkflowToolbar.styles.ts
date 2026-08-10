@@ -5,5 +5,5 @@ export default {
   truncated: "truncate",
   next: "truncate text-[var(--fg-primary)]",
   actions: "flex flex-wrap items-center gap-2",
-  select: "min-w-[12rem]",
+  select: "min-w-[18rem] max-w-[28rem]",
 } as const;

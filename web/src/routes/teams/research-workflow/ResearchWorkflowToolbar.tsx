@@ -1,5 +1,6 @@
 import { VButton, VSelect } from "../../../components/vui";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
+import { researchRunStatusLabel, type ResearchRunOption } from "./researchRunPresentation";
 import type { ResearchWorkflowStreamState } from "./useResearchWorkflowStream";
 import styles from "./ResearchWorkflowToolbar.styles";
 
@@ -12,13 +13,12 @@ const STREAM_LABEL: Record<ResearchWorkflowStreamState, string> = {
 
 export function ResearchWorkflowToolbar(props: {
   teamName: string;
-  questionId: string;
+  projectName: string;
   runId: string;
   runStatus: string;
-  activeProjectId: string;
   nextAction: string;
   streamState: ResearchWorkflowStreamState;
-  runOptions: Array<{ runId: string; status: string }>;
+  runOptions: ResearchRunOption[];
   panel: ResearchProcessPanel;
   hasRuntimeNode: boolean;
   createDisabled: boolean;
@@ -31,8 +31,8 @@ export function ResearchWorkflowToolbar(props: {
     <div className={styles.root}>
       <div className={styles.context}>
         <strong className={styles.primary}>{props.teamName}</strong>
-        <span className={styles.truncated}>{props.questionId || props.activeProjectId || "未选择题目"}</span>
-        {props.runId ? <span className={styles.truncated}>{props.runStatus}</span> : null}
+        <span className={styles.truncated}>{props.projectName || "未选择研究项目"}</span>
+        {props.runId ? <span className={styles.truncated}>{researchRunStatusLabel(props.runStatus)}</span> : null}
         {props.runId ? <span aria-label="事件连接状态">{STREAM_LABEL[props.streamState]}</span> : null}
         {props.nextAction ? <span className={styles.next}>下一步：{props.nextAction}</span> : null}
       </div>
@@ -42,11 +42,11 @@ export function ResearchWorkflowToolbar(props: {
             density="compact"
             className={styles.select}
             aria-label="运行切换"
-            placeholder="选择运行"
+            placeholder="切换运行"
             selectedKey={props.runId || null}
             options={props.runOptions.map((item) => ({
               id: item.runId,
-              label: `${item.runId} · ${item.status}`,
+              label: item.label,
             }))}
             onSelectionChange={(key) => props.onSelectRun(key == null ? "" : String(key))}
           />

@@ -85,10 +85,9 @@ export function ResearchProcessWorkspace({
         toolbar={(
           <ResearchWorkflowToolbar
             teamName={teamName || teamId}
-            questionId={runState.run?.questionId || location.questionId}
+            projectName={project.activeProjectName}
             runId={location.runId}
             runStatus={runState.run?.status || runState.projection?.run.status || ""}
-            activeProjectId={project.activeProjectId || ""}
             nextAction={nextAction}
             streamState={runState.streamState}
             runOptions={catalog.runOptions}
