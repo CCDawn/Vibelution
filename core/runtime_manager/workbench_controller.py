@@ -150,7 +150,12 @@ def _iter_browser_candidate_windows(pid: int) -> list[dict[str, int | bool | str
             return True
         width = int(rect.right) - int(rect.left)
         height = int(rect.bottom) - int(rect.top)
-        if width < 160 or height < 120:
+        visible = bool(user32.IsWindowVisible(hwnd))
+        iconic = bool(user32.IsIconic(hwnd))
+        # Windows reports a compact off-screen restore rectangle for minimized
+        # Edge app windows. Keep those candidates so liveness can distinguish a
+        # user-minimized workbench from a genuinely closed window.
+        if (width < 160 or height < 120) and not (visible and iconic):
             return True
         length = int(user32.GetWindowTextLengthW(hwnd) or 0)
         title = ""
@@ -161,8 +166,8 @@ def _iter_browser_candidate_windows(pid: int) -> list[dict[str, int | bool | str
         found.append(
             {
                 "hwnd": int(hwnd),
-                "visible": bool(user32.IsWindowVisible(hwnd)),
-                "iconic": bool(user32.IsIconic(hwnd)),
+                "visible": visible,
+                "iconic": iconic,
                 "width": width,
                 "height": height,
                 "title": title,
@@ -301,6 +306,18 @@ def _visible_top_level_window_handles(pid: int) -> list[int]:
     ]
 
 
+def _minimized_workbench_window_handles(pid: int) -> list[int]:
+    """Return minimized, still-live managed workbench HWND values."""
+
+    return [
+        int(item["hwnd"])
+        for item in _iter_browser_candidate_windows(pid)
+        if bool(item.get("visible"))
+        and bool(item.get("iconic"))
+        and _browser_window_title_is_workbench(item.get("title"))
+    ]
+
+
 def _restore_hidden_browser_windows(pid: int) -> list[int]:
     """Show/restore the single best managed Edge app window when none are visible."""
 
@@ -356,6 +373,10 @@ def _is_browser_window_alive(pid: int) -> bool:
     if handles:
         _converge_browser_windows(int(pid), focus_kept=False)
         return bool(_visible_top_level_window_handles(int(pid)) or handles)
+    if _minimized_workbench_window_handles(int(pid)):
+        # Minimized is a valid user-controlled state. Do not restore or focus
+        # the window from the runtime-manager observation loop.
+        return True
     # Self-heal: restore the best hidden managed app window, then converge.
     return bool(_restore_hidden_browser_windows(int(pid)))
 
@@ -808,7 +829,12 @@ def observe_workbench(
         "changed": False,
     }
     browser_window_alive = _is_browser_window_alive(browser_window_pid)
-    if browser_window_alive and browser_window_pid > 0 and os.name == "nt":
+    if (
+        browser_window_alive
+        and browser_window_pid > 0
+        and os.name == "nt"
+        and bool(_visible_top_level_window_handles(browser_window_pid))
+    ):
         # observe re-converges so dual Edge frames are closed even when the
         # initial alive check used focus_kept=False. Only demote alive when we
         # actually saw top-level frames and none remain after close.

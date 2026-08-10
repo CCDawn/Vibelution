@@ -5180,6 +5180,31 @@ def test_is_browser_window_alive_converges_dual_frames(monkeypatch):
     assert converge_calls == [39060]
 
 
+def test_is_browser_window_alive_accepts_minimized_titled_workbench_without_restoring(monkeypatch):
+    minimized_workbench = {
+        "hwnd": 303,
+        "title": "Vibelution 工作台",
+        "visible": True,
+        "iconic": True,
+        "width": 133,
+        "height": 365,
+    }
+    monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 40856)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_iter_browser_candidate_windows",
+        lambda pid: [minimized_workbench] if int(pid) == 40856 else [],
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_restore_hidden_browser_windows",
+        lambda pid: (_ for _ in ()).throw(AssertionError("minimized workbench must not be restored")),
+    )
+
+    assert workbench_controller._is_browser_window_alive(40856) is True
+
+
 def test_snapshot_residual_excluded_pids_includes_backend_launch_tree_root():
     excluded = daemon._snapshot_residual_excluded_pids(
         {
