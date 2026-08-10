@@ -20,6 +20,7 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service,
 )
+from core.web.services.team_workflow import challenge_question_runs
 from tools import team_knowledge_tools
 
 # Domain case modules intentionally omit module-level ``serial``.
@@ -81,6 +82,26 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _NoopBackgroundExecutor())
+    # The official Challenge Cup dataset is operator-provided and intentionally
+    # ignored by Git. Give isolated worktrees a minimal immutable catalog so
+    # policy tests exercise the same fail-closed question lookup without
+    # reaching into a different worktree or weakening production validation.
+    catalog_path = tmp_path / "science_125_questions.test.json"
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "questions": [
+                    {
+                        "id": "SCI-096",
+                        "question_en": "What are the coding principles embedded in neuronal spike trains?",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(challenge_question_runs, "_catalog_path", lambda: catalog_path)
 
 def _capture_workflow_events(monkeypatch):
     events = []

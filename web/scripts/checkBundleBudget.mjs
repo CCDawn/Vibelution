@@ -41,6 +41,14 @@ export const BUNDLE_BUDGETS = [
     maxBytes: 160 * 1024,
   },
   {
+    // The source-collection tail is intentionally isolated from the stage
+    // host for an independently cacheable update boundary. Keep the leaf
+    // bounded too, so the host budget is not met by merely moving bloat.
+    name: "known Teams source collection tail",
+    pattern: /^teams-source-collection-tail-[\w-]+\.js$/,
+    maxBytes: 120 * 1024,
+  },
+  {
     // Lazy SC composition + shell phase bag (Mid/Tail + compose + surfaces).
     name: "known Teams SC phase residual",
     pattern: /^TeamsWorkbenchWithScPhase-[\w-]+\.js$/,

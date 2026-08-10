@@ -124,6 +124,8 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
     expect(markup).toContain('data-vui="workflow-edge-label"');
     expect(markup).toContain("交接");
     expect(markup).toContain('data-path-state="active"');
+    expect(markup).toContain("width:34px");
+    expect(markup).toContain("height:20px");
   });
 
   it("always renders the label when labelAlwaysVisible is set", () => {

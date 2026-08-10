@@ -2138,9 +2138,9 @@ def test_agent_config_workspace_includes_team_reference(tmp_path, monkeypatch):
 
     enriched = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
     team_ref = next(item for item in enriched["references"] if item["kind"] == "team")
-    assert team_ref["route"] == f"/teams?team={team['teamId']}"
+    assert team_ref["route"] == f"/teams?teamId={team['teamId']}"
     assert team_ref["sourceRef"]["owner"] == "TeamWorkflow"
-    assert team_ref["sourceRef"]["canonicalEditRoute"] == f"/teams?team={team['teamId']}"
+    assert team_ref["sourceRef"]["canonicalEditRoute"] == f"/teams?teamId={team['teamId']}"
     assert team_ref["projectionEdit"]["canWrite"] is False
     assert team_ref["projectionEdit"]["mode"] == "deep_link_to_source"
     assert team_ref["projectionCanWrite"] is False

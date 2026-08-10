@@ -81,6 +81,28 @@ describe("bundle budget", () => {
       .toBe("known Teams SC phase residual");
   });
 
+  it("keeps the isolated Teams source-collection tail under its own budget", () => {
+    writeAsset("teams-source-collection-tail-Ab12CdEf.js", 110 * 1024);
+
+    const result = checkBundleBudget(tempRoot, { expectElkWorker: false });
+
+    expect(result.failures).toEqual([]);
+    expect(result.entries.find((entry) => entry.name.startsWith("teams-source-collection-tail-"))?.budgetName)
+      .toBe("known Teams source collection tail");
+  });
+
+  it("fails when the isolated Teams source-collection tail absorbs host bloat", () => {
+    writeAsset("teams-source-collection-tail-Ab12CdEf.js", 130 * 1024);
+
+    const result = checkBundleBudget(tempRoot, { expectElkWorker: false });
+
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({
+      name: "teams-source-collection-tail-Ab12CdEf.js",
+      budgetName: "known Teams source collection tail",
+    });
+  });
+
   it("fails when an ordinary feature chunk grows beyond its budget", () => {
     writeAsset("ChatCodingRoute-CcYah-sm.js", 420 * 1024);
 

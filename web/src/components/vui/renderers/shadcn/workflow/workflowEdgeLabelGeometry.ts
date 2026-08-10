@@ -9,9 +9,9 @@
 
 export const EDGE_LABEL_FONT_SIZE = 11;
 export const EDGE_LABEL_PADDING_X = 6;
-export const EDGE_LABEL_PADDING_Y = 3;
 export const EDGE_LABEL_MAX_WIDTH = 152;
-export const EDGE_LABEL_HEIGHT = EDGE_LABEL_FONT_SIZE + EDGE_LABEL_PADDING_Y * 2 + 6;
+/** Compact single-line control height; shared by ELK reservation and the DOM. */
+export const EDGE_LABEL_HEIGHT = 20;
 
 /** Approximate glyph advance for CJK/ASCII mixed text at 11px. */
 const CHAR_ADVANCE = 11;

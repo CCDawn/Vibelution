@@ -10,11 +10,10 @@ import type { ElkNode } from "elkjs/lib/elk-api";
 
 import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
 import type { WorkflowNodeSize } from "./workflowLayoutHash";
+import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 import { resolveElkPorts } from "./workflowElkPorts";
 import {
   WORKFLOW_DECISION_DESIGN_HEIGHT,
-  WORKFLOW_EDGE_LABEL_HEIGHT,
-  WORKFLOW_EDGE_LABEL_WIDTH,
   WORKFLOW_ELK_ROOT_OPTIONS,
   WORKFLOW_ELK_STAGE_OPTIONS,
   WORKFLOW_NODE_DESIGN_HEIGHT,
@@ -144,9 +143,7 @@ export function toElkGraph(
         edge.label.length > 0
           ? [
               {
-                text: edge.label,
-                width: WORKFLOW_EDGE_LABEL_WIDTH,
-                height: WORKFLOW_EDGE_LABEL_HEIGHT,
+                ...resolveEdgeLabelSpec(edge.label),
                 layoutOptions: { "elk.edgeLabels.placement": "CENTER" },
               },
             ]

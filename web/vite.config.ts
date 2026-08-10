@@ -127,6 +127,7 @@ const frontendPort = coercePort(
   firstEnvPort(["VIBELUTION_FRONTEND_PORT", "AGENT_WORKBENCH_FRONTEND_PORT"]),
   readWorkbenchPort("frontend_port", DEFAULT_FRONTEND_PORT),
 );
+const workflowElkProbeBuild = process.env.VIBELUTION_PROBE_BUILD === "1";
 
 export default defineConfig({
   define: {
@@ -150,6 +151,13 @@ export default defineConfig({
         // Main app entry keeps its historical `index-*` output name so the
         // existing budget rules stay valid.
         index: fileURLToPath(new URL("./index.html", import.meta.url)),
+        ...(workflowElkProbeBuild
+          ? {
+              "workflow-elk-handshake": fileURLToPath(
+                new URL("./probes/workflow-elk-handshake.html", import.meta.url),
+              ),
+            }
+          : {}),
       },
       output: {
         /**
@@ -159,6 +167,9 @@ export default defineConfig({
          */
         manualChunks(id) {
           const normalized = id.replace(/\\/g, "/");
+          if (normalized.endsWith("/src/routes/teams/useSourceCollectionPresentationTail.ts")) {
+            return "teams-source-collection-tail";
+          }
           if (!normalized.includes("/node_modules/")) {
             return undefined;
           }

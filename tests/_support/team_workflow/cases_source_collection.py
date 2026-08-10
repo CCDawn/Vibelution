@@ -815,7 +815,14 @@ def test_seed_source_collection_agent_session_context_writes_and_dedupes_project
     assert agent_directory_service.get_agent(discovery["agentId"])["directSessionId"] == direct_session["id"]
     assert first["message"]["metadata"]["kind"] == "source_collection_agent_context"
     assert first["message"]["metadata"]["sourceCollectionContextKey"] == first["contextKey"]
-    assert "脑启发路由" in first["message"]["content"]
+    # Assistant detail messages are projected from turnItems only; content is
+    # intentionally not duplicated as a second renderer source.
+    assert "content" not in first["message"]
+    assert any(
+        "脑启发路由" in str(item.get("text") or "")
+        for item in first["message"]["turnItems"]
+        if isinstance(item, dict)
+    )
     assert second["created"] is False
     assert second["sessionCreated"] is False
     assert second["sessionId"] == first["sessionId"]
