@@ -208,8 +208,15 @@ def wait_for_result(command_id: str, *, timeout_seconds: float = DEFAULT_COMMAND
     raise TimeoutError(f"Timed out waiting for runtime-manager command {command_id}.")
 
 
-def recover_processing_queue() -> None:
+def recover_processing_queue() -> list[str]:
+    """Recover commands stuck in the processing directory back to the inbox.
+
+    Returns the command IDs that were recovered (moved back to the inbox) so
+    callers such as the launcher watchdog can record what was unblocked.
+    """
+
     ensure_runtime_manager_dirs()
+    recovered: list[str] = []
     for path in sorted(PROCESSING_DIR.glob("*.json")):
         command = _load_command_file(path)
         if _discard_recovered_command_with_existing_result(path, command):
@@ -227,6 +234,8 @@ def recover_processing_queue() -> None:
                 if isinstance(command, dict)
                 else {"queuePath": target.name},
             )
+            if isinstance(command, dict):
+                recovered.append(str(command.get("commandId") or path.stem))
         except OSError:
             continue
     for path in sorted(INBOX_DIR.glob("*.json")):
@@ -234,6 +243,7 @@ def recover_processing_queue() -> None:
         if str(command.get("type") or "").strip() in {"open_workbench", "restart_workbench"}:
             _supersede_pending_close_commands_for_open(command)
     _complete_satisfied_pending_close_commands()
+    return recovered
 
 
 def _complete_satisfied_pending_close_commands() -> None:

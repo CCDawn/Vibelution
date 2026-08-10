@@ -2495,3 +2495,73 @@ def test_launcher_supervisor_reattach_blocks_when_state_is_incomplete(tmp_path, 
     assert "runtime_scene_missing" in payload["blockers"]
     assert "backend_not_alive" in payload["blockers"]
     assert "launcher.supervisor.reattach.blocked" in [event[0] for event in events]
+
+
+def test_ensure_runtime_manager_daemon_alive_skips_when_daemon_running(monkeypatch):
+    calls = []
+    monkeypatch.setattr(launcher_service, "is_daemon_running", lambda: True)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: calls.append("ensure") or True)
+    monkeypatch.setattr(launcher_service, "command_queue", None)
+    monkeypatch.setattr(launcher_service, "_record_launcher_event", lambda *a, **k: None)
+
+    result = launcher_service.ensure_runtime_manager_daemon_alive()
+
+    assert result["action"] == "already_running"
+    assert result["daemonRunning"] is True
+    assert calls == []
+
+
+def test_ensure_runtime_manager_daemon_alive_recovers_queue_and_restarts(monkeypatch):
+    calls = []
+    monkeypatch.setattr(launcher_service, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: calls.append("ensure") or True)
+
+    class FakeQueue:
+        @staticmethod
+        def recover_processing_queue():
+            calls.append("recover")
+            return ["cmd_force_stop_stuck"]
+
+    monkeypatch.setattr(launcher_service, "command_queue", FakeQueue)
+    events = []
+    monkeypatch.setattr(
+        launcher_service,
+        "_record_launcher_event",
+        lambda event_code, **kwargs: events.append(event_code),
+    )
+
+    result = launcher_service.ensure_runtime_manager_daemon_alive()
+
+    assert result["action"] == "restarted"
+    assert result["ensured"] is True
+    assert result["recoveredCommandCount"] == 1
+    assert calls == ["recover", "ensure"]
+    assert "launcher.daemon.watchdog.restarted" in events
+
+
+def test_ensure_runtime_manager_daemon_alive_records_recovery_failure_but_still_restarts(monkeypatch):
+    calls = []
+
+    def _fail_recover():
+        calls.append("recover")
+        raise OSError("queue locked")
+
+    class FakeQueue:
+        recover_processing_queue = staticmethod(_fail_recover)
+
+    monkeypatch.setattr(launcher_service, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: calls.append("ensure") or True)
+    monkeypatch.setattr(launcher_service, "command_queue", FakeQueue)
+    events = []
+    monkeypatch.setattr(
+        launcher_service,
+        "_record_launcher_event",
+        lambda event_code, **kwargs: events.append(event_code),
+    )
+
+    result = launcher_service.ensure_runtime_manager_daemon_alive()
+
+    assert result["action"] == "restarted"
+    assert calls == ["recover", "ensure"]
+    assert "launcher.daemon.watchdog.recovery_failed" in events
+    assert "launcher.daemon.watchdog.restarted" in events
