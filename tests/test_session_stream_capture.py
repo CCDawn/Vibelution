@@ -247,6 +247,29 @@ def test_explicit_wrong_turn_is_dropped_even_inside_capture_context(monkeypatch)
     assert discarded[-1]["fields"]["reason"] == "turn_mismatch"
 
 
+def test_repeated_wrong_turn_discards_are_recorded_only_once(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-s3d", turn_id="cap-t3d")
+    discarded: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *_args, **kwargs: discarded.append(kwargs),
+    )
+
+    with stream_capture._capture_session_ui_stream("cap-s3d", capture):
+        for _ in range(3):
+            get_event_bus().publish(EventNames.TOOL_START, {
+                "name": "glob_tool",
+                "callId": "call-wrong-turn",
+                "sessionId": "cap-s3d",
+                "turnId": "other-turn",
+            })
+
+    assert capture.tool_calls == []
+    assert len(discarded) == 1
+    assert discarded[0]["fields"]["reason"] == "turn_mismatch"
+
+
 def test_tool_lifecycle_keeps_sequence_and_increments_revision() -> None:
     capture = stream_capture.SessionTurnCapture(session_id="cap-s4", turn_id="cap-t4")
 
