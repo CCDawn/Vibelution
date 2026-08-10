@@ -30,8 +30,9 @@ describe("useConfigProviderDraftActions contract", () => {
     expect(routeSource).toContain("handleDiscoverProvider");
     expect(routeSource).toContain("handleDeleteProvider");
     expect(routeSource).toContain("handleBeginProviderRouteEdit");
-    // Migration stays on the route (different API family).
+    // Migration lives in its own hook family (useConfigMigrationActions);
+    // the draft provider actions must not re-own the migration endpoints.
     expect(routeSource).toContain("handlePreviewMigration");
-    expect(routeSource).toContain("/api/config/migration/llm-v2/preview");
+    expect(routeSource).not.toContain("/api/config/migration/llm-v2/preview");
   });
 });

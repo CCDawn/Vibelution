@@ -52,6 +52,8 @@ describe("evolution mutations contract (T3)", () => {
     expect(runSource).toContain('approvalMode: "human" | "agent"');
     expect(runSource.match(/approvalMode: payload\.approvalMode/g) ?? []).toHaveLength(3);
     expect(routeSource).toContain('useState<"human" | "agent">("human")');
-    expect(routeSource).toContain("最终审批方式");
+    // The approval-mode picker UI lives in EvolutionSupervisedLiveSetupPanel
+    // (thin-route split); the route keeps the state + freeze wiring.
+    expect(routeSource).toContain('approvalMode={approvalMode}');
   });
 });
