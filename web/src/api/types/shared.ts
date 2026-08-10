@@ -30,6 +30,12 @@ export type TokenUsageRollup = {
   notCalledCount: number;
   latencyMs: number;
   cacheHitRate: number;
+  cacheObservedInputTokens?: number;
+  cacheObservedCallCount?: number;
+  cacheUnobservedCallCount?: number;
+  cacheUsageObserved?: boolean;
+  cacheUsageComplete?: boolean;
+  cacheUsageMissingReason?: string;
 };
 
 export type TokenUsageSample = Partial<TokenUsageRollup> & {

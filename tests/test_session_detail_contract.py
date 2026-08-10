@@ -313,6 +313,40 @@ def test_session_detail_marks_prompt_cache_missing_without_provider_usage(tmp_pa
     assert cache_usage["source"] == "missing"
 
 
+def test_session_detail_keeps_llm_usage_but_marks_missing_cache_telemetry(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-provider-cache-unknown",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "上游返回了 token usage，但没有缓存计数。",
+            "llmUsage": {
+                "source": "provider_usage",
+                "input_tokens": 2048,
+                "output_tokens": 256,
+                "cache_usage_observed": False,
+                "cache_usage_missing_reason": "provider_cache_usage_missing",
+                "recorded_at": "2026-05-18T12:04:00",
+            },
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    detail = client.get("/api/sessions/session-live").json()
+
+    assert detail["llmUsage"]["source"] == "provider_usage"
+    assert detail["llmUsage"]["inputTokens"] == 2048
+    assert detail["llmUsage"]["cacheUsageObserved"] is False
+    assert detail["llmUsage"]["cacheUsageMissingReason"] == "provider_cache_usage_missing"
+    assert detail["cacheUsage"]["source"] == "missing"
+    assert detail["cacheUsage"]["cacheUsageObserved"] is False
+    assert detail["cacheUsage"]["cacheUsageMissingReason"] == "provider_cache_usage_missing"
+    assert detail["lastCacheComposition"]["source"] == "missing"
+
+
 def test_session_detail_exposes_last_provider_llm_usage(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     append_conversation_event(

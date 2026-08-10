@@ -30,7 +30,11 @@ def _aggregate_session_provider_cache_usage(
             continue
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
         usage = s._normalize_turn_llm_usage(metadata.get("llmUsage") or metadata.get("llm_usage"))
-        if usage is None or usage.get("source") != "provider_usage":
+        if (
+            usage is None
+            or usage.get("source") != "provider_usage"
+            or not bool(usage.get("cacheUsageObserved"))
+        ):
             continue
         input_tokens = s._coerce_nonnegative_int(usage.get("inputTokens") or 0)
         if not input_tokens:
@@ -46,7 +50,11 @@ def _aggregate_session_provider_cache_usage(
         seen.add(key)
         usages.append(usage)
     fallback = s._normalize_turn_llm_usage(fallback_usage)
-    if fallback is not None and fallback.get("source") == "provider_usage":
+    if (
+        fallback is not None
+        and fallback.get("source") == "provider_usage"
+        and bool(fallback.get("cacheUsageObserved"))
+    ):
         fallback_input = s._coerce_nonnegative_int(fallback.get("inputTokens") or 0)
         fallback_key = (
             str(fallback.get("recordedAt") or "").strip(),
@@ -70,6 +78,7 @@ def _aggregate_session_provider_cache_usage(
         "uncachedInputTokens": min(total_uncached, total_input) if total_input else 0,
         "cacheHitRate": (min(total_cached, total_input) / total_input) if total_input else 0.0,
         "turnCount": len(usages),
+        "cacheUsageObserved": bool(usages),
     }
 
 
