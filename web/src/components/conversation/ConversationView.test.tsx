@@ -539,6 +539,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.composerAttachmentThumb).toContain("object-cover");
     expect(styles.composerAttachmentName).toContain("truncate");
     expect(styles.composerAttachmentRemoveButton).toContain("!w-6");
+    expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:min-h-[84px]");
+    expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:[&_textarea]:min-h-[44px]");
 
     const composerActionStackSource = conversationViewSource.slice(
       conversationViewSource.indexOf("const composerActions = ("),

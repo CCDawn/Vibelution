@@ -60,7 +60,25 @@ describe("conversationOperationPresentation", () => {
       hasActiveProcess: true,
       turnErrorMessage: false,
       hasCodexSurface: true,
-    })).toBe(true);
+    })).toBe(false);
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: true,
+      showResponseBlock: false,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: true,
+      turnErrorMessage: false,
+      hasCodexSurface: false,
+    })).toBe(false);
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: true,
+      showResponseBlock: false,
+      hasFeedbackTimeline: true,
+      hasActiveProcess: false,
+      turnErrorMessage: false,
+      hasCodexSurface: false,
+    })).toBe(false);
     expect(shouldRenderCompactActiveTurnPlaceholder({
       role: "user",
       streaming: true,
