@@ -94,12 +94,21 @@ def test_window_payload_attaches_explicit_final_answer_transcript() -> None:
         )
     ]
     assert final_items
-    assert final_items[0]["text"] == assistant["content"]
-    assert final_items[0].get("version") == 2
+    expected_answer = "继续审查后的结论更明确：仅打开状态栏不会降低缓存命中率。"
+    assert final_items[0]["text"] == expected_answer
+    assert final_items[0].get("version") == 3
     assert final_items[0].get("itemId")
     assert final_items[0].get("terminal") is True
 
-    transcript = assistant["codexTranscript"]
+    assert "content" not in assistant
+    assert "codexTranscript" not in assistant
+    transcript = session_service._build_codex_transcript_from_turn_items(
+        message_id=assistant["id"],
+        turn_items=turn_items,
+        streaming=False,
+        window_slimmed=True,
+    )
+    assert transcript is not None
     assert transcript["source"] == "native"
     assert transcript.get("windowSlimmed") is True
     cells = transcript["cells"]
@@ -107,7 +116,40 @@ def test_window_payload_attaches_explicit_final_answer_transcript() -> None:
     assert cells[0]["kind"] == "assistant_markdown"
     assert cells[0]["phase"] == "final_answer"
     assert cells[0]["terminal"] is True
-    assert cells[0]["text"] == assistant["content"]
+    assert cells[0]["text"] == expected_answer
+
+
+def test_ui_projection_keeps_submission_anchor_on_committed_assistant() -> None:
+    messages = session_service._normalize_messages(
+        "session-anchor-1",
+        [
+            {
+                "role": "user",
+                "content": "检查一下",
+                "timestamp": "2026-08-10T01:00:00Z",
+                "metadata": {
+                    "turnId": "turn-anchor-1",
+                    "clientSubmissionId": "submission-anchor-1",
+                },
+            },
+            {
+                "role": "assistant",
+                "content": "检查完成",
+                "timestamp": "2026-08-10T01:00:01Z",
+                "metadata": {
+                    "kind": "assistant_item_committed",
+                    "turnId": "turn-anchor-1",
+                },
+            },
+        ],
+        transcript_scope="window",
+        include_timeline=False,
+    )
+
+    user, assistant = messages
+    assert user["metadata"]["clientSubmissionId"] == "submission-anchor-1"
+    assert assistant["metadata"]["turnId"] == "turn-anchor-1"
+    assert assistant["metadata"]["clientSubmissionId"] == "submission-anchor-1"
 
 
 def test_turn_items_projection_prefers_journal_and_stamps_message_id(monkeypatch) -> None:
@@ -147,7 +189,9 @@ def test_turn_items_projection_prefers_journal_and_stamps_message_id(monkeypatch
     )
     assert len(items) == 1
     assert items[0]["text"] == "来自 journal 的最终答案"
-    assert items[0]["messageId"] == "message-42"
+    assert items[0]["version"] == 3
+    assert items[0]["type"] == "agent_message"
+    assert "messageId" not in items[0]
     assert items[0]["itemId"] == "item-final"
 
 
@@ -187,14 +231,180 @@ def test_turn_items_projection_merges_live_content_when_journal_has_tools_only(m
         done=False,
         source="assistant_delta",
     )
-    assert [item["kind"] for item in items] == ["tool_call", "assistant_message"]
+    assert [item["type"] for item in items] == ["tool_call", "agent_message"]
     final_item = items[1]
     assert final_item["phase"] == "final_answer"
     assert final_item["text"] == "流式正文已经出现。"
-    assert final_item["provisional"] is True
     assert final_item["terminal"] is False
-    assert final_item["status"] == "in_progress"
-    assert final_item["messageId"] == "message-live-1"
+    assert final_item["status"] == "running"
+    assert "messageId" not in final_item
+
+
+def test_turn_items_projection_does_not_mirror_commentary_as_provisional_final(monkeypatch) -> None:
+    """Live envelope content already committed as commentary must not become a second row."""
+    commentary_text = "用户说刷新过了，但预算仍是 32，我需要查清策略来源。"
+    commentary_item = {
+        "version": 2,
+        "id": "commentary-1:0",
+        "itemId": "commentary-1",
+        "type": "commentary",
+        "kind": "commentary",
+        "channel": "commentary",
+        "phase": "commentary",
+        "status": "completed",
+        "terminal": False,
+        "provisional": False,
+        "text": commentary_text,
+        "turnId": "turn-commentary-live-1",
+        "sequence": 3,
+        "revision": 0,
+    }
+    tool_item = {
+        "version": 2,
+        "id": "tool-commentary-1:0",
+        "itemId": "tool-commentary-1",
+        "type": "tool_call",
+        "kind": "tool_call",
+        "phase": "tool_call",
+        "status": "completed",
+        "terminal": False,
+        "provisional": False,
+        "text": "search done",
+        "toolName": "search_tool",
+        "turnId": "turn-commentary-live-1",
+        "sequence": 4,
+        "revision": 0,
+    }
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        lambda _session_id: [object()],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [dict(commentary_item), dict(tool_item)]
+        if turn_id == "turn-commentary-live-1"
+        else [],
+    )
+
+    items = session_service._build_session_turn_items_projection(
+        session_id="session-commentary-live-1",
+        turn_id="turn-commentary-live-1",
+        message_id="message-commentary-live-1",
+        content=commentary_text,
+        done=False,
+        source="assistant_delta",
+    )
+
+    assert [(item["type"], item.get("phase")) for item in items] == [
+        ("agent_message", "commentary"),
+        ("tool_call", None),
+    ]
+    assert [item.get("text") for item in items].count(commentary_text) == 1
+    assert not any(item.get("phase") == "final_answer" for item in items)
+
+
+def test_turn_items_projection_keeps_distinct_live_final_after_commentary(monkeypatch) -> None:
+    commentary_item = {
+        "version": 2,
+        "id": "commentary-distinct-1:0",
+        "itemId": "commentary-distinct-1",
+        "type": "commentary",
+        "kind": "commentary",
+        "channel": "commentary",
+        "phase": "commentary",
+        "status": "completed",
+        "text": "我先检查配置来源。",
+        "turnId": "turn-commentary-distinct-1",
+        "sequence": 3,
+        "revision": 0,
+    }
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        lambda _session_id: [object()],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [dict(commentary_item)]
+        if turn_id == "turn-commentary-distinct-1"
+        else [],
+    )
+
+    items = session_service._build_session_turn_items_projection(
+        session_id="session-commentary-distinct-1",
+        turn_id="turn-commentary-distinct-1",
+        message_id="message-commentary-distinct-1",
+        content="最终确认：当前运行时读取的是 operator config。",
+        done=False,
+        source="assistant_delta",
+    )
+
+    assert [(item["type"], item.get("phase")) for item in items] == [
+        ("agent_message", "commentary"),
+        ("agent_message", "final_answer"),
+    ]
+
+
+def test_turn_items_projection_keeps_only_committed_final_when_commentary_matches(monkeypatch) -> None:
+    duplicate_text = "最终确认：当前运行时读取的是 operator config。"
+    commentary_item = {
+        "version": 2,
+        "id": "commentary-committed-1:0",
+        "itemId": "commentary-committed-1",
+        "type": "commentary",
+        "kind": "commentary",
+        "channel": "commentary",
+        "phase": "commentary",
+        "status": "completed",
+        "text": duplicate_text,
+        "turnId": "turn-commentary-committed-1",
+        "sequence": 3,
+        "revision": 0,
+    }
+    final_item = {
+        "version": 2,
+        "id": "final-committed-1:0",
+        "itemId": "final-committed-1",
+        "type": "assistant_message",
+        "kind": "assistant_message",
+        "channel": "answer",
+        "phase": "final_answer",
+        "status": "completed",
+        "terminal": True,
+        "provisional": False,
+        "text": duplicate_text,
+        "turnId": "turn-commentary-committed-1",
+        "sequence": 4,
+        "revision": 0,
+    }
+    monkeypatch.setattr(
+        session_service,
+        "_load_session_conversation_events_cached",
+        lambda _session_id: [object()],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [dict(commentary_item), dict(final_item)]
+        if turn_id == "turn-commentary-committed-1"
+        else [],
+    )
+
+    items = session_service._build_session_turn_items_projection(
+        session_id="session-commentary-committed-1",
+        turn_id="turn-commentary-committed-1",
+        message_id="message-commentary-committed-1",
+        content=duplicate_text,
+        done=True,
+        source="session_detail",
+    )
+
+    assert [(item["type"], item.get("phase"), item.get("text")) for item in items] == [
+        ("agent_message", "final_answer", duplicate_text)
+    ]
 
 
 def test_turn_items_projection_merges_thought_when_journal_has_answer_only(monkeypatch) -> None:
@@ -235,10 +445,9 @@ def test_turn_items_projection_merges_thought_when_journal_has_answer_only(monke
         done=True,
         source="assistant_delta",
     )
-    assert [item["kind"] for item in items] == ["reasoning", "assistant_message"]
-    assert items[0]["phase"] == "reasoning"
+    assert [item["type"] for item in items] == ["reasoning", "agent_message"]
     assert items[0]["text"] == thought
-    assert items[0]["messageId"] == "message-thought-1"
+    assert "messageId" not in items[0]
     assert items[1]["text"] == "你好！我是会话 Agent。"
     assert items[1]["itemId"] == "item-final"
 
@@ -292,8 +501,8 @@ def test_turn_items_projection_extends_provisional_final_with_faster_content(mon
     )
     assert len(items) == 1
     assert items[0]["text"] == "你好，世界"
-    assert items[0]["provisional"] is True
-    assert items[0]["status"] == "in_progress"
+    assert items[0]["status"] == "running"
+    assert items[0]["terminal"] is False
 
 
 def test_window_slim_keeps_full_final_answer_text() -> None:

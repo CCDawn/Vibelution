@@ -1011,6 +1011,19 @@ def _normalize_messages(
         raw_items,
         source_start_index=normalized_start_index,
     )
+    client_submission_id_by_turn: dict[str, str] = {}
+    for raw in raw_items:
+        if not isinstance(raw, dict) or str(raw.get("role") or "").strip().lower() != "user":
+            continue
+        turn_id = s._message_turn_id(raw)
+        metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+        client_submission_id = str(
+            metadata.get("clientSubmissionId")
+            or metadata.get("client_submission_id")
+            or ""
+        ).strip()
+        if turn_id and client_submission_id:
+            client_submission_id_by_turn[turn_id] = client_submission_id
     messages: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_items, start=normalized_start_index):
         if not isinstance(raw, dict):
@@ -1200,7 +1213,11 @@ def _normalize_messages(
             entry["attachments"] = attachments
         if references:
             entry["references"] = references
-        metadata = raw_metadata
+        metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+        if role == "assistant" and turn_id:
+            client_submission_id = client_submission_id_by_turn.get(turn_id, "")
+            if client_submission_id:
+                metadata.setdefault("clientSubmissionId", client_submission_id)
         if isinstance(metadata, dict) and metadata:
             entry["metadata"] = dict(metadata)
             if role == "assistant" and str(metadata.get("kind") or "").strip() == "turn_error":
@@ -1865,8 +1882,26 @@ def _merge_live_content_into_turn_items(
     if final_index >= 0:
         final_item = merged[final_index]
         if _is_committed_session_turn_final_answer_item(final_item):
-            # Committed journal final answer remains the sole authority.
-            return merged
+            # Committed journal final answer remains the sole authority. Some
+            # providers commit their last commentary segment again as the final
+            # answer; keep the answer and remove only that exact duplicate.
+            final_text_key = s._assistant_projection_text_key(
+                final_item.get("text") or final_item.get("summary") or ""
+            )
+            if not final_text_key:
+                return merged
+            return [
+                item
+                for index, item in enumerate(merged)
+                if index == final_index
+                or not (
+                    _is_session_turn_commentary_item(item)
+                    and s._assistant_projection_text_key(
+                        item.get("text") or item.get("summary") or ""
+                    )
+                    == final_text_key
+                )
+            ]
         item_text = str(final_item.get("text") or "").strip()
         if (
             len(content_text) > len(item_text)
@@ -1887,6 +1922,29 @@ def _merge_live_content_into_turn_items(
                 next_item["source"] = source
             merged[final_index] = s._compact_codex_record(next_item)
         return merged
+
+    content_key = s._assistant_projection_text_key(content_text)
+    if content_key:
+        for item in merged:
+            if not _is_session_turn_commentary_item(item):
+                continue
+            commentary_text = s._sanitize_message_content(
+                "assistant",
+                item.get("text") or item.get("summary") or "",
+            )
+            commentary_key = s._assistant_projection_text_key(commentary_text)
+            if not commentary_key:
+                continue
+            # Responses-style providers expose the latest commentary segment as
+            # live ``content`` until a distinct final-answer segment arrives.
+            # Mirroring that envelope into a provisional final row renders the
+            # same text twice and later replaces the active row identity.  A
+            # shorter live prefix is covered by the committed commentary too;
+            # content that extends beyond commentary remains eligible to bridge.
+            if content_key == commentary_key or (
+                len(content_key) >= 24 and content_key in commentary_key
+            ):
+                return merged
 
     item_id = s._session_turn_agent_message_item_id(session_id, turn_id or "turn")
     sequence = max(
