@@ -30,7 +30,7 @@ from typing import Any, Callable, Mapping
 from urllib.parse import quote
 
 from config.llm_key_env import sync_llm_key_env_from_persisted_user_env
-from config.settings import get_config
+from config.settings import get_config, get_web_chat_config
 from core.context.segments import (
     build_context_manifest,
     build_context_segment,

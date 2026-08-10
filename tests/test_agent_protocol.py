@@ -687,18 +687,19 @@ class TestToolMessageFlow:
 
         restored = list(agent._active_turn_messages or [])
         tool_messages = [message for message in restored if isinstance(message, ToolMessage)]
-        semantic_tool_messages = [
+        assistant_messages = [
             message
             for message in restored
-            if isinstance(message, AIMessage) and "历史工具结果: cli_tool" in str(message.content)
+            if isinstance(message, AIMessage) and getattr(message, "tool_calls", None)
         ]
 
-        assert tool_messages == []
-        assert semantic_tool_messages
-        assert "完整工具结果" in semantic_tool_messages[0].content
-        assert "failure-line\n" * 120 in semantic_tool_messages[0].content
-        assert "Windows detected Unix shell fragment" not in semantic_tool_messages[0].content
-        assert "运行相关测试验证修改：" in semantic_tool_messages[0].content
+        assert len(tool_messages) == 1
+        assert tool_messages[0].tool_call_id == "history_tool_1_1"
+        assert "完整工具结果" in tool_messages[0].content
+        assert "failure-line\n" * 120 in tool_messages[0].content
+        assert "Windows detected Unix shell fragment" not in tool_messages[0].content
+        assert assistant_messages
+        assert "运行相关测试验证修改：" in assistant_messages[0].content
 
     def test_seed_chat_history_projects_canonical_tool_pair_to_semantic_history_without_duplicate_result(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -733,15 +734,16 @@ class TestToolMessageFlow:
 
         restored = list(agent._active_turn_messages or [])
         tool_messages = [message for message in restored if isinstance(message, ToolMessage)]
-        semantic_tool_messages = [
+        assistant_messages = [
             message
             for message in restored
-            if isinstance(message, AIMessage) and "历史工具结果: cli_tool" in str(message.content)
+            if isinstance(message, AIMessage) and getattr(message, "tool_calls", None)
         ]
 
-        assert tool_messages == []
-        assert len(semantic_tool_messages) == 1
-        assert "完整 canonical 工具结果" in semantic_tool_messages[0].content
+        assert len(tool_messages) == 1
+        assert tool_messages[0].tool_call_id == "call_canonical"
+        assert "完整 canonical 工具结果" in tool_messages[0].content
+        assert len(assistant_messages) == 1
         assert sum("完整 canonical 工具结果" in str(message.content) for message in restored) == 1
 
     def test_seed_chat_history_clears_previous_provider_continuation_before_new_user_turn(self):
@@ -5196,6 +5198,12 @@ class TestLocalProviderBootstrap:
 
         mental_model = MagicMock()
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: mental_model)
+        monkeypatch.setattr(
+            agent_module,
+            "resolve_feature_decision",
+            lambda feature, **kwargs: MagicMock(effective_enabled=True),
+        )
+
 
         config = isolated_settings_config(
             **{
@@ -5207,7 +5215,7 @@ class TestLocalProviderBootstrap:
                 "llm.providers.default.requires_api_key": False,
             },
         )
-        agent = SelfEvolvingAgent(config=config)
+        agent = SelfEvolvingAgent(config=config, mode="chat")
         provider = agent.config.llm.get_provider(role="primary")
 
         assert provider.kind == "local"
@@ -5228,7 +5236,7 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
-        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
 
         captured = {}
 
@@ -5264,7 +5272,7 @@ class TestLocalProviderBootstrap:
         baseline_profile.profile_id = "supervised_baseline"
         baseline_profile.model = "baseline-model"
         original_config.llm.profiles["supervised_baseline"] = baseline_profile
-        agent = SelfEvolvingAgent(config=original_config)
+        agent = SelfEvolvingAgent(config=original_config, mode="chat")
 
         assert agent.runtime_agent_binding["agentId"] == "agent-supervised-baseline"
         assert agent.runtime_agent_binding["supervisedRole"] == "baseline"
@@ -5283,6 +5291,12 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
         mental_model = MagicMock()
         monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: mental_model)
+        monkeypatch.setattr(
+            agent_module,
+            "resolve_feature_decision",
+            lambda feature, **kwargs: MagicMock(effective_enabled=True),
+        )
+
 
         config = isolated_settings_config(
             **{
@@ -5346,7 +5360,7 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        agent = SelfEvolvingAgent(config=config)
+        agent = SelfEvolvingAgent(config=config, mode="chat")
 
         mental_model.set_shared_llm.assert_called_once()
         assert mental_model.set_shared_llm.call_args.args[0].model == "mental-model"
@@ -5365,7 +5379,7 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
-        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
 
         config = isolated_settings_config(
             **{
@@ -5432,7 +5446,7 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        agent = SelfEvolvingAgent(config=config)
+        agent = SelfEvolvingAgent(config=config, mode="chat")
         llm_for_turn = agent._get_llm_for_current_mode()
 
         assert agent.runtime_agent_binding["agentId"] == "agent-dialogue-default"
@@ -5731,7 +5745,7 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
-        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
 
         config = isolated_settings_config(
             **{
@@ -5786,7 +5800,7 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        agent = SelfEvolvingAgent(config=config)
+        agent = SelfEvolvingAgent(config=config, mode="chat")
 
         assert agent.runtime_agent_binding["llmSlot"] == "subagentExecution"
         assert agent.config.llm.get_profile(profile_id="primary").model == "subagent-execution-model"
@@ -5810,7 +5824,7 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
-        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
 
         config = isolated_settings_config(
             **{
@@ -5855,7 +5869,7 @@ class TestLocalProviderBootstrap:
             ),
         )
 
-        agent = SelfEvolvingAgent(config=config)
+        agent = SelfEvolvingAgent(config=config, mode="chat")
 
         assert agent.runtime_agent_binding["llmBindings"]["dialogue"]["modelId"] == "supervised-dialogue-model-id"
         assert agent.config.llm.get_profile(profile_id="primary").model == "supervised-dialogue-model"
@@ -5940,7 +5954,7 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
         monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
-        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
         monkeypatch.setattr(
             agent_module,
             "get_llm_client",
@@ -5986,7 +6000,7 @@ class TestLocalProviderBootstrap:
                 "llm.providers.default.requires_api_key": False,
             },
         )
-        agent = SelfEvolvingAgent(config=config)
+        agent = SelfEvolvingAgent(config=config, mode="chat")
         messages, resumed = TurnOutcomeController.prepare_turn_messages(
             system_prompt=(
                 "static",
@@ -6245,7 +6259,7 @@ class TestResolvedApiKeyUsage:
         }
 
         with pytest.raises(ValueError) as exc_info:
-            SelfEvolvingAgent(config=config)
+            SelfEvolvingAgent(config=config, mode="chat")
 
         message = str(exc_info.value)
         assert "modelId=relay_gpt_5_6_luna" in message
@@ -6275,10 +6289,7 @@ class TestResolvedApiKeyUsage:
         monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
         monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
-        monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
 
-        mental_model = MagicMock()
-        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: mental_model)
 
         captured = {}
 
@@ -6314,7 +6325,7 @@ class TestResolvedApiKeyUsage:
         primary_provider = config.llm.get_provider(role="primary")
         primary_provider.api_key = ""
         primary_provider.api_key_env = "MINIMAX_API_KEY"
-        agent = SelfEvolvingAgent(config=config)
+        agent = SelfEvolvingAgent(config=config, mode="chat")
 
         assert agent.api_key == "minimax-test-key"
         assert agent.config.llm.api_key == "minimax-test-key"

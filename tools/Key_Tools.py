@@ -140,7 +140,7 @@ Codex CLI），无需在命令中指定或选择平台；写命令时遵循下�
 === 调用纪律 ===
 1. 搜索：`rg -n "pattern" path`（无管道；不要 `rg ... | head`）。
 2. 读小段：按当前宿主方言用有界命令读取（如 `cat ... | head -n 80` 或 `Get-Content -LiteralPath "file" -TotalCount 80`）。
-3. 同类 shell 失败 **1 次**后立即换结构化工具，禁止 cmd/PowerShell/bash 来回探路。
+3. 同类 shell 失败 **1 次**后立即换结构化工具，避免 cmd/PowerShell/bash 来回探路。
 4. 输出默认有界；`max_output_chars` 默认 6000，大结果只消费结论。
 5. 本回合工具有额度上限：探查不要耗尽额度，至少预留 2–3 次给 lint/test。
 6. 避免交互式/无休止命令。
@@ -164,7 +164,7 @@ def _exec_command_tool_docstring() -> str:
 无需指定或选择平台后端。
 
 `cmd` 与 `cli_tool` **共用同一套 shell 路由/方言**。进程仍在运行时返回 `terminalSessionId`，
-后续必须原样传给 `write_stdin`。旧 `cli_tool` 仅兼容旧工作流。
+后续需原样传给 `write_stdin`。旧 `cli_tool` 仅兼容旧工作流。
 
 {_shell_dialect_block()}
 
@@ -189,7 +189,7 @@ _EXEC_COMMAND_TOOL_DOCSTRING = _exec_command_tool_docstring()
 _WRITE_STDIN_TOOL_DOCSTRING = """
 【继续命令】向仍在运行的 `exec_command` 沙盒进程写入标准输入，或轮询其新输出。
 
-`session_id` 必须来自 `exec_command` 的真实 `terminalSessionId`。`chars` 为空时只轮询，
+`session_id` 需来自 `exec_command` 的真实 `terminalSessionId`。`chars` 为空时只轮询，
 不创建新进程；会话不存在、已过期或后端重启时会明确返回失败，不能回退为执行新命令。
 
 Args:
@@ -416,7 +416,7 @@ def _build_key_tools() -> List[BaseTool]:
     def apply_patch_tool(patch_text: str, cwd: str = ".") -> str:
         """
         Codex 风格 patch 编辑器。适合一次提交多文件 Add/Update/Delete patch。
-        所有目标必须位于 cwd 内；整份 patch 会先完成路径与 hunk 校验，
+        所有目标需位于 cwd 内；整份 patch 会先完成路径与 hunk 校验，
         应用中失败时回滚本次已写文件，避免留下部分修改。
 
         格式：
@@ -429,7 +429,7 @@ def _build_key_tools() -> List[BaseTool]:
 
         Args:
             patch_text: Codex 风格 patch 文本
-            cwd: 相对路径解析根目录；workspace_write 模式必须位于项目或当前 Agent 工作区内
+            cwd: 相对路径解析根目录；workspace_write 模式需位于项目或当前 Agent 工作区内
 
         Returns:
             JSON 格式的修改结果；格式或匹配失败时返回可纠正错误。
@@ -850,7 +850,7 @@ def _build_key_tools() -> List[BaseTool]:
             team_id: 团队 ID
             operation: create_loop / record_evidence / record_decision
             loop_id: Research Loop ID，create_loop 可留空
-            payload_json: JSON 对象字符串；字段必须严格遵循
+            payload_json: JSON 对象字符串；字段需严格遵循
                 challenge_cup_iteration_context_tool 返回的 writebackContract。
                 record_evidence 使用顶层 evidenceType，并至少同时提供
                 summary / metrics / artifactRefs 等 oneOfEvidenceFields 之一；
