@@ -16,10 +16,26 @@ const api = vi.hoisted(() => ({
 vi.mock("../../../api/researchWorkflow", () => api);
 
 import {
+  childRunIdFromCommandResult,
   commandLabel,
   disableReasonFor,
   executeNodeCommand,
 } from "./nodeCommandAdapter";
+
+describe("childRunIdFromCommandResult", () => {
+  it("selects the newest remediation child and never returns the parent", () => {
+    expect(childRunIdFromCommandResult({
+      command: "fork_evidence_remediation",
+      message: "ok",
+      raw: { childRunIds: ["run-parent", "run-child-1", "run-child-2"] },
+    }, "run-parent")).toBe("run-child-2");
+    expect(childRunIdFromCommandResult({
+      command: "fork_evidence_remediation",
+      message: "ok",
+      raw: { childRunIds: ["run-parent"] },
+    }, "run-parent")).toBeNull();
+  });
+});
 
 const ALL_BACKEND_COMMANDS = [
   "start_agent_task",
@@ -34,6 +50,7 @@ const ALL_BACKEND_COMMANDS = [
   "open_session",
   "build_package",
   "open_evidence_graph",
+  "fork_evidence_remediation",
 ];
 
 describe("nodeCommandAdapter", () => {
@@ -132,6 +149,40 @@ describe("nodeCommandAdapter", () => {
         idempotencyKey: "retry-node:nr-run-1-evidence_relations-a1:a2",
         command: "retry_execution",
         payload: {},
+      },
+    );
+  });
+
+  it("submits the operator-frozen evidence remediation contract with the backend key", async () => {
+    api.postResearchWorkflowNodeCommand.mockResolvedValue({ status: "superseded" });
+    const payload = {
+      evidenceGapCandidateIds: ["candidate-a", "candidate-b"],
+      scopeCandidateIds: ["candidate-a"],
+      resolutionKind: "reduce_scope",
+      additionalBudget: {},
+      operatorReason: "只补救最高优先级候选",
+    };
+
+    await executeNodeCommand(
+      { runId: "run-1", nodeId: "source_extraction", teamId: "t1", runVersion: 24 },
+      {
+        command: "fork_evidence_remediation",
+        available: true,
+        reason: "",
+        idempotencyKey: "fork-evidence-remediation:nr-extraction-a3",
+        payload,
+      },
+    );
+
+    expect(api.postResearchWorkflowNodeCommand).toHaveBeenCalledWith(
+      "run-1",
+      "source_extraction",
+      {
+        teamId: "t1",
+        expectedRunVersion: 24,
+        idempotencyKey: "fork-evidence-remediation:nr-extraction-a3",
+        command: "fork_evidence_remediation",
+        payload,
       },
     );
   });

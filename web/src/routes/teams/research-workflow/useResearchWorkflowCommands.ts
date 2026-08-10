@@ -5,7 +5,10 @@ import type {
   WorkflowRunRecord,
 } from "../../../api/researchWorkflow";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
-import { executeNodeCommand } from "./nodeCommandAdapter";
+import {
+  childRunIdFromCommandResult,
+  executeNodeCommand,
+} from "./nodeCommandAdapter";
 
 type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
 
@@ -69,13 +72,15 @@ export function useResearchWorkflowCommands(options: {
   const resolveCurrentHumanTask = useCallback(
     async (decision: "accept" | "reject" | "revise") => {
       if (!selectedNodeId) {
-        setError("请先选择待处理的人工节点");
-        return;
+        const reason = new Error("请先选择待处理的人工节点");
+        setError(reason.message);
+        throw reason;
       }
       const taskId = pendingTaskId(selectedNodeId);
       if (!taskId) {
-        setError("当前节点没有待处理的人工任务");
-        return;
+        const reason = new Error("当前节点没有待处理的人工任务");
+        setError(reason.message);
+        throw reason;
       }
       setError(null);
       try {
@@ -88,55 +93,72 @@ export function useResearchWorkflowCommands(options: {
         }
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
+        throw reason;
       }
     },
     [pendingTaskId, replaceParams, resolveHuman, selectedNodeId],
   );
 
   const runInspectorCommand = useCallback(
-    (command: string) => {
+    async (command: string, payload?: Record<string, unknown>) => {
       if (command === "open_evidence_graph") {
         replaceParams({ panel: "evidence" });
         return;
       }
       if (command === "accept_handoff") {
-        void resolveCurrentHumanTask("accept");
+        await resolveCurrentHumanTask("accept");
         return;
       }
       if (command === "reject_handoff") {
-        void resolveCurrentHumanTask("reject");
+        await resolveCurrentHumanTask("reject");
         return;
       }
       if (command === "revise") {
-        void resolveCurrentHumanTask("revise");
+        await resolveCurrentHumanTask("revise");
         return;
       }
       if (!run || !runId || !selectedNodeId) {
-        setError("当前没有可执行命令的运行节点");
-        return;
+        const reason = new Error("当前没有可执行命令的运行节点");
+        setError(reason.message);
+        throw reason;
       }
       const capability = nodeDetail?.commands.find((item) => item.command === command);
       if (!capability) {
-        setError(`命令「${command}」后端未声明能力`);
-        return;
+        const reason = new Error(`命令「${command}」后端未声明能力`);
+        setError(reason.message);
+        throw reason;
       }
       setBusy(true);
       setError(null);
-      executeNodeCommand(
-        {
-          runId,
-          nodeId: selectedNodeId,
-          teamId,
-          runVersion: run.runVersion,
-          pendingHumanTaskId: pendingTaskId(selectedNodeId) || undefined,
-        },
-        capability,
-      )
-        .then(() => refresh())
-        .catch((reason: unknown) => {
-          setError(reason instanceof Error ? reason.message : String(reason));
-        })
-        .finally(() => setBusy(false));
+      try {
+        const result = await executeNodeCommand(
+          {
+            runId,
+            nodeId: selectedNodeId,
+            teamId,
+            runVersion: run.runVersion,
+            pendingHumanTaskId: pendingTaskId(selectedNodeId) || undefined,
+          },
+          {
+            ...capability,
+            payload: { ...(capability.payload ?? {}), ...(payload ?? {}) },
+          },
+        );
+        if (command === "fork_evidence_remediation") {
+          const childRunId = childRunIdFromCommandResult(result, runId);
+          if (!childRunId) {
+            throw new Error("证据补救子运行已提交，但响应缺少 childRunIds，无法安全跳转");
+          }
+          replaceParams({ runId: childRunId, node: "source_extraction", panel: "node" });
+          return;
+        }
+        await refresh();
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+        throw reason;
+      } finally {
+        setBusy(false);
+      }
     },
     [nodeDetail, pendingTaskId, refresh, replaceParams, resolveCurrentHumanTask, run, runId, selectedNodeId, teamId],
   );

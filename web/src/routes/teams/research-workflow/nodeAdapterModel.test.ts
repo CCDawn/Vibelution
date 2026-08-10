@@ -40,6 +40,7 @@ describe("nodeAdapterModel", () => {
       "start_controlled_run",
       "view_artifacts",
       "build_package",
+      "fork_evidence_remediation",
     ];
     const declared = listNodeAdapters().flatMap((a) => a.commands);
     for (const command of declared) {

@@ -3571,17 +3571,40 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
             "agentId": agent["agentId"],
             "agentRole": "source_extractor",
             "idempotencyKey": "retry-missing-evidence-anchor",
+            "formalRetry": True,
+            "evidenceRemediationContract": {
+                "schemaVersion": 1,
+                "parentRunId": "research-parent-run",
+                "sourceNodeId": "source_extraction",
+                "resolutionKind": "add_budget",
+                "evidenceGapCandidateIds": [candidates[1]["candidateId"]],
+                "scopeCandidateIds": [candidates[1]["candidateId"]],
+                "requiredExistingLocatorFetch": True,
+                "additionalBudget": {"toolCalls": 1},
+                "operatorReason": "补抓唯一缺少证据锚点的候选",
+            },
         },
     )
 
     assert retry_task["created"] is True
     assert retry_task["task"]["sourceContextMode"] == "retry_evidence"
     assert retry_task["task"]["retrySourceTaskId"] == task["taskId"]
+    assert retry_task["task"]["evidenceRemediationContract"]["scopeCandidateIds"] == [
+        candidates[1]["candidateId"]
+    ]
+    assert any(
+        item["id"] == "fetch_existing_locators"
+        and item["requiredTool"] == "web_fetch_tool"
+        for item in retry_task["task"]["taskChecklist"]
+    )
     assert '"context_mode": "retry_evidence"' in submitted_messages[-1]
     assert "只返回 `retryFocus.evidenceGapCandidateIds`" in submitted_messages[-1]
     assert "仅抓取该既有定位符补证" in submitted_messages[-1]
     assert "不要扩展检索方向" in submitted_messages[-1]
     assert "每页先补证并分批回写，再读取下一页" in submitted_messages[-1]
+    assert "正式证据修复 child Run" in submitted_messages[-1]
+    assert "`web_fetch_tool`" in submitted_messages[-1]
+    assert "`evidenceFetchAttempts[]`" in submitted_messages[-1]
     assert submitted_metadata[-1]["sourceContextMode"] == "retry_evidence"
     new_task_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
         team["teamId"],
@@ -3598,6 +3621,8 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     )
     assert authoritative_context["contextMode"] == "retry_evidence"
     assert [item["candidateId"] for item in authoritative_context["candidates"]] == [candidates[1]["candidateId"]]
+
+    _append_stage_task_tool_trace(tmp_path, retry_task["task"])
 
     retry_writeback = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
@@ -3624,6 +3649,14 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
                         "summary": "Legacy pre-candidate extraction retained for audit only.",
                     }
                 ],
+                "evidenceFetchAttempts": [
+                    {
+                        "candidateId": candidates[1]["candidateId"],
+                        "locator": candidates[1]["sourceUrl"],
+                        "status": "fetched",
+                        "toolName": "web_fetch_tool",
+                    }
+                ],
             },
             "recordedByAgent": agent["agentId"],
         },
@@ -3633,6 +3666,15 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
     assert retry_writeback["writeback"]["coverageSummary"]["missing"] == 0
     assert retry_writeback["writeback"]["coverageSummary"]["complete"] is True
     assert retry_writeback["writeback"]["coverageSummary"]["coverageKind"] == "candidate_extractions"
+    assert retry_writeback["writeback"]["closureSummary"]["evidenceFetchProgress"] == {
+        "required": True,
+        "total": 1,
+        "completed": 1,
+        "complete": True,
+        "completedCandidateIds": [candidates[1]["candidateId"]],
+        "missingCandidateIds": [],
+        "invalidCandidateIds": [],
+    }
     assert {
         item["candidateId"]
         for item in retry_writeback["task"]["result"]["candidateExtractions"]
@@ -5097,6 +5139,66 @@ def test_source_collection_stage_reconciliation_reuses_session_event_snapshot(mo
         )
 
     assert load_calls == ["session-shared-stage-reconciliation"]
+
+
+def test_evidence_remediation_fetch_progress_requires_auditable_result_per_candidate():
+    task = {
+        "evidenceRemediationContract": {
+            "requiredExistingLocatorFetch": True,
+            "scopeCandidateIds": ["candidate-a", "candidate-b"],
+        }
+    }
+
+    incomplete = team_workflow_orchestration_service._source_collection_evidence_fetch_progress(
+        task,
+        {
+            "evidenceFetchAttempts": [
+                {
+                    "candidateId": "candidate-a",
+                    "locator": "https://doi.org/10.0000/a",
+                    "status": "fetched",
+                    "toolName": "web_fetch_tool",
+                },
+                {
+                    "candidateId": "candidate-b",
+                    "locator": "https://doi.org/10.0000/b",
+                    "status": "failed",
+                    "toolName": "web_fetch_tool",
+                },
+            ]
+        },
+    )
+
+    assert incomplete["complete"] is False
+    assert incomplete["completedCandidateIds"] == ["candidate-a"]
+    assert incomplete["missingCandidateIds"] == ["candidate-b"]
+    assert incomplete["invalidCandidateIds"] == ["candidate-b"]
+
+    complete = team_workflow_orchestration_service._source_collection_evidence_fetch_progress(
+        task,
+        {
+            "evidenceFetchAttempts": [
+                {
+                    "candidateId": "candidate-a",
+                    "locator": "https://doi.org/10.0000/a",
+                    "status": "fetched",
+                    "toolName": "web_fetch_tool",
+                },
+                {
+                    "candidateId": "candidate-b",
+                    "locator": "https://doi.org/10.0000/b",
+                    "status": "failed",
+                    "failureCode": "upstream_not_found",
+                    "toolName": "web_fetch_tool",
+                },
+            ]
+        },
+    )
+
+    assert complete["complete"] is True
+    assert complete["completedCandidateIds"] == ["candidate-a", "candidate-b"]
+    assert complete["missingCandidateIds"] == []
+    assert complete["invalidCandidateIds"] == []
 
 def test_content_extraction_writeback_materializes_record_extractions_and_reports_partial_closure(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)

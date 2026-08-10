@@ -27,6 +27,19 @@ export type NodeCommandResult = {
   raw?: Record<string, unknown>;
 };
 
+export function childRunIdFromCommandResult(
+  result: NodeCommandResult,
+  parentRunId: string,
+): string | null {
+  if (result.command !== "fork_evidence_remediation") return null;
+  const childRunIds = result.raw?.childRunIds;
+  if (!Array.isArray(childRunIds)) return null;
+  const candidates = childRunIds
+    .map((item) => String(item).trim())
+    .filter((item) => item && item !== parentRunId);
+  return candidates.at(-1) ?? null;
+}
+
 /** Commands whose backend handler exists and can be invoked. */
 const EXECUTABLE = new Set([
   "start_agent_task",
@@ -40,6 +53,7 @@ const EXECUTABLE = new Set([
   "revise",
   "build_package",
   "open_evidence_graph",
+  "fork_evidence_remediation",
 ]);
 
 export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string {
@@ -56,6 +70,7 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
     view_artifacts: "查看产物",
     build_package: "生成结果包",
     rebind_node: "受控换绑",
+    fork_evidence_remediation: "创建证据补救运行",
   };
   const en: Record<string, string> = {
     start_agent_task: "Start agent task",
@@ -70,6 +85,7 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
     view_artifacts: "View artifacts",
     build_package: "Build result package",
     rebind_node: "Controlled rebind",
+    fork_evidence_remediation: "Create evidence remediation run",
   };
   return (lang === "zh" ? zh : en)[command] || command;
 }
@@ -114,8 +130,11 @@ export async function executeNodeCommand(
   ) {
     throw new Error("启动 Agent 任务缺少后端幂等与预算契约");
   }
-  if (command === "retry_execution" && !capability.idempotencyKey?.trim()) {
-    throw new Error("节点重试缺少后端幂等契约");
+  if (
+    (command === "retry_execution" || command === "fork_evidence_remediation")
+    && !capability.idempotencyKey?.trim()
+  ) {
+    throw new Error("节点命令缺少后端幂等契约");
   }
 
   if (command === "accept_handoff" || command === "reject_handoff" || command === "revise") {
@@ -139,7 +158,9 @@ export async function executeNodeCommand(
     teamId: context.teamId,
     expectedRunVersion: context.runVersion,
     idempotencyKey:
-      command === "start_agent_task" || command === "retry_execution"
+      command === "start_agent_task"
+        || command === "retry_execution"
+        || command === "fork_evidence_remediation"
         ? capability.idempotencyKey!
         : `node:${runId}:${nodeId}:${command}:v${context.runVersion}`,
     command,

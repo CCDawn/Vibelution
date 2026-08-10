@@ -2073,6 +2073,10 @@ def _source_collection_stage_task_tool_progress_from_trace(
             for tool_call in tool_calls
             if s._source_collection_stage_tool_call_succeeded(tool_call)
         }
+        attempted_tool_names = {
+            s._source_collection_stage_tool_call_name(tool_call)
+            for tool_call in tool_calls
+        }
         persisted_writeback_after_turn = s._source_collection_stage_persisted_writeback_after_turn(task)
         writeback_observed = (
             "source_collection_stage_writeback_tool" in successful_tool_names
@@ -2112,7 +2116,11 @@ def _source_collection_stage_task_tool_progress_from_trace(
             if required_tool == "source_collection_stage_writeback_tool":
                 item_complete = bool(writeback_observed and artifact_complete)
             elif required_tool:
-                item_complete = required_tool in successful_tool_names
+                item_complete = (
+                    required_tool in attempted_tool_names
+                    if required_tool == "web_fetch_tool"
+                    else required_tool in successful_tool_names
+                )
                 if (
                     not item_complete
                     and required_tool == "batch_web_search_tool"
@@ -2751,6 +2759,25 @@ def _source_collection_stage_session_task_message(
     ]
     previous_attempt_lines = s._source_collection_stage_previous_attempt_lines(previous_task)
     previous_attempt_block = [*previous_attempt_lines, ""] if previous_attempt_lines else []
+    evidence_remediation_contract = (
+        writeback_contract.get("evidenceRemediationContract")
+        if isinstance(writeback_contract.get("evidenceRemediationContract"), dict)
+        else {}
+    )
+    remediation_scope_ids = s._normalize_text_list(
+        evidence_remediation_contract.get("scopeCandidateIds"),
+        max_items=120,
+        max_length=160,
+    )
+    remediation_lines = (
+        [
+            "- 本轮是正式证据修复 child Run；只处理冻结的 scopeCandidateIds，禁止扩展检索范围。",
+            f"- 必须为每个 scopeCandidateId 调用一次 `web_fetch_tool` 抓取其既有 DOI/URL，并在 `evidenceFetchAttempts[]` 记录 candidateId、locator、status、toolName；失败时同时写 failureCode。冻结范围：{json.dumps(remediation_scope_ids, ensure_ascii=False)}",
+            "- 所有既有定位符均尝试后，仍证据不足才允许写 `needs_review`；不得跳过抓取直接沿用上一轮结论。",
+        ]
+        if evidence_remediation_contract
+        else []
+    )
     if can_materialize_formal_knowledge:
         pagination_lines = [
             "- 本任务是资料入库：读取一次 `source_collection_context_tool` 后，如果返回 `stewardActionPacket.approvedCandidateIds` 和 `writebackResultSkeleton`，优先立刻调用 `source_collection_stage_writeback_tool` 写回，不要先重读全部资料。",
@@ -2793,6 +2820,7 @@ def _source_collection_stage_session_task_message(
             ),
             *pagination_lines,
             *stage_writeback_lines,
+            *remediation_lines,
             "- 可以分批调用 `source_collection_stage_writeback_tool`，系统会按真实 `candidateId` / `recordId` 累计上一批结果；不要因为 compact 返回未展开完整数组而重复提交同一大包。",
             (
                 "- 资料提炼阶段若受控摘要不足，但 `candidates[].sourceUrl` 或 `doi` 存在，可用 `web_fetch_tool` 仅抓取该既有定位符补证；"

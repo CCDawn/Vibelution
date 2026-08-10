@@ -53,7 +53,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     label: "资料提炼",
     actorKind: "agent",
     slot: "knowledge_ops",
-    commands: ["start_agent_task", "open_session"],
+    commands: ["start_agent_task", "fork_evidence_remediation", "open_session"],
     replaces: "collectionStage=extraction",
   },
   {
@@ -208,6 +208,7 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
     start_controlled_run: "启动受控运行",
     view_artifacts: "查看产物",
     build_package: "生成结果包",
+    fork_evidence_remediation: "创建证据补救运行",
   };
   const en: Record<string, string> = {
     start_agent_task: "Start agent task",
@@ -220,6 +221,7 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
     start_controlled_run: "Start controlled run",
     view_artifacts: "View artifacts",
     build_package: "Build result package",
+    fork_evidence_remediation: "Create evidence remediation run",
   };
   return (lang === "zh" ? zh : en)[command] || command;
 }

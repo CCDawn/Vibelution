@@ -177,6 +177,10 @@ def _start_external_task(
                 "idempotencyKey": idempotency_key,
                 "returnTo": return_to,
                 "returnLabel": "科研工作流",
+                "formalRetry": bool(record.get("evidenceRemediationContract")),
+                "evidenceRemediationContract": dict(
+                    record.get("evidenceRemediationContract") or {}
+                ),
             },
         )
         return record, started
