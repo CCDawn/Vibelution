@@ -62,6 +62,8 @@ NEXT_ACTION_MARKERS = (
     "建议",
     "可以先",
     "我会继续",
+    "有什么可以帮你",
+    "how can i help",
     "recommended_next_action",
     "next action",
 )
