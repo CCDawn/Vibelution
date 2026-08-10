@@ -86,6 +86,25 @@ describe("conversation operation state helpers", () => {
     ])).toBe("degraded");
   });
 
+  it("treats incomplete live operation fields as pending instead of throwing during render", () => {
+    const incomplete = operation({
+      status: undefined as unknown as string,
+      label: undefined as unknown as string,
+      summary: undefined as unknown as string,
+    });
+
+    expect(isRunningOperationStatus(undefined as unknown as string)).toBe(false);
+    expect(operationStatusTone(incomplete)).toBe("pending");
+    expect(operationDisplayLabel(incomplete, labels)).toBe("Tool");
+    expect(processSummaryPreview([incomplete], labels, (value) => value)).toBe("");
+
+    expect(processSummaryPreview([
+      { ...incomplete, status: "running" },
+      { ...incomplete, status: "degraded" },
+      { ...incomplete, status: "failed" },
+    ], labels, (value) => value)).toBe("Tool");
+  });
+
   it("shows long-loop status operations while hiding internal pipeline noise", () => {
     const internalStatus = operation({
       id: "context",

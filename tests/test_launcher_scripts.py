@@ -160,6 +160,37 @@ def test_python_launcher_workbench_window_applies_vibelution_app_identity():
     assert "browserWindowIconApplied" in source
 
 
+def test_python_launcher_workbench_identity_finds_the_profile_owned_window(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+
+    monkeypatch.setattr(launcher, "os", type("FakeOs", (), {"name": "nt"})())
+    monkeypatch.setattr(launcher, "WORKBENCH_BROWSER_PROFILE_DIR", tmp_path / "workbench-profile")
+    monkeypatch.setattr(launcher, "_visible_windows_for_process", lambda pid: [90210] if pid == 4736 else [])
+    monkeypatch.setattr(launcher, "_managed_browser_pids_for_profile", lambda profile_dir: [4736])
+    monkeypatch.setattr(launcher, "_window_process_id", lambda hwnd: 4736)
+
+    assert launcher._MANAGED_BROWSER_IDENTITY_TIMEOUT_SECONDS <= 1.0
+    assert launcher._managed_browser_window_candidates(47264, "workbench") == [
+        {"hwnd": 90210, "processId": 4736, "resolvedBy": "workbench_profile"},
+    ]
+
+
+def test_python_launcher_workbench_identity_skips_profile_scan_after_exact_pid_match(monkeypatch):
+    launcher = _load_python_launcher()
+
+    monkeypatch.setattr(launcher, "_visible_windows_for_process", lambda pid: [90210] if pid == 47264 else [])
+    monkeypatch.setattr(launcher, "_window_process_id", lambda hwnd: 47264)
+    monkeypatch.setattr(
+        launcher,
+        "_managed_browser_pids_for_profile",
+        lambda profile_dir: pytest.fail("exact launch-PID match must not scan all Edge processes"),
+    )
+
+    assert launcher._managed_browser_window_candidates(47264, "workbench") == [
+        {"hwnd": 90210, "processId": 47264, "resolvedBy": "launch_pid"},
+    ]
+
+
 def test_python_launcher_imports_safely_on_non_windows(monkeypatch):
     fake_os = types.ModuleType("os")
     fake_os.name = "posix"

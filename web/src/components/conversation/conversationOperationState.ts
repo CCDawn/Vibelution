@@ -29,8 +29,12 @@ export type OperationStateLabels = {
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
 const DEGRADED_OPERATION_STATUSES = new Set(["degraded", "fallback", "partial", "recovered", "unavailable"]);
 
+function normalizedOperationText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
 export function operationStatusTone(operation: AgentMessageOperation): OperationStateTone {
-  const status = operation.status.trim().toLowerCase();
+  const status = normalizedOperationText(operation.status).toLowerCase();
   if (["failed", "error", "timeout"].includes(status)) {
     return "failed";
   }
@@ -47,14 +51,14 @@ export function operationStatusTone(operation: AgentMessageOperation): Operation
 }
 
 export function isRunningOperationStatus(status: string) {
-  return RUNNING_OPERATION_STATUSES.has(status.trim().toLowerCase());
+  return RUNNING_OPERATION_STATUSES.has(normalizedOperationText(status).toLowerCase());
 }
 
 export function operationDisplayLabel(operation: AgentMessageOperation, labels: Pick<OperationStateLabels, "toolProcess">) {
   if (operation.kind !== "tool") {
     return operation.label;
   }
-  const normalized = operation.label.trim();
+  const normalized = normalizedOperationText(operation.label);
   return normalized || labels.toolProcess;
 }
 
@@ -210,7 +214,7 @@ export function processSummaryPreview(
     return "";
   }
   const preview = tone === "running"
-    ? running?.summary.trim()
+    ? normalizedOperationText(running?.summary)
       || running?.resultPreview?.trim()
       || (running ? operationDisplayLabel(running, labels).trim() : "")
     : tone === "failed"
@@ -230,7 +234,7 @@ function degradedOperationSummary(
   if (!operation) {
     return "";
   }
-  const raw = operation.summary.trim() || operation.error?.trim() || operation.resultPreview?.trim() || "";
+  const raw = normalizedOperationText(operation.summary) || operation.error?.trim() || operation.resultPreview?.trim() || "";
   const readable = readableStructuredSummary(raw) || readablePlainFailureText(raw, operation) || raw.trim();
   const label = operationDisplayLabel(operation, labels).trim();
   if (readable && label && readable !== label && !isUnmappedRawToolLabel(label, operation)) {
@@ -260,7 +264,7 @@ function bestFailedOperationSummary(
   });
   if (candidates.length === 0) {
     operations.forEach((operation, index) => {
-      if (operation.summary.trim() || operation.error?.trim()) {
+      if (normalizedOperationText(operation.summary) || operation.error?.trim()) {
         const summary = failedOperationSummary(operation, labels, index);
         if (summary) {
           candidates.push(summary);
@@ -280,7 +284,7 @@ function failedOperationSummary(
   if (!operation) {
     return null;
   }
-  const rawSummary = operation.summary.trim();
+  const rawSummary = normalizedOperationText(operation.summary);
   const rawError = operation.error?.trim() || "";
   const rawResult = operation.resultPreview?.trim() || "";
   const raw = rawSummary || rawError || rawResult;
