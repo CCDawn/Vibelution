@@ -375,7 +375,7 @@ hash = stableStringify({
 | `workflowElkEdgePath.ts` | sections → SVG path（纯函数） | 状态 |
 | `useWorkflowAutoLayout.ts` | hash / 单飞 / last-good / settling / fit / 尺寸校准上报 | 几何 |
 | `workflowElkLayout.test.ts` | 探针 + 几何不变量 + 确定性断言 | Browser Worker 验收 |
-| `web/probes/workflow-elk-handshake.html` / `.ts`（T5 移除） | Browser Worker handshake 测试入口；仅 test-only probe build（`VIBELUTION_PROBE_BUILD=1`）构建，不进入普通 `npm run build` 产物 | 产品 UI |
+| `web/probes/workflow-elk-handshake.html` / `.ts`（T5 后恢复） | Browser Worker handshake 测试入口；仅 test-only probe build（`VIBELUTION_PROBE_BUILD=1`）构建，不进入普通 `npm run build` 产物 | 产品 UI |
 
 调整：
 

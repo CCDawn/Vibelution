@@ -197,11 +197,21 @@ def test_content_extraction_writeback_contract_distinguishes_source_locators_fro
     )
 
     result_contract = contract["resultContract"]
-    assert result_contract["acceptedCollections"] == ["candidateExtractions", "recordExtractions"]
+    assert result_contract["acceptedCollections"] == [
+        "candidateExtractions",
+        "recordExtractions",
+        "evidenceFetchAttempts",
+    ]
     assert result_contract["sourceLocatorFields"] == ["sourceRefs"]
     assert result_contract["evidenceAnchorFields"] == ["evidenceRefs", "claims", "keyFindings", "citations"]
     assert result_contract["locatorOnlyTypes"] == ["doi", "url", "uri", "paper"]
     assert result_contract["locatorOnlySatisfiesEvidenceAnchor"] is False
+    assert result_contract["evidenceFetchAttemptFields"] == [
+        "candidateId",
+        "locator",
+        "status",
+        "toolName",
+    ]
 
 def test_stage_checklist_accepts_persisted_writeback_recorded_after_interrupted_turn(monkeypatch):
     context_event = SimpleNamespace(
