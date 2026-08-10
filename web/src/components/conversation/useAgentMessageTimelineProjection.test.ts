@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 
-import type { ConversationMessage } from "../../api/types";
+import type { ConversationMessage, SessionTurnItem } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import { buildAgentMessageOperations } from "./agentMessageOperations";
 import { buildAgentMessageTimelineItems } from "./agentMessageTimeline";
@@ -53,4 +53,35 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.messages).toEqual([]);
     expect(projection.agentMessages).toEqual([]);
     expect(projection.rowIdentities).toEqual([]);
-  });});
+  });
+
+  it("keeps incomplete live text revisions from crashing the strict renderer adapter", () => {
+    const incompleteItem = (type: "agent_message" | "reasoning", sequence: number): SessionTurnItem => ({
+      id: `${type}-${sequence}`,
+      itemId: `${type}-${sequence}`,
+      version: 3,
+      sessionId: "session-live",
+      turnId: "turn-live",
+      status: "running",
+      revision: 0,
+      sequence,
+      type,
+      ...(type === "agent_message" ? { phase: "commentary" as const } : {}),
+      text: undefined as unknown as string,
+    });
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [{
+        id: "live-turn",
+        role: "assistant",
+        turnId: "turn-live",
+        status: "running",
+        turnItems: [incompleteItem("reasoning", 1), incompleteItem("agent_message", 2)],
+        timestamp: "2026-08-10T12:00:00Z",
+      }],
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.agentMessages).toHaveLength(1);
+    expect(projection.agentMessages[0]?.parts).toEqual([]);
+  });
+});
