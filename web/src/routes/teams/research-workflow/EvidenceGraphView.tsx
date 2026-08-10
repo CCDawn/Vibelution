@@ -15,6 +15,7 @@ import {
   VSurface,
 } from "../../../components/vui";
 import { executeNodeCommand } from "./nodeCommandAdapter";
+import styles from "./EvidenceGraphView.styles";
 
 export type EvidenceGraphViewProps = {
   runId: string;
@@ -81,51 +82,51 @@ export function EvidenceGraphContent({ graph }: { graph: EvidenceGraphDto }) {
 
   return (
     <>
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]">
+      <div className={styles.headerRow}>
+        <div className={styles.sectionLabel}>
           证据关系图 · {nodes.length} 节点 / {edges.length} 关系
         </div>
       </div>
       {nodes.length === 0 ? (
-        <VEmptyState title="暂无图数据" className="h-auto w-full border-0 bg-transparent">
+        <VEmptyState title="暂无图数据" className={styles.emptyState}>
           后端投影未返回节点；先完成证据卡与关系图产出。
         </VEmptyState>
       ) : (
         <>
           {sections.map((section) => (
-            <div key={section.key} className="grid gap-1">
-              <div className="text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]">
+            <div key={section.key} className={styles.sectionGrid}>
+              <div className={styles.sectionLabel}>
                 {section.label}（{section.items.length}）
               </div>
-              <ul className="m-0 list-none space-y-1 p-0">
+              <ul className={styles.list}>
                 {section.items.map((node) => (
                   <li
                     key={node.id}
-                    className="rounded border border-[var(--border-subtle)] px-2 py-1.5 text-xs"
+                    className={styles.nodeItem}
                   >
-                    <div className="font-medium break-all text-[var(--fg-primary)]">
+                    <div className={styles.nodeTitle}>
                       {nodeTitle(node)}
                     </div>
                     {nodeDetail(node) ? (
-                      <div className="break-all text-[var(--fg-secondary)]">{nodeDetail(node)}</div>
+                      <div className={styles.nodeMeta}>{nodeDetail(node)}</div>
                     ) : null}
                   </li>
                 ))}
               </ul>
             </div>
           ))}
-          <div className="grid gap-1">
-            <div className="text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]">
+          <div className={styles.sectionGrid}>
+            <div className={styles.sectionLabel}>
               关系
             </div>
             {edges.length === 0 ? (
-              <p className="m-0 text-xs text-[var(--fg-secondary)]">暂无关系边</p>
+              <p className={styles.emptyEdges}>暂无关系边</p>
             ) : (
-              <ul className="m-0 list-none space-y-1 p-0">
+              <ul className={styles.list}>
                 {edges.map((edge) => (
                   <li
                     key={`${edge.source}->${edge.target}:${edge.kind}`}
-                    className="rounded border border-[var(--border-subtle)] px-2 py-1.5 text-xs break-all text-[var(--fg-primary)]"
+                    className={styles.edgeItem}
                   >
                     {edge.source} —{KIND_LABELS[edge.kind] ?? edge.kind}→ {edge.target}
                   </li>
@@ -165,10 +166,10 @@ export function EvidenceGraphView({ runId, nodeId, teamId }: EvidenceGraphViewPr
 
   if (state.kind === "idle") {
     return (
-      <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3" data-vui="evidence-graph-view">
+      <VSurface tone="panel" className={styles.panel} data-vui="evidence-graph-view">
         <VEmptyState
           title="证据关系图"
-          className="h-auto w-full border-0 bg-transparent"
+          className={styles.emptyState}
           actions={
             <VButton type="button" variant="secondary" onClick={() => void loadGraph()}>
               生成证据图
@@ -183,17 +184,17 @@ export function EvidenceGraphView({ runId, nodeId, teamId }: EvidenceGraphViewPr
 
   if (state.kind === "loading") {
     return (
-      <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3">
-        <VStateSurface tone="loading" title="生成证据图" fill className="h-full min-h-0" />
+      <VSurface tone="panel" className={styles.panel}>
+        <VStateSurface tone="loading" title="生成证据图" fill className={styles.fill} />
       </VSurface>
     );
   }
 
   if (state.kind === "error") {
     return (
-      <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3">
+      <VSurface tone="panel" className={styles.panel}>
         <div
-          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]"
+          className={styles.alert}
           role="alert"
         >
           {state.message}
@@ -207,7 +208,7 @@ export function EvidenceGraphView({ runId, nodeId, teamId }: EvidenceGraphViewPr
 
   const { nodes, edges } = state.graph;
   return (
-    <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3" data-vui="evidence-graph-view">
+    <VSurface tone="panel" className={styles.panel} data-vui="evidence-graph-view">
       <EvidenceGraphContent graph={{ nodes, edges }} />
     </VSurface>
   );
