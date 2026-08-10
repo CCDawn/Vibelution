@@ -20,8 +20,10 @@ describe("ChatCodingRoute layout contract", () => {
       "onClick={() => onMentalModelEnabledChange(!mentalModelEnabledForNextTurn)}",
     );
     expect(chatStatusRailSource).toContain("title={t(\"chatFeatureMentalModelHint\")}");
-    expect(chatStatusRailSource.indexOf("styles.featureChipPrimary")).toBeLessThan(
-      chatStatusRailSource.indexOf("CHAT_FEATURE_PRESETS.map"),
+    // The mental-model chip stays the first chip inside the next-turn preset row,
+    // ahead of the runtime-status chip (VUI renderer buttons, no preset map loop).
+    expect(chatStatusRailSource.indexOf("mentalModelEnabledForNextTurn")).toBeLessThan(
+      chatStatusRailSource.indexOf("runtimeStatusEnabledForNextTurn"),
     );
     expect(chatRoute).toContain("mentalModelEnabledForNextTurn={mentalModelEnabledForNextTurn}");
     expect(chatRoute).toContain("onMentalModelEnabledChange={handleMentalModelEnabledChange}");

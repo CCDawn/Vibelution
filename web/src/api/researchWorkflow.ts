@@ -14,6 +14,7 @@ import type {
   WorkflowCanvasProjection,
   WorkflowDefinition,
 } from "./types/researchWorkflow";
+import type { TeamResearchProjectListPayload } from "./types/teams";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "./types/researchWorkflow";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
@@ -333,4 +334,12 @@ export async function fetchResearchWorkflowEvaluation(
 
 export function researchWorkflowStreamUrl(runId: string, options: RequiredTeamScope): string {
   return `/api/research/workflow-runs/${encodeURIComponent(runId)}/stream${teamQuery(options.teamId)}`;
+}
+
+export async function fetchTeamWorkflowResearchProjects(
+  teamId: string,
+): Promise<TeamResearchProjectListPayload> {
+  return fetchJson(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects`,
+  );
 }

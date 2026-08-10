@@ -147,9 +147,11 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).toContain("copy.leaveGuardDiscard");
     expect(configRouteSource).toContain("copy.leaveGuardCancel");
 
-    expect(configRouteSource).toContain("styles.leaveGuardOverlay");
-    expect(configRouteSource).toContain("styles.leaveGuardPanel");
-    expect(configRouteStylesSource).toContain("leaveGuardOverlay:");
+    // VUI migration: the leave guard is a VDialog surface, not a hand-rolled overlay.
+    expect(configRouteSource).toContain("open={leaveGuardOpen}");
+    expect(configRouteSource).toContain("contentClassName={styles.leaveGuardPanel}");
+    expect(configRouteSource).not.toContain("styles.leaveGuardOverlay");
     expect(configRouteStylesSource).toContain("leaveGuardPanel:");
+    expect(configRouteStylesSource).not.toContain("leaveGuardOverlay:");
   });
 });

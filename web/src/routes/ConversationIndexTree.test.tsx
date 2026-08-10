@@ -228,7 +228,7 @@ describe("ConversationIndexTree", () => {
 
     expect(markup).toContain("待配置团队");
     expect(markup).toContain("空团队");
-    expect(markup).toContain("0人");
+    expect(markup).toContain("0 人");
   });
 
   it("marks the session targeted by the right-click context menu", () => {
