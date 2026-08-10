@@ -35,16 +35,7 @@ export function TeamSourceCollectionStageAgentsPanel({
   return (
     <section className={styles.sourceCollectionStageAgentPanel} aria-label={isZh ? "当前步骤 Agent 配置" : "Current step Agent configuration"}>
       <div className={styles.sourceCollectionStageAgentHeader}>
-        <div>
-          <strong>{isZh ? "当前步骤 Agent 配置" : "Step Agent configuration"}</strong>
-          <span>
-            {agents.length} {isZh ? "个功能 Agent" : "functional Agents"}
-          </span>
-        </div>
-        <Link to="/agents">
-          <Link2 size={12} />
-          {isZh ? "Agent 管理" : "Agent management"}
-        </Link>
+        <strong>{isZh ? "Agent 配置" : "Agent configuration"}</strong>
       </div>
       <div className={styles.sourceCollectionStageAgentList}>
         {agents.map((agent) => (
@@ -64,10 +55,12 @@ export function TeamSourceCollectionStageAgentsPanel({
                 <small>Agent</small>
                 <strong>{agent.agentName}</strong>
               </span>
-              <span>
-                <small>{isZh ? "模型" : "Model"}</small>
-                <strong>{agent.modelLabel}</strong>
-              </span>
+              {agent.modelLabel ? (
+                <span>
+                  <small>{isZh ? "模型" : "Model"}</small>
+                  <strong>{agent.modelLabel}</strong>
+                </span>
+              ) : null}
             </div>
             <div className={styles.sourceCollectionStageAgentCardActions}>
               <span>{agent.statusLabel}</span>

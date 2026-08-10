@@ -8,6 +8,7 @@ export function NodeAgentSection({ detail }: { detail: ResearchWorkflowNodeDetai
   const card = buildResearchAgentCard({
     nodeId: detail.nodeId,
     roleKey: detail.primaryRoleKey,
+    roleLabel: detail.label,
     agentId,
     agentName: String(snapshot.displayName || agentId),
     resolvedFrom: String(snapshot.resolvedFrom || "unbound"),

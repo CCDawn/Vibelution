@@ -17,6 +17,11 @@ export function useResearchWorkflowProjectContext(teamId: string) {
 
   return {
     activeProjectId: String(query.data?.activeProjectId || "").trim(),
+    activeProjectName: String(
+      query.data?.projects?.find((project) => project.projectId === query.data?.activeProjectId)?.name
+      || query.data?.project?.name
+      || "",
+    ).trim(),
     loading: query.isPending,
     error: query.error instanceof Error ? query.error.message : query.error ? String(query.error) : null,
   };

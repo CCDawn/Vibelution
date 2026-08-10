@@ -22,8 +22,10 @@ const SOURCE_LABELS: Record<string, string> = {
 export function buildResearchAgentCard(input: {
   nodeId: string;
   roleKey: string;
+  roleLabel?: string;
   agentId: string;
   agentName?: string;
+  modelLabel?: string;
   resolvedFrom: string;
   sessionBound: boolean;
   lang?: "zh" | "en";
@@ -41,9 +43,9 @@ export function buildResearchAgentCard(input: {
     tone: !input.agentId || input.resolvedFrom === "unbound"
       ? "missing"
       : input.sessionBound ? "ready" : "warning",
-    roleLabel: ROLE_LABELS[input.roleKey] ?? input.roleKey,
+    roleLabel: input.roleLabel || ROLE_LABELS[input.roleKey] || (isZh ? "科研执行" : "Research execution"),
     agentName: input.agentName || input.agentId || (isZh ? "未绑定" : "Unbound"),
-    modelLabel: input.roleKey,
+    modelLabel: input.modelLabel || "",
     statusLabel,
     memoryRoute: "",
     configRoute: input.agentId

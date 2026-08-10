@@ -7,6 +7,7 @@ import {
 } from "../../../api/researchWorkflow";
 import { queryKeys } from "../../../api/queryKeys";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
+import { buildResearchRunOptions } from "./researchRunPresentation";
 
 export function useResearchWorkflowCatalog(teamId: string, runVersion: number | null) {
   const enabled = Boolean(teamId.trim());
@@ -29,10 +30,7 @@ export function useResearchWorkflowCatalog(teamId: string, runVersion: number | 
 
   const error = runsQuery.error || bindingsQuery.error;
   return {
-    runOptions: (runsQuery.data?.runs ?? []).map((run) => ({
-      runId: run.runId,
-      status: run.status,
-    })),
+    runOptions: buildResearchRunOptions(runsQuery.data?.runs ?? []),
     effectiveBindings: bindingsQuery.data?.bindings ?? null,
     loading: enabled && (runsQuery.isPending || bindingsQuery.isPending),
     error: !enabled

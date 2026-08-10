@@ -21,7 +21,7 @@ describe("DefinitionNodeAgentSection", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("当前步骤 Agent 配置");
+    expect(markup).toContain("Agent 配置");
     expect(markup).toContain("资料提炼 Agent");
     expect(markup).toContain("已绑定 · 团队/工作流默认");
     expect(markup).toContain("pane=config");
