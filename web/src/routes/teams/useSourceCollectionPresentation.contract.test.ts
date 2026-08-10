@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 const routeShellSource = readFileSync(new URL("./TeamsRouteWorkbench.tsx", import.meta.url), "utf8");
 const routeModelSource = readFileSync(new URL("./useTeamsWorkbenchModel.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchFoundation.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8");
-const routeSource = `${routeShellSource}\n${routeModelSource}`;
+const lazyScPhaseSource = readFileSync(new URL("./TeamsWorkbenchWithScPhase.tsx", import.meta.url), "utf8");
+const scLayerSource = readFileSync(new URL("./useTeamsWorkbenchScLayer.ts", import.meta.url), "utf8");
+const routeSource = `${routeShellSource}\n${routeModelSource}\n${lazyScPhaseSource}\n${scLayerSource}`;
 const presentationCoreSource = readFileSync(new URL("./useSourceCollectionPresentationCore.ts", import.meta.url), "utf8");
 const presentationPipelineSource = readFileSync(new URL("./useSourceCollectionPresentationPipeline.ts", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useSourceCollectionPresentationMid.ts", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useSourceCollectionPresentationTail.ts", import.meta.url), "utf8");
 const presentationSource = `${presentationCoreSource}\n${presentationPipelineSource}`;
