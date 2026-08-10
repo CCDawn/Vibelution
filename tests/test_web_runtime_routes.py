@@ -3575,13 +3575,13 @@ def test_launcher_desktop_session_routes_write_revisioned_window_projection(monk
     monkeypatch.setattr(
         standalone_launcher_service,
         "heartbeat_desktop_session",
-        lambda desktop_session_id: calls.append(("heartbeat", desktop_session_id))
+        lambda desktop_session_id, payload: calls.append(("heartbeat", desktop_session_id, payload))
         or {"desktopSessionId": desktop_session_id, "revision": 3, "status": "active"},
     )
     monkeypatch.setattr(
         standalone_launcher_service,
         "close_desktop_session",
-        lambda desktop_session_id: calls.append(("close", desktop_session_id))
+        lambda desktop_session_id, payload: calls.append(("close", desktop_session_id, payload))
         or {"desktopSessionId": desktop_session_id, "revision": 4, "status": "closed"},
     )
 
@@ -3593,8 +3593,8 @@ def test_launcher_desktop_session_routes_write_revisioned_window_projection(monk
         "/api/launcher/desktop-sessions/desktop-session-1/windows/launcher",
         json={"revision": 1, "provider": "electron", "open": True, "focused": True, "windowId": 7, "rendererProcessId": 7070, "url": "http://127.0.0.1:8765/launcher"},
     )
-    heartbeat = client.post("/api/launcher/desktop-sessions/desktop-session-1/heartbeat")
-    closed = client.delete("/api/launcher/desktop-sessions/desktop-session-1")
+    heartbeat = client.post("/api/launcher/desktop-sessions/desktop-session-1/heartbeat", json={"revision": 2})
+    closed = client.request("DELETE", "/api/launcher/desktop-sessions/desktop-session-1", json={"revision": 3})
 
     assert registered.status_code == 201
     assert window.status_code == 200
@@ -3602,7 +3602,34 @@ def test_launcher_desktop_session_routes_write_revisioned_window_projection(monk
     assert closed.status_code == 200
     assert calls[0][0] == "register"
     assert calls[1][0:3] == ("window", "desktop-session-1", "launcher")
-    assert calls[2:] == [("heartbeat", "desktop-session-1"), ("close", "desktop-session-1")]
+    assert calls[2:] == [
+        ("heartbeat", "desktop-session-1", {"revision": 2}),
+        ("close", "desktop-session-1", {"revision": 3}),
+    ]
+
+
+def test_launcher_desktop_session_window_revision_conflict_is_structured(monkeypatch):
+    from core.launcher.desktop_session_store import DesktopSessionRevisionConflict
+
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "update_desktop_session_window",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(DesktopSessionRevisionConflict(3, 4)),
+    )
+
+    conflict = client.put(
+        "/api/launcher/desktop-sessions/desktop-session-1/windows/workbench",
+        json={"revision": 3, "provider": "electron", "open": True},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == {
+        "code": "desktop_session_revision_conflict",
+        "message": "desktop session revision conflict: expected 3, actual 4",
+        "expectedDesktopSessionRevision": 3,
+        "actualDesktopSessionRevision": 4,
+    }
+
 
 def test_runtime_scene_event_helper_keeps_noisy_observations_out_of_timeline(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event-noise", status="running")

@@ -82,6 +82,10 @@ class DesktopSessionWindowPayload(BaseModel):
     url: str = ""
 
 
+class DesktopSessionRevisionPayload(BaseModel):
+    revision: int = 0
+
+
 class LauncherRuntimeSceneEventPayload(BaseModel):
     eventCode: str
     message: str = ""

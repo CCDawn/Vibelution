@@ -25,7 +25,12 @@ class FakeWindow implements ElectronWindowLike {
   private focused = false;
   private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
 
-  constructor(id: number, private readonly url: string, rendererProcessId: number) {
+  constructor(
+    id: number,
+    private readonly url: string,
+    rendererProcessId: number,
+    private readonly closeEmitsClosed = true
+  ) {
     this.id = id;
     this.webContents = {
       getOSProcessId: () => rendererProcessId,
@@ -59,6 +64,9 @@ class FakeWindow implements ElectronWindowLike {
 
   close(): void {
     this.closeCount += 1;
+    if (!this.closeEmitsClosed) {
+      return;
+    }
     this.destroyed = true;
     this.emit("closed");
   }
@@ -138,6 +146,48 @@ describe("Electron window provider state", () => {
       rendererProcessId: 4242,
       url: "http://127.0.0.1:8000/"
     });
+  });
+
+  it("does not report an optimistic closed state when BrowserWindow.close is cancelled", async () => {
+    const reports: Array<{ open: boolean }> = [];
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      reportState: (state) => {
+        reports.push({ open: state.open });
+      }
+    });
+
+    await provider.openOrFocusWorkbench();
+    reports.length = 0;
+
+    const stateAfterCloseRequest = await provider.closeWorkbench();
+
+    expect(workbenchWindow.closeCount).toBe(1);
+    expect(stateAfterCloseRequest.open).toBe(true);
+    expect(reports).toEqual([]);
+
+    workbenchWindow.emit("closed");
+
+    expect(reports).toEqual([{ open: false }]);
+  });
+
+  it("reports Windows session-end signals without treating them as a confirmed window close", async () => {
+    const sessionEndEvents: string[] = [];
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      onOsSessionEnd: (event, role) => sessionEndEvents.push(`${event}:${role}`)
+    });
+
+    await provider.openOrFocusWorkbench();
+    workbenchWindow.emit("query-session-end");
+    workbenchWindow.emit("session-end");
+
+    expect(sessionEndEvents).toEqual(["query-session-end:workbench", "session-end:workbench"]);
+    expect(provider.snapshot().workbench.open).toBe(true);
   });
 
   it("reuses an open launcher window and focuses it for public deep links", async () => {

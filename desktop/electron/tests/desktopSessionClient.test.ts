@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   closeDesktopSession,
+  DesktopSessionConflictError,
   heartbeatDesktopSession,
   registerDesktopSession,
   reportDesktopWindowState
@@ -29,12 +30,14 @@ describe("desktop session client", () => {
       launcherOrigin: "http://127.0.0.1:8765/launcher",
       controlToken: "token",
       desktopSessionId: "desktop-session-1",
+      revision: 1,
       fetchImpl
     });
     await closeDesktopSession({
       launcherOrigin: "http://127.0.0.1:8765/launcher",
       controlToken: "token",
       desktopSessionId: "desktop-session-1",
+      revision: 2,
       fetchImpl
     });
 
@@ -49,6 +52,8 @@ describe("desktop session client", () => {
       workspaceRoot: "C:/Users/17533/Desktop/Vibelution",
       capabilities: ["desktop_actions.claim"]
     });
+    expect(JSON.parse(String(requests[1].init.body))).toEqual({ revision: 1 });
+    expect(JSON.parse(String(requests[2].init.body))).toEqual({ revision: 2 });
   });
 
   it("reports a bounded electron window state update", async () => {
@@ -97,6 +102,32 @@ describe("desktop session client", () => {
       windowId: 42,
       rendererProcessId: 4242,
       url: "http://127.0.0.1:8000"
+    });
+  });
+
+  it("surfaces a structured revision conflict without treating it as a successful close", async () => {
+    await expect(
+      closeDesktopSession({
+        launcherOrigin: "http://127.0.0.1:8765/launcher",
+        controlToken: "token",
+        desktopSessionId: "desktop-session-1",
+        revision: 4,
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              detail: {
+                code: "desktop_session_revision_conflict",
+                message: "desktop session revision conflict: expected 4, actual 5",
+                actualDesktopSessionRevision: 5
+              }
+            }),
+            { status: 409, headers: { "content-type": "application/json" } }
+          )
+      })
+    ).rejects.toMatchObject<Partial<DesktopSessionConflictError>>({
+      name: "DesktopSessionConflictError",
+      code: "desktop_session_revision_conflict",
+      actualRevision: 5
     });
   });
 });

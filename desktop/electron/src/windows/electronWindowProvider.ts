@@ -45,6 +45,7 @@ export type ElectronWindowProviderOptions = {
   shouldInterceptLauncherClose?: () => boolean;
   onLauncherCloseRequest?: () => void;
   onWorkbenchFocusAttentionClear?: () => void;
+  onOsSessionEnd?: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
 };
 
 export class ElectronWindowProvider {
@@ -56,6 +57,7 @@ export class ElectronWindowProvider {
   private readonly shouldInterceptLauncherClose: () => boolean;
   private readonly onLauncherCloseRequest: () => void;
   private readonly onWorkbenchFocusAttentionClear: () => void;
+  private readonly onOsSessionEnd: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
 
   constructor(
     private readonly paths: DesktopPaths,
@@ -69,6 +71,7 @@ export class ElectronWindowProvider {
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
     this.onLauncherCloseRequest = options.onLauncherCloseRequest ?? (() => undefined);
     this.onWorkbenchFocusAttentionClear = options.onWorkbenchFocusAttentionClear ?? (() => undefined);
+    this.onOsSessionEnd = options.onOsSessionEnd ?? (() => undefined);
   }
 
   async openLauncher(): Promise<ManagedWindowState> {
@@ -126,10 +129,12 @@ export class ElectronWindowProvider {
   }
 
   async closeWorkbench(): Promise<ManagedWindowState> {
-    if (this.workbenchWindow && !this.workbenchWindow.isDestroyed()) {
-      this.workbenchWindow.close();
+    const workbenchWindow = this.workbenchWindow;
+    if (!workbenchWindow || workbenchWindow.isDestroyed()) {
+      return this.reportAndReturn(closedWindowState("workbench"));
     }
-    return this.reportAndReturn(closedWindowState("workbench"));
+    workbenchWindow.close();
+    return this.stateFor("workbench");
   }
 
   snapshot(): { launcher: ManagedWindowState; workbench: ManagedWindowState } {
@@ -169,6 +174,8 @@ export class ElectronWindowProvider {
     window.on("blur", () => void this.reportState(this.stateFor(role)));
     window.on("unresponsive", () => void this.reportState(this.stateFor(role)));
     window.webContents.on("render-process-gone", () => void this.reportState(this.stateFor(role)));
+    window.on("query-session-end", () => this.onOsSessionEnd("query-session-end", role));
+    window.on("session-end", () => this.onOsSessionEnd("session-end", role));
   }
 
   private interceptLauncherWindowOpenRequests(window: ElectronWindowLike): void {

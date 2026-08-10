@@ -1085,12 +1085,12 @@ def update_desktop_session_window(desktop_session_id: str, role: str, payload: d
     return desktop_session_store.update_desktop_session_window(desktop_session_id, role, payload)
 
 
-def heartbeat_desktop_session(desktop_session_id: str) -> dict[str, Any]:
-    return desktop_session_store.heartbeat_desktop_session(desktop_session_id)
+def heartbeat_desktop_session(desktop_session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return desktop_session_store.heartbeat_desktop_session(desktop_session_id, payload)
 
 
-def close_desktop_session(desktop_session_id: str) -> dict[str, Any]:
-    return desktop_session_store.close_desktop_session(desktop_session_id)
+def close_desktop_session(desktop_session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return desktop_session_store.close_desktop_session(desktop_session_id, payload)
 
 
 def request_launcher_start() -> LauncherCommandResponse:
