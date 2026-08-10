@@ -483,20 +483,11 @@ def _persist_session_turn_result(
                     },
                     source="persist_session_turn_result",
                 )
-            s._append_session_conversation_event(
-                session_id,
-                turn_id,
-                s.EVENT_ASSISTANT_MESSAGE,
-                status="failed_provider",
-                payload={
-                    "content": str(error_entry.get("content") or ""),
-                    "thought": str(error_entry.get("thought") or ""),
-                    "toolCalls": s._normalize_message_tool_calls(error_entry.get("tool_calls") or error_entry.get("toolCalls") or []),
-                    "feedbackEvents": s._normalize_message_feedback_events(error_entry.get("feedback_events") or error_entry.get("feedbackEvents") or []),
-                    "metadata": error_entry.get("metadata") if isinstance(error_entry.get("metadata"), dict) else {},
-                },
-                source="persist_session_turn_result",
-            )
+            # Non-tool failures (provider/runtime errors) are deliberately NOT written
+            # to the conversation journal: error text is runtime noise, not dialogue,
+            # and persisting it polluted model history (see history-filtering contract
+            # in core/chat/turn_journal.py). The error stays visible via
+            # conversation["last_turn_error"] (session detail turnError surface).
             s._append_session_conversation_event(
                 session_id,
                 turn_id,
@@ -840,7 +831,7 @@ def _persist_session_turn_result(
             and str(item.get("text") or "").strip()
             for item in canonical_turn_items
         )
-        if not has_canonical_final:
+        if not has_canonical_final and not runtime_failed:
             s._append_session_conversation_event(
                 session_id,
                 turn_id,
@@ -857,6 +848,9 @@ def _persist_session_turn_result(
                 },
                 source="persist_session_turn_result",
             )
+        # runtime_failed turns persist no error assistant message to the journal
+        # (see "Non-tool failures" note above): the error stays visible through
+        # conversation["last_turn_error"] only.
         terminal_event = s.EVENT_TURN_FAILED if final_status in {"failed_provider", "failed_runtime", "failed"} else (
             s.EVENT_TURN_INTERRUPTED if stop_requested or final_status in {"stopped", "stopped_by_user"} else s.EVENT_TURN_COMPLETED
         )
@@ -974,20 +968,9 @@ def _persist_session_turn_runtime_error(
         raw_error=raw_error,
         status=normalized_status,
     )
-    s._append_session_conversation_event(
-        session_id,
-        turn_id,
-        s.EVENT_ASSISTANT_MESSAGE,
-        status=normalized_status,
-        payload={
-            "content": str(error_entry.get("content") or ""),
-            "thought": str(error_entry.get("thought") or ""),
-            "toolCalls": s._normalize_message_tool_calls(error_entry.get("tool_calls") or error_entry.get("toolCalls") or []),
-            "feedbackEvents": s._normalize_message_feedback_events(error_entry.get("feedback_events") or error_entry.get("feedbackEvents") or []),
-            "metadata": error_entry.get("metadata") if isinstance(error_entry.get("metadata"), dict) else {},
-        },
-        source="persist_session_turn_runtime_error",
-    )
+    # No error assistant message is appended to the journal for runtime failures
+    # (see "Non-tool failures" note above); conversation["last_turn_error"] carries
+    # the visible error instead.
     s._append_session_conversation_event(
         session_id,
         turn_id,
@@ -1101,20 +1084,9 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 raw_error=raw_error,
                 related_event_code="conversation.turn_error",
             )
-            s._append_session_conversation_event(
-                session_id,
-                turn_id,
-                s.EVENT_ASSISTANT_MESSAGE,
-                status="failed_provider",
-                payload={
-                    "content": str(error_entry.get("content") or ""),
-                    "thought": str(error_entry.get("thought") or ""),
-                    "toolCalls": s._normalize_message_tool_calls(error_entry.get("tool_calls") or error_entry.get("toolCalls") or []),
-                    "feedbackEvents": s._normalize_message_feedback_events(error_entry.get("feedback_events") or error_entry.get("feedbackEvents") or []),
-                    "metadata": error_entry.get("metadata") if isinstance(error_entry.get("metadata"), dict) else {},
-                },
-                source="persist_session_turn_failure",
-            )
+            # Provider-failure error messages stay out of the journal
+            # (see "Non-tool failures" note above); last_turn_error carries the
+            # visible error for the session detail turnError surface.
             s._append_session_conversation_event(
                 session_id,
                 turn_id,
@@ -1199,20 +1171,9 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         event="assistant_turn_error",
         status="failed",
     )
-    s._append_session_conversation_event(
-        session_id,
-        turn_id,
-        s.EVENT_ASSISTANT_MESSAGE,
-        status="failed_runtime",
-        payload={
-            "content": str(error_entry.get("content") or ""),
-            "thought": str(error_entry.get("thought") or ""),
-            "toolCalls": s._normalize_message_tool_calls(error_entry.get("tool_calls") or error_entry.get("toolCalls") or []),
-            "feedbackEvents": s._normalize_message_feedback_events(error_entry.get("feedback_events") or error_entry.get("feedbackEvents") or []),
-            "metadata": error_entry.get("metadata") if isinstance(error_entry.get("metadata"), dict) else {},
-        },
-        source="persist_session_turn_failure",
-    )
+    # Runtime-failure error messages stay out of the journal
+    # (see "Non-tool failures" note above); last_turn_error carries the
+    # visible error for the session detail turnError surface.
     s._append_session_conversation_event(
         session_id,
         turn_id,
