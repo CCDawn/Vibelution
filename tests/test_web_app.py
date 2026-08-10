@@ -10031,8 +10031,12 @@ def test_submit_session_message_persists_visible_failure(tmp_path, monkeypatch):
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["role"] == "assistant"
-    error_text = _assistant_visible_text(payload["messages"][-1])
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert payload["lastTurnError"] is not None
+    error_text = payload["lastTurnError"]["message"]
     assert "失败" in error_text or "failed" in error_text.lower()
     assert "LLM unavailable" in error_text
     assert payload["currentPhase"] == "failed"
@@ -10073,8 +10077,11 @@ def test_submit_session_message_surfaces_failed_result_error(tmp_path, monkeypat
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["role"] == "assistant"
-    assert "LiteLLM 未安装" in _assistant_visible_text(payload["messages"][-1])
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert "LiteLLM 未安装" in payload["lastTurnError"]["message"]
     assert payload["currentPhase"] == "failed"
 
 
@@ -10123,15 +10130,13 @@ def test_submit_session_message_surfaces_provider_error_inside_messages(tmp_path
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-2]["role"] == "user"
-    assert payload["messages"][-2]["content"] == "继续当前对话"
     # Non-tool failures are no longer persisted as journal messages (model context
     # stays clean); the visible error is carried by lastTurnError only.
     assert not any(
         message.get("metadata", {}).get("kind") == "turn_error"
         for message in payload["messages"]
     )
-    assert payload["messages"][-1]["role"] == "user"
+    assert any(message.get("content") == "继续当前对话" for message in payload["messages"])
     assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
     assert payload["lastTurnError"]["reasonCode"] == "upstream_unavailable"
     assert "provider 上游服务不可用或网关失败" in payload["lastTurnError"]["reasonSummary"]
@@ -10242,7 +10247,6 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
         message.get("metadata", {}).get("kind") == "turn_error"
         for message in payload["messages"]
     )
-    assert payload["messages"][-1]["role"] == "user"
     assert payload["lastTurnError"]["errorType"] == "runtime_error"
     assert payload["lastTurnError"]["reasonCode"] == "canonical_turn_outcome_missing"
     assert payload["lastTurnError"]["chainStage"] == "llm_response_normalization"
@@ -10306,18 +10310,18 @@ def test_submit_session_message_surfaces_provider_http_diagnostics(tmp_path, mon
 
     assert response.status_code == 202
     payload = response.json()
-    metadata = payload["messages"][-1]["metadata"]
-    assert metadata["httpStatus"] == 503
-    assert metadata["provider"] == "anthropic"
-    assert metadata["providerHost"] == "www.atpify.cn"
-    assert metadata["providerErrorType"] == "api_error"
-    assert metadata["providerErrorMessage"] == "No available accounts: no available accounts"
-    assert metadata["model"] == "claude-opus-4-7"
+    # Provider diagnostics now live on lastTurnError only (no error journal message).
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
     assert payload["lastTurnError"]["httpStatus"] == 503
+    assert payload["lastTurnError"]["provider"] == "anthropic"
+    assert payload["lastTurnError"]["providerHost"] == "www.atpify.cn"
     assert payload["lastTurnError"]["providerErrorType"] == "api_error"
     assert payload["lastTurnError"]["providerErrorMessage"] == "No available accounts: no available accounts"
-    assert "HTTP 503" in _assistant_visible_text(payload["messages"][-1])
-    assert "No available accounts" in _assistant_visible_text(payload["messages"][-1])
+    assert payload["lastTurnError"]["model"] == "claude-opus-4-7"
+    assert "No available accounts" in payload["lastTurnError"]["message"]
 
 
 def test_submit_session_message_surfaces_prompt_cache_unsupported_inside_messages(tmp_path, monkeypatch):
@@ -10360,7 +10364,6 @@ def test_submit_session_message_surfaces_prompt_cache_unsupported_inside_message
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["role"] == "user"
     assert not any(
         message.get("metadata", {}).get("kind") == "turn_error"
         for message in payload["messages"]
@@ -10411,10 +10414,12 @@ def test_submit_session_message_surfaces_provider_quota_reason_inside_messages(t
 
     assert response.status_code == 202
     payload = response.json()
-    assert "API Key 额度或当日限额已用完" in _assistant_visible_text(payload["messages"][-1])
-    assert "api key 7天限额已用完" in _assistant_visible_text(payload["messages"][-1])
-    assert payload["messages"][-1]["metadata"]["reasonCode"] == "quota_exhausted"
-    assert payload["messages"][-1]["metadata"]["reasonDetail"] == "api key 7天限额已用完"
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert "API Key 额度或当日限额已用完" in payload["lastTurnError"]["message"]
+    assert "api key 7天限额已用完" in payload["lastTurnError"]["message"]
     assert payload["lastTurnError"]["reasonCode"] == "quota_exhausted"
     assert payload["lastTurnError"]["reasonSummary"] == "API Key 额度或当日限额已用完"
     assert payload["lastTurnError"]["reasonDetail"] == "api key 7天限额已用完"
@@ -10466,10 +10471,13 @@ def test_submit_session_message_prefers_llm_failure_message_for_provider_detail(
 
     assert response.status_code == 202
     payload = response.json()
-    assert "provider 正在限流" in _assistant_visible_text(payload["messages"][-1])
-    assert "group requests-per-minute limit exceeded" in _assistant_visible_text(payload["messages"][-1])
-    assert payload["messages"][-1]["metadata"]["reasonCode"] == "rate_limited"
-    assert payload["messages"][-1]["metadata"]["reasonDetail"] == "group requests-per-minute limit exceeded"
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert "provider 正在限流" in payload["lastTurnError"]["message"]
+    assert "group requests-per-minute limit exceeded" in payload["lastTurnError"]["message"]
+    assert payload["lastTurnError"]["reasonCode"] == "rate_limited"
     assert payload["lastTurnError"]["reasonDetail"] == "group requests-per-minute limit exceeded"
 
 
@@ -10510,11 +10518,14 @@ def test_submit_session_message_surfaces_deprecated_parameter_reason_inside_mess
 
     assert response.status_code == 202
     payload = response.json()
-    assert "模型不接受当前采样参数，例如 temperature" in _assistant_visible_text(payload["messages"][-1])
-    assert "`temperature` is deprecated" in _assistant_visible_text(payload["messages"][-1])
-    assert payload["messages"][-1]["metadata"]["reasonCode"] == "deprecated_sampling_parameter"
-    assert payload["messages"][-1]["metadata"]["reasonDetail"] == "`temperature` is deprecated for this model."
+    assert not any(
+        message.get("metadata", {}).get("kind") == "turn_error"
+        for message in payload["messages"]
+    )
+    assert "模型不接受当前采样参数，例如 temperature" in payload["lastTurnError"]["message"]
+    assert "`temperature` is deprecated" in payload["lastTurnError"]["message"]
     assert payload["lastTurnError"]["reasonCode"] == "deprecated_sampling_parameter"
+    assert payload["lastTurnError"]["reasonDetail"] == "`temperature` is deprecated for this model."
 
 
 def test_submit_session_message_omits_mental_snapshot_when_disabled(tmp_path, monkeypatch):

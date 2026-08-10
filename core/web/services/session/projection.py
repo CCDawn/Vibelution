@@ -490,6 +490,20 @@ def _build_session_summary(
             s._ledger_visible_messages_for_session(conversation["id"]),
         )
     summary = s._latest_message_summary(normalized_summary_messages)
+    # Failed turns persist no error assistant message to the journal anymore, so
+    # the last visible message may be a partial reply. Keep the operator-facing
+    # task summary on the sanitized failure instead of presenting the partial
+    # text as task progress.
+    if status == "failed":
+        last_turn_error = s._normalize_session_turn_error(
+            conversation.get("last_turn_error") or conversation.get("lastTurnError")
+        )
+        if last_turn_error:
+            failure_summary = s._compact_preview_text(
+                str(last_turn_error.get("message") or "").strip()
+            )
+            if failure_summary:
+                summary = failure_summary
     updated_at = str(conversation.get("updatedAt") or "").strip()
     agent_id = str(conversation.get("agentId") or "").strip()
     cached_agent = conversation.get("_agent")
