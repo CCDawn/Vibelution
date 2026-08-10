@@ -646,21 +646,25 @@ def test_session_live_output_publishes_long_loop_progress_as_status_only_delta(m
 
 
 def test_completed_visible_reply_with_tool_trace_is_terminal():
-    result = {
-        "status": "completed",
-        "summary": "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？",
-        "raw_output": "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？",
-        "tool_call_count": 1,
-        "tool_trace": [
-            {
-                "name": "get_git_status_summary_tool",
-                "status": "done",
-                "summary": "工作区干净",
-            }
-        ],
-    }
+    for visible_reply in (
+        "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？",
+        "The workspace is healthy. How can I help you?",
+    ):
+        result = {
+            "status": "completed",
+            "summary": visible_reply,
+            "raw_output": visible_reply,
+            "tool_call_count": 1,
+            "tool_trace": [
+                {
+                    "name": "get_git_status_summary_tool",
+                    "status": "done",
+                    "summary": "工作区干净",
+                }
+            ],
+        }
 
-    assert session_service._chat_turn_result_status("completed", result, stop_requested=False) == "completed"
+        assert session_service._chat_turn_result_status("completed", result, stop_requested=False) == "completed"
 
 
 def test_needs_continue_feedback_finalization_does_not_mark_thought_failed():
