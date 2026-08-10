@@ -474,6 +474,37 @@ def test_run_process_uses_utf8_and_failure_summary_tolerates_missing_streams(
     assert gate.summarize_failure(completed, "tool") == "tool: command failed"
 
 
+def test_main_emits_ascii_json_when_gate_result_contains_non_ascii(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        gate,
+        "run_commit_gate",
+        lambda root: gate.GateResult(
+            outcome="passed",
+            exit_code=0,
+            commands=[
+                gate.ProcessResult(
+                    kind="pytest",
+                    argv=["pytest"],
+                    cwd=str(root),
+                    exit_code=0,
+                    duration_ms=1,
+                    status="passed",
+                    failure_summary="⎯ UTF-8 摘要",
+                )
+            ],
+        ),
+    )
+
+    assert gate.main(["commit"]) == 0
+
+    output = capsys.readouterr().out
+    assert "\\u23af" in output
+    assert json.loads(output)["commands"][0]["failure_summary"] == "⎯ UTF-8 摘要"
+
+
 def test_main_worktree_falls_back_to_single_repository(git_repo: Path) -> None:
     git(git_repo, "branch", "-M", "main")
     git(git_repo, "switch", "-c", "codex/test-task")

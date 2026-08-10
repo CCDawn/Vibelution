@@ -882,7 +882,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = verify_manifest(args.manifest, Path.cwd(), args.base)
     else:
         raise AssertionError(f"unhandled mode: {args.mode}")
-    print(json.dumps(asdict(result), ensure_ascii=False, default=str))
+    # Gate output is consumed by Windows shells and CI parsers, some of which
+    # still use a legacy code page. Keep the machine-readable envelope ASCII.
+    print(json.dumps(asdict(result), ensure_ascii=True, default=str))
     return result.exit_code
 
 
