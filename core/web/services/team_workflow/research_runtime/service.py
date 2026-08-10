@@ -325,7 +325,19 @@ class ResearchWorkflowRuntimeService:
             meta = self.get_definition(workflow_id)
             create_input_fingerprint = create_request_fingerprint(run_input)
             run_id = run_id_for_create(workflow_id, idempotency_key)
+            create_index_key = f"create:{idempotency_key}" if idempotency_key else ""
+            indexed_run_id = self._index.get_run_id(create_index_key) if create_index_key else None
+            if indexed_run_id and indexed_run_id != run_id:
+                raise ResearchWorkflowError(
+                    "idempotency index points to a different run",
+                    code="idempotency_index_conflict",
+                )
             existing = self._store.get_run(run_id)
+            if indexed_run_id and existing is None:
+                raise ResearchWorkflowError(
+                    "idempotency index points to a missing run",
+                    code="idempotency_index_missing_run",
+                )
             if existing:
                 if existing.get("createInputFingerprint") != create_input_fingerprint:
                     raise ResearchWorkflowError(
@@ -381,8 +393,8 @@ class ResearchWorkflowRuntimeService:
                 created_at=created_at,
             )
             self._store.create_run(record)
-            if idempotency_key:
-                self._index.put_run_id(f"create:{idempotency_key}", run_id)
+            if create_index_key:
+                self._index.put_run_id(create_index_key, run_id)
             return self.get_run(run_id)
 
     def get_run(self, run_id: str) -> dict[str, Any]:

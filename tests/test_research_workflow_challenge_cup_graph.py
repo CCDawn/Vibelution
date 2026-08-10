@@ -9,6 +9,10 @@ from langgraph.types import Command
 from core.research.workflow.challenge_cup_graph import compile_challenge_cup_graph
 from core.research.workflow.checkpoint_store import open_sqlite_checkpointer
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle import (
+    advance_checkpoint,
+    prepare_initial_checkpoint,
+)
 
 
 def test_graph_contains_all_definition_nodes() -> None:
@@ -18,50 +22,46 @@ def test_graph_contains_all_definition_nodes() -> None:
     assert len(definition.nodes) == 16
 
 
-def test_run_stops_at_first_human_gate_and_can_progress(tmp_path: Path) -> None:
+def test_direct_graph_requires_durable_adapter_execution(tmp_path: Path) -> None:
     db = tmp_path / "cc.sqlite"
     with open_sqlite_checkpointer(db) as checkpointer:
         graph = compile_challenge_cup_graph(checkpointer)
         cfg = {"configurable": {"thread_id": "cc-1"}}
-        # start → auto-run agent nodes until knowledge_handoff interrupt
         graph.invoke({}, cfg)
         state = graph.get_state(cfg)
-        assert state.next
-        # First human in order is knowledge_handoff (after 4 agent nodes)
-        assert "knowledge_handoff" in (state.next or []) or state.values.get("current_node_id") in {
-            "knowledge_handoff",
-            "source_finding",
-            "source_extraction",
-            "evidence_relations",
-            "knowledge_ingestion",
-        }
+        assert list(state.next or []) == ["source_finding"]
+        assert state.values == {}
 
-        # Drive through interrupts until done or blocked — accept all human gates;
-        # at iteration_decision supply a structured stop decision.
-        guard = 0
-        while state.next and guard < 25:
-            guard += 1
-            nxt = list(state.next or [])
-            if "iteration_decision" in nxt:
-                graph.invoke(
-                    Command(
-                        resume={
-                            "decisionKind": "stop",
-                            "terminalReason": "test_complete",
-                            "decisionId": "dec-test-stop",
-                        }
-                    ),
-                    cfg,
-                )
-            else:
-                graph.invoke(Command(resume={"accept": True}), cfg)
-            state = graph.get_state(cfg)
 
-        assert state.values.get("knowledge_package_accepted") is True
-        assert "knowledge_handoff" in (state.values.get("completed_node_ids") or [])
-        # After full accept chain, either finished or progressed past experiment gates
-        completed = state.values.get("completed_node_ids") or []
-        assert len(completed) >= 5
+def test_checkpoint_lifecycle_advances_source_chain_to_human_handoff(tmp_path: Path) -> None:
+    db = tmp_path / "cc.sqlite"
+    checkpoint_id = prepare_initial_checkpoint(str(db), "cc-1")
+    completed: list[str] = []
+    for node_id, expected_next in (
+        ("source_finding", "source_extraction"),
+        ("source_extraction", "evidence_relations"),
+        ("evidence_relations", "knowledge_ingestion"),
+        ("knowledge_ingestion", "knowledge_handoff"),
+    ):
+        completed.append(node_id)
+        checkpoint_id, scheduled = advance_checkpoint(
+            str(db),
+            thread_id="cc-1",
+            checkpoint_id=checkpoint_id,
+            completed_node_id=node_id,
+            state_patch={
+                "current_node_id": node_id,
+                "completed_node_ids": list(completed),
+            },
+        )
+        assert scheduled == [expected_next]
+
+    assert completed == [
+        "source_finding",
+        "source_extraction",
+        "evidence_relations",
+        "knowledge_ingestion",
+    ]
 
 
 def test_reject_knowledge_handoff_does_not_set_package_accepted(tmp_path: Path) -> None:

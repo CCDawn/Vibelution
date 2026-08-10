@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,7 @@ def test_resume_accept_completes_and_marks_handoff_accepted(tmp_path: Path) -> N
         assert done.get("step") == "done"
         assert done.get("accepted") is True
         assert done.get("handoff_status") == "accepted"
-        assert done.get("input_snapshot_hash") == "hash:k2:v1"
+        assert done.get("input_snapshot_hash") == hashlib.sha256(b"k2:v1").hexdigest()
 
 
 def test_resume_reject_does_not_accept_handoff(tmp_path: Path) -> None:

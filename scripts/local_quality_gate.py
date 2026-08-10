@@ -207,6 +207,8 @@ def run_process(
         input=input_text,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
         env=env,
         **no_window_subprocess_kwargs(),
@@ -288,7 +290,7 @@ def staged_blob(root: Path, path: str) -> str:
 
 
 def summarize_failure(completed: subprocess.CompletedProcess[str], subject: str) -> str:
-    raw = completed.stderr.strip() or completed.stdout.strip() or "command failed"
+    raw = (completed.stderr or "").strip() or (completed.stdout or "").strip() or "command failed"
     return bounded_failure_summary(f"{subject}: {raw}")
 
 
@@ -880,7 +882,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = verify_manifest(args.manifest, Path.cwd(), args.base)
     else:
         raise AssertionError(f"unhandled mode: {args.mode}")
-    print(json.dumps(asdict(result), ensure_ascii=False, default=str))
+    # Gate output is consumed by Windows shells and CI parsers, some of which
+    # still use a legacy code page. Keep the machine-readable envelope ASCII.
+    print(json.dumps(asdict(result), ensure_ascii=True, default=str))
     return result.exit_code
 
 

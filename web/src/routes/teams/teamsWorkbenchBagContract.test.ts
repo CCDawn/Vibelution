@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 const foundationSource = readFileSync(new URL("./useTeamsWorkbenchFoundation.tsx", import.meta.url), "utf8");
 const shellSource = readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8");
+const lazyScPhaseSource = readFileSync(new URL("./TeamsWorkbenchWithScPhase.tsx", import.meta.url), "utf8");
 const researchBagSource = readFileSync(new URL("./buildTeamsWorkbenchResearchSurfacesFromBag.ts", import.meta.url), "utf8");
 const scLayerSource = readFileSync(new URL("./useTeamsWorkbenchScLayer.ts", import.meta.url), "utf8");
 
@@ -44,9 +45,12 @@ function foundationReturnBody(source: string): string {
 }
 
 describe("teams workbench bag wiring contracts", () => {
-  it("foundation returns SC layer via spread (not destructure-only locals)", () => {
+  it("lazy SC phase composes the foundation bag with the SC layer", () => {
     const ret = foundationReturnBody(foundationSource);
-    expect(ret).toContain("...scLayer");
+    expect(ret).toContain("scLayerInput");
+    expect(lazyScPhaseSource).toContain("useTeamsWorkbenchScLayer(scLayerInput)");
+    expect(lazyScPhaseSource).toContain("...base");
+    expect(lazyScPhaseSource).toContain("...scLayer");
     expect(scLayerSource).toContain("renderSourceCollectionStandalonePage");
     expect(scLayerSource).toContain("sourceCollectionDisplayState");
   });
@@ -56,8 +60,8 @@ describe("teams workbench bag wiring contracts", () => {
     for (const field of CRITICAL_BAG_FIELDS) {
       const inReturn =
         new RegExp(`^\\s{4}${field}\\s*[,:]`, "m").test(ret)
-        || (ret.includes("...scLayer") && scLayerSource.includes(field));
-      // drafts live on foundation body return, not only scLayer
+        || (lazyScPhaseSource.includes("...scLayer") && scLayerSource.includes(field));
+      // Drafts live on the foundation return; SC display fields join it in the lazy phase.
       const inFoundationBody = foundationSource.includes(field);
       expect(inReturn || (inFoundationBody && new RegExp(`^\\s{4}${field}\\s*[,:]`, "m").test(ret)), field).toBe(true);
     }
