@@ -45,34 +45,75 @@ describe("conversationMessageOrder", () => {
     ]);
   });
 
-  it("falls back to timestamp order when no journal sequence is available", () => {
+  it("keeps input order for unsequenced messages despite reversed timestamps", () => {
+    // Optimistic user messages carry the client clock while live assistant
+    // layers carry the server clock; wall-clock must not reorder them.
     const ordered = chronologicalConversationMessages([
       message({
-        id: "assistant-new",
-        content: "new answer",
+        id: "user-optimistic",
+        role: "user",
+        content: "new question",
         timestamp: "2026-07-09T01:27:00Z",
       }),
       message({
-        id: "user-new",
-        content: "new question",
+        id: "assistant-new",
+        role: "assistant",
+        content: "new answer",
         timestamp: "2026-07-09T01:26:58Z",
       }),
       message({
-        id: "assistant-old",
-        content: "old answer",
+        id: "user-old",
+        role: "user",
+        content: "old question",
         timestamp: "2026-07-09T01:26:48Z",
       }),
       message({
-        id: "user-old",
-        content: "old question",
+        id: "assistant-old",
+        role: "assistant",
+        content: "old answer",
         timestamp: "2026-07-09T01:26:16Z",
       }),
     ]);
     expect(ordered.map((item) => item.id)).toEqual([
+      "user-optimistic",
+      "assistant-new",
       "user-old",
       "assistant-old",
-      "user-new",
-      "assistant-new",
+    ]);
+  });
+
+  it("keeps optimistic user message before active assistant layer under server clock skew", () => {
+    // Regression: assistant_delta carries the server timestamp (older than the
+    // client clock when the turn started), which previously moved the assistant
+    // layer above the optimistic user message and made the timeline look
+    // reversed until a later delta refreshed the timestamp. Input order mirrors
+    // the real render path: canonical timeline (with the optimistic user
+    // message appended last) followed by the active turn layer.
+    const ordered = chronologicalConversationMessages([
+      message({
+        id: "optimistic-user-submission-abc",
+        role: "user",
+        content: "question",
+        timestamp: "2026-08-10T10:00:05Z",
+        metadata: {
+          optimisticUserMessage: true,
+          clientSubmissionId: "submission-abc",
+          pending: true,
+        },
+      }),
+      message({
+        id: "session-1-message-active-turn-1",
+        role: "assistant",
+        content: "answer",
+        timestamp: "2026-08-10T10:00:00Z",
+        turnItems: [],
+        metadata: { kind: "session_active_turn_layer" },
+      }),
+    ]);
+
+    expect(ordered.map((item) => item.id)).toEqual([
+      "optimistic-user-submission-abc",
+      "session-1-message-active-turn-1",
     ]);
   });
 
