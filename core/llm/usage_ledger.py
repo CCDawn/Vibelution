@@ -15,7 +15,7 @@ from core.infrastructure import developer_sandbox
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-USAGE_SCHEMA_VERSION = 1
+USAGE_SCHEMA_VERSION = 2
 DEFAULT_LEDGER_TIMEOUT_SECONDS = 5.0
 UsageSource = Literal["provider_usage", "estimated", "missing", "not_called"]
 VALID_SOURCES = {"provider_usage", "estimated", "missing", "not_called"}
@@ -60,6 +60,8 @@ class UsageLedgerEvent:
     latency_ms: int = 0
     runtime_scene_id: str = ""
     provider_usage_keys: list[str] = field(default_factory=list)
+    cache_usage_observed: bool | None = None
+    cache_usage_missing_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,9 @@ class UsageRollup:
     missing_call_count: int = 0
     not_called_count: int = 0
     latency_ms: int = 0
+    cache_observed_input_tokens: int = 0
+    cache_observed_call_count: int = 0
+    cache_unobserved_call_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,8 +100,21 @@ class UsageRollup:
             "missingCallCount": self.missing_call_count,
             "notCalledCount": self.not_called_count,
             "latencyMs": self.latency_ms,
-            "cacheHitRate": round(self.cached_input_tokens / self.input_tokens, 4)
-            if self.input_tokens > 0
+            "cacheObservedInputTokens": self.cache_observed_input_tokens,
+            "cacheObservedCallCount": self.cache_observed_call_count,
+            "cacheUnobservedCallCount": self.cache_unobserved_call_count,
+            "cacheUsageObserved": self.cache_observed_call_count > 0,
+            "cacheUsageComplete": self.cache_observed_call_count > 0
+            and self.cache_unobserved_call_count == 0,
+            "cacheUsageMissingReason": (
+                "partial_provider_cache_usage"
+                if self.cache_observed_call_count > 0 and self.cache_unobserved_call_count > 0
+                else "provider_cache_usage_missing"
+                if self.cache_unobserved_call_count > 0
+                else ""
+            ),
+            "cacheHitRate": round(self.cached_input_tokens / self.cache_observed_input_tokens, 4)
+            if self.cache_observed_input_tokens > 0
             else 0.0,
         }
 
@@ -166,8 +184,9 @@ def record_usage_event(
               input_tokens, cached_input_tokens, cache_read_input_tokens,
               cache_creation_input_tokens, uncached_input_tokens, output_tokens,
               reasoning_output_tokens, total_tokens, context_window, latency_ms,
-              runtime_scene_id, provider_usage_keys_json, usage_schema_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              runtime_scene_id, provider_usage_keys_json, cache_usage_observed,
+              cache_usage_missing_reason, usage_schema_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 normalized.event_id,
@@ -195,6 +214,8 @@ def record_usage_event(
                 normalized.latency_ms,
                 normalized.runtime_scene_id,
                 json.dumps(normalized.provider_usage_keys, ensure_ascii=False),
+                1 if normalized.cache_usage_observed else 0,
+                normalized.cache_usage_missing_reason,
                 USAGE_SCHEMA_VERSION,
             ),
         )
@@ -321,12 +342,35 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
           latency_ms INTEGER NOT NULL DEFAULT 0,
           runtime_scene_id TEXT NOT NULL DEFAULT '',
           provider_usage_keys_json TEXT NOT NULL DEFAULT '[]',
+          cache_usage_observed INTEGER NOT NULL DEFAULT 0,
+          cache_usage_missing_reason TEXT NOT NULL DEFAULT '',
           usage_schema_version INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS idx_usage_events_recorded_at ON usage_events(recorded_at);
         CREATE INDEX IF NOT EXISTS idx_usage_events_session_id ON usage_events(session_id);
         CREATE INDEX IF NOT EXISTS idx_usage_events_agent_id ON usage_events(agent_id);
         CREATE INDEX IF NOT EXISTS idx_usage_events_provider_model ON usage_events(provider, model);
+        """
+    )
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(usage_events)")}
+    if "cache_usage_observed" not in columns:
+        conn.execute(
+            "ALTER TABLE usage_events ADD COLUMN cache_usage_observed INTEGER NOT NULL DEFAULT 0"
+        )
+    if "cache_usage_missing_reason" not in columns:
+        conn.execute(
+            "ALTER TABLE usage_events ADD COLUMN cache_usage_missing_reason TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute(
+        """
+        UPDATE usage_events
+        SET cache_usage_observed = 1
+        WHERE cache_usage_observed = 0
+          AND (
+            cached_input_tokens > 0
+            OR cache_read_input_tokens > 0
+            OR cache_creation_input_tokens > 0
+          )
         """
     )
     conn.commit()
@@ -362,6 +406,21 @@ def _normalize_event(event: UsageLedgerEvent) -> UsageLedgerEvent:
     }
     for field_name in NUMERIC_EVENT_FIELDS:
         updates[field_name] = _coerce_nonnegative_int(getattr(event, field_name, 0))
+    cache_usage_observed = event.cache_usage_observed
+    if cache_usage_observed is None:
+        cache_usage_observed = any(
+            updates[field_name] > 0
+            for field_name in (
+                "cached_input_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+            )
+        )
+    updates["cache_usage_observed"] = bool(cache_usage_observed)
+    missing_reason = _safe_text(event.cache_usage_missing_reason)
+    if not cache_usage_observed and not missing_reason and updates["source"] == "provider_usage":
+        missing_reason = "provider_cache_usage_missing"
+    updates["cache_usage_missing_reason"] = missing_reason if not cache_usage_observed else ""
     return replace(event, **updates)
 
 
@@ -374,7 +433,10 @@ def _rollup_rows(rows: list[sqlite3.Row]) -> tuple[UsageRollup, int]:
         "estimated_call_count": 0,
         "missing_call_count": 0,
         "not_called_count": 0,
+        "cache_observed_call_count": 0,
+        "cache_unobserved_call_count": 0,
     }
+    cache_observed_input_tokens = 0
     for row in rows:
         source = str(row["source"] or "")
         if source not in VALID_SOURCES:
@@ -383,15 +445,22 @@ def _rollup_rows(rows: list[sqlite3.Row]) -> tuple[UsageRollup, int]:
         input_tokens = _coerce_nonnegative_int(row["input_tokens"])
         output_tokens = _coerce_nonnegative_int(row["output_tokens"])
         total_tokens = _coerce_nonnegative_int(row["total_tokens"]) or (input_tokens + output_tokens)
-        cached_tokens = _coerce_nonnegative_int(row["cached_input_tokens"])
-        cache_read_tokens = _coerce_nonnegative_int(row["cache_read_input_tokens"]) or cached_tokens
-        uncached_tokens = _coerce_nonnegative_int(row["uncached_input_tokens"])
-        if input_tokens and not uncached_tokens:
+        cache_usage_observed = bool(_coerce_nonnegative_int(row["cache_usage_observed"]))
+        cached_tokens = _coerce_nonnegative_int(row["cached_input_tokens"]) if cache_usage_observed else 0
+        cache_read_tokens = (
+            _coerce_nonnegative_int(row["cache_read_input_tokens"]) or cached_tokens
+        ) if cache_usage_observed else 0
+        uncached_tokens = _coerce_nonnegative_int(row["uncached_input_tokens"]) if cache_usage_observed else 0
+        if cache_usage_observed and input_tokens and not uncached_tokens:
             uncached_tokens = max(0, input_tokens - cached_tokens)
         totals["input_tokens"] += input_tokens
         totals["cached_input_tokens"] += cached_tokens
         totals["cache_read_input_tokens"] += cache_read_tokens
-        totals["cache_creation_input_tokens"] += _coerce_nonnegative_int(row["cache_creation_input_tokens"])
+        totals["cache_creation_input_tokens"] += (
+            _coerce_nonnegative_int(row["cache_creation_input_tokens"])
+            if cache_usage_observed
+            else 0
+        )
         totals["uncached_input_tokens"] += uncached_tokens
         totals["output_tokens"] += output_tokens
         totals["reasoning_output_tokens"] += _coerce_nonnegative_int(row["reasoning_output_tokens"])
@@ -401,6 +470,11 @@ def _rollup_rows(rows: list[sqlite3.Row]) -> tuple[UsageRollup, int]:
         counts["call_count"] += 1
         if source == "provider_usage":
             counts["observed_call_count"] += 1
+            if cache_usage_observed:
+                counts["cache_observed_call_count"] += 1
+                cache_observed_input_tokens += input_tokens
+            else:
+                counts["cache_unobserved_call_count"] += 1
         elif source == "estimated":
             counts["estimated_call_count"] += 1
         elif source == "missing":
@@ -423,6 +497,9 @@ def _rollup_rows(rows: list[sqlite3.Row]) -> tuple[UsageRollup, int]:
             missing_call_count=counts["missing_call_count"],
             not_called_count=counts["not_called_count"],
             latency_ms=totals["latency_ms"],
+            cache_observed_input_tokens=cache_observed_input_tokens,
+            cache_observed_call_count=counts["cache_observed_call_count"],
+            cache_unobserved_call_count=counts["cache_unobserved_call_count"],
         ),
         skipped,
     )
@@ -517,14 +594,19 @@ def _row_to_last_usage(row: sqlite3.Row | None) -> dict[str, Any]:
             "reasoningOutputTokens": 0,
             "totalTokens": 0,
             "cacheHitRate": 0.0,
+            "cacheUsageObserved": False,
+            "cacheUsageMissingReason": "not_called",
         }
     input_tokens = _coerce_nonnegative_int(row["input_tokens"])
-    cached_tokens = _coerce_nonnegative_int(row["cached_input_tokens"])
-    cache_read_tokens = _coerce_nonnegative_int(row["cache_read_input_tokens"]) or cached_tokens
+    cache_usage_observed = bool(_coerce_nonnegative_int(row["cache_usage_observed"]))
+    cached_tokens = _coerce_nonnegative_int(row["cached_input_tokens"]) if cache_usage_observed else 0
+    cache_read_tokens = (
+        _coerce_nonnegative_int(row["cache_read_input_tokens"]) or cached_tokens
+    ) if cache_usage_observed else 0
     output_tokens = _coerce_nonnegative_int(row["output_tokens"])
     total_tokens = _coerce_nonnegative_int(row["total_tokens"]) or (input_tokens + output_tokens)
-    uncached_tokens = _coerce_nonnegative_int(row["uncached_input_tokens"])
-    if input_tokens and not uncached_tokens:
+    uncached_tokens = _coerce_nonnegative_int(row["uncached_input_tokens"]) if cache_usage_observed else 0
+    if cache_usage_observed and input_tokens and not uncached_tokens:
         uncached_tokens = max(0, input_tokens - cached_tokens)
     return {
         "eventId": str(row["event_id"] or ""),
@@ -543,7 +625,11 @@ def _row_to_last_usage(row: sqlite3.Row | None) -> dict[str, Any]:
         "inputTokens": input_tokens,
         "cachedInputTokens": cached_tokens,
         "cacheReadInputTokens": cache_read_tokens,
-        "cacheCreationInputTokens": _coerce_nonnegative_int(row["cache_creation_input_tokens"]),
+        "cacheCreationInputTokens": (
+            _coerce_nonnegative_int(row["cache_creation_input_tokens"])
+            if cache_usage_observed
+            else 0
+        ),
         "uncachedInputTokens": uncached_tokens,
         "outputTokens": output_tokens,
         "reasoningOutputTokens": _coerce_nonnegative_int(row["reasoning_output_tokens"]),
@@ -552,7 +638,14 @@ def _row_to_last_usage(row: sqlite3.Row | None) -> dict[str, Any]:
         "latencyMs": _coerce_nonnegative_int(row["latency_ms"]),
         "runtimeSceneId": str(row["runtime_scene_id"] or ""),
         "providerUsageKeys": _provider_usage_keys_from_row(row),
-        "cacheHitRate": round(cached_tokens / input_tokens, 4) if input_tokens > 0 else 0.0,
+        "cacheUsageObserved": cache_usage_observed,
+        "cacheUsageMissingReason": (
+            str(row["cache_usage_missing_reason"] or "").strip()
+            or ("provider_cache_usage_missing" if not cache_usage_observed else "")
+        ),
+        "cacheHitRate": round(cached_tokens / input_tokens, 4)
+        if cache_usage_observed and input_tokens > 0
+        else 0.0,
     }
 
 

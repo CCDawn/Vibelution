@@ -22,6 +22,62 @@ describe("formatTokenStatusRingCompact", () => {
 });
 
 describe("chatTokenStatusModel", () => {
+  it("shows missing cache telemetry instead of a false zero hit", () => {
+    const model = buildChatTokenStatusViewModel({
+      detail: {
+        llmUsage: {
+          source: "provider_usage",
+          inputTokens: 1200,
+          outputTokens: 100,
+          totalTokens: 1300,
+          cachedInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          uncachedInputTokens: 0,
+          cacheHitRate: 0,
+          cacheUsageObserved: false,
+          cacheUsageMissingReason: "provider_cache_usage_missing",
+        },
+        cacheUsage: {
+          source: "missing",
+          cacheUsageObserved: false,
+          cacheUsageMissingReason: "provider_cache_usage_missing",
+          turnInputTokens: 0,
+          turnCachedInputTokens: 0,
+          turnCacheHitRate: 0,
+        },
+      } as never,
+      lastCacheComposition: null,
+      lastContextComposition: { limitTokens: 200000, totalTokens: 1200 } as never,
+      compression: null,
+      cache: {
+        cacheDetailAvailable: false,
+        cacheCompositionPercent: 0,
+        providerCachedInputTokens: 0,
+        providerCacheInputTokens: 0,
+        cacheCompositionSummary: "cache missing",
+        cacheDetailOpenLabel: "View cache",
+        cacheCompositionTitle: "cache title",
+      },
+      tokenSpeedTracker: null,
+      activeSessionId: "s1",
+      groupPanelActive: false,
+      sessionStateValue: "idle",
+      sessionStateLabel: "Idle",
+      sessionStateLine: "ready",
+      lang: "zh",
+      t: ((key: string) => key) as never,
+      numberFormatter: new Intl.NumberFormat("zh-CN"),
+      compactNumberFormatter: new Intl.NumberFormat("zh-CN", { notation: "compact" }),
+      locale: "zh-CN",
+      formatTime: (value) => value,
+    });
+
+    expect(model.tokenStatusCacheTitle).toBe("cacheHitMissing");
+    expect(model.llmUsageLine).toBe("1,200 · cacheHitMissing");
+    expect(model.llmUsageTitle).toContain("cacheHitMissing");
+    expect(model.llmUsageLine).not.toContain("缓 0");
+  });
+
   it("builds cache/model/compression/speed metrics from provider usage", () => {
     const model = buildChatTokenStatusViewModel({
       detail: {
