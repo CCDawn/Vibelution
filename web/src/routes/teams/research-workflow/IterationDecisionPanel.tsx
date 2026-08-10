@@ -23,6 +23,7 @@ import {
   VSurface,
   VTextarea,
 } from "../../../components/vui";
+import styles from "./IterationDecisionPanel.styles";
 
 export type IterationDecisionPanelProps = {
   runId: string;
@@ -94,8 +95,8 @@ export function IterationDecisionPanel({
 
   if (!run) {
     return (
-      <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3">
-        <VEmptyState title="迭代决策" className="h-auto w-full border-0 bg-transparent">
+      <VSurface tone="panel" className={styles.panel}>
+        <VEmptyState title="迭代决策" className={styles.emptyState}>
           创建运行后，在迭代决策节点提交结构化决策。
         </VEmptyState>
       </VSurface>
@@ -137,12 +138,12 @@ export function IterationDecisionPanel({
   };
 
   return (
-    <VSurface tone="panel" className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-3" data-vui="iteration-decision-panel">
+    <VSurface tone="panel" className={styles.panel} data-vui="iteration-decision-panel">
       <VPanelHeader title="迭代决策" headingLevel={3} />
 
       {!atIterationDecision ? (
         <div
-          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]"
+          className={styles.notice}
           role="status"
         >
           流程当前不在迭代决策节点；决策将在引擎到达决策门后生效。
@@ -150,15 +151,15 @@ export function IterationDecisionPanel({
       ) : null}
       {hasPendingHumanTask ? (
         <div
-          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]"
+          className={styles.notice}
           role="status"
         >
           存在待处理人工任务；stop 决策会因未决任务被后端拒绝。
         </div>
       ) : null}
 
-      <div className="grid gap-2">
-        <label className="grid gap-1 text-xs text-[var(--fg-secondary)]">
+      <div className={styles.formGrid}>
+        <label className={styles.fieldLabel}>
           决策类型
           <VSelect
             density="compact"
@@ -171,7 +172,7 @@ export function IterationDecisionPanel({
             }}
           />
         </label>
-        <label className="grid gap-1 text-xs text-[var(--fg-secondary)]">
+        <label className={styles.fieldLabel}>
           决策理由
           <VTextarea
             value={reason}
@@ -181,7 +182,7 @@ export function IterationDecisionPanel({
           />
         </label>
         {decisionKind === "stop" ? (
-          <label className="grid gap-1 text-xs text-[var(--fg-secondary)]">
+          <label className={styles.fieldLabel}>
             终止原因（terminalReason，必需）
             <VInput
               value={terminalReason}
@@ -191,7 +192,7 @@ export function IterationDecisionPanel({
           </label>
         ) : null}
         {decisionKind && KIND_REQUIRES_CANDIDATE.includes(decisionKind) ? (
-          <label className="grid gap-1 text-xs text-[var(--fg-secondary)]">
+          <label className={styles.fieldLabel}>
             目标候选引用（可留空，缺省用基线/当前候选）
             <VInput
               value={candidateRef}
@@ -207,31 +208,31 @@ export function IterationDecisionPanel({
 
       {submitError ? (
         <div
-          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]"
+          className={styles.notice}
           role="alert"
         >
           决策提交失败：{submitError}
         </div>
       ) : null}
 
-      <div className="grid gap-1">
-        <div className="text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]">
+      <div className={styles.sectionGrid}>
+        <div className={styles.sectionLabel}>
           决策历史（{decisions.length}）
         </div>
         {decisions.length === 0 ? (
-          <p className="m-0 text-xs text-[var(--fg-secondary)]">暂无决策记录</p>
+          <p className={styles.emptyText}>暂无决策记录</p>
         ) : (
-          <ul className="m-0 list-none space-y-1 p-0">
+          <ul className={styles.list}>
             {decisions.map((item) => (
               <li
                 key={String(item.decisionId || item.idempotencyKey)}
-                className="rounded border border-[var(--border-subtle)] px-2 py-1.5 text-xs"
+                className={styles.listItem}
               >
-                <div className="font-medium text-[var(--fg-primary)]">
+                <div className={styles.listItemTitle}>
                   {decisionKindLabel(String(item.decisionKind))}
                   {item.iterationAttempt ? ` · 第 ${item.iterationAttempt} 次迭代` : ""}
                 </div>
-                <div className="break-all text-[var(--fg-secondary)]">
+                <div className={styles.listItemMeta}>
                   {shortId(item.reason || "—")}
                   {item.selectedCandidateRef ? ` · ${item.selectedCandidateRef}` : ""}
                 </div>
@@ -243,7 +244,7 @@ export function IterationDecisionPanel({
 
       {run.status === "succeeded" ? (
         <div
-          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-[var(--fg-primary)]"
+          className={styles.notice}
           role="status"
         >
           运行已完成：{run.completionKind || "—"}
@@ -252,7 +253,7 @@ export function IterationDecisionPanel({
       ) : null}
 
       {run.status === "blocked" ? (
-        <VStateSurface tone="error" title="运行已阻塞" className="h-auto">
+        <VStateSurface tone="error" title="运行已阻塞" className={styles.autoHeight}>
           {run.blockedReason || "未知阻塞原因"}
         </VStateSurface>
       ) : null}

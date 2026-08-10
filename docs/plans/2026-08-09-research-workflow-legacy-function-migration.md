@@ -1,12 +1,27 @@
 # 挑战杯旧功能完整迁移方案 · Workflow 工作台
 
-Status: **Draft for alignment**
+Status: **Completed (T-M1 ~ T-M6 implemented and verified)**
 
 Created: 2026-08-09
 
 Product contract: `docs/prds/2026-08-07-research-process-flow-single-page-workspace.md`
 
 Implementation authority: `docs/archive/plans/2026-08-07/challenge-cup-workflow-implementation-plan.md`（Task 0-10 任务图，本方案是其 Task 6 "EMBED by node adapters" 的补完 + 后续面）
+
+## 0. 执行结果（2026-08-09）
+
+| 任务 | 状态 | 交付 |
+| --- | --- | --- |
+| T-M1 后端命令接线 | ✅ | `result_package.py`（结果包组装/幂等/availability）、`evidence_graph_projection.py`（证据图投影：artifact dict 优先 + research-loop evidenceRecords 回退）、`node_command_adapter.py` capability+handler 扩展（`build_package`/`open_evidence_graph`）；前端 `EXECUTABLE` 全量接线、删除 `EXPLICITLY_UNAVAILABLE` 硬禁 |
+| T-M2 执行迭代抽屉 | ✅ | `panel=iteration`（`IterationDecisionPanel`：5 种结构化决策表单 + 历史 + 错误/阻塞态）；execution_iteration 5 节点 `drawerPanel: "iteration"`；复用 `renderResearchLoopPanel(null,"iteration")` 注入 |
+| T-M3 知识抽屉扩展 | ✅ | knowledge 抽屉按节点切换：`evidence_relations` → `EvidenceGraphView`（走 `open_evidence_graph` 命令投影渲染）；`knowledge_ingestion` → 完成流面板注入 |
+| T-M4 题目级/MVP 投影 | ✅ | `getChallengeQuestionRunStatus` API + `ChallengeMvpProgressPanel`（有效/已验证/已批准 + 题目行深链）+ `panel=question` 单题验收（复活 `ChallengeQuestionDetailPanel`） |
+| T-M5 跨阶段入口+清理 | ✅ | launcher 死分支 `challengeProgramSurfaceSelected` 删除（单题入口收敛到 workflow 深链）；`challengeProgramProjection` 半死状态修复（overview 直接投影）；workspace 工具栏项目 ID 显示；lazy/queryKeys/getChallengeQuestionRunDetail 残留 import 清理 |
+| T-M6 正式验收 | ✅ | 端到端命令链测试（真实 run → stop → build_package 幂等；promote → 人工门禁 → 官方候选）；后端 research_workflow 全量 105 绿；前端 research-workflow+launcher+layout 172 绿；VUI 门禁绿；`tsc -b` 绿 |
+
+已知 pre-existing 债（不在本方案改动面，待独立处理）：
+- `web/src/design/chat-selection-persistence-preview.{tsx,css}` 违反 VUI 边界（inline Tailwind + raw 颜色），chat 域历史引入；
+- 6 个 teams 契约测试（`teamMutationSurface`/`useSourceCollectionPresentation`/`teamsWorkbenchBagContract`/`TeamResearchWorkflowPanelHost`/`createSourceCollectionController`）在基线 commit 已红（`useTeamsScComposition` 等断言漂移），与本次改动零交集。
 
 ## 1. 目标与边界
 

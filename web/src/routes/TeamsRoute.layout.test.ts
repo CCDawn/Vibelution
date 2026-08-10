@@ -240,18 +240,15 @@ describe("research project workspace", () => {
     expect(experimentActionSource).not.toContain('teamId: selectedTeam?.teamId || ""');
   });
 
-  it("mounts the Challenge Program workspace only on the explicit progress surface", () => {
-    expect(teamResearchStageLauncherPanelSource).toContain(
-      "const challengeProgramSurfaceSelected =",
+  it("keeps the Challenge Program projection read-only on the overview console", () => {
+    // Single-canvas workflow is the only operations surface: the launcher no
+    // longer hosts a progress rail that shadows the active workflow, and the
+    // program projection stays a read-only overview reading.
+    expect(teamResearchStageLauncherPanelSource).not.toContain(
+      "challengeProgramSurfaceSelected",
     );
-    expect(teamResearchStageLauncherPanelSource).toMatch(
-      /const challengeProgramSurfaceSelected =\s+challengeCupResearchTeamSelected && challengeTeamSurface === "progress";/,
-    );
-    expect(teamResearchStageLauncherPanelSource).toContain(
-      "if (challengeProgramSurfaceSelected) {",
-    );
-    // Task 9/10: progress surface mounts single-canvas workflow, not stage-rail ops shell.
-    expect(teamResearchStageLauncherPanelSource).toContain("ResearchProcessWorkspace");
+    expect(teamResearchStageLauncherPanelSource).toContain("challengeProgramProjection");
+    expect(teamResearchStageLauncherPanelSource).not.toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain('surface="workspace"');
   });
 
@@ -1778,7 +1775,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("ExperimentStageComposer");
     // Wave 8H: challengeProgramProjection is read inside TeamResearchStageLauncherPanel.
     expect(teamResearchStageLauncherPanelSource).toContain("challengeProgramProjection");
-    expect(teamResearchStageLauncherPanelSource).toContain("ResearchProcessWorkspace");
+    // The workflow workspace mounts via the primary-surface renderer, not a
+    // parallel launcher rail; launcher renders the overview console only.
+    expect(teamResearchStageLauncherPanelSource).not.toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain("ChallengeCupOperationsWorkspace");
     expect(routeSource).toContain("challengeCupResearchTeamSelected");
     expect(routeSource).toContain('useState<"workspace" | "progress">("workspace")');
