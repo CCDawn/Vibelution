@@ -625,7 +625,7 @@ def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
             [
                 "=== Shell 方言（Windows 宿主，与运行时路由一致）===",
                 "1. 默认普通命令 → `cmd /c`（不是 bash，也不是默认 PowerShell）。",
-                "2. PowerShell cmdlet/语法（`Get-*`、`Select-Object`、`$var`、`$env:`、`[Type]::`、`;` 多语句）→ 直接 `powershell -NoProfile -Command \"...\"`，**禁止** `cmd /c \"powershell ...\"` 双层包装（内层引号会被 cmd 拆碎）。",
+                "2. PowerShell cmdlet/语法（`Get-*`、`Select-Object`、`$var`、`$env:`、`[Type]::`、`;` 多语句）→ 直接 `powershell -NoProfile -Command \"...\"`，**避免** `cmd /c \"powershell ...\"` 双层包装（内层引号会被 cmd 拆碎）。",
                 "3. 不要用 `findstr` 搜 UTF-8 无 BOM 配置文件（系统代码页 GBK 会漏匹配）；文件内容搜索用 `grep_search_tool` / `rg -n`。",
                 "4. Unix 管道片段（`| head`、`grep -n`、`xargs`、`/dev/null`）→ 拦截；需要 bash 时显式 `bash -c \"...\"`。",
                 "5. 本轮选定一种写法后不要再探路；**cmd 方言下跑裸 PowerShell** 失败 1 次后改 `code_symbol_tool`/`grep_search_tool`。PowerShell 路径/引号 EXEC 失败只拦截同一条命令，改写后的 Get-Item/Get-Content 可继续。",
@@ -836,6 +836,23 @@ def get_git_safe_directory_override() -> Optional[Path]:
     """Return the current child-process Git safe.directory override."""
     override = _GIT_SAFE_DIRECTORY_OVERRIDE.get("").strip()
     return Path(override).resolve() if override else None
+
+
+def _with_git_safe_directory_env(process_env: dict) -> dict:
+    """Merge the current Agent Git safe.directory override into a process env."""
+    git_safe_directory = get_git_safe_directory_override()
+    if git_safe_directory is None:
+        return process_env
+    merged = dict(process_env)
+    git_config_count = int(merged.get("GIT_CONFIG_COUNT", "0") or "0")
+    merged.update(
+        {
+            "GIT_CONFIG_COUNT": str(git_config_count + 1),
+            f"GIT_CONFIG_KEY_{git_config_count}": "safe.directory",
+            f"GIT_CONFIG_VALUE_{git_config_count}": str(git_safe_directory),
+        }
+    )
+    return merged
 
 
 def _agent_has_danger_full_access() -> bool:
@@ -1210,7 +1227,12 @@ def execute_shell_command(
                 if cancelled_early:
                     return f"[取消] 命令已因停止请求终止：{cancelled_early} (0ms)"
             try:
-                result = run_git(git_args, cwd=cwd, timeout=float(timeout_int))
+                result = run_git(
+                    git_args,
+                    cwd=cwd,
+                    timeout=float(timeout_int),
+                    env=_with_git_safe_directory_env(os.environ.copy()),
+                )
             except subprocess.TimeoutExpired:
                 return f"[超时] 命令执行超过 {timeout} 秒被强制终止。\n请检查命令是否陷入死循环。"
             stdout = str(result.stdout or "").strip()
@@ -1236,19 +1258,7 @@ def execute_shell_command(
                 return f"[WARNING | Exit Code: {result.returncode}]\n{output}"
             return output
 
-        process_env = os.environ.copy()
-        git_safe_directory = get_git_safe_directory_override()
-        if git_safe_directory is not None:
-            git_config_count = int(process_env.get("GIT_CONFIG_COUNT", "0") or "0")
-            process_env.update(
-                {
-                    "GIT_CONFIG_COUNT": str(git_config_count + 1),
-                    f"GIT_CONFIG_KEY_{git_config_count}": "safe.directory",
-                    f"GIT_CONFIG_VALUE_{git_config_count}": str(
-                        git_safe_directory
-                    ),
-                }
-            )
+        process_env = _with_git_safe_directory_env(os.environ.copy())
         # When agent still hits git via bash/cmd (complex pipes), still apply no-console git env.
         if re.match(r"^\s*git(?:\.exe)?\b", str(command or ""), flags=re.IGNORECASE):
             try:

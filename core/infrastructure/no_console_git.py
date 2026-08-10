@@ -200,11 +200,12 @@ def run_git(
     *,
     cwd: str | Path,
     timeout: float = 15.0,
+    env: dict | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``git <args>`` with no console window on Windows."""
 
     git_exe = resolve_git_executable()
-    env = apply_no_console_git_env(git_exe=git_exe)
+    env = apply_no_console_git_env(env=env, git_exe=git_exe)
     kwargs = no_console_subprocess_kwargs()
     return subprocess.run(
         [git_exe, *list(args)],

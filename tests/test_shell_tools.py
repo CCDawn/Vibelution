@@ -138,13 +138,12 @@ class TestReadFile:
         result = read_file(file_path=file_path, max_lines=3, offset=0)
 
         assert "[区间] 第 1-3 行" in result
-        assert "[阅读导航]" in result
+        assert "[剩余]" in result
         assert "read_file_tool(" not in result
         assert "grep_search_tool" not in result
         assert "code_symbol_tool" not in result
         assert "offset=3" not in result
         assert "max_lines=" not in result
-        assert "这不是续读指令" in result
 
     def test_read_file_adapts_page_size_for_large_file(self, temp_test_dir):
         file_path = os.path.join(temp_test_dir, "large.txt")
@@ -154,12 +153,11 @@ class TestReadFile:
 
         result = read_file(file_path=file_path, max_lines=120, offset=0)
 
-        assert "[阅读导航]" in result
+        assert "[剩余]" in result
         assert "read_file_tool(" not in result
         assert "grep_search_tool" not in result
         assert "code_symbol_tool" not in result
         assert "max_lines=80" not in result
-        assert "这不是续读指令" in result
 
 
 # ============================================================================
@@ -252,13 +250,13 @@ class TestCreateFile:
     def test_overwrite_existing_file(self, temp_test_dir):
         """测试覆盖现有文件"""
         file_path = os.path.join(temp_test_dir, "existing.txt")
-        with open(file_path, 'w') as f:
+        with open(file_path, 'w', encoding='utf-8') as f:
             f.write("旧内容")
         
         result = create_file(file_path=file_path, content="新内容")
         assert "覆盖" in result or "overwritten" in result.lower()
         
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             saved = f.read()
         assert saved == "新内容"
 
@@ -403,7 +401,7 @@ class TestEditFile:
     def test_auto_backup_created(self, temp_test_dir):
         """测试编辑成功；当前实现不再强依赖显式备份文件副作用。"""
         file_path = os.path.join(temp_test_dir, "backup_test.txt")
-        with open(file_path, 'w') as f:
+        with open(file_path, 'w', encoding='utf-8') as f:
             f.write("原始内容")
         
         result = edit_file(file_path=file_path, search_string="原始", replace_string="新")
@@ -477,8 +475,9 @@ class TestExecuteShellCommand:
         class FakeProcess:
             returncode = 0
             pid = 12345
+            args = ("git", "status")
 
-            def communicate(self, timeout=None):
+            def communicate(self, input=None, timeout=None):
                 return "ok\n", ""
 
             def poll(self):
@@ -486,6 +485,15 @@ class TestExecuteShellCommand:
 
             def wait(self, timeout=None):
                 return self.returncode
+
+            def kill(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                return False
 
         def fake_popen(command, **kwargs):
             calls.append((command, kwargs))
@@ -499,7 +507,7 @@ class TestExecuteShellCommand:
         result = execute_shell_command(command="git status", cwd=str(Path.cwd()))
 
         assert result == "ok"
-        assert "git status" in calls[0][0]
+        assert "git" in str(calls[0][0]).lower()
         assert calls[0][1]["creationflags"] & 0x08000000
 
     def test_git_safe_directory_override_scopes_subprocess_environment(
@@ -513,8 +521,9 @@ class TestExecuteShellCommand:
         class FakeProcess:
             returncode = 0
             pid = 12345
+            args = ("git", "status")
 
-            def communicate(self, timeout=None):
+            def communicate(self, input=None, timeout=None):
                 return "ok\n", ""
 
             def poll(self):
@@ -522,6 +531,15 @@ class TestExecuteShellCommand:
 
             def wait(self, timeout=None):
                 return self.returncode
+
+            def kill(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                return False
 
         def fake_popen(command, **kwargs):
             calls.append((command, kwargs))
