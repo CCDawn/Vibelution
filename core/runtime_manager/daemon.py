@@ -117,6 +117,8 @@ _STARTUP_COMMAND_GRACE_SECONDS = 1.0
 _STARTUP_COMMAND_GRACE_POLL_SECONDS = 0.05
 _RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS = 120.0
 _BROWSER_MISSING_AUTO_CLOSE_GRACE_SECONDS = 8.0
+_DAEMON_LOCK_SETTLE_SECONDS = 0.15
+_ORPHANED_CLEANUP_MAX_ATTEMPTS = 3
 _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 _LIFECYCLE_REQUEST_AUDIT_LIMITS = {
     "operation": 48,
@@ -350,13 +352,22 @@ def _persistent_active_work_run_snapshots() -> list[dict[str, Any]]:
         "supervised_evolution_run",
         "supervised_worktree_evolution_run",
     ):
+        source = f"work_run_store:{kind}"
         try:
             active_run_id = str(store.load_run_index(kind).get("activeRunId") or "").strip()
-        except Exception:
+        except Exception as exc:
+            _append_event(
+                "workbench.lifecycle.persistent_active_work_probe_failed",
+                {"source": source, "errorType": type(exc).__name__, "message": str(exc)},
+            )
             active_run_id = ""
         try:
             payloads = store.list_snapshots(kind)
-        except Exception:
+        except Exception as exc:
+            _append_event(
+                "workbench.lifecycle.persistent_active_work_probe_failed",
+                {"source": source, "errorType": type(exc).__name__, "message": str(exc)},
+            )
             payloads = []
         for payload in payloads if isinstance(payloads, list) else []:
             if not isinstance(payload, dict):
@@ -686,7 +697,7 @@ def _claim_daemon_ownership(pid: int) -> bool:
         )
         return False
 
-    for _attempt in range(2):
+    for _attempt in range(4):
         try:
             fd = os.open(str(DAEMON_LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
@@ -711,6 +722,30 @@ def _claim_daemon_ownership(pid: int) -> bool:
                     {"pid": current_pid, "ownerPid": owner_pid, "source": "lock_file"},
                 )
                 return False
+            if not owner_pid:
+                # Lock exists but the owner pid is not written yet: another daemon
+                # is mid-startup. Give it a settle window before treating the lock
+                # as stale so two concurrent starts cannot both claim ownership
+                # (the old code deleted the fresh lock here).
+                time.sleep(_DAEMON_LOCK_SETTLE_SECONDS)
+                settled_pid = _read_daemon_lock_pid()
+                _append_event(
+                    "daemon.start_lock_settle_wait",
+                    {"pid": current_pid, "settledOwnerPid": settled_pid},
+                )
+                if settled_pid:
+                    # The concurrent starter wrote its pid during the settle
+                    # window; re-evaluate against the real owner.
+                    continue
+                try:
+                    DAEMON_LOCK_PATH.unlink(missing_ok=True)
+                except OSError:
+                    _append_event(
+                        "daemon.start_blocked_existing_owner",
+                        {"pid": current_pid, "ownerPid": 0, "source": "stale_empty_lock_unlink_failed"},
+                    )
+                    return False
+                continue
             try:
                 DAEMON_LOCK_PATH.unlink(missing_ok=True)
             except OSError:
@@ -1692,6 +1727,17 @@ def load_runtime_snapshot() -> dict[str, Any]:
         if not _workbench_failure_should_stick(
             state, desired_state=desired_state, observed_state=observed_state
         ):
+            workbench["failureMessage"] = ""
+        elif (
+            observed_state == "closed"
+            and not consistency_fields["frontendOrphaned"]
+            and str(workbench.get("failureMessage") or "").startswith(
+                "Workbench frontend window is still open"
+            )
+        ):
+            # Orphaned-browser text is bound to the orphan observation; once the
+            # window/backend pair is consistent the message must not linger even
+            # when an unrelated lifecycle lastError still sticks.
             workbench["failureMessage"] = ""
     elif desired_state == "open" and observed_state == "partial" and browser_missing and phase != "failed":
         phase = "steady"
@@ -3079,26 +3125,48 @@ class RuntimeManagerDaemon:
                     "workbench.consistency.orphaned_browser_detected",
                     payload,
                 )
-            _append_event("workbench.consistency.orphaned_browser_cleanup_requested", payload)
-            result = close_workbench()
-            cleanup_payload = payload | {
-                "returnCode": int(result.returncode),
-                "stdout": str(getattr(result, "stdout", "") or "").strip()[-400:],
-                "stderr": str(getattr(result, "stderr", "") or "").strip()[-400:],
-            }
-            if result.returncode == 0:
-                _append_event("workbench.consistency.orphaned_browser_cleanup_succeeded", cleanup_payload)
-                observation = observe_workbench()
-                observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
-                consistency_fields = _workbench_consistency_fields(observation)
-                orphaned_browser = bool(consistency_fields["frontendOrphaned"])
-                browser_missing = bool(consistency_fields["browserMissing"])
-                if not orphaned_browser and observed_state == "closed":
-                    phase = "steady"
-                    workbench["failureMessage"] = ""
-            else:
+            cleanup_attempts = int(workbench.get("orphanedCleanupAttempts") or 0) + 1
+            if cleanup_attempts > _ORPHANED_CLEANUP_MAX_ATTEMPTS:
+                # Give up on repeated close_workbench failures: each attempt spawns a
+                # fresh internal launcher and can thrash the host. Keep the failure
+                # visible to the user (sticky phase) instead of looping forever.
+                _append_event(
+                    "workbench.consistency.orphaned_browser_cleanup_gave_up",
+                    payload | {"attempts": cleanup_attempts},
+                )
                 phase = "failed"
-                _append_event("workbench.consistency.orphaned_browser_cleanup_failed", cleanup_payload)
+                workbench["orphanedCleanupAttempts"] = cleanup_attempts
+                state["lastError"] = {
+                    "scope": "workbench",
+                    "message": (
+                        f"Workbench cleanup failed {cleanup_attempts} times; "
+                        "close the leftover window manually or restart the Launcher."
+                    ),
+                    "at": now_iso(),
+                }
+            else:
+                workbench["orphanedCleanupAttempts"] = cleanup_attempts
+                _append_event("workbench.consistency.orphaned_browser_cleanup_requested", payload)
+                result = close_workbench()
+                cleanup_payload = payload | {
+                    "returnCode": int(result.returncode),
+                    "stdout": str(getattr(result, "stdout", "") or "").strip()[-400:],
+                    "stderr": str(getattr(result, "stderr", "") or "").strip()[-400:],
+                }
+                if result.returncode == 0:
+                    _append_event("workbench.consistency.orphaned_browser_cleanup_succeeded", cleanup_payload)
+                    observation = observe_workbench()
+                    observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
+                    consistency_fields = _workbench_consistency_fields(observation)
+                    orphaned_browser = bool(consistency_fields["frontendOrphaned"])
+                    browser_missing = bool(consistency_fields["browserMissing"])
+                    workbench["orphanedCleanupAttempts"] = 0
+                    if not orphaned_browser and observed_state == "closed":
+                        phase = "steady"
+                        workbench["failureMessage"] = ""
+                else:
+                    phase = "failed"
+                    _append_event("workbench.consistency.orphaned_browser_cleanup_failed", cleanup_payload)
 
         if (
             not active_command
@@ -4508,8 +4576,16 @@ class RuntimeManagerDaemon:
             if session_service._is_session_running(session_id):
                 try:
                     session_service.request_stop_session_turn(session_id)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _append_event(
+                        "daemon.hot_restart.stop_previous_turn_failed",
+                        {
+                            "sessionId": session_id,
+                            "commandId": command_id,
+                            "errorType": type(exc).__name__,
+                            "message": str(exc),
+                        },
+                    )
 
             detail = session_service.submit_session_message(
                 session_id,
