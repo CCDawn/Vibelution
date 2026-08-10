@@ -273,8 +273,8 @@ def test_runtime_cache_usage_marks_missing_provider_usage_as_unavailable():
     assert cache_usage["turnInputTokens"] == 0
     assert cache_usage["lastCacheHitRate"] is None
     assert cache_usage["turnCacheHitRate"] is None
-    assert cache_usage["totalCacheHitRate"] == pytest.approx(0.5)
-    assert cache_usage["totalSource"] == "provider_usage"
+    assert cache_usage["totalCacheHitRate"] is None
+    assert cache_usage["totalSource"] == "missing"
 
 
 def test_runtime_cache_usage_projects_observed_provider_usage():
@@ -284,6 +284,7 @@ def test_runtime_cache_usage_projects_observed_provider_usage():
                 "source": "provider_usage",
                 "inputTokens": 1000,
                 "cachedInputTokens": 640,
+                "cacheUsageObserved": True,
             },
             "turn_input_tokens": 1500,
             "turn_cached_input_tokens": 900,
@@ -299,6 +300,80 @@ def test_runtime_cache_usage_projects_observed_provider_usage():
     assert cache_usage["totalCacheHitRate"] == pytest.approx(0.5)
     assert cache_usage["totalObservedTurnCount"] == 4
     assert cache_usage["totalSource"] == "provider_usage"
+
+
+def test_runtime_cache_usage_treats_legacy_zero_cache_counters_as_unobservable():
+    cache_usage = runtime_service._runtime_cache_usage(
+        {
+            "last_llm_usage": {
+                "source": "provider_usage",
+                "inputTokens": 1000,
+                "cachedInputTokens": 0,
+            },
+            "turn_input_tokens": 1500,
+            "turn_cached_input_tokens": 0,
+            "total_input_tokens": 5000,
+            "total_cached_input_tokens": 0,
+        }
+    )
+
+    assert cache_usage["source"] == "missing"
+    assert cache_usage["lastInputTokens"] == 0
+    assert cache_usage["lastCacheHitRate"] is None
+    assert cache_usage["turnCacheHitRate"] is None
+    assert cache_usage["totalCacheHitRate"] is None
+    assert cache_usage["totalSource"] == "missing"
+
+
+def test_runtime_cache_usage_preserves_explicit_zero_cache_hit():
+    cache_usage = runtime_service._runtime_cache_usage(
+        {
+            "last_llm_usage": {
+                "source": "provider_usage",
+                "inputTokens": 1000,
+                "cachedInputTokens": 0,
+                "cacheUsageObserved": True,
+            },
+            "turn_input_tokens": 1500,
+            "turn_cached_input_tokens": 0,
+            "total_input_tokens": 5000,
+            "total_cached_input_tokens": 0,
+            "last_cache_composition": {"averageObservedTurnCount": 4},
+        }
+    )
+
+    assert cache_usage["source"] == "provider_usage"
+    assert cache_usage["lastCacheHitRate"] == 0.0
+    assert cache_usage["turnCacheHitRate"] == 0.0
+    assert cache_usage["totalCacheHitRate"] == 0.0
+    assert cache_usage["totalSource"] == "provider_usage"
+
+
+def test_runtime_last_cache_composition_hides_legacy_zero_cache_calibration():
+    composition = runtime_service._runtime_last_cache_composition(
+        {
+            "last_llm_usage": {
+                "source": "provider_usage",
+                "inputTokens": 1000,
+                "cachedInputTokens": 0,
+            },
+            "last_cache_composition": {
+                "turnId": "turn-legacy",
+                "source": "provider_usage",
+                "inputTokens": 1000,
+                "cachedInputTokens": 0,
+                "uncachedInputTokens": 1000,
+                "cacheHitRate": 0.0,
+            },
+        }
+    )
+
+    assert composition is not None
+    assert composition["source"] == "missing"
+    assert composition["cacheUsageObserved"] is False
+    assert composition["cacheUsageMissingReason"] == "provider_cache_usage_missing"
+    assert composition["inputTokens"] == 0
+    assert composition["segments"][0]["key"] == "missing"
 
 
 def test_runtime_summary_uses_active_session_agent_dialogue_model(tmp_path, monkeypatch):
