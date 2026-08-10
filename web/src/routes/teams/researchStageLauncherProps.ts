@@ -54,7 +54,6 @@ export type TeamResearchStageLauncherPanelProps = {
       statusTone: string;
       configRoute: string;
     }>;
-    challengeSurface: "workspace" | "progress";
     detailDegraded: boolean;
     detailLoading: boolean;
     detailQuery: { isFetching: boolean; refetch: () => unknown };
@@ -138,7 +137,6 @@ export type TeamResearchStageLauncherFlatBindings = {
   selectedTeam: Team | null | undefined;
   selectedTeamMemoryMembers: TeamResearchStageLauncherPanelProps["team"]["memoryMembers"];
   lang: Lang;
-  challengeTeamSurface: "workspace" | "progress";
   presentationMode: "overview" | "interactive";
   sourceCollectionDraft: SourceCollectionDraft;
   setSourceCollectionDraft: TeamResearchStageLauncherPanelProps["sourceCollection"]["setDraft"];
@@ -216,7 +214,6 @@ export function flattenResearchStageLauncherProps(
     selectedTeam: team.selected,
     selectedTeamMemoryMembers: team.memoryMembers,
     lang: props.lang,
-    challengeTeamSurface: team.challengeSurface,
     presentationMode: props.presentationMode ?? "interactive",
     sourceCollectionDraft: sourceCollection.draft,
     setSourceCollectionDraft: sourceCollection.setDraft,

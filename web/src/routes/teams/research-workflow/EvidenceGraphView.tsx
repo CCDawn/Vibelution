@@ -21,6 +21,7 @@ export type EvidenceGraphViewProps = {
   runId: string;
   nodeId: string;
   teamId: string;
+  runVersion: number;
 };
 
 export type EvidenceGraphDto = {
@@ -82,51 +83,51 @@ export function EvidenceGraphContent({ graph }: { graph: EvidenceGraphDto }) {
 
   return (
     <>
-      <div className={styles.headerRow}>
-        <div className={styles.sectionLabel}>
+      <div className={styles.header}>
+        <div className={styles.eyebrow}>
           证据关系图 · {nodes.length} 节点 / {edges.length} 关系
         </div>
       </div>
       {nodes.length === 0 ? (
-        <VEmptyState title="暂无图数据" className={styles.emptyState}>
+        <VEmptyState title="暂无图数据" className={styles.empty}>
           后端投影未返回节点；先完成证据卡与关系图产出。
         </VEmptyState>
       ) : (
         <>
           {sections.map((section) => (
-            <div key={section.key} className={styles.sectionGrid}>
-              <div className={styles.sectionLabel}>
+            <div key={section.key} className={styles.section}>
+              <div className={styles.eyebrow}>
                 {section.label}（{section.items.length}）
               </div>
               <ul className={styles.list}>
                 {section.items.map((node) => (
                   <li
                     key={node.id}
-                    className={styles.nodeItem}
+                    className={styles.item}
                   >
-                    <div className={styles.nodeTitle}>
+                    <div className={styles.itemTitle}>
                       {nodeTitle(node)}
                     </div>
                     {nodeDetail(node) ? (
-                      <div className={styles.nodeMeta}>{nodeDetail(node)}</div>
+                      <div className={styles.itemDetail}>{nodeDetail(node)}</div>
                     ) : null}
                   </li>
                 ))}
               </ul>
             </div>
           ))}
-          <div className={styles.sectionGrid}>
-            <div className={styles.sectionLabel}>
+          <div className={styles.section}>
+            <div className={styles.eyebrow}>
               关系
             </div>
             {edges.length === 0 ? (
-              <p className={styles.emptyEdges}>暂无关系边</p>
+              <p className={styles.relationEmpty}>暂无关系边</p>
             ) : (
               <ul className={styles.list}>
                 {edges.map((edge) => (
                   <li
                     key={`${edge.source}->${edge.target}:${edge.kind}`}
-                    className={styles.edgeItem}
+                    className={styles.relation}
                   >
                     {edge.source} —{KIND_LABELS[edge.kind] ?? edge.kind}→ {edge.target}
                   </li>
@@ -140,13 +141,13 @@ export function EvidenceGraphContent({ graph }: { graph: EvidenceGraphDto }) {
   );
 }
 
-export function EvidenceGraphView({ runId, nodeId, teamId }: EvidenceGraphViewProps) {
+export function EvidenceGraphView({ runId, nodeId, teamId, runVersion }: EvidenceGraphViewProps) {
   const [state, setState] = useState<LoadState>({ kind: "idle" });
 
   const loadGraph = useCallback(() => {
     setState({ kind: "loading" });
     executeNodeCommand(
-      { runId, nodeId, teamId },
+      { runId, nodeId, teamId, runVersion },
       { command: "open_evidence_graph", available: true, reason: "" },
     )
       .then((result) => {
@@ -162,14 +163,14 @@ export function EvidenceGraphView({ runId, nodeId, teamId }: EvidenceGraphViewPr
       .catch((err: unknown) => {
         setState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
       });
-  }, [runId, nodeId, teamId]);
+  }, [runId, nodeId, teamId, runVersion]);
 
   if (state.kind === "idle") {
     return (
-      <VSurface tone="panel" className={styles.panel} data-vui="evidence-graph-view">
+      <VSurface tone="panel" className={styles.root} data-vui="evidence-graph-view">
         <VEmptyState
           title="证据关系图"
-          className={styles.emptyState}
+          className={styles.empty}
           actions={
             <VButton type="button" variant="secondary" onClick={() => void loadGraph()}>
               生成证据图
@@ -184,7 +185,7 @@ export function EvidenceGraphView({ runId, nodeId, teamId }: EvidenceGraphViewPr
 
   if (state.kind === "loading") {
     return (
-      <VSurface tone="panel" className={styles.panel}>
+      <VSurface tone="panel" className={styles.root}>
         <VStateSurface tone="loading" title="生成证据图" fill className={styles.fill} />
       </VSurface>
     );
@@ -192,9 +193,9 @@ export function EvidenceGraphView({ runId, nodeId, teamId }: EvidenceGraphViewPr
 
   if (state.kind === "error") {
     return (
-      <VSurface tone="panel" className={styles.panel}>
+      <VSurface tone="panel" className={styles.root}>
         <div
-          className={styles.alert}
+          className={styles.error}
           role="alert"
         >
           {state.message}
@@ -208,7 +209,7 @@ export function EvidenceGraphView({ runId, nodeId, teamId }: EvidenceGraphViewPr
 
   const { nodes, edges } = state.graph;
   return (
-    <VSurface tone="panel" className={styles.panel} data-vui="evidence-graph-view">
+    <VSurface tone="panel" className={styles.root} data-vui="evidence-graph-view">
       <EvidenceGraphContent graph={{ nodes, edges }} />
     </VSurface>
   );

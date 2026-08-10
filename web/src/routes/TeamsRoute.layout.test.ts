@@ -224,10 +224,9 @@ describe("research project workspace", () => {
     expect(panel).toContain("Open Agent chat");
   });
 
-  it("loads the current experiment projection on the Challenge research overview", () => {
-    expect(routeSource).toContain(
-      'challengeProgramProgressVisible: challengeCupResearchTeamSelected && (challengeTeamSurface === "progress" || researchWorkspaceView === "overview")',
-    );
+  it("does not enable legacy experiment projections from the Challenge workflow shell", () => {
+    expect(routeSource).toContain("challengeProgramProgressVisible: false");
+    expect(routeSource).not.toContain("challengeTeamSurface");
   });
 
   it("anchors experiment mutations to the stable route team while details are deferred", () => {
@@ -240,14 +239,11 @@ describe("research project workspace", () => {
     expect(experimentActionSource).not.toContain('teamId: selectedTeam?.teamId || ""');
   });
 
-  it("keeps the Challenge Program projection read-only on the overview console", () => {
-    // Single-canvas workflow is the only operations surface: the launcher no
-    // longer hosts a progress rail that shadows the active workflow, and the
-    // program projection stays a read-only overview reading.
+  it("mounts the Challenge Program workflow only through the canonical primary surface", () => {
     expect(teamResearchStageLauncherPanelSource).not.toContain(
-      "challengeProgramSurfaceSelected",
+      "const challengeProgramSurfaceSelected =",
     );
-    expect(teamResearchStageLauncherPanelSource).toContain("challengeProgramProjection");
+    expect(teamResearchPrimarySurfaceRenderersSource).toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain('surface="workspace"');
   });
@@ -476,11 +472,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("useAppI18n");
   });
 
-  it("is mounted as the top-level Team workspace with legacy redirects", () => {
+  it("is mounted as the top-level Team workspace without retired research routes", () => {
     expect(routerSource).toContain('path: "teams"');
     expect(routerSource).toContain('guardedLazyElement(<TeamsRoute />, "workbench", "teams")');
     expect(routerSource).toContain('path: "agents/teams"');
-    expect(routerSource).toContain('path: "research"');
+    expect(routerSource).not.toContain('path: "research"');
+    expect(routerSource).not.toContain('path: "research/flow-canvas"');
     expect(routerSource).toContain("<LegacyTeamsRedirect />");
     expect(routeSource).not.toContain("AgentManagementNav");
     expect(routeSource).toContain("团队工作台");
@@ -502,11 +499,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain('title={lang === "zh" ? "到 AgentDirectory 源配置修改"');
   });
 
-  it("preserves selected Team deep links from legacy routes", () => {
+  it("preserves selected Team deep links with canonical teamId", () => {
     expect(resolveLegacyTeamsRedirect("")).toBe("/teams");
-    expect(resolveLegacyTeamsRedirect("?team=research-core")).toBe(
-      "/teams?team=research-core&researchView=workflow&workflowId=challenge-cup-research",
+    expect(resolveLegacyTeamsRedirect("?teamId=research-core")).toBe(
+      "/teams?teamId=research-core&researchView=workflow&workflowId=challenge-cup-research",
     );
+    expect(resolveLegacyTeamsRedirect("?team=research-core")).toBe("/teams");
   });
 
   it("uses Team APIs and Agent Center as the binding source", () => {
@@ -814,13 +812,13 @@ describe("TeamsRoute layout contract", () => {
 
   it("can deep-link from Agent references to a selected Team", () => {
     expect(routeSource).toContain("useSearchParams");
-    expect(routeSource).toContain('searchParams.get("team")');
+    expect(routeSource).toContain('searchParams.get("teamId")');
     expect(routeSource).toContain('searchParams.get("agent")');
     expect(routeSource).toContain('searchParams.get("researchView")');
     expect(routeSource).toContain("parseResearchWorkspaceView");
     expect(routeSource).toContain("requestedAgentTeamId");
     // R2-h: team deep-link param writes live in createTeamsResearchNavigation.
-    expect(createTeamsResearchNavigationSource).toContain('nextParams.set("team", effectiveTeamId)');
+    expect(createTeamsResearchNavigationSource).toContain('nextParams.set("teamId", effectiveTeamId)');
     expect(createTeamsResearchNavigationSource).toContain('nextParams.set("teamMode", "canvas")');
     expect(createTeamsResearchNavigationSource).toContain('nextParams.set("teamMode", "board")');
   });
@@ -1625,8 +1623,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectedTeamKnowledgeIngestionLatestWorkRun");
     expect(routeSource).toContain("flowVisualization");
     expect(routeSource).toContain("latestWorkRun");
-    expect(routeSource).toContain('nextParams.set("researchView", "canvas")');
-    expect(routeSource).toMatch(/selectResearchWorkspaceView\(\s*"canvas"/);
+    expect(routeSource).toContain('nextParams.set("researchView", "workflow")');
+    expect(routeSource).toContain('nextParams.set("node", "knowledge_ingestion")');
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("一键流程图");
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("阶段详情");
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("Agent 私聊");
@@ -1775,14 +1773,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("ExperimentStageComposer");
     // Wave 8H: challengeProgramProjection is read inside TeamResearchStageLauncherPanel.
     expect(teamResearchStageLauncherPanelSource).toContain("challengeProgramProjection");
-    // The workflow workspace mounts via the primary-surface renderer, not a
-    // parallel launcher rail; launcher renders the overview console only.
+    expect(teamResearchPrimarySurfaceRenderersSource).toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain("ResearchProcessWorkspace");
     expect(teamResearchStageLauncherPanelSource).not.toContain("ChallengeCupOperationsWorkspace");
     expect(routeSource).toContain("challengeCupResearchTeamSelected");
-    expect(routeSource).toContain('useState<"workspace" | "progress">("workspace")');
-    expect(routeSource).toContain('challengeTeamSurface === "progress"');
-    // Board/canvas shell owns mode chrome; challenge surface remains state for progress queries.
+    expect(routeSource).not.toContain('useState<"workspace" | "progress">("workspace")');
+    expect(routeSource).not.toContain("challengeTeamSurface");
+    // Board/canvas shell owns mode chrome; Challenge progress is URL-panel state in the canonical workspace.
     expect(routeSource).toContain("TeamShellToolbar");
     expect(routeSource).not.toContain("<TeamShellModeSwitch");
     expect(routeSource).toContain("challengeWorkspaceContextHidden");
@@ -1834,8 +1831,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("ResearchMemoryEvidencePanel");
     expect(teamResearchStageLauncherPanelSource).toContain("stage={stage}");
     expect(routeSource).toContain('stageView="iteration"');
-    expect(researchWorkspaceModelSource).toContain('value === "source_collection"');
-    expect(researchWorkspaceModelSource).toContain('return "knowledge_collection"');
+    expect(researchWorkspaceModelSource).not.toContain('value === "source_collection"');
+    expect(researchWorkspaceModelSource).toContain('value === "workflow" || value === "overview"');
     expect(teamResearchWorkflowPanelHostSource).toContain('id="research-workflow-overview"');
     expect(routeSource).toContain("TeamResearchWorkflowPanelHost");
     expect(researchWorkspaceModelSource).toContain('knowledge_collection: "research-workflow-knowledge-collection"');

@@ -18,7 +18,6 @@ import {
   type NodeProps,
   type NodeTypes,
   type EdgeTypes,
-  type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useCallback, useLayoutEffect, useMemo, useRef, type ReactElement, type ReactNode } from "react";
@@ -283,10 +282,9 @@ function WorkflowCanvasInner({
     [layout.edges],
   );
 
-  const onSelectionChange = useCallback(
-    (params: OnSelectionChangeParams) => {
-      const task = params.nodes.find((n: Node) => n.type !== "stageRegion");
-      onSelectNode?.(task?.id ?? null);
+  const onNodeClick = useCallback(
+    (_event: unknown, node: Node) => {
+      if (node.type !== "stageRegion") onSelectNode?.(node.id);
     },
     [onSelectNode],
   );
@@ -323,7 +321,7 @@ function WorkflowCanvasInner({
           elementsSelectable
           panOnScroll
           zoomOnScroll
-          onSelectionChange={onSelectionChange}
+          onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
           proOptions={{ hideAttribution: true }}
           style={{ width: "100%", height: "100%" }}

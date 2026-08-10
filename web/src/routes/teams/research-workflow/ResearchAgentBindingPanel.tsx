@@ -13,9 +13,9 @@ import type { EffectiveAgentBinding } from "../../../api/types/researchWorkflow"
 import {
   TeamSourceCollectionStageAgentsPanel,
   type TeamSourceCollectionStageAgentCard,
-  type TeamSourceCollectionStageAgentTone,
 } from "../source-collection/ui/TeamSourceCollectionStageAgentsPanel";
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
+import { buildResearchAgentCard } from "./researchAgentCardModel";
 import styles from "./ResearchAgentBindingPanel.styles";
 
 type ResearchAgentBindingPanelProps = {
@@ -24,34 +24,6 @@ type ResearchAgentBindingPanelProps = {
   effectiveBindings: EffectiveAgentBinding[] | null;
   lang?: "zh" | "en";
 };
-
-const ROLE_LABELS: Record<string, string> = {
-  source_finder: "资料寻找",
-  source_extractor: "资料提炼",
-  source_relation_mapper: "证据关系",
-  source_ingestor: "知识入库",
-  experiment_planner: "实验规划",
-  experiment_ledger: "实验证据",
-  iteration_planner: "迭代决策",
-  iteration_versioning: "版本治理",
-};
-
-function sourceLabel(source: string): string {
-  const labels: Record<string, string> = {
-    workflow_default: "团队/工作流默认",
-    stage_override: "阶段覆盖",
-    node_override: "节点覆盖",
-    rebind: "运行内换绑",
-    unbound: "未绑定",
-  };
-  return labels[source] ?? source;
-}
-
-function toneFor(source: string, hasSession: boolean): TeamSourceCollectionStageAgentTone {
-  if (source === "unbound" || !source) return "missing";
-  if (!hasSession) return "warning";
-  return "ready";
-}
 
 export function ResearchAgentBindingPanel({
   teamId,
@@ -80,22 +52,15 @@ export function ResearchAgentBindingPanel({
         | { sessionId?: string; status?: string }
         | undefined;
       const hasSession = Boolean(session?.sessionId && session.status === "bound");
-      const statusLabel = !agentId
-        ? isZh ? "未绑定" : "Unbound"
-        : hasSession
-          ? isZh ? `会话已绑定${sourceLabel(source)}` : `Session bound · ${sourceLabel(source)}`
-          : isZh ? `已绑定 · ${sourceLabel(source)}` : `Bound · ${sourceLabel(source)}`;
-      return {
-        id: binding.nodeId,
-        tone: toneFor(source, hasSession),
-        roleLabel: ROLE_LABELS[binding.roleKey] ?? binding.roleKey,
-        agentName: agentId || (isZh ? "未绑定" : "Unbound"),
-        modelLabel: String(snap?.roleKey || binding.roleKey || ""),
-        statusLabel,
-        memoryRoute: "",
-        configRoute: agentId ? `/agents?pane=config&agent=${encodeURIComponent(agentId)}` : "/agents",
-        configLabel: isZh ? "Agent 配置" : "Configure",
-      };
+      return buildResearchAgentCard({
+        nodeId: binding.nodeId,
+        roleKey: String(snap?.roleKey || binding.roleKey || ""),
+        agentId,
+        agentName: String(snap?.displayName || binding.displayName || agentId),
+        resolvedFrom: source,
+        sessionBound: hasSession,
+        lang,
+      });
     });
   }, [effectiveBindings, run, isZh]);
 

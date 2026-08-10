@@ -24,11 +24,6 @@ export type NodeAdapterSpec = {
   slot: NodeAdapterSlot;
   /** Primary command keys shown in inspector (not route navigations). */
   commands: string[];
-  /**
-   * Stage drawer panel this node opens (Task 6: legacy stage functions are
-   * embedded as same-shell secondary panels, not copied into the inspector).
-   */
-  drawerPanel?: "experiment" | "knowledge" | "iteration";
   /** Legacy surface this adapter replaces as primary entry. */
   replaces: string;
 };
@@ -50,7 +45,6 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "knowledge_ops",
     commands: ["start_agent_task", "open_session"],
-    drawerPanel: "knowledge",
     replaces: "researchView=knowledge_collection&collectionStage=finding",
   },
   {
@@ -59,8 +53,7 @@ const ADAPTERS: NodeAdapterSpec[] = [
     label: "资料提炼",
     actorKind: "agent",
     slot: "knowledge_ops",
-    commands: ["start_agent_task", "open_session"],
-    drawerPanel: "knowledge",
+    commands: ["start_agent_task", "fork_evidence_remediation", "open_session"],
     replaces: "collectionStage=extraction",
   },
   {
@@ -97,7 +90,6 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "experiment_ops",
     commands: ["start_agent_task", "open_session"],
-    drawerPanel: "experiment",
     replaces: "researchView=experiment",
   },
   {
@@ -107,7 +99,6 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "experiment_ops",
     commands: ["start_agent_task", "open_session"],
-    drawerPanel: "experiment",
     replaces: "protocol design draft",
   },
   {
@@ -144,7 +135,6 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "system",
     slot: "system_run",
     commands: ["start_controlled_run", "view_artifacts"],
-    drawerPanel: "iteration",
     replaces: "formal_runner entry",
   },
   {
@@ -154,7 +144,6 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "iteration_ops",
     commands: ["start_agent_task", "open_session"],
-    drawerPanel: "iteration",
     replaces: "iteration evaluation",
   },
   {
@@ -164,7 +153,6 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "agent",
     slot: "iteration_ops",
     commands: ["start_agent_task", "open_session"],
-    drawerPanel: "iteration",
     replaces: "iteration_decision task",
   },
   {
@@ -174,7 +162,6 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "human",
     slot: "human_gate",
     commands: ["accept_handoff", "reject_handoff"],
-    drawerPanel: "iteration",
     replaces: "promotion human confirm",
   },
   {
@@ -184,7 +171,6 @@ const ADAPTERS: NodeAdapterSpec[] = [
     actorKind: "system",
     slot: "result_package",
     commands: ["build_package", "view_artifacts"],
-    drawerPanel: "iteration",
     replaces: "result package",
   },
 ];
@@ -222,6 +208,7 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
     start_controlled_run: "启动受控运行",
     view_artifacts: "查看产物",
     build_package: "生成结果包",
+    fork_evidence_remediation: "创建证据补救运行",
   };
   const en: Record<string, string> = {
     start_agent_task: "Start agent task",
@@ -234,6 +221,7 @@ export function commandLabel(command: string, lang: "zh" | "en" = "zh"): string 
     start_controlled_run: "Start controlled run",
     view_artifacts: "View artifacts",
     build_package: "Build result package",
+    fork_evidence_remediation: "Create evidence remediation run",
   };
   return (lang === "zh" ? zh : en)[command] || command;
 }

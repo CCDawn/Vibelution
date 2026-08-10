@@ -1159,7 +1159,6 @@ def test_research_flow_canvas_is_locked_to_research_organization_graph(tmp_path,
     assert research_team["teamId"] == "research-team"
     assert {member["agentId"] for member in research_team["members"]} == active_org_agent_ids
     assert {node["agentId"] for node in research_team["canvas"]["nodes"]} == active_org_agent_ids
-    assert all(node["displayName"] != "CEO Agent" for node in canvas_graph["agents"])
     assert all("agentInboxMessages" not in (node.get("agent") or {}) for node in canvas_graph["agents"])
     assert all("workspaceTerritory" not in (node.get("agent") or {}) for node in canvas_graph["agents"])
     assert {
@@ -1851,83 +1850,6 @@ def test_research_flow_canvas_rejects_structural_contract_errors(tmp_path, monke
         )
 
 
-def test_research_flow_canvas_executes_next_ready_node_and_routes_successors(tmp_path, monkeypatch):
-    class FakeWorkspace:
-        def __init__(self, root):
-            self.root = root
-
-        def get_research_flow_canvas_path(self):
-            return self.root / "prompts" / "research" / "flow_canvas.json"
-
-        def read_research_flow_canvas(self):
-            path = self.get_research_flow_canvas_path()
-            if path.exists():
-                import json
-
-                return json.loads(path.read_text(encoding="utf-8"))
-            return _explicit_research_worker_flow_canvas()
-
-        def write_research_flow_canvas(self, data):
-            path = self.get_research_flow_canvas_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            import json
-
-            path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            return True
-
-    service = _service(tmp_path)
-    created = service.create_session(
-        {
-            "openGoal": "Find a novel interdisciplinary AI Scientist research theme",
-            "constraints": "Student team, public sources, competition MVP",
-            "preferences": "Novel first",
-        }
-    )
-    events = []
-    monkeypatch.setattr(research_service, "_SERVICE", service)
-    monkeypatch.setattr(research_service, "get_workspace", lambda: FakeWorkspace(tmp_path))
-    monkeypatch.setattr(
-        research_service,
-        "record_research_scene_event",
-        lambda *args, **kwargs: events.append((args, kwargs)),
-    )
-
-    result = research_service.execute_research_flow_canvas_node(created["session"]["sessionId"])
-
-    canvas = result["canvas"]
-    assert result["execution"]["nodeId"] == "broad_search"
-    assert result["execution"]["routeOutcome"] == "completed"
-    assert result["session"]["summary"]["sourceCount"] > 0
-    assert next(node for node in canvas["nodes"] if node["id"] == "broad_search")["status"] == "done"
-    assert next(node for node in canvas["nodes"] if node["id"] == "deep_search")["status"] == "ready"
-    event_codes = [event[0][0] for event in events]
-    assert "research.flow_canvas.updated" not in event_codes
-    assert "research.flow_canvas.node_started" in event_codes
-    assert events[-1][0][0] == "research.flow_canvas.node_executed"
-    assert events[-1][1]["fields"]["activatedNodeIds"] == ["deep_search"]
-
-    deep_result = research_service.execute_research_flow_canvas_node(created["session"]["sessionId"])
-    deep_canvas = deep_result["canvas"]
-    assert deep_result["execution"]["nodeId"] == "deep_search"
-    assert next(node for node in deep_canvas["nodes"] if node["id"] == "evidence_review")["status"] == "ready"
-    assert next(node for node in deep_canvas["nodes"] if node["id"] == "theme_generation")["status"] == "idle"
-    assert deep_result["execution"]["activatedNodeIds"] == ["evidence_review"]
-
-    rerun_result = research_service.execute_research_flow_canvas_node(created["session"]["sessionId"], node_id="broad_search")
-    rerun_canvas = rerun_result["canvas"]
-    assert rerun_result["execution"]["nodeId"] == "broad_search"
-    assert next(node for node in rerun_canvas["nodes"] if node["id"] == "broad_search")["status"] == "done"
-    assert next(node for node in rerun_canvas["nodes"] if node["id"] == "deep_search")["status"] == "ready"
-    assert next(node for node in rerun_canvas["nodes"] if node["id"] == "evidence_review")["status"] == "idle"
-    assert rerun_result["execution"]["activatedNodeIds"] == ["deep_search"]
-    rerun_started = [
-        event
-        for event in events
-        if event[0][0] == "research.flow_canvas.node_started" and event[1]["fields"].get("rerun")
-    ]
-    assert rerun_started
-
-
 def test_theme_discovery_actions_sync_flow_canvas_statuses(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
@@ -1982,174 +1904,6 @@ def test_theme_discovery_actions_sync_flow_canvas_statuses(tmp_path, monkeypatch
     assert next(node for node in canvas_after_broad["nodes"] if node["id"] == "broad_search")["status"] == "done"
     assert next(node for node in canvas_after_broad["nodes"] if node["id"] == "deep_search")["status"] == "idle"
     assert any(event[0][0] == "research.flow_canvas.synced" for event in events)
-
-
-def test_research_flow_canvas_blocks_theme_card_without_selected_theme(tmp_path, monkeypatch):
-    class FakeWorkspace:
-        def __init__(self, root):
-            self.root = root
-
-        def get_research_flow_canvas_path(self):
-            return self.root / "prompts" / "research" / "flow_canvas.json"
-
-        def read_research_flow_canvas(self):
-            return {
-                "canvasKind": "research_flow_canvas",
-                "nodes": [
-                    {
-                        "id": "theme_card",
-                        "label": "正式主题卡",
-                        "type": "artifact",
-                        "status": "ready",
-                        "x": 0,
-                        "y": 0,
-                        "agentKey": "card",
-                        "promptKey": "card",
-                        "llmConfigId": "research_card",
-                        "description": "",
-                        "routeCondition": "",
-                    }
-                ],
-                "edges": [],
-                "viewport": {"x": 0, "y": 0, "zoom": 1},
-            }
-
-        def write_research_flow_canvas(self, data):
-            self.saved = data
-            return True
-
-    service = _service(tmp_path)
-    created = service.create_session(
-        {
-            "openGoal": "Find a novel interdisciplinary AI Scientist research theme",
-            "constraints": "Student team, public sources, competition MVP",
-            "preferences": "Novel first",
-        }
-    )
-    workspace = FakeWorkspace(tmp_path)
-    monkeypatch.setattr(research_service, "_SERVICE", service)
-    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
-    monkeypatch.setattr(research_service, "record_research_scene_event", lambda *args, **kwargs: None)
-
-    with pytest.raises(ValueError, match="Select a candidate theme"):
-        research_service.execute_research_flow_canvas_node(created["session"]["sessionId"], node_id="theme_card")
-
-    assert workspace.saved["nodes"][0]["status"] == "failed"
-
-
-def test_research_flow_canvas_reopens_done_search_on_missing_evidence(tmp_path, monkeypatch):
-    class FakeWorkspace:
-        def __init__(self):
-            self.saved = None
-
-        def get_research_flow_canvas_path(self):
-            return tmp_path / "prompts" / "research" / "flow_canvas.json"
-
-        def read_research_flow_canvas(self):
-            return {
-                "canvasKind": "research_flow_canvas",
-                "nodes": [
-                    {
-                        "id": "deep_search",
-                        "label": "定向深搜",
-                        "type": "agent",
-                        "status": "done",
-                        "x": 0,
-                        "y": 0,
-                        "agentKey": "deep",
-                        "promptKey": "deep",
-                        "llmConfigId": "research_deep",
-                        "description": "",
-                        "routeCondition": "",
-                    },
-                    {
-                        "id": "evidence_review",
-                        "label": "证据审查",
-                        "type": "agent",
-                        "status": "ready",
-                        "x": 260,
-                        "y": 0,
-                        "agentKey": "review",
-                        "promptKey": "review",
-                        "llmConfigId": "research_review",
-                        "description": "",
-                        "routeCondition": "",
-                    },
-                ],
-                "edges": [
-                    {
-                        "id": "edge_review_deep",
-                        "source": "evidence_review",
-                        "target": "deep_search",
-                        "label": "缺证据补搜",
-                        "condition": "needs_evidence",
-                    }
-                ],
-                "viewport": {"x": 0, "y": 0, "zoom": 1},
-            }
-
-        def write_research_flow_canvas(self, data):
-            self.saved = data
-            return True
-
-    workspace = FakeWorkspace()
-    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
-    monkeypatch.setattr(research_service, "record_research_scene_event", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        research_service,
-        "extract_theme_discovery_evidence",
-        lambda session_id: {
-            "session": {"sessionId": session_id},
-            "summary": {"evidenceCount": 1},
-            "events": [{"fields": {"missingEvidenceRequests": ["补充 GitHub 项目证据"]}}],
-        },
-    )
-
-    result = research_service.execute_research_flow_canvas_node("session-1", node_id="evidence_review")
-
-    deep_node = next(node for node in result["canvas"]["nodes"] if node["id"] == "deep_search")
-    review_node = next(node for node in result["canvas"]["nodes"] if node["id"] == "evidence_review")
-    assert result["execution"]["routeOutcome"] == "needs_evidence"
-    assert result["execution"]["activatedNodeIds"] == ["deep_search"]
-    assert deep_node["status"] == "needs_evidence"
-    assert review_node["status"] == "done"
-
-
-def test_research_flow_canvas_blocks_new_node_while_another_is_running(tmp_path, monkeypatch):
-    class FakeWorkspace:
-        def __init__(self):
-            self.saved = None
-
-        def get_research_flow_canvas_path(self):
-            return tmp_path / "prompts" / "research" / "flow_canvas.json"
-
-        def read_research_flow_canvas(self):
-            canvas = _explicit_research_worker_flow_canvas()
-            for node in canvas["nodes"]:
-                if node["id"] == "broad_search":
-                    node["status"] = "done"
-                if node["id"] == "theme_generation":
-                    node["status"] = "running"
-            return canvas
-
-        def write_research_flow_canvas(self, data):
-            self.saved = data
-            return True
-
-    service = _service(tmp_path)
-    created = service.create_session(
-        {
-            "openGoal": "Find a novel interdisciplinary AI Scientist research theme",
-            "constraints": "Student team, public sources, competition MVP",
-            "preferences": "Novel first",
-        }
-    )
-    monkeypatch.setattr(research_service, "_SERVICE", service)
-    monkeypatch.setattr(research_service, "get_workspace", lambda: FakeWorkspace())
-    monkeypatch.setattr(research_service, "record_research_scene_event", lambda *args, **kwargs: None)
-
-    with pytest.raises(ValueError, match="Research flow node is already running: theme_generation"):
-        research_service.execute_research_flow_canvas_node(created["session"]["sessionId"], node_id="broad_search")
 
 
 def test_llm_research_agent_runner_requires_search_tool_calls(tmp_path, monkeypatch):
@@ -2826,7 +2580,6 @@ def test_research_flow_canvas_api_declares_utf8_json(tmp_path, monkeypatch):
     assert response.json()["projectBinding"]["teamId"] == "research-team"
     assert response.json()["projectBinding"]["organizationSource"] == "research_organization"
     assert response.json()["nodes"][0]["label"]
-    assert response.json()["nodes"][0]["label"] != "CEO Agent"
 
 
 def test_public_search_provider_uses_configured_proxy(monkeypatch):

@@ -20,7 +20,12 @@ export type NodeDetailState =
   | { kind: "ready"; detail: ResearchWorkflowNodeDetail }
   | { kind: "error"; nodeId: string; message: string };
 
-export function useNodeDetailState(runId: string, nodeId: string | null): {
+export function useNodeDetailState(
+  teamId: string,
+  runId: string,
+  nodeId: string | null,
+  runVersion: number | null = null,
+): {
   state: NodeDetailState;
   retry: () => void;
 } {
@@ -33,7 +38,9 @@ export function useNodeDetailState(runId: string, nodeId: string | null): {
       const gen = ++fetchGenRef.current;
       setState({ kind: "loading" });
       try {
-        const detail = await fetchResearchWorkflowNodeDetail(targetRunId, targetNodeId);
+        const detail = await fetchResearchWorkflowNodeDetail(targetRunId, targetNodeId, {
+          teamId,
+        });
         if (gen !== fetchGenRef.current) {
           return;
         }
@@ -53,7 +60,7 @@ export function useNodeDetailState(runId: string, nodeId: string | null): {
         });
       }
     },
-    [],
+    [teamId],
   );
 
   useEffect(() => {
@@ -65,7 +72,7 @@ export function useNodeDetailState(runId: string, nodeId: string | null): {
       return;
     }
     void load(runId, nodeId);
-  }, [runId, nodeId, load, retryTick]);
+  }, [teamId, runId, nodeId, runVersion, load, retryTick]);
 
   const retry = useCallback(() => {
     if (runId && nodeId) {

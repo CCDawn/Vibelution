@@ -276,6 +276,7 @@ export function mergeRuntimeFields(
       blockedReason: live.blockedReason,
       description: live.description,
       primaryRoleKey: live.primaryRoleKey,
+      primaryAgentId: live.primaryAgentId,
       sourceHandleIds: sourceHandleIds.length > 0 ? sourceHandleIds : undefined,
       decisionOutcomeIds:
         node.visualKind === "decision" ? [...DECISION_OUTCOME_IDS] : undefined,

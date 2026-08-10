@@ -50,6 +50,7 @@ from core.web.services.team_workflow.research_memory_context import (
     build_research_memory_context as _build_research_memory_context,
 )
 from core.web.services.team_workflow.source_collection_stage_tasks import (
+    source_collection_evidence_fetch_progress as _source_collection_evidence_fetch_progress,
     source_collection_stage_can_materialize_formal_knowledge as _source_collection_stage_can_materialize_formal_knowledge,
     source_collection_stage_completion_gate as _source_collection_stage_completion_gate,
     source_collection_stage_round_status_from_task_refs as _source_collection_stage_round_status_from_task_refs,

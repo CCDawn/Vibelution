@@ -138,7 +138,7 @@ def _canonical_edit_route(kind: str, source_id: str, metadata: dict[str, Any]) -
     if kind in {"task", "kernel_task"}:
         return _route("/kernel", {"taskId": normalized_id})
     if kind in {"team", "team_workflow"}:
-        return _route("/teams", {"team": normalized_id})
+        return _route("/teams", {"teamId": normalized_id})
     return ""
 
 

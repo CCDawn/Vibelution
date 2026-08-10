@@ -30,6 +30,7 @@ class WorkflowRunStatus(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
 
 
 class NodeRunStatus(str, Enum):

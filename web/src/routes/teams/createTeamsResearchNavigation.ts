@@ -43,7 +43,9 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
   function selectResearchWorkspaceView(view: ResearchWorkspaceView) {
     const nextParams = new URLSearchParams(searchParams);
     if (effectiveTeamId) {
-      nextParams.set("team", effectiveTeamId);
+      nextParams.delete("team");
+      nextParams.delete("team_id");
+      nextParams.set("teamId", effectiveTeamId);
     }
     // overview / legacy canvas → single team home; stage pages → board workbench.
     if (view === "overview" || view === "canvas") {

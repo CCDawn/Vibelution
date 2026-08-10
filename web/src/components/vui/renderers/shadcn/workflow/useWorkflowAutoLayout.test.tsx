@@ -346,6 +346,28 @@ describe("useWorkflowAutoLayout behavior", () => {
     expect(latest?.edges[0].pathState).toBe("active");
   });
 
+  it("refreshes Agent bindings without re-running ELK", async () => {
+    const engine = makeEngine();
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+    await renderWith(graph, engine);
+    expect(engine.layout).toHaveBeenCalledTimes(3);
+
+    const bindingOnly: WorkflowLayoutInput = {
+      ...graph,
+      nodes: graph.nodes.map((node, index) => ({
+        ...node,
+        primaryAgentId: index === 0 ? "agent-source-finder" : undefined,
+      })),
+    };
+    await renderWith(bindingOnly, engine);
+
+    expect(engine.layout).toHaveBeenCalledTimes(3);
+    const boundTask = latest?.nodes.find(
+      (node) => node.kind === "task" && node.id === "knowledge_collection",
+    );
+    expect(boundTask?.primaryAgentId).toBe("agent-source-finder");
+  });
+
   it("re-runs ELK when topology changes and bumps layoutRevision", async () => {
     const engine = makeEngine();
     await renderWith(makeGraph(["knowledge_collection", "experiment_design"]), engine);

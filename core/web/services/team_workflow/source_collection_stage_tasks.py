@@ -35,7 +35,11 @@ def source_collection_stage_can_materialize_formal_knowledge(stage_id: str, agen
 
 def _source_collection_extraction_result_contract() -> dict[str, Any]:
     return {
-        "acceptedCollections": ["candidateExtractions", "recordExtractions"],
+        "acceptedCollections": [
+            "candidateExtractions",
+            "recordExtractions",
+            "evidenceFetchAttempts",
+        ],
         "requiredItemFields": ["decision"],
         "candidateIdentityField": "candidateId",
         "recordIdentityField": "recordId",
@@ -66,6 +70,12 @@ def _source_collection_extraction_result_contract() -> dict[str, Any]:
             "timestamp",
         ],
         "missingAnchorBehavior": "preserve_decision_and_mark_missing_evidence_anchor",
+        "evidenceFetchAttemptFields": [
+            "candidateId",
+            "locator",
+            "status",
+            "toolName",
+        ],
     }
 
 
@@ -115,7 +125,12 @@ def source_collection_stage_task_title(stage_id: str) -> str:
     }.get(stage_id, "知识搜集阶段任务")
 
 
-def source_collection_stage_task_checklist(stage_id: str, agent_role: str = "") -> list[dict[str, Any]]:
+def source_collection_stage_task_checklist(
+    stage_id: str,
+    agent_role: str = "",
+    *,
+    evidence_remediation_contract: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     normalized_stage_id = normalize_source_collection_stage_id(stage_id, default="finding")
     normalized_agent_role = normalize_source_collection_agent_role(agent_role)
     raw_items_by_stage: dict[str, tuple[tuple[str, str, str], ...]] = {
@@ -147,7 +162,26 @@ def source_collection_stage_task_checklist(stage_id: str, agent_role: str = "") 
             ("confirm_formal_knowledge_or_return", "确认正式知识项已生成或明确退回原因", "source_collection_stage_writeback_tool"),
         ),
     }
-    raw_items = raw_items_by_stage.get(normalized_stage_id, raw_items_by_stage["finding"])
+    raw_items = list(
+        raw_items_by_stage.get(normalized_stage_id, raw_items_by_stage["finding"])
+    )
+    remediation = (
+        evidence_remediation_contract
+        if isinstance(evidence_remediation_contract, dict)
+        else {}
+    )
+    if (
+        normalized_stage_id == "extraction"
+        and bool(remediation.get("requiredExistingLocatorFetch"))
+    ):
+        raw_items.insert(
+            2,
+            (
+                "fetch_existing_locators",
+                "逐候选抓取既有 DOI/URL 并记录 evidenceFetchAttempts[]",
+                "web_fetch_tool",
+            ),
+        )
     return [
         {
             "id": item_id,
@@ -159,6 +193,57 @@ def source_collection_stage_task_checklist(stage_id: str, agent_role: str = "") 
         }
         for index, (item_id, description, required_tool) in enumerate(raw_items, start=1)
     ]
+
+
+def source_collection_evidence_fetch_progress(
+    task: dict[str, Any],
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    contract = (
+        task.get("evidenceRemediationContract")
+        if isinstance(task.get("evidenceRemediationContract"), dict)
+        else {}
+    )
+    required_ids = {
+        trim_text(item, max_length=160)
+        for item in list(contract.get("scopeCandidateIds") or [])
+        if trim_text(item, max_length=160)
+    }
+    required = bool(contract.get("requiredExistingLocatorFetch") and required_ids)
+    attempts = [
+        item
+        for item in list((result or {}).get("evidenceFetchAttempts") or [])
+        if isinstance(item, dict)
+    ]
+    completed_ids: set[str] = set()
+    invalid_ids: list[str] = []
+    for item in attempts:
+        candidate_id = trim_text(item.get("candidateId"), max_length=160)
+        locator = trim_text(item.get("locator"), max_length=1000)
+        status = trim_text(item.get("status"), max_length=80).lower()
+        tool_name = trim_text(item.get("toolName"), max_length=120)
+        failure_code = trim_text(item.get("failureCode"), max_length=160)
+        valid = bool(
+            candidate_id in required_ids
+            and locator
+            and tool_name == "web_fetch_tool"
+            and status in {"fetched", "failed"}
+            and (status != "failed" or failure_code)
+        )
+        if valid:
+            completed_ids.add(candidate_id)
+        elif candidate_id:
+            invalid_ids.append(candidate_id)
+    missing_ids = sorted(required_ids - completed_ids)
+    return {
+        "required": required,
+        "total": len(required_ids),
+        "completed": len(completed_ids),
+        "complete": not required or not missing_ids,
+        "completedCandidateIds": sorted(completed_ids),
+        "missingCandidateIds": missing_ids,
+        "invalidCandidateIds": sorted(set(invalid_ids)),
+    }
 
 
 def source_collection_stage_task_tool_progress(

@@ -127,6 +127,45 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     }
   });
 
+  it("selects a task directly from the React Flow node click", async () => {
+    const onSelectNode = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={emptyGraph()} onSelectNode={onSelectNode} />);
+    });
+
+    const rfProps = rfCalls[0];
+    expect(typeof rfProps.onNodeClick).toBe("function");
+    (rfProps.onNodeClick as (event: unknown, node: { id: string }) => void)(
+      {},
+      { id: "source_extraction" },
+    );
+    expect(onSelectNode).toHaveBeenCalledWith("source_extraction");
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+  });
+
+  it("does not expose React Flow selection-change callbacks that can replay stale nodes", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={emptyGraph()} selectedNodeId="source_extraction" />);
+    });
+
+    expect(rfCalls[0].onSelectionChange).toBeUndefined();
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+  });
+
   it("shows a degraded banner when the layout hook reports a failure (P1-5)", async () => {
     vi.mocked(useWorkflowAutoLayout).mockReturnValue({
       nodes: [],

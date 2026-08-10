@@ -9,7 +9,6 @@ from core.web.services.research_service import (
     approve_theme_card,
     create_theme_discovery_session,
     delete_theme_discovery_session,
-    execute_research_flow_canvas_node,
     extract_theme_discovery_evidence,
     generate_candidate_themes,
     generate_theme_card,
@@ -73,11 +72,6 @@ class ResearchFlowCanvasPayload(BaseModel):
     viewport: dict = Field(default_factory=dict)
     nodes: list[dict] = Field(default_factory=list, max_length=80)
     edges: list[dict] = Field(default_factory=list, max_length=160)
-
-
-class ResearchFlowCanvasExecutionPayload(BaseModel):
-    sessionId: str = Field("", max_length=128)
-    nodeId: str | None = Field(default=None, max_length=128)
 
 
 class ResearchOrganizationPayload(BaseModel):
@@ -255,11 +249,6 @@ def research_flow_canvas_update(payload: ResearchFlowCanvasPayload) -> dict:
         return save_research_flow_canvas(payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/research/flow-canvas/execute")
-def research_flow_canvas_execute(payload: ResearchFlowCanvasExecutionPayload) -> dict:
-    return _run_research_action(lambda: execute_research_flow_canvas_node(payload.sessionId, payload.nodeId))
 
 
 @router.get("/research/organization")

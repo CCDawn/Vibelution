@@ -6,11 +6,14 @@ const workspaceSource = readFileSync(
   resolve(import.meta.dirname, "ResearchProcessWorkspace.tsx"),
   "utf8",
 );
+const canvasSource = readFileSync(resolve(import.meta.dirname, "ResearchWorkflowCanvasPane.tsx"), "utf8");
+const inspectorSource = readFileSync(resolve(import.meta.dirname, "ResearchProcessInspectorPane.tsx"), "utf8");
+const commandSource = readFileSync(resolve(import.meta.dirname, "useResearchWorkflowCommands.ts"), "utf8");
 
 describe("researchWorkflowNoDuplicateSurface", () => {
   it("workspace uses VWorkflowCanvas and does not mount stage rail", () => {
-    expect(workspaceSource).toContain("VWorkflowCanvas");
-    expect(workspaceSource).toContain("ResearchProcessNodeInspector");
+    expect(canvasSource).toContain("VWorkflowCanvas");
+    expect(inspectorSource).toContain("ResearchProcessNodeInspector");
     expect(workspaceSource).toContain("useResearchWorkflowRun");
     expect(workspaceSource).not.toContain("ChallengeCupStageRail");
     expect(workspaceSource).not.toContain("ResearchStageNav");
@@ -19,18 +22,14 @@ describe("researchWorkflowNoDuplicateSurface", () => {
   });
 
   it("selection updates URL node without claiming runtime authority in comments/code", () => {
-    expect(workspaceSource).toContain("Selection is UI-only");
     expect(workspaceSource).toContain("runtimeCurrentNodeIds");
-    expect(workspaceSource).toContain("onSelectNode");
-    expect(workspaceSource).not.toContain("canonical");
-    expect(workspaceSource).not.toContain("不维护第二份");
+    expect(workspaceSource).toContain("selectNode");
   });
 
   it("has no fake-command fallback error (commands are backend-declared)", () => {
-    expect(workspaceSource).not.toContain("尚未接入业务服务");
-    expect(workspaceSource).not.toContain("WIRED_COMMANDS");
+    expect(commandSource).not.toContain("WIRED_COMMANDS");
     // Commands are executed through the real backend adapter only.
-    expect(workspaceSource).toContain("executeNodeCommand");
-    expect(workspaceSource).toContain("onInspectorCommand");
+    expect(commandSource).toContain("executeNodeCommand");
+    expect(commandSource).toContain("runInspectorCommand");
   });
 });

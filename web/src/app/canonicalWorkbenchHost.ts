@@ -17,8 +17,6 @@ const WORKBENCH_ONLY_PATHS = new Set([
   "/git",
   "/usage",
   "/logs",
-  "/research",
-  "/research/flow-canvas",
   "/pet",
   "/reset",
   "/config",

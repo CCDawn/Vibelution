@@ -39,7 +39,7 @@ PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 12
 SUPERVISED_BASELINE_PROMPT_VERSION = 15
 SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 15
-SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 16
+SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 17
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
@@ -207,6 +207,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "- 已有候选时优先回写 candidateExtractions[]，每项绑定真实 candidateId；可直接在 candidateExtractions[] 内写 decision=keep/needs_more_info/exclude，不需要另交一份 candidateDecisions[]。\n"
             "- 没有 candidateId 时用 recordExtractions[] 绑定完整 recordId；只有专门做资料审查/质检时才单独回写 candidateDecisions[]。\n"
             "- 覆盖不足时不要写完成口吻；可以分批回写，系统会按真实 candidateId/recordId 累计上一批结果；工具超时后不要盲目重复同一大包，改用更小批次或写 blocked/needs_review。\n\n"
+            "- 收到 evidenceRemediationContract 时，必须逐个处理 scopeCandidateIds：仅用既有 DOI/URL 调用 web_fetch_tool，并在 evidenceFetchAttempts[] 留下 fetched/failed 记录；没有完成全部尝试前不得直接写 needs_review。\n\n"
             "## 输出要求\n"
             "1. Coverage：已处理 X/Y、待补读、无效 ID 或无法读取数量。\n"
             "2. Kept Sources：保留资料、价值说明、缺口说明和证据锚点。\n"

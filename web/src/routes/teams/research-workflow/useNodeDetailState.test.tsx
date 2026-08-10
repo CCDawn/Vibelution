@@ -18,15 +18,19 @@ vi.mock("../../../api/researchWorkflow", () => api);
 import { useNodeDetailState, type NodeDetailState } from "./useNodeDetailState";
 
 function Probe({
+  teamId,
   runId,
   nodeId,
+  runVersion = null,
   onValue,
 }: {
+  teamId: string;
   runId: string;
   nodeId: string | null;
+  runVersion?: number | null;
   onValue: (state: NodeDetailState, retry: () => void) => void;
 }) {
-  const { state, retry } = useNodeDetailState(runId, nodeId);
+  const { state, retry } = useNodeDetailState(teamId, runId, nodeId, runVersion);
   onValue(state, retry);
   return null;
 }
@@ -56,6 +60,7 @@ describe("useNodeDetailState", () => {
     await act(async () => {
       root.render(
         <Probe
+          teamId="team-1"
           runId={runId}
           nodeId={nodeId}
           onValue={(state, retry) => {
@@ -87,7 +92,59 @@ describe("useNodeDetailState", () => {
     if (latest.kind === "ready") {
       expect(latest.detail.nodeId).toBe("source_finding");
     }
-    expect(api.fetchResearchWorkflowNodeDetail).toHaveBeenCalledWith("run-1", "source_finding");
+    expect(api.fetchResearchWorkflowNodeDetail).toHaveBeenCalledWith(
+      "run-1",
+      "source_finding",
+      { teamId: "team-1" },
+    );
+  });
+
+  it("refetches the selected node when the authoritative run version changes", async () => {
+    api.fetchResearchWorkflowNodeDetail.mockResolvedValue({
+      runId: "run-1",
+      nodeId: "source_finding",
+      label: "资料寻找",
+      commands: [],
+    });
+    await act(async () => {
+      root.render(
+        <Probe
+          teamId="team-1"
+          runId="run-1"
+          nodeId="source_finding"
+          runVersion={4}
+          onValue={(state, retry) => {
+            latest = state;
+            latestRetry = retry;
+          }}
+        />,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.fetchResearchWorkflowNodeDetail).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.render(
+        <Probe
+          teamId="team-1"
+          runId="run-1"
+          nodeId="source_finding"
+          runVersion={8}
+          onValue={(state, retry) => {
+            latest = state;
+            latestRetry = retry;
+          }}
+        />,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(api.fetchResearchWorkflowNodeDetail).toHaveBeenCalledTimes(2);
+    expect(latest.kind).toBe("ready");
   });
 
   it("surfaces a retryable error state on failure and retries", async () => {
@@ -139,6 +196,7 @@ describe("useNodeDetailState", () => {
     await act(async () => {
       root.render(
         <Probe
+          teamId="team-1"
           runId="run-1"
           nodeId="protocol_design"
           onValue={(state, retry) => {

@@ -166,6 +166,8 @@ def test_instance_environment_and_state_are_private(runtime, tmp_path, monkeypat
         assert env["VIBELUTION_FRONTEND_PORT"] == str(state["ports"]["frontend"])
         assert Path(env["VIBELUTION_DATA_HOME"]).is_relative_to(instance_root)
         assert Path(env["VIBELUTION_CONFIG_HOME"]).is_relative_to(instance_root)
+        assert Path(env["VIBELUTION_RESEARCH_WORKFLOW_RUN_STORE"]).is_relative_to(instance_root)
+        assert Path(env["VIBELUTION_RESEARCH_WORKFLOW_CHECKPOINT_PATH"]).is_relative_to(instance_root)
         assert env["VIBELUTION_ACCEPTANCE_INSTANCE_ID"] == "task-a"
         assert env["VIBELUTION_ACCEPTANCE_MODE"] == "isolated-fixture"
     persisted = json.loads((instance_root / "state.json").read_text(encoding="utf-8"))

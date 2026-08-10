@@ -3,7 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { teamWorkspaceRoute } from "./teams/researchWorkspaceModel";
 
 export function resolveLegacyTeamsRedirect(search: string): string {
-  const teamId = new URLSearchParams(search).get("team")?.trim() ?? "";
+  const teamId = new URLSearchParams(search).get("teamId")?.trim() ?? "";
   if (!teamId) {
     return "/teams";
   }

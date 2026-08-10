@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
+from .stage_writeback_prompt_contracts import stage_writeback_prompt_lines
 
 
 def _service():
@@ -2072,6 +2073,10 @@ def _source_collection_stage_task_tool_progress_from_trace(
             for tool_call in tool_calls
             if s._source_collection_stage_tool_call_succeeded(tool_call)
         }
+        attempted_tool_names = {
+            s._source_collection_stage_tool_call_name(tool_call)
+            for tool_call in tool_calls
+        }
         persisted_writeback_after_turn = s._source_collection_stage_persisted_writeback_after_turn(task)
         writeback_observed = (
             "source_collection_stage_writeback_tool" in successful_tool_names
@@ -2111,7 +2116,11 @@ def _source_collection_stage_task_tool_progress_from_trace(
             if required_tool == "source_collection_stage_writeback_tool":
                 item_complete = bool(writeback_observed and artifact_complete)
             elif required_tool:
-                item_complete = required_tool in successful_tool_names
+                item_complete = (
+                    required_tool in attempted_tool_names
+                    if required_tool == "web_fetch_tool"
+                    else required_tool in successful_tool_names
+                )
                 if (
                     not item_complete
                     and required_tool == "batch_web_search_tool"
@@ -2750,6 +2759,25 @@ def _source_collection_stage_session_task_message(
     ]
     previous_attempt_lines = s._source_collection_stage_previous_attempt_lines(previous_task)
     previous_attempt_block = [*previous_attempt_lines, ""] if previous_attempt_lines else []
+    evidence_remediation_contract = (
+        writeback_contract.get("evidenceRemediationContract")
+        if isinstance(writeback_contract.get("evidenceRemediationContract"), dict)
+        else {}
+    )
+    remediation_scope_ids = s._normalize_text_list(
+        evidence_remediation_contract.get("scopeCandidateIds"),
+        max_items=120,
+        max_length=160,
+    )
+    remediation_lines = (
+        [
+            "- 本轮是正式证据修复 child Run；只处理冻结的 scopeCandidateIds，禁止扩展检索范围。",
+            f"- 必须为每个 scopeCandidateId 调用一次 `web_fetch_tool` 抓取其既有 DOI/URL，并在 `evidenceFetchAttempts[]` 记录 candidateId、locator、status、toolName；失败时同时写 failureCode。冻结范围：{json.dumps(remediation_scope_ids, ensure_ascii=False)}",
+            "- 所有既有定位符均尝试后，仍证据不足才允许写 `needs_review`；不得跳过抓取直接沿用上一轮结论。",
+        ]
+        if evidence_remediation_contract
+        else []
+    )
     if can_materialize_formal_knowledge:
         pagination_lines = [
             "- 本任务是资料入库：读取一次 `source_collection_context_tool` 后，如果返回 `stewardActionPacket.approvedCandidateIds` 和 `writebackResultSkeleton`，优先立刻调用 `source_collection_stage_writeback_tool` 写回，不要先重读全部资料。",
@@ -2766,24 +2794,7 @@ def _source_collection_stage_session_task_message(
             "- 如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取，直到本阶段应处理原始资料都有真实 recordId 的结论。",
             "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",
         ]
-    if stage_id == "finding":
-        stage_writeback_lines = [
-            "- 本任务只负责资料寻找：新资料只写入 `candidateLeads[]`，无效来源只写入 `invalidSources[]`；不要把检索结果写成 `candidateExtractions[]`、`recordExtractions[]` 或 `candidateDecisions[]`。",
-            "- 每条 `candidateLeads[]` 至少包含 `title`、`locator`（可验证 DOI 或 https URL）、`sourceType`、`summary` 和本条资料对应的 `query`；可额外填写 `doi`、`authors`、`year`、`container`、`relevance`。",
-            "- `locator` 必须是本条资料的 DOI 或 https URL；不要只写自然语言来源名，也不要把搜索结果的概述当作资料定位符。",
-            "- 先在同一批 `result.candidateLeads[]` 写入检索到的可用资料，再用 `result.invalidSources[]` 登记明确无效、跑题或不可获取的来源；自然语言总结不能替代这两项结构化写回。",
-        ]
-    elif stage_id == "extraction":
-        stage_writeback_lines = [
-            "- 资料提炼阶段如果 `candidatePage.total=0`，输入就是原始 DataRecord：请用 `recordExtractions[]` 回写，并绑定完整 `recordId`；已有候选后优先用 `candidateExtractions[]` 绑定完整 `candidateId`，可直接在每项里写 `decision=keep/needs_more_info/exclude`。",
-            "- 资料提炼阶段不需要额外提交一份 `candidateDecisions[]`；只有专门做资料审查/质检时才单独回写 `candidateDecisions[]`。",
-            "- 资料提炼采用宽松保留：只要有可用内容或有价值线索，就写 `decision=keep` 或 `needs_more_info`，并填写 `valueSummary`、`defects`、`followUpSuggestion`；不要因为缺 DOI/缺全文直接丢弃。",
-            "- 资料提炼必须区分来源定位与主张级证据：DOI/URL/论文 ID 只能写入 `sourceRefs[]`；它们只能说明资料在哪里，不能单独证明资料支持某个结论。",
-            "- `evidenceRefs[]` 只写页码、PDF 页、段落、章节、引文或受控记录锚点；`claims[]` / `keyFindings[]` / `citations[]` 每项必须包含 `sourceRef`，并至少包含 `page/pageRange/citation/evidenceRef` 之一。",
-            "- 对摘要或元数据足以支持的范围，可把 `candidates[].evidenceRefs` 中已有的真实锚点原样写入对应 extraction；如果只有 DOI/URL 或摘要定位，保留 `keep/needs_more_info` 决定，但证据状态必须保持 `missing_evidence_anchor`，不得虚构页码、直接引语或全文结论。",
-        ]
-    else:
-        stage_writeback_lines = []
+    stage_writeback_lines = stage_writeback_prompt_lines(stage_id)
     return "\n".join(
         [
             f"## 资料搜集阶段任务：{task_title}",
@@ -2809,6 +2820,7 @@ def _source_collection_stage_session_task_message(
             ),
             *pagination_lines,
             *stage_writeback_lines,
+            *remediation_lines,
             "- 可以分批调用 `source_collection_stage_writeback_tool`，系统会按真实 `candidateId` / `recordId` 累计上一批结果；不要因为 compact 返回未展开完整数组而重复提交同一大包。",
             (
                 "- 资料提炼阶段若受控摘要不足，但 `candidates[].sourceUrl` 或 `doi` 存在，可用 `web_fetch_tool` 仅抓取该既有定位符补证；"

@@ -57,6 +57,22 @@ export const queryKeys = {
     ["teams", teamId, "challenge-program", "questions", questionId, runId] as const,
   challengeQuestionRunStatus: (teamId: string) =>
     ["teams", teamId, "challenge-program", "question-runs", "status"] as const,
+  researchWorkflowRuns: (workflowId: string, teamId: string) =>
+    ["research-workflow", workflowId, teamId, "runs"] as const,
+  researchWorkflowBindings: (workflowId: string, teamId: string) =>
+    ["research-workflow", workflowId, teamId, "bindings"] as const,
+  researchWorkflowLedger: (runId: string, teamId: string) =>
+    ["research-workflow", teamId, runId, "ledger"] as const,
+  researchWorkflowBudget: (runId: string, teamId: string) =>
+    ["research-workflow", teamId, runId, "budget"] as const,
+  researchWorkflowHypotheses: (runId: string, teamId: string) =>
+    ["research-workflow", teamId, runId, "hypotheses"] as const,
+  researchWorkflowCampaigns: (runId: string, teamId: string) =>
+    ["research-workflow", teamId, runId, "campaigns"] as const,
+  researchWorkflowEvaluation: (runId: string, teamId: string) =>
+    ["research-workflow", teamId, runId, "evaluation"] as const,
+  researchWorkflowHandoffs: (runId: string, teamId: string) =>
+    ["research-workflow", teamId, runId, "handoffs"] as const,
   teamWorkflowSourceCollectionRuns: (id: string, limit = 6) =>
     ["teams", id, "workflow-orchestration", "source-collection-runs", limit] as const,
   dataProcessingRunStatus: (id: string) => ["data-processing", "runs", id, "status"] as const,
