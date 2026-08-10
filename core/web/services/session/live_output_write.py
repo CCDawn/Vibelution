@@ -615,6 +615,11 @@ def _set_session_llm_status_live_output(
         feedback_name = "model_transport"
     elif status_key == "failed":
         reason_line = category or s.text_for(language, zh="模型调用失败", en="model call failed")
+        attempt_line = (
+            s.text_for(language, zh=f"已重试 {attempt}/{max_attempts} 次。", en=f"Retried {attempt}/{max_attempts} times. ")
+            if attempt and max_attempts
+            else ""
+        )
         hint_line = (
             s.text_for(language, zh="\n请检查网络连接或代理端口是否可用。", en="\nCheck the network connection or proxy port.")
             if category == "network_error"
@@ -622,8 +627,8 @@ def _set_session_llm_status_live_output(
         )
         content = s.text_for(
             language,
-            zh=f"模型请求失败。\n原因：{reason_line}。{hint_line}",
-            en=f"The model request failed.\nReason: {reason_line}.{hint_line}",
+            zh=f"模型请求失败。\n原因：{reason_line}。{attempt_line}{hint_line}",
+            en=f"The model request failed.\nReason: {reason_line}.{attempt_line}{hint_line}",
         )
         stage = "model_failed"
         feedback_status = "failed"
