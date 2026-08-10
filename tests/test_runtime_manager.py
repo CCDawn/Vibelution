@@ -2352,6 +2352,163 @@ def test_reconcile_observation_does_not_fail_opening_orphaned_browser(monkeypatc
     assert events == []
 
 
+def test_reconcile_observation_gives_up_orphaned_cleanup_after_max_attempts(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, str]] = []
+    close_calls: list[int] = []
+
+    orphan_observation = {
+        "observedState": "open",
+        "backendPid": 0,
+        "browserLaunchPid": 0,
+        "browserWindowPid": 29004,
+        "backendAlive": False,
+        "backendHealthy": False,
+        "backendObserved": False,
+        "backendPort": 8000,
+        "backendPortListening": False,
+        "backendPortOwnerPid": 0,
+        "backendPortOwnerTrusted": False,
+        "backendPortConflict": False,
+        "browserWindowAlive": True,
+        "browserManaged": True,
+        "backendMissing": True,
+        "frontendOrphaned": True,
+        "lifecycleConsistency": "orphaned_browser",
+        "sessionId": "stale-session",
+        "url": "http://127.0.0.1:8000",
+    }
+
+    def failing_close_workbench():
+        close_calls.append(1)
+        return subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="failed")
+
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: orphan_observation)
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "close_workbench", failing_close_workbench)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, str(payload))))
+
+    state = {"runtimeState": "running", "command": {"activeCommandId": ""}, "workbench": {}}
+    for _ in range(daemon._ORPHANED_CLEANUP_MAX_ATTEMPTS + 1):
+        state = runtime_daemon._reconcile_observation(state)
+    assert len(close_calls) == daemon._ORPHANED_CLEANUP_MAX_ATTEMPTS
+    assert state["workbench"]["phase"] == "failed"
+    assert state["lastError"]["scope"] == "workbench"
+
+    # One more reconcile must not spawn another close attempt after give-up.
+    state = runtime_daemon._reconcile_observation(state)
+    assert len(close_calls) == daemon._ORPHANED_CLEANUP_MAX_ATTEMPTS
+    assert "workbench.consistency.orphaned_browser_cleanup_gave_up" in [t for t, _ in events]
+
+
+def test_reconcile_observation_resets_orphaned_cleanup_attempts_on_success(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    close_calls: list[int] = []
+
+    orphan_observation = {
+        "observedState": "open",
+        "backendPid": 0,
+        "browserLaunchPid": 0,
+        "browserWindowPid": 29004,
+        "backendAlive": False,
+        "backendHealthy": False,
+        "backendObserved": False,
+        "backendPort": 8000,
+        "backendPortListening": False,
+        "backendPortOwnerPid": 0,
+        "backendPortOwnerTrusted": False,
+        "backendPortConflict": False,
+        "browserWindowAlive": True,
+        "browserManaged": True,
+        "backendMissing": True,
+        "frontendOrphaned": True,
+        "lifecycleConsistency": "orphaned_browser",
+        "sessionId": "stale-session",
+        "url": "http://127.0.0.1:8000",
+    }
+    closed_observation = {
+        **orphan_observation,
+        "observedState": "closed",
+        "browserWindowAlive": False,
+        "frontendOrphaned": False,
+        "lifecycleConsistency": "consistent",
+    }
+
+    monkeypatch.setattr(daemon, "observe_workbench", _repeat_last([orphan_observation, closed_observation]))
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append(1) or subprocess.CompletedProcess(args=[], returncode=0, stdout="stopped", stderr=""),
+    )
+
+    state = runtime_daemon._reconcile_observation(
+        {
+            "runtimeState": "running",
+            "command": {"activeCommandId": ""},
+            "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+        }
+    )
+    assert len(close_calls) == 1
+    assert state["workbench"]["orphanedCleanupAttempts"] == 0
+    assert state["workbench"]["phase"] == "steady"
+    assert state["workbench"]["failureMessage"] == ""
+
+
+def test_load_runtime_snapshot_clears_orphaned_message_when_consistent(monkeypatch):
+    monkeypatch.setattr(daemon, "load_state", lambda: {
+        "runtimeState": "running",
+        "command": {"activeCommandId": ""},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+            "frontendOrphaned": False,
+            "failureMessage": "Workbench frontend window is still open, but no backend service is reachable. "
+            "browserWindowPid=29004 backendPid=0 backendPort=8000",
+        },
+        "lastError": {"scope": "workbench", "message": "sticky unrelated lifecycle error", "at": "now"},
+    })
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "backendPid": 0,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": 8000,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerTrusted": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": False,
+            "browserManaged": True,
+            "backendMissing": False,
+            "frontendOrphaned": False,
+            "lifecycleConsistency": "consistent",
+            "sessionId": "",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: True)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 6476)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
+
+    snapshot = daemon.load_runtime_snapshot()
+    assert snapshot["workbench"]["failureMessage"] == ""
+
+
 def test_reconcile_observation_cleans_closed_residual_processes(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     events: list[tuple[str, dict]] = []
@@ -4558,6 +4715,57 @@ def test_claim_daemon_ownership_recovers_stale_lock(monkeypatch, tmp_path):
 
     daemon._release_daemon_ownership(24680)
     assert not lock_path.exists()
+
+
+def test_claim_daemon_ownership_settles_empty_lock_instead_of_deleting_fresh_lock(monkeypatch, tmp_path):
+    # Regression: a concurrent start used to delete the freshly created lock while
+    # the owner had not written its pid yet, letting two daemons both claim
+    # ownership and both drive the shared state file.
+    events: list[tuple[str, dict]] = []
+    saved: list[int] = []
+    lock_path = tmp_path / "daemon.lock"
+    lock_path.write_text("", encoding="utf-8")
+    reads = iter([0, 24680, 24680])
+
+    monkeypatch.setattr(daemon, "DAEMON_LOCK_PATH", lock_path)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: int(pid) == 24680)
+    monkeypatch.setattr(daemon, "_is_runtime_manager_process", lambda pid: int(pid) == 24680)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: saved.append(pid))
+    monkeypatch.setattr(daemon, "_DAEMON_LOCK_SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr(daemon, "_read_daemon_lock_pid", lambda: next(reads))
+
+    # First read finds an empty lock (owner still writing its pid), the settle
+    # re-read finds the real owner 24680 alive -> the new daemon must be blocked,
+    # and the fresh lock must survive.
+    assert daemon._claim_daemon_ownership(24681) is False
+    assert saved == []
+    assert lock_path.exists()
+    assert events[-1][0] == "daemon.start_blocked_existing_owner"
+
+
+def test_claim_daemon_ownership_recovers_lock_still_empty_after_settle(monkeypatch, tmp_path):
+    events: list[tuple[str, dict]] = []
+    saved: list[int] = []
+    lock_path = tmp_path / "daemon.lock"
+    lock_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(daemon, "DAEMON_LOCK_PATH", lock_path)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(daemon, "_is_runtime_manager_process", lambda pid: False)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: saved.append(pid))
+    monkeypatch.setattr(daemon, "_DAEMON_LOCK_SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr(daemon, "_read_daemon_lock_pid", lambda: 0)
+
+    # Empty lock that stays empty after the settle window is a crashed starter:
+    # recover it instead of blocking forever.
+    assert daemon._claim_daemon_ownership(24680) is True
+    assert saved == [24680]
+    assert lock_path.read_text(encoding="utf-8") == "24680"
+    assert any(event_type == "daemon.start_lock_settle_wait" for event_type, _ in events)
 
 
 def test_rotate_daemon_log_file_rotates_when_exceeding_max_bytes(monkeypatch, tmp_path):
