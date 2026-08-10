@@ -10409,3 +10409,112 @@ def test_backend_health_probe_treats_low_level_http_errors_as_unhealthy(monkeypa
     monkeypatch.setattr(workbench_controller, "_open_backend_health_url", raise_http_exception)
 
     assert workbench_controller._is_backend_healthy("http://127.0.0.1:8766") is False
+
+
+def test_maybe_auto_close_on_browser_missing_schedules_and_submits_after_grace(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    timestamps = iter(
+        [
+            "2026-08-10T10:00:00+00:00",
+            "2026-08-10T10:00:02+00:00",
+            "2026-08-10T10:00:11+00:00",
+        ]
+    )
+    submitted = []
+    events = []
+    monkeypatch.setattr(daemon, "now_iso", lambda: next(timestamps))
+    monkeypatch.setattr(
+        daemon,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": submitted.append((command_type, args, requested_by))
+        or {"commandId": "cmd-auto-close"},
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload=None: events.append(event_type))
+
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "partial",
+            "phase": "steady",
+            "lifecycleConsistency": "browser_missing",
+        },
+    }
+
+    first = runtime_daemon._maybe_auto_close_on_browser_missing(state)
+    assert first["browserMissingSince"] == "2026-08-10T10:00:00+00:00"
+    assert submitted == []
+
+    second = runtime_daemon._maybe_auto_close_on_browser_missing(first)
+    assert "browserMissingSince" in second
+    assert submitted == []
+
+    third = runtime_daemon._maybe_auto_close_on_browser_missing(second)
+    assert "browserMissingSince" not in third
+    assert submitted == [
+        (
+            "close_workbench",
+            {
+                "reason": "browser_missing_auto_close",
+                "source": "runtime_manager_daemon",
+                "stopManager": False,
+            },
+            "runtime_manager_daemon",
+        )
+    ]
+    assert "workbench.auto_close.browser_missing_scheduled" in events
+    assert "workbench.auto_close.browser_missing_submitted" in events
+
+
+def test_maybe_auto_close_on_browser_missing_clears_when_window_returns(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-08-10T10:00:00+00:00")
+    monkeypatch.setattr(daemon, "submit_command", lambda *a, **k: {"commandId": "cmd"})
+    monkeypatch.setattr(daemon, "_append_event", lambda *a, **k: None)
+
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "partial",
+            "phase": "steady",
+            "lifecycleConsistency": "browser_missing",
+        },
+    }
+    scheduled = runtime_daemon._maybe_auto_close_on_browser_missing(state)
+    assert "browserMissingSince" in scheduled
+
+    restored = dict(scheduled)
+    restored["workbench"] = {
+        "desiredState": "open",
+        "observedState": "open",
+        "phase": "steady",
+        "lifecycleConsistency": "consistent",
+    }
+    cleared = runtime_daemon._maybe_auto_close_on_browser_missing(restored)
+    assert "browserMissingSince" not in cleared
+
+
+def test_maybe_auto_close_on_browser_missing_skips_when_command_active(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-08-10T10:00:00+00:00")
+    submitted = []
+    monkeypatch.setattr(
+        daemon,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": submitted.append(command_type) or {"commandId": "cmd"},
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda *a, **k: None)
+
+    state = {
+        "command": {"activeCommandId": "cmd-running"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "partial",
+            "phase": "steady",
+            "lifecycleConsistency": "browser_missing",
+        },
+    }
+    result = runtime_daemon._maybe_auto_close_on_browser_missing(state)
+    assert "browserMissingSince" not in result
+    assert submitted == []

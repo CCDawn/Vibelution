@@ -34,6 +34,7 @@ from .command_queue import (
     lifecycle_interrupt_requested,
     recover_processing_queue,
     reject_pending_commands_for_shutdown,
+    submit_command,
 )
 from .constants import (
     DAEMON_LOG_BACKUP_COUNT,
@@ -115,6 +116,7 @@ _DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS = 10.0
 _STARTUP_COMMAND_GRACE_SECONDS = 1.0
 _STARTUP_COMMAND_GRACE_POLL_SECONDS = 0.05
 _RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS = 120.0
+_BROWSER_MISSING_AUTO_CLOSE_GRACE_SECONDS = 8.0
 _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 _LIFECYCLE_REQUEST_AUDIT_LIMITS = {
     "operation": 48,
@@ -576,6 +578,14 @@ def _elapsed_ms_between(start: Any, end: Any) -> float | None:
     if started is None or ended is None:
         return None
     return round(max(0.0, (ended - started).total_seconds() * 1000.0), 1)
+
+
+def _elapsed_seconds_between(start: Any, end: Any) -> float | None:
+    started = _parse_command_datetime(start)
+    ended = _parse_command_datetime(end)
+    if started is None or ended is None:
+        return None
+    return max(0.0, (ended - started).total_seconds())
 
 
 def _elapsed_monotonic_ms(started_at: float) -> float:
@@ -2428,6 +2438,72 @@ class RuntimeManagerDaemon:
                 return None
             time.sleep(min(_STARTUP_COMMAND_GRACE_POLL_SECONDS, remaining))
 
+    def _maybe_auto_close_on_browser_missing(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Close the workbench backend when the managed window stays closed.
+
+        The daemon intentionally keeps the backend alive while only the
+        browser window is missing (browser_missing), so a quick re-open can
+        reuse the running backend. But a long-closed window leaves the backend
+        holding the project directory lock on Windows, which blocks repo
+        maintenance (rename/delete/restart). After a grace period the daemon
+        submits its own close_workbench command so the backend exits and the
+        directory unlocks.
+
+        Only fires when desiredState is open and no lifecycle command is
+        already active; the close itself still goes through the normal queue
+        (active-work guard, verification, launcher state cleanup).
+        """
+
+        workbench = state.get("workbench") if isinstance(state.get("workbench"), dict) else {}
+        desired_state = str(workbench.get("desiredState") or "").strip()
+        observed_state = str(workbench.get("observedState") or "").strip()
+        lifecycle_consistency = str(workbench.get("lifecycleConsistency") or "").strip()
+        phase = str(workbench.get("phase") or "").strip()
+        active_command_id = str((state.get("command") or {}).get("activeCommandId") or "").strip()
+        if (
+            desired_state != "open"
+            or observed_state != "partial"
+            or lifecycle_consistency != "browser_missing"
+            or phase == "failed"
+            or active_command_id
+        ):
+            if "browserMissingSince" in state:
+                state.pop("browserMissingSince", None)
+            return state
+
+        browser_missing_since = state.get("browserMissingSince")
+        if not browser_missing_since:
+            state["browserMissingSince"] = now_iso()
+            _append_event(
+                "workbench.auto_close.browser_missing_scheduled",
+                {"browserMissingSince": state["browserMissingSince"], "graceSeconds": _BROWSER_MISSING_AUTO_CLOSE_GRACE_SECONDS},
+            )
+            return state
+
+        elapsed_seconds = _elapsed_seconds_between(browser_missing_since, now_iso())
+        if elapsed_seconds is None or elapsed_seconds < _BROWSER_MISSING_AUTO_CLOSE_GRACE_SECONDS:
+            return state
+
+        state.pop("browserMissingSince", None)
+        submit_command(
+            "close_workbench",
+            args={
+                "reason": "browser_missing_auto_close",
+                "source": "runtime_manager_daemon",
+                "stopManager": False,
+            },
+            requested_by="runtime_manager_daemon",
+        )
+        _append_event(
+            "workbench.auto_close.browser_missing_submitted",
+            {
+                "browserMissingSince": browser_missing_since,
+                "graceSeconds": _BROWSER_MISSING_AUTO_CLOSE_GRACE_SECONDS,
+                "elapsedSeconds": elapsed_seconds,
+            },
+        )
+        return state
+
     def _process_claimed_command(self, path: Path, payload: dict[str, Any]) -> bool:
         result = self._handle_command(payload)
         if bool(result.get("deferCommandUntilActiveWorkClear")):
@@ -2514,6 +2590,7 @@ class RuntimeManagerDaemon:
 
                 self._process_self_evolution_restart_intent()
                 state = self._reconcile_observation(load_state())
+                state = self._maybe_auto_close_on_browser_missing(state)
                 save_state(state)
                 time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
         finally:

@@ -1102,7 +1102,7 @@ def request_launcher_start() -> LauncherCommandResponse:
     )
     try:
         ensure_started = time.monotonic()
-        ensure_daemon_running()
+        ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
         submit_started = time.monotonic()
         command = submit_command(
@@ -1227,7 +1227,7 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
         }
     try:
         ensure_started = time.monotonic()
-        ensure_daemon_running()
+        ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
         command_args: dict[str, Any] = {
             "reason": "launcher_stop_button",
@@ -1365,7 +1365,7 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         )
     try:
         ensure_started = time.monotonic()
-        ensure_daemon_running()
+        ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
         command_args: dict[str, Any] = {
             "reason": "launcher_force_stop_button",
@@ -1499,7 +1499,7 @@ def request_launcher_restart(
     prequeue_timings_ms["activeWorkMs"] = _launcher_elapsed_ms(active_work_started)
     try:
         ensure_started = time.monotonic()
-        ensure_daemon_running()
+        ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
         submit_started = time.monotonic()
         command = submit_command(
@@ -1599,7 +1599,7 @@ def request_launcher_rebuild_and_start() -> LauncherCommandResponse:
 
     try:
         ensure_started = time.monotonic()
-        ensure_daemon_running()
+        ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
         submit_started = time.monotonic()
         command = submit_command(
@@ -1689,7 +1689,7 @@ def request_launcher_supervisor_reattach() -> LauncherSupervisorCommandResponse:
         }
 
     try:
-        ensure_daemon_running()
+        ensure_runtime_manager_daemon_alive()
         command = submit_command(
             "open_workbench",
             args={"reason": "launcher_supervisor_reattach", "source": "launcher_api", "noBrowser": False},
