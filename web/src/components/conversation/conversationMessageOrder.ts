@@ -52,9 +52,12 @@ function hasFiniteSequence(order: number) {
  * Order messages for the conversation timeline.
  *
  * Primary key is journal sequence (messageIndex / seq / id), matching backend
- * transcript chain and Codex-style turn order. Wall-clock timestamps are only a
- * fallback when sequence is missing — timestamp-first reordering was scrambling
- * turns after frontend unification when clocks or sticky merges disagreed.
+ * transcript chain and Codex-style turn order. Wall-clock timestamps are only
+ * a tie-breaker between messages that share a journal sequence; messages
+ * without any sequence keep their input (append) order — sorting them by
+ * timestamp is wrong because optimistic user messages carry the client clock
+ * while live assistant layers carry the server clock, so a small skew swaps
+ * their order.
  */
 export function chronologicalConversationMessages(messages: ConversationMessage[]) {
   return messages
@@ -84,8 +87,12 @@ export function chronologicalConversationMessages(messages: ConversationMessage[
         // Prefer journal-keyed messages over unsequenced noise in the same batch.
         return leftHasSeq ? -1 : 1;
       }
-      return left.timestampOrder - right.timestampOrder
-        || left.index - right.index;
+      // Both lack a journal sequence. The input order is already the append
+      // order (canonical timeline plus the active turn layer appended last).
+      // Sorting by wall-clock here is wrong: optimistic user messages carry a
+      // client clock timestamp while live assistant layers carry the server
+      // clock, so a small skew swaps them. Keep the stable input order.
+      return left.index - right.index;
     })
     .map((item) => item.message);
 }

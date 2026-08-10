@@ -31,18 +31,17 @@ describe("conversation display message projection", () => {
     expect(conversationViewSource).not.toContain("function mergeAdjacentTurnErrorMessages");
     expect(conversationViewSource).not.toContain("const mergedMessages: ConversationMessage[]");
   });
-  it("normalizes display messages to chronological order before rendering", async () => {
+  it("keeps append order for unsequenced messages without reordering by wall clock", async () => {
+    // detail.messages is already ordered by mergeSessionDetailMessageWindow
+    // (journal sequence first, append order otherwise). The display projection
+    // must not reorder unsequenced messages by timestamp: optimistic user
+    // messages carry the client clock while live assistant layers carry the
+    // server clock, so a small skew would swap them.
     const projected = await projectConversationDisplayMessages([
       message({
-        id: "assistant-new",
-        role: "assistant",
-        content: "new answer",
-        timestamp: "2026-07-09T01:27:00Z",
-      }),
-      message({
-        id: "user-new",
+        id: "user-old",
         role: "user",
-        content: "new question",
+        content: "old question",
         timestamp: "2026-07-09T01:26:58Z",
       }),
       message({
@@ -52,10 +51,16 @@ describe("conversation display message projection", () => {
         timestamp: "2026-07-09T01:26:48Z",
       }),
       message({
-        id: "user-old",
+        id: "user-new",
         role: "user",
-        content: "old question",
-        timestamp: "2026-07-09T01:26:16Z",
+        content: "new question",
+        timestamp: "2026-07-09T01:26:46Z",
+      }),
+      message({
+        id: "assistant-new",
+        role: "assistant",
+        content: "new answer",
+        timestamp: "2026-07-09T01:26:44Z",
       }),
     ]);
 
