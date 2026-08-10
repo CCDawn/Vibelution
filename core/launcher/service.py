@@ -13,7 +13,7 @@ from typing import Any, Literal, TypedDict
 from urllib.parse import urlparse
 
 from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
-from core.runtime_manager import command_queue, ensure_daemon_running, submit_command
+from core.runtime_manager import command_queue, ensure_daemon_running, is_daemon_running, submit_command
 from core.runtime_manager.constants import (
     EVENTS_PATH,
     INBOX_DIR,
@@ -860,6 +860,69 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
         _append_active_work_run(items, seen, kind=kind, payload=payload)
 
     return items
+
+
+def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
+    """Watchdog: recover a dead runtime-manager daemon and its stuck commands.
+
+    Returns what was done so callers (e.g. a periodic control-plane loop) can
+    record evidence. Never kills a healthy daemon; only acts when the daemon
+    pid is missing or the tracked process is not a runtime-manager process.
+    """
+
+    started = time.monotonic()
+    if is_daemon_running():
+        return {"action": "already_running", "daemonRunning": True, "elapsedMs": _launcher_elapsed_ms(started)}
+
+    recovered_commands: list[str] = []
+    try:
+        recovered_commands = command_queue.recover_processing_queue()
+    except Exception as exc:  # pragma: no cover - defensive watchdog boundary
+        _record_launcher_event(
+            "launcher.daemon.watchdog.recovery_failed",
+            phase="runtime_manager",
+            message="Runtime-manager queue recovery failed before daemon restart.",
+            outcome="failed",
+            level="warning",
+            fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
+        )
+
+    ensured = False
+    try:
+        ensured = ensure_daemon_running()
+    except Exception as exc:  # pragma: no cover - defensive watchdog boundary
+        _record_launcher_event(
+            "launcher.daemon.watchdog.restart_failed",
+            phase="runtime_manager",
+            message="Runtime-manager daemon restart attempt failed.",
+            outcome="failed",
+            level="error",
+            fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
+        )
+
+    action = "restarted" if ensured else "restart_failed"
+    _record_launcher_event(
+        "launcher.daemon.watchdog.restarted" if ensured else "launcher.daemon.watchdog.restart_failed",
+        phase="runtime_manager",
+        message="Runtime-manager daemon recovered by watchdog."
+        if ensured
+        else "Runtime-manager daemon restart attempt failed.",
+        outcome="succeeded" if ensured else "failed",
+        level="info" if ensured else "error",
+        fields={
+            "action": action,
+            "recoveredCommandCount": len(recovered_commands),
+            "recoveredCommands": recovered_commands[:8],
+            "elapsedMs": _launcher_elapsed_ms(started),
+        },
+    )
+    return {
+        "action": action,
+        "daemonRunning": False,
+        "ensured": ensured,
+        "recoveredCommandCount": len(recovered_commands),
+        "elapsedMs": _launcher_elapsed_ms(started),
+    }
 
 
 def trusted_lifecycle_actor_context() -> dict[str, str]:
