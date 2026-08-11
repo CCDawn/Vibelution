@@ -5411,12 +5411,25 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(directory_module, "get_agent", lambda _agent_id, include_archived=False: agent_record)
         monkeypatch.setattr(
             directory_module,
-            "resolve_tool_policy_for_agent",
-            lambda *_args, **_kwargs: {
-                "policyId": "tool-agent-dialogue-default",
-                "allowedTools": ["cli_tool"],
-                "preferredTools": [],
-                "blockedTools": [],
+            "current_agent_runtime",
+            lambda: {
+                "agentId": "agent-dialogue-default",
+                "turnId": "turn-1",
+                "runId": "turn-1",
+                "agent": {"agentId": "agent-dialogue-default"},
+                "agentConfigSnapshot": {
+                    "agentId": "agent-dialogue-default",
+                    "configRevision": 1,
+                    "configHash": "test-config-hash",
+                },
+                "permissionPreset": "standard",
+                "toolPolicy": {
+                    "policyId": "tool-agent-dialogue-default",
+                    "policyVersion": 1,
+                    "allowedTools": ["cli_tool"],
+                    "preferredTools": [],
+                    "blockedTools": [],
+                },
             },
         )
         monkeypatch.setattr(directory_module, "filter_llm_tools_for_current_agent", lambda tools: list(tools or []))
