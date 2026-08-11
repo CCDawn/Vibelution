@@ -24,7 +24,7 @@ def test_logs_roots_and_tree_are_read_only(tmp_path, monkeypatch):
     workspace_log.parent.mkdir(parents=True, exist_ok=True)
     workspace_log.write_text("# latest transcript\n", encoding="utf-8")
 
-    conversation_log = tmp_path / "log_info" / "chat.jsonl"
+    conversation_log = tmp_path / "logs" / "conversations" / "chat.jsonl"
     conversation_log.parent.mkdir(parents=True, exist_ok=True)
     conversation_log.write_text('{"message":"ok"}\n', encoding="utf-8")
 
@@ -46,7 +46,7 @@ def test_logs_roots_and_tree_are_read_only(tmp_path, monkeypatch):
         {"id": "runtime_scenes", "path": "logs/runtime_scenes", "exists": True},
         {"id": "runtime_logs", "path": "logs", "exists": True},
         {"id": "workspace_logs", "path": "workspace/logs", "exists": True},
-        {"id": "conversation_logs", "path": "log_info", "exists": True},
+        {"id": "conversation_logs", "path": "logs/conversations", "exists": True},
     ]
     runtime_root = next(item for item in roots_payload if item["id"] == "runtime_logs")
     assert runtime_root["summary"]["fileCount"] == 1
@@ -79,7 +79,7 @@ def test_logs_roots_and_tree_are_read_only(tmp_path, monkeypatch):
 
 
 def test_log_content_returns_user_and_agent_diagnostics(tmp_path, monkeypatch):
-    conversation_log = tmp_path / "log_info" / "conversation_debug.jsonl"
+    conversation_log = tmp_path / "logs" / "conversations" / "conversation_debug.jsonl"
     conversation_log.parent.mkdir(parents=True, exist_ok=True)
     conversation_log.write_text(
         "\n".join(
@@ -124,6 +124,19 @@ def test_log_content_rejects_path_escape(tmp_path, monkeypatch):
 
     assert response.status_code == 400
     assert "selected log root" in response.json()["detail"]
+
+
+def test_runtime_logs_reject_direct_conversations_access(tmp_path, monkeypatch):
+    (tmp_path / "logs" / "conversations").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get(
+        "/api/logs/content",
+        params={"root": "runtime_logs", "path": "conversations/chat.jsonl"},
+    )
+
+    assert response.status_code == 400
+    assert "Conversation logs must be managed" in response.json()["detail"]
 
 
 def test_clear_log_file_empties_content_but_keeps_file(tmp_path, monkeypatch):
