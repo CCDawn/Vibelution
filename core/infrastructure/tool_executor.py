@@ -176,7 +176,29 @@ def _coerce_result_status(value: Any) -> str:
     return value.lstrip("\ufeff").strip().lower()
 
 
-def _record_current_agent_tool_observation(tool_name: str, status: str, tool_args: dict[str, Any], summary: str = "") -> None:
+def _record_current_agent_tool_observation(
+    tool_name: str,
+    status: str,
+    tool_args: dict[str, Any],
+    summary: str = "",
+    *,
+    duration_ms: float | None = None,
+) -> None:
+    try:
+        from core.logging.tool_tracker import get_tool_tracker
+
+        _SUCCESS_STATUSES = {"succeeded", "completed", "observed", "degraded"}
+        is_success = status in _SUCCESS_STATUSES
+        get_tool_tracker().record_call(
+            tool_name,
+            max(0.0, float(duration_ms or 0.0)),
+            success=is_success,
+            error=None if is_success else summary,
+            args=dict(tool_args or {}),
+            result_preview=(summary or "")[:160],
+        )
+    except Exception as exc:
+        _debug_logger.warning(f"[工具观测] 记录工具统计失败: {type(exc).__name__}: {exc}")
     try:
         from core.web.services.agent_directory_service import write_current_tool_observation
 
@@ -781,7 +803,13 @@ class ToolExecutor:
                     failure_class="authorization_denied",
                 ),
             })
-            _record_current_agent_tool_observation(tool_name, "authorization_denied", tool_args, authorization_error)
+            _record_current_agent_tool_observation(
+                tool_name,
+                "authorization_denied",
+                tool_args,
+                authorization_error,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+            )
             _record_tool_scene_event(
                 "authorize",
                 "tool.authorization.execution_denied",
@@ -889,7 +917,13 @@ class ToolExecutor:
                     failure_class="unknown_tool",
                 ),
             })
-            _record_current_agent_tool_observation(str(tool_name or "[unknown_tool]"), "unknown_tool", tool_args, error_msg)
+            _record_current_agent_tool_observation(
+                str(tool_name or "[unknown_tool]"),
+                "unknown_tool",
+                tool_args,
+                error_msg,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+            )
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.failed",
@@ -939,7 +973,13 @@ class ToolExecutor:
                 ),
             })
             self._record_runtime_signals(tool_name, tool_args, argument_error)
-            _record_current_agent_tool_observation(tool_name, "invalid_args", tool_args, argument_error)
+            _record_current_agent_tool_observation(
+                tool_name,
+                "invalid_args",
+                tool_args,
+                argument_error,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+            )
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.invalid_args",
@@ -1110,6 +1150,7 @@ class ToolExecutor:
                 semantic_outcome,
                 tool_args,
                 str(result or "")[:320],
+                duration_ms=duration_ms,
             )
             _record_tool_scene_event(
                 "execute",
@@ -1156,7 +1197,13 @@ class ToolExecutor:
                 ),
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
-            _record_current_agent_tool_observation(tool_name, "timeout", tool_args, error_msg)
+            _record_current_agent_tool_observation(
+                tool_name,
+                "timeout",
+                tool_args,
+                error_msg,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+            )
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.timeout",
@@ -1192,7 +1239,13 @@ class ToolExecutor:
                 ),
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
-            _record_current_agent_tool_observation(tool_name, "invalid_args", tool_args, error_msg)
+            _record_current_agent_tool_observation(
+                tool_name,
+                "invalid_args",
+                tool_args,
+                error_msg,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+            )
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.invalid_args",
@@ -1228,7 +1281,13 @@ class ToolExecutor:
                 ),
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
-            _record_current_agent_tool_observation(tool_name, "failed", tool_args, error_msg)
+            _record_current_agent_tool_observation(
+                tool_name,
+                "failed",
+                tool_args,
+                error_msg,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+            )
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.failed",

@@ -25,7 +25,11 @@ from core.runtime_manager.constants import (
 )
 from core.runtime_manager.evolution_store import load_active_run_snapshot
 from core.runtime_manager.process_identity import is_runtime_manager_process
-from core.runtime_manager.scene_logging import append_runtime_manager_file_event
+from core.runtime_manager.scene_logging import (
+    append_runtime_manager_file_event,
+    record_runtime_manager_scene_event,
+    runtime_manager_event_phase,
+)
 from core.runtime_manager.state_store import load_pid, load_state
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
@@ -2734,8 +2738,19 @@ def _record_launcher_event(
         "level": level,
         "fields": fields or {},
     }
+    event_at = ""
     try:
-        append_runtime_manager_file_event(event_code, payload, suppress_io_errors=True)
+        event_at = append_runtime_manager_file_event(event_code, payload, suppress_io_errors=True)
+        scene_payload = dict(payload)
+        for key, value in (fields or {}).items():
+            if key not in scene_payload:
+                scene_payload[key] = value
+        record_runtime_manager_scene_event(
+            event_code,
+            scene_payload,
+            phase=runtime_manager_event_phase(event_code),
+            occurred_at=event_at,
+        )
     except Exception as exc:
         _debug_logger.warning(f"Failed to record launcher scene event: {exc}")
 

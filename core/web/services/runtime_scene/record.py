@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.logging import debug as _debug_logger
+
 
 def _service():
     from core.web.services import runtime_scene_service
@@ -2627,6 +2629,48 @@ def record_runtime_scene_conversation_event(
 
 
 def record_runtime_scene_event(
+    component: str,
+    phase: str,
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+    raw_refs: list[dict[str, Any]] | None = None,
+    child_log_path: str = "",
+    child_log_payload: dict[str, Any] | None = None,
+    lifecycle: bool = False,
+    occurred_at: str = "",
+    allow_recent_completed: bool = False,
+) -> dict[str, Any]:
+    """Append one structured service/runtime event into the active runtime scene package."""
+    try:
+        return _record_runtime_scene_event_impl(
+            component,
+            phase,
+            event_code,
+            message=message,
+            level=level,
+            outcome=outcome,
+            fields=fields,
+            raw_refs=raw_refs,
+            child_log_path=child_log_path,
+            child_log_payload=child_log_payload,
+            lifecycle=lifecycle,
+            occurred_at=occurred_at,
+            allow_recent_completed=allow_recent_completed,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene event record failed ({component}/{phase}/{event_code}): "
+            f"{type(exc).__name__}: {exc}",
+            tag="SCENE",
+        )
+        raise
+
+
+def _record_runtime_scene_event_impl(
     component: str,
     phase: str,
     event_code: str,

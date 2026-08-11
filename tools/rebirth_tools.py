@@ -534,6 +534,19 @@ def trigger_self_restart_tool(
 
     # 6. 启动脱离进程
     new_pid = spawn_detached_process(command, env)
+    _record_restart_scene_event(
+        "agent.restart.spawn_requested" if new_pid else "agent.restart.spawn_failed",
+        phase="restart",
+        message=("重启进程已触发" if new_pid else "启动重启进程失败"),
+        fields={
+            "pid": current_pid,
+            "restarterPid": new_pid or 0,
+            "reason": reason,
+            "reasonCategory": reason_category,
+            "script": script_path,
+        },
+        outcome="succeeded" if new_pid else "failed",
+    )
 
     if new_pid:
         # 构建成功消息
@@ -591,6 +604,31 @@ def write_restart_log(pid: int, reason: str, success: bool) -> None:
     
     with open(log_path, 'a', encoding='utf-8') as f:
         f.write(f"{timestamp} | PID:{pid} | {status} | {reason}\n")
+
+
+def _record_restart_scene_event(
+    event_code: str,
+    *,
+    phase: str,
+    message: str,
+    fields: Optional[dict] = None,
+    outcome: str = "observed",
+) -> None:
+    """记录重启生命周期场景事件；失败时降级为 debug 日志，不影响主流程。"""
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "agent",
+            phase,
+            event_code,
+            message=message,
+            level="warning" if outcome == "failed" else "info",
+            outcome=outcome,
+            fields=fields or {},
+        )
+    except Exception as exc:
+        debug_logger.warning(f"Failed to record restart scene event ({event_code}): {exc}")
 
 
 def _open_restart_transaction(reason: str = "") -> Optional[str]:
