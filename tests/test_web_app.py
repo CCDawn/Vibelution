@@ -6370,6 +6370,7 @@ def test_submit_session_message_rejects_busy_session(tmp_path, monkeypatch):
         },
         active_run_id="existing-chat-turn",
     )
+
     try:
         response = client.post(
             "/api/sessions/session-live/messages",
@@ -7766,7 +7767,7 @@ def test_request_stop_session_turn_reuses_active_work_run_when_controller_is_mis
         "_WORK_RUN_STORE",
         session_service.WorkRunStore(tmp_path / ".runtime" / "runtime-manager" / "work_runs"),
     )
-    session_service._set_session_running("session-live", True)
+    session_service._set_session_running("session-live", True, turn_id="existing-chat-turn")
     session_service._clear_session_turn_control("session-live")
     session_service._WORK_RUN_STORE.persist_snapshot(
         "chat_turn",
@@ -7779,8 +7780,8 @@ def test_request_stop_session_turn_reuses_active_work_run_when_controller_is_mis
             "currentPhase": "running",
             "leases": ["readonly_chat"],
             "userMessage": "上一轮控制器丢失但 WorkRun 仍活跃",
-            "startedAt": "2026-05-18T11:59:00",
-            "updatedAt": "2026-05-18T12:00:00",
+            "startedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "finishedAt": "",
         },
         active_run_id="existing-chat-turn",
