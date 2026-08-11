@@ -85,6 +85,21 @@ def test_workbench_close_canary_uses_unique_foreground_window_when_titles_collid
     assert "return $foregroundMatches[0]" in source
 
 
+def test_workbench_close_canary_bootstraps_control_after_package_smoke_shutdown():
+    source = WORKBENCH_CLOSE_CANARY_SCRIPT.read_text(encoding="utf-8")
+
+    assert "function Ensure-LauncherControlForCanary" in source
+    assert '"open", "--no-browser"' in source
+    assert "$launcherBootstrapProcess = Start-Process" in source
+    assert "$null = Ensure-LauncherControlForCanary" in source
+
+    active_work_check_index = source.index("$activeWorkCountBeforeCanary = Assert-NoActiveWorkbenchWork")
+    package_verify_index = source.index("if (-not $SkipPackageVerification)")
+    control_bootstrap_index = source.index("$null = Ensure-LauncherControlForCanary")
+    quiesce_index = source.index("$managedWorkbenchState = Close-ManagedWorkbenchForCanary -RecoveryRequired")
+    assert active_work_check_index < package_verify_index < control_bootstrap_index < quiesce_index
+
+
 def test_launcher_script_is_utf8_with_bom_for_windows_powershell_compatibility():
     assert LAUNCHER_SCRIPT.read_bytes().startswith(b"\xef\xbb\xbf")
 
