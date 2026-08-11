@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import core.chat.conversation_store.database as conversation_database
+import core.chat.conversation_store.runtime as conversation_sqlite_runtime
 from core.chat.conversation_store import (
     ConversationBackpressureError,
     ConversationStore,
@@ -51,6 +52,21 @@ def _create_agent(store: ConversationStore, agent_id: str = "agent-a") -> str:
         source="test",
     ).result(timeout=3)
     return str(result["configRevisionId"])
+
+
+def test_project_local_sqlite_runtime_is_used_without_version_spoofing(
+    tmp_path: Path,
+):
+    assert conversation_sqlite_runtime.DRIVER_NAME == "apsw"
+    assert conversation_sqlite_runtime.sqlite_version_info >= (3, 51, 3)
+
+    store = ConversationStore(tmp_path / "conversations.sqlite3")
+    try:
+        metadata = store.open()
+        assert metadata["sqliteDriver"] == "apsw"
+        assert metadata["sqliteVersion"] == conversation_sqlite_runtime.sqlite_version
+    finally:
+        store.close()
 
 
 def test_sqlite_runtime_gate_rejects_known_wal_reset_race_versions(tmp_path: Path):
@@ -343,4 +359,64 @@ def test_32_sessions_concurrent_turn_writes_do_not_deadlock_or_lose_rows(
         assert metrics["failedMutations"] == 0
         assert metrics["maxQueueDepth"] <= 512
     finally:
+        store.close()
+
+
+def test_readers_and_single_writer_remain_consistent_under_concurrency(
+    tmp_path: Path,
+):
+    store = _open_store(
+        tmp_path,
+        queue_capacity=512,
+        max_batch_size=32,
+        max_batch_delay_ms=5,
+    )
+    stop_readers = threading.Event()
+    reader_counts = [0] * 8
+    reader_errors: list[Exception] = []
+    try:
+        revision = _create_agent(store)
+        for session_index in range(32):
+            store.repository.create_session(
+                session_id=f"session-{session_index:02d}",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
+                title=f"Session {session_index:02d}",
+            ).result(timeout=3)
+
+        def read_sessions(reader_index: int) -> None:
+            try:
+                while not stop_readers.is_set():
+                    rows = store.repository.list_sessions(agent_id="agent-a")
+                    assert len(rows) == 32
+                    reader_counts[reader_index] += 1
+            except Exception as exc:  # noqa: BLE001 - retained for the parent assertion.
+                reader_errors.append(exc)
+
+        def write_turn(index: int) -> dict[str, object]:
+            session_index = index % 32
+            turn_index = index // 32
+            return store.repository.begin_turn(
+                turn_id=f"turn-{session_index:02d}-{turn_index:02d}",
+                session_id=f"session-{session_index:02d}",
+                client_submission_id=f"submission-{session_index:02d}-{turn_index:02d}",
+            ).result(timeout=5)
+
+        with ThreadPoolExecutor(max_workers=24) as executor:
+            readers = [executor.submit(read_sessions, index) for index in range(8)]
+            writers = [executor.submit(write_turn, index) for index in range(128)]
+            results = [future.result(timeout=10) for future in writers]
+            stop_readers.set()
+            for future in readers:
+                future.result(timeout=5)
+
+        assert len(results) == 128
+        assert reader_errors == []
+        assert all(count > 0 for count in reader_counts)
+        for session_index in range(32):
+            assert len(
+                store.repository.list_turns(f"session-{session_index:02d}")
+            ) == 4
+    finally:
+        stop_readers.set()
         store.close()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import queue
-import sqlite3
 import threading
 import time
 from collections import deque
@@ -12,6 +11,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
+from . import runtime as sqlite3
 from .database import ConversationDatabase
 from .repository import ConversationUnitOfWork
 

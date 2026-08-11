@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any
+
+from . import runtime as sqlite3
 
 if TYPE_CHECKING:
     from .database import ConversationDatabase
