@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -12,6 +14,7 @@ import core.chat.conversation_store.runtime as conversation_sqlite_runtime
 from core.chat.conversation_store import (
     ConversationBackpressureError,
     ConversationStore,
+    ConversationStoreLockedError,
     ConversationStoreUnavailableError,
     assess_sqlite_wal_runtime,
 )
@@ -460,6 +463,115 @@ def test_writer_runs_maintenance_between_queued_mutation_batches(
         store.close()
 
 
+def test_failed_maintenance_does_not_stop_the_single_writer_actor(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        failed = store.writer.submit_maintenance(
+            lambda _connection: (_ for _ in ()).throw(RuntimeError("planned fault"))
+        )
+        with pytest.raises(RuntimeError, match="planned fault"):
+            failed.result(timeout=3)
+
+        revision = _create_agent(store)
+        assert revision
+        metrics = store.writer.metrics()
+        assert metrics["maintenanceRuns"] == 1
+        assert metrics["failedMaintenanceRuns"] == 1
+        assert metrics["failedMutations"] == 0
+    finally:
+        store.close()
+
+
+def test_drained_store_reopens_with_canonical_agent_session_and_turn_data(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    database_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+    store = ConversationStore(database_path)
+    store.open()
+    try:
+        revision = _create_agent(store)
+        store.repository.create_session(
+            session_id="session-reopen",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Reopen session",
+        ).result(timeout=3)
+        store.repository.begin_turn(
+            turn_id="turn-reopen",
+            session_id="session-reopen",
+            client_submission_id="submission-reopen",
+        ).result(timeout=3)
+        assert store.checkpoint_wal_passive(timeout=3)["mode"] == "passive"
+        store.writer.flush(timeout=3)
+    finally:
+        store.close()
+
+    reopened = ConversationStore(database_path)
+    reopened.open()
+    try:
+        assert reopened.database.metadata()["quickCheck"] == "ok"
+        assert reopened.repository.get_agent("agent-a") is not None
+        assert [row["sessionId"] for row in reopened.repository.list_sessions(agent_id="agent-a")] == [
+            "session-reopen"
+        ]
+        assert [row["turnId"] for row in reopened.repository.list_turns("session-reopen")] == [
+            "turn-reopen"
+        ]
+    finally:
+        reopened.close()
+
+
+def test_committed_wal_data_reopens_after_writer_process_exits_abruptly(
+    tmp_path: Path,
+):
+    database_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+    crash_writer = f"""
+import os
+from pathlib import Path
+from core.chat.conversation_store import ConversationStore
+
+store = ConversationStore(Path({str(database_path)!r}))
+store.open()
+revision = store.repository.create_agent(
+    agent_id='agent-crash',
+    display_name='Crash Agent',
+    kind='assistant',
+    config={{'modelId': 'gpt-5.6-luna'}},
+    source='crash-test',
+).result(timeout=5)['configRevisionId']
+store.repository.create_session(
+    session_id='session-crash',
+    agent_id='agent-crash',
+    agent_config_revision_id=revision,
+    title='Committed before abrupt exit',
+).result(timeout=5)
+os._exit(0)
+"""
+    subprocess.run(
+        [sys.executable, "-c", crash_writer],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    reopened = ConversationStore(database_path)
+    reopened.open()
+    try:
+        assert reopened.database.metadata()["quickCheck"] == "ok"
+        assert reopened.repository.get_agent("agent-crash") is not None
+        assert [row["sessionId"] for row in reopened.repository.list_sessions(agent_id="agent-crash")] == [
+            "session-crash"
+        ]
+    finally:
+        reopened.close()
+
+
 def test_bounded_writer_queue_rejects_excess_work(
     tmp_path: Path,
     safe_sqlite_runtime: None,
@@ -489,6 +601,40 @@ def test_bounded_writer_queue_rejects_excess_work(
         assert second.result(timeout=3) == "queued"
     finally:
         release.set()
+        store.close()
+
+
+def test_external_write_lock_is_diagnostic_and_writer_recovers(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path, busy_timeout_ms=20)
+    external_writer = conversation_sqlite_runtime.connect(
+        str(store.database.path),
+        timeout=0.02,
+        isolation_level=None,
+    )
+    try:
+        external_writer.execute("BEGIN IMMEDIATE")
+        blocked = store.repository.create_agent(
+            agent_id="agent-locked",
+            display_name="Locked Agent",
+            kind="assistant",
+            config={"modelId": "gpt-5.6-luna"},
+            source="lock-test",
+        )
+        with pytest.raises(ConversationStoreLockedError, match="bounded lock wait"):
+            blocked.result(timeout=3)
+
+        external_writer.rollback()
+        assert _create_agent(store, "agent-after-lock")
+        assert store.writer.metrics()["failedMutations"] == 1
+    finally:
+        try:
+            external_writer.rollback()
+        except sqlite3.Error:
+            pass
+        external_writer.close()
         store.close()
 
 

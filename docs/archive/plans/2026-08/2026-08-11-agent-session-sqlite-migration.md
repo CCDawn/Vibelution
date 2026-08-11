@@ -526,6 +526,9 @@ T1-T6 是本次迁移的 Critical Path；T7 可紧随切换，T8 不得扩大本
 
 ### T1 实施检查点（2026-08-11）
 
-- 已在隔离分支建立 `core/chat/conversation_store/`：migration checksum、Agent/Revision/Session/Turn/TurnItem/Chunk/Checkpoint schema、DAO/Repository/UoW、单 writer actor、短 query-only reader 与有限队列。
-- 最小并发门禁覆盖 32 个 Session、128 个并发 Turn 写入；验证无丢行、无重复 sequence、无死锁，并记录 queue wait、batch size、queue depth 与 callback failure。
-- 当前受管 SQLite 3.49.1 因安全门只允许测试模拟，不接现有 Chat/Launcher/正式数据；这不是迁移完成信号。运行库升级与 T2 之前仍需完成 1000 Session/50 Agent 查询基准、WAL/checkpoint 故障注入和真实切换演练。
+- 已在隔离分支建立 `core/chat/conversation_store/`，并合入 `main@7e7c1563b`：migration checksum、Agent/Revision/Session/Turn/TurnItem/Chunk/Checkpoint schema、DAO/Repository/UoW、单 writer actor、有限队列与 query-only reader。
+- canonical store 使用项目本地 APSW 运行库；实测 SQLite `3.53.4`，通过 WAL-reset 安全门。现有 stdlib SQLite 路径不打开同一 canonical 数据库，因此不形成双运行库写入。
+- 读路径采用最多 4 个**线程归属**的可复用 reader；同一线程复用连接，跨线程不会借用连接，饱和读请求立刻使用短生命周期 query-only overflow reader 并记录压力。8 并发、400 次目录查询的 3 次微基准中位吞吐约 `3.0k–3.8k ops/s`、p95 `3.5–4.5 ms`；这是单机开发机证据，不是发布 SLA。
+- 最小并发门禁覆盖 32 个 Session、128 个并发 Turn 写入；验证无丢行、无重复 sequence、无死锁，并记录 queue wait、batch size、queue depth 与 callback failure。额外的 50 Agent / 1000 Session 压力探针完成 500 次目录查询（p95 `8.367 ms`，无 reader error）；1000 个异步 Session mutation 形成 32 条一批的 group commit，实测约 `1377 mutation/s`。
+- WAL maintenance 只通过 writer actor 执行 `PASSIVE` checkpoint；有序插入、失败隔离、外部写锁诊断/恢复、drain 后 reopen，以及提交完成后进程 `os._exit` 的 WAL 恢复均已有回归。checkpoint `busy/log/pages/duration/walBytes` 已可观测，实际耗时会随 WAL backlog 变化，尚未冻结阈值。
+- **仍未进行产品切换**：没有 Chat/Launcher 接线、没有正式数据库、没有 Agent 配置导入、没有旧会话清理。T2 可开始构建隔离 importer；T4 的统一 executor、1/4/8/16/32 会话长压、CPU/事件循环预算和 `FULL/NORMAL` 对照仍是进入 T6 的硬门。
