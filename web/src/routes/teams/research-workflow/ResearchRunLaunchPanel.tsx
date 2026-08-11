@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { CreateResearchWorkflowRunInput } from "../../../api/researchWorkflow";
 import {
@@ -14,7 +14,16 @@ import {
   RESEARCH_MODEL_ROUTING_PURPOSES,
   type ResearchRunLaunchDraft,
 } from "./researchRunLaunchContract";
+import { ResearchRunSafetyLimitPanel } from "./ResearchRunSafetyLimitPanel";
+import {
+  createResearchRunSafetyBudget,
+  createResearchRunSafetyBudgetPolicy,
+  readResearchRunSafetyBudget,
+  writeResearchRunSafetyBudget,
+} from "./researchRunSafetyBudget";
 import styles from "./ResearchRunLaunchPanel.styles";
+
+const INITIAL_SAFETY_BUDGET = createResearchRunSafetyBudget();
 
 const INITIAL_CONTRACT = JSON.stringify(
   {
@@ -23,15 +32,12 @@ const INITIAL_CONTRACT = JSON.stringify(
     trackAndRubricSnapshot: { track: "", blockingRules: [] },
     researchObjectiveContract: { question: "", falsifiableOutcome: "" },
     sourcePolicy: { minimumPrimarySources: 3, requireCounterEvidence: true },
-    budgetPolicy: {
-      tokens: 100000,
-      toolCalls: 120,
-      wallClockSeconds: 14400,
+    budgetPolicy: createResearchRunSafetyBudgetPolicy(INITIAL_SAFETY_BUDGET, {
       experiments: 12,
       computeUnits: 100,
       maxParallelTasks: 3,
       maxRetries: 2,
-    },
+    }),
     stopPolicy: { maxNoImprovementRounds: 2, stopOnBudgetExhaustion: true },
     modelRoutingPolicy: Object.fromEntries(
       RESEARCH_MODEL_ROUTING_PURPOSES.map((purpose) => [
@@ -65,6 +71,21 @@ export function ResearchRunLaunchPanel(props: {
   const [error, setError] = useState<string | null>(null);
   const update = (key: keyof ResearchRunLaunchDraft, value: string) =>
     setDraft((current) => ({ ...current, [key]: value }));
+  const safetyBudget = useMemo(() => {
+    try {
+      return { value: readResearchRunSafetyBudget(draft.contractJson), error: null };
+    } catch (reason) {
+      return { value: null, error: reason instanceof Error ? reason.message : String(reason) };
+    }
+  }, [draft.contractJson]);
+  const updateSafetyBudget = (nextBudget: NonNullable<typeof safetyBudget.value>) => {
+    try {
+      update("contractJson", writeResearchRunSafetyBudget(draft.contractJson, nextBudget));
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
 
   return (
     <VSurface tone="panel" className={styles.root}>
@@ -106,14 +127,27 @@ export function ResearchRunLaunchPanel(props: {
           onChange={(event) => update("environmentSnapshotRef", event.currentTarget.value)}
         />
       </VFieldRow>
-      <VFieldRow label="运行合同">
-        <VTextarea
-          value={draft.contractJson}
-          onChange={(event) => update("contractJson", event.currentTarget.value)}
-          rows={18}
-          className={styles.contract}
+      {safetyBudget.value ? (
+        <ResearchRunSafetyLimitPanel
+          budget={safetyBudget.value}
+          isDisabled={busy}
+          onChange={updateSafetyBudget}
         />
-      </VFieldRow>
+      ) : <div role="alert" className={styles.error}>{safetyBudget.error}</div>}
+      <details className={styles.advancedContract}>
+        <summary className={styles.advancedContractSummary}>高级运行合同</summary>
+        <div className={styles.advancedContractBody}>
+          <VFieldRow label="运行合同 JSON">
+            <VTextarea
+              value={draft.contractJson}
+              onChange={(event) => update("contractJson", event.currentTarget.value)}
+              rows={18}
+              isDisabled={busy}
+              className={styles.contract}
+            />
+          </VFieldRow>
+        </div>
+      </details>
       {error ? <div role="alert" className={styles.error}>{error}</div> : null}
       <div className={styles.actions}>
         <VButton variant="ghost" onClick={onCancel} isDisabled={busy}>取消</VButton>
