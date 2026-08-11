@@ -211,7 +211,10 @@ export class ElectronWindowProvider {
       }
       const report = this.reportState(closedWindowState(role));
       if (role === "workbench") {
-        void Promise.resolve(report).then(() => this.onWorkbenchClosed());
+        void Promise.resolve(report)
+          .catch(() => undefined)
+          .then(() => this.onWorkbenchClosed())
+          .catch(() => undefined);
       }
     });
     window.on("focus", () => {
