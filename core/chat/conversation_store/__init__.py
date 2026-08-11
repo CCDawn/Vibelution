@@ -1,4 +1,9 @@
-"""Canonical SQLite conversation-store infrastructure (not yet live-wired)."""
+"""SQLite control-plane infrastructure for Agent, config, and session metadata.
+
+Conversation messages, turn items, tool output, and terminal truth remain in
+the append-only turn journal.  This package intentionally does not provide a
+second transcript API.
+"""
 
 from .database import (
     ConversationStoreError,
