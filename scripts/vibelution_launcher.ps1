@@ -44,6 +44,7 @@ $launcherShortcutName = "Vibelution.lnk"
 $launcherDesktopShortcutName = "Vibelution Launcher.lnk"
 $launcherIconPath = Join-Path $projectDir "assets\icons\vibelution.ico"
 $launcherDesktopEntryVbsPath = Join-Path $projectDir "scripts\vibelution_desktop_entry.vbs"
+$desktopEntryCatalogScriptPath = Join-Path $projectDir "scripts\desktop_entry_catalog.ps1"
 $nativeLauncherEntryBuildScriptPath = Join-Path $projectDir "scripts\windows_launcher_entry\build_vibelution_launcher_entry.ps1"
 
 function Initialize-GlobalConfigFile {
@@ -2166,6 +2167,21 @@ function Test-ProcessAlive {
     return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
 }
 
+function Resolve-PackagedElectronDesktopEntryPath {
+    if (-not (Test-Path -LiteralPath $desktopEntryCatalogScriptPath)) {
+        throw "Desktop entry catalog is missing: $desktopEntryCatalogScriptPath"
+    }
+
+    . $desktopEntryCatalogScriptPath
+    $catalog = Assert-DesktopEntryCatalog -ProjectDir $projectDir
+    $entryPath = Resolve-DesktopPublicEntryPath -Catalog $catalog -ProjectDir $projectDir
+    if (-not (Test-Path -LiteralPath $entryPath)) {
+        throw "Packaged Electron desktop entry is missing: $entryPath. Run scripts\build_desktop_package.ps1 before repairing the shortcut."
+    }
+
+    return (Resolve-Path -LiteralPath $entryPath).Path
+}
+
 function Get-NativeLauncherEntryExePath {
     $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
     if (-not $localAppData) {
@@ -2258,15 +2274,6 @@ function Repair-LauncherShortcut {
         New-Item -ItemType Directory -Path $programsDir -Force | Out-Null
     }
 
-    if (-not (Test-Path -LiteralPath $launcherDesktopEntryVbsPath)) {
-        throw "Vibelution desktop entry script is missing: $launcherDesktopEntryVbsPath"
-    }
-
-    $wscriptPath = Join-Path $env:SystemRoot "System32\wscript.exe"
-    if (-not (Test-Path -LiteralPath $wscriptPath)) {
-        throw "wscript.exe was not found: $wscriptPath"
-    }
-
     $iconPath = $launcherIconPath
     if (-not (Test-Path -LiteralPath $iconPath)) {
         $iconPath = Join-Path $projectDir "web\public\favicon.ico"
@@ -2275,18 +2282,9 @@ function Repair-LauncherShortcut {
         throw "Vibelution icon file is missing: $launcherIconPath"
     }
 
-    $nativeLauncherEntryPath = Ensure-NativeLauncherEntryExecutable
-    $shortcutTargetPath = $nativeLauncherEntryPath
-    $shortcutArguments = ('--project "{0}" launcher' -f $projectDir)
-    $shortcutMode = "native_exe"
-    if (-not $shortcutTargetPath) {
-        $shortcutTargetPath = Join-Path $env:SystemRoot "System32\wscript.exe"
-        if (-not (Test-Path -LiteralPath $shortcutTargetPath)) {
-            throw "wscript.exe was not found: $shortcutTargetPath"
-        }
-        $shortcutArguments = ('"{0}" launcher' -f $launcherDesktopEntryVbsPath)
-        $shortcutMode = "script_host_fallback"
-    }
+    $shortcutTargetPath = Resolve-PackagedElectronDesktopEntryPath
+    $shortcutArguments = ('--workspace "{0}"' -f $projectDir)
+    $shortcutMode = "electron_package"
 
     $shortcutPath = Join-Path $programsDir $launcherShortcutName
     $shell = New-Object -ComObject WScript.Shell
@@ -2307,7 +2305,7 @@ function Repair-LauncherShortcut {
             desktop_shortcut_path = $desktopShortcutPath
             target_path = $shortcutTargetPath
             shortcut_mode = $shortcutMode
-            desktop_entry = $launcherDesktopEntryVbsPath
+            desktop_entry = $shortcutTargetPath
             icon_path = $iconPath
         }
     return $shortcutPath
@@ -8911,7 +8909,6 @@ try {
     [void](Repair-StaleLauncherControlState)
     switch ($Action) {
         "launcher" {
-            [void](Repair-LauncherShortcut)
             Write-LauncherControlLog `
                 -Event "launcher.control_surface.open_requested" `
                 -Message "Launcher action is opening only the standalone control surface." `

@@ -83,6 +83,35 @@ describe("desktop package script", () => {
     expect(script).not.toContain("Stop-Process -Name Vibelution");
   });
 
+  it("promotes public shortcuts only from a clean main package after smoke and cleanup", () => {
+    const script = readFileSync(verifyScriptPath, "utf8");
+    const smokeIndex = script.indexOf("$summary = Assert-SmokeSummary");
+    const cleanupIndex = script.indexOf("Wait-ForNoNewDesktopPackageProcesses $baselineProcessIds");
+    const sourceRecheckIndex = script.indexOf(
+      "Assert-PublicEntryPromotionSourceStillCurrent -ExpectedSource $expectedPromotionSource"
+    );
+    const shortcutIndex = script.indexOf('$null = & $launcherScript -Action "repair-shortcut"');
+
+    expect(script).toContain('$launcherScript = Join-Path $projectDir "scripts/vibelution_launcher.ps1"');
+    expect(script).toContain("[switch]$PromotePublicEntry");
+    expect(script).toContain("function Assert-PublicEntryPromotionSource");
+    expect(script).toContain("Public entry promotion requires a clean main checkout.");
+    expect(script).toContain('Invoke-GitText @("status", "--porcelain", "--untracked-files=all")');
+    expect(script).toContain("function Assert-PublicEntryPackageProvenance");
+    expect(script).toContain("function Assert-PublicEntryPromotionSourceStillCurrent");
+    expect(script).toContain("Public entry promotion source changed during package verification.");
+    expect(script).toContain("$packageProvenance.sourceCommit -ne $ExpectedSource.sourceCommit");
+    expect(script).toContain("$packageProvenance.electronTreeHash -ne $ExpectedSource.electronTreeHash");
+    expect(smokeIndex).toBeGreaterThanOrEqual(0);
+    expect(cleanupIndex).toBeGreaterThan(smokeIndex);
+    expect(sourceRecheckIndex).toBeGreaterThan(cleanupIndex);
+    expect(shortcutIndex).toBeGreaterThan(sourceRecheckIndex);
+    expect(script).toContain("if ($PromotePublicEntry -and $SkipBuild)");
+    expect(script).toContain("if ($PromotePublicEntry)");
+    expect(script).toContain('$null = & $launcherScript -Action "repair-shortcut"');
+    expect(script).not.toContain("Start-Process -FilePath powershell");
+  });
+
   it("verifies the packaged executable embeds the shared Vibelution icon", () => {
     const script = readFileSync(verifyScriptPath, "utf8");
 

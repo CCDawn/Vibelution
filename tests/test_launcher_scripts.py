@@ -33,21 +33,32 @@ def test_launcher_script_repairs_start_menu_shortcut_entry():
 
     assert '"repair-shortcut"' in source
     assert "function Repair-LauncherShortcut" in source
-    assert "function Ensure-NativeLauncherEntryExecutable" in source
+    assert "function Resolve-PackagedElectronDesktopEntryPath" in source
     assert "function Set-LauncherShellShortcut" in source
     assert "Vibelution.lnk" in source
     assert "Vibelution Launcher.lnk" in source
-    assert "VibelutionLauncher.exe" in source
-    assert "windows_launcher_entry\\build_vibelution_launcher_entry.ps1" in source
-    assert "vibelution_desktop_entry.vbs" in source
+    assert "scripts\\desktop_entry_catalog.ps1" in source
+    assert "Resolve-DesktopPublicEntryPath" in source
+    assert "Run scripts\\build_desktop_package.ps1" in source
     assert "assets\\icons\\vibelution.ico" in source
     assert "CreateShortcut" in source
     assert "$shortcut.TargetPath = $TargetPath" in source
-    assert '$shortcutArguments = (\'--project "{0}" launcher\' -f $projectDir)' in source
-    assert '$shortcutMode = "native_exe"' in source
-    assert '$shortcutMode = "script_host_fallback"' in source
+    assert '$shortcutArguments = (\'--workspace "{0}"\' -f $projectDir)' in source
+    assert '$shortcutMode = "electron_package"' in source
     assert "$shortcut.IconLocation" in source
-    assert "[void](Repair-LauncherShortcut)" in source
+
+    repair_start = source.index("function Repair-LauncherShortcut")
+    repair_end = source.index("function Repair-StaleLauncherControlState")
+    repair_source = source[repair_start:repair_end]
+    assert "Resolve-PackagedElectronDesktopEntryPath" in repair_source
+    assert "Ensure-NativeLauncherEntryExecutable" not in repair_source
+    assert "VibelutionLauncher.exe" not in repair_source
+    assert "vibelution_desktop_entry.vbs" not in repair_source
+
+    launcher_action_start = source.rindex('        "launcher" {')
+    launcher_action_end = source.index('        "toggle" {', launcher_action_start)
+    launcher_action = source[launcher_action_start:launcher_action_end]
+    assert "Repair-LauncherShortcut" not in launcher_action
 
 
 def test_workbench_close_canary_quiesces_managed_workbench_before_packaged_run():
