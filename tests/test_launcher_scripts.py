@@ -112,7 +112,7 @@ def test_workbench_close_canary_uses_bounded_launcher_status_polling():
     assert 'throw "Workbench-close canary did not restore the managed Workbench. Last failure: $lastFailure"' in source
 
 
-def test_workbench_close_canary_recovers_control_after_stop_before_reading_closed_state():
+def test_workbench_close_canary_repolls_state_without_restarting_during_stop():
     source = WORKBENCH_CLOSE_CANARY_SCRIPT.read_text(encoding="utf-8")
     close_function = source[
         source.index("function Close-ManagedWorkbenchForCanary") : source.index(
@@ -122,10 +122,8 @@ def test_workbench_close_canary_recovers_control_after_stop_before_reading_close
 
     assert "$latestLauncherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json" in close_function
     assert "$latestLauncherOrigin = ([uri]$latestLauncherControlUrl).GetLeftPart([System.UriPartial]::Authority)" in close_function
-    assert "$null = Ensure-LauncherControlForCanary" in close_function
-    assert close_function.index("$null = Ensure-LauncherControlForCanary") > close_function.index(
-        "} catch {\n            $lastFailure = $_.Exception.Message"
-    )
+    assert "Ensure-LauncherControlForCanary" not in close_function
+    assert "$deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)" in close_function
 
 
 def test_workbench_close_canary_restores_control_before_active_work_gate():

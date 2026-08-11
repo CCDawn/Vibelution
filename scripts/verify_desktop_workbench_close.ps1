@@ -191,15 +191,17 @@ function Close-ManagedWorkbenchForCanary {
     $launcherProcess = Start-Process -FilePath $launcherExecutable -ArgumentList @("--project", $projectDir, "stop") -WindowStyle Hidden -PassThru
     $RecoveryRequired.Value = $true
 
-    $deadline = (Get-Date).AddSeconds($ShutdownTimeoutSeconds)
+    # Queue claim + fast cleanup regularly outlive the process-cleanup budget;
+    # use the canary's bounded startup window for this asynchronous command.
+    $deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)
     $lastFailure = ""
     do {
         if ($launcherProcess.HasExited -and $launcherProcess.ExitCode -ne 0) {
             throw "Official Vibelution Launcher stop failed with exit code $($launcherProcess.ExitCode)."
         }
         try {
-            # `stop` may retire the old control backend with the Workbench.  Do
-            # not keep polling its stale origin: re-read state after bootstrap.
+            # Re-read state on every attempt: the control-plane process can be
+            # replaced while the asynchronous stop command is being claimed.
             $latestLauncherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json
             $latestLauncherControlUrl = [string]$latestLauncherState.launcherControlUrl
             if ([string]::IsNullOrWhiteSpace($latestLauncherControlUrl)) {
@@ -216,11 +218,6 @@ function Close-ManagedWorkbenchForCanary {
             }
         } catch {
             $lastFailure = $_.Exception.Message
-            try {
-                $null = Ensure-LauncherControlForCanary
-            } catch {
-                $lastFailure = "$lastFailure; control recovery: $($_.Exception.Message)"
-            }
         }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
