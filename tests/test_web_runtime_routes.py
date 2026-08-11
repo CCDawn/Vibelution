@@ -1066,6 +1066,40 @@ def test_runtime_summary_uses_active_electron_workbench_session(tmp_path, monkey
     assert payload["lifecycleProof"]["overallState"] == "ready"
 
 
+def test_runtime_workbench_payload_projects_launcher_only_electron_session(tmp_path, monkeypatch):
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
+    monkeypatch.setattr(runtime_service, "PROJECT_ROOT", tmp_path)
+    desktop_session_store.register_desktop_session(
+        {
+            "desktopSessionId": "electron-runtime-launcher-only-1",
+            "provider": "electron",
+            "workspaceRoot": str(tmp_path),
+            "capabilities": ["desktop_actions.claim"],
+        }
+    )
+
+    payload = runtime_service._workbench_payload(
+        "zh",
+        {
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+            }
+        },
+    )
+
+    assert payload["windowProvider"] == "electron"
+    assert payload["windowManaged"] is False
+    assert payload["browserManaged"] is False
+
+
 def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
     monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})

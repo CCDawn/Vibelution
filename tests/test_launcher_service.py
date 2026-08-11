@@ -756,6 +756,78 @@ def test_desktop_session_store_exposes_active_window_only_while_lease_valid(tmp_
     assert expired == {}
 
 
+def test_desktop_session_store_projects_launcher_only_electron_session(tmp_path, monkeypatch):
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
+    created = launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "electron-launcher-only-1",
+            "provider": "electron",
+            "workspaceRoot": str(tmp_path),
+            "capabilities": ["desktop_actions.claim"],
+        }
+    )
+
+    projection = desktop_session_store.latest_active_window_provider_projection(
+        workspace_root=str(tmp_path)
+    )
+
+    assert created["revision"] == 1
+    assert projection["windowProvider"] == "electron"
+    assert projection["windowManaged"] is False
+    assert projection["browserManaged"] is False
+    assert projection["browserWindowAlive"] is False
+    assert projection["desktopSessionId"] == "electron-launcher-only-1"
+    assert "observedState" not in projection
+
+
+def test_launcher_payload_prefers_launcher_only_electron_provider_projection(tmp_path, monkeypatch):
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
+    monkeypatch.setattr(launcher_service, "PROJECT_ROOT", tmp_path)
+    launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "electron-launcher-only-2",
+            "provider": "electron",
+            "workspaceRoot": str(tmp_path),
+            "capabilities": ["desktop_actions.claim"],
+        }
+    )
+
+    workbench = launcher_service._workbench_payload(
+        runtime_state={
+            "daemonRunning": True,
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+            },
+        },
+        observed_workbench={
+            "observedState": "open",
+            "backendObserved": True,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendPortListening": True,
+        },
+    )
+
+    assert workbench["windowProvider"] == "electron"
+    assert workbench["windowManaged"] is False
+    assert workbench["browserManaged"] is False
+    assert workbench["desktopSessionId"] == "electron-launcher-only-2"
+
+
 def test_launcher_status_projects_active_desktop_session_window(tmp_path, monkeypatch):
     from core.launcher import desktop_session_store
 

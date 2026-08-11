@@ -92,6 +92,23 @@ def test_safe_command_args_keeps_launcher_request_audit_bounded():
     assert safe["argKeys"] == ["source", "unsafeToken"]
 
 
+def test_open_request_ready_accepts_an_electron_managed_window():
+    observation = {
+        "observedState": "open",
+        "backendHealthy": True,
+        "backendObserved": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
+        "browserManaged": False,
+        "browserWindowAlive": True,
+    }
+
+    assert daemon._open_request_ready(observation, no_browser=False) is True
+    assert daemon._open_request_ready(
+        {**observation, "windowManaged": False}, no_browser=False
+    ) is False
+
+
 @pytest.fixture(autouse=True)
 def _block_real_process_termination(monkeypatch, tmp_path):
     events_path = tmp_path / "runtime-manager-events.jsonl"
@@ -5580,6 +5597,57 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
     completed = _event_payload(events, "launcher.action.completed")
     assert completed["durationMs"] >= 0
+
+
+def test_run_launcher_action_routes_active_electron_session_to_desktop_action(monkeypatch):
+    captured = {}
+    events: list[tuple[str, dict]] = []
+    submitted: list[dict] = []
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            kwargs["stdout"].write(b"ok\n")
+            kwargs["stdout"].flush()
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(
+        workbench_controller,
+        "_latest_active_electron_desktop_session",
+        lambda: {"desktopSessionId": "electron-session-1"},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_submit_electron_window_action",
+        lambda **kwargs: submitted.append(kwargs)
+        or {"status": "accepted", "action": kwargs["action"]},
+    )
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
+    )
+
+    result = workbench_controller.run_launcher_action("internal-start")
+
+    assert result.returncode == 0
+    assert "--no-browser" in captured["args"][0]
+    assert submitted == [
+        {
+            "action": "open_workbench",
+            "reason": "internal-start:electron_window_provider",
+            "session": {"desktopSessionId": "electron-session-1"},
+        }
+    ]
+    assert [event_type for event_type, _payload in events] == [
+        "launcher.action.requested",
+        "launcher.action.electron_desktop_action_submitted",
+        "launcher.action.completed",
+    ]
 
 
 def test_run_launcher_action_preserves_explicit_port_env_override(monkeypatch):
