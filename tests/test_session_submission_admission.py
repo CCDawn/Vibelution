@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
+from core.chat.conversation_ledger import (
+    EVENT_TURN_STARTED,
+    EVENT_USER_MESSAGE,
+    append_conversation_event,
+    load_conversation_events,
+)
 from core.chat.conversation_store import ConversationStore
 from core.chat.conversation_store.schema import MIGRATIONS
 from core.web.services.session.admission import SessionSubmissionAdmissionService
@@ -159,5 +166,214 @@ def test_v1_store_upgrades_to_control_plane_v2_without_creating_transcript_rows(
             }.issubset(tables)
             assert connection.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 0
             assert connection.execute("SELECT COUNT(*) FROM turn_items").fetchone()[0] == 0
+    finally:
+        store.close()
+
+
+def test_journal_admission_retry_writes_one_turn_start_and_one_user_message(
+    tmp_path: Path,
+):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_bound_session(store)
+        admission = SessionSubmissionAdmissionService(store.repository)
+
+        def lookup(record: dict[str, object]) -> dict[str, object] | None:
+            matching = [
+                event
+                for event in load_conversation_events(tmp_path, "session-a")
+                if event.correlation_id == record["clientSubmissionId"]
+                and event.event_type == EVENT_USER_MESSAGE
+            ]
+            if not matching:
+                return None
+            final_event = matching[-1]
+            return {
+                "journalSequence": final_event.sequence,
+                "journalEventId": final_event.event_id,
+            }
+
+        def append_initial_events(record: dict[str, object]) -> dict[str, object]:
+            correlation_id = str(record["clientSubmissionId"])
+            turn_id = str(record["turnId"])
+            append_conversation_event(
+                tmp_path,
+                "session-a",
+                turn_id,
+                EVENT_TURN_STARTED,
+                status="running",
+                correlation_id=correlation_id,
+                visible_in_model=False,
+            )
+            user_event = append_conversation_event(
+                tmp_path,
+                "session-a",
+                turn_id,
+                EVENT_USER_MESSAGE,
+                status="recorded",
+                correlation_id=correlation_id,
+                payload={"content": "hello"},
+            )
+            return {
+                "journalSequence": user_event.sequence,
+                "journalEventId": user_event.event_id,
+            }
+
+        first = admission.admit_to_journal(
+            session_id="session-a",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            client_submission_id="submission-a",
+            turn_id="turn-a",
+            journal_lookup=lookup,
+            journal_append=append_initial_events,
+        )
+        retried = admission.admit_to_journal(
+            session_id="session-a",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            client_submission_id="submission-a",
+            turn_id="turn-retry-must-not-replace-a",
+            journal_lookup=lookup,
+            journal_append=append_initial_events,
+        )
+
+        events = load_conversation_events(tmp_path, "session-a")
+        assert first["journalDisposition"] == "appended"
+        assert retried["journalDisposition"] == "already_journaled"
+        assert [event.event_type for event in events] == [
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
+        assert first["turnId"] == retried["turnId"] == "turn-a"
+        assert retried["state"] == "journaled"
+    finally:
+        store.close()
+
+
+def test_concurrent_journal_admission_uses_one_append_callback(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_bound_session(store)
+        admission = SessionSubmissionAdmissionService(store.repository)
+        append_calls = 0
+
+        def lookup(_record: dict[str, object]) -> dict[str, object] | None:
+            return None
+
+        def append(_record: dict[str, object]) -> dict[str, object]:
+            nonlocal append_calls
+            append_calls += 1
+            return {"journalSequence": 1, "journalEventId": "event-a"}
+
+        def admit(index: int) -> dict[str, object]:
+            return admission.admit_to_journal(
+                session_id="session-a",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
+                client_submission_id="submission-a",
+                turn_id=f"turn-{index}",
+                journal_lookup=lookup,
+                journal_append=append,
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(admit, range(16)))
+
+        assert append_calls == 1
+        assert {str(result["turnId"]) for result in results} == {"turn-0"}
+        assert {str(result["state"]) for result in results} == {"journaled"}
+    finally:
+        store.close()
+
+
+def test_journal_success_before_sqlite_ack_recovers_without_second_user_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_bound_session(store)
+        admission = SessionSubmissionAdmissionService(store.repository)
+        append_calls = 0
+
+        def lookup(record: dict[str, object]) -> dict[str, object] | None:
+            matching = [
+                event
+                for event in load_conversation_events(tmp_path, "session-a")
+                if event.correlation_id == record["clientSubmissionId"]
+                and event.event_type == EVENT_USER_MESSAGE
+            ]
+            if not matching:
+                return None
+            event = matching[-1]
+            return {
+                "journalSequence": event.sequence,
+                "journalEventId": event.event_id,
+            }
+
+        def append(record: dict[str, object]) -> dict[str, object]:
+            nonlocal append_calls
+            append_calls += 1
+            correlation_id = str(record["clientSubmissionId"])
+            turn_id = str(record["turnId"])
+            append_conversation_event(
+                tmp_path,
+                "session-a",
+                turn_id,
+                EVENT_TURN_STARTED,
+                status="running",
+                correlation_id=correlation_id,
+                visible_in_model=False,
+            )
+            event = append_conversation_event(
+                tmp_path,
+                "session-a",
+                turn_id,
+                EVENT_USER_MESSAGE,
+                status="recorded",
+                correlation_id=correlation_id,
+                payload={"content": "recover me"},
+            )
+            return {
+                "journalSequence": event.sequence,
+                "journalEventId": event.event_id,
+            }
+
+        real_mark_journaled = admission.mark_journaled
+        monkeypatch.setattr(
+            admission,
+            "mark_journaled",
+            lambda **_values: (_ for _ in ()).throw(RuntimeError("simulated crash")),
+        )
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            admission.admit_to_journal(
+                session_id="session-a",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
+                client_submission_id="submission-recover",
+                turn_id="turn-recover",
+                journal_lookup=lookup,
+                journal_append=append,
+            )
+
+        monkeypatch.setattr(admission, "mark_journaled", real_mark_journaled)
+        recovered = admission.admit_to_journal(
+            session_id="session-a",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            client_submission_id="submission-recover",
+            turn_id="turn-retry-must-not-replace-recover",
+            journal_lookup=lookup,
+            journal_append=append,
+        )
+
+        assert append_calls == 1
+        assert recovered["journalDisposition"] == "recovered"
+        assert recovered["state"] == "journaled"
+        assert [event.event_type for event in load_conversation_events(tmp_path, "session-a")] == [
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
     finally:
         store.close()
