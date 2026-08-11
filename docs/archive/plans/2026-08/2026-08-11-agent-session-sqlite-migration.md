@@ -5,7 +5,7 @@
 > Baseline: `main@852d74af4ac81ac82289f090296ecb1852bdbe50`
 > Scope: Agent 配置权威、会话父子关系、Turn/Item 持久化、前端状态边界、旧测试会话清理与可恢复切换
 > User decisions: 旧 Agent 会话均为测试数据，不迁移；每个会话必须绑定一个 Agent 父节点；Agent 配置进入 SQLite；数据访问采用 DAO + Repository + Unit of Work；前端继续使用 React Query + Zustand；优先复用现有能力。
-> Architecture hardening: 2026-08-11，补充 canonical 数据位置、单 writer actor、锁顺序、revision CAS、WAL checkpoint、CPU/IO 资源池、背压和 32 会话压力门禁。
+> Architecture hardening: 2026-08-11，补充 canonical 数据位置、单 writer actor、锁顺序、revision CAS、WAL checkpoint、CPU/IO 资源池、背压、32 会话压力门禁与 SQLite WAL-reset 运行库安全门。
 > Authority: 本文是 dated implementation plan，不覆盖 `AGENTS.md`、`docs/standards/`、ADR、模块 README 或用户后续明确决定。
 
 ## 1. 结论先行
@@ -54,10 +54,10 @@
 
 | 来源 | 可吸收设计 | 在 Vibelution 中的落点 | 不采用的部分 |
 | --- | --- | --- | --- |
-| [OpenCode session schema](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/session.sql.ts) | `Session -> Message -> Part` 的稳定关系层、父子 session、关系字段 + JSON payload、按父键/时间建索引 | 映射为 `Agent -> Session -> Turn -> TurnItem`；结构字段单列，provider 扩展进入有界 JSON | 不引入 Drizzle；不让 JSON payload 代替应有的外键、状态和顺序列 |
-| [Codex app-server](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md) | `Thread -> Turn -> Item`、`clientUserMessageId/clientId`、item started/delta/completed、turn completed、resume/fork、cursor pagination、`recencyAt` 与 `updatedAt` 分离 | 直接对齐现有 TurnItem v3；新增 `client_submission_id` 唯一约束、`recency_at`、游标目录和明确 resume/fork | 不采用 SQLite + JSONL 双 canonical；JSONL 只可作为切换前只读遗留数据或运行日志 |
-| [Grok Build](https://github.com/xai-org/grok-build) / [headless mode](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/14-headless-mode.md) | session SQLite 与 memory/log/trace/worktree 分目录；显式 new/resume/continue/fork；稳定 `toolCallId` 和 `tool_call_update` | 数据目录按权威类型隔离；工具生命周期继续复用稳定 `callId/itemId/revision`；API 显式区分 resume/fork | 拒绝只读数据目录时静默进入 ephemeral session；Vibelution 必须 fail visible |
-| [CrewAI memory](https://docs.crewai.com/en/concepts/memory) / [checkpointing](https://docs.crewai.com/en/concepts/checkpointing) | scope、来源/provenance、只读切片、写屏障、事件驱动 checkpoint、lineage、SQLite WAL、checkpoint 保留上限 | v1 先落 checkpoint/lineage；长期 memory 作为 v2 独立表与服务，保持 scope/source/private 边界 | 不引入 CrewAI Runtime；不在每个细粒度事件写完整 checkpoint |
+| [OpenCode session schema](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/session.sql.ts) | `Session -> Message -> Part` 的稳定关系层、父子 session、关系字段 + JSON payload、按父键/时间建索引；Part/delta 使用稳定身份持续更新 | 映射为 `Agent -> Session -> Turn -> TurnItem`；结构字段单列，provider 扩展进入有界 JSON；流式阶段只提升同一 item revision | 不引入 Drizzle；不让 JSON payload 代替应有的外键、状态和顺序列 |
+| [Codex app-server](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md) | `Thread -> Turn -> Item`、`clientUserMessageId/clientId`、item started/delta/completed、turn completed、resume/fork、cursor pagination、`recencyAt` 与 `updatedAt` 分离；目录可 DB-only，resume 先读 metadata 再按需取正文 | 直接对齐现有 TurnItem v3；新增 `client_submission_id` 唯一约束、`recency_at`、游标目录和明确 resume/fork；目录与恢复首屏禁止扫描/反序列化完整正文 | 不采用 SQLite + JSONL 双 canonical；JSONL 只可作为切换前只读遗留数据或运行日志 |
+| [Grok Build](https://github.com/xai-org/grok-build) / [configuration](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/05-configuration.md) | session SQLite 与 memory/log/trace/worktree 分目录；显式 new/resume/continue/fork；稳定 `toolCallId` 和 `tool_call_update`；内容型 telemetry 与指标/log 开关分离 | 数据目录按权威类型隔离；工具生命周期继续复用稳定 `callId/itemId/revision`；API 显式区分 resume/fork；运行指标禁止携带 Prompt/正文 | 拒绝只读数据目录时静默进入 ephemeral session；Vibelution 必须 fail visible |
+| [CrewAI checkpointing](https://docs.crewai.com/en/concepts/checkpointing) | scope、来源/provenance、只读切片、写屏障、任务完成事件 checkpoint、lineage、SQLite WAL、checkpoint 保留上限；高频 checkpoint 会直接拖慢流程 | v1 只在任务/Turn 终态与显式恢复点落 checkpoint/lineage；长期 memory 作为 v2 独立表与服务，保持 scope/source/private 边界 | 不引入 CrewAI Runtime；不在 token、tool delta 或每个细粒度事件写完整 checkpoint |
 
 ### 3.1 直接复用（优先）
 
@@ -224,6 +224,17 @@ CREATE INDEX idx_items_call
 
 ## 5. 数据访问层
 
+### 5.0 SQLite 运行库安全门
+
+SQLite 官方在 WAL 文档中披露：3.7.0–3.51.2 存在 WAL-reset 并发竞态，修复版本为 3.51.3，并回补到 3.44.6、3.50.7。当前项目 Python 3.12.10 实测链接 SQLite 3.49.1，因此：
+
+- T1 初始化必须在打开 canonical WAL 前执行版本门；不安全版本 fail visible，禁止静默降级或通过配置绕过。
+- 当前 3.49.1 只能用于未接生产的隔离测试，且测试仍必须保持一个 writer/checkpoint owner、只读 reader，不制造第二写连接。
+- T6 正式切换的前置条件是项目受管 Python 已升级到 SQLite >= 3.51.3，或命中明确的官方修复回补版本 allowlist。
+- 运行库版本、判定代码与失败原因进入有界 health/runtime-scene；不得只检查 Python 包版本或 `PRAGMA journal_mode`。
+
+来源：[SQLite WAL documentation](https://www.sqlite.org/wal.html)。
+
 ### 5.1 分层
 
 | 层 | 责任 | 示例 |
@@ -367,7 +378,7 @@ Session scheduler admission
 | 阶段 | 交付物 | 依赖 | 验证与停止条件 |
 | --- | --- | --- | --- |
 | T0 基线冻结 | 当前 schema/数据路径/锁图/接口/性能基线；canonical data-root ADR；旧会话清理清单 | 无 | `quick_check`、现有目录/打开会话基准、runtime lock 指标；任何未知生产会话立即停止清理 |
-| T1 SQLite 核心 | 新 canonical ConversationStore；复用 migration/checksum；writer actor、read pool、WAL policy、DAO | T0 | migration、WAL 并发、writer backpressure、锁超时、FK、checksum、损坏、进程崩溃后 reopen 与 durability policy 验证 |
+| T1 SQLite 核心 | 新 canonical ConversationStore；复用 migration/checksum；SQLite 版本安全门；writer actor、短 query-only reader、WAL policy、DAO | T0 | runtime gate、migration、WAL 并发、writer backpressure、锁超时、FK、checksum、损坏、进程崩溃后 reopen 与 durability policy 验证 |
 | T2 Agent 配置权威 | Agent importer、不可变 revision、Repository/UoW、读写 API | T1 | hash/revision/CAS、重复 ID、无效模型、archive、历史 revision 测试 |
 | T3 会话写入权威 | Session/Turn/TurnItem/chunk 原子写；sequence allocator；CAS；group commit；after-commit SSE | T1-T2 | crash/retry/迟到 revision/同名工具/失败重试/重连/幂等/终态测试 |
 | T4 并发执行预算 | 移除普通路径全局锁；per-session ordering；统一 IO/CPU/tool executor budget 与公平背压 | T1-T3 | 1/4/8/16/32 Session 压测、deadlock watchdog、event-loop lag、CPU scaling |
@@ -504,10 +515,17 @@ T1-T6 是本次迁移的 Critical Path；T7 可紧随切换，T8 不得扩大本
 第一批只做 T0-T1，不立刻清会话：
 
 1. 先冻结 canonical data-root ADR 和 cache/canonical 删除边界；不在 runtime cache 上建正式库。
-2. 从 `SessionCatalog` 提取 migration/checksum/error 分类，建立新 `ConversationStore`，实现长连接 writer actor、只读连接和 WAL policy。
-3. 落最小 `AgentDao/SessionDao/TurnDao/TurnItemDao` 与 CAS/sequence allocator，但暂不切换正式读写。
-4. 建立 1000 Session/50 Agent 数据 fixture，以及 1/4/8/16/32 并发 Session fixture。
-5. 对比 `synchronous=FULL/NORMAL`、batch 大小和 flush 周期；只有 correctness、p95/p99、WAL 与 CPU 指标同时通过才冻结默认值。
-6. 证明 WAL、FK、幂等、锁顺序、背压和游标索引正确后，再开始 T2 配置导入。
+2. 在任何数据库创建前检查受管 Python 的 SQLite 运行库；3.49.1 明确阻断正式启用，先升级到 3.51.3+ 或官方修复回补版本。
+3. 从 `SessionCatalog` 提取 migration/checksum/error 分类，建立新 `ConversationStore`，实现长连接 writer actor、短 query-only reader 和 WAL policy。
+4. 落最小 `AgentDao/SessionDao/TurnDao/TurnItemDao` 与 CAS/sequence allocator，但暂不切换正式读写。
+5. 建立 1000 Session/50 Agent 数据 fixture，以及 1/4/8/16/32 并发 Session fixture。
+6. 对比 `synchronous=FULL/NORMAL`、batch 大小和 flush 周期；只有 correctness、p95/p99、WAL 与 CPU 指标同时通过才冻结默认值。
+7. 证明 WAL、FK、幂等、锁顺序、背压和游标索引正确后，再开始 T2 配置导入。
 
 这样能最大化复用，又把最高风险的“数据切换与清理”延后到基础设施被证明可靠之后。
+
+### T1 实施检查点（2026-08-11）
+
+- 已在隔离分支建立 `core/chat/conversation_store/`：migration checksum、Agent/Revision/Session/Turn/TurnItem/Chunk/Checkpoint schema、DAO/Repository/UoW、单 writer actor、短 query-only reader 与有限队列。
+- 最小并发门禁覆盖 32 个 Session、128 个并发 Turn 写入；验证无丢行、无重复 sequence、无死锁，并记录 queue wait、batch size、queue depth 与 callback failure。
+- 当前受管 SQLite 3.49.1 因安全门只允许测试模拟，不接现有 Chat/Launcher/正式数据；这不是迁移完成信号。运行库升级与 T2 之前仍需完成 1000 Session/50 Agent 查询基准、WAL/checkpoint 故障注入和真实切换演练。
