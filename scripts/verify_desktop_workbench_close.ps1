@@ -106,6 +106,50 @@ function Assert-NoActiveWorkbenchWork {
     return $activeWorkCount
 }
 
+function Ensure-LauncherControlForCanary {
+    $launcherStatePath = Join-Path $projectDir ".runtime/launcher/state.json"
+    $lastFailure = ""
+    $deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)
+
+    try {
+        $launcherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json
+        $launcherControlUrl = [string]$launcherState.launcherControlUrl
+        if (-not [string]::IsNullOrWhiteSpace($launcherControlUrl)) {
+            $launcherOrigin = ([uri]$launcherControlUrl).GetLeftPart([System.UriPartial]::Authority)
+            $null = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
+            return
+        }
+    } catch {
+        $lastFailure = $_.Exception.Message
+    }
+
+    $launcherExecutable = Join-Path $env:LOCALAPPDATA "Vibelution/Launcher/VibelutionLauncher.exe"
+    if (-not (Test-Path -LiteralPath $launcherExecutable)) {
+        throw "Official Vibelution Launcher is missing; cannot restore the control plane for Workbench-close verification."
+    }
+    $launcherBootstrapProcess = Start-Process -FilePath $launcherExecutable -ArgumentList @("--project", $projectDir, "open", "--no-browser") -WindowStyle Hidden -PassThru -Wait
+    if ($launcherBootstrapProcess.ExitCode -ne 0) {
+        throw "Official Vibelution Launcher control bootstrap failed with exit code $($launcherBootstrapProcess.ExitCode)."
+    }
+
+    do {
+        try {
+            $launcherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json
+            $launcherControlUrl = [string]$launcherState.launcherControlUrl
+            if (-not [string]::IsNullOrWhiteSpace($launcherControlUrl)) {
+                $launcherOrigin = ([uri]$launcherControlUrl).GetLeftPart([System.UriPartial]::Authority)
+                $null = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
+                return
+            }
+            $lastFailure = "Launcher control URL is unavailable after bootstrap."
+        } catch {
+            $lastFailure = $_.Exception.Message
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    throw "Timed out restoring Launcher control for Workbench-close verification. Last failure: $lastFailure"
+}
+
 function Close-ManagedWorkbenchForCanary {
     param(
         [Parameter(Mandatory = $true)]
@@ -418,6 +462,7 @@ if (-not $SkipPackageVerification) {
     Invoke-CheckedNative powershell @("-ExecutionPolicy", "Bypass", "-File", $packageVerifier)
 }
 Assert-NoOtherVibelutionDesktopProcesses
+$null = Ensure-LauncherControlForCanary
 
 if (-not (Test-Path -LiteralPath $desktopExe)) {
     throw "Desktop package executable is missing: $desktopExe"
