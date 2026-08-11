@@ -1075,10 +1075,11 @@ app.whenReady()
       await handlePublicDeepLinkUrl(rawUrl, "startup");
     }
     await flushPendingPublicDeepLinks();
-    startDesktopActionLoop(paths, launcherBootstrap, windowProvider);
     if (desktopCliArgs.workbenchCloseCanary) {
       await windowProvider.openOrFocusWorkbench();
+      return;
     }
+    startDesktopActionLoop(paths, launcherBootstrap, windowProvider);
   })
   .catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));

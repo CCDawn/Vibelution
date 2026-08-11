@@ -44,4 +44,12 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("desktopWorkbenchCloseCanarySummaryPath(paths.workspaceRoot)");
     expect(source).toContain("desktopWorkbenchCloseCanarySummary({");
   });
+
+  it("keeps the Workbench-close canary outside the normal desktop action loop", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+
+    expect(source).toMatch(
+      /if \(desktopCliArgs\.workbenchCloseCanary\) \{\s*await windowProvider\.openOrFocusWorkbench\(\);\s*return;\s*\}\s*startDesktopActionLoop\(paths, launcherBootstrap, windowProvider\);/
+    );
+  });
 });
