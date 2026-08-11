@@ -14,6 +14,11 @@ import base64
 import binascii
 from typing import Any
 
+from .admission import (
+    DevelopmentSubmissionAdmissionConfigurationError,
+    get_development_submission_admission_runtime,
+)
+
 
 def _service():
     """Late-bound facade module (avoids import cycles at package import time)."""
@@ -21,6 +26,105 @@ def _service():
     from core.web.services import session_service
 
     return session_service
+
+
+def _append_initial_session_journal_markers(
+    *,
+    session_id: str,
+    turn_id: str,
+    client_submission_id: str,
+    agent: dict[str, Any],
+    conversation: dict[str, Any],
+    source: str,
+    leases: list[str],
+    user_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Append/recover one journal-backed user submission.
+
+    SQLite is only consulted when an explicit development data root is set.
+    Its receipt prevents duplicate journal writes for a retried browser
+    submission; it never stores message text, reasoning, tools, or results.
+    """
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    normalized_submission_id = str(client_submission_id or "").strip()
+
+    def lookup(record: dict[str, Any]) -> dict[str, Any] | None:
+        if not normalized_submission_id:
+            return None
+        for event in reversed(s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id)):
+            if str(getattr(event, "correlation_id", "") or "").strip() != normalized_submission_id:
+                continue
+            if str(getattr(event, "event_type", "") or "") != s.EVENT_USER_MESSAGE:
+                continue
+            return {
+                "journalSequence": int(getattr(event, "sequence", 0) or 0),
+                "journalEventId": str(getattr(event, "event_id", "") or "").strip(),
+            }
+        return None
+
+    def append(record: dict[str, Any]) -> dict[str, Any]:
+        record_turn_id = str(record.get("turnId") or normalized_turn_id).strip()
+        s._append_session_conversation_event(
+            normalized_session_id,
+            record_turn_id,
+            s.EVENT_TURN_STARTED,
+            status="running",
+            payload={
+                "agentId": str(record.get("agentId") or agent.get("agentId") or "").strip(),
+                "leases": list(leases),
+                "source": source,
+            },
+            source="submit_session_message",
+            visible_in_model=False,
+            correlation_id=normalized_submission_id,
+        )
+        user_event = s._append_session_conversation_event(
+            normalized_session_id,
+            record_turn_id,
+            s.EVENT_USER_MESSAGE,
+            status="recorded",
+            payload=dict(user_payload),
+            source="submit_session_message",
+            correlation_id=normalized_submission_id,
+        )
+        return {
+            "journalSequence": int(getattr(user_event, "sequence", 0) or 0),
+            "journalEventId": str(getattr(user_event, "event_id", "") or "").strip(),
+        }
+
+    runtime = get_development_submission_admission_runtime(s.PROJECT_ROOT)
+    if runtime is None or not normalized_submission_id:
+        receipt = append(
+            {
+                "sessionId": normalized_session_id,
+                "turnId": normalized_turn_id,
+                "agentId": str(agent.get("agentId") or agent.get("agent_id") or "").strip(),
+            }
+        )
+        return {
+            **receipt,
+            "turnId": normalized_turn_id,
+            "admissionDisposition": "disabled",
+        }
+
+    admission = runtime.admit(
+        session_id=normalized_session_id,
+        agent=agent,
+        conversation=conversation,
+        client_submission_id=normalized_submission_id,
+        turn_id=normalized_turn_id,
+        journal_lookup=lookup,
+        journal_append=append,
+    )
+    return {
+        "journalSequence": int(admission.get("journalSequence") or 0),
+        "journalEventId": str(admission.get("journalEventId") or "").strip(),
+        "turnId": str(admission.get("turnId") or "").strip(),
+        "admissionDisposition": str(admission.get("journalDisposition") or ""),
+    }
 
 
 def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe") -> dict:
@@ -119,6 +223,30 @@ def submit_session_message(
     lang = s.get_web_language()
     conversation_id = str(session_id or "").strip()
     normalized_client_submission_id = str(client_submission_id or "").strip()
+    development_admission_runtime = None
+    existing_development_admission: dict[str, Any] | None = None
+    if normalized_client_submission_id:
+        try:
+            development_admission_runtime = get_development_submission_admission_runtime(
+                s.PROJECT_ROOT
+            )
+        except DevelopmentSubmissionAdmissionConfigurationError as exc:
+            raise s.SessionValidationError(str(exc)) from exc
+        if development_admission_runtime is not None:
+            existing_development_admission = development_admission_runtime.existing(
+                session_id=conversation_id,
+                client_submission_id=normalized_client_submission_id,
+            )
+            if str((existing_development_admission or {}).get("state") or "") in {
+                "journaled",
+                "projected",
+            }:
+                return _accepted_session_turn_payload(
+                    conversation_id,
+                    str(existing_development_admission.get("turnId") or "").strip(),
+                    status="running",
+                    client_submission_id=normalized_client_submission_id,
+                )
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     normalized_message_source = str(message_source or "").strip() or "raw"
     recent_image_reference_routing_enabled = normalized_message_source not in {
@@ -260,7 +388,13 @@ def submit_session_message(
         skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
         s._reconcile_stale_session_ledger(conversation_id, reason="new_turn_submitted")
         previous_messages = s._session_ledger_visible_messages(conversation_id)
-        turn_control = s._create_session_turn_control(conversation_id)
+        reserved_turn_id = str(
+            (existing_development_admission or {}).get("turnId") or ""
+        ).strip()
+        turn_control = s._create_session_turn_control(
+            conversation_id,
+            turn_id=reserved_turn_id,
+        )
         active_skill_contract = (
             s._active_skill_contract_from_invocation(skill_invocation, turn_id=turn_control.turn_id)
             if skill_invocation
@@ -359,35 +493,29 @@ def submit_session_message(
         )
         submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(lock_acquired_at)
     stage_started_at = s._perf_counter()
-    s._append_session_conversation_event(
-        conversation_id,
-        turn_control.turn_id,
-        s.EVENT_TURN_STARTED,
-        status="running",
-        payload={
-            "agentId": agent_id,
-            "leases": requested_leases,
-            "source": normalized_message_source,
-        },
-        source="submit_session_message",
-    )
-    submit_timing_fields["turnStartedJournalMs"] = s._elapsed_ms(stage_started_at)
-    stage_started_at = s._perf_counter()
-    s._append_session_conversation_event(
-        conversation_id,
-        turn_control.turn_id,
-        s.EVENT_USER_MESSAGE,
-        status="recorded",
-        payload={
+    journal_receipt = _append_initial_session_journal_markers(
+        session_id=conversation_id,
+        turn_id=turn_control.turn_id,
+        client_submission_id=normalized_client_submission_id,
+        agent=dict(agent) if isinstance(agent, dict) else {"agentId": agent_id},
+        conversation=dict(conversation) if isinstance(conversation, dict) else {},
+        source=normalized_message_source,
+        leases=requested_leases,
+        user_payload={
             "content": message,
             "attachments": s._normalize_message_attachments(attachments),
             "references": s._normalize_session_references(session_references),
             "metadata": persisted_message_metadata,
             "source": normalized_message_source,
         },
-        source="submit_session_message",
     )
-    submit_timing_fields["userMessageJournalMs"] = s._elapsed_ms(stage_started_at)
+    admitted_turn_id = str(journal_receipt.get("turnId") or "").strip()
+    if admitted_turn_id and admitted_turn_id != turn_control.turn_id:
+        raise RuntimeError("Submission admission turn identity changed during journal append.")
+    submit_timing_fields["initialJournalMarkersMs"] = s._elapsed_ms(stage_started_at)
+    submit_timing_fields["sessionAdmissionDisposition"] = str(
+        journal_receipt.get("admissionDisposition") or "disabled"
+    )
     live_publish_started_at = s._perf_counter()
     s._set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
     submit_timing_fields["initialLiveDeltaPublishMs"] = s._elapsed_ms(live_publish_started_at)

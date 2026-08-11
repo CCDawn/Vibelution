@@ -202,7 +202,7 @@ def append_session_conversation_event(
     correlation_id: str = "",
     source_kind: str = "",
     project_root: Path | None = None,
-) -> None:
+) -> Any | None:
     """Append a ledger event and invalidate the session events cache."""
 
     normalized_session_id = str(session_id or "").strip()
@@ -211,7 +211,7 @@ def append_session_conversation_event(
         return
     root = _resolve_project_root(project_root)
     try:
-        append_conversation_event(
+        event = append_conversation_event(
             root,
             normalized_session_id,
             str(turn_id or "").strip(),
@@ -235,6 +235,7 @@ def append_session_conversation_event(
             normalized_session_id,
             f"journal:{sequence}",
         )
+        return event
     except Exception as exc:
         try:
             record_runtime_scene_event(

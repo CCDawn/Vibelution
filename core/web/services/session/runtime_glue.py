@@ -325,9 +325,9 @@ def _append_session_conversation_event(
     tool_call_id: str = "",
     correlation_id: str = "",
     source_kind: str = "",
-) -> None:
+) -> Any | None:
     s = _service()
-    s._journal_bridge.append_session_conversation_event(
+    return s._journal_bridge.append_session_conversation_event(
         session_id,
         turn_id,
         event_type,

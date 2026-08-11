@@ -8,13 +8,24 @@ tool transcript while preserving retry-safe admission identity.
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from core.chat.conversation_store import ConversationStore
 from core.chat.conversation_store.repository import ConversationRepository
+
+DEVELOPMENT_SUBMISSION_ADMISSION_ROOT_ENV = "VIBELUTION_SESSION_SQLITE_ADMISSION_ROOT"
+_DEVELOPMENT_RUNTIME_LOCK = threading.Lock()
+_DEVELOPMENT_RUNTIMES: dict[str, DevelopmentSubmissionAdmissionRuntime] = {}
+
+
+class DevelopmentSubmissionAdmissionConfigurationError(ValueError):
+    """The explicit development-only admission store configuration is unsafe."""
 
 
 @dataclass
@@ -162,3 +173,126 @@ def _journal_receipt(receipt: Mapping[str, Any]) -> tuple[int, str]:
     if journal_sequence < 1 or not journal_event_id:
         raise ValueError("Journal append must return a positive sequence and event id.")
     return journal_sequence, journal_event_id
+
+
+class DevelopmentSubmissionAdmissionRuntime:
+    """Opt-in development data-root bridge for journal-backed submissions.
+
+    This is intentionally not an operator configuration or a production
+    default.  It exists so one isolated runtime can exercise the real submit
+    bridge without opening a SQLite file under the formal project data root.
+    """
+
+    def __init__(self, data_root: Path) -> None:
+        self.data_root = Path(data_root).resolve()
+        self.store = ConversationStore(
+            self.data_root / "conversation-control" / "session_admission.sqlite3"
+        )
+        self.store.open()
+        self.admission = SessionSubmissionAdmissionService(self.store.repository)
+
+    def close(self) -> None:
+        self.store.close()
+
+    def existing(
+        self,
+        *,
+        session_id: str,
+        client_submission_id: str,
+    ) -> dict[str, Any] | None:
+        return self.store.repository.get_submission_admission(
+            session_id=str(session_id).strip(),
+            client_submission_id=str(client_submission_id).strip(),
+        )
+
+    def admit(
+        self,
+        *,
+        session_id: str,
+        agent: Mapping[str, Any],
+        conversation: Mapping[str, Any],
+        client_submission_id: str,
+        turn_id: str,
+        journal_lookup: Callable[[dict[str, Any]], Mapping[str, Any] | None],
+        journal_append: Callable[[dict[str, Any]], Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        agent_id = str(agent.get("agentId") or agent.get("agent_id") or "").strip()
+        if not agent_id:
+            raise ValueError("Development submission admission requires an Agent id.")
+        control = self.store.repository.ensure_session_control_plane(
+            agent_id=agent_id,
+            display_name=str(agent.get("displayName") or agent.get("display_name") or agent_id),
+            kind=str(agent.get("kind") or agent.get("type") or "assistant"),
+            status=str(agent.get("status") or "active"),
+            config=_admission_agent_config(agent),
+            source="development_session_submission",
+            session_id=str(session_id).strip(),
+            title=str(conversation.get("title") or conversation.get("name") or ""),
+        ).result(timeout=3)
+        return self.admission.admit_to_journal(
+            session_id=str(control["sessionId"]),
+            agent_id=str(control["agentId"]),
+            agent_config_revision_id=str(control["agentConfigRevisionId"]),
+            client_submission_id=str(client_submission_id).strip(),
+            turn_id=str(turn_id).strip(),
+            journal_lookup=journal_lookup,
+            journal_append=journal_append,
+        )
+
+
+def get_development_submission_admission_runtime(
+    project_root: Path,
+) -> DevelopmentSubmissionAdmissionRuntime | None:
+    """Return the explicitly configured development-only control store.
+
+    The gate is off unless its data root is supplied.  Pointing it at the
+    project root is rejected to prevent a test bridge from silently becoming
+    formal runtime storage.
+    """
+
+    raw_root = str(os.environ.get(DEVELOPMENT_SUBMISSION_ADMISSION_ROOT_ENV) or "").strip()
+    if not raw_root:
+        return None
+    data_root = Path(raw_root).expanduser().resolve()
+    formal_root = Path(project_root).resolve()
+    if data_root == formal_root:
+        raise DevelopmentSubmissionAdmissionConfigurationError(
+            "Development SQLite admission data root must differ from the formal project root."
+        )
+    key = str(data_root)
+    with _DEVELOPMENT_RUNTIME_LOCK:
+        runtime = _DEVELOPMENT_RUNTIMES.get(key)
+        if runtime is None:
+            runtime = DevelopmentSubmissionAdmissionRuntime(data_root)
+            _DEVELOPMENT_RUNTIMES[key] = runtime
+        return runtime
+
+
+def close_development_submission_admission_runtimes() -> None:
+    """Close test/development stores without touching journal or chat data."""
+
+    with _DEVELOPMENT_RUNTIME_LOCK:
+        runtimes = list(_DEVELOPMENT_RUNTIMES.values())
+        _DEVELOPMENT_RUNTIMES.clear()
+    for runtime in runtimes:
+        runtime.close()
+
+
+def _admission_agent_config(agent: Mapping[str, Any]) -> dict[str, Any]:
+    """Persist only non-secret, admission-relevant Agent identity fields."""
+
+    return {
+        key: agent[key]
+        for key in (
+            "agentId",
+            "agent_id",
+            "configRevision",
+            "configHash",
+            "dialogueModelId",
+            "modelId",
+            "profileId",
+            "primaryMode",
+            "roleKey",
+        )
+        if key in agent and agent[key] not in (None, "")
+    }

@@ -309,6 +309,31 @@ class SessionDao:
         )
         return {"sessionId": session_id, "agentId": agent_id}
 
+    def get(self, session_id: str) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            """
+            SELECT session_id, agent_id, parent_session_id,
+                   agent_config_revision_id, title, status,
+                   recency_at_ms, updated_at_ms, created_at_ms, archived_at_ms
+            FROM sessions
+            WHERE session_id=? AND archived_at_ms IS NULL
+            """,
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "sessionId": str(row["session_id"]),
+            "agentId": str(row["agent_id"]),
+            "parentSessionId": str(row["parent_session_id"] or ""),
+            "agentConfigRevisionId": str(row["agent_config_revision_id"]),
+            "title": str(row["title"]),
+            "status": str(row["status"]),
+            "recencyAtMs": int(row["recency_at_ms"]),
+            "updatedAtMs": int(row["updated_at_ms"]),
+            "createdAtMs": int(row["created_at_ms"]),
+        }
+
     def list_for_agent(
         self,
         agent_id: str,
@@ -662,6 +687,68 @@ class ConversationRepository:
 
         return self._writer.submit(create_with_parent_edge, force_flush=True)
 
+    def ensure_session_control_plane(
+        self,
+        *,
+        agent_id: str,
+        display_name: str,
+        kind: str,
+        status: str,
+        config: Mapping[str, Any],
+        source: str,
+        session_id: str,
+        title: str,
+    ) -> Future[dict[str, Any]]:
+        """Create one shadow control record without touching transcript state.
+
+        The caller may invoke this on every enabled submission.  The stored
+        session keeps its initial Agent configuration revision, so a later
+        operator config edit cannot silently rewrite the admission contract of
+        an already existing session.
+        """
+
+        frozen_values = {
+            "agent_id": str(agent_id).strip(),
+            "display_name": str(display_name).strip(),
+            "kind": str(kind).strip(),
+            "status": str(status).strip(),
+            "config": dict(config),
+            "source": str(source).strip(),
+            "session_id": str(session_id).strip(),
+            "title": str(title).strip(),
+        }
+
+        def ensure_control_plane(unit_of_work: ConversationUnitOfWork) -> dict[str, Any]:
+            agent = unit_of_work.agents.upsert_config_snapshot(
+                agent_id=frozen_values["agent_id"],
+                display_name=frozen_values["display_name"],
+                kind=frozen_values["kind"],
+                status=frozen_values["status"],
+                config=frozen_values["config"],
+                source=frozen_values["source"],
+            )
+            session = unit_of_work.sessions.get(frozen_values["session_id"])
+            if session is None:
+                session = unit_of_work.sessions.create(
+                    session_id=frozen_values["session_id"],
+                    agent_id=frozen_values["agent_id"],
+                    agent_config_revision_id=str(agent["configRevisionId"]),
+                    title=frozen_values["title"],
+                )
+                session = unit_of_work.sessions.get(str(session["sessionId"]))
+            if session is None:
+                raise RuntimeError("Session control record was not created.")
+            if str(session["agentId"]) != frozen_values["agent_id"]:
+                raise ValueError("Session control record belongs to a different Agent.")
+            return {
+                "sessionId": str(session["sessionId"]),
+                "agentId": str(session["agentId"]),
+                "agentConfigRevisionId": str(session["agentConfigRevisionId"]),
+                "sessionCreated": bool(session["createdAtMs"] == session["updatedAtMs"]),
+            }
+
+        return self._writer.submit(ensure_control_plane, force_flush=True)
+
     def link_sessions(self, **values: Any) -> Future[dict[str, Any]]:
         return self._writer.submit(
             lambda unit_of_work: unit_of_work.session_edges.link(**values),
@@ -689,6 +776,10 @@ class ConversationRepository:
     def get_agent(self, agent_id: str) -> dict[str, Any] | None:
         with self._database.reader() as connection:
             return AgentDao(connection).get(agent_id)
+
+    def get_session(self, session_id: str) -> dict[str, Any] | None:
+        with self._database.reader() as connection:
+            return SessionDao(connection).get(session_id)
 
     def get_current_agent_config(self, agent_id: str) -> dict[str, Any] | None:
         with self._database.reader() as connection:
