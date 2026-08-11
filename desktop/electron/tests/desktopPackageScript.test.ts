@@ -20,6 +20,18 @@ describe("desktop package script", () => {
     expect(script).not.toMatch(/^\s*node \$desktopLaunchProfileWriter/m);
   });
 
+  it("uses the project virtual environment and validates its Launcher dependency before packaging", () => {
+    const script = readFileSync(buildScriptPath, "utf8");
+
+    expect(script).toContain('$projectVenvPythonPath = Join-Path $projectDir ".venv\\Scripts\\python.exe"');
+    expect(script).toMatch(
+      /if \(Test-Path -LiteralPath \$projectVenvPythonPath\) \{\s*return \(Resolve-Path -LiteralPath \$projectVenvPythonPath\)\.Path\s*\}/
+    );
+    expect(script).toContain("function Assert-DesktopProfilePython");
+    expect(script).toContain('Invoke-CheckedNative $PythonPath @("-c", "import uvicorn")');
+    expect(script).toContain("Assert-DesktopProfilePython -PythonPath $pythonPath");
+  });
+
   it("packages the desktop executable with the shared Vibelution icon", () => {
     const config = JSON.parse(readFileSync(electronBuilderConfigPath, "utf8")) as {
       files?: string[];

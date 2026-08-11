@@ -6,6 +6,7 @@ $electronDir = Join-Path $projectDir "desktop/electron"
 $desktopResourcesDir = Join-Path $projectDir "dist/desktop/win-unpacked/resources"
 $desktopLaunchProfileWriter = Join-Path $electronDir "dist/scripts/writeLaunchProfile.js"
 $operatorConfigPath = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Vibelution/config/config.toml"
+$projectVenvPythonPath = Join-Path $projectDir ".venv\Scripts\python.exe"
 $knownCodexPythonPath = Join-Path $env:USERPROFILE ".cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe"
 
 function Invoke-CheckedNative {
@@ -26,6 +27,9 @@ function Resolve-PythonPathForDesktopProfile {
     if ($env:VIBELUTION_PYTHON_PATH -and $env:VIBELUTION_PYTHON_PATH.Trim()) {
         return $env:VIBELUTION_PYTHON_PATH.Trim()
     }
+    if (Test-Path -LiteralPath $projectVenvPythonPath) {
+        return (Resolve-Path -LiteralPath $projectVenvPythonPath).Path
+    }
     if ($env:PYTHON -and $env:PYTHON.Trim()) {
         return $env:PYTHON.Trim()
     }
@@ -35,6 +39,15 @@ function Resolve-PythonPathForDesktopProfile {
     return ""
 }
 
+function Assert-DesktopProfilePython {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonPath
+    )
+
+    Invoke-CheckedNative $PythonPath @("-c", "import uvicorn")
+}
+
 Invoke-CheckedNative npm @("--prefix", $electronDir, "install")
 Invoke-CheckedNative npm @("--prefix", $electronDir, "run", "package:dir")
 
@@ -42,6 +55,7 @@ $pythonPath = Resolve-PythonPathForDesktopProfile
 if (-not $pythonPath) {
     throw "Unable to resolve a Python executable for the Electron launch profile. Set VIBELUTION_PYTHON_PATH or PYTHON before packaging."
 }
+Assert-DesktopProfilePython -PythonPath $pythonPath
 
 Invoke-CheckedNative node @(
     $desktopLaunchProfileWriter,
