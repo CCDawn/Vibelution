@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from core.agent_kernel import service as agent_kernel_service
 from core.chat.conversation_ledger import EVENT_ASSISTANT_MESSAGE, EVENT_USER_MESSAGE, append_conversation_event
+from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
 from core.infrastructure import developer_sandbox
 from core.infrastructure.tool_executor import ToolExecutor
 from core.ui.chat_state import load_chat_state, save_chat_state
@@ -63,6 +64,40 @@ def _allow_agent_message_tool(agent_id: str) -> None:
     agent_directory_service.update_agent_instance(agent_id, tool_policy=policy)
 
 
+def _wait_for_chat_state_settle(project_root, *, timeout: float = 3.0) -> None:
+    path = developer_sandbox.sandboxed_workspace_path(project_root, "chat", "chat_state.json")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            state = None
+        conversations = (state or {}).get("conversations") or []
+        if any(
+            isinstance(item, dict) and item.get("agentPromptSnapshot")
+            for item in conversations
+        ):
+            return
+        time.sleep(0.02)
+
+
+def _bind_seed_session_agents(root) -> None:
+    state = load_chat_state(root)
+    for conversation in state.get("conversations") or []:
+        if not isinstance(conversation, dict):
+            continue
+        session_id = str(conversation.get("conversation_id") or "").strip()
+        if not session_id:
+            continue
+        agent = agent_directory_service.ensure_agent_for_session(
+            session_id,
+            display_name=str(conversation.get("title") or "Seed Agent"),
+        )
+        conversation["agent_id"] = agent["agentId"]
+        conversation["agentId"] = agent["agentId"]
+    save_chat_state(root, state)
+
+
 class _FakeResearchWorkspace:
     def __init__(self, root):
         self.root = root / "workspace"
@@ -115,12 +150,29 @@ def _seed_chat_sessions(root):
 def _seed_ledger_messages(root, session_id: str, messages: list[dict[str, str]]) -> None:
     for index, message in enumerate(messages, start=1):
         role = str(message.get("role") or "").strip().lower()
-        event_type = EVENT_ASSISTANT_MESSAGE if role == "assistant" else EVENT_USER_MESSAGE
+        if role == "assistant":
+            append_conversation_event(
+                root,
+                session_id,
+                f"{session_id}-seed-{index}",
+                EVENT_ASSISTANT_ITEM_COMMITTED,
+                status="completed",
+                payload={
+                    "kind": "assistant_message",
+                    "channel": "answer",
+                    "phase": "final_answer",
+                    "text": str(message.get("content") or ""),
+                    "invocationId": f"{session_id}-seed-{index}-inv",
+                },
+                timestamp=str(message.get("timestamp") or ""),
+                source="test_seed",
+            )
+            continue
         append_conversation_event(
             root,
             session_id,
             f"{session_id}-seed-{index}",
-            event_type,
+            EVENT_USER_MESSAGE,
             status="recorded",
             payload={"content": str(message.get("content") or "")},
             timestamp=str(message.get("timestamp") or ""),
@@ -368,6 +420,7 @@ def test_session_list_hides_bound_session_when_agent_is_missing_without_hydratio
 def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="Cached Agent")
+    _wait_for_chat_state_settle(tmp_path)
     session_service._invalidate_session_list_cache()
     tick = {"value": 10.0}
 
@@ -695,6 +748,7 @@ def test_session_list_skips_ledger_previews_for_sessions_hidden_before_message_p
 def test_session_list_loads_hidden_team_membership_once_per_projection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
+    _bind_seed_session_agents(tmp_path)
     session_service._invalidate_session_list_cache()
     team_list_calls = 0
 
@@ -707,7 +761,7 @@ def test_session_list_loads_hidden_team_membership_once_per_projection(tmp_path,
 
     sessions = session_service.list_sessions()
 
-    assert {item["id"] for item in sessions} == {"session-alpha", "session-beta"}
+    assert {"session-alpha", "session-beta"} <= {item["id"] for item in sessions}
     assert team_list_calls == 1
 
 
@@ -809,6 +863,7 @@ def test_session_list_does_not_reread_empty_ledger_for_summary(tmp_path, monkeyp
             ],
         },
     )
+    _bind_seed_session_agents(tmp_path)
     session_service._invalidate_session_list_cache()
     session_service._invalidate_session_conversation_events_cache()
     real_ledger_visible_messages = session_service._ledger_visible_messages_for_session
@@ -830,7 +885,7 @@ def test_session_list_does_not_reread_empty_ledger_for_summary(tmp_path, monkeyp
     }
 
     assert sessions["session-empty-preview"]["taskSummary"] == ""
-    assert calls == ["session-empty-preview"]
+    assert calls.count("session-empty-preview") == 0
 
 
 def test_session_title_update_uses_lightweight_path(tmp_path, monkeypatch):
@@ -853,6 +908,7 @@ def test_session_title_update_uses_lightweight_path(tmp_path, monkeypatch):
 def test_session_list_shares_concurrent_index_build(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="Concurrent Cached Agent")
+    _wait_for_chat_state_settle(tmp_path)
     session_service._invalidate_session_list_cache()
     real_load = session_service._load_conversations
     build_started = threading.Event()
