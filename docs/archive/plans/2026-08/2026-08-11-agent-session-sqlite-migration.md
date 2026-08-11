@@ -531,4 +531,12 @@ T1-T6 是本次迁移的 Critical Path；T7 可紧随切换，T8 不得扩大本
 - 读路径采用最多 4 个**线程归属**的可复用 reader；同一线程复用连接，跨线程不会借用连接，饱和读请求立刻使用短生命周期 query-only overflow reader 并记录压力。8 并发、400 次目录查询的 3 次微基准中位吞吐约 `3.0k–3.8k ops/s`、p95 `3.5–4.5 ms`；这是单机开发机证据，不是发布 SLA。
 - 最小并发门禁覆盖 32 个 Session、128 个并发 Turn 写入；验证无丢行、无重复 sequence、无死锁，并记录 queue wait、batch size、queue depth 与 callback failure。额外的 50 Agent / 1000 Session 压力探针完成 500 次目录查询（p95 `8.367 ms`，无 reader error）；1000 个异步 Session mutation 形成 32 条一批的 group commit，实测约 `1377 mutation/s`。
 - WAL maintenance 只通过 writer actor 执行 `PASSIVE` checkpoint；有序插入、失败隔离、外部写锁诊断/恢复、drain 后 reopen，以及提交完成后进程 `os._exit` 的 WAL 恢复均已有回归。checkpoint `busy/log/pages/duration/walBytes` 已可观测，实际耗时会随 WAL backlog 变化，尚未冻结阈值。
-- **仍未进行产品切换**：没有 Chat/Launcher 接线、没有正式数据库、没有 Agent 配置导入、没有旧会话清理。T2 可开始构建隔离 importer；T4 的统一 executor、1/4/8/16/32 会话长压、CPU/事件循环预算和 `FULL/NORMAL` 对照仍是进入 T6 的硬门。
+- **仍未进行产品切换**：没有 Chat/Launcher 接线、没有正式数据库、没有旧会话清理。T2 的隔离 importer 已进入实现，但不改变 `agents.json` 的当前写入权威；T4 的统一 executor、1/4/8/16/32 会话长压、CPU/事件循环预算和 `FULL/NORMAL` 对照仍是进入 T6 的硬门。
+
+### T2 实施检查点（2026-08-11）
+
+- 已合入 `main@e9a7b4023`：`LegacyAgentConfigImporter` 只接受调用方显式传入的 `agents.json` 路径，整份文件先完成 JSON、类型、空 ID 与重复 ID 校验，再经单 writer transaction 写入 SQLite；导入过程只读源文件，不扫描、改写或默认指向正式配置路径。
+- 配置快照复用现有 `canonical_agent_config_payload()` 与 `agent_config_hash()`，每个 Agent 以 `agent_id:config_hash` 建立不可变 revision；同一快照重导入为 `reused`，变更后产生新 revision，旧 revision 可按 ID 只读回查。
+- 已实现 SQLite 内部的 `compare_and_swap_agent_config()`：只有携带当前 revision 的更新可以推进；陈旧 revision 会得到明确冲突，随后 writer 仍可继续处理更新。导入快照不存在的 Agent 不会被删除或自动归档；源快照的 `archived` 状态会被保留。
+- 回归覆盖导入源字节不变、canonical hash、幂等、历史 revision、重复/空 ID 的原子拒绝、缺席不归档与 CAS 冲突恢复。合入后 `tests/test_conversation_store.py`、`tests/test_conversation_store_importer.py`、`tests/test_agent_config_authority_migration.py` 共 `34 passed`。
+- **T2 仍未完成正式切换**：Agent 的线上写入权威仍是 `agents.json`，SQLite 配置 API 还没有接入 Agent 编辑、会话创建或 Launcher；不存在正式数据库、自动导入或现有会话清理。
