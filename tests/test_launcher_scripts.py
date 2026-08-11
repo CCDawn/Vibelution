@@ -23,6 +23,7 @@ DESKTOP_ENTRY_PY = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.py"
 NATIVE_ENTRY_SOURCE = PROJECT_ROOT / "scripts" / "windows_launcher_entry" / "VibelutionLauncher.cs"
 NATIVE_ENTRY_BUILD_SCRIPT = PROJECT_ROOT / "scripts" / "windows_launcher_entry" / "build_vibelution_launcher_entry.ps1"
 PYTHON_LAUNCHER_SCRIPT = PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+WORKBENCH_CLOSE_CANARY_SCRIPT = PROJECT_ROOT / "scripts" / "verify_desktop_workbench_close.ps1"
 
 pytestmark = [pytest.mark.slow, pytest.mark.serial]
 
@@ -47,6 +48,22 @@ def test_launcher_script_repairs_start_menu_shortcut_entry():
     assert '$shortcutMode = "script_host_fallback"' in source
     assert "$shortcut.IconLocation" in source
     assert "[void](Repair-LauncherShortcut)" in source
+
+
+def test_workbench_close_canary_quiesces_managed_workbench_before_packaged_run():
+    source = WORKBENCH_CLOSE_CANARY_SCRIPT.read_text(encoding="utf-8")
+
+    assert "function Close-ManagedWorkbenchForCanary" in source
+    assert '"stop"' in source
+    assert 'overallState -eq "closed"' in source
+    assert 'observedState -eq "closed"' in source
+    assert "$RecoveryRequired.Value = $true" in source
+
+    active_work_check_index = source.index("$activeWorkCountBeforeCanary = Assert-NoActiveWorkbenchWork")
+    quiesce_index = source.index("$managedWorkbenchState = Close-ManagedWorkbenchForCanary -RecoveryRequired")
+    package_verify_index = source.index("if (-not $SkipPackageVerification)")
+    package_start_index = source.index("Start-Process -FilePath $desktopExe")
+    assert active_work_check_index < package_verify_index < quiesce_index < package_start_index
 
 
 def test_launcher_script_is_utf8_with_bom_for_windows_powershell_compatibility():
