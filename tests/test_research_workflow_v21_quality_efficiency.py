@@ -17,6 +17,10 @@ from core.web.services.team_workflow.research_runtime.artifact_reuse import (
     ArtifactReuseError,
     validate_artifact_reuse,
 )
+from core.web.services.team_workflow.research_runtime.budget_lifecycle import (
+    reserve_node_budget,
+    settle_budget_records,
+)
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
     ResearchWorkflowRuntimeService,
@@ -107,6 +111,49 @@ def test_run_initializes_stage_ledgers_and_budget_exhaustion_blocks_dispatch(
     )
     assert knowledge_ledger["stopReason"] == "budget_exceeded"
     assert blocked.get("taskBundles") in (None, [])
+
+
+def test_budget_settlement_charges_observed_usage_when_stage_capacity_remains(
+    tmp_path: Path,
+) -> None:
+    service = _service(tmp_path)
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={"source_finder": "agent-source-finder"}
+        ),
+        idempotency_key="create-allocation-overrun",
+    )
+    node_run = dict(run["nodeRuns"][0])
+    reservation = reserve_node_budget(
+        service._store,
+        record=run,
+        node_run=node_run,
+        stage_id="knowledge_collection",
+        request={"tokens": 100, "toolCalls": 2, "wallClockSeconds": 30},
+        idempotency_key="reserve-allocation-overrun",
+    )
+    reserved = service._store.get_run(run["runId"])
+    assert reserved is not None
+
+    ledgers, reservations = settle_budget_records(
+        reserved,
+        reservation_id=reservation["reservationId"],
+        actual={"tokens": 101, "toolCalls": 2, "wallClockSeconds": 30},
+        settled_at="2026-08-11T12:00:00Z",
+    )
+
+    settled = reservations[0]
+    ledger = next(
+        item for item in ledgers if item["stageId"] == "knowledge_collection"
+    )
+    assert settled["actual"]["tokens"] == 101
+    assert settled["charged"]["tokens"] == 101
+    assert settled["allocationOverrun"] == {"tokens": 1}
+    assert "overrun" not in settled
+    assert ledger["consumed"]["tokens"] == 101
+    assert ledger["stopReason"] == ""
 
 
 def test_agent_completion_settles_budget_and_task_bundle_with_real_artifact(

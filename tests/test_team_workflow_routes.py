@@ -26,6 +26,20 @@ def _client() -> TestClient:
     return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
+def test_json_writer_keeps_atomic_temp_path_short_for_long_target_paths(tmp_path):
+    from core.web.services.team_workflow import facade_helpers as team_workflow_facade_helpers
+
+    leaf_name = "index.json"
+    segment_length = max(1, 248 - len(str(tmp_path)) - 2 - len(leaf_name))
+    path = tmp_path / ("x" * segment_length) / leaf_name
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    team_workflow_facade_helpers._write_json(path, {"persisted": True})
+
+    assert len(str(path)) >= 245
+    assert json.loads(path.read_text(encoding="utf-8")) == {"persisted": True}
+
+
 def _approve_candidate_for_experiment(
     client: TestClient,
     team_id: str,

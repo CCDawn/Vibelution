@@ -16,6 +16,10 @@ from core.research.workflow.definition import build_challenge_cup_workflow_defin
 from .artifact_quality_gate import ArtifactQualityError, validate_artifact_quality
 from .artifact_reuse import ArtifactReuseError, validate_artifact_reuse
 from .budget_lifecycle import BudgetLifecycleError, settle_budget_records
+from .budget_overrun_reconciliation import (
+    block_completed_node_for_budget_overrun,
+    budget_overrun,
+)
 from .checkpoint_lifecycle import advance_checkpoint
 from .node_execution_support import (
     NodeExecutionError,
@@ -198,6 +202,23 @@ def complete_node_execution(
         )
     except BudgetLifecycleError as exc:
         raise NodeExecutionError(str(exc), code=exc.code) from exc
+    settled_reservation = next(
+        (
+            dict(item)
+            for item in budget_reservations
+            if item.get("reservationId") == reservation_id
+        ),
+        None,
+    )
+    if reservation_id and budget_overrun(settled_reservation):
+        return block_completed_node_for_budget_overrun(
+            store,
+            record=record,
+            node_id=node_id,
+            reservation_id=reservation_id,
+            budget_ledgers=budget_ledgers,
+            budget_reservations=budget_reservations,
+        )
 
     definition = build_challenge_cup_workflow_definition()
     completed_ids = list(record.get("completedNodeIds") or [])
