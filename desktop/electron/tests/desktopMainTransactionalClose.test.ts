@@ -34,4 +34,14 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("acknowledgeWorkbenchCloseWindowClosed");
     expect(source).toContain("desktopSessionRevision");
   });
+
+  it("opens the named Workbench only in canary mode and writes proof after the closed acknowledgement", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+
+    expect(source).toContain("desktopCliArgs.workbenchCloseCanary");
+    expect(source).toContain("await windowProvider.openOrFocusWorkbench()");
+    expect(source).toContain("function writeWorkbenchCloseCanarySummary(");
+    expect(source).toContain("desktopWorkbenchCloseCanarySummaryPath(paths.workspaceRoot)");
+    expect(source).toContain("desktopWorkbenchCloseCanarySummary({");
+  });
 });

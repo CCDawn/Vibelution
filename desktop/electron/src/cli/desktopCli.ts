@@ -2,13 +2,15 @@ export type DesktopCliArgs = {
   workspaceRoot: string;
   configPath: string;
   smoke: boolean;
+  workbenchCloseCanary: boolean;
 };
 
 export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
   const result: DesktopCliArgs = {
     workspaceRoot: "",
     configPath: "",
-    smoke: false
+    smoke: false,
+    workbenchCloseCanary: false
   };
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
@@ -24,6 +26,10 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     }
     if (item === "--smoke") {
       result.smoke = true;
+      continue;
+    }
+    if (item === "--workbench-close-canary") {
+      result.workbenchCloseCanary = true;
     }
   }
   return result;
@@ -34,6 +40,7 @@ export function applyDesktopCliToEnvironment(env: NodeJS.ProcessEnv, args: Deskt
     ...env,
     ...(args.workspaceRoot ? { VIBELUTION_WORKSPACE_ROOT: args.workspaceRoot } : {}),
     ...(args.configPath ? { VIBELUTION_CONFIG_PATH: args.configPath } : {}),
-    ...(args.smoke ? { VIBELUTION_ELECTRON_SMOKE: "1" } : {})
+    ...(args.smoke ? { VIBELUTION_ELECTRON_SMOKE: "1" } : {}),
+    ...(args.workbenchCloseCanary ? { VIBELUTION_ELECTRON_WORKBENCH_CLOSE_CANARY: "1" } : {})
   };
 }

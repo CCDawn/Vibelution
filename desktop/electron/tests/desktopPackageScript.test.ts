@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 const buildScriptPath = fileURLToPath(new URL("../../../scripts/build_desktop_package.ps1", import.meta.url));
 const verifyScriptPath = fileURLToPath(new URL("../../../scripts/verify_desktop_package.ps1", import.meta.url));
 const lifecycleScriptPath = fileURLToPath(new URL("../../../scripts/verify_desktop_lifecycle.ps1", import.meta.url));
+const workbenchCloseCanaryScriptPath = fileURLToPath(
+  new URL("../../../scripts/verify_desktop_workbench_close.ps1", import.meta.url)
+);
 const electronBuilderConfigPath = fileURLToPath(new URL("../electron-builder.json", import.meta.url));
 
 describe("desktop package script", () => {
@@ -124,5 +127,27 @@ describe("desktop package script", () => {
     expect(script).not.toContain("taskkill");
     expect(script).not.toContain("Stop-Process -Name Vibelution");
     expect(script).not.toContain("scripts/build_desktop_package.ps1");
+  });
+
+  it("provides a native Workbench-close canary that drives the packaged Electron close event", () => {
+    const script = readFileSync(workbenchCloseCanaryScriptPath, "utf8");
+
+    expect(script).toContain("$packageVerifier = Join-Path $projectDir \"scripts/verify_desktop_package.ps1\"");
+    expect(script).toContain("$canarySummaryPath = Join-Path $projectDir \".runtime/launcher/electron-workbench-close-canary-summary.json\"");
+    expect(script).toContain("--workbench-close-canary");
+    expect(script).toContain('$workbenchWindowTitle = "Vibelution Workbench"');
+    expect(script).toContain("PostMessage");
+    expect(script).toContain("WM_CLOSE");
+    expect(script).toContain("function Assert-NoActiveWorkbenchWork");
+    expect(script).toContain("$status.lifecycleProof.activeWorkRuns.count");
+    expect(script).toContain("$activeWorkCountBeforeCanary = Assert-NoActiveWorkbenchWork\nif (-not $SkipPackageVerification)");
+    expect(script).toContain("function Wait-ForWorkbenchCloseCanarySummary");
+    expect(script).toContain("function Restore-ManagedWorkbench");
+    expect(script).toContain("VibelutionLauncher.exe");
+    expect(script).toContain("Workbench-close canary did not restore the managed Workbench.");
+    expect(script).toContain('$summary.phase -ne "succeeded"');
+    expect(script).toContain("Request-OwnedDesktopClose $ownedProcessIds");
+    expect(script).not.toContain("taskkill");
+    expect(script).not.toContain("Stop-Process -Name Vibelution");
   });
 });

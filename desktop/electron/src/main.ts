@@ -54,6 +54,10 @@ import {
   emptyDesktopSmokeBootstrapSummary,
   type DesktopSmokeBootstrapSummary
 } from "./smoke/desktopSmoke.js";
+import {
+  desktopWorkbenchCloseCanarySummary,
+  desktopWorkbenchCloseCanarySummaryPath
+} from "./smoke/workbenchCloseCanary.js";
 import { prepareDesktopSmokeShutdown } from "./smoke/desktopSmokeShutdown.js";
 import {
   closeDesktopSession,
@@ -633,6 +637,12 @@ async function acknowledgeTransactionalWorkbenchClose(
     throw new Error(workbenchCloseTransactionFailureMessage(transaction));
   }
   pendingWorkbenchCloseAck = null;
+  writeWorkbenchCloseCanarySummary(paths, {
+    closeId: transaction.closeId,
+    desktopSessionId: context.desktopSessionId,
+    desktopSessionRevision,
+    controlToken: context.controlToken
+  });
   await recordElectronSupervisorEvent(bootstrap, {
     eventCode: "electron.workbench_close.completed",
     message: "Electron confirmed the Workbench closed after the backend close transaction completed.",
@@ -643,6 +653,35 @@ async function acknowledgeTransactionalWorkbenchClose(
       workspaceRoot: paths.workspaceRoot
     }
   });
+}
+
+function writeWorkbenchCloseCanarySummary(
+  paths: DesktopPaths,
+  input: {
+    closeId: string;
+    desktopSessionId: string;
+    desktopSessionRevision: number;
+    controlToken: string;
+  }
+): void {
+  if (!desktopCliArgs.workbenchCloseCanary) {
+    return;
+  }
+  const summaryPath = desktopWorkbenchCloseCanarySummaryPath(paths.workspaceRoot);
+  mkdirSync(dirname(summaryPath), { recursive: true });
+  writeFileSync(
+    summaryPath,
+    JSON.stringify(
+      desktopWorkbenchCloseCanarySummary({
+        workspaceRoot: paths.workspaceRoot,
+        configPath: String(desktopEnvironment().VIBELUTION_CONFIG_PATH || "").trim(),
+        ...input
+      }),
+      null,
+      2
+    ),
+    "utf8"
+  );
 }
 
 async function handleTransactionalWorkbenchCloseFailure(
@@ -1037,6 +1076,9 @@ app.whenReady()
     }
     await flushPendingPublicDeepLinks();
     startDesktopActionLoop(paths, launcherBootstrap, windowProvider);
+    if (desktopCliArgs.workbenchCloseCanary) {
+      await windowProvider.openOrFocusWorkbench();
+    }
   })
   .catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));
