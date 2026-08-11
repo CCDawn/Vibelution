@@ -100,6 +100,18 @@ def test_workbench_close_canary_bootstraps_control_after_package_smoke_shutdown(
     assert active_work_check_index < package_verify_index < control_bootstrap_index < quiesce_index
 
 
+def test_workbench_close_canary_uses_bounded_launcher_status_polling():
+    source = WORKBENCH_CLOSE_CANARY_SCRIPT.read_text(encoding="utf-8")
+
+    assert "-PassThru -Wait" not in source
+    assert "$launcherBootstrapProcess = Start-Process" in source
+    assert "$launcherProcess = Start-Process" in source
+    assert "if ($launcherBootstrapProcess.HasExited -and $launcherBootstrapProcess.ExitCode -ne 0)" in source
+    assert "if ($launcherProcess.HasExited -and $launcherProcess.ExitCode -ne 0)" in source
+    assert 'throw "Managed Workbench did not close before the packaged Workbench-close canary. Last failure: $lastFailure"' in source
+    assert 'throw "Workbench-close canary did not restore the managed Workbench. Last failure: $lastFailure"' in source
+
+
 def test_workbench_close_canary_restores_control_before_active_work_gate():
     source = WORKBENCH_CLOSE_CANARY_SCRIPT.read_text(encoding="utf-8")
     active_work_function = source[
