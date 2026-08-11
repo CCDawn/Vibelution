@@ -53,7 +53,11 @@ describe("parseLauncherBootstrap", () => {
         protocolVersion: 1,
         minDesktopProtocolVersion: 1,
         maxDesktopProtocolVersion: 1,
-        capabilities: ["desktop_actions.claim", "desktop_sessions.heartbeat"]
+        capabilities: [
+          "desktop_actions.claim",
+          "desktop_sessions.heartbeat",
+          "workbench_close.transaction.v1"
+        ]
       })
     );
 
@@ -82,5 +86,28 @@ describe("parseLauncherBootstrap", () => {
         })
       )
     ).toThrow("invalid launcher bootstrap result");
+  });
+
+  it("fails closed when the Launcher lacks the transactional Workbench-close capability", () => {
+    expect(() =>
+      parseLauncherBootstrap(
+        JSON.stringify({
+          schemaVersion: 1,
+          workspaceRoot: "C:/repo",
+          operatorConfigPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
+          workspaceId: "workspace-1",
+          launcherInstanceId: "launcher-1",
+          mode: "attached",
+          launcherBackendPid: 1234,
+          launcherUrl: "http://127.0.0.1:8765/launcher",
+          workbenchUrl: "http://127.0.0.1:8000",
+          ready: true,
+          protocolVersion: 1,
+          minDesktopProtocolVersion: 1,
+          maxDesktopProtocolVersion: 1,
+          capabilities: ["desktop_actions.claim", "desktop_sessions.heartbeat"]
+        })
+      )
+    ).toThrow("launcher bootstrap is missing transactional Workbench-close capability");
   });
 });
