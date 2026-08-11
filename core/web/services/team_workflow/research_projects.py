@@ -15,9 +15,9 @@ from core.infrastructure import developer_sandbox
 from core.web.services import team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
-
 SCHEMA_VERSION = 1
 LEGACY_PROJECT_ID = "legacy-default"
+CHALLENGE_PROJECT_ID_PREFIX = "challenge-"
 _STORE_LOCK = threading.RLock()
 
 
@@ -33,6 +33,12 @@ class ResearchProjectNameLockedError(ResearchProjectError):
     """Raised when a frozen research project name would be changed."""
 
     code = "research_project_name_locked"
+
+
+class ResearchProjectQuestionMismatchError(ResearchProjectError):
+    """Raised when a canonical Challenge Cup project identity conflicts."""
+
+    code = "research_project_question_mismatch"
 
 
 def _utc_now() -> str:
@@ -94,6 +100,7 @@ def _default_project(now: str) -> dict[str, Any]:
         "topic": "",
         "experimentMethod": "",
         "storageMode": "legacy",
+        "challengeQuestionId": "",
         "nameLocked": False,
         "nameLockedAt": "",
         "nameLockReason": "",
@@ -111,6 +118,7 @@ def _normalize_project(project: dict[str, Any], *, fallback_now: str) -> dict[st
         "topic": str(project.get("topic") or "").strip()[:1000],
         "experimentMethod": str(project.get("experimentMethod") or "").strip()[:120],
         "storageMode": storage_mode,
+        "challengeQuestionId": str(project.get("challengeQuestionId") or "").strip()[:32],
         "nameLocked": bool(project.get("nameLocked")),
         "nameLockedAt": str(project.get("nameLockedAt") or ""),
         "nameLockReason": str(project.get("nameLockReason") or "").strip()[:160],
@@ -177,6 +185,7 @@ def create_research_project(team_id: str, payload: dict[str, Any]) -> dict[str, 
             "topic": str(payload.get("topic") or "").strip()[:1000],
             "experimentMethod": str(payload.get("experimentMethod") or "").strip()[:120],
             "storageMode": "isolated",
+            "challengeQuestionId": "",
             "nameLocked": False,
             "nameLockedAt": "",
             "nameLockReason": "",
@@ -187,6 +196,85 @@ def create_research_project(team_id: str, payload: dict[str, Any]) -> dict[str, 
         _persist_store(team_id, store)
     _record_project_event("research_project.created", team_id, project["projectId"])
     return {"project": project, **store}
+
+
+def ensure_challenge_question_project(
+    team_id: str,
+    *,
+    question_id: str,
+    title: str,
+    topic: str,
+) -> dict[str, Any]:
+    """Resolve the one canonical project identity for an approved question.
+
+    Generic research projects are deliberately not reused: a legacy project may
+    be historical evidence, but it cannot become the authoritative identity of
+    a Challenge Cup question by name or by the active-project pointer alone.
+    """
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()[:32]
+    normalized_title = str(title or "").strip()[:160]
+    normalized_topic = str(topic or "").strip()[:1000]
+    if not normalized_question_id or not normalized_title:
+        raise ResearchProjectError("Challenge question identity is required.")
+    project_id = f"{CHALLENGE_PROJECT_ID_PREFIX}{_safe_team_id(normalized_question_id).lower()}"
+    canonical_name = f"{normalized_question_id} · {normalized_title}"[:160]
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        matching_question = next(
+            (
+                item
+                for item in store["projects"]
+                if str(item.get("challengeQuestionId") or "").strip().upper()
+                == normalized_question_id
+            ),
+            None,
+        )
+        matching_project_id = next(
+            (item for item in store["projects"] if item["projectId"] == project_id),
+            None,
+        )
+        if matching_question is not None and matching_question["projectId"] != project_id:
+            raise ResearchProjectQuestionMismatchError(
+                "A Challenge Cup question is already bound to a different research project."
+            )
+        if matching_project_id is not None and str(
+            matching_project_id.get("challengeQuestionId") or ""
+        ).strip().upper() != normalized_question_id:
+            raise ResearchProjectQuestionMismatchError(
+                "The canonical Challenge Cup project id is occupied by a different project."
+            )
+        project = matching_question or matching_project_id
+        if project is None:
+            now = _utc_now()
+            project = {
+                "projectId": project_id,
+                "name": canonical_name,
+                "topic": normalized_topic,
+                "experimentMethod": "",
+                "storageMode": "isolated",
+                "challengeQuestionId": normalized_question_id,
+                "nameLocked": False,
+                "nameLockedAt": "",
+                "nameLockReason": "",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            store["projects"].append(project)
+        else:
+            if bool(project.get("nameLocked")) and project["name"] != canonical_name:
+                raise ResearchProjectQuestionMismatchError(
+                    "The canonical Challenge Cup project name is locked to a different question title."
+                )
+            project["name"] = canonical_name
+            project["topic"] = normalized_topic
+            project["challengeQuestionId"] = normalized_question_id
+            project["updatedAt"] = _utc_now()
+        store["activeProjectId"] = project_id
+        _persist_store(team_id, store)
+    _record_project_event("research_project.challenge_question_resolved", team_id, project_id)
+    return {"project": dict(project), **store}
 
 
 def update_research_project(team_id: str, project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
