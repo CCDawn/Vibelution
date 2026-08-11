@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -517,6 +519,53 @@ def test_drained_store_reopens_with_canonical_agent_session_and_turn_data(
         ]
         assert [row["turnId"] for row in reopened.repository.list_turns("session-reopen")] == [
             "turn-reopen"
+        ]
+    finally:
+        reopened.close()
+
+
+def test_committed_wal_data_reopens_after_writer_process_exits_abruptly(
+    tmp_path: Path,
+):
+    database_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+    crash_writer = f"""
+import os
+from pathlib import Path
+from core.chat.conversation_store import ConversationStore
+
+store = ConversationStore(Path({str(database_path)!r}))
+store.open()
+revision = store.repository.create_agent(
+    agent_id='agent-crash',
+    display_name='Crash Agent',
+    kind='assistant',
+    config={{'modelId': 'gpt-5.6-luna'}},
+    source='crash-test',
+).result(timeout=5)['configRevisionId']
+store.repository.create_session(
+    session_id='session-crash',
+    agent_id='agent-crash',
+    agent_config_revision_id=revision,
+    title='Committed before abrupt exit',
+).result(timeout=5)
+os._exit(0)
+"""
+    subprocess.run(
+        [sys.executable, "-c", crash_writer],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    reopened = ConversationStore(database_path)
+    reopened.open()
+    try:
+        assert reopened.database.metadata()["quickCheck"] == "ok"
+        assert reopened.repository.get_agent("agent-crash") is not None
+        assert [row["sessionId"] for row in reopened.repository.list_sessions(agent_id="agent-crash")] == [
+            "session-crash"
         ]
     finally:
         reopened.close()
