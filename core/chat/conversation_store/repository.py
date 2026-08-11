@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any
 
@@ -89,6 +89,155 @@ class AgentDao:
                 else None
             ),
         }
+
+    def upsert_config_snapshot(
+        self,
+        *,
+        agent_id: str,
+        display_name: str,
+        kind: str,
+        status: str,
+        config: Mapping[str, Any],
+        source: str,
+    ) -> dict[str, Any]:
+        """Import one immutable configuration snapshot without deleting siblings.
+
+        The enclosing writer mutation is one transaction, so a registry import
+        either updates every validated Agent snapshot or none of them.
+        """
+
+        normalized_agent_id = str(agent_id).strip()
+        if not normalized_agent_id:
+            raise ValueError("Agent configuration snapshot requires an agent_id.")
+        normalized_display_name = str(display_name).strip() or normalized_agent_id
+        normalized_kind = str(kind).strip() or "assistant"
+        normalized_status = str(status).strip() or "active"
+        normalized_source = str(source).strip()
+        if not normalized_source:
+            raise ValueError("Agent configuration snapshot requires a source.")
+
+        now_ms = _now_ms()
+        config_json = _canonical_json(config)
+        config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
+        revision_id = f"{normalized_agent_id}:{config_hash}"
+        agent_row = self._connection.execute(
+            """
+            SELECT display_name, kind, status, current_config_revision_id, archived_at_ms
+            FROM agents WHERE agent_id=?
+            """,
+            (normalized_agent_id,),
+        ).fetchone()
+        revision_row = self._connection.execute(
+            """
+            SELECT revision_id FROM agent_config_revisions
+            WHERE agent_id=? AND config_hash=?
+            """,
+            (normalized_agent_id, config_hash),
+        ).fetchone()
+
+        if agent_row is None:
+            self._connection.execute(
+                """
+                INSERT INTO agents(
+                  agent_id, display_name, kind, status,
+                  current_config_revision_id, created_at_ms, updated_at_ms, archived_at_ms
+                ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
+                """,
+                (
+                    normalized_agent_id,
+                    normalized_display_name,
+                    normalized_kind,
+                    normalized_status,
+                    now_ms,
+                    now_ms,
+                    now_ms if normalized_status == "archived" else None,
+                ),
+            )
+            action = "created"
+        else:
+            current_revision_id = str(agent_row["current_config_revision_id"] or "")
+            action = "revised" if current_revision_id != revision_id else "reused"
+
+        if revision_row is None:
+            self._connection.execute(
+                """
+                INSERT INTO agent_config_revisions(
+                  revision_id, agent_id, config_hash, config_json, source, created_at_ms
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    revision_id,
+                    normalized_agent_id,
+                    config_hash,
+                    config_json,
+                    normalized_source,
+                    now_ms,
+                ),
+            )
+
+        if agent_row is None or action != "reused" or any(
+            (
+                str(agent_row["display_name"]) != normalized_display_name,
+                str(agent_row["kind"]) != normalized_kind,
+                str(agent_row["status"]) != normalized_status,
+                (
+                    agent_row["archived_at_ms"] is None
+                    if normalized_status == "archived"
+                    else agent_row["archived_at_ms"] is not None
+                ),
+            )
+        ):
+            self._connection.execute(
+                """
+                UPDATE agents
+                SET display_name=?, kind=?, status=?, current_config_revision_id=?,
+                    updated_at_ms=?, archived_at_ms=?
+                WHERE agent_id=?
+                """,
+                (
+                    normalized_display_name,
+                    normalized_kind,
+                    normalized_status,
+                    revision_id,
+                    now_ms,
+                    now_ms if normalized_status == "archived" else None,
+                    normalized_agent_id,
+                ),
+            )
+        return {
+            "action": action,
+            "agentId": normalized_agent_id,
+            "configRevisionId": revision_id,
+            "configHash": config_hash,
+        }
+
+    def get_current_config(self, agent_id: str) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            """
+            SELECT revision_id, config_hash, config_json, source, created_at_ms
+            FROM agent_config_revisions
+            WHERE agent_id=? AND revision_id=(
+              SELECT current_config_revision_id FROM agents WHERE agent_id=?
+            )
+            """,
+            (agent_id, agent_id),
+        ).fetchone()
+        return _config_revision_row(row)
+
+    def get_config_revision(
+        self,
+        agent_id: str,
+        revision_id: str,
+    ) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            """
+            SELECT revision_id, config_hash, config_json, source, created_at_ms
+            FROM agent_config_revisions
+            WHERE agent_id=? AND revision_id=?
+            """,
+            (agent_id, revision_id),
+        ).fetchone()
+        return _config_revision_row(row)
 
 
 class SessionDao:
@@ -428,6 +577,21 @@ class ConversationRepository:
     def create_agent(self, **values: Any) -> Future[dict[str, Any]]:
         return self._writer.submit(lambda unit_of_work: unit_of_work.agents.create(**values))
 
+    def import_agent_config_snapshots(
+        self,
+        snapshots: Sequence[Mapping[str, Any]],
+    ) -> Future[list[dict[str, Any]]]:
+        """Persist a pre-validated registry snapshot through one writer transaction."""
+
+        frozen_snapshots = tuple(dict(snapshot) for snapshot in snapshots)
+        return self._writer.submit(
+            lambda unit_of_work: [
+                unit_of_work.agents.upsert_config_snapshot(**snapshot)
+                for snapshot in frozen_snapshots
+            ],
+            force_flush=True,
+        )
+
     def create_session(self, **values: Any) -> Future[dict[str, Any]]:
         return self._writer.submit(lambda unit_of_work: unit_of_work.sessions.create(**values))
 
@@ -440,6 +604,18 @@ class ConversationRepository:
     def get_agent(self, agent_id: str) -> dict[str, Any] | None:
         with self._database.reader() as connection:
             return AgentDao(connection).get(agent_id)
+
+    def get_current_agent_config(self, agent_id: str) -> dict[str, Any] | None:
+        with self._database.reader() as connection:
+            return AgentDao(connection).get_current_config(agent_id)
+
+    def get_agent_config_revision(
+        self,
+        agent_id: str,
+        revision_id: str,
+    ) -> dict[str, Any] | None:
+        with self._database.reader() as connection:
+            return AgentDao(connection).get_config_revision(agent_id, revision_id)
 
     def list_sessions(
         self,
@@ -472,6 +648,21 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
         separators=(",", ":"),
         allow_nan=False,
     )
+
+
+def _config_revision_row(row: Any) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    config = json.loads(str(row["config_json"]))
+    if not isinstance(config, dict):
+        raise TypeError("Agent configuration revision payload is not an object.")
+    return {
+        "configRevisionId": str(row["revision_id"]),
+        "configHash": str(row["config_hash"]),
+        "config": config,
+        "source": str(row["source"]),
+        "createdAtMs": int(row["created_at_ms"]),
+    }
 
 
 def _now_ms() -> int:
