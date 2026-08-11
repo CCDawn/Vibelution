@@ -1652,7 +1652,20 @@ def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
             detail = s.get_session_detail(persisted_target_session_id, message_limit=0, transcript_scope="none")
         except Exception:
             detail = None
-        if not detail:
+        previous_target_session_id = ""
+        target_agent_metadata = (target_agent or {}).get("metadata")
+        if isinstance(target_agent_metadata, dict):
+            previous_target_session_id = str(target_agent_metadata.get("previousDirectSessionId") or "").strip()
+        # ADR 0002 prefers the explicit session landing, but a replaced direct
+        # session (previousDirectSessionId) is a rebuild seam: wake the current
+        # session instead of the stale one the message was addressed to.
+        stale_replaced_session = bool(
+            previous_target_session_id
+            and previous_target_session_id == persisted_target_session_id
+            and current_target_session_id
+            and current_target_session_id != persisted_target_session_id
+        )
+        if not detail or stale_replaced_session:
             redirected_from_missing_session = True
             target_session_id = current_target_session_id or persisted_target_session_id
         else:
