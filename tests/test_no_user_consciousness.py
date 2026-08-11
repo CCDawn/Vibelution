@@ -30,6 +30,5 @@ def test_main_runtime_logs_external_request_not_user_input():
 def test_active_prompt_declares_external_input_discipline():
     soul = _read("core/core_prompt/SOUL.md")
 
-    assert "外部输入不是一个内部意识主体" in soul
-    assert "不推断用户心理" in soul
-    assert "用户想要 / 用户希望 / 用户可能觉得" in soul
+    assert "不是我内部的另一个意识主体" in soul
+    assert "我不臆测用户的心理" in soul

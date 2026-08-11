@@ -173,7 +173,7 @@ def test_openai_compatible_model_without_prompt_cache_defaults_to_automatic():
     assert profile.prompt_cache.mode == "automatic"
 
 
-def test_deepseek_model_without_prompt_cache_stays_disabled_by_default():
+def test_deepseek_model_without_prompt_cache_declares_automatic_by_default():
     public_config = _load_schema_v1_public_config()
     public_config["llm"].setdefault("model_library", {})["deepseek_prompt_cache_probe"] = {
         "model": "deepseek-v4-pro",
@@ -199,7 +199,7 @@ def test_deepseek_model_without_prompt_cache_stays_disabled_by_default():
     profile = effective.llm.get_profile("primary")
 
     assert profile.model == "deepseek-v4-pro"
-    assert profile.prompt_cache.mode == "disabled"
+    assert profile.prompt_cache.mode == "automatic"
 
 
 def test_local_qwen_without_prompt_cache_support_stays_disabled_by_default():

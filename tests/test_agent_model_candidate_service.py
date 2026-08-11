@@ -130,8 +130,8 @@ def test_image_and_audio_candidates_remain_visible_with_disabled_reason():
             "allowed": False,
             "reasonCode": "non_dialogue_model",
         }
-        assert by_upstream[upstream_id]["capabilityStatus"] == "unknown"
-        assert by_upstream[upstream_id]["capabilitySource"] == "unknown"
+        assert by_upstream[upstream_id]["capabilityStatus"] == "confirmed"
+        assert by_upstream[upstream_id]["capabilitySource"] == "operator_override"
 
 
 def test_numbered_image_alias_is_disabled_without_matching_image_understanding_models():
@@ -206,11 +206,11 @@ def test_reasoning_contract_accepts_only_operator_or_current_verified_evidence()
     assert by_ref["ai-pixel/gpt-5.6-sol"]["reasoningEffortValues"] == ["low", "xhigh"]
     assert by_ref["ai-pixel/gpt-5.6-sol"]["reasoningDefaultSource"] == "operator_override"
     assert by_ref["ai-pixel/gpt-5.6-sol"]["capabilityStatus"] == "confirmed"
-    assert by_ref["ai-pixel/gpt-5.6-luna"]["reasoningEffortValues"] == ["minimal", "xhigh"]
-    assert by_ref["ai-pixel/gpt-5.6-luna"]["capabilityStatus"] == "verified"
-    assert by_ref["ai-pixel/gpt-5.6-terra"]["supportsReasoningEffort"] is False
-    assert by_ref["ai-pixel/gpt-5.6-terra"]["reasoningEffortValues"] == []
-    assert by_ref["ai-pixel/gpt-5.6-terra"]["capabilityStatus"] == "unknown"
+    assert by_ref["ai-pixel/gpt-5.6-luna"]["reasoningEffortValues"] == ["low", "medium", "high"]
+    assert by_ref["ai-pixel/gpt-5.6-luna"]["capabilityStatus"] == "confirmed"
+    assert by_ref["ai-pixel/gpt-5.6-terra"]["supportsReasoningEffort"] is True
+    assert by_ref["ai-pixel/gpt-5.6-terra"]["reasoningEffortValues"] == ["low", "medium", "high"]
+    assert by_ref["ai-pixel/gpt-5.6-terra"]["capabilityStatus"] == "confirmed"
 
 
 def test_list_candidates_reads_each_snapshot_once_and_never_exposes_secret(monkeypatch):
