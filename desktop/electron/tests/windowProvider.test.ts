@@ -19,6 +19,10 @@ class FakeWindow implements ElectronWindowLike {
   windowOpenHandler: ElectronWindowOpenHandler | null = null;
   focusCount = 0;
   closeCount = 0;
+  showCount = 0;
+  hideCount = 0;
+  destroyCount = 0;
+  loadedUrls: string[] = [];
   overlayCalls: Array<{ icon: unknown; description: string }> = [];
   flashCalls: boolean[] = [];
   private destroyed = false;
@@ -27,9 +31,10 @@ class FakeWindow implements ElectronWindowLike {
 
   constructor(
     id: number,
-    private readonly url: string,
+    private url: string,
     rendererProcessId: number,
-    private readonly closeEmitsClosed = true
+    private readonly closeEmitsClosed = true,
+    private readonly navigationError: Error | null = null
   ) {
     this.id = id;
     this.webContents = {
@@ -57,6 +62,23 @@ class FakeWindow implements ElectronWindowLike {
     this.focused = true;
   }
 
+  show(): void {
+    this.showCount += 1;
+  }
+
+  hide(): void {
+    this.hideCount += 1;
+  }
+
+  loadURL(url: string): Promise<void> {
+    this.loadedUrls.push(url);
+    if (this.navigationError !== null) {
+      return Promise.reject(this.navigationError);
+    }
+    this.url = url;
+    return Promise.resolve();
+  }
+
   blur(): void {
     this.focused = false;
     this.emit("blur");
@@ -65,6 +87,15 @@ class FakeWindow implements ElectronWindowLike {
   close(): void {
     this.closeCount += 1;
     if (!this.closeEmitsClosed) {
+      return;
+    }
+    this.destroyed = true;
+    this.emit("closed");
+  }
+
+  destroy(): void {
+    this.destroyCount += 1;
+    if (this.destroyed) {
       return;
     }
     this.destroyed = true;
@@ -146,6 +177,54 @@ describe("Electron window provider state", () => {
       rendererProcessId: 4242,
       url: "http://127.0.0.1:8000/"
     });
+  });
+
+  it("navigates to a refreshed Workbench URL before revealing or reporting the window", async () => {
+    const reports: Array<{ open: boolean; url: string }> = [];
+    const workbenchWindow = new FakeWindow(42, "", 0);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      reportState: (state) => reports.push({ open: state.open, url: state.url })
+    });
+
+    const state = await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(workbenchWindow.loadedUrls).toEqual(["http://127.0.0.1:8002/"]);
+    expect(workbenchWindow.showCount).toBe(1);
+    expect(workbenchWindow.focusCount).toBe(1);
+    expect(state).toMatchObject({
+      role: "workbench",
+      open: true,
+      url: "http://127.0.0.1:8002/"
+    });
+    expect(reports).toEqual([{ open: true, url: "http://127.0.0.1:8002/" }]);
+  });
+
+  it("keeps a failed navigation hidden and permits the next open action to retry", async () => {
+    const failedWindow = new FakeWindow(42, "", 0, true, new Error("ERR_CONNECTION_REFUSED"));
+    const recoveredWindow = new FakeWindow(43, "", 4343);
+    const factory = vi
+      .fn<(url: string, paths: DesktopPaths) => FakeWindow>()
+      .mockReturnValueOnce(failedWindow)
+      .mockReturnValueOnce(recoveredWindow);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: factory
+    });
+
+    await expect(provider.openOrFocusWorkbench("http://127.0.0.1:8002/")).rejects.toThrow("ERR_CONNECTION_REFUSED");
+
+    expect(failedWindow.showCount).toBe(0);
+    expect(failedWindow.destroyCount).toBe(1);
+    expect(provider.snapshot().workbench).toEqual(closedWindowState("workbench"));
+
+    await expect(provider.openOrFocusWorkbench("http://127.0.0.1:8002/")).resolves.toMatchObject({
+      open: true,
+      url: "http://127.0.0.1:8002/"
+    });
+    expect(recoveredWindow.showCount).toBe(1);
+    expect(factory).toHaveBeenCalledTimes(2);
   });
 
   it("does not report an optimistic closed state when BrowserWindow.close is cancelled", async () => {

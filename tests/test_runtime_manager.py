@@ -1222,6 +1222,11 @@ def test_load_runtime_snapshot_preserves_failed_close_state(monkeypatch):
                 "failureMessage": "stop failed",
             },
             "command": {"activeCommandId": ""},
+            "lastError": {
+                "scope": "close_workbench",
+                "message": "stop failed",
+                "at": "2026-08-11T13:15:30+00:00",
+            },
         },
     )
     monkeypatch.setattr(
@@ -6861,7 +6866,10 @@ def test_handle_open_workbench_refocuses_existing_browser_session(monkeypatch):
     assert result["ok"] is True
     assert result["message"] == "Workbench is already open."
     assert focused == {"called": True}
-    assert events == [
+    lifecycle_events = [
+        event for event in events if not event[0].startswith("workbench.stable_backup.")
+    ]
+    assert lifecycle_events == [
         (
             "workbench.open.already_satisfied",
             {
@@ -6935,15 +6943,29 @@ def test_handle_open_workbench_logs_focus_failure_for_existing_browser_session(m
             stderr="No managed browser window was available to focus.",
         ),
     )
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda **_kwargs: subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="Fallback open failed.",
+        ),
+    )
 
-    with pytest.raises(RuntimeError, match="No managed browser window"):
+    with pytest.raises(RuntimeError, match="Fallback open failed"):
         runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
 
-    assert [event_type for event_type, _ in events] == [
-        "workbench.open.already_satisfied",
-        "workbench.open.focus_failed",
+    lifecycle_events = [
+        event for event in events if not event[0].startswith("workbench.stable_backup.")
     ]
-    assert events[1][1] == {
+    assert [event_type for event_type, _ in lifecycle_events] == [
+        "workbench.open.already_satisfied",
+        "workbench.open.focus_failed_fallback_open",
+        "workbench.open.fast_path_started",
+    ]
+    assert lifecycle_events[1][1] == {
         "commandId": "cmd-open",
         "returnCode": 1,
         "detail": "No managed browser window was available to focus.\nLauncher exit code: 1",

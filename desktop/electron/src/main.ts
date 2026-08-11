@@ -87,6 +87,7 @@ let desktopSessionHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let desktopSessionHeartbeatRunning = false;
 let desktopActionContext: DesktopActionLoopContext | null = null;
 let runtimeSceneBridge: RuntimeSceneBridge | null = null;
+let currentWorkbenchUrl = "";
 let desktopSessionRegistered = false;
 let desktopSessionRevision = 0;
 let shutdownApproved = false;
@@ -328,7 +329,7 @@ function startDesktopActionLoop(
         ...context,
         leaseSeconds: DESKTOP_ACTION_LEASE_SECONDS,
         operations: {
-          openOrFocusWorkbench: () => provider.openOrFocusWorkbench(),
+          openOrFocusWorkbench: () => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider),
           focusWorkbench: () => provider.focusWorkbench(),
           closeWorkbench: () => requestTransactionalWorkbenchClose(paths, bootstrap)
         }
@@ -361,6 +362,50 @@ function startDesktopActionLoop(
 
   void pollOnce();
   desktopActionTimer = setInterval(() => void pollOnce(), DESKTOP_ACTION_POLL_MS);
+}
+
+async function openWorkbenchAtCurrentLauncherUrl(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider
+): Promise<ManagedWindowState> {
+  let workbenchUrl = "";
+  const previousWorkbenchUrl = currentWorkbenchUrl;
+  try {
+    const currentBootstrap = await bootstrapLauncherIfEnabled(paths);
+    if (currentBootstrap === null) {
+      throw new Error("Workbench open requires an active Launcher bootstrap");
+    }
+    workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), currentBootstrap.workbenchUrl);
+    currentWorkbenchUrl = workbenchUrl;
+    const state = await provider.openOrFocusWorkbench(workbenchUrl);
+    await recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.workbench.navigation.ready",
+      message: "Electron loaded the current Workbench URL before acknowledging the open action.",
+      fields: {
+        workspaceRoot: paths.workspaceRoot,
+        workbenchOrigin: safeOrigin(workbenchUrl),
+        windowId: state.windowId,
+        rendererProcessId: state.rendererProcessId
+      }
+    });
+    return state;
+  } catch (error: unknown) {
+    if (currentWorkbenchUrl === workbenchUrl) {
+      currentWorkbenchUrl = previousWorkbenchUrl;
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    await recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.workbench.navigation.failed",
+      message: "Electron could not load the current Workbench URL; the desktop action remains retryable.",
+      fields: {
+        workspaceRoot: paths.workspaceRoot,
+        workbenchOrigin: safeOrigin(workbenchUrl),
+        error: detail.slice(0, 300)
+      }
+    });
+    throw error;
+  }
 }
 
 async function reportManagedWindowState(
@@ -942,10 +987,11 @@ function safeOrigin(value: string): string {
 
 function trustedIpcOrigins(): string[] {
   const desktopEnv = desktopEnvironment();
+  const workbenchUrl = currentWorkbenchUrl || resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl);
   return Array.from(
     new Set([
       new URL(resolveLauncherUrl(desktopEnv, launcherBootstrap?.launcherUrl)).origin,
-      new URL(resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl)).origin
+      new URL(workbenchUrl).origin
     ])
   );
 }

@@ -16,6 +16,13 @@ def test_facade_reexports_record_pack() -> None:
     assert facade.delete_runtime_scenes is record.delete_runtime_scenes
 
 
+def test_electron_supervisor_catalog_accepts_workbench_navigation_outcomes() -> None:
+    assert {
+        "electron.workbench.navigation.ready",
+        "electron.workbench.navigation.failed",
+    }.issubset(facade.ELECTRON_SUPERVISOR_EVENT_CODES)
+
+
 def test_facade_reexports_query_pack() -> None:
     assert facade.list_runtime_scenes is query.list_runtime_scenes
     assert facade.get_runtime_scene_detail is query.get_runtime_scene_detail
