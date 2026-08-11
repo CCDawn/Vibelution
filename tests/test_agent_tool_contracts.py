@@ -124,7 +124,7 @@ def test_agent_message_tool_blocks_without_bound_agent_runtime(monkeypatch):
 
     result, action = _executor_result(
         "agent_message_tool",
-        {"target_agent": "target-agent", "content": "hello"},
+        {"target_session": "session-target", "target_agent": "target-agent", "content": "hello"},
     )
 
     payload = json.loads(result)

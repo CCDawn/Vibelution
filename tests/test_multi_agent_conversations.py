@@ -80,6 +80,10 @@ def _allow_agent_message_tool(agent_id: str) -> None:
     agent_directory_service.update_agent_instance(agent_id, tool_policy=policy)
 
 
+def _create_secondary_session_for_agent(source_session: dict, *, title: str) -> dict:
+    return session_service.create_chat_session(title=title, agent_id=str(source_session["agentId"] or ""))
+
+
 def _wait_for_chat_state_settle(project_root, *, timeout: float = 3.0) -> None:
     path = developer_sandbox.sandboxed_workspace_path(project_root, "chat", "chat_state.json")
     deadline = time.time() + timeout
@@ -2467,11 +2471,15 @@ def test_agent_inbox_idle_release_does_not_wake_mailbox_only_message(tmp_path, m
     assert [item["messageId"] for item in remaining] == [payload["messageId"]]
 
 
-def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, monkeypatch):
+def test_agent_message_tool_blocks_generic_cross_agent_before_kernel_delivery(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     _allow_agent_message_tool(alpha["agentId"])
+    from core.agent_kernel import adapters
+
+    kernel_calls: list[dict] = []
+    monkeypatch.setattr(adapters, "submit_agent_message_event", lambda **kwargs: kernel_calls.append(kwargs))
 
     result, action = execute_authorized_agent_tool(
         alpha["agentId"],
@@ -2482,38 +2490,29 @@ def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, mon
             "target_agent": beta["agentCode"],
             "content": "Beta，请从架构风险角度审查这轮改造。",
             "summary": "请求架构审查",
-            "wake_target": False,
+            "wake_target": True,
             "metadata_json": "{\"priority\":\"normal\"}",
         },
     )
     payload = json.loads(result)
     assert action is None
-    assert payload["ok"] is True
-    assert payload["status"] == "sent"
-    assert payload["route"] == "kernel"
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["route"] == "policy"
+    assert payload["error"] == "policy_blocked"
+    assert payload["reason"] == "cross_agent_policy_required"
     assert payload["sourceAgentId"] == alpha["agentId"]
     assert payload["sourceSessionId"] == alpha["id"]
     assert payload["targetAgentId"] == beta["agentId"]
     assert payload["targetAgentCode"] == beta["agentCode"]
-    assert payload["wakeStatus"] == "not_requested"
-    assert payload["kernel"]["taskId"]
-    assert payload["kernel"]["eventId"]
-    assert payload["kernel"]["outcomeId"]
+    assert payload["targetSessionId"] == beta["id"]
+    assert payload["wakeStatus"] == "blocked"
+    assert payload["delivery"]["allowed"] is False
+    assert payload["delivery"]["inboxMessageId"] == ""
 
     pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
-    assert [item["messageId"] for item in pending] == [payload["messageId"]]
-    assert pending[0]["sourceAgentId"] == alpha["agentId"]
-    assert pending[0]["sourceAgentCode"] == alpha["agentCode"]
-    assert pending[0]["sourceSessionId"] == alpha["id"]
-    assert pending[0]["threadId"] == f"session:{beta['id']}"
-    assert pending[0]["kind"] == "agent_direct_message"
-    assert pending[0]["createdBy"] == "kernel"
-    assert pending[0]["summary"] == "请求架构审查"
-    assert pending[0]["content"] == "请求架构审查"
-    assert json.loads(pending[0]["metadata"]["agentToolMetadataJson"]) == {"priority": "normal"}
-    assert pending[0]["metadata"]["sourceSurface"] == "agent_message_tool"
-    assert pending[0]["metadata"]["kernelTaskId"] == payload["kernel"]["taskId"]
-    assert pending[0]["metadata"]["kernelEventId"] == payload["kernel"]["eventId"]
+    assert pending == []
+    assert kernel_calls == []
 
 
 def test_session_reference_message_persists_reference_and_schedules_query_context(tmp_path, monkeypatch):
@@ -2599,13 +2598,61 @@ def test_session_reference_query_tool_only_reads_current_turn_references(tmp_pat
     assert blocked_payload["error"] == "session_reference_not_allowed"
 
 
+@pytest.mark.parametrize("stored_content", ["", "   "])
+def test_session_reference_query_uses_turn_items_for_blank_assistant_content(tmp_path, monkeypatch, stored_content):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    from tools.session_reference_tools import session_reference_query_tool
+
+    target_session_id = "session-visible-turn-items"
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *args, **kwargs: {
+            "id": target_session_id,
+            "title": "Visible output",
+            "agentId": "agent-target",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": stored_content,
+                    "turnItems": [
+                        {"type": "agent_message", "text": "可见最终答复"},
+                    ],
+                }
+            ],
+        },
+    )
+
+    with session_reference_context(
+        [
+            {
+                "referenceId": f"session:{target_session_id}",
+                "kind": "session",
+                "sessionId": target_session_id,
+                "title": "Visible output",
+                "agentId": "agent-target",
+            }
+        ]
+    ):
+        payload = json.loads(
+            session_reference_query_tool(
+                reference_id=f"session:{target_session_id}",
+                query="最终答复",
+            )
+        )
+
+    assert payload["status"] == "ok"
+    assert payload["matchedMessageCount"] == 1
+    assert payload["messages"][0]["content"] == "可见最终答复"
+
+
 def test_agent_message_tool_resolves_ui_composite_agent_label(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
-    beta = session_service.create_chat_session(title="Beta Agent")
+    beta = _create_secondary_session_for_agent(alpha, title="Alpha Review Session")
     _allow_agent_message_tool(alpha["agentId"])
-    beta_agent = agent_directory_service.get_agent(beta["agentId"])
-    label = f"{beta['agentCode']} · {beta_agent['displayName']}"
+    alpha_agent = agent_directory_service.get_agent(alpha["agentId"])
+    label = f"{alpha_agent['agentCode']} · {alpha_agent['displayName']}"
 
     result, action = execute_authorized_agent_tool(
         alpha["agentId"],
@@ -2625,7 +2672,7 @@ def test_agent_message_tool_resolves_ui_composite_agent_label(tmp_path, monkeypa
     assert payload["ok"] is True
     assert payload["status"] == "sent"
     assert payload["targetAgentId"] == beta["agentId"]
-    assert payload["targetAgentCode"] == beta["agentCode"]
+    assert payload["targetAgentCode"] == alpha_agent["agentCode"]
 
 
 @pytest.mark.parametrize(
@@ -2639,10 +2686,10 @@ def test_agent_message_tool_resolves_ui_composite_agent_label(tmp_path, monkeypa
 def test_agent_message_tool_resolves_common_agent_label_variants(tmp_path, monkeypatch, label_template):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
-    beta = session_service.create_chat_session(title="Beta Agent")
+    beta = _create_secondary_session_for_agent(alpha, title="Alpha Review Session")
     _allow_agent_message_tool(alpha["agentId"])
-    beta_agent = agent_directory_service.get_agent(beta["agentId"])
-    label = label_template.format(code=beta["agentCode"], name=beta_agent["displayName"])
+    alpha_agent = agent_directory_service.get_agent(alpha["agentId"])
+    label = label_template.format(code=alpha_agent["agentCode"], name=alpha_agent["displayName"])
 
     result, action = execute_authorized_agent_tool(
         alpha["agentId"],
@@ -2666,10 +2713,10 @@ def test_agent_message_tool_resolves_common_agent_label_variants(tmp_path, monke
 def test_agent_message_tool_resolves_unique_role_key_target(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
-    beta = session_service.create_chat_session(title="Beta Agent")
+    beta = _create_secondary_session_for_agent(alpha, title="Alpha Research Workspace")
     _allow_agent_message_tool(alpha["agentId"])
     agent_directory_service.update_agent_instance(
-        beta["agentId"],
+        alpha["agentId"],
         primary_mode="research",
         role_key="source_finder",
     )
@@ -2697,7 +2744,7 @@ def test_agent_message_tool_resolves_unique_role_key_target(tmp_path, monkeypatc
 def test_agent_message_tool_preserves_full_message_body(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
-    beta = session_service.create_chat_session(title="Beta Agent")
+    beta = _create_secondary_session_for_agent(alpha, title="Alpha Report Workspace")
     _allow_agent_message_tool(alpha["agentId"])
     full_report = "\n".join(f"第 {index:02d} 行：工具发送报告正文" for index in range(1, 31))
 
@@ -2722,10 +2769,10 @@ def test_agent_message_tool_preserves_full_message_body(tmp_path, monkeypatch):
     assert pending[0]["content"] == "完整报告"
 
 
-def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, monkeypatch):
+def test_agent_message_tool_can_wake_secondary_session_for_same_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
-    beta = session_service.create_chat_session(title="Beta Agent")
+    beta = _create_secondary_session_for_agent(alpha, title="Alpha Follow-up Session")
     _allow_agent_message_tool(alpha["agentId"])
     captured = {}
 
@@ -2773,8 +2820,6 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
     assert payload["delivery"]["targetSessionId"] == beta["id"]
     assert payload["delivery"]["turnId"]
     assert any("Beta，请接力回答 Alpha 的私信。" in prompt for prompt in captured["prompts"])
-    assert any("Beta 已通过 agent_message_tool 接到私信。" in prompt for prompt in captured["prompts"])
-    assert any("面向当前用户或当前任务汇总这条回复" in prompt for prompt in captured["prompts"])
     assert "AgentInboxMessages:" in captured["runtimeContext"]
 
     detail = session_service.get_session_detail(beta["id"])
@@ -2788,11 +2833,7 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
     assert consumed[0]["messageId"] == payload["messageId"]
     assert consumed[0]["consumedByTurnId"] == payload["delivery"]["turnId"]
     alpha_detail = session_service.get_session_detail(alpha["id"])
-    assert alpha_detail["messages"][-2]["metadata"]["inboxKind"] == "agent_inbox_reply"
-    assert alpha_detail["messages"][-2]["metadata"]["sourceAgentId"] == beta["agentId"]
-    alpha_consumed = agent_directory_service.list_agent_inbox_messages_for_agent(alpha["agentId"], status="consumed")
-    assert alpha_consumed[0]["metadata"]["sourceSurface"] == "agent_inbox_reply"
-    assert alpha_consumed[0]["metadata"]["kernelTaskId"]
+    assert alpha_detail["messages"] == []
 
 
 def test_research_org_inbox_wake_carries_communication_metadata_to_conversation(tmp_path, monkeypatch):
@@ -3015,6 +3056,7 @@ def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp
     org = research_organization_service.get_research_organization()
     ceo = next(node for node in org["agents"] if node["role"] == "ceo")
     steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
+    target_session = session_service.create_chat_session(title="Capability Steward Review", agent_id=steward["agentId"])
     _allow_agent_message_tool(ceo["agentId"])
 
     result, action = execute_authorized_agent_tool(
@@ -3022,7 +3064,7 @@ def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp
         ceo["agent"]["directSessionId"],
         "agent_message_tool",
         {
-            "target_session": steward["agent"]["directSessionId"],
+            "target_session": target_session["id"],
             "target_agent": steward["agent"]["agentCode"],
             "content": "请审查数据库试水团队的工具权限。",
             "summary": "能力权限审查",
@@ -3044,10 +3086,12 @@ def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp
     assert payload["route"] == "research_org"
     assert payload["sourceAgentId"] == ceo["agentId"]
     assert payload["targetAgentId"] == steward["agentId"]
+    assert payload["targetSessionId"] == target_session["id"]
     assert payload["researchOrgMessageId"]
     assert payload["kernel"]["taskId"]
     assert payload["kernel"]["eventId"]
     assert payload["delivery"]["edgeId"] == f"edge-{ceo['agentId']}-{steward['agentId']}"
+    assert payload["delivery"]["targetSessionId"] == target_session["id"]
     tool_events = [
         event for event in recorded_events
         if event[0][2] == "agent_inbox.tool_sent"

@@ -123,7 +123,7 @@ def session_reference_query_tool(
         if not isinstance(message, dict):
             continue
         content = str(message.get("content") or "")
-        if not content and str(message.get("role") or "").strip().lower() == "assistant":
+        if not content.strip() and str(message.get("role") or "").strip().lower() == "assistant":
             content = "\n".join(
                 str(item.get("text") or "").strip()
                 for item in list(message.get("turnItems") or [])
