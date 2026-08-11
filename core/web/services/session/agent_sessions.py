@@ -3064,8 +3064,7 @@ def _find_cli_agent_lifecycle_message(
     normalized_key = str(lifecycle_key or "").strip()
     if not normalized_key:
         return None
-    normalized_messages = s._normalize_messages(conversation_id, messages)
-    for message in normalized_messages:
+    for message in messages:
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
         if str(metadata.get("kind") or "").strip() not in {"cli_agent_lifecycle", s.EVENT_CLI_SESSION_LIFECYCLE}:
             continue
