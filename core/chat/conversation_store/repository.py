@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
 
 
+class AgentConfigRevisionConflictError(RuntimeError):
+    """A config update targeted a revision that is no longer current."""
+
+
 class AgentDao:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
@@ -223,6 +227,39 @@ class AgentDao:
             (agent_id, agent_id),
         ).fetchone()
         return _config_revision_row(row)
+
+    def compare_and_swap_config_snapshot(
+        self,
+        *,
+        agent_id: str,
+        expected_config_revision_id: str,
+        display_name: str,
+        kind: str,
+        status: str,
+        config: Mapping[str, Any],
+        source: str,
+    ) -> dict[str, Any]:
+        """Advance configuration only if the caller still owns the current revision."""
+
+        normalized_agent_id = str(agent_id).strip()
+        expected_revision_id = str(expected_config_revision_id).strip()
+        row = self._connection.execute(
+            "SELECT current_config_revision_id FROM agents WHERE agent_id=?",
+            (normalized_agent_id,),
+        ).fetchone()
+        current_revision_id = str(row["current_config_revision_id"] or "") if row else ""
+        if not expected_revision_id or current_revision_id != expected_revision_id:
+            raise AgentConfigRevisionConflictError(
+                "Agent configuration changed before this update could be applied."
+            )
+        return self.upsert_config_snapshot(
+            agent_id=normalized_agent_id,
+            display_name=display_name,
+            kind=kind,
+            status=status,
+            config=config,
+            source=source,
+        )
 
     def get_config_revision(
         self,
@@ -589,6 +626,14 @@ class ConversationRepository:
                 unit_of_work.agents.upsert_config_snapshot(**snapshot)
                 for snapshot in frozen_snapshots
             ],
+            force_flush=True,
+        )
+
+    def compare_and_swap_agent_config(self, **values: Any) -> Future[dict[str, Any]]:
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.agents.compare_and_swap_config_snapshot(
+                **values
+            ),
             force_flush=True,
         )
 

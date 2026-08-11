@@ -10,7 +10,11 @@ from .database import (
     assess_sqlite_wal_runtime,
 )
 from .importer import AgentConfigImportError, LegacyAgentConfigImporter
-from .repository import ConversationRepository, ConversationUnitOfWork
+from .repository import (
+    AgentConfigRevisionConflictError,
+    ConversationRepository,
+    ConversationUnitOfWork,
+)
 from .store import ConversationStore
 from .writer import (
     ConversationBackpressureError,
@@ -20,6 +24,7 @@ from .writer import (
 
 __all__ = [
     "AgentConfigImportError",
+    "AgentConfigRevisionConflictError",
     "ConversationBackpressureError",
     "ConversationRepository",
     "ConversationStore",
