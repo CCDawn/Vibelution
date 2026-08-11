@@ -1,5 +1,6 @@
 param(
     [switch]$SkipBuild,
+    [switch]$PromotePublicEntry,
     [switch]$AllowRunningDesktop,
     [switch]$SkipResidualProcessCheck,
     [int]$SmokeTimeoutSeconds = 90,
@@ -14,10 +15,12 @@ $entryCatalogScript = Join-Path $projectDir "scripts/desktop_entry_catalog.ps1"
 . $entryCatalogScript
 $entryCatalog = Assert-DesktopEntryCatalog -ProjectDir $projectDir
 $buildScript = Join-Path $projectDir "scripts/build_desktop_package.ps1"
+$launcherScript = Join-Path $projectDir "scripts/vibelution_launcher.ps1"
 $desktopResourcesDir = Join-Path $projectDir "dist/desktop/win-unpacked/resources"
 $desktopExe = Resolve-DesktopPublicEntryPath -Catalog $entryCatalog -ProjectDir $projectDir
 $desktopIconPath = Join-Path $projectDir "assets/icons/vibelution.ico"
 $launchProfilePath = Join-Path $desktopResourcesDir "vibelution-launch-profile.json"
+$packageProvenancePath = Join-Path $desktopResourcesDir "app.asar.unpacked/package-provenance.json"
 $summaryPath = Join-Path $projectDir ".runtime/launcher/electron-smoke-summary.json"
 
 function Invoke-CheckedNative {
@@ -44,6 +47,67 @@ function Read-JsonFile {
         throw "Required JSON file is missing: $Path"
     }
     return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+}
+
+function Invoke-GitText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgumentList
+    )
+
+    $output = @(& git -C $projectDir @ArgumentList 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "git $($ArgumentList -join ' ') failed: $($output -join [Environment]::NewLine)"
+    }
+    return (($output | ForEach-Object { [string]$_ }) -join "`n").Trim()
+}
+
+function Assert-PublicEntryPromotionSource {
+    $branch = Invoke-GitText @("branch", "--show-current")
+    $status = Invoke-GitText @("status", "--porcelain", "--untracked-files=all")
+    if ($branch -ne "main" -or -not [string]::IsNullOrWhiteSpace($status)) {
+        throw "Public entry promotion requires a clean main checkout. Current branch: $branch."
+    }
+
+    return [pscustomobject]@{
+        sourceCommit = Invoke-GitText @("rev-parse", "HEAD")
+        electronTreeHash = Invoke-GitText @("rev-parse", "HEAD:desktop/electron")
+        frontendTreeHash = Invoke-GitText @("rev-parse", "HEAD:web")
+    }
+}
+
+function Assert-PublicEntryPackageProvenance {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$ExpectedSource
+    )
+
+    $packageProvenance = Read-JsonFile $packageProvenancePath
+    if ($packageProvenance.sourceCommit -ne $ExpectedSource.sourceCommit) {
+        throw "Desktop package sourceCommit does not match the clean main checkout."
+    }
+    if ($packageProvenance.electronTreeHash -ne $ExpectedSource.electronTreeHash) {
+        throw "Desktop package electronTreeHash does not match the clean main checkout."
+    }
+    if ($packageProvenance.frontendTreeHash -ne $ExpectedSource.frontendTreeHash) {
+        throw "Desktop package frontendTreeHash does not match the clean main checkout."
+    }
+}
+
+function Assert-PublicEntryPromotionSourceStillCurrent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$ExpectedSource
+    )
+
+    $currentSource = Assert-PublicEntryPromotionSource
+    if (
+        $currentSource.sourceCommit -ne $ExpectedSource.sourceCommit -or
+        $currentSource.electronTreeHash -ne $ExpectedSource.electronTreeHash -or
+        $currentSource.frontendTreeHash -ne $ExpectedSource.frontendTreeHash
+    ) {
+        throw "Public entry promotion source changed during package verification. Rebuild from the latest clean main checkout."
+    }
 }
 
 function Get-DesktopPackageProcesses {
@@ -219,6 +283,14 @@ function Assert-SmokeSummary {
     return $summary
 }
 
+$expectedPromotionSource = $null
+if ($PromotePublicEntry -and $SkipBuild) {
+    throw "Public entry promotion requires a fresh package build; -PromotePublicEntry cannot be combined with -SkipBuild."
+}
+if ($PromotePublicEntry) {
+    $expectedPromotionSource = Assert-PublicEntryPromotionSource
+}
+
 Assert-NoDesktopPackageProcesses
 
 if (-not $SkipBuild) {
@@ -244,6 +316,11 @@ if ($smokeProcess.ExitCode -ne 0) {
 
 $summary = Assert-SmokeSummary
 Wait-ForNoNewDesktopPackageProcesses $baselineProcessIds
+if ($PromotePublicEntry) {
+    Assert-PublicEntryPromotionSourceStillCurrent -ExpectedSource $expectedPromotionSource
+    Assert-PublicEntryPackageProvenance -ExpectedSource $expectedPromotionSource
+    $null = & $launcherScript -Action "repair-shortcut"
+}
 
 [ordered]@{
     schemaVersion = 1
@@ -258,4 +335,5 @@ Wait-ForNoNewDesktopPackageProcesses $baselineProcessIds
     shutdownStoppedPidCount = $summary.shutdown.stoppedPidCount
     launcherOrigin = $summary.bootstrap.launcherOrigin
     workbenchOrigin = $summary.bootstrap.workbenchOrigin
+    publicEntryPromoted = [bool]$PromotePublicEntry
 } | ConvertTo-Json -Depth 4
