@@ -131,12 +131,15 @@ function Ensure-LauncherControlForCanary {
     if (-not (Test-Path -LiteralPath $launcherExecutable)) {
         throw "Official Vibelution Launcher is missing; cannot restore the control plane for Workbench-close verification."
     }
-    $launcherBootstrapProcess = Start-Process -FilePath $launcherExecutable -ArgumentList @("--project", $projectDir, "open", "--no-browser") -WindowStyle Hidden -PassThru -Wait
-    if ($launcherBootstrapProcess.ExitCode -ne 0) {
-        throw "Official Vibelution Launcher control bootstrap failed with exit code $($launcherBootstrapProcess.ExitCode)."
-    }
+    # The native Launcher can hand off the command before its own process exits.
+    # Waiting for that process turns an otherwise healthy bootstrap into an
+    # unbounded canary hang, so state polling below is the completion authority.
+    $launcherBootstrapProcess = Start-Process -FilePath $launcherExecutable -ArgumentList @("--project", $projectDir, "open", "--no-browser") -WindowStyle Hidden -PassThru
 
     do {
+        if ($launcherBootstrapProcess.HasExited -and $launcherBootstrapProcess.ExitCode -ne 0) {
+            throw "Official Vibelution Launcher control bootstrap failed with exit code $($launcherBootstrapProcess.ExitCode)."
+        }
         try {
             $launcherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json
             $launcherControlUrl = [string]$launcherState.launcherControlUrl
@@ -183,25 +186,42 @@ function Close-ManagedWorkbenchForCanary {
     if (-not (Test-Path -LiteralPath $launcherExecutable)) {
         throw "Official Vibelution Launcher is missing; cannot quiesce the managed Workbench."
     }
-    $launcherProcess = Start-Process -FilePath $launcherExecutable -ArgumentList @("--project", $projectDir, "stop") -WindowStyle Hidden -PassThru -Wait
-    if ($launcherProcess.ExitCode -ne 0) {
-        throw "Official Vibelution Launcher stop failed with exit code $($launcherProcess.ExitCode)."
-    }
+    # The native command host may remain alive after handing the stop request to
+    # the control plane.  The bounded lifecycle poll below is authoritative.
+    $launcherProcess = Start-Process -FilePath $launcherExecutable -ArgumentList @("--project", $projectDir, "stop") -WindowStyle Hidden -PassThru
     $RecoveryRequired.Value = $true
 
-    $deadline = (Get-Date).AddSeconds($ShutdownTimeoutSeconds)
+    # Queue claim + fast cleanup regularly outlive the process-cleanup budget;
+    # use the canary's bounded startup window for this asynchronous command.
+    $deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)
+    $lastFailure = ""
     do {
-        $status = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
-        if ($status.overallState -eq "closed" -and $status.observedState -eq "closed") {
-            return [pscustomobject]@{
-                WasOpen = $true
-                OverallState = [string]$status.overallState
-                ObservedState = [string]$status.observedState
+        if ($launcherProcess.HasExited -and $launcherProcess.ExitCode -ne 0) {
+            throw "Official Vibelution Launcher stop failed with exit code $($launcherProcess.ExitCode)."
+        }
+        try {
+            # Re-read state on every attempt: the control-plane process can be
+            # replaced while the asynchronous stop command is being claimed.
+            $latestLauncherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json
+            $latestLauncherControlUrl = [string]$latestLauncherState.launcherControlUrl
+            if ([string]::IsNullOrWhiteSpace($latestLauncherControlUrl)) {
+                throw "Launcher control URL is unavailable after stop."
             }
+            $latestLauncherOrigin = ([uri]$latestLauncherControlUrl).GetLeftPart([System.UriPartial]::Authority)
+            $status = Invoke-RestMethod -Uri "$latestLauncherOrigin/api/launcher/status" -TimeoutSec 15
+            if ($status.overallState -eq "closed" -and $status.observedState -eq "closed") {
+                return [pscustomobject]@{
+                    WasOpen = $true
+                    OverallState = [string]$status.overallState
+                    ObservedState = [string]$status.observedState
+                }
+            }
+        } catch {
+            $lastFailure = $_.Exception.Message
         }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
-    throw "Managed Workbench did not close before the packaged Workbench-close canary."
+    throw "Managed Workbench did not close before the packaged Workbench-close canary. Last failure: $lastFailure"
 }
 
 function Wait-ForDesktopRootProcess {
@@ -434,30 +454,37 @@ function Restore-ManagedWorkbench {
     if (-not (Test-Path -LiteralPath $launcherExecutable)) {
         throw "Official Vibelution Launcher is missing; cannot restore the managed Workbench."
     }
-    $launcherProcess = Start-Process -FilePath $launcherExecutable -ArgumentList @("--project", $projectDir, "start") -WindowStyle Hidden -PassThru -Wait
-    if ($launcherProcess.ExitCode -ne 0) {
-        throw "Official Vibelution Launcher start failed with exit code $($launcherProcess.ExitCode)."
-    }
+    # Completion is defined by the Launcher control-plane status, not by the
+    # native command host lifetime. See Ensure-LauncherControlForCanary.
+    $launcherProcess = Start-Process -FilePath $launcherExecutable -ArgumentList @("--project", $projectDir, "start") -WindowStyle Hidden -PassThru
     $launcherStatePath = Join-Path $projectDir ".runtime/launcher/state.json"
     $deadline = (Get-Date).AddSeconds($StartTimeoutSeconds)
+    $lastFailure = ""
     do {
+        if ($launcherProcess.HasExited -and $launcherProcess.ExitCode -ne 0) {
+            throw "Official Vibelution Launcher start failed with exit code $($launcherProcess.ExitCode)."
+        }
         if (Test-Path -LiteralPath $launcherStatePath) {
-            $launcherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json
-            $launcherControlUrl = [string]$launcherState.launcherControlUrl
-            if (-not [string]::IsNullOrWhiteSpace($launcherControlUrl)) {
-                $launcherOrigin = ([uri]$launcherControlUrl).GetLeftPart([System.UriPartial]::Authority)
-                $status = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
-                if ($status.overallState -eq "ready" -and $status.observedState -eq "open") {
-                    return [pscustomobject]@{
-                        OverallState = [string]$status.overallState
-                        ObservedState = [string]$status.observedState
+            try {
+                $launcherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json
+                $launcherControlUrl = [string]$launcherState.launcherControlUrl
+                if (-not [string]::IsNullOrWhiteSpace($launcherControlUrl)) {
+                    $launcherOrigin = ([uri]$launcherControlUrl).GetLeftPart([System.UriPartial]::Authority)
+                    $status = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
+                    if ($status.overallState -eq "ready" -and $status.observedState -eq "open") {
+                        return [pscustomobject]@{
+                            OverallState = [string]$status.overallState
+                            ObservedState = [string]$status.observedState
+                        }
                     }
                 }
+            } catch {
+                $lastFailure = $_.Exception.Message
             }
         }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
-    throw "Workbench-close canary did not restore the managed Workbench."
+    throw "Workbench-close canary did not restore the managed Workbench. Last failure: $lastFailure"
 }
 
 Assert-NoOtherVibelutionDesktopProcesses

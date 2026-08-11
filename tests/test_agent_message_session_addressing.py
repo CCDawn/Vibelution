@@ -91,13 +91,13 @@ def test_agent_message_tool_delivers_with_target_session_metadata(monkeypatch) -
     monkeypatch.setattr(
         session_service,
         "get_session_detail",
-        lambda *args, **kwargs: {"id": "session-target", "agentId": "agent-target"},
+        lambda *args, **kwargs: {"id": "session-target", "agentId": "agent-source"},
     )
     monkeypatch.setattr(
         ads,
         "list_agents",
         lambda include_archived=False: [
-            {"agentId": "agent-target", "agentCode": "A002", "displayName": "Target", "directSessionId": "session-direct"},
+            {"agentId": "agent-source", "agentCode": "A001", "displayName": "Source", "directSessionId": "session-source"},
         ],
     )
     monkeypatch.setattr(
@@ -105,9 +105,9 @@ def test_agent_message_tool_delivers_with_target_session_metadata(monkeypatch) -
         "get_agent",
         lambda agent_id, include_archived=False: {
             "agentId": agent_id,
-            "agentCode": "A002" if agent_id == "agent-target" else "A001",
-            "displayName": "Target" if agent_id == "agent-target" else "Source",
-            "directSessionId": "session-direct" if agent_id == "agent-target" else "session-source",
+            "agentCode": "A001",
+            "displayName": "Source",
+            "directSessionId": "session-source",
             "metadata": {},
         },
     )
@@ -120,7 +120,7 @@ def test_agent_message_tool_delivers_with_target_session_metadata(monkeypatch) -
             "outcome": {
                 "deliveries": [
                     {
-                        "targetAgentId": "agent-target",
+                        "targetAgentId": "agent-source",
                         "status": "delivered",
                         "inboxMessageId": "agentmsg-1",
                         "targetSessionId": "session-target",
@@ -159,10 +159,64 @@ def test_agent_message_tool_delivers_with_target_session_metadata(monkeypatch) -
     assert result["ok"] is True
     assert result["status"] == "sent"
     assert result["targetSessionId"] == "session-target"
-    assert result["targetAgentId"] == "agent-target"
+    assert result["targetAgentId"] == "agent-source"
     assert result["wakeStatus"] == "started"
     assert captured["metadata"]["targetSessionId"] == "session-target"
     assert captured["wake_target"] is True
+
+
+def test_agent_message_tool_blocks_cross_agent_without_authorized_research_route(monkeypatch) -> None:
+    import core.web.services.agent_directory_service as ads
+    from core.agent_kernel import adapters
+    from core.web.services import session_service
+
+    monkeypatch.setattr(ads, "current_agent_runtime", lambda: {"agentId": "agent-source", "sessionId": "session-source"})
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *args, **kwargs: {"id": "session-target", "agentId": "agent-target"},
+    )
+    monkeypatch.setattr(
+        ads,
+        "list_agents",
+        lambda include_archived=False: [
+            {"agentId": "agent-source", "agentCode": "A001", "displayName": "Source", "directSessionId": "session-source"},
+            {"agentId": "agent-target", "agentCode": "A002", "displayName": "Target", "directSessionId": "session-direct"},
+        ],
+    )
+    monkeypatch.setattr(
+        ads,
+        "get_agent",
+        lambda agent_id, include_archived=False: {
+            "agentId": agent_id,
+            "agentCode": "A002" if agent_id == "agent-target" else "A001",
+            "displayName": "Target" if agent_id == "agent-target" else "Source",
+            "directSessionId": "session-direct" if agent_id == "agent-target" else "session-source",
+            "metadata": {},
+        },
+    )
+    kernel_calls: list[dict] = []
+    monkeypatch.setattr(adapters, "submit_agent_message_event", lambda **kwargs: kernel_calls.append(kwargs))
+    monkeypatch.setattr(agent_message_tools, "_try_send_research_org_message", lambda **kwargs: None)
+    monkeypatch.setattr(agent_message_tools, "_record_agent_message_tool_event", lambda *args, **kwargs: None)
+
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="please review",
+            target_session="session-target",
+            wake_target=True,
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["route"] == "policy"
+    assert result["error"] == "policy_blocked"
+    assert result["reason"] == "cross_agent_policy_required"
+    assert result["targetSessionId"] == "session-target"
+    assert result["delivery"]["allowed"] is False
+    assert result["delivery"]["wakeStatus"] == "blocked"
+    assert kernel_calls == []
 
 
 def test_write_agent_inbox_message_respects_explicit_target_session(tmp_path, monkeypatch) -> None:
