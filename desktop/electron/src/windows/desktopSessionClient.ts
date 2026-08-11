@@ -1,4 +1,5 @@
 import type { ManagedWindowState } from "./windowProviderTypes.js";
+import { boundedDesktopControlFetch } from "../protocol/boundedFetch.js";
 
 export type DesktopSessionRegistration = {
   desktopSessionId: string;
@@ -24,20 +25,26 @@ export async function registerDesktopSession(input: {
   workspaceRoot: string;
   capabilities: string[];
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<DesktopSessionRegistration> {
-  const fetcher = input.fetchImpl ?? fetch;
-  const response = await fetcher(`${new URL(input.launcherOrigin).origin}/api/launcher/desktop-sessions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "X-Vibelution-Control-Token": input.controlToken
-    },
-    body: JSON.stringify({
-      desktopSessionId: input.desktopSessionId,
-      provider: "electron",
-      workspaceRoot: input.workspaceRoot,
-      capabilities: input.capabilities
-    })
+  const response = await boundedDesktopControlFetch({
+    fetchImpl: input.fetchImpl,
+    resource: `${new URL(input.launcherOrigin).origin}/api/launcher/desktop-sessions`,
+    operation: "desktop session registration",
+    requestTimeoutMs: input.requestTimeoutMs,
+    init: {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Vibelution-Control-Token": input.controlToken
+      },
+      body: JSON.stringify({
+        desktopSessionId: input.desktopSessionId,
+        provider: "electron",
+        workspaceRoot: input.workspaceRoot,
+        capabilities: input.capabilities
+      })
+    }
   });
   if (!response.ok) {
     throw new Error(`desktop session registration failed: ${response.status}`);
@@ -51,11 +58,14 @@ export async function heartbeatDesktopSession(input: {
   desktopSessionId: string;
   revision: number;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<DesktopSessionRegistration> {
-  const fetcher = input.fetchImpl ?? fetch;
-  const response = await fetcher(
-    `${new URL(input.launcherOrigin).origin}/api/launcher/desktop-sessions/${encodeURIComponent(input.desktopSessionId)}/heartbeat`,
-    {
+  const response = await boundedDesktopControlFetch({
+    fetchImpl: input.fetchImpl,
+    resource: `${new URL(input.launcherOrigin).origin}/api/launcher/desktop-sessions/${encodeURIComponent(input.desktopSessionId)}/heartbeat`,
+    operation: "desktop session heartbeat",
+    requestTimeoutMs: input.requestTimeoutMs,
+    init: {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -63,7 +73,7 @@ export async function heartbeatDesktopSession(input: {
       },
       body: JSON.stringify({ revision: input.revision })
     }
-  );
+  });
   await throwDesktopSessionRequestError(response, "heartbeat");
   return (await response.json()) as DesktopSessionRegistration;
 }
@@ -74,11 +84,14 @@ export async function closeDesktopSession(input: {
   desktopSessionId: string;
   revision: number;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<DesktopSessionRegistration> {
-  const fetcher = input.fetchImpl ?? fetch;
-  const response = await fetcher(
-    `${new URL(input.launcherOrigin).origin}/api/launcher/desktop-sessions/${encodeURIComponent(input.desktopSessionId)}`,
-    {
+  const response = await boundedDesktopControlFetch({
+    fetchImpl: input.fetchImpl,
+    resource: `${new URL(input.launcherOrigin).origin}/api/launcher/desktop-sessions/${encodeURIComponent(input.desktopSessionId)}`,
+    operation: "desktop session close",
+    requestTimeoutMs: input.requestTimeoutMs,
+    init: {
       method: "DELETE",
       headers: {
         "content-type": "application/json",
@@ -86,7 +99,7 @@ export async function closeDesktopSession(input: {
       },
       body: JSON.stringify({ revision: input.revision })
     }
-  );
+  });
   await throwDesktopSessionRequestError(response, "close");
   return (await response.json()) as DesktopSessionRegistration;
 }
@@ -99,11 +112,14 @@ export async function reportDesktopWindowState(input: {
   revision: number;
   state: ManagedWindowState;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<DesktopSessionRegistration> {
-  const fetcher = input.fetchImpl ?? fetch;
-  const response = await fetcher(
-    `${new URL(input.launcherOrigin).origin}/api/launcher/desktop-sessions/${encodeURIComponent(input.desktopSessionId)}/windows/${input.role}`,
-    {
+  const response = await boundedDesktopControlFetch({
+    fetchImpl: input.fetchImpl,
+    resource: `${new URL(input.launcherOrigin).origin}/api/launcher/desktop-sessions/${encodeURIComponent(input.desktopSessionId)}/windows/${input.role}`,
+    operation: "desktop session window update",
+    requestTimeoutMs: input.requestTimeoutMs,
+    init: {
       method: "PUT",
       headers: {
         "content-type": "application/json",
@@ -119,7 +135,7 @@ export async function reportDesktopWindowState(input: {
         url: input.state.url
       })
     }
-  );
+  });
   await throwDesktopSessionRequestError(response, "window update");
   return (await response.json()) as DesktopSessionRegistration;
 }
