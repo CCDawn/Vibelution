@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-import sqlite3
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import runtime as sqlite3
 from .schema import MIGRATIONS, SCHEMA_VERSION
 
 DEFAULT_BUSY_TIMEOUT_MS = 250
@@ -140,6 +140,7 @@ class ConversationDatabase:
                 "schemaVersion": SCHEMA_VERSION,
                 "migrationChecksum": MIGRATIONS[-1].checksum,
                 "quickCheck": quick_check,
+                "sqliteDriver": sqlite3.DRIVER_NAME,
                 "sqliteVersion": sqlite3.sqlite_version,
             }
         except ConversationStoreError:
