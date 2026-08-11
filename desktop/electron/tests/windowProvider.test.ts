@@ -173,6 +173,83 @@ describe("Electron window provider state", () => {
     expect(reports).toEqual([{ open: false }]);
   });
 
+  it("intercepts a workbench X until the transactional close is explicitly authorized", async () => {
+    const closeRequests: string[] = [];
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      shouldInterceptWorkbenchClose: () => true,
+      onWorkbenchCloseRequest: () => {
+        closeRequests.push("workbench");
+      }
+    });
+    await provider.openOrFocusWorkbench();
+
+    const closeEvent = { preventDefault: vi.fn() };
+    workbenchWindow.emit("close", closeEvent);
+
+    expect(closeEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(closeRequests).toEqual(["workbench"]);
+    expect(workbenchWindow.closeCount).toBe(0);
+    expect(provider.isWorkbenchCloseInFlight()).toBe(true);
+
+    await provider.approveWorkbenchCloseOnce();
+
+    expect(workbenchWindow.closeCount).toBe(1);
+    expect(provider.isWorkbenchCloseInFlight()).toBe(true);
+  });
+
+  it("does not let a programmatic Workbench close bypass the transactional interceptor", async () => {
+    const closeRequests: string[] = [];
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      shouldInterceptWorkbenchClose: () => true,
+      onWorkbenchCloseRequest: () => {
+        closeRequests.push("workbench");
+      }
+    });
+    await provider.openOrFocusWorkbench();
+
+    const state = await provider.closeWorkbench();
+
+    expect(closeRequests).toEqual(["workbench"]);
+    expect(workbenchWindow.closeCount).toBe(0);
+    expect(state.open).toBe(true);
+  });
+
+  it("waits for the closed window state report before sending the final close callback", async () => {
+    let releaseReport: (() => void) | null = null;
+    let closeCallbacks = 0;
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      reportState: (state) => {
+        if (!state.open) {
+          return new Promise<void>((resolve) => {
+            releaseReport = resolve;
+          });
+        }
+      },
+      onWorkbenchClosed: () => {
+        closeCallbacks += 1;
+      }
+    });
+    await provider.openOrFocusWorkbench();
+
+    workbenchWindow.emit("closed");
+
+    expect(closeCallbacks).toBe(0);
+    releaseReport?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(closeCallbacks).toBe(1);
+  });
+
   it("reports Windows session-end signals without treating them as a confirmed window close", async () => {
     const sessionEndEvents: string[] = [];
     const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);

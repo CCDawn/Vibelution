@@ -44,6 +44,9 @@ export type ElectronWindowProviderOptions = {
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
   shouldInterceptLauncherClose?: () => boolean;
   onLauncherCloseRequest?: () => void;
+  shouldInterceptWorkbenchClose?: () => boolean;
+  onWorkbenchCloseRequest?: () => void | Promise<void>;
+  onWorkbenchClosed?: () => void | Promise<void>;
   onWorkbenchFocusAttentionClear?: () => void;
   onOsSessionEnd?: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
 };
@@ -56,8 +59,13 @@ export class ElectronWindowProvider {
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
   private readonly shouldInterceptLauncherClose: () => boolean;
   private readonly onLauncherCloseRequest: () => void;
+  private readonly shouldInterceptWorkbenchClose: () => boolean;
+  private readonly onWorkbenchCloseRequest: () => void | Promise<void>;
+  private readonly onWorkbenchClosed: () => void | Promise<void>;
   private readonly onWorkbenchFocusAttentionClear: () => void;
   private readonly onOsSessionEnd: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
+  private workbenchCloseAuthorized = false;
+  private workbenchCloseInFlight = false;
 
   constructor(
     private readonly paths: DesktopPaths,
@@ -70,6 +78,9 @@ export class ElectronWindowProvider {
     this.reportState = options.reportState ?? (() => undefined);
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
     this.onLauncherCloseRequest = options.onLauncherCloseRequest ?? (() => undefined);
+    this.shouldInterceptWorkbenchClose = options.shouldInterceptWorkbenchClose ?? (() => false);
+    this.onWorkbenchCloseRequest = options.onWorkbenchCloseRequest ?? (() => undefined);
+    this.onWorkbenchClosed = options.onWorkbenchClosed ?? (() => undefined);
     this.onWorkbenchFocusAttentionClear = options.onWorkbenchFocusAttentionClear ?? (() => undefined);
     this.onOsSessionEnd = options.onOsSessionEnd ?? (() => undefined);
   }
@@ -133,8 +144,33 @@ export class ElectronWindowProvider {
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
       return this.reportAndReturn(closedWindowState("workbench"));
     }
+    if (this.shouldInterceptWorkbenchClose() && !this.workbenchCloseAuthorized) {
+      this.requestWorkbenchCloseTransaction();
+      return this.stateFor("workbench");
+    }
     workbenchWindow.close();
     return this.stateFor("workbench");
+  }
+
+  async approveWorkbenchCloseOnce(): Promise<ManagedWindowState> {
+    const workbenchWindow = this.workbenchWindow;
+    if (!workbenchWindow || workbenchWindow.isDestroyed()) {
+      return this.reportAndReturn(closedWindowState("workbench"));
+    }
+    this.workbenchCloseAuthorized = true;
+    workbenchWindow.close();
+    return this.stateFor("workbench");
+  }
+
+  isWorkbenchCloseInFlight(): boolean {
+    return this.workbenchCloseInFlight;
+  }
+
+  workbenchDialogParent(): ElectronWindowLike | null {
+    if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
+      return null;
+    }
+    return this.workbenchWindow;
   }
 
   snapshot(): { launcher: ManagedWindowState; workbench: ManagedWindowState } {
@@ -155,14 +191,28 @@ export class ElectronWindowProvider {
         this.onLauncherCloseRequest();
       });
     }
+    if (role === "workbench") {
+      window.on("close", (event) => {
+        if (this.workbenchCloseAuthorized || !this.shouldInterceptWorkbenchClose()) {
+          return;
+        }
+        preventWindowClose(event);
+        this.requestWorkbenchCloseTransaction();
+      });
+    }
     window.on("closed", () => {
       if (role === "launcher" && this.launcherWindow === window) {
         this.launcherWindow = null;
       }
       if (role === "workbench" && this.workbenchWindow === window) {
         this.workbenchWindow = null;
+        this.workbenchCloseAuthorized = false;
+        this.workbenchCloseInFlight = false;
       }
-      void this.reportState(closedWindowState(role));
+      const report = this.reportState(closedWindowState(role));
+      if (role === "workbench") {
+        void Promise.resolve(report).then(() => this.onWorkbenchClosed());
+      }
     });
     window.on("focus", () => {
       if (role === "workbench") {
@@ -176,6 +226,18 @@ export class ElectronWindowProvider {
     window.webContents.on("render-process-gone", () => void this.reportState(this.stateFor(role)));
     window.on("query-session-end", () => this.onOsSessionEnd("query-session-end", role));
     window.on("session-end", () => this.onOsSessionEnd("session-end", role));
+  }
+
+  private requestWorkbenchCloseTransaction(): void {
+    if (this.workbenchCloseInFlight) {
+      return;
+    }
+    this.workbenchCloseInFlight = true;
+    void Promise.resolve(this.onWorkbenchCloseRequest()).finally(() => {
+      if (!this.workbenchCloseAuthorized) {
+        this.workbenchCloseInFlight = false;
+      }
+    });
   }
 
   private interceptLauncherWindowOpenRequests(window: ElectronWindowLike): void {
