@@ -34,16 +34,60 @@ def _claim(item: dict[str, Any], parent: dict[str, Any]) -> str:
     return ""
 
 
-def _citation_locator(item: dict[str, Any]) -> dict[str, Any]:
-    explicit = item.get("citationLocator")
-    if isinstance(explicit, dict):
-        return dict(explicit)
+def _has_locator_value(locator: dict[str, Any]) -> bool:
+    return any(value not in (None, "") for value in locator.values())
+
+
+def _direct_citation_locator(item: dict[str, Any]) -> dict[str, Any]:
     locator: dict[str, Any] = {}
     for key in ("evidenceRef", "sourceRef", "locator", "doi"):
         value = item.get(key)
         if value not in (None, ""):
             locator[key] = value
     return locator
+
+
+def _first_nested_citation_locator(item: dict[str, Any]) -> dict[str, Any]:
+    for collection_key in ("claims", "evidenceRefs"):
+        for raw in item.get(collection_key) or []:
+            if not isinstance(raw, dict):
+                continue
+            explicit = raw.get("citationLocator")
+            if isinstance(explicit, dict) and _has_locator_value(explicit):
+                return dict(explicit)
+            locator = _direct_citation_locator(raw)
+            if _has_locator_value(locator):
+                return locator
+    return {}
+
+
+def _source_ref_from_parent(item: dict[str, Any]) -> str:
+    for raw in item.get("sourceRefs") or []:
+        if isinstance(raw, str) and raw:
+            return raw
+        if isinstance(raw, dict):
+            source_ref = _text(raw.get("sourceRef"))
+            if source_ref:
+                return source_ref
+    return ""
+
+
+def _citation_locator(item: dict[str, Any]) -> dict[str, Any]:
+    explicit = item.get("citationLocator")
+    if isinstance(explicit, dict) and _has_locator_value(explicit):
+        return dict(explicit)
+    locator = _direct_citation_locator(item)
+    if _has_locator_value(locator):
+        return locator
+
+    nested_locator = _first_nested_citation_locator(item)
+    if not _has_locator_value(nested_locator):
+        return {}
+    if "sourceRef" not in nested_locator:
+        source_ref = _source_ref_from_parent(item)
+        if source_ref:
+            nested_locator["sourceRef"] = source_ref
+    return nested_locator
 
 
 def _parent_context(parent: dict[str, Any]) -> dict[str, Any]:

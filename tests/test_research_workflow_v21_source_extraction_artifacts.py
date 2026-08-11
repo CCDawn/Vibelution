@@ -147,3 +147,71 @@ def test_nested_agent_result_passes_the_source_extraction_quality_contract() -> 
     assert quality["status"] == "passed"
     assert quality["details"] == {"evidenceCardCount": 1}
     assert records == {}
+
+
+def test_real_agent_writeback_claim_anchor_passes_the_quality_contract() -> None:
+    definition = build_challenge_cup_workflow_definition()
+    node_spec = next(
+        node for node in definition.nodes if node.nodeId == "source_extraction"
+    )
+    record = {
+        "runId": "run-extraction",
+        "workflowVersionId": f"{definition.workflowId}@{definition.schemaVersion}",
+        "inputSnapshot": {"environmentSnapshotRef": "fixture://environment"},
+        "artifactManifests": [
+            {"artifactId": "source_candidate_batch:input"}
+        ],
+    }
+    task = {
+        "taskId": "task-extraction",
+        "sessionId": "session-extraction",
+        "result": {
+            "candidateExtractions": [
+                {
+                    "candidateId": "candidate-a",
+                    "valueSummary": "Controlled thresholding reduces redundant updates.",
+                    "sourceRefs": ["https://example.test/a"],
+                    "claims": [
+                        {
+                            "claim": "Controlled thresholding reduces redundant updates.",
+                            "sourceRef": "https://example.test/a",
+                            "evidenceRef": "record-anchor-a",
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+    manifests, payloads = build_agent_task_artifacts(
+        record=record,
+        node_spec=node_spec,
+        node_run={
+            "nodeRunId": "node-run-extraction",
+            "attempt": 1,
+            "inputSnapshotHash": "a" * 64,
+            "agentId": "agent-extraction",
+            "modelRef": "fixture-model",
+        },
+        task=task,
+        created_at="2026-08-10T00:00:00Z",
+    )
+
+    quality, records = validate_artifact_quality(
+        record,
+        node_id="source_extraction",
+        manifests=[item.to_dict() for item in manifests],
+        payloads=payloads,
+    )
+
+    cards = payloads[next(
+        item.artifactId
+        for item in manifests
+        if item.artifactId.startswith("evidence_card_batch:")
+    )]["evidenceCards"]
+    assert cards[0]["citationLocator"] == {
+        "evidenceRef": "record-anchor-a",
+        "sourceRef": "https://example.test/a",
+    }
+    assert quality is not None
+    assert quality["status"] == "passed"
+    assert records == {}
