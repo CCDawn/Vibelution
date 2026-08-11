@@ -88,6 +88,10 @@ function Assert-NoOtherVibelutionDesktopProcesses {
 }
 
 function Assert-NoActiveWorkbenchWork {
+    # Package smoke may have stopped an earlier Launcher control plane.  Restore only
+    # that control plane here (never the managed browser) so the active-work gate is
+    # authoritative before a canary is allowed to build or open a package.
+    $null = Ensure-LauncherControlForCanary
     $launcherStatePath = Join-Path $projectDir ".runtime/launcher/state.json"
     if (-not (Test-Path -LiteralPath $launcherStatePath)) {
         throw "Launcher state is unavailable; refusing to run a Workbench-close canary without an active-work check."

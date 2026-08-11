@@ -95,9 +95,23 @@ def test_workbench_close_canary_bootstraps_control_after_package_smoke_shutdown(
 
     active_work_check_index = source.index("$activeWorkCountBeforeCanary = Assert-NoActiveWorkbenchWork")
     package_verify_index = source.index("if (-not $SkipPackageVerification)")
-    control_bootstrap_index = source.index("$null = Ensure-LauncherControlForCanary")
+    control_bootstrap_index = source.rindex("$null = Ensure-LauncherControlForCanary")
     quiesce_index = source.index("$managedWorkbenchState = Close-ManagedWorkbenchForCanary -RecoveryRequired")
     assert active_work_check_index < package_verify_index < control_bootstrap_index < quiesce_index
+
+
+def test_workbench_close_canary_restores_control_before_active_work_gate():
+    source = WORKBENCH_CLOSE_CANARY_SCRIPT.read_text(encoding="utf-8")
+    active_work_function = source[
+        source.index("function Assert-NoActiveWorkbenchWork") : source.index(
+            "function Ensure-LauncherControlForCanary"
+        )
+    ]
+
+    assert "$null = Ensure-LauncherControlForCanary" in active_work_function
+    assert active_work_function.index("$null = Ensure-LauncherControlForCanary") < active_work_function.index(
+        "Invoke-RestMethod -Uri \"$launcherOrigin/api/launcher/status\""
+    )
 
 
 def test_launcher_script_is_utf8_with_bom_for_windows_powershell_compatibility():
