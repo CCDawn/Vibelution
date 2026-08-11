@@ -1131,9 +1131,14 @@ def test_workbench_supervised_evolution_dataset_run_persists_state(monkeypatch, 
         bundle_name = "custom_prompt_jsonl_v1"
         case_count = 2
         bundle_path = str(tmp_path / "workspace" / "evaluation" / "bundles" / "custom_prompt_jsonl_v1.json")
+        summary = "已物化 custom_prompt_jsonl_v1（2 cases）"
 
     monkeypatch.setattr(
         "core.evaluation.dataset_registry.materialize_dataset_bundle",
+        lambda *args, **kwargs: Materialized(),
+    )
+    monkeypatch.setattr(
+        "core.ui.workbench.prepare_dataset_run",
         lambda *args, **kwargs: Materialized(),
     )
 
@@ -1240,6 +1245,19 @@ def test_workbench_supervised_evolution_dataset_flow_uses_saved_defaults(monkeyp
             bundle_name="saved_dataset_v1",
             case_count=3,
             bundle_path=str(tmp_path / "workspace" / "evaluation" / "bundles" / "saved_dataset_v1.json"),
+            summary="已物化 saved_dataset_v1（3 cases）",
+        ),
+    )
+    monkeypatch.setattr(
+        "core.ui.workbench.prepare_dataset_run",
+        lambda *args, **kwargs: SimpleNamespace(
+            dataset_name="saved_dataset",
+            runnable=True,
+            adapter_status="ready",
+            bundle_name="saved_dataset_v1",
+            case_count=3,
+            bundle_path=str(tmp_path / "workspace" / "evaluation" / "bundles" / "saved_dataset_v1.json"),
+            summary="已物化 saved_dataset_v1（3 cases）",
         ),
     )
 
