@@ -11,6 +11,7 @@ from core.chat.conversation_store.importer import (
     AgentConfigImportError,
     LegacyAgentConfigImporter,
 )
+from core.chat.conversation_store.repository import AgentConfigRevisionConflictError
 from core.web.services.agent_config_authority import (
     agent_config_hash,
     canonical_agent_config_payload,
@@ -142,6 +143,59 @@ def test_importer_is_idempotent_and_preserves_immutable_config_revisions(
         assert current["configRevisionId"] != original_revision_id
         assert current["config"] == canonical_agent_config_payload(changed)
         assert previous["config"] == canonical_agent_config_payload(alpha)
+    finally:
+        store.close()
+
+
+def test_config_compare_and_swap_rejects_stale_revision_without_rollback(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    source_path = tmp_path / "workspace" / "agents" / "agents.json"
+    alpha = _agent("agent-alpha")
+    _write_registry(source_path, [alpha])
+    store = _open_store(tmp_path)
+    try:
+        initial = LegacyAgentConfigImporter(store.repository).import_file(source_path)
+        initial_revision_id = initial["agents"][0]["configRevisionId"]
+        changed = _agent("agent-alpha", model_id="deepseek-v4-flash")
+        updated = store.repository.compare_and_swap_agent_config(
+            agent_id="agent-alpha",
+            expected_config_revision_id=initial_revision_id,
+            display_name="Alpha",
+            kind="assistant",
+            status="active",
+            config=canonical_agent_config_payload(changed),
+            source="test_config_update",
+        ).result(timeout=3)
+        assert updated["action"] == "revised"
+
+        with pytest.raises(AgentConfigRevisionConflictError):
+            store.repository.compare_and_swap_agent_config(
+                agent_id="agent-alpha",
+                expected_config_revision_id=initial_revision_id,
+                display_name="Alpha",
+                kind="assistant",
+                status="active",
+                config=canonical_agent_config_payload(alpha),
+                source="test_config_update",
+            ).result(timeout=3)
+
+        recovered = store.repository.compare_and_swap_agent_config(
+            agent_id="agent-alpha",
+            expected_config_revision_id=updated["configRevisionId"],
+            display_name="Alpha",
+            kind="assistant",
+            status="active",
+            config=canonical_agent_config_payload(changed),
+            source="test_config_update",
+        ).result(timeout=3)
+        assert recovered["action"] == "reused"
+
+        current = store.repository.get_current_agent_config("agent-alpha")
+        assert current is not None
+        assert current["configRevisionId"] == updated["configRevisionId"]
+        assert current["config"] == canonical_agent_config_payload(changed)
     finally:
         store.close()
 
