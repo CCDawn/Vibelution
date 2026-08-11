@@ -46,6 +46,7 @@ def test_agent_tool_governance_low_risk_change_auto_applies_for_governance_agent
         role_key="research_broad",
         prompt_template_id="prompt-research-broad",
     )
+    baseline_allowed = list(target["toolPolicy"]["allowedTools"])
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
@@ -59,8 +60,8 @@ def test_agent_tool_governance_low_risk_change_auto_applies_for_governance_agent
     assert request["status"] == "applied"
     assert request["requiresApproval"] is False
     assert request["riskLevel"] == "low"
-    assert updated["toolPolicy"]["allowedTools"] == ["grep_search_tool", "glob_tool"]
-    assert request["after"]["allowedTools"] == ["grep_search_tool", "glob_tool"]
+    assert updated["toolPolicy"]["allowedTools"] == [*baseline_allowed, "grep_search_tool", "glob_tool"]
+    assert request["after"]["allowedTools"] == [*baseline_allowed, "grep_search_tool", "glob_tool"]
     assert any(
         event[0][:3] == ("agent_tool_governance", "tool_policy", "agent_tool_governance.request_applied")
         and event[1]["fields"]["targetAgentId"] == target["agentId"]
@@ -83,6 +84,7 @@ def test_agent_tool_governance_high_risk_change_waits_for_review_and_can_be_appr
         role_key="research_broad",
         prompt_template_id="prompt-research-broad",
     )
+    baseline_allowed = list(target["toolPolicy"]["allowedTools"])
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
@@ -96,7 +98,7 @@ def test_agent_tool_governance_high_risk_change_waits_for_review_and_can_be_appr
     assert request["status"] == "pending_review"
     assert request["requiresApproval"] is True
     assert request["riskLevel"] == "high"
-    assert unchanged["toolPolicy"]["allowedTools"] == []
+    assert unchanged["toolPolicy"]["allowedTools"] == baseline_allowed
 
     approved = agent_tool_governance_service.resolve_tool_governance_request(
         target["agentId"],
@@ -109,7 +111,7 @@ def test_agent_tool_governance_high_risk_change_waits_for_review_and_can_be_appr
 
     assert approved["status"] == "applied"
     assert approved["resolvedBy"] == "user"
-    assert updated["toolPolicy"]["allowedTools"] == ["cli_tool"]
+    assert updated["toolPolicy"]["allowedTools"] == [*baseline_allowed, "cli_tool"]
 
 
 def test_agent_tool_governance_session_scope_approval_does_not_persist_policy(tmp_path, monkeypatch):
@@ -120,6 +122,7 @@ def test_agent_tool_governance_session_scope_approval_does_not_persist_policy(tm
         role_key="research_broad",
         prompt_template_id="prompt-research-broad",
     )
+    baseline_allowed = list(target["toolPolicy"]["allowedTools"])
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
@@ -135,7 +138,7 @@ def test_agent_tool_governance_session_scope_approval_does_not_persist_policy(tm
 
     assert request["status"] == "pending_review"
     assert request["grantScope"] == "session"
-    assert unchanged["toolPolicy"]["allowedTools"] == []
+    assert unchanged["toolPolicy"]["allowedTools"] == baseline_allowed
 
     approved = agent_tool_governance_service.resolve_tool_governance_request(
         target["agentId"],
@@ -160,11 +163,11 @@ def test_agent_tool_governance_session_scope_approval_does_not_persist_policy(tm
     assert approved["grantScope"] == "session"
     assert approved["appliedToolPolicyId"] == ""
     assert approved["temporaryGrant"]["grantTools"] == ["cli_tool"]
-    assert still_persistent["toolPolicy"]["allowedTools"] == []
-    assert base_policy["allowedTools"] == []
-    assert session_policy["allowedTools"] == ["cli_tool"]
+    assert still_persistent["toolPolicy"]["allowedTools"] == baseline_allowed
+    assert base_policy["allowedTools"] == baseline_allowed
+    assert session_policy["allowedTools"] == [*baseline_allowed, "cli_tool"]
     assert session_policy["temporaryAllowedTools"] == ["cli_tool"]
-    assert other_session_policy["allowedTools"] == []
+    assert other_session_policy["allowedTools"] == baseline_allowed
 
 
 def test_session_detail_surfaces_pending_tool_governance_request(tmp_path, monkeypatch):
@@ -201,6 +204,7 @@ def test_agent_tool_governance_uses_shared_tool_catalog_risk_metadata(tmp_path, 
         role_key="research_broad",
         prompt_template_id="prompt-research-broad",
     )
+    baseline_allowed = list(target["toolPolicy"]["allowedTools"])
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
@@ -213,7 +217,7 @@ def test_agent_tool_governance_uses_shared_tool_catalog_risk_metadata(tmp_path, 
     assert request["status"] == "pending_review"
     assert request["riskLevel"] == "high"
     assert {"model_cost", "artifact_write"}.issubset(set(request["riskTags"]))
-    assert agent_directory_service.get_agent(target["agentId"])["toolPolicy"]["allowedTools"] == []
+    assert agent_directory_service.get_agent(target["agentId"])["toolPolicy"]["allowedTools"] == baseline_allowed
 
 
 def test_agent_tool_governance_rejects_disabled_rtoken_search_grants(tmp_path, monkeypatch):

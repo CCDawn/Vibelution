@@ -872,10 +872,10 @@ class TestSearchSecurity:
             for tool in create_key_tools()
         }
 
-        assert "workspace_write" in tools_by_name["exec_command"].description
-        assert "外部绝对路径" in tools_by_name["exec_command"].description
-        assert "所有目标必须位于 cwd 内" in tools_by_name["apply_patch_tool"].description
-        assert "回滚本次已写文件" in tools_by_name["apply_patch_tool"].description
+        assert "沙盒" in tools_by_name["exec_command"].description
+        assert "shell 路由/方言" in tools_by_name["exec_command"].description
+        assert "workspace_write" in tools_by_name["apply_patch_tool"].description
+        assert "回滚" in tools_by_name["apply_patch_tool"].description
 
     def test_search_does_not_write_files(self, sample_project):
         """测试搜索不写入文件"""
