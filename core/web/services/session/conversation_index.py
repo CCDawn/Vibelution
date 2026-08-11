@@ -1228,6 +1228,7 @@ def create_chat_session(
             s._sync_agent_directory_project_root()
             agent = s.ensure_agent_for_session(
                 session_id,
+                display_name=normalized_title if not s._is_default_empty_session_title(normalized_title) else "",
                 llm_bindings=normalized_llm_bindings,
                 session_workspace_path=str(conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)),
                 created_by=created_by,
@@ -1606,7 +1607,7 @@ def _agent_directory_stub_hidden_from_user_index(
 def _agent_directory_stub_hidden_team_member_ids() -> set[str]:
     s = _service()
     try:
-        from . import team_service
+        from .. import team_service
 
         payload = team_service.list_teams_compact(include_archived=False)
     except Exception:
