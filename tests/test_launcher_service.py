@@ -356,6 +356,45 @@ def test_window_provider_dispatcher_routes_electron_to_desktop_action_without_ed
     assert edge_provider.calls == []
 
 
+def test_workbench_close_dispatch_declares_electron_as_external_window_owner(monkeypatch):
+    from core.launcher import lifecycle_action_dispatcher
+
+    calls = []
+    monkeypatch.setattr(
+        lifecycle_action_dispatcher.command_queue,
+        "submit_command",
+        lambda command_type, *, requested_by, args: calls.append((command_type, requested_by, args))
+        or {"accepted": True, "commandId": "command-close-1"},
+    )
+
+    dispatched = lifecycle_action_dispatcher.dispatch_workbench_close_transaction(
+        {
+            "closeId": "workbench-close-1",
+            "desktopSessionId": "desktop-session-1",
+            "expectedDesktopSessionRevision": 4,
+            "mode": "normal",
+            "reason": "user_requested_close",
+        }
+    )
+
+    assert dispatched == {"dispatched": True, "accepted": True, "commandId": "command-close-1"}
+    assert calls == [
+        (
+            "close_workbench",
+            "electron_workbench_close",
+            {
+                "reason": "user_requested_close",
+                "source": "electron_workbench_close",
+                "desktopSessionId": "desktop-session-1",
+                "expectedDesktopSessionRevision": 4,
+                "workbenchCloseId": "workbench-close-1",
+                "confirmationCloseId": "",
+                "externalWindowOwner": "electron",
+            },
+        )
+    ]
+
+
 def test_standalone_launcher_app_exposes_force_stop_route(monkeypatch):
     calls = []
     monkeypatch.setattr(
