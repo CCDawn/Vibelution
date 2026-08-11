@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.routes import team_workflows
+from core.web.routes.team_workflows import experiment as team_workflows_experiment
 
 
 def _client() -> TestClient:
@@ -52,7 +52,7 @@ def test_get_challenge_question_detail_exposes_explicit_read_only_contract(monke
         calls.append((team_id, question_id, run_id))
         return _detail()
 
-    monkeypatch.setattr(team_workflows, "get_challenge_question_run_detail", fake_detail)
+    monkeypatch.setattr(team_workflows_experiment, "get_challenge_question_run_detail", fake_detail)
 
     response = _client().get(
         "/api/teams/research-team/workflow-orchestration/challenge-program/questions/SCI-096",
@@ -69,7 +69,7 @@ def test_get_challenge_question_detail_fails_closed_instead_of_loading_active_pr
     def fake_detail(team_id: str, question_id: str, *, run_id: str = "") -> dict:
         raise ValueError("challenge_question_run_not_found: no registered output exists for this question.")
 
-    monkeypatch.setattr(team_workflows, "get_challenge_question_run_detail", fake_detail)
+    monkeypatch.setattr(team_workflows_experiment, "get_challenge_question_run_detail", fake_detail)
 
     response = _client().get(
         "/api/teams/research-team/workflow-orchestration/challenge-program/questions/SCI-999"
