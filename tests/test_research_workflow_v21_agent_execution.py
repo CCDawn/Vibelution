@@ -9,6 +9,7 @@ import pytest
 
 from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.web.services import session_service
 from core.web.services.team_workflow.research_runtime.node_command_adapter import (
     node_command_capabilities,
 )
@@ -29,6 +30,17 @@ SOURCE_AGENTS = {
 }
 
 BUDGET_REQUEST = {"tokens": 100, "toolCalls": 2, "wallClockSeconds": 30}
+
+
+@pytest.fixture(autouse=True)
+def _canonical_session_detail_for_external_adapter_fixtures(monkeypatch):
+    """External-adapter fixtures return synthetic task anchors, not real Chat rows."""
+
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda session_id, **_kwargs: {"id": str(session_id or ""), "agentId": ""},
+    )
 
 
 def test_chat_deep_link_preserves_exact_team_run_node_return_context() -> None:
@@ -609,3 +621,52 @@ def test_parallel_task_limit_blocks_second_bundle_before_external_dispatch(
         )
     assert getattr(exc.value, "code", "") == "parallel_budget_exhausted"
     assert len(calls) == 1
+
+
+def test_agent_task_does_not_bind_a_session_missing_from_chat_authority(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = _service(tmp_path / "missing-canonical-session")
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(workflowDefaults=SOURCE_AGENTS),
+        idempotency_key="create-missing-canonical-session",
+    )
+    run = _make_node_ready(
+        service,
+        run,
+        node_id="source_finding",
+        agent_id=SOURCE_AGENTS["source_finder"],
+    )
+    service._store.update_run(
+        run["runId"], {"sourceCollectionRunId": "source-run-missing-session"}
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_session.start_source_collection_stage_session_task",
+        lambda _team_id, _source_run_id, _payload: {
+            "taskId": "task-missing-session",
+            "agentId": SOURCE_AGENTS["source_finder"],
+            "sessionId": "session-missing-session",
+            "sessionAttempt": 1,
+            "turn": {"turnId": "turn-missing-session"},
+        },
+    )
+    monkeypatch.setattr(session_service, "get_session_detail", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(ResearchWorkflowError) as exc:
+        service.apply_node_command(
+            run["runId"],
+            "source_finding",
+            "start_agent_task",
+            payload={
+                "idempotencyKey": "start-missing-session",
+                "budgetRequest": BUDGET_REQUEST,
+            },
+        )
+
+    assert getattr(exc.value, "code", "") == "task_session_not_canonical"
+    persisted = service.get_run(run["runId"])
+    assert service._store.get_session_binding(run["runId"], "source_finding") is None
+    assert persisted["nodeRuns"][0]["status"] == "ready"

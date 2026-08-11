@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import pytest
 
+from core.chat.turn_journal import (
+    EVENT_TURN_STARTED,
+    EVENT_USER_MESSAGE,
+    append_turn_event,
+)
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -128,6 +133,126 @@ def test_same_project_agent_reuses_flat_session_without_touching_direct_session(
         == legacy_direct_session["id"]
     )
     assert session_service.get_session_detail(legacy_direct_session["id"]) is not None
+
+
+def test_project_agent_session_recovers_exact_identity_from_real_stage_turn_journal(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    created = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="资料寻找",
+        created_from_task_id="stage-task-recovery",
+    )
+    session_id = created["sessionId"]
+    turn_id = "turn-stage-recovery"
+    timestamp = "2026-08-11T01:02:03Z"
+    append_turn_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TURN_STARTED,
+        status="running",
+        payload={"agentId": agent["agentId"]},
+        source="test.stage_task",
+        timestamp=timestamp,
+    )
+    append_turn_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_USER_MESSAGE,
+        status="completed",
+        payload={
+            "content": "stage task",
+            "metadata": {
+                "kind": "source_collection_stage_session_task",
+                "sourceSurface": "team_workflow_stage_task",
+                "teamId": team["teamId"],
+                "researchProjectId": project["projectId"],
+                "experimentName": project["name"],
+                "agentId": agent["agentId"],
+                "agentRole": "source_finder",
+                "sessionAttempt": 1,
+                "retryOfSessionId": "",
+                "sourceCollectionStageTaskId": "stage-task-recovery",
+            },
+        },
+        source="test.stage_task",
+        timestamp=timestamp,
+    )
+    with session_service._CHAT_STATE_LOCK:
+        state = session_service.load_chat_state(tmp_path)
+        state["conversations"] = [
+            item
+            for item in state.get("conversations", [])
+            if item.get("conversation_id") != session_id
+        ]
+        session_service.save_chat_state(tmp_path, state)
+
+    recovered = session_service.get_session_detail(session_id)
+
+    assert recovered is not None
+    assert recovered["id"] == session_id
+    assert recovered["title"] == "层级反馈实验｜资料寻找"
+    assert recovered["agentId"] == agent["agentId"]
+    assert recovered["experimentBinding"] == {
+        "teamId": team["teamId"],
+        "researchProjectId": project["projectId"],
+        "experimentName": project["name"],
+        "agentId": agent["agentId"],
+        "roleKey": "source_finder",
+        "roleLabel": "资料寻找",
+        "attempt": 1,
+        "retryOfSessionId": "",
+        "createdFromTaskId": "stage-task-recovery",
+        "createdAt": timestamp,
+    }
+
+
+def test_project_agent_session_does_not_register_created_session_without_canonical_detail(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    monkeypatch.setattr(
+        session_service,
+        "create_chat_session",
+        lambda **_kwargs: {"id": "session-orphaned"},
+    )
+    monkeypatch.setattr(session_service, "get_session_detail", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(
+        ResearchProjectAgentSessionError,
+        match="canonical session",
+    ):
+        resolve_research_project_agent_session(
+            team["teamId"],
+            research_project_id=project["projectId"],
+            agent_id=agent["agentId"],
+            role_key="source_finder",
+            role_label="资料寻找",
+            created_from_task_id="stage-task-orphan",
+        )
+
+    with pytest.raises(
+        ResearchProjectAgentSessionError,
+        match="canonical session",
+    ):
+        resolve_research_project_agent_session(
+            team["teamId"],
+            research_project_id=project["projectId"],
+            agent_id=agent["agentId"],
+            role_key="source_finder",
+            role_label="资料寻找",
+            created_from_task_id="stage-task-orphan",
+        )
 
 
 def test_missing_canonical_project_agent_session_fails_closed_and_requires_formal_retry(

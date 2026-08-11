@@ -216,6 +216,7 @@ import {
 import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useChatSessionSelection } from "./useChatSessionSelection";
+import { shouldKeepExplicitSessionRouteOnNotFound } from "./chatSessionRouteSync";
 import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
@@ -1112,6 +1113,15 @@ export function ChatCodingRoute() {
       || !sessionDetailQuery.isError
       || !isSessionNotFoundError(sessionDetailQuery.error)
     ) {
+      return;
+    }
+    if (shouldKeepExplicitSessionRouteOnNotFound({
+      requestedSessionId,
+      activeSessionId,
+    })) {
+      // A workflow handoff is an exact audit anchor. Preserve its URL and the
+      // existing blocking error rather than making the user inspect another
+      // session after an authority failure.
       return;
     }
     const nextActiveSessionId = sessionsQuery.data.find((session) => session.id !== activeSessionId)?.id || "";

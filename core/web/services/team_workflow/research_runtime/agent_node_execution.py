@@ -150,6 +150,35 @@ def _task_anchor(started: dict[str, Any]) -> dict[str, str | int]:
     }
 
 
+def _require_canonical_task_session(*, session_id: str, agent_id: str) -> None:
+    """Reject a task anchor unless its session resolves through the Chat authority."""
+    from core.web.services import session_service
+
+    normalized_session_id = str(session_id or "").strip()
+    try:
+        detail = session_service.get_session_detail(
+            normalized_session_id,
+            message_limit=0,
+            transcript_scope="none",
+        )
+    except Exception as exc:
+        raise AgentNodeExecutionError(
+            "Agent task session authority could not be verified",
+            code="task_session_authority_unavailable",
+        ) from exc
+    if not isinstance(detail, dict) or str(detail.get("id") or "").strip() != normalized_session_id:
+        raise AgentNodeExecutionError(
+            "Agent task session is missing from the canonical session index",
+            code="task_session_not_canonical",
+        )
+    canonical_agent_id = str(detail.get("agentId") or "").strip()
+    if canonical_agent_id and canonical_agent_id != agent_id:
+        raise AgentNodeExecutionError(
+            "Agent task session Agent does not match the frozen NodeRun binding",
+            code="task_session_agent_mismatch",
+        )
+
+
 def _start_external_task(
     store: WorkflowRunStore,
     record: dict[str, Any],
@@ -335,6 +364,10 @@ def start_agent_node_execution(
             f"Agent task anchor is incomplete: {', '.join(missing)}",
             code="incomplete_task_anchor",
         )
+    _require_canonical_task_session(
+        session_id=str(anchor["sessionId"]),
+        agent_id=agent_id,
+    )
     try:
         binding = SessionBindingBridge(store).put(
             record,

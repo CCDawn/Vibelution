@@ -164,7 +164,13 @@ def get_session_detail(
         transcript_scope=transcript_scope,
     )
 
-    s._ensure_agent_directory_conversation_materialized(normalized_session_id, source="s.get_session_detail")
+    # Exact deep links are allowed to recover a real, non-deleted session
+    # workspace.  A missing row must not make the client silently switch to an
+    # unrelated active conversation.
+    s._ensure_session_conversation_record(
+        normalized_session_id,
+        source="session.detail",
+    )
     agent_by_id = s._agent_lookup_for_conversations()
     payload = s.load_chat_state(s.PROJECT_ROOT)
     if s._find_conversation_entry(payload, normalized_session_id) is None:

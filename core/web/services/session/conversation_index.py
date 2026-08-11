@@ -1849,6 +1849,106 @@ def _recover_agent_id_from_session_journal(session_id: str) -> str:
     return ""
 
 
+def _recover_stage_task_workspace_conversation(session_id: str) -> dict[str, Any] | None:
+    """Recover a stage-task session only when its journal has a complete identity."""
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    workspace = s._session_workspace_dir_if_present(normalized_session_id)
+    if workspace is None:
+        return None
+    journal_path = workspace / "turn_journal.jsonl"
+    if not journal_path.is_file():
+        return None
+    journal_agent_id = s._recover_agent_id_from_session_journal(normalized_session_id)
+    if not journal_agent_id:
+        return None
+    try:
+        with journal_path.open("r", encoding="utf-8", errors="replace") as handle:
+            for index, line in enumerate(handle):
+                if index >= 120:
+                    break
+                try:
+                    event = json.loads(str(line or ""))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if not isinstance(event, dict) or str(event.get("eventType") or "") != "user_message":
+                    continue
+                payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+                metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+                if (
+                    str(metadata.get("kind") or "") != "source_collection_stage_session_task"
+                    or str(metadata.get("sourceSurface") or "") != "team_workflow_stage_task"
+                ):
+                    continue
+                team_id = str(metadata.get("teamId") or "").strip()[:160]
+                project_id = str(metadata.get("researchProjectId") or "").strip()[:160]
+                experiment_name = str(metadata.get("experimentName") or "").strip()[:160]
+                agent_id = str(metadata.get("agentId") or "").strip()[:160]
+                role_key = str(metadata.get("agentRole") or "").strip()[:80]
+                task_id = str(metadata.get("sourceCollectionStageTaskId") or "").strip()[:160]
+                if (
+                    not all((team_id, project_id, experiment_name, agent_id, role_key, task_id))
+                    or agent_id != journal_agent_id
+                ):
+                    return None
+                try:
+                    attempt = max(1, int(metadata.get("sessionAttempt") or 1))
+                except (TypeError, ValueError):
+                    return None
+                agent = s.get_agent(agent_id, include_archived=True)
+                if not isinstance(agent, dict):
+                    return None
+                agent_metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+                role_label = str(
+                    agent.get("roleLabel")
+                    or agent_metadata.get("functionalDisplayName")
+                    or agent_metadata.get("roleLabel")
+                    or agent.get("displayName")
+                    or role_key
+                ).strip()[:80]
+                if not role_label:
+                    return None
+                retry_of_session_id = str(metadata.get("retryOfSessionId") or "").strip()[:160]
+                created_at = str(event.get("timestamp") or "").strip()[:120] or s._now_timestamp()
+                retry_suffix = f"｜重试 {attempt}" if attempt > 1 else ""
+                suffix = f"｜{role_label}{retry_suffix}"
+                title = f"{experiment_name[:max(1, 120 - len(suffix))]}{suffix}"
+                conversation = s._make_empty_conversation(
+                    normalized_session_id,
+                    title=title,
+                    timestamp=created_at,
+                    conversation_index_kind=s.agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+                )
+                conversation.update(
+                    {
+                        "agent_id": agent_id,
+                        "agentId": agent_id,
+                        "session_role": "workspace",
+                        "sessionRole": "workspace",
+                        "experiment_binding": {
+                            "teamId": team_id,
+                            "researchProjectId": project_id,
+                            "experimentName": experiment_name,
+                            "agentId": agent_id,
+                            "roleKey": role_key,
+                            "roleLabel": role_label,
+                            "attempt": attempt,
+                            "retryOfSessionId": retry_of_session_id,
+                            "createdFromTaskId": task_id,
+                            "createdAt": created_at,
+                        },
+                    }
+                )
+                conversation["experimentBinding"] = dict(conversation["experiment_binding"])
+                s._ensure_conversation_workspace_metadata(conversation)
+                return conversation
+    except OSError:
+        return None
+    return None
+
+
 def _recover_missing_conversation_from_workspace_locked(
     payload: dict[str, Any],
     session_id: str,
@@ -1885,9 +1985,14 @@ def _recover_missing_conversation_from_workspace_locked(
     # Require real activity — bare empty workspaces must not re-enter the index.
     if not s._session_workspace_has_recoverable_activity(normalized_session_id):
         return False
-    agent_id = s._recover_agent_id_from_session_journal(normalized_session_id)
+    stage_task_conversation = s._recover_stage_task_workspace_conversation(
+        normalized_session_id
+    )
+    agent_id = str((stage_task_conversation or {}).get("agentId") or "").strip()
     agent = s.get_agent(agent_id, include_archived=True) if agent_id else None
-    if isinstance(agent, dict) and agent:
+    if isinstance(stage_task_conversation, dict):
+        conversation = stage_task_conversation
+    elif isinstance(agent, dict) and agent:
         conversation = s._agent_directory_conversation_record(
             agent,
             session_id=normalized_session_id,

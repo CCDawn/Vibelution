@@ -52,3 +52,13 @@ export function shouldDeferUrlSessionSync(options: {
   const graceMs = options.graceMs ?? SESSION_ROUTE_INTENT_GRACE_MS;
   return nowMs - Number(options.intentAtMs || 0) < graceMs;
 }
+
+/** A hard URL target must never silently turn into an unrelated active session. */
+export function shouldKeepExplicitSessionRouteOnNotFound(options: {
+  requestedSessionId: string | null | undefined;
+  activeSessionId: string | null | undefined;
+}): boolean {
+  const requestedSessionId = String(options.requestedSessionId || "").trim();
+  const activeSessionId = String(options.activeSessionId || "").trim();
+  return Boolean(requestedSessionId && activeSessionId && requestedSessionId === activeSessionId);
+}

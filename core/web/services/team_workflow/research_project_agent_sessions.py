@@ -448,9 +448,34 @@ def resolve_research_project_agent_session(
             conversation_index_kind=s.agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
             experiment_binding=binding,
         )
+        created_session_id = _text(session.get("id"))
+        canonical_detail = (
+            s.session_service.get_session_detail(created_session_id)
+            if created_session_id
+            else None
+        )
+        canonical_agent_id = _text(
+            canonical_detail.get("agentId") if isinstance(canonical_detail, dict) else ""
+        )
+        canonical_binding = (
+            canonical_detail.get("experimentBinding")
+            if isinstance(canonical_detail, dict)
+            and isinstance(canonical_detail.get("experimentBinding"), dict)
+            else {}
+        )
+        if (
+            not isinstance(canonical_detail, dict)
+            or canonical_agent_id != normalized_agent_id
+            or _text(canonical_binding.get("teamId")) != normalized_team_id
+            or _text(canonical_binding.get("researchProjectId")) != normalized_project_id
+        ):
+            raise ResearchProjectAgentSessionError(
+                "New project Agent session is missing from the canonical session index; "
+                "the registry was not updated. Retry only after the session authority error is repaired."
+            )
         attempt = _normalize_attempt(
             {
-                "sessionId": session.get("id"),
+                "sessionId": created_session_id,
                 "agentId": normalized_agent_id,
                 "roleKey": normalized_role_key,
                 "attempt": attempt_number,
