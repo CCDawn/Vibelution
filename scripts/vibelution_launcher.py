@@ -415,19 +415,29 @@ def _retire_project_workbench_instance(state: dict, port: int | None = None) -> 
         or DEFAULT_PORT
     )
     handles = _collect_project_workbench_handles(state, resolved_port)
+    termination_failures: list[str] = []
     for pid in sorted(handles, reverse=True):
-        _terminate_pid(pid)
+        reason = _terminate_pid(pid)
+        if reason:
+            termination_failures.append(reason)
     # Port may still be TIME_WAIT or a slow child — wait for this project's listener to leave.
     if resolved_port > 0:
         owner = _listening_pid_for_port(resolved_port)
         if owner > 0 and _is_project_workbench_pid(owner):
-            _terminate_pid(owner)
+            reason = _terminate_pid(owner)
+            if reason:
+                termination_failures.append(reason)
             if not _wait_for_port_release(resolved_port):
                 still = _listening_pid_for_port(resolved_port)
                 if still > 0 and _is_project_workbench_pid(still):
+                    detail = (
+                        f" Termination failures: {'; '.join(termination_failures)}."
+                        if termination_failures
+                        else ""
+                    )
                     raise RuntimeError(
                         f"Failed to retire previous workbench on port {resolved_port} "
-                        f"(still held by project pid {still})."
+                        f"(still held by project pid {still}).{detail}"
                     )
     return handles
 
@@ -2027,22 +2037,31 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     return state
 
 
-def _terminate_pid(pid: int) -> None:
+def _terminate_pid(pid: int) -> str:
+    """Terminate a pid with SIGTERM then SIGKILL escalation.
+
+    Returns an empty string when the pid is confirmed dead (or was already
+    gone); otherwise returns a short reason so callers can surface why a
+    retire/cleanup could not complete instead of failing silently.
+    """
     if pid <= 0 or not _pid_alive(pid):
-        return
+        return ""
     try:
         os.kill(pid, signal.SIGTERM)
-    except OSError:
-        return
+    except OSError as exc:
+        return f"os.kill({pid}, SIGTERM) failed: {exc}"
     deadline = time.monotonic() + 8.0
     while time.monotonic() < deadline:
         if not _pid_alive(pid):
-            return
+            return ""
         time.sleep(0.2)
     try:
         os.kill(pid, signal.SIGKILL)
-    except OSError:
-        return
+    except OSError as exc:
+        return f"os.kill({pid}, SIGKILL) failed: {exc}"
+    if not _pid_alive(pid):
+        return ""
+    return f"pid {pid} still alive after SIGTERM and SIGKILL"
 
 
 def _stop_backend() -> dict:

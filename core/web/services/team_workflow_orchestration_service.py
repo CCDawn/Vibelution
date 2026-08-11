@@ -922,7 +922,6 @@ SOURCE_COLLECTION_STAGE_REQUIRED_TOOLS = (
 
 
 SOURCE_COLLECTION_SEARCH_REQUIRED_TOOLS = (
-    "web_search_tool",
     "batch_web_search_tool",
     "paper_search_tool",
 )

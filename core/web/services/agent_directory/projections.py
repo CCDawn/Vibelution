@@ -308,12 +308,13 @@ def _build_agent_api_hydration_context(
         if not agent_id:
             continue
         path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
-        agent_inbox_messages_by_agent[agent_id] = s._read_recent_jsonl(
+        recent, pending_count = s._read_recent_jsonl_with_count(
             path,
             limit=8,
             status="pending",
         )
-        agent_inbox_pending_count_by_agent[agent_id] = s._count_jsonl_matching_status(path, status="pending")
+        agent_inbox_messages_by_agent[agent_id] = recent
+        agent_inbox_pending_count_by_agent[agent_id] = pending_count
     timings_ref["agent_inbox_messages"] = round((time.perf_counter() - started) * 1000, 1)
     context = s.AgentApiHydrationContext(
         state=state,
