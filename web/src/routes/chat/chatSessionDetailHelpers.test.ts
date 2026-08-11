@@ -16,12 +16,34 @@ import {
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import * as client from "../../api/client";
 import { vi } from "vitest";
+import { resolveAssistantTurnRenderSurface } from "../chatTurnProtocol";
 
 describe("chatSessionDetailHelpers", () => {
   it("detects session-not-found errors across locales", () => {
     expect(isSessionNotFoundError(new Error("Session not found"))).toBe(true);
     expect(isSessionNotFoundError(new Error("会话不存在"))).toBe(true);
     expect(isSessionNotFoundError(new Error("network down"))).toBe(false);
+  });
+
+  it("safely renders a deep-linked persisted turn item whose text is absent", () => {
+    const surface = resolveAssistantTurnRenderSurface({
+      turnItems: [{
+        id: "item-1-rev-1",
+        itemId: "item-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        version: 3,
+        revision: 1,
+        sequence: 1,
+        type: "reasoning",
+        status: "running",
+        terminal: false,
+        // Persisted legacy frames can omit text while the item is still live.
+      }] as unknown as SessionDetail["messages"][number]["turnItems"],
+    });
+
+    expect(surface.thoughtContent).toBe("");
+    expect(surface.codexTranscript.cells).toEqual([]);
   });
 
   it("treats only strictly lower ledger seq as stale", () => {
