@@ -541,17 +541,27 @@ def _ensure_local_path(path: Path) -> None:
         )
 
 
-def _raise_sqlite_error(exc: sqlite3.Error, *, during_migration: bool = False) -> None:
+def classify_sqlite_error(
+    exc: sqlite3.Error,
+    *,
+    during_migration: bool = False,
+) -> ConversationStoreError:
+    """Map driver errors onto the stable storage-boundary error contract."""
+
     message = str(exc).lower()
     if "locked" in message or "busy" in message:
-        raise ConversationStoreLockedError(
+        return ConversationStoreLockedError(
             "Conversation store writer exceeded the bounded lock wait."
-        ) from exc
+        )
     if during_migration:
-        raise ConversationStoreMigrationError(
+        return ConversationStoreMigrationError(
             "Conversation store migration failed and was rolled back."
-        ) from exc
-    raise ConversationStoreError("Conversation store operation failed.") from exc
+        )
+    return ConversationStoreError("Conversation store operation failed.")
+
+
+def _raise_sqlite_error(exc: sqlite3.Error, *, during_migration: bool = False) -> None:
+    raise classify_sqlite_error(exc, during_migration=during_migration) from exc
 
 
 def _now_ms() -> int:

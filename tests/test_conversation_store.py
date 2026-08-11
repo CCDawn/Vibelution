@@ -14,6 +14,7 @@ import core.chat.conversation_store.runtime as conversation_sqlite_runtime
 from core.chat.conversation_store import (
     ConversationBackpressureError,
     ConversationStore,
+    ConversationStoreLockedError,
     ConversationStoreUnavailableError,
     assess_sqlite_wal_runtime,
 )
@@ -600,6 +601,40 @@ def test_bounded_writer_queue_rejects_excess_work(
         assert second.result(timeout=3) == "queued"
     finally:
         release.set()
+        store.close()
+
+
+def test_external_write_lock_is_diagnostic_and_writer_recovers(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path, busy_timeout_ms=20)
+    external_writer = conversation_sqlite_runtime.connect(
+        str(store.database.path),
+        timeout=0.02,
+        isolation_level=None,
+    )
+    try:
+        external_writer.execute("BEGIN IMMEDIATE")
+        blocked = store.repository.create_agent(
+            agent_id="agent-locked",
+            display_name="Locked Agent",
+            kind="assistant",
+            config={"modelId": "gpt-5.6-luna"},
+            source="lock-test",
+        )
+        with pytest.raises(ConversationStoreLockedError, match="bounded lock wait"):
+            blocked.result(timeout=3)
+
+        external_writer.rollback()
+        assert _create_agent(store, "agent-after-lock")
+        assert store.writer.metrics()["failedMutations"] == 1
+    finally:
+        try:
+            external_writer.rollback()
+        except sqlite3.Error:
+            pass
+        external_writer.close()
         store.close()
 
 

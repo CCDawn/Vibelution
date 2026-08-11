@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
 from . import runtime as sqlite3
-from .database import ConversationDatabase
+from .database import ConversationDatabase, classify_sqlite_error
 from .repository import ConversationUnitOfWork
 
 T = TypeVar("T")
@@ -271,6 +271,11 @@ class ConversationWriter:
                     failures.append((envelope, exc))
             connection.commit()
         except Exception as exc:  # noqa: BLE001 - every queued future needs a terminal outcome.
+            normalized_error = (
+                classify_sqlite_error(exc)
+                if isinstance(exc, sqlite3.Error)
+                else exc
+            )
             try:
                 connection.rollback()
             except sqlite3.Error:
@@ -278,11 +283,14 @@ class ConversationWriter:
                 # callers; the next writer operation will reopen only in a
                 # later recovery phase if SQLite itself remains unhealthy.
                 pass
-            failures.extend((envelope, exc) for envelope, _result, _callbacks in successful)
+            failures.extend(
+                (envelope, normalized_error)
+                for envelope, _result, _callbacks in successful
+            )
             successful.clear()
             settled = {id(envelope) for envelope, _failure in failures}
             failures.extend(
-                (envelope, exc)
+                (envelope, normalized_error)
                 for envelope in batch
                 if id(envelope) not in settled
             )
@@ -315,7 +323,9 @@ class ConversationWriter:
         try:
             result = envelope.operation(connection)
         except Exception as exc:  # noqa: BLE001 - every queued future needs a terminal outcome.
-            envelope.future.set_exception(exc)
+            envelope.future.set_exception(
+                classify_sqlite_error(exc) if isinstance(exc, sqlite3.Error) else exc
+            )
             with self._metrics_lock:
                 self._failed_maintenance_runs += 1
         else:
