@@ -97,10 +97,14 @@ describe("desktop package script", () => {
     expect(script).toContain("function Stop-OwnedDesktopProcesses");
     expect(script).toContain("function Wait-ForNoOwnedDesktopProcesses");
     expect(script).toContain("$packageVerifier = Join-Path $projectDir \"scripts/verify_desktop_package.ps1\"");
+    expect(script).toContain("$canaryUserDataRoot = Join-Path $projectDir \".runtime/electron-package-canary-user-data\"");
+    expect(script).toContain('$env:VIBELUTION_ELECTRON_REGISTER_DEEP_LINKS = "0"');
     expect(script).not.toContain("$desktopExe = Join-Path $projectDir \"dist/desktop/win-unpacked/Vibelution.exe\"");
     expect(script).toContain("Invoke-CheckedNative powershell @(\"-ExecutionPolicy\", \"Bypass\", \"-File\", $packageVerifier");
-    expect(script).toContain("Start-Process -FilePath $desktopExe -PassThru");
-    expect(script).toContain("Start-Process -FilePath $desktopExe -PassThru");
+    expect(script).toContain('Start-Process -FilePath $desktopExe -ArgumentList @("--user-data-dir=$canaryUserDataRoot") -PassThru');
+    expect(script).toContain("function Request-OwnedDesktopClose");
+    expect(script).toContain("CloseMainWindow()");
+    expect(script).toContain("Request-OwnedDesktopClose $ownedProcessIds");
     expect(script).toContain("Stop-Process -Id");
     expect(script).toContain("First desktop launch did not remain running.");
     expect(script).toContain("firstInstanceStayedRunning");

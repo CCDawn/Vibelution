@@ -15,6 +15,7 @@ $entryCatalog = Assert-DesktopEntryCatalog -ProjectDir $projectDir
 $packageVerifier = Join-Path $projectDir "scripts/verify_desktop_package.ps1"
 $desktopExe = Resolve-DesktopPublicEntryPath -Catalog $entryCatalog -ProjectDir $projectDir
 $MaxCommandLineLength = 260
+$canaryUserDataRoot = Join-Path $projectDir ".runtime/electron-package-canary-user-data"
 
 function Invoke-CheckedNative {
     param(
@@ -172,6 +173,37 @@ function Stop-OwnedDesktopProcesses {
     }
 }
 
+function Request-OwnedDesktopClose {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [int[]]$OwnedProcessIds
+    )
+
+    $uniqueProcessIds = @($OwnedProcessIds | Sort-Object -Unique)
+    if ($uniqueProcessIds.Count -eq 0) {
+        return 0
+    }
+
+    $currentProcesses = @(
+        Get-DesktopPackageProcesses |
+            Where-Object { $uniqueProcessIds -contains [int]$_.ProcessId }
+    )
+    $rootProcesses = @(Get-RootDesktopProcesses $currentProcesses)
+    $requestedCount = 0
+    foreach ($process in $rootProcesses) {
+        try {
+            $desktopProcess = Get-Process -Id ([int]$process.ProcessId) -ErrorAction Stop
+            if ($desktopProcess.CloseMainWindow()) {
+                $requestedCount += 1
+            }
+        } catch {
+            Write-Warning "Unable to request normal Electron close for process $($process.ProcessId): $($_.Exception.Message)"
+        }
+    }
+    return $requestedCount
+}
+
 function Wait-ForNoOwnedDesktopProcesses {
     param(
         [Parameter(Mandatory = $true)]
@@ -213,12 +245,17 @@ if (-not (Test-Path -LiteralPath $desktopExe)) {
     throw "Desktop package executable is missing: $desktopExe"
 }
 
-$baselineProcessIds = @((Get-DesktopPackageProcesses | ForEach-Object { [int]$_.ProcessId }))
+$baselineProcessIds = @()
 $startedProcessIds = @()
 $ownedProcessIds = @()
+$normalCloseRequested = $false
+$previousDeepLinkRegistration = $env:VIBELUTION_ELECTRON_REGISTER_DEEP_LINKS
 
 try {
-    $firstProcess = Start-Process -FilePath $desktopExe -PassThru
+    $env:VIBELUTION_ELECTRON_REGISTER_DEEP_LINKS = "0"
+    New-Item -ItemType Directory -Path $canaryUserDataRoot -Force | Out-Null
+    $baselineProcessIds = @((Get-DesktopPackageProcesses | ForEach-Object { [int]$_.ProcessId }))
+    $firstProcess = Start-Process -FilePath $desktopExe -ArgumentList @("--user-data-dir=$canaryUserDataRoot") -PassThru
     $startedProcessIds += [int]$firstProcess.Id
     $firstRoot = Wait-ForDesktopRootProcess $baselineProcessIds
 
@@ -232,7 +269,7 @@ try {
         throw "First desktop launch did not remain running."
     }
 
-    $secondProcess = Start-Process -FilePath $desktopExe -PassThru
+    $secondProcess = Start-Process -FilePath $desktopExe -ArgumentList @("--user-data-dir=$canaryUserDataRoot") -PassThru
     $startedProcessIds += [int]$secondProcess.Id
     Wait-ForSecondInstanceToSettle $secondProcess
 
@@ -252,8 +289,17 @@ try {
         throw "Second desktop launch created an extra root process. Running roots:`n$details"
     }
 
-    Stop-OwnedDesktopProcesses $ownedProcessIds
-    Wait-ForNoOwnedDesktopProcesses $ownedProcessIds
+    $normalCloseRequested = (Request-OwnedDesktopClose $ownedProcessIds) -gt 0
+    if (-not $normalCloseRequested) {
+        throw "Unable to request normal close for the Electron package canary."
+    }
+    try {
+        Wait-ForNoOwnedDesktopProcesses $ownedProcessIds
+    } catch {
+        Stop-OwnedDesktopProcesses $ownedProcessIds
+        Wait-ForNoOwnedDesktopProcesses $ownedProcessIds
+        throw
+    }
 
     [ordered]@{
         schemaVersion = 1
@@ -266,6 +312,7 @@ try {
         rootsBeforeSecondLaunch = $beforeSecondRoots.Count
         rootsAfterSecondLaunch = $afterSecondRoots.Count
         secondInstanceCreatedExtraRoot = $secondInstanceCreatedExtraRoot
+        normalCloseRequested = $normalCloseRequested
         cleanedProcessIds = @($ownedProcessIds)
     } | ConvertTo-Json -Depth 4
 } finally {
@@ -275,5 +322,17 @@ try {
             ForEach-Object { [int]$_.ProcessId }
         $startedProcessIds
     ) | Sort-Object -Unique
-    Stop-OwnedDesktopProcesses $remainingOwnedProcessIds
+    if ($remainingOwnedProcessIds.Count -gt 0) {
+        $null = Request-OwnedDesktopClose $remainingOwnedProcessIds
+        try {
+            Wait-ForNoOwnedDesktopProcesses $remainingOwnedProcessIds
+        } catch {
+            Stop-OwnedDesktopProcesses $remainingOwnedProcessIds
+        }
+    }
+    if ($null -eq $previousDeepLinkRegistration) {
+        Remove-Item Env:VIBELUTION_ELECTRON_REGISTER_DEEP_LINKS -ErrorAction SilentlyContinue
+    } else {
+        $env:VIBELUTION_ELECTRON_REGISTER_DEEP_LINKS = $previousDeepLinkRegistration
+    }
 }
