@@ -1658,18 +1658,19 @@ class TestToolExecutorErrorHandling:
         target = tmp_path / "demo.txt"
         target.write_text("hello\n", encoding="utf-8")
 
-        result, action = executor.execute(
-            "apply_patch_tool",
-            {
-                "cwd": str(tmp_path),
-                "patch_text": """*** Begin Patch
+        with shell_tools.workspace_root_override(tmp_path):
+            result, action = executor.execute(
+                "apply_patch_tool",
+                {
+                    "cwd": str(tmp_path),
+                    "patch_text": """*** Begin Patch
 *** Update File: demo.txt
 @@
 -hello
 +hello codex
 *** End Patch""",
-            },
-        )
+                },
+            )
 
         assert action is None
         payload = json.loads(str(result))

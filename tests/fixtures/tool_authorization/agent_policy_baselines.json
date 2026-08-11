@@ -5,7 +5,10 @@
     {
       "case_id": "default_session_agent",
       "agent_class": "session",
-      "run_kinds": ["direct_session", "chat_room"],
+      "run_kinds": [
+        "direct_session",
+        "chat_room"
+      ],
       "policy_source": "default_session_private_policy",
       "visibility_semantics": "exact",
       "expected_allowed_tools": [
@@ -17,6 +20,8 @@
         "write_file_tool",
         "python_lint_tool",
         "run_test_for_tool",
+        "exec_command",
+        "write_stdin",
         "cli_tool",
         "agent_message_tool",
         "agent_tool_permission_request_tool",
@@ -29,6 +34,8 @@
         "conversation_log_inspect_tool"
       ],
       "expected_preferred_tools": [
+        "exec_command",
+        "write_stdin",
         "grep_search_tool",
         "code_symbol_tool",
         "apply_patch_tool",
@@ -44,7 +51,10 @@
     {
       "case_id": "explicit_zero_tool_agent",
       "agent_class": "explicit_zero_tool",
-      "run_kinds": ["supervised", "self_evolution"],
+      "run_kinds": [
+        "supervised",
+        "self_evolution"
+      ],
       "policy_source": "explicit_private_policy",
       "visibility_semantics": "exact",
       "expected_allowed_tools": [],
@@ -58,7 +68,10 @@
       "agent_class": "research_fixed_role",
       "role_key": "source_finder",
       "primary_mode": "research",
-      "run_kinds": ["research", "team_workflow"],
+      "run_kinds": [
+        "research",
+        "team_workflow"
+      ],
       "policy_source": "role_tool_profile",
       "visibility_semantics": "role_profile",
       "expected_required_tools": [
@@ -89,7 +102,9 @@
       "agent_class": "team_fixed_role",
       "role_key": "challenge_cup_iteration_planner",
       "primary_mode": "research",
-      "run_kinds": ["team_workflow"],
+      "run_kinds": [
+        "team_workflow"
+      ],
       "policy_source": "role_tool_profile",
       "visibility_semantics": "role_profile",
       "expected_required_tools": [
@@ -110,7 +125,9 @@
     {
       "case_id": "self_evolution_executor",
       "agent_class": "self_evolution_executor",
-      "run_kinds": ["self_evolution"],
+      "run_kinds": [
+        "self_evolution"
+      ],
       "policy_source": "self_evolution_executable_policy",
       "visibility_semantics": "exact_default_session_contract",
       "expected_required_tools": [
@@ -130,7 +147,9 @@
     {
       "case_id": "supervised_observer",
       "agent_class": "supervised_observer",
-      "run_kinds": ["supervised"],
+      "run_kinds": [
+        "supervised"
+      ],
       "policy_source": "system_no_tool_role",
       "visibility_semantics": "exact",
       "expected_allowed_tools": [],
@@ -142,7 +161,9 @@
     {
       "case_id": "legacy_wide_private_policy",
       "agent_class": "legacy_wide",
-      "run_kinds": ["direct_session"],
+      "run_kinds": [
+        "direct_session"
+      ],
       "policy_source": "legacy_private_policy",
       "visibility_semantics": "preserve_input",
       "expected_required_tools": [],
@@ -153,7 +174,11 @@
     {
       "case_id": "missing_policy",
       "agent_class": "invalid_policy_reference",
-      "run_kinds": ["direct_session", "team_workflow", "research"],
+      "run_kinds": [
+        "direct_session",
+        "team_workflow",
+        "research"
+      ],
       "policy_source": "missing",
       "visibility_semantics": "deny_all",
       "expected_allowed_tools": [],
@@ -165,7 +190,11 @@
     {
       "case_id": "corrupt_policy",
       "agent_class": "invalid_policy_payload",
-      "run_kinds": ["direct_session", "team_workflow", "research"],
+      "run_kinds": [
+        "direct_session",
+        "team_workflow",
+        "research"
+      ],
       "policy_source": "corrupt",
       "visibility_semantics": "deny_all",
       "expected_allowed_tools": [],

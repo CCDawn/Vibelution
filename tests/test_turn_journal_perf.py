@@ -75,8 +75,8 @@ def test_fsync_skipped_for_volatile_events(tmp_path, monkeypatch):
     append_turn_event(tmp_path, "sess", "turn-1", EVENT_TOOL_RESULT, status="done")
     append_turn_event(tmp_path, "sess", "turn-1", EVENT_TURN_COMPLETED, status="done")
 
-    # 6 个事件：4 个关键（fsync）+ 2 个易失（仅 flush）
-    assert len(fsync_calls) == 4, fsync_calls
+    # 6 个事件：3 个关键（fsync）+ 2 个易失（仅 flush）+ turn_started（flush-only，可从 work-run 重构）
+    assert len(fsync_calls) == 3, fsync_calls
 
 
 def test_terminal_check_cache_avoids_full_scan(tmp_path, monkeypatch):

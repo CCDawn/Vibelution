@@ -591,8 +591,6 @@ class TestBuildAPI:
 
         assert "## 工具索引" not in result
         assert "`read_file_tool`" not in result
-        assert "`grep_search_tool`" not in result
-        assert "`code_symbol_tool`" not in result
         assert "`clean_workspace_debris_tool`" not in result
         assert "工具错误是可观察反馈" not in result
         assert "参数错误时按返回的必填/可选参数和示例修正后重试" not in result
@@ -608,11 +606,11 @@ class TestBuildAPI:
         if "操作系统: Windows" not in result:
             pytest.skip("当前测试运行环境不是 Windows")
 
-        assert "命令平台纪律" in result
+        assert "Shell 方言" in result
         assert "/dev/null" in result
-        assert "Select-Object -First/-Last" in result
-        assert "读文件/搜索默认用 `cli_tool`" in result
-        assert "Windows 兼容的 `rg`/PowerShell 小范围命令" in result
+        assert "Select-Object" in result
+        assert "`cmd /c`" in result
+        assert "grep_search_tool" in result
 
     def test_build_exclude_filter(self):
         pm = PromptManager()

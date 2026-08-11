@@ -7,12 +7,12 @@ def _route():
     config = Settings(
         None,
         **{
-            "llm.providers.default.kind": "openai_compatible",
-            "llm.providers.default.api_key": "test-key",
-            "llm.providers.default.base_url": "https://example.test/v1",
-            "llm.profiles.primary.provider_id": "default",
+            "llm.providers.openai_main.kind": "openai_compatible",
+            "llm.providers.openai_main.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "openai_main",
             "llm.profiles.primary.model": "gpt-4o",
             "llm.profiles.primary.contract": "tool_chat",
+            "llm.profiles.primary.transport": "chat_completions",
         },
     ).config
     profile = config.llm.get_profile("primary")
