@@ -800,6 +800,8 @@ def run_commit_gate(root: Path) -> GateResult:
     staged = staged_paths(root)
     if not staged:
         return GateResult(outcome="passed", exit_code=0)
+    if current_branch(root) == "main":
+        return GateResult(outcome="main_branch_direct_write_blocked", exit_code=1)
     if gate_definition_is_dirty(root, staged):
         return GateResult(outcome="gate_definition_dirty", exit_code=1)
 
