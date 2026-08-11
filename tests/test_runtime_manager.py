@@ -5583,7 +5583,12 @@ def test_terminate_workbench_processes_reports_cleanup_stage_timings(monkeypatch
     assert all(isinstance(result["timingsMs"][key], (int, float)) for key in result["timingsMs"])
 
 
-def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch):
+@pytest.fixture
+def no_active_electron_desktop_session(monkeypatch):
+    monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: None)
+
+
+def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch, no_active_electron_desktop_session):
     captured = {}
     events: list[tuple[str, dict]] = []
 
@@ -5672,7 +5677,7 @@ def test_run_launcher_action_routes_active_electron_session_to_desktop_action(mo
     ]
 
 
-def test_run_launcher_action_preserves_explicit_port_env_override(monkeypatch):
+def test_run_launcher_action_preserves_explicit_port_env_override(monkeypatch, no_active_electron_desktop_session):
     captured = {}
     events: list[tuple[str, dict]] = []
 
@@ -5702,7 +5707,9 @@ def test_run_launcher_action_preserves_explicit_port_env_override(monkeypatch):
     assert completed["portSet"] is True
 
 
-def test_run_launcher_action_falls_back_to_configured_port_when_explicit_env_invalid(monkeypatch):
+def test_run_launcher_action_falls_back_to_configured_port_when_explicit_env_invalid(
+    monkeypatch, no_active_electron_desktop_session
+):
     captured = {}
 
     class FakeProcess:
@@ -5729,7 +5736,9 @@ def test_run_launcher_action_falls_back_to_configured_port_when_explicit_env_inv
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
 
 
-def test_run_launcher_action_uses_python_adapter_without_detached_process(monkeypatch):
+def test_run_launcher_action_uses_python_adapter_without_detached_process(
+    monkeypatch, no_active_electron_desktop_session
+):
     captured = {}
 
     class DummyStartupInfo:
@@ -5769,7 +5778,7 @@ def test_run_launcher_action_uses_python_adapter_without_detached_process(monkey
     assert startupinfo.wShowWindow == 0
 
 
-def test_run_launcher_action_events_report_hidden_waitable_launch(monkeypatch):
+def test_run_launcher_action_events_report_hidden_waitable_launch(monkeypatch, no_active_electron_desktop_session):
     events: list[tuple[str, dict]] = []
 
     class FakeProcess:
@@ -5804,7 +5813,9 @@ def test_run_launcher_action_events_report_hidden_waitable_launch(monkeypatch):
     assert "DETACHED_PROCESS" not in completed["creationFlagNames"]
 
 
-def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(monkeypatch):
+def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(
+    monkeypatch, no_active_electron_desktop_session
+):
     captured = {}
 
     class DummyStartupInfo:
@@ -6981,7 +6992,7 @@ def test_handle_open_workbench_logs_focus_failure_for_existing_browser_session(m
     }
 
 
-def test_run_launcher_action_uses_devnull_stdio(monkeypatch):
+def test_run_launcher_action_uses_devnull_stdio(monkeypatch, no_active_electron_desktop_session):
     captured = {}
     events: list[tuple[str, dict]] = []
 
