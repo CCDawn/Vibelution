@@ -3608,6 +3608,68 @@ def test_launcher_desktop_session_routes_write_revisioned_window_projection(monk
     ]
 
 
+def test_web_launcher_workbench_close_transaction_routes_delegate_to_launcher_service(monkeypatch):
+    calls = []
+    transaction = {
+        "closeId": "workbench-close-web-1",
+        "phase": "backend_closing",
+        "desktopSessionId": "desktop-session-web-1",
+        "expectedDesktopSessionRevision": 6,
+    }
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "submit_workbench_close_transaction",
+        lambda payload: calls.append(("submit", payload)) or transaction,
+    )
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "get_workbench_close_transaction",
+        lambda close_id: calls.append(("get", close_id)) or transaction,
+    )
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "ack_workbench_close_transaction_window_closed",
+        lambda close_id, payload: calls.append(("ack", close_id, payload))
+        or {**transaction, "phase": "succeeded"},
+    )
+
+    submitted = client.post(
+        "/api/launcher/workbench-close-transactions",
+        json={
+            "desktopSessionId": "desktop-session-web-1",
+            "idempotencyKey": "desktop-session-web-1:close:1",
+            "mode": "normal",
+        },
+    )
+    fetched = client.get("/api/launcher/workbench-close-transactions/workbench-close-web-1")
+    acknowledged = client.post(
+        "/api/launcher/workbench-close-transactions/workbench-close-web-1/window-closed",
+        json={"desktopSessionId": "desktop-session-web-1", "desktopSessionRevision": 6},
+    )
+
+    assert submitted.status_code == 202
+    assert fetched.status_code == 200
+    assert acknowledged.status_code == 202
+    assert calls == [
+        (
+            "submit",
+            {
+                "desktopSessionId": "desktop-session-web-1",
+                "idempotencyKey": "desktop-session-web-1:close:1",
+                "mode": "normal",
+                "reason": "",
+                "confirmationCloseId": "",
+            },
+        ),
+        ("get", "workbench-close-web-1"),
+        (
+            "ack",
+            "workbench-close-web-1",
+            {"desktopSessionId": "desktop-session-web-1", "desktopSessionRevision": 6},
+        ),
+    ]
+
+
 def test_launcher_desktop_session_window_revision_conflict_is_structured(monkeypatch):
     from core.launcher.desktop_session_store import DesktopSessionRevisionConflict
 

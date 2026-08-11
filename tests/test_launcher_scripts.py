@@ -2232,6 +2232,7 @@ def test_desktop_entry_bootstrap_json_reports_attached_or_started(monkeypatch, t
     assert payload["ready"] is True
     assert payload["protocolVersion"] >= 1
     assert "desktop_actions.claim" in payload["capabilities"]
+    assert "workbench_close.transaction.v1" in payload["capabilities"]
 
 
 def test_desktop_entry_stop_owned_launcher_terminates_matching_state_pids(monkeypatch, capsys):

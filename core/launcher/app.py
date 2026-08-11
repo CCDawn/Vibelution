@@ -27,9 +27,12 @@ from .api_contract import (
     LauncherRuntimeSceneEventPayload,
     LauncherStartupSettingsPayload,
     LifecycleIntentPayload,
+    WorkbenchCloseTransactionPayload,
+    WorkbenchCloseWindowClosedPayload,
     WorkbenchWindowModePayload,
 )
 from .desktop_session_store import DesktopSessionClosed, DesktopSessionRevisionConflict
+from .lifecycle_intent_store import WorkbenchCloseTransactionConflict
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -70,6 +73,21 @@ def _desktop_session_mutation_response(operation, *, invalid_code: str = "invali
         raise HTTPException(
             status_code=400,
             detail={"code": invalid_code, "message": str(exc)},
+        ) from exc
+
+
+def _workbench_close_transaction_response(operation):
+    try:
+        return operation()
+    except WorkbenchCloseTransactionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": str(exc), **exc.details},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_workbench_close_transaction", "message": str(exc)},
         ) from exc
 
 
@@ -273,6 +291,35 @@ def launcher_get_lifecycle_intent(request: Request, intent_id: str) -> dict:
     if not result:
         raise HTTPException(status_code=404, detail={"code": "lifecycle_intent_not_found"})
     return result
+
+
+@router.post("/api/launcher/workbench-close-transactions", status_code=202)
+def launcher_submit_workbench_close_transaction(
+    request: Request, payload: WorkbenchCloseTransactionPayload
+) -> dict:
+    _ensure_control_request(request)
+    return _workbench_close_transaction_response(
+        lambda: launcher_service.submit_workbench_close_transaction(payload.model_dump())
+    )
+
+
+@router.get("/api/launcher/workbench-close-transactions/{close_id}")
+def launcher_get_workbench_close_transaction(request: Request, close_id: str) -> dict:
+    _ensure_control_request(request)
+    result = launcher_service.get_workbench_close_transaction(close_id)
+    if not result:
+        raise HTTPException(status_code=404, detail={"code": "workbench_close_transaction_not_found"})
+    return result
+
+
+@router.post("/api/launcher/workbench-close-transactions/{close_id}/window-closed", status_code=202)
+def launcher_ack_workbench_close_transaction_window_closed(
+    request: Request, close_id: str, payload: WorkbenchCloseWindowClosedPayload
+) -> dict:
+    _ensure_control_request(request)
+    return _workbench_close_transaction_response(
+        lambda: launcher_service.ack_workbench_close_transaction_window_closed(close_id, payload.model_dump())
+    )
 
 
 @router.post("/api/launcher/desktop-actions/claim")

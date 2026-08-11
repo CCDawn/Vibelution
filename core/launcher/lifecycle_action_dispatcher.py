@@ -36,3 +36,31 @@ def dispatch_runtime_effect_intent(intent: dict[str, Any]) -> dict[str, Any]:
         "commandId": str(result.get("commandId") or ""),
         "accepted": bool(result.get("accepted", True)),
     }
+
+
+def dispatch_workbench_close_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
+    """Submit the backend half of a persisted Electron close transaction.
+
+    Electron remains the exclusive window owner.  A successful command only
+    authorizes its later ``window-closed`` acknowledgement.
+    """
+
+    mode = str(transaction.get("mode") or "normal").strip().lower()
+    command_type = "force_close_workbench" if mode == "force" else "close_workbench"
+    result = command_queue.submit_command(
+        command_type,
+        requested_by="electron_workbench_close",
+        args={
+            "reason": str(transaction.get("reason") or "electron_workbench_close"),
+            "source": "electron_workbench_close",
+            "desktopSessionId": str(transaction.get("desktopSessionId") or ""),
+            "expectedDesktopSessionRevision": int(transaction.get("expectedDesktopSessionRevision") or 0),
+            "workbenchCloseId": str(transaction.get("closeId") or ""),
+            "confirmationCloseId": str(transaction.get("confirmationCloseId") or ""),
+        },
+    )
+    return {
+        "dispatched": True,
+        "commandId": str(result.get("commandId") or ""),
+        "accepted": bool(result.get("accepted", True)),
+    }

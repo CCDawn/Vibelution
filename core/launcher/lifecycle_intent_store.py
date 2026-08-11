@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -15,6 +15,14 @@ DESKTOP_ACTIONS = {"open_workbench", "focus_workbench", "close_workbench"}
 RUNTIME_EFFECT_ACTIONS = {"restart_after_apply", "resume_self_evolution", "recover_after_crash", "request_app_exit"}
 ALLOWED_ACTIONS = DESKTOP_ACTIONS | RUNTIME_EFFECT_ACTIONS
 TERMINAL_INTENT_STATUSES = {"succeeded", "failed", "superseded"}
+WORKBENCH_CLOSE_MODES = {"normal", "force"}
+
+
+class WorkbenchCloseTransactionConflict(ValueError):
+    def __init__(self, code: str, message: str, **details: Any) -> None:
+        super().__init__(message)
+        self.code = code
+        self.details = details
 
 
 def _now_iso() -> str:
@@ -74,6 +82,35 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_desktop_actions_claim
           ON desktop_actions(status, lease_expires_at, created_at);
+        CREATE TABLE IF NOT EXISTS workbench_close_transactions (
+          close_id TEXT PRIMARY KEY,
+          schema_version INTEGER NOT NULL,
+          desktop_session_id TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          mode TEXT NOT NULL,
+          close_reason TEXT NOT NULL DEFAULT '',
+          phase TEXT NOT NULL,
+          confirmation_close_id TEXT NOT NULL DEFAULT '',
+          command_id TEXT NOT NULL DEFAULT '',
+          active_work_count INTEGER NOT NULL DEFAULT 0,
+          expected_desktop_session_revision INTEGER NOT NULL,
+          deadline_at TEXT NOT NULL DEFAULT '',
+          next_poll_after_ms INTEGER NOT NULL DEFAULT 0,
+          retryable INTEGER NOT NULL DEFAULT 0,
+          rejection_reason TEXT NOT NULL DEFAULT '',
+          failure_code TEXT NOT NULL DEFAULT '',
+          failure_message TEXT NOT NULL DEFAULT '',
+          result_json TEXT NOT NULL DEFAULT '{}',
+          backend_closed_at TEXT NOT NULL DEFAULT '',
+          window_closed_at TEXT NOT NULL DEFAULT '',
+          completion_source TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workbench_close_transactions_phase
+          ON workbench_close_transactions(phase, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_workbench_close_transactions_session
+          ON workbench_close_transactions(desktop_session_id, created_at);
         """
     )
     _ensure_column(conn, "lifecycle_intents", "result_json", "TEXT NOT NULL DEFAULT '{}'")
@@ -280,6 +317,341 @@ def _public_intent(row: dict[str, Any]) -> dict[str, Any]:
         "createdAt": row.get("created_at"),
         "updatedAt": row.get("updated_at"),
     }
+
+
+def submit_workbench_close_transaction(
+    payload: dict[str, Any],
+    *,
+    desktop_session: dict[str, Any],
+    active_work_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    desktop_session_id = _safe_text(payload.get("desktopSessionId"), max_length=160)
+    if not desktop_session_id:
+        raise ValueError("desktopSessionId is required")
+    if desktop_session_id != _safe_text(desktop_session.get("desktopSessionId"), max_length=160):
+        raise WorkbenchCloseTransactionConflict(
+            "desktop_session_mismatch",
+            "workbench close transaction desktop session does not match the active Electron session",
+        )
+    expected_revision = _safe_int(desktop_session.get("revision"))
+    if str(desktop_session.get("status") or "") != "active" or expected_revision <= 0:
+        raise WorkbenchCloseTransactionConflict(
+            "desktop_session_unavailable",
+            "workbench close transaction requires an active Electron desktop session",
+            actualDesktopSessionRevision=expected_revision,
+        )
+    capabilities = desktop_session.get("capabilities")
+    if not isinstance(capabilities, list) or "workbench_close.transaction.v1" not in capabilities:
+        raise WorkbenchCloseTransactionConflict(
+            "desktop_session_capability_missing",
+            "workbench close transaction requires the Electron close-transaction capability",
+        )
+    mode = _safe_text(payload.get("mode") or "normal", max_length=32).lower()
+    if mode not in WORKBENCH_CLOSE_MODES:
+        raise ValueError("workbench close transaction mode must be normal or force")
+    idempotency_key = _safe_text(payload.get("idempotencyKey"), max_length=240)
+    if not idempotency_key:
+        raise ValueError("workbench close transaction idempotencyKey is required")
+    confirmation_close_id = _safe_text(payload.get("confirmationCloseId"), max_length=160)
+    active_work_count = min(len(active_work_runs), 999)
+    requires_confirmation = mode == "normal" and active_work_count > 0
+    if mode == "force" and not confirmation_close_id:
+        raise ValueError("force workbench close transaction requires confirmationCloseId")
+    phase = "confirmation_required" if requires_confirmation else "backend_closing"
+    now = _now_iso()
+    deadline_at = _deadline_after_seconds(30) if phase == "backend_closing" else ""
+    transaction = {
+        "closeId": f"workbench-close-{uuid4().hex}",
+        "schemaVersion": 1,
+        "desktopSessionId": desktop_session_id,
+        "idempotencyKey": idempotency_key,
+        "mode": mode,
+        "reason": _safe_text(payload.get("reason"), max_length=300),
+        "phase": phase,
+        "confirmationCloseId": confirmation_close_id,
+        "commandId": "",
+        "activeWorkCount": active_work_count,
+        "expectedDesktopSessionRevision": expected_revision,
+        "deadlineAt": deadline_at,
+        "nextPollAfterMs": 250 if phase == "backend_closing" else 0,
+        "retryable": phase == "backend_closing",
+        "rejectionReason": "active_work_running" if requires_confirmation else "",
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT * FROM workbench_close_transactions WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
+        if existing is not None:
+            conn.execute("COMMIT")
+            return _public_workbench_close_transaction(_row_to_dict(existing))
+        if mode == "force":
+            confirmation = conn.execute(
+                "SELECT * FROM workbench_close_transactions WHERE close_id = ?",
+                (confirmation_close_id,),
+            ).fetchone()
+            if confirmation is None:
+                conn.execute("ROLLBACK")
+                raise WorkbenchCloseTransactionConflict(
+                    "confirmation_not_found",
+                    "force workbench close transaction confirmationCloseId was not found",
+                )
+            if (
+                str(confirmation["desktop_session_id"] or "") != desktop_session_id
+                or str(confirmation["phase"] or "") != "confirmation_required"
+            ):
+                conn.execute("ROLLBACK")
+                raise WorkbenchCloseTransactionConflict(
+                    "confirmation_not_eligible",
+                    "force workbench close transaction requires a matching confirmation-required transaction",
+                )
+            existing_force = conn.execute(
+                """
+                SELECT close_id FROM workbench_close_transactions
+                WHERE confirmation_close_id = ? AND mode = 'force'
+                LIMIT 1
+                """,
+                (confirmation_close_id,),
+            ).fetchone()
+            if existing_force is not None:
+                conn.execute("ROLLBACK")
+                raise WorkbenchCloseTransactionConflict(
+                    "confirmation_already_consumed",
+                    "force workbench close transaction confirmation has already been consumed",
+                    closeId=str(existing_force["close_id"] or ""),
+                )
+        conn.execute(
+            """
+            INSERT INTO workbench_close_transactions (
+              close_id, schema_version, desktop_session_id, idempotency_key, mode, close_reason, phase,
+              confirmation_close_id, command_id, active_work_count, expected_desktop_session_revision,
+              deadline_at, next_poll_after_ms, retryable, rejection_reason, failure_code, failure_message,
+              result_json, backend_closed_at, window_closed_at, completion_source, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, '', '', '{}', '', '', '', ?, ?)
+            """,
+            (
+                transaction["closeId"],
+                1,
+                desktop_session_id,
+                idempotency_key,
+                mode,
+                transaction["reason"],
+                phase,
+                confirmation_close_id,
+                active_work_count,
+                expected_revision,
+                deadline_at,
+                transaction["nextPollAfterMs"],
+                1 if transaction["retryable"] else 0,
+                transaction["rejectionReason"],
+                now,
+                now,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM workbench_close_transactions WHERE close_id = ?",
+            (transaction["closeId"],),
+        ).fetchone()
+        conn.execute("COMMIT")
+    return _public_workbench_close_transaction(_row_to_dict(row))
+
+
+def get_workbench_close_transaction(close_id: str) -> dict[str, Any]:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM workbench_close_transactions WHERE close_id = ?",
+            (_safe_text(close_id, max_length=160),),
+        ).fetchone()
+    return _public_workbench_close_transaction(_row_to_dict(row))
+
+
+def record_workbench_close_dispatch(close_id: str, *, command_id: str) -> dict[str, Any]:
+    normalized_close_id = _safe_text(close_id, max_length=160)
+    normalized_command_id = _safe_text(command_id, max_length=160)
+    if not normalized_command_id:
+        raise ValueError("workbench close transaction dispatch did not return commandId")
+    now = _now_iso()
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            UPDATE workbench_close_transactions
+            SET command_id = CASE WHEN command_id = '' THEN ? ELSE command_id END,
+                updated_at = ?
+            WHERE close_id = ? AND phase = 'backend_closing'
+            """,
+            (normalized_command_id, now, normalized_close_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM workbench_close_transactions WHERE close_id = ?",
+            (normalized_close_id,),
+        ).fetchone()
+        conn.execute("COMMIT")
+    return _public_workbench_close_transaction(_row_to_dict(row))
+
+
+def authorize_workbench_close_window(
+    close_id: str,
+    *,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    normalized_close_id = _safe_text(close_id, max_length=160)
+    now = _now_iso()
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            UPDATE workbench_close_transactions
+            SET phase = CASE WHEN phase = 'backend_closing' THEN 'window_close_authorized' ELSE phase END,
+                result_json = CASE WHEN phase = 'backend_closing' THEN ? ELSE result_json END,
+                backend_closed_at = CASE WHEN phase = 'backend_closing' THEN ? ELSE backend_closed_at END,
+                deadline_at = CASE WHEN phase = 'backend_closing' THEN ? ELSE deadline_at END,
+                next_poll_after_ms = CASE WHEN phase = 'backend_closing' THEN 250 ELSE next_poll_after_ms END,
+                retryable = CASE WHEN phase = 'backend_closing' THEN 1 ELSE retryable END,
+                updated_at = ?
+            WHERE close_id = ?
+            """,
+            (
+                json.dumps(result, ensure_ascii=False, sort_keys=True),
+                now,
+                _deadline_after_seconds(30),
+                now,
+                normalized_close_id,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM workbench_close_transactions WHERE close_id = ?",
+            (normalized_close_id,),
+        ).fetchone()
+        conn.execute("COMMIT")
+    return _public_workbench_close_transaction(_row_to_dict(row))
+
+
+def fail_workbench_close_transaction(
+    close_id: str,
+    *,
+    code: str,
+    message: str,
+    result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_close_id = _safe_text(close_id, max_length=160)
+    now = _now_iso()
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            UPDATE workbench_close_transactions
+            SET phase = CASE WHEN phase NOT IN ('succeeded', 'failed') THEN 'failed' ELSE phase END,
+                failure_code = CASE WHEN phase NOT IN ('succeeded', 'failed') THEN ? ELSE failure_code END,
+                failure_message = CASE WHEN phase NOT IN ('succeeded', 'failed') THEN ? ELSE failure_message END,
+                result_json = CASE WHEN phase NOT IN ('succeeded', 'failed') THEN ? ELSE result_json END,
+                retryable = CASE WHEN phase NOT IN ('succeeded', 'failed') THEN 0 ELSE retryable END,
+                updated_at = ?
+            WHERE close_id = ?
+            """,
+            (
+                _safe_text(code, max_length=80),
+                _safe_text(message, max_length=500),
+                json.dumps(result or {}, ensure_ascii=False, sort_keys=True),
+                now,
+                normalized_close_id,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM workbench_close_transactions WHERE close_id = ?",
+            (normalized_close_id,),
+        ).fetchone()
+        conn.execute("COMMIT")
+    return _public_workbench_close_transaction(_row_to_dict(row))
+
+
+def complete_workbench_close_transaction(
+    close_id: str,
+    *,
+    completion_source: str,
+) -> dict[str, Any]:
+    normalized_close_id = _safe_text(close_id, max_length=160)
+    now = _now_iso()
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            UPDATE workbench_close_transactions
+            SET phase = CASE WHEN phase = 'window_close_authorized' THEN 'succeeded' ELSE phase END,
+                window_closed_at = CASE WHEN phase = 'window_close_authorized' THEN ? ELSE window_closed_at END,
+                completion_source = CASE WHEN phase = 'window_close_authorized' THEN ? ELSE completion_source END,
+                deadline_at = CASE WHEN phase = 'window_close_authorized' THEN '' ELSE deadline_at END,
+                next_poll_after_ms = CASE WHEN phase = 'window_close_authorized' THEN 0 ELSE next_poll_after_ms END,
+                retryable = CASE WHEN phase = 'window_close_authorized' THEN 0 ELSE retryable END,
+                updated_at = ?
+            WHERE close_id = ?
+            """,
+            (now, _safe_text(completion_source, max_length=80), now, normalized_close_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM workbench_close_transactions WHERE close_id = ?",
+            (normalized_close_id,),
+        ).fetchone()
+        conn.execute("COMMIT")
+    return _public_workbench_close_transaction(_row_to_dict(row))
+
+
+def _public_workbench_close_transaction(row: dict[str, Any]) -> dict[str, Any]:
+    if not row:
+        return {}
+    result_raw = row.get("result_json") or "{}"
+    try:
+        result = json.loads(str(result_raw))
+    except json.JSONDecodeError:
+        result = {}
+    phase = str(row.get("phase") or "")
+    message = ""
+    if phase == "confirmation_required":
+        message = "Active work requires explicit force-close confirmation."
+    elif phase == "window_close_authorized":
+        message = "Backend close completed; waiting for Electron window-closed acknowledgement."
+    elif phase == "succeeded":
+        message = "Workbench close transaction completed."
+    elif phase == "failed":
+        message = str(row.get("failure_message") or "Workbench close transaction failed.")
+    return {
+        "closeId": row.get("close_id"),
+        "schemaVersion": int(row.get("schema_version") or 1),
+        "desktopSessionId": row.get("desktop_session_id"),
+        "mode": row.get("mode"),
+        "reason": row.get("close_reason") or "",
+        "phase": phase,
+        "confirmationCloseId": row.get("confirmation_close_id") or "",
+        "commandId": row.get("command_id") or "",
+        "activeWorkCount": int(row.get("active_work_count") or 0),
+        "expectedDesktopSessionRevision": int(row.get("expected_desktop_session_revision") or 0),
+        "deadlineAt": row.get("deadline_at") or "",
+        "nextPollAfterMs": int(row.get("next_poll_after_ms") or 0),
+        "retryable": bool(row.get("retryable")),
+        "rejectionReason": row.get("rejection_reason") or "",
+        "failureCode": row.get("failure_code") or "",
+        "result": result if isinstance(result, dict) else {},
+        "backendClosedAt": row.get("backend_closed_at") or "",
+        "windowClosedAt": row.get("window_closed_at") or "",
+        "completionSource": row.get("completion_source") or "",
+        "message": message,
+        "createdAt": row.get("created_at"),
+        "updatedAt": row.get("updated_at"),
+    }
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _deadline_after_seconds(seconds: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=max(1, int(seconds)))).isoformat()
 
 
 def claim_desktop_action(*, desktop_session_id: str, lease_seconds: int = 30) -> dict[str, Any]:
