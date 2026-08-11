@@ -106,7 +106,7 @@ export const isFinalAnswerTurnItem = (
 export const finalAnswerTextFromTurnItems = (items: readonly SessionTurnItem[]) => (
   items
     .filter(isFinalAnswerTurnItem)
-    .map((item) => item.text.trim())
+    .map((item) => compactText(item.text))
     .filter(Boolean)
     .join("\n\n")
 );
@@ -114,7 +114,7 @@ export const finalAnswerTextFromTurnItems = (items: readonly SessionTurnItem[]) 
 export const reasoningTextFromTurnItems = (items: readonly SessionTurnItem[]) => (
   items
     .filter((item) => item.type === "reasoning")
-    .map((item) => item.text.trim())
+    .map((item) => compactText(item.text))
     .filter(Boolean)
     .join("\n\n")
 );
@@ -170,10 +170,12 @@ export function codexTranscriptFromTurnItems(
       sourceItemId: item.itemId,
     };
     if (item.type === "agent_message") {
-      return item.text.trim() ? [{ ...base, kind: "assistant_markdown", text: item.text }] : [];
+      const text = compactText(item.text);
+      return text ? [{ ...base, kind: "assistant_markdown", text }] : [];
     }
     if (item.type === "reasoning") {
-      return item.text.trim() ? [{ ...base, kind: "reasoning_summary", text: item.text }] : [];
+      const text = compactText(item.text);
+      return text ? [{ ...base, kind: "reasoning_summary", text }] : [];
     }
     if (item.type === "tool_call") {
       return [{
@@ -236,7 +238,7 @@ export function hasCommittedAssistantProtocolAnswer(message: ConversationMessage
     isFinalAnswerTurnItem(item)
     && item.status === "completed"
     && item.terminal === true
-    && Boolean(item.text.trim())
+    && Boolean(compactText(item.text))
   ));
 }
 
