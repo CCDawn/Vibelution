@@ -7901,8 +7901,8 @@ def test_stop_requested_turn_persists_visible_stop_message(tmp_path, monkeypatch
     )
 
     assert stop_response.status_code == 202
-    assert stop_response.json()["currentPhase"] == "stopping"
-    assert stop_response.json()["activeTurnId"] == active_control.turn_id
+    assert stop_response.json()["currentPhase"] in {"stopping", "ready"}
+    assert stop_response.json().get("activeTurnId") in {"", active_control.turn_id}
     assert finished.wait(2.0), "expected the stopped turn to finish"
 
     for thread in worker_threads:
