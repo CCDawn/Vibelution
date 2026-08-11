@@ -195,23 +195,32 @@ def _start_external_task(
         from core.web.services.team_workflow.source_collection.stage_session import (
             start_source_collection_stage_session_task,
         )
-
-        started = start_source_collection_stage_session_task(
-            str(record.get("teamId") or ""),
-            source_run_id,
-            {
-                "stageId": stage_id,
-                "agentId": agent_id,
-                "agentRole": role_key,
-                "idempotencyKey": idempotency_key,
-                "returnTo": return_to,
-                "returnLabel": "科研工作流",
-                "formalRetry": bool(record.get("evidenceRemediationContract")),
-                "evidenceRemediationContract": dict(
-                    record.get("evidenceRemediationContract") or {}
-                ),
-            },
+        from core.web.services.team_workflow_orchestration_service import (
+            TeamWorkflowOrchestrationError,
         )
+
+        try:
+            started = start_source_collection_stage_session_task(
+                str(record.get("teamId") or ""),
+                source_run_id,
+                {
+                    "stageId": stage_id,
+                    "agentId": agent_id,
+                    "agentRole": role_key,
+                    "idempotencyKey": idempotency_key,
+                    "returnTo": return_to,
+                    "returnLabel": "科研工作流",
+                    "formalRetry": bool(record.get("evidenceRemediationContract")),
+                    "evidenceRemediationContract": dict(
+                        record.get("evidenceRemediationContract") or {}
+                    ),
+                },
+            )
+        except TeamWorkflowOrchestrationError as exc:
+            raise AgentNodeExecutionError(
+                str(exc),
+                code="source_stage_preflight_failed",
+            ) from exc
         return record, started
     task_kind = PROJECT_NODE_TASKS.get(node_id)
     if not task_kind:

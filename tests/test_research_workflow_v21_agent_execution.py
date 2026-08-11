@@ -21,6 +21,9 @@ from core.web.services.team_workflow.research_runtime.session_binding_bridge imp
     chat_deep_link,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
+from core.web.services.team_workflow_orchestration_service import (
+    TeamWorkflowOrchestrationError,
+)
 
 SOURCE_AGENTS = {
     "source_finder": "agent-source-finder",
@@ -338,6 +341,7 @@ def test_project_agent_task_uses_frozen_agent_and_rejects_mismatch(
     assert getattr(exc.value, "code", "") == "binding_agent_mismatch"
     assert len(calls) == 1
 
+
     stop_calls: list[dict] = []
 
     def fake_stop(session_id: str, *, expected_turn_id: str = "") -> dict:
@@ -373,6 +377,54 @@ def test_project_agent_task_uses_frozen_agent_and_rejects_mismatch(
     assert stop_calls == [
         {"sessionId": "session-hypothesis", "expectedTurnId": "turn-hypothesis"}
     ]
+
+
+def test_source_stage_preflight_is_a_recoverable_workflow_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = _service(tmp_path / "source-stage-preflight")
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(workflowDefaults=SOURCE_AGENTS),
+        idempotency_key="create-source-stage-preflight",
+    )
+    run = _make_node_ready(
+        service,
+        run,
+        node_id="knowledge_ingestion",
+        agent_id=SOURCE_AGENTS["source_ingestor"],
+    )
+    service._store.update_run(
+        run["runId"], {"sourceCollectionRunId": "source-run-preflight"}
+    )
+
+    def reject_stage_start(_team_id: str, _source_run_id: str, _payload: dict) -> dict:
+        raise TeamWorkflowOrchestrationError(
+            "推进失败（不合格）：关系图有 5 个节点但 0 条边，入库会被系统拦截。请先完成整理关系。"
+        )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.stage_session.start_source_collection_stage_session_task",
+        reject_stage_start,
+    )
+
+    with pytest.raises(ResearchWorkflowError) as exc:
+        service.apply_node_command(
+            run["runId"],
+            "knowledge_ingestion",
+            "start_agent_task",
+            payload={
+                "idempotencyKey": "start-source-stage-preflight",
+                "budgetRequest": BUDGET_REQUEST,
+            },
+        )
+
+    assert getattr(exc.value, "code", "") == "source_stage_preflight_failed"
+    assert "关系图有 5 个节点但 0 条边" in str(exc.value)
+    persisted = service.get_run(run["runId"])
+    assert persisted["nodeRuns"][0]["status"] == "ready"
 
 
 def test_partial_agent_start_replays_persisted_key_and_budget(

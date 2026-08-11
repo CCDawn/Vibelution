@@ -3,6 +3,10 @@
 from core.web.services.team_workflow.source_collection.stage_writeback_prompt_contracts import (
     stage_writeback_prompt_lines,
 )
+from core.web.services.team_workflow.source_collection.writeback_materialize import (
+    _merge_source_collection_stage_writeback_agent_graph,
+    _source_collection_stage_writeback_agent_graph_payload,
+)
 
 
 def test_finding_prompt_requires_counter_search_without_fabrication() -> None:
@@ -20,3 +24,45 @@ def test_finding_prompt_requires_counter_search_without_fabrication() -> None:
 
 def test_unknown_stage_has_no_extra_writeback_contract() -> None:
     assert stage_writeback_prompt_lines("unknown") == []
+
+
+def test_relation_prompt_candidate_relations_materialize_as_candidate_graph_edges() -> None:
+    payload = _source_collection_stage_writeback_agent_graph_payload(
+        {
+            "themes": [{"id": "theme-baseline", "label": "Frozen baseline"}],
+            "candidateRelations": [
+                {
+                    "from": "candidate-source-a",
+                    "to": "theme-baseline",
+                    "type": "compares_against",
+                    "evidenceRefs": ["record-a#p4"],
+                }
+            ],
+        }
+    )
+
+    assert payload["themeNodes"] == [
+        {"id": "theme-baseline", "label": "Frozen baseline"}
+    ]
+    assert payload["sourceThemeEdges"] == [
+        {
+            "candidateId": "candidate-source-a",
+            "themeId": "theme-baseline",
+            "relation": "compares_against",
+            "evidenceRefs": ["record-a#p4"],
+        }
+    ]
+    graph = _merge_source_collection_stage_writeback_agent_graph(
+        {"nodes": [{"candidateId": "candidate-source-a"}]},
+        payload,
+    )
+
+    assert graph["summary"]["edgeCount"] == 1
+    assert graph["edges"] == [
+        {
+            "sourceCandidateId": "candidate-source-a",
+            "targetCandidateId": "source-theme:theme-baseline",
+            "relation": "compares_against",
+            "edgeState": "candidate_only",
+        }
+    ]
