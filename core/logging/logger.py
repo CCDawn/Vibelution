@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -39,6 +40,8 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 LOG_ROOT = os.path.join(_PROJECT_ROOT, "logs")
 CONVERSATION_LOG_DIR = os.path.join(LOG_ROOT, "conversations")
 DEBUG_LOG_DIR = os.path.join(LOG_ROOT, "debug")
+
+_logger = logging.getLogger("core.logging.logger")
 
 # ============================================================================
 # UI 桥接 — 延迟获取 UIManager（打破循环导入）
@@ -643,7 +646,7 @@ class ConversationLogger:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 f.flush()
         except Exception as e:
-            print(f"[ConversationLogger] 写入失败: {e}")
+            _logger.warning("ConversationLogger write failed: %s", e)
 
     def start_session(self, metadata: dict = None):
         """记录会话开始"""
