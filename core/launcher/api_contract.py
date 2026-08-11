@@ -55,6 +55,19 @@ class LifecycleIntentPayload(BaseModel):
     idempotencyKey: str
 
 
+class WorkbenchCloseTransactionPayload(BaseModel):
+    desktopSessionId: str
+    idempotencyKey: str
+    mode: str = "normal"
+    reason: str = ""
+    confirmationCloseId: str = ""
+
+
+class WorkbenchCloseWindowClosedPayload(BaseModel):
+    desktopSessionId: str
+    desktopSessionRevision: int = 0
+
+
 class DesktopActionClaimPayload(BaseModel):
     desktopSessionId: str
     leaseSeconds: int = 30

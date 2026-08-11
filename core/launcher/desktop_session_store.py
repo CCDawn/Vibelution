@@ -227,6 +227,18 @@ def close_desktop_session(desktop_session_id: str, payload: dict[str, Any]) -> d
     return _public_session(updated)
 
 
+def get_desktop_session(desktop_session_id: str) -> dict[str, Any]:
+    normalized_id = _safe_text(desktop_session_id, max_length=160)
+    if not normalized_id:
+        return {}
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM desktop_sessions WHERE desktop_session_id = ?",
+            (normalized_id,),
+        ).fetchone()
+    return _public_session(row)
+
+
 def latest_active_desktop_window(role: str) -> dict[str, Any]:
     normalized_role = _safe_text(role, max_length=80)
     if normalized_role not in WINDOW_ROLES:

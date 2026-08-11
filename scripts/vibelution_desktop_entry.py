@@ -940,6 +940,7 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
             "desktop_actions.claim",
             "desktop_sessions.heartbeat",
             "runtime_scene.electron_event",
+            "workbench_close.transaction.v1",
         ],
     }
 

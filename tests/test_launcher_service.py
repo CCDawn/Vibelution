@@ -74,10 +74,255 @@ def test_launcher_payload_contract_is_shared_between_standalone_and_web_routes()
     assert web_launcher_routes.LauncherStartupSettingsPayload is api_contract.LauncherStartupSettingsPayload
     assert launcher_app.DesktopSessionWindowPayload is api_contract.DesktopSessionWindowPayload
     assert web_launcher_routes.DesktopSessionWindowPayload is api_contract.DesktopSessionWindowPayload
+    assert launcher_app.WorkbenchCloseTransactionPayload is api_contract.WorkbenchCloseTransactionPayload
+    assert web_launcher_routes.WorkbenchCloseTransactionPayload is api_contract.WorkbenchCloseTransactionPayload
     assert api_contract.launcher_error_detail("invalid_mode", ValueError("bad")) == {
         "code": "invalid_mode",
         "message": "bad",
     }
+
+
+def test_workbench_close_transaction_is_durable_idempotent_and_requires_confirmed_force(tmp_path, monkeypatch):
+    """A close command is never a substitute for a durable Electron-close transaction."""
+    from core.launcher import lifecycle_action_dispatcher, lifecycle_intent_store
+
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "LIFECYCLE_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "lifecycle.sqlite3",
+    )
+    session = launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "desktop-close-1",
+            "provider": "electron",
+            "capabilities": ["workbench_close.transaction.v1"],
+        }
+    )
+    opened = launcher_service.update_desktop_session_window(
+        "desktop-close-1",
+        "workbench",
+        {"revision": session["revision"], "open": True, "windowId": 7},
+    )
+    dispatched: list[dict[str, object]] = []
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(
+        lifecycle_action_dispatcher,
+        "dispatch_workbench_close_transaction",
+        lambda transaction: dispatched.append(transaction)
+        or {"dispatched": True, "accepted": True, "commandId": "close-command-1"},
+        raising=False,
+    )
+
+    requested = launcher_service.submit_workbench_close_transaction(
+        {
+            "desktopSessionId": "desktop-close-1",
+            "idempotencyKey": "desktop-close-1:normal:1",
+            "mode": "normal",
+            "reason": "user_requested_close",
+        }
+    )
+    replayed = launcher_service.submit_workbench_close_transaction(
+        {
+            "desktopSessionId": "desktop-close-1",
+            "idempotencyKey": "desktop-close-1:normal:1",
+            "mode": "normal",
+            "reason": "user_requested_close",
+        }
+    )
+
+    assert requested["phase"] == "backend_closing"
+    assert requested["commandId"] == "close-command-1"
+    assert requested["expectedDesktopSessionRevision"] == opened["revision"]
+    assert replayed["closeId"] == requested["closeId"]
+    assert dispatched == [
+        {
+            "closeId": requested["closeId"],
+            "desktopSessionId": "desktop-close-1",
+            "expectedDesktopSessionRevision": opened["revision"],
+            "mode": "normal",
+            "reason": "user_requested_close",
+            "confirmationCloseId": "",
+        }
+    ]
+
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [{"runId": "chat-run-1"}])
+    confirmation = launcher_service.submit_workbench_close_transaction(
+        {
+            "desktopSessionId": "desktop-close-1",
+            "idempotencyKey": "desktop-close-1:normal:2",
+            "mode": "normal",
+            "reason": "user_requested_close",
+        }
+    )
+
+    assert confirmation["phase"] == "confirmation_required"
+    assert confirmation["activeWorkCount"] == 1
+    assert confirmation["commandId"] == ""
+    with pytest.raises(ValueError, match="confirmationCloseId"):
+        launcher_service.submit_workbench_close_transaction(
+            {
+                "desktopSessionId": "desktop-close-1",
+                "idempotencyKey": "desktop-close-1:force:missing",
+                "mode": "force",
+            }
+        )
+
+    force_requested = launcher_service.submit_workbench_close_transaction(
+        {
+            "desktopSessionId": "desktop-close-1",
+            "idempotencyKey": "desktop-close-1:force:2",
+            "mode": "force",
+            "confirmationCloseId": confirmation["closeId"],
+            "reason": "user_confirmed_force_close",
+        }
+    )
+
+    assert force_requested["phase"] == "backend_closing"
+    assert force_requested["confirmationCloseId"] == confirmation["closeId"]
+    assert force_requested["commandId"] == "close-command-1"
+    assert len(dispatched) == 2
+    assert dispatched[-1]["mode"] == "force"
+    with pytest.raises(ValueError, match="already been consumed"):
+        launcher_service.submit_workbench_close_transaction(
+            {
+                "desktopSessionId": "desktop-close-1",
+                "idempotencyKey": "desktop-close-1:force:duplicate",
+                "mode": "force",
+                "confirmationCloseId": confirmation["closeId"],
+            }
+        )
+
+
+def test_workbench_close_transaction_requires_matching_closed_window_ack(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_action_dispatcher, lifecycle_intent_store
+
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "LIFECYCLE_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "lifecycle.sqlite3",
+    )
+    session = launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "desktop-close-ack-1",
+            "provider": "electron",
+            "capabilities": ["workbench_close.transaction.v1"],
+        }
+    )
+    opened = launcher_service.update_desktop_session_window(
+        "desktop-close-ack-1",
+        "workbench",
+        {"revision": session["revision"], "open": True, "windowId": 8},
+    )
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(
+        lifecycle_action_dispatcher,
+        "dispatch_workbench_close_transaction",
+        lambda _transaction: {"dispatched": True, "accepted": True, "commandId": "close-command-ack-1"},
+        raising=False,
+    )
+    requested = launcher_service.submit_workbench_close_transaction(
+        {
+            "desktopSessionId": "desktop-close-ack-1",
+            "idempotencyKey": "desktop-close-ack-1:normal:1",
+            "mode": "normal",
+        }
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "_load_runtime_manager_command_result",
+        lambda command_id: {"commandId": command_id, "completed": True, "ok": True},
+    )
+
+    authorized = launcher_service.get_workbench_close_transaction(requested["closeId"])
+
+    assert authorized["phase"] == "window_close_authorized"
+    with pytest.raises(ValueError, match="another desktop session"):
+        launcher_service.ack_workbench_close_transaction_window_closed(
+            requested["closeId"],
+            {"desktopSessionId": "desktop-close-ack-other", "desktopSessionRevision": opened["revision"]},
+        )
+    with pytest.raises(ValueError, match="workbench window is still open"):
+        launcher_service.ack_workbench_close_transaction_window_closed(
+            requested["closeId"],
+            {"desktopSessionId": "desktop-close-ack-1", "desktopSessionRevision": opened["revision"]},
+        )
+
+    closed_window = launcher_service.update_desktop_session_window(
+        "desktop-close-ack-1",
+        "workbench",
+        {"revision": opened["revision"], "open": False, "windowId": 8},
+    )
+    completed = launcher_service.ack_workbench_close_transaction_window_closed(
+        requested["closeId"],
+        {
+            "desktopSessionId": "desktop-close-ack-1",
+            "desktopSessionRevision": closed_window["revision"],
+        },
+    )
+    replayed = launcher_service.ack_workbench_close_transaction_window_closed(
+        requested["closeId"],
+        {
+            "desktopSessionId": "desktop-close-ack-1",
+            "desktopSessionRevision": closed_window["revision"],
+        },
+    )
+
+    assert completed["phase"] == "succeeded"
+    assert completed["completionSource"] == "electron_window_closed_ack"
+    assert replayed["closeId"] == completed["closeId"]
+
+
+def test_workbench_close_transaction_reconciles_backend_failure_without_authorizing_window_close(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_action_dispatcher, lifecycle_intent_store
+
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "LIFECYCLE_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "lifecycle.sqlite3",
+    )
+    session = launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "desktop-close-failure-1",
+            "provider": "electron",
+            "capabilities": ["workbench_close.transaction.v1"],
+        }
+    )
+    launcher_service.update_desktop_session_window(
+        "desktop-close-failure-1",
+        "workbench",
+        {"revision": session["revision"], "open": True, "windowId": 9},
+    )
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(
+        lifecycle_action_dispatcher,
+        "dispatch_workbench_close_transaction",
+        lambda _transaction: {"dispatched": True, "accepted": True, "commandId": "close-command-failure-1"},
+        raising=False,
+    )
+    requested = launcher_service.submit_workbench_close_transaction(
+        {
+            "desktopSessionId": "desktop-close-failure-1",
+            "idempotencyKey": "desktop-close-failure-1:normal:1",
+            "mode": "normal",
+        }
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "_load_runtime_manager_command_result",
+        lambda command_id: {
+            "commandId": command_id,
+            "completed": True,
+            "ok": False,
+            "status": "failed",
+            "message": "backend close rejected",
+        },
+    )
+
+    reconciled = launcher_service.get_workbench_close_transaction(requested["closeId"])
+
+    assert reconciled["phase"] == "failed"
+    assert reconciled["failureCode"] == "backend_close_failed"
+    assert reconciled["result"]["commandId"] == "close-command-failure-1"
 
 
 def test_window_provider_dispatcher_routes_electron_to_desktop_action_without_edge_call():
@@ -220,6 +465,104 @@ def test_standalone_launcher_app_exposes_lifecycle_intent_and_desktop_action_rou
         ("ack", "action-1", "desktop-session-1", {"ok": True}),
         ("fail", "action-2", "desktop-session-1", {"ok": False}),
     ]
+
+
+def test_standalone_launcher_app_exposes_controlled_workbench_close_transaction_routes(monkeypatch):
+    from core.launcher.lifecycle_intent_store import WorkbenchCloseTransactionConflict
+
+    calls = []
+    transaction = {
+        "closeId": "workbench-close-1",
+        "phase": "backend_closing",
+        "desktopSessionId": "desktop-session-1",
+        "expectedDesktopSessionRevision": 4,
+    }
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_workbench_close_transaction",
+        lambda payload: calls.append(("submit", payload)) or transaction,
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "get_workbench_close_transaction",
+        lambda close_id: calls.append(("get", close_id)) or transaction,
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "ack_workbench_close_transaction_window_closed",
+        lambda close_id, payload: calls.append(("ack", close_id, payload))
+        or {**transaction, "phase": "succeeded"},
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+    token_headers = {"X-Vibelution-Control-Token": client.get("/api/control-token").json()["controlToken"]}
+
+    submitted = client.post(
+        "/api/launcher/workbench-close-transactions",
+        headers=token_headers,
+        json={
+            "desktopSessionId": "desktop-session-1",
+            "idempotencyKey": "desktop-session-1:close:1",
+            "mode": "normal",
+            "reason": "user_requested_close",
+        },
+    )
+    fetched = client.get(
+        "/api/launcher/workbench-close-transactions/workbench-close-1",
+        headers=token_headers,
+    )
+    acknowledged = client.post(
+        "/api/launcher/workbench-close-transactions/workbench-close-1/window-closed",
+        headers=token_headers,
+        json={"desktopSessionId": "desktop-session-1", "desktopSessionRevision": 4},
+    )
+
+    assert submitted.status_code == 202
+    assert fetched.status_code == 200
+    assert acknowledged.status_code == 202
+    assert calls == [
+        (
+            "submit",
+            {
+                "desktopSessionId": "desktop-session-1",
+                "idempotencyKey": "desktop-session-1:close:1",
+                "mode": "normal",
+                "reason": "user_requested_close",
+                "confirmationCloseId": "",
+            },
+        ),
+        ("get", "workbench-close-1"),
+        (
+            "ack",
+            "workbench-close-1",
+            {"desktopSessionId": "desktop-session-1", "desktopSessionRevision": 4},
+        ),
+    ]
+
+    monkeypatch.setattr(
+        launcher_service,
+        "ack_workbench_close_transaction_window_closed",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            WorkbenchCloseTransactionConflict(
+                "desktop_session_revision_conflict",
+                "revision mismatch",
+                expectedDesktopSessionRevision=4,
+                actualDesktopSessionRevision=5,
+            )
+        ),
+    )
+    conflict = client.post(
+        "/api/launcher/workbench-close-transactions/workbench-close-1/window-closed",
+        headers=token_headers,
+        json={"desktopSessionId": "desktop-session-1", "desktopSessionRevision": 4},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == {
+        "code": "desktop_session_revision_conflict",
+        "message": "revision mismatch",
+        "expectedDesktopSessionRevision": 4,
+        "actualDesktopSessionRevision": 5,
+    }
 
 
 def test_desktop_session_store_records_revisioned_window_state(tmp_path, monkeypatch):

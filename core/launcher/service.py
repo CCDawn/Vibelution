@@ -1093,6 +1093,169 @@ def close_desktop_session(desktop_session_id: str, payload: dict[str, Any]) -> d
     return desktop_session_store.close_desktop_session(desktop_session_id, payload)
 
 
+def submit_workbench_close_transaction(payload: dict[str, Any]) -> dict[str, Any]:
+    desktop_session_id = str(payload.get("desktopSessionId") or "").strip()
+    desktop_session = desktop_session_store.get_desktop_session(desktop_session_id)
+    transaction = lifecycle_intent_store.submit_workbench_close_transaction(
+        payload,
+        desktop_session=desktop_session,
+        active_work_runs=launcher_active_work_runs(),
+    )
+    _record_workbench_close_event(
+        "confirmation_required" if transaction.get("phase") == "confirmation_required" else "persisted",
+        transaction,
+    )
+    if transaction.get("phase") != "backend_closing" or transaction.get("commandId"):
+        return transaction
+    dispatch_payload = {
+        "closeId": str(transaction.get("closeId") or ""),
+        "desktopSessionId": str(transaction.get("desktopSessionId") or ""),
+        "expectedDesktopSessionRevision": int(transaction.get("expectedDesktopSessionRevision") or 0),
+        "mode": str(transaction.get("mode") or "normal"),
+        "reason": str(transaction.get("reason") or ""),
+        "confirmationCloseId": str(transaction.get("confirmationCloseId") or ""),
+    }
+    try:
+        dispatch = lifecycle_action_dispatcher.dispatch_workbench_close_transaction(dispatch_payload)
+    except Exception as exc:  # noqa: BLE001 - command queue is an external persistence boundary.
+        failed = lifecycle_intent_store.fail_workbench_close_transaction(
+            str(transaction.get("closeId") or ""),
+            code="backend_dispatch_failed",
+            message=str(exc),
+        )
+        _record_workbench_close_event("failed", failed)
+        return failed
+    command_id = str(dispatch.get("commandId") or "")
+    if not dispatch.get("accepted", True) or not command_id:
+        failed = lifecycle_intent_store.fail_workbench_close_transaction(
+            str(transaction.get("closeId") or ""),
+            code="backend_dispatch_rejected",
+            message="Runtime Manager did not accept the workbench close command.",
+            result={"accepted": bool(dispatch.get("accepted")), "commandId": command_id},
+        )
+        _record_workbench_close_event("failed", failed)
+        return failed
+    dispatched = lifecycle_intent_store.record_workbench_close_dispatch(
+        str(transaction.get("closeId") or ""),
+        command_id=command_id,
+    )
+    _record_workbench_close_event("persisted", dispatched)
+    return dispatched
+
+
+def get_workbench_close_transaction(close_id: str) -> dict[str, Any]:
+    transaction = lifecycle_intent_store.get_workbench_close_transaction(close_id)
+    if not transaction:
+        return {}
+    if transaction.get("phase") != "backend_closing" or not transaction.get("commandId"):
+        return transaction
+    runtime_result = _load_runtime_manager_command_result(str(transaction.get("commandId") or ""))
+    if not runtime_result:
+        return transaction
+    terminal_status = _lifecycle_status_for_runtime_result(runtime_result)
+    if not terminal_status:
+        return transaction
+    result_summary = _lifecycle_result_summary(runtime_result)
+    if terminal_status == "succeeded":
+        authorized = lifecycle_intent_store.authorize_workbench_close_window(
+            str(transaction.get("closeId") or ""),
+            result=result_summary,
+        )
+        _record_workbench_close_event("backend_closed", authorized)
+        return authorized
+    failed = lifecycle_intent_store.fail_workbench_close_transaction(
+        str(transaction.get("closeId") or ""),
+        code="backend_close_failed",
+        message=str(result_summary.get("message") or "Runtime Manager close command failed."),
+        result=result_summary,
+    )
+    _record_workbench_close_event("failed", failed)
+    return failed
+
+
+def ack_workbench_close_transaction_window_closed(close_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    transaction = lifecycle_intent_store.get_workbench_close_transaction(close_id)
+    if not transaction:
+        raise ValueError("workbench close transaction was not found")
+    desktop_session_id = str(payload.get("desktopSessionId") or "").strip()
+    if desktop_session_id != str(transaction.get("desktopSessionId") or ""):
+        raise lifecycle_intent_store.WorkbenchCloseTransactionConflict(
+            "desktop_session_mismatch",
+            "workbench close transaction acknowledgement came from another desktop session",
+        )
+    desktop_session = desktop_session_store.get_desktop_session(desktop_session_id)
+    actual_revision = int(desktop_session.get("revision") or 0)
+    acknowledged_revision = _positive_int(payload.get("desktopSessionRevision"))
+    if acknowledged_revision != actual_revision:
+        raise lifecycle_intent_store.WorkbenchCloseTransactionConflict(
+            "desktop_session_revision_conflict",
+            "workbench close transaction acknowledgement desktop session revision does not match",
+            expectedDesktopSessionRevision=acknowledged_revision,
+            actualDesktopSessionRevision=actual_revision,
+        )
+    if actual_revision < int(transaction.get("expectedDesktopSessionRevision") or 0):
+        raise lifecycle_intent_store.WorkbenchCloseTransactionConflict(
+            "desktop_session_revision_too_old",
+            "workbench close transaction acknowledgement predates the requested desktop session revision",
+            expectedDesktopSessionRevision=int(transaction.get("expectedDesktopSessionRevision") or 0),
+            actualDesktopSessionRevision=actual_revision,
+        )
+    if str(desktop_session.get("status") or "") != "active":
+        raise lifecycle_intent_store.WorkbenchCloseTransactionConflict(
+            "desktop_session_unavailable",
+            "workbench close transaction acknowledgement requires an active desktop session",
+            actualDesktopSessionRevision=actual_revision,
+        )
+    workbench_window = desktop_session.get("windows", {}).get("workbench", {})
+    if not isinstance(workbench_window, dict) or bool(workbench_window.get("open", False)):
+        raise lifecycle_intent_store.WorkbenchCloseTransactionConflict(
+            "workbench_window_still_open",
+            "workbench window is still open; close acknowledgement is not accepted",
+            actualDesktopSessionRevision=actual_revision,
+        )
+    phase = str(transaction.get("phase") or "")
+    if phase == "succeeded":
+        return transaction
+    if phase != "window_close_authorized":
+        raise lifecycle_intent_store.WorkbenchCloseTransactionConflict(
+            "window_close_not_authorized",
+            "workbench close transaction is not authorized for Electron window completion",
+        )
+    completed = lifecycle_intent_store.complete_workbench_close_transaction(
+        str(transaction.get("closeId") or ""),
+        completion_source="electron_window_closed_ack",
+    )
+    _record_workbench_close_event("completed", completed)
+    return completed
+
+
+def _record_workbench_close_event(event_suffix: str, transaction: dict[str, Any]) -> None:
+    phase = str(transaction.get("phase") or "")
+    _record_launcher_event(
+        f"launcher.workbench_close.{event_suffix}",
+        phase="workbench_close_transaction",
+        message="Workbench close transaction state changed.",
+        outcome="failed" if phase == "failed" else phase or "observed",
+        level="error" if phase == "failed" else "info",
+        fields={
+            "closeId": str(transaction.get("closeId") or ""),
+            "desktopSessionId": str(transaction.get("desktopSessionId") or ""),
+            "expectedDesktopSessionRevision": int(transaction.get("expectedDesktopSessionRevision") or 0),
+            "commandId": str(transaction.get("commandId") or ""),
+            "mode": str(transaction.get("mode") or ""),
+            "phase": phase,
+        },
+    )
+
+
+def _positive_int(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
+
+
 def request_launcher_start() -> LauncherCommandResponse:
     """Request the managed project bundle to start."""
 
