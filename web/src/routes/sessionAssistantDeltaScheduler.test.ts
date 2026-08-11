@@ -30,4 +30,27 @@ describe("sessionAssistantDeltaScheduler canonical payload", () => {
     expect(result.telemetry.contentDeltaLength).toBe(3);
     expect(result.entries[0]?.payload).not.toHaveProperty("contentDelta");
   });
+
+  it("treats incomplete live text revisions as zero-length telemetry", () => {
+    const scheduler = createSessionAssistantDeltaScheduler({ nowMs: () => 100 });
+    const incomplete: AssistantDelta = {
+      ...delta(),
+      turnItems: [
+        {
+          ...delta().turnItems[0],
+          text: undefined as unknown as string,
+        },
+        {
+          id: "thought-r1", itemId: "thought", version: 3, sessionId: "session-1", turnId: "turn-1",
+          type: "reasoning", text: undefined as unknown as string, status: "running", revision: 1, sequence: 2,
+        },
+      ],
+    };
+
+    scheduler.enqueue(incomplete, 120);
+    const result = scheduler.drain("frame", { frameScheduledAtMs: 90 });
+
+    expect(result.telemetry.contentDeltaLength).toBe(0);
+    expect(result.telemetry.thoughtDeltaLength).toBe(0);
+  });
 });
