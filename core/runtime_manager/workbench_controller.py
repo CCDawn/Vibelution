@@ -1182,6 +1182,23 @@ def _electron_window_action_for_launcher_action(action: str) -> str:
     return ""
 
 
+def _can_reuse_backend_for_electron_window_open(*, action: str, session: dict[str, Any]) -> bool:
+    if not session or str(action or "").strip().lower() not in {"internal-start", "start"}:
+        return False
+    try:
+        observation = observe_workbench(
+            recover_browser_window=False,
+            recover_browser_window_for_backend_observed=False,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+    return bool(
+        observation.get("backendHealthy")
+        and observation.get("backendObserved")
+        and not observation.get("backendPortConflict")
+    )
+
+
 def _submit_electron_window_action(*, action: str, reason: str, session: dict[str, Any]) -> dict[str, Any]:
     """Submit a Python-owned Desktop Action for the active Electron shell."""
 
@@ -1203,6 +1220,55 @@ def _submit_electron_window_action(*, action: str, reason: str, session: dict[st
     )
 
 
+def _run_captured_launcher_process(
+    args: list[str],
+    *,
+    env: dict[str, str],
+    action: str,
+    no_browser: bool,
+    started_at: float,
+    cancel_check: Callable[[], bool] | None,
+) -> subprocess.CompletedProcess[str]:
+    stdout_fd, stdout_path = tempfile.mkstemp(prefix="vibelution-launcher-stdout-", suffix=".log")
+    stderr_fd, stderr_path = tempfile.mkstemp(prefix="vibelution-launcher-stderr-", suffix=".log")
+    try:
+        with os.fdopen(stdout_fd, "w+b") as stdout_handle, os.fdopen(stderr_fd, "w+b") as stderr_handle:
+            try:
+                result = _run_waitable_launcher_process(
+                    args,
+                    env=env,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                    action=action,
+                    no_browser=no_browser,
+                    started_at=started_at,
+                    cancel_check=cancel_check,
+                )
+            except Exception as exc:
+                _record_launcher_action_event(
+                    "launcher.action.failed",
+                    action=action,
+                    no_browser=no_browser,
+                    env=env,
+                    duration_ms=(time.monotonic() - started_at) * 1000,
+                    error_type=type(exc).__name__,
+                    message=str(exc),
+                )
+                raise
+        return subprocess.CompletedProcess(
+            args=result.args,
+            returncode=result.returncode,
+            stdout=_read_capture_file(stdout_path),
+            stderr=_read_capture_file(stderr_path),
+        )
+    finally:
+        for capture_path in (stdout_path, stderr_path):
+            try:
+                os.remove(capture_path)
+            except OSError:
+                pass
+
+
 def run_launcher_action(
     action: str,
     *,
@@ -1213,6 +1279,10 @@ def run_launcher_action(
     electron_session = _latest_active_electron_desktop_session()
     electron_window_action = _electron_window_action_for_launcher_action(action)
     effective_no_browser = bool(no_browser or electron_session)
+    reuse_electron_backend = _can_reuse_backend_for_electron_window_open(
+        action=action,
+        session=electron_session,
+    )
     args = _launcher_command_args(action, no_browser=effective_no_browser)
     env = os.environ.copy()
     env["VIBELUTION_PORT"] = _explicit_workbench_port_env_value() or str(configured_backend_port())
@@ -1234,73 +1304,58 @@ def run_launcher_action(
         env=env,
     )
     started_at = time.monotonic()
-    stdout_fd, stdout_path = tempfile.mkstemp(prefix="vibelution-launcher-stdout-", suffix=".log")
-    stderr_fd, stderr_path = tempfile.mkstemp(prefix="vibelution-launcher-stderr-", suffix=".log")
-    try:
-        with os.fdopen(stdout_fd, "w+b") as stdout_handle, os.fdopen(stderr_fd, "w+b") as stderr_handle:
-            try:
-                result = _run_waitable_launcher_process(
-                    args,
-                    env=env,
-                    stdout_handle=stdout_handle,
-                    stderr_handle=stderr_handle,
-                    action=action,
-                    no_browser=effective_no_browser,
-                    started_at=started_at,
-                    cancel_check=cancel_check,
-                )
-            except Exception as exc:
-                _record_launcher_action_event(
-                    "launcher.action.failed",
-                    action=action,
-                    no_browser=effective_no_browser,
-                    env=env,
-                    duration_ms=(time.monotonic() - started_at) * 1000,
-                    error_type=type(exc).__name__,
-                    message=str(exc),
-                )
-                raise
+    if reuse_electron_backend:
         completed = subprocess.CompletedProcess(
-            args=result.args,
-            returncode=result.returncode,
-            stdout=_read_capture_file(stdout_path),
-            stderr=_read_capture_file(stderr_path),
+            args=args,
+            returncode=0,
+            stdout="backendReady=true; launcherProcessSkipped=true",
+            stderr="",
         )
-        if completed.returncode == 0 and electron_session and electron_window_action:
-            intent = _submit_electron_window_action(
-                action=electron_window_action,
-                reason=f"{action}:electron_window_provider",
-                session=electron_session,
-            )
-            if str(intent.get("status") or "") != "accepted":
-                raise RuntimeError(
-                    "Electron window action was not accepted by the Launcher: "
-                    f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
-                )
-            _record_launcher_action_event(
-                "launcher.action.electron_desktop_action_submitted",
-                action=action,
-                no_browser=effective_no_browser,
-                env=env,
-                stdout=f"desktopAction={electron_window_action}",
-            )
         _record_launcher_action_event(
-            "launcher.action.completed",
+            "launcher.action.electron_backend_reused",
             action=action,
             no_browser=effective_no_browser,
             env=env,
-            return_code=completed.returncode,
             stdout=completed.stdout,
-            stderr=completed.stderr,
-            duration_ms=(time.monotonic() - started_at) * 1000,
         )
-        return completed
-    finally:
-        for capture_path in (stdout_path, stderr_path):
-            try:
-                os.remove(capture_path)
-            except OSError:
-                pass
+    else:
+        completed = _run_captured_launcher_process(
+            args,
+            env=env,
+            action=action,
+            no_browser=effective_no_browser,
+            started_at=started_at,
+            cancel_check=cancel_check,
+        )
+    if completed.returncode == 0 and electron_session and electron_window_action:
+        intent = _submit_electron_window_action(
+            action=electron_window_action,
+            reason=f"{action}:electron_window_provider",
+            session=electron_session,
+        )
+        if str(intent.get("status") or "") != "accepted":
+            raise RuntimeError(
+                "Electron window action was not accepted by the Launcher: "
+                f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+            )
+        _record_launcher_action_event(
+            "launcher.action.electron_desktop_action_submitted",
+            action=action,
+            no_browser=effective_no_browser,
+            env=env,
+            stdout=f"desktopAction={electron_window_action}",
+        )
+    _record_launcher_action_event(
+        "launcher.action.completed",
+        action=action,
+        no_browser=effective_no_browser,
+        env=env,
+        return_code=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+        duration_ms=(time.monotonic() - started_at) * 1000,
+    )
+    return completed
 
 
 def _record_launcher_action_event(
