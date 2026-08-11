@@ -9,6 +9,7 @@ from .database import (
     SqliteWalRuntimeAssessment,
     assess_sqlite_wal_runtime,
 )
+from .importer import AgentConfigImportError, LegacyAgentConfigImporter
 from .repository import ConversationRepository, ConversationUnitOfWork
 from .store import ConversationStore
 from .writer import (
@@ -18,6 +19,7 @@ from .writer import (
 )
 
 __all__ = [
+    "AgentConfigImportError",
     "ConversationBackpressureError",
     "ConversationRepository",
     "ConversationStore",
@@ -29,6 +31,7 @@ __all__ = [
     "ConversationUnitOfWork",
     "ConversationWriter",
     "ConversationWriterClosedError",
+    "LegacyAgentConfigImporter",
     "SqliteWalRuntimeAssessment",
     "assess_sqlite_wal_runtime",
 ]
