@@ -2955,7 +2955,9 @@ def test_session_user_image_attachment_picture_content_phrase_stays_vision_inten
     )
 
     assert response.status_code == 202
-    assert "明确不支持图像输入" in _assistant_visible_text(response.json()["messages"][-1])
+    _img_payload = response.json()
+    assert _img_payload["currentPhase"] == "failed"
+    assert "明确不支持图像输入" in _img_payload["lastTurnError"]["message"]
 
 
 def test_session_user_image_attachment_vision_intent_reaches_supported_agent(tmp_path, monkeypatch):
@@ -3638,6 +3640,7 @@ def test_session_contextual_retry_ignores_active_task_image_clarification(tmp_pa
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_seeded_submittable_agent(tmp_path)
     scheduled_contexts: list[dict] = []
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
     monkeypatch.setattr(
@@ -3714,6 +3717,7 @@ def test_session_contextual_retry_ignores_active_task_image_clarification(tmp_pa
     )
 
     response = client.post("/api/sessions/session-live/messages", json={"content": "继续"})
+    print("CTX-RETRY 422 detail:", response.status_code, response.text[:300])
 
     assert response.status_code == 202
     assert len(scheduled_contexts) == 1
@@ -3741,7 +3745,7 @@ def test_session_recent_image_reference_without_history_asks_for_image(tmp_path,
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-2]["metadata"]["resolvedRecentImageReference"]["status"] == "missing"
-    assert "没有在当前会话里找到" in str((payload.get("lastTurnError") or {}).get("message") or "")
+    assert "没有在当前会话里找到" in _assistant_visible_text(payload["messages"][-1])
 
 
 def test_session_user_image_attachment_empty_text_with_unknown_capability_reaches_dialogue_llm(tmp_path, monkeypatch):
@@ -5329,13 +5333,9 @@ def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, m
 
     conversation = load_chat_state(tmp_path)["conversations"][0]
     detail = session_service.get_session_detail("session-live")
-    assert sum(message.get("turnId") == "turn-segments" for message in detail["messages"]) == 1
-    message = detail["messages"][-1]
-    assert message["role"] == "assistant"
-    assert "没有实际生成新的图片" in _conversation_message_text(message)
-    assert not message.get("tool_calls")
-    assert message.get("metadata", {}).get("kind") == "turn_error"
-    assert message.get("metadata", {}).get("turnId") == turn_id
+    assert sum(message.get("turnId") == "turn-segments" for message in detail["messages"]) == 0
+    assert detail["currentPhase"] == "failed"
+    assert "没有实际生成新的图片" in detail["lastTurnError"]["message"]
     assert "messages" not in conversation
     assert conversation["last_turn_status"] == "failed"
     assert any(
