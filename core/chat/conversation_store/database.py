@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-import queue
 import threading
 import time
+import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,9 +17,6 @@ from .schema import MIGRATIONS, SCHEMA_VERSION
 DEFAULT_BUSY_TIMEOUT_MS = 250
 _SAFE_BACKPORTS = {(3, 44, 6), (3, 50, 7)}
 _FIRST_FULLY_FIXED_VERSION = (3, 51, 3)
-_UNOPENED_READER_SLOT = object()
-
-
 class ConversationStoreError(RuntimeError):
     """Base class for bounded canonical conversation-store failures."""
 
@@ -46,6 +43,43 @@ class SqliteWalRuntimeAssessment:
     safe: bool
     code: str
     detail: str
+
+
+class _ThreadReaderLease:
+    """A reusable query-only connection owned by one Python thread."""
+
+    def __init__(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        generation: int,
+        slot: threading.BoundedSemaphore,
+        database: ConversationDatabase,
+    ) -> None:
+        self.connection = connection
+        self.generation = generation
+        self._slot = slot
+        self._database_ref = weakref.ref(database)
+        self._closed = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.connection.close()
+        finally:
+            self._slot.release()
+            database = self._database_ref()
+            if database is not None:
+                database._record_thread_reader_retired()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except (sqlite3.Error, ValueError):
+            # Thread-local cleanup must not surface during interpreter shutdown.
+            return
 
 
 def assess_sqlite_wal_runtime(
@@ -90,13 +124,11 @@ class ConversationDatabase:
         self.path = Path(path).expanduser().resolve(strict=False)
         self.busy_timeout_ms = max(1, int(busy_timeout_ms))
         self.read_pool_capacity = max(1, int(read_pool_capacity))
-        self._reader_pool: queue.LifoQueue[sqlite3.Connection | object] = queue.LifoQueue(
-            maxsize=self.read_pool_capacity
-        )
-        for _ in range(self.read_pool_capacity):
-            self._reader_pool.put_nowait(_UNOPENED_READER_SLOT)
+        self._reader_slots = threading.BoundedSemaphore(self.read_pool_capacity)
+        self._reader_local = threading.local()
         self._reader_pool_lock = threading.Lock()
         self._reader_pool_closed = False
+        self._reader_generation = 0
         self._reader_metrics_lock = threading.Lock()
         self._active_readers = 0
         self._max_active_readers = 0
@@ -105,6 +137,8 @@ class ConversationDatabase:
         self._overflow_readers = 0
         self._pooled_connection_opens = 0
         self._reused_pooled_reader_leases = 0
+        self._cached_pooled_readers = 0
+        self._max_cached_pooled_readers = 0
         _ensure_local_path(self.path)
 
     def initialize(self) -> dict[str, object]:
@@ -210,8 +244,7 @@ class ConversationDatabase:
     @contextmanager
     def reader(self) -> Iterator[sqlite3.Connection]:
         self._require_safe_runtime()
-        slot = self._take_reader_slot()
-        pooled = slot is not None
+        connection, pooled = self._lease_current_thread_reader()
         with self._reader_metrics_lock:
             self._active_readers += 1
             self._max_active_readers = max(
@@ -226,24 +259,14 @@ class ConversationDatabase:
                 )
             else:
                 self._overflow_readers += 1
-        connection: sqlite3.Connection | None = None
         try:
-            if slot is _UNOPENED_READER_SLOT or slot is None:
-                connection = self._open_reader_connection()
-                if pooled:
-                    with self._reader_metrics_lock:
-                        self._pooled_connection_opens += 1
-            else:
-                connection = slot
-                with self._reader_metrics_lock:
-                    self._reused_pooled_reader_leases += 1
             yield connection
         finally:
             try:
-                if pooled:
-                    self._return_reader_slot(connection)
-                elif connection is not None:
+                if not pooled:
                     connection.close()
+                elif self._reader_pool_is_retired():
+                    self._retire_current_thread_reader()
             finally:
                 with self._reader_metrics_lock:
                     self._active_readers -= 1
@@ -251,30 +274,17 @@ class ConversationDatabase:
                         self._active_pooled_readers -= 1
 
     def close_read_pool(self) -> None:
-        """Stop reusing idle readers; active leases close when returned."""
+        """Retire the thread-local reader pool without cross-thread closes."""
 
         with self._reader_pool_lock:
             if self._reader_pool_closed:
                 return
             self._reader_pool_closed = True
-            idle_slots: list[sqlite3.Connection | object] = []
-            while True:
-                try:
-                    idle_slots.append(self._reader_pool.get_nowait())
-                except queue.Empty:
-                    break
-        for slot in idle_slots:
-            if slot is _UNOPENED_READER_SLOT:
-                continue
-            try:
-                slot.close()
-            except sqlite3.Error:
-                # Shutdown must remain best-effort; the next open validates the store.
-                continue
+            self._reader_generation += 1
+        # Only this calling thread can safely close its thread-affine lease.
+        self._retire_current_thread_reader()
 
     def reader_metrics(self) -> dict[str, int]:
-        with self._reader_pool_lock:
-            idle_pooled_readers = self._reader_pool.qsize()
         with self._reader_metrics_lock:
             return {
                 "readerCapacity": self.read_pool_capacity,
@@ -282,36 +292,86 @@ class ConversationDatabase:
                 "maxActiveReaders": self._max_active_readers,
                 "activePooledReaders": self._active_pooled_readers,
                 "maxPooledReaders": self._max_pooled_readers,
-                "idlePooledReaders": idle_pooled_readers,
+                "idlePooledReaders": max(
+                    0,
+                    self._cached_pooled_readers - self._active_pooled_readers,
+                ),
                 "overflowReaders": self._overflow_readers,
                 "pooledConnectionOpens": self._pooled_connection_opens,
                 "reusedPooledReaderLeases": self._reused_pooled_reader_leases,
+                "cachedPooledReaders": self._cached_pooled_readers,
+                "maxCachedPooledReaders": self._max_cached_pooled_readers,
             }
 
-    def _take_reader_slot(self) -> sqlite3.Connection | object | None:
-        """Lease an idle query-only connection without delaying overflow reads."""
+    def _lease_current_thread_reader(self) -> tuple[sqlite3.Connection, bool]:
+        """Reuse one owning-thread connection or open a short overflow reader."""
 
+        existing = getattr(self._reader_local, "lease", None)
         with self._reader_pool_lock:
-            if self._reader_pool_closed:
+            pool_closed = self._reader_pool_closed
+            generation = self._reader_generation
+        if isinstance(existing, _ThreadReaderLease):
+            if not pool_closed and existing.generation == generation:
+                with self._reader_metrics_lock:
+                    self._reused_pooled_reader_leases += 1
+                return existing.connection, True
+            self._retire_current_thread_reader(existing)
+        if pool_closed:
+            raise ConversationStoreUnavailableError(
+                "Conversation store reader pool is closed."
+            )
+
+        # Do not wait for a hot-slot. A sixth concurrent query must be able to
+        # finish with a short read-only connection rather than stall behind a
+        # slow reader or borrow a connection owned by another thread.
+        if not self._reader_slots.acquire(blocking=False):
+            return self._open_reader_connection(), False
+        try:
+            connection = self._open_reader_connection()
+        except Exception:
+            self._reader_slots.release()
+            raise
+        with self._reader_pool_lock:
+            if self._reader_pool_closed or generation != self._reader_generation:
+                connection.close()
+                self._reader_slots.release()
                 raise ConversationStoreUnavailableError(
-                    "Conversation store reader pool is closed."
+                    "Conversation store reader pool closed while opening a reader."
                 )
-            try:
-                return self._reader_pool.get_nowait()
-            except queue.Empty:
-                return None
+        self._reader_local.lease = _ThreadReaderLease(
+            connection=connection,
+            generation=generation,
+            slot=self._reader_slots,
+            database=self,
+        )
+        with self._reader_metrics_lock:
+            self._pooled_connection_opens += 1
+            self._cached_pooled_readers += 1
+            self._max_cached_pooled_readers = max(
+                self._max_cached_pooled_readers,
+                self._cached_pooled_readers,
+            )
+        return connection, True
 
-    def _return_reader_slot(self, connection: sqlite3.Connection | None) -> None:
-        """Return a healthy pooled connection or release its capacity after shutdown."""
+    def _retire_current_thread_reader(
+        self,
+        lease: _ThreadReaderLease | None = None,
+    ) -> None:
+        current = getattr(self._reader_local, "lease", None)
+        if not isinstance(current, _ThreadReaderLease):
+            return
+        if lease is not None and current is not lease:
+            return
+        del self._reader_local.lease
+        current.close()
 
+    def _reader_pool_is_retired(self) -> bool:
         with self._reader_pool_lock:
-            if not self._reader_pool_closed:
-                self._reader_pool.put_nowait(
-                    connection if connection is not None else _UNOPENED_READER_SLOT
-                )
-                return
-        if connection is not None:
-            connection.close()
+            return self._reader_pool_closed
+
+    def _record_thread_reader_retired(self) -> None:
+        with self._reader_metrics_lock:
+            self._cached_pooled_readers = max(0, self._cached_pooled_readers - 1)
 
     def _open_reader_connection(self) -> sqlite3.Connection:
         uri = f"{self.path.as_uri()}?mode=ro"
