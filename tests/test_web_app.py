@@ -5550,7 +5550,7 @@ def test_same_agent_sessions_queue_when_agent_concurrency_limit_is_reached(tmp_p
 def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(agent_directory_service, "_ensure_agent_default_avatar", lambda agent: None, raising=False)
+    monkeypatch.setattr(agent_directory_service, "_ensure_agent_default_avatar", lambda agent, **kwargs: None, raising=False)
     wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(
         session_service,
@@ -5617,7 +5617,7 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
         stopped = session_service.request_stop_session_turn(beta["id"])
         assert stopped["currentPhase"] == "ready"
         assert stopped["messages"][-1]["role"] == "user"
-        assert "beta 串行任务" in _assistant_visible_text(stopped["messages"][-1])
+        assert "beta 串行任务" in str(stopped["messages"][-1].get("content") or "")
         assert stopped["runtimeNotices"][-1]["kind"] == "turn_stopped"
         assert "尚未开始执行" in stopped["runtimeNotices"][-1]["message"]
 
@@ -5631,7 +5631,7 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
     assert prompts == ["alpha 串行任务"]
     beta_detail = session_service.get_session_detail(beta["id"])
     assert beta_detail["messages"][-1]["role"] == "user"
-    assert "beta 串行任务" in _assistant_visible_text(beta_detail["messages"][-1])
+    assert "beta 串行任务" in str(beta_detail["messages"][-1].get("content") or "")
     assert all("本轮已按请求停止" not in _conversation_message_text(message) for message in beta_detail["messages"])
     assert beta_detail["runtimeNotices"][-1]["kind"] == "turn_stopped"
 
@@ -8629,7 +8629,7 @@ def test_session_detail_keeps_runtime_notice_outside_ledger_messages(tmp_path, m
         timestamp="2026-05-29T21:36:19",
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(agent_directory_service, "_ensure_agent_default_avatar", lambda agent: None, raising=False)
+    monkeypatch.setattr(agent_directory_service, "_ensure_agent_default_avatar", lambda agent, **kwargs: None, raising=False)
 
     response = client.get("/api/sessions/session-live")
 
