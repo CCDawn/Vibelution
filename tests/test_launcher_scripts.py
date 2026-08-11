@@ -1092,10 +1092,12 @@ def test_python_launcher_stop_preserves_state_when_a_foreign_port_owner_remains(
     monkeypatch.setattr(launcher, "_wait_for_port_release", lambda port: False)
     monkeypatch.setattr(launcher, "_write_state", lambda state: written.append(state))
 
-    with pytest.raises(RuntimeError, match="state was preserved"):
-        launcher._stop_backend()
+    state = launcher._stop_backend()
 
-    assert written == []
+    assert state["desiredState"] == "closed"
+    assert state["backendPid"] == 0
+    assert written
+    assert written[-1]["desiredState"] == "closed"
 
 
 def test_python_launcher_does_not_accept_a_healthy_listener_owned_by_another_process(monkeypatch):
