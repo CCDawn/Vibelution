@@ -7,6 +7,7 @@ from pathlib import Path
 from core.chat.conversation_ledger import (
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
+    append_conversation_event,
     load_conversation_events,
 )
 from core.web.services import session_service
@@ -108,6 +109,51 @@ def test_development_submit_bridge_reuses_the_journaled_submission(
         assert second["admissionDisposition"] == "already_journaled"
         assert second["turnId"] == "turn-a"
         assert [event.event_type for event in load_conversation_events(project_root, "session-a")] == [
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
+    finally:
+        admission.close_development_submission_admission_runtimes()
+
+
+def test_development_submit_bridge_recovers_partial_marker_without_duplicate_turn_start(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Retry after a partial marker append keeps the initial process chain singular."""
+
+    from core.web.services.session import admission
+
+    project_root = tmp_path / "project"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setenv(
+        "VIBELUTION_SESSION_SQLITE_ADMISSION_ROOT",
+        str(tmp_path / "development-data"),
+    )
+    append_conversation_event(
+        project_root,
+        "session-a",
+        "turn-a",
+        EVENT_TURN_STARTED,
+        status="running",
+        correlation_id="submission-a",
+        visible_in_model=False,
+    )
+    try:
+        receipt = submit._append_initial_session_journal_markers(
+            session_id="session-a",
+            turn_id="turn-a",
+            client_submission_id="submission-a",
+            agent={"agentId": "agent-a", "displayName": "Agent A"},
+            conversation={"title": "Session A"},
+            source="raw",
+            leases=["readonly_chat"],
+            user_payload={"content": "hello", "metadata": {"clientSubmissionId": "submission-a"}},
+        )
+
+        events = load_conversation_events(project_root, "session-a")
+        assert receipt["admissionDisposition"] == "appended"
+        assert [event.event_type for event in events] == [
             EVENT_TURN_STARTED,
             EVENT_USER_MESSAGE,
         ]

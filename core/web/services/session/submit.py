@@ -51,44 +51,57 @@ def _append_initial_session_journal_markers(
     normalized_turn_id = str(turn_id or "").strip()
     normalized_submission_id = str(client_submission_id or "").strip()
 
+    def matching_events(event_type: str) -> list[Any]:
+        return [
+            event
+            for event in s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id)
+            if str(getattr(event, "correlation_id", "") or "").strip()
+            == normalized_submission_id
+            and str(getattr(event, "event_type", "") or "") == event_type
+        ]
+
     def lookup(record: dict[str, Any]) -> dict[str, Any] | None:
         if not normalized_submission_id:
             return None
-        for event in reversed(s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id)):
-            if str(getattr(event, "correlation_id", "") or "").strip() != normalized_submission_id:
-                continue
-            if str(getattr(event, "event_type", "") or "") != s.EVENT_USER_MESSAGE:
-                continue
-            return {
-                "journalSequence": int(getattr(event, "sequence", 0) or 0),
-                "journalEventId": str(getattr(event, "event_id", "") or "").strip(),
-            }
-        return None
+        events = matching_events(s.EVENT_USER_MESSAGE)
+        if not events:
+            return None
+        event = events[-1]
+        return {
+            "journalSequence": int(getattr(event, "sequence", 0) or 0),
+            "journalEventId": str(getattr(event, "event_id", "") or "").strip(),
+        }
 
     def append(record: dict[str, Any]) -> dict[str, Any]:
         record_turn_id = str(record.get("turnId") or normalized_turn_id).strip()
-        s._append_session_conversation_event(
-            normalized_session_id,
-            record_turn_id,
-            s.EVENT_TURN_STARTED,
-            status="running",
-            payload={
-                "agentId": str(record.get("agentId") or agent.get("agentId") or "").strip(),
-                "leases": list(leases),
-                "source": source,
-            },
-            source="submit_session_message",
-            visible_in_model=False,
-            correlation_id=normalized_submission_id,
-        )
-        user_event = s._append_session_conversation_event(
-            normalized_session_id,
-            record_turn_id,
-            s.EVENT_USER_MESSAGE,
-            status="recorded",
-            payload=dict(user_payload),
-            source="submit_session_message",
-            correlation_id=normalized_submission_id,
+        if not matching_events(s.EVENT_TURN_STARTED):
+            s._append_session_conversation_event(
+                normalized_session_id,
+                record_turn_id,
+                s.EVENT_TURN_STARTED,
+                status="running",
+                payload={
+                    "agentId": str(record.get("agentId") or agent.get("agentId") or "").strip(),
+                    "leases": list(leases),
+                    "source": source,
+                },
+                source="submit_session_message",
+                visible_in_model=False,
+                correlation_id=normalized_submission_id,
+            )
+        existing_user_events = matching_events(s.EVENT_USER_MESSAGE)
+        user_event = (
+            existing_user_events[-1]
+            if existing_user_events
+            else s._append_session_conversation_event(
+                normalized_session_id,
+                record_turn_id,
+                s.EVENT_USER_MESSAGE,
+                status="recorded",
+                payload=dict(user_payload),
+                source="submit_session_message",
+                correlation_id=normalized_submission_id,
+            )
         )
         return {
             "journalSequence": int(getattr(user_event, "sequence", 0) or 0),
