@@ -194,6 +194,62 @@ def test_query_only_reader_pool_reuses_idle_connection(
         store.close()
 
 
+def test_query_only_reader_pool_never_crosses_thread_connection_ownership(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path, read_pool_capacity=2)
+    first_released = threading.Event()
+    release_first_thread = threading.Event()
+    connection_ids: list[int] = []
+
+    def first_thread() -> None:
+        with store.database.reader() as reader:
+            connection_ids.append(id(reader))
+        first_released.set()
+        assert release_first_thread.wait(timeout=3)
+
+    def second_thread() -> None:
+        assert first_released.wait(timeout=3)
+        with store.database.reader() as reader:
+            connection_ids.append(id(reader))
+
+    first = threading.Thread(target=first_thread, name="conversation-reader-owner-a")
+    second = threading.Thread(target=second_thread, name="conversation-reader-owner-b")
+    first.start()
+    second.start()
+    try:
+        assert first_released.wait(timeout=1)
+        second.join(timeout=3)
+        assert not second.is_alive()
+        assert len(connection_ids) == 2
+        assert connection_ids[0] != connection_ids[1]
+        assert store.database.reader_metrics()["overflowReaders"] == 0
+    finally:
+        release_first_thread.set()
+        first.join(timeout=3)
+        second.join(timeout=3)
+        store.close()
+
+
+def test_store_close_retires_the_current_thread_reader_lease(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path, read_pool_capacity=1)
+    with store.database.reader() as reader:
+        assert reader.execute("SELECT 1").fetchone()[0] == 1
+
+    assert store.database.reader_metrics()["cachedPooledReaders"] == 1
+    store.close()
+    assert store.database.reader_metrics()["cachedPooledReaders"] == 0
+    with (
+        pytest.raises(ConversationStoreUnavailableError, match="pool is closed"),
+        store.database.reader(),
+    ):
+        pass
+
+
 def test_agent_revision_and_parent_session_binding_are_enforced(
     tmp_path: Path,
     safe_sqlite_runtime: None,
