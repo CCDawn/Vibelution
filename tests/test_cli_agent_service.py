@@ -887,7 +887,7 @@ def test_mimo_cli_terminal_discovers_session_id_from_user_level_sqlite(monkeypat
 def test_claude_cli_terminal_discovers_session_id_from_project_jsonl(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     session_id = "6d9ae669-28b4-42a0-8767-0e78f406a2b1"
-    project_dir = tmp_path / ".claude" / "projects" / terminal_service._claude_project_dir_name(str(project_root))
+    project_dir = tmp_path / ".claude" / "projects" / "vibelution"
     project_dir.mkdir(parents=True)
     (project_dir / f"{session_id}.jsonl").write_text(
         '{"type":"mode","sessionId":"6d9ae669-28b4-42a0-8767-0e78f406a2b1"}\n',
@@ -1892,7 +1892,7 @@ def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
     assert second is not None
     assert first["metadata"]["lifecycleKey"] == second["metadata"]["lifecycleKey"]
     assert "messages" not in state["conversations"][0]
-    assert first["content"] == "MiMo Code 已关闭。"
+    assert first["turnItems"][0]["text"] == "MiMo Code 已关闭。"
     assert first["metadata"]["cliRunId"] == "cli-run-1"
     assert first["metadata"]["lockKey"] == "cli-lock-1"
     assert first["metadata"]["mode"] == "readonly"
@@ -1972,7 +1972,7 @@ def test_cli_agent_lifecycle_link_event_persists_cli_session_id(monkeypatch, tmp
     )
 
     assert event is not None
-    assert event["content"] == "MiMo Code 已连接 CLI 会话。"
+    assert event["turnItems"][0]["text"] == "MiMo Code 已连接 CLI 会话。"
     assert event["metadata"]["event"] == "linked"
     assert event["metadata"]["cliSessionId"] == "ses_linked"
     assert event["metadata"]["cliSessionIdSource"] == "session_discovery"

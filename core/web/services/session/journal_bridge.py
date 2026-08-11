@@ -85,13 +85,31 @@ def prune_session_conversation_events_cache_locked() -> None:
         _SESSION_CONVERSATION_EVENTS_CACHE.pop(oldest_key, None)
 
 
+def _cache_key(root: Path, session_id: str) -> str:
+    return f"{Path(root).resolve()}:{str(session_id or '').strip()}"
+
+
 def invalidate_session_conversation_events_cache(session_id: str = "") -> None:
     normalized_session_id = str(session_id or "").strip()
     with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
         if normalized_session_id:
-            _SESSION_CONVERSATION_EVENTS_CACHE.pop(normalized_session_id, None)
+            suffix = f":{normalized_session_id}"
+            stale_keys = [
+                key
+                for key in _SESSION_CONVERSATION_EVENTS_CACHE
+                if key.endswith(suffix)
+            ]
+            for key in stale_keys:
+                _SESSION_CONVERSATION_EVENTS_CACHE.pop(key, None)
+            for key in [
+                key
+                for key in _SESSION_CONVERSATION_EVENTS_INFLIGHT
+                if key.endswith(suffix)
+            ]:
+                _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(key, None)
         else:
             _SESSION_CONVERSATION_EVENTS_CACHE.clear()
+            _SESSION_CONVERSATION_EVENTS_INFLIGHT.clear()
         _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
 
 
@@ -106,6 +124,7 @@ def load_session_conversation_events_cached(
     if not normalized_session_id:
         return []
     root = _resolve_project_root(project_root)
+    cache_key = _cache_key(root, normalized_session_id)
     owner = object()
     while True:
         signature = session_conversation_events_signature(
@@ -114,12 +133,12 @@ def load_session_conversation_events_cached(
         )
         now = _perf_counter()
         with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-            cached = _SESSION_CONVERSATION_EVENTS_CACHE.get(normalized_session_id)
+            cached = _SESSION_CONVERSATION_EVENTS_CACHE.get(cache_key)
             if cached and cached.get("signature") == signature:
                 cached["last_access"] = now
                 return list(cached.get("events") or ())
-            if normalized_session_id not in _SESSION_CONVERSATION_EVENTS_INFLIGHT:
-                _SESSION_CONVERSATION_EVENTS_INFLIGHT[normalized_session_id] = owner
+            if cache_key not in _SESSION_CONVERSATION_EVENTS_INFLIGHT:
+                _SESSION_CONVERSATION_EVENTS_INFLIGHT[cache_key] = owner
                 break
             _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.wait()
 
@@ -127,18 +146,18 @@ def load_session_conversation_events_cached(
         events = list(load_conversation_events(root, normalized_session_id) or [])
     except Exception:
         with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-            if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(normalized_session_id) is owner:
-                _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(normalized_session_id, None)
+            if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key) is owner:
+                _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(cache_key, None)
             _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
         raise
     with _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION:
-        if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(normalized_session_id) is owner:
-            _SESSION_CONVERSATION_EVENTS_CACHE[normalized_session_id] = {
+        if _SESSION_CONVERSATION_EVENTS_INFLIGHT.get(cache_key) is owner:
+            _SESSION_CONVERSATION_EVENTS_CACHE[cache_key] = {
                 "signature": signature,
                 "events": tuple(events),
                 "last_access": now,
             }
-            _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(normalized_session_id, None)
+            _SESSION_CONVERSATION_EVENTS_INFLIGHT.pop(cache_key, None)
             prune_session_conversation_events_cache_locked()
         _SESSION_CONVERSATION_EVENTS_CACHE_CONDITION.notify_all()
         return list(events)
