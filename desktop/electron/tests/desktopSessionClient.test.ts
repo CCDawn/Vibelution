@@ -8,6 +8,22 @@ import {
 } from "../src/windows/desktopSessionClient.js";
 
 describe("desktop session client", () => {
+  it("bounds a stalled heartbeat request so the main-loop retry can recover", async () => {
+    await expect(
+      heartbeatDesktopSession({
+        launcherOrigin: "http://127.0.0.1:8765/launcher",
+        controlToken: "token",
+        desktopSessionId: "desktop-session-1",
+        revision: 1,
+        requestTimeoutMs: 5,
+        fetchImpl: async (_url, init) =>
+          await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+          })
+      })
+    ).rejects.toThrow("desktop session heartbeat timed out after 5ms");
+  });
+
   it("registers, heartbeats, and closes a desktop session through the Launcher API", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {

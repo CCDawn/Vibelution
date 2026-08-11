@@ -28,6 +28,19 @@ describe("desktopWindowOperationForAction", () => {
 });
 
 describe("fetchLauncherControlToken", () => {
+  it("bounds a stalled control request so the desktop action loop can retry", async () => {
+    await expect(
+      fetchLauncherControlToken({
+        launcherOrigin: "http://127.0.0.1:8765/launcher",
+        requestTimeoutMs: 5,
+        fetchImpl: async (_url, init) =>
+          await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+          })
+      })
+    ).rejects.toThrow("launcher control token timed out after 5ms");
+  });
+
   it("reads the existing Launcher control-token endpoint without exposing it in summaries", async () => {
     const requests: string[] = [];
     const fetchImpl = async (url: string | URL | Request) => {

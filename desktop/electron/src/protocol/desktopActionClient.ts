@@ -1,3 +1,5 @@
+import { boundedDesktopControlFetch } from "./boundedFetch.js";
+
 export type DesktopActionName =
   | "open_workbench"
   | "focus_workbench"
@@ -68,9 +70,14 @@ export function launcherDesktopActionEndpoints(launcherOrigin: string): DesktopA
 export async function fetchLauncherControlToken(input: {
   launcherOrigin: string;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<string> {
-  const fetcher = input.fetchImpl ?? fetch;
-  const response = await fetcher(`${new URL(input.launcherOrigin).origin}/api/control-token`);
+  const response = await boundedDesktopControlFetch({
+    fetchImpl: input.fetchImpl,
+    resource: `${new URL(input.launcherOrigin).origin}/api/control-token`,
+    operation: "launcher control token",
+    requestTimeoutMs: input.requestTimeoutMs
+  });
   if (!response.ok) {
     throw new Error(`launcher control token request failed: ${response.status}`);
   }
@@ -88,15 +95,21 @@ export async function claimDesktopAction(input: {
   desktopSessionId: string;
   leaseSeconds: number;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<DesktopAction | null> {
-  const fetcher = input.fetchImpl ?? fetch;
-  const response = await fetcher(launcherDesktopActionEndpoints(input.launcherOrigin).claim, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "X-Vibelution-Control-Token": input.controlToken
-    },
-    body: JSON.stringify({ desktopSessionId: input.desktopSessionId, leaseSeconds: input.leaseSeconds })
+  const response = await boundedDesktopControlFetch({
+    fetchImpl: input.fetchImpl,
+    resource: launcherDesktopActionEndpoints(input.launcherOrigin).claim,
+    operation: "desktop action claim",
+    requestTimeoutMs: input.requestTimeoutMs,
+    init: {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Vibelution-Control-Token": input.controlToken
+      },
+      body: JSON.stringify({ desktopSessionId: input.desktopSessionId, leaseSeconds: input.leaseSeconds })
+    }
   });
   if (!response.ok) {
     throw new Error(`desktop action claim failed: ${response.status}`);
@@ -113,19 +126,25 @@ export async function finishDesktopAction(input: {
   status: "ack" | "fail";
   result: Record<string, unknown>;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<void> {
-  const fetcher = input.fetchImpl ?? fetch;
   const template =
     input.status === "ack"
       ? launcherDesktopActionEndpoints(input.launcherOrigin).ack
       : launcherDesktopActionEndpoints(input.launcherOrigin).fail;
-  const response = await fetcher(template.replace("{actionId}", encodeURIComponent(input.actionId)), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "X-Vibelution-Control-Token": input.controlToken
-    },
-    body: JSON.stringify({ desktopSessionId: input.desktopSessionId, result: input.result })
+  const response = await boundedDesktopControlFetch({
+    fetchImpl: input.fetchImpl,
+    resource: template.replace("{actionId}", encodeURIComponent(input.actionId)),
+    operation: `desktop action ${input.status}`,
+    requestTimeoutMs: input.requestTimeoutMs,
+    init: {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Vibelution-Control-Token": input.controlToken
+      },
+      body: JSON.stringify({ desktopSessionId: input.desktopSessionId, result: input.result })
+    }
   });
   if (!response.ok) {
     throw new Error(`desktop action ${input.status} failed: ${response.status}`);
@@ -139,6 +158,7 @@ export async function runDesktopActionOnce(input: {
   leaseSeconds: number;
   operations: DesktopWindowOperations;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<DesktopActionRunResult> {
   const action = await claimDesktopAction(input);
   if (action === null) {
