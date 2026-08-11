@@ -2165,7 +2165,13 @@ def test_edit_resubmit_session_message_rejects_archived_agent_without_mutating_s
 def test_run_session_turn_blocks_if_agent_archived_after_scheduling(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    detail = session_service.create_chat_session(title="排队后归档 Agent")
+    _dialogue_cfg = session_service.get_config()
+    _dialogue_profile = _dialogue_cfg.llm.get_profile(role="primary")
+    _dialogue_model_id, _ = _dialogue_cfg.llm.get_model_library_entry_for_profile(_dialogue_profile)
+    detail = session_service.create_chat_session(
+        title="排队后归档 Agent",
+        llm_bindings={"dialogue": {"modelId": str(_dialogue_model_id or "").strip()}},
+    )
     scheduled_contexts = []
     events = []
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(context))
@@ -2188,8 +2194,7 @@ def test_run_session_turn_blocks_if_agent_archived_after_scheduling(tmp_path, mo
 
     next_detail = session_service.get_session_detail(detail["id"])
     assert next_detail["currentPhase"] == "failed"
-    assert next_detail["messages"][-1]["role"] == "assistant"
-    assert "已归档" in _assistant_visible_text(next_detail["messages"][-1])
+    assert "已归档" in next_detail["lastTurnError"]["message"]
     blocked_events = [item for item in events if item[0][2] == "conversation.turn.blocked_archived_agent"]
     assert len(blocked_events) == 1
     assert blocked_events[0][1]["fields"]["agentId"] == detail["agentId"]
