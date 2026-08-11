@@ -1,0 +1,106 @@
+export type WorkbenchCloseTransactionPhase =
+  | "confirmation_required"
+  | "backend_closing"
+  | "window_close_authorized"
+  | "succeeded"
+  | "failed";
+
+export type WorkbenchCloseTransaction = {
+  closeId: string;
+  phase: WorkbenchCloseTransactionPhase | string;
+  mode?: "normal" | "force" | string;
+  confirmationCloseId?: string;
+  nextPollAfterMs?: number;
+  deadlineAt?: string;
+  retryable?: boolean;
+  failureCode?: string;
+  message?: string;
+};
+
+type WorkbenchCloseTransactionRequest = {
+  launcherOrigin: string;
+  controlToken: string;
+  desktopSessionId: string;
+  fetchImpl?: typeof fetch;
+};
+
+export function workbenchCloseTransactionEndpoints(launcherOrigin: string) {
+  const origin = new URL(launcherOrigin).origin;
+  const transactions = `${origin}/api/launcher/workbench-close-transactions`;
+  return {
+    submit: transactions,
+    transaction: `${transactions}/{closeId}`,
+    windowClosed: `${transactions}/{closeId}/window-closed`
+  };
+}
+
+export async function submitWorkbenchCloseTransaction(
+  input: WorkbenchCloseTransactionRequest & {
+    idempotencyKey: string;
+    mode: "normal" | "force";
+    reason: string;
+    confirmationCloseId?: string;
+  }
+): Promise<WorkbenchCloseTransaction> {
+  const fetcher = input.fetchImpl ?? fetch;
+  const response = await fetcher(workbenchCloseTransactionEndpoints(input.launcherOrigin).submit, {
+    method: "POST",
+    headers: transactionHeaders(input.controlToken),
+    body: JSON.stringify({
+      desktopSessionId: input.desktopSessionId,
+      idempotencyKey: input.idempotencyKey,
+      mode: input.mode,
+      reason: input.reason,
+      confirmationCloseId: input.confirmationCloseId ?? ""
+    })
+  });
+  return await readTransaction(response, "submit");
+}
+
+export async function fetchWorkbenchCloseTransaction(
+  input: WorkbenchCloseTransactionRequest & { closeId: string }
+): Promise<WorkbenchCloseTransaction> {
+  const fetcher = input.fetchImpl ?? fetch;
+  const endpoint = workbenchCloseTransactionEndpoints(input.launcherOrigin).transaction.replace(
+    "{closeId}",
+    encodeURIComponent(input.closeId)
+  );
+  const response = await fetcher(endpoint, {
+    method: "GET",
+    headers: { "X-Vibelution-Control-Token": input.controlToken }
+  });
+  return await readTransaction(response, "fetch");
+}
+
+export async function acknowledgeWorkbenchCloseWindowClosed(
+  input: WorkbenchCloseTransactionRequest & { closeId: string; desktopSessionRevision: number }
+): Promise<WorkbenchCloseTransaction> {
+  const fetcher = input.fetchImpl ?? fetch;
+  const endpoint = workbenchCloseTransactionEndpoints(input.launcherOrigin).windowClosed.replace(
+    "{closeId}",
+    encodeURIComponent(input.closeId)
+  );
+  const response = await fetcher(endpoint, {
+    method: "POST",
+    headers: transactionHeaders(input.controlToken),
+    body: JSON.stringify({
+      desktopSessionId: input.desktopSessionId,
+      desktopSessionRevision: input.desktopSessionRevision
+    })
+  });
+  return await readTransaction(response, "window closed acknowledgement");
+}
+
+function transactionHeaders(controlToken: string): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    "X-Vibelution-Control-Token": controlToken
+  };
+}
+
+async function readTransaction(response: Response, operation: string): Promise<WorkbenchCloseTransaction> {
+  if (!response.ok) {
+    throw new Error(`workbench close transaction ${operation} failed: ${response.status}`);
+  }
+  return (await response.json()) as WorkbenchCloseTransaction;
+}

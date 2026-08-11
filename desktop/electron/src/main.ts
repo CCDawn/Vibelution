@@ -1,4 +1,5 @@
-import { Notification, app, ipcMain, nativeImage, nativeTheme } from "electron";
+import { Notification, app, dialog, ipcMain, nativeImage, nativeTheme, type BrowserWindow } from "electron";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { singleInstanceDecision } from "./appLock.js";
@@ -24,6 +25,12 @@ import {
 } from "./notifications/conversationNotifications.js";
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
+import {
+  acknowledgeWorkbenchCloseWindowClosed,
+  fetchWorkbenchCloseTransaction,
+  submitWorkbenchCloseTransaction,
+  type WorkbenchCloseTransaction
+} from "./protocol/workbenchCloseTransactionClient.js";
 import { findVibelutionDeepLinkArg, parsePublicVibelutionDeepLink } from "./protocol/deepLink.js";
 import {
   buildDeepLinkRegistrationPlan,
@@ -65,6 +72,7 @@ const DESKTOP_ACTION_LEASE_SECONDS = 30;
 const RUNTIME_SCENE_MAX_BUFFERED_EVENTS = 50;
 const DESKTOP_SESSION_HEARTBEAT_MS = 15000;
 const DESKTOP_SESSIONS_HEARTBEAT_CAPABILITY = "desktop_sessions.heartbeat";
+const WORKBENCH_CLOSE_TRANSACTION_CAPABILITY = "workbench_close.transaction.v1";
 const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
 
 let windowProvider: ElectronWindowProvider | null = null;
@@ -83,10 +91,16 @@ const desktopSessionMutations = new DesktopSessionMutationQueue();
 let conversationNotificationService: ConversationNotificationService | null = null;
 const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
+let pendingWorkbenchCloseAck: PendingWorkbenchCloseAck | null = null;
 
 type DesktopActionLoopContext = {
   launcherOrigin: string;
   controlToken: string;
+  desktopSessionId: string;
+};
+
+type PendingWorkbenchCloseAck = {
+  closeId: string;
   desktopSessionId: string;
 };
 
@@ -182,6 +196,15 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
           console.warn(error instanceof Error ? error.message : String(error));
         });
       },
+      shouldInterceptWorkbenchClose: () => true,
+      onWorkbenchCloseRequest: () =>
+        requestTransactionalWorkbenchClose(paths, bootstrap).catch((error: unknown) =>
+          handleTransactionalWorkbenchCloseFailure(paths, bootstrap, error)
+        ),
+      onWorkbenchClosed: () =>
+        acknowledgeTransactionalWorkbenchClose(paths, bootstrap).catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        }),
       onWorkbenchFocusAttentionClear: () => {
         conversationNotificationService?.clearAttention();
       },
@@ -281,7 +304,11 @@ async function bootstrapLauncherIfEnabled(paths: DesktopPaths): Promise<Launcher
   });
 }
 
-function startDesktopActionLoop(bootstrap: LauncherBootstrapResult | null, provider: ElectronWindowProvider): void {
+function startDesktopActionLoop(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult | null,
+  provider: ElectronWindowProvider
+): void {
   if (bootstrap === null || desktopActionTimer !== null) {
     return;
   }
@@ -299,7 +326,7 @@ function startDesktopActionLoop(bootstrap: LauncherBootstrapResult | null, provi
         operations: {
           openOrFocusWorkbench: () => provider.openOrFocusWorkbench(),
           focusWorkbench: () => provider.focusWorkbench(),
-          closeWorkbench: () => provider.closeWorkbench()
+          closeWorkbench: () => requestTransactionalWorkbenchClose(paths, bootstrap)
         }
       });
       if (result.claimed) {
@@ -350,7 +377,7 @@ async function reportManagedWindowState(
         const registration = await registerDesktopSession({
           ...context,
           workspaceRoot: paths.workspaceRoot,
-          capabilities: bootstrap.capabilities
+          capabilities: desktopSessionCapabilities(bootstrap)
         });
         desktopSessionRevision = registration.revision;
         desktopSessionRegistered = true;
@@ -517,6 +544,195 @@ function currentDesktopSessionId(
   }
   const bootstrapId = String(bootstrap.launcherInstanceId || bootstrap.workspaceId || process.pid).trim();
   return `electron-${bootstrapId}-${DESKTOP_SESSION_GENERATION}`;
+}
+
+function desktopSessionCapabilities(bootstrap: LauncherBootstrapResult): string[] {
+  return Array.from(new Set([...bootstrap.capabilities, WORKBENCH_CLOSE_TRANSACTION_CAPABILITY])).sort();
+}
+
+async function requestTransactionalWorkbenchClose(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult | null
+): Promise<void> {
+  const provider = windowProvider;
+  if (provider === null || bootstrap === null) {
+    throw new Error("Electron Workbench close transaction requires an active Launcher bootstrap.");
+  }
+  await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
+    if (!desktopSessionRegistered) {
+      await reportManagedWindowState(paths, bootstrap, provider.snapshot().workbench);
+    }
+    if (!desktopSessionRegistered) {
+      throw new Error("Electron Workbench close transaction requires an active desktop session.");
+    }
+    const context = await resolveDesktopActionLoopContext(bootstrap);
+    const normalIdempotencyKey = `electron-workbench-close:${context.desktopSessionId}:${randomUUID()}`;
+    let transaction = await submitWorkbenchCloseTransaction({
+      ...context,
+      idempotencyKey: normalIdempotencyKey,
+      mode: "normal",
+      reason: "workbench_window_close"
+    });
+    if (transaction.phase === "confirmation_required") {
+      const confirmed = await confirmWorkbenchForceClose(provider);
+      if (!confirmed) {
+        await recordElectronSupervisorEvent(bootstrap, {
+          eventCode: "electron.workbench_close.cancelled_active_work",
+          message: "Workbench close was cancelled while active work was present.",
+          fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
+        });
+        return;
+      }
+      transaction = await submitWorkbenchCloseTransaction({
+        ...context,
+        idempotencyKey: `${normalIdempotencyKey}:force`,
+        mode: "force",
+        reason: "workbench_window_close",
+        confirmationCloseId: transaction.closeId
+      });
+    }
+    transaction = await awaitWorkbenchCloseAuthorization(context, transaction);
+    if (transaction.phase !== "window_close_authorized") {
+      throw new Error(workbenchCloseTransactionFailureMessage(transaction));
+    }
+    pendingWorkbenchCloseAck = {
+      closeId: transaction.closeId,
+      desktopSessionId: context.desktopSessionId
+    };
+    await recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.workbench_close.window_authorized",
+      message: "Workbench backend close completed; Electron is requesting the final window close.",
+      fields: {
+        closeId: transaction.closeId,
+        desktopSessionId: context.desktopSessionId,
+        phase: transaction.phase
+      }
+    });
+    await provider.approveWorkbenchCloseOnce();
+  });
+}
+
+async function acknowledgeTransactionalWorkbenchClose(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult | null
+): Promise<void> {
+  const pending = pendingWorkbenchCloseAck;
+  if (pending === null || bootstrap === null) {
+    return;
+  }
+  const context = await resolveDesktopActionLoopContext(bootstrap);
+  if (context.desktopSessionId !== pending.desktopSessionId) {
+    throw new Error("Electron Workbench close acknowledgement desktop session changed before the window closed.");
+  }
+  const transaction = await acknowledgeWorkbenchCloseWindowClosed({
+    ...context,
+    closeId: pending.closeId,
+    desktopSessionRevision
+  });
+  if (transaction.phase !== "succeeded") {
+    throw new Error(workbenchCloseTransactionFailureMessage(transaction));
+  }
+  pendingWorkbenchCloseAck = null;
+  await recordElectronSupervisorEvent(bootstrap, {
+    eventCode: "electron.workbench_close.completed",
+    message: "Electron confirmed the Workbench closed after the backend close transaction completed.",
+    fields: {
+      closeId: transaction.closeId,
+      desktopSessionId: context.desktopSessionId,
+      desktopSessionRevision,
+      workspaceRoot: paths.workspaceRoot
+    }
+  });
+}
+
+async function handleTransactionalWorkbenchCloseFailure(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult | null,
+  error: unknown
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  await recordElectronSupervisorEvent(bootstrap, {
+    eventCode: "electron.workbench_close.failed",
+    message: "Workbench close transaction failed before Electron window authorization.",
+    fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
+  });
+  const provider = windowProvider;
+  if (provider === null) {
+    console.warn(message);
+    return;
+  }
+  const retry = await confirmWorkbenchCloseRetry(provider, message);
+  if (!retry) {
+    return;
+  }
+  setTimeout(() => {
+    void requestTransactionalWorkbenchClose(paths, bootstrap).catch((retryError: unknown) =>
+      handleTransactionalWorkbenchCloseFailure(paths, bootstrap, retryError)
+    );
+  }, 0);
+}
+
+async function awaitWorkbenchCloseAuthorization(
+  context: DesktopActionLoopContext,
+  initialTransaction: WorkbenchCloseTransaction
+): Promise<WorkbenchCloseTransaction> {
+  let transaction = initialTransaction;
+  while (transaction.phase === "backend_closing") {
+    const deadlineEpochMs = Date.parse(String(transaction.deadlineAt || ""));
+    if (Number.isFinite(deadlineEpochMs) && Date.now() >= deadlineEpochMs) {
+      throw new Error("Workbench backend close transaction reached its Launcher deadline before window authorization.");
+    }
+    if (!transaction.retryable) {
+      throw new Error("Workbench backend close transaction stopped being retryable before window authorization.");
+    }
+    const nextPollAfterMs = Number(transaction.nextPollAfterMs);
+    if (!Number.isFinite(nextPollAfterMs) || nextPollAfterMs <= 0) {
+      throw new Error("Workbench backend close transaction is missing a valid Launcher-directed retry interval.");
+    }
+    await waitForTransactionPoll(nextPollAfterMs);
+    transaction = await fetchWorkbenchCloseTransaction({ ...context, closeId: transaction.closeId });
+  }
+  return transaction;
+}
+
+async function confirmWorkbenchForceClose(provider: ElectronWindowProvider): Promise<boolean> {
+  const options = {
+    type: "warning" as const,
+    title: "仍有进行中的任务",
+    message: "关闭工作台会中断正在运行的任务。",
+    detail: "选择“继续运行”会保留窗口、后端和当前任务。",
+    buttons: ["继续运行", "停止任务并关闭"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true
+  };
+  const parent = provider.workbenchDialogParent() as unknown as BrowserWindow | null;
+  const response = parent === null ? await dialog.showMessageBox(options) : await dialog.showMessageBox(parent, options);
+  return response.response === 1;
+}
+
+async function confirmWorkbenchCloseRetry(provider: ElectronWindowProvider, detail: string): Promise<boolean> {
+  const options = {
+    type: "error" as const,
+    title: "工作台未关闭",
+    message: "后端关闭未完成，窗口将保持打开。",
+    detail: detail.slice(0, 500),
+    buttons: ["重试", "取消"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  };
+  const parent = provider.workbenchDialogParent() as unknown as BrowserWindow | null;
+  const response = parent === null ? await dialog.showMessageBox(options) : await dialog.showMessageBox(parent, options);
+  return response.response === 0;
+}
+
+function waitForTransactionPoll(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.round(delayMs)));
+}
+
+function workbenchCloseTransactionFailureMessage(transaction: WorkbenchCloseTransaction): string {
+  return String(transaction.message || transaction.failureCode || `Unexpected close transaction phase: ${transaction.phase}`);
 }
 
 function stopDesktopActionLoop(): void {
@@ -820,7 +1036,7 @@ app.whenReady()
       await handlePublicDeepLinkUrl(rawUrl, "startup");
     }
     await flushPendingPublicDeepLinks();
-    startDesktopActionLoop(launcherBootstrap, windowProvider);
+    startDesktopActionLoop(paths, launcherBootstrap, windowProvider);
   })
   .catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));
