@@ -1860,3 +1860,9 @@ T0 先记录基线，T9 再在以下控制条件下对照：
 - 修复（验收发现）：`core/web/routes/team_workflows/experiment.py` 缺失 `HTTPException` 导入导致 fails-closed 路径 NameError（500）；`tests/test_challenge_question_run_routes.py` monkeypatch 目标随 `1467cd407` 路由重构漂移；
 - 未覆盖：T9 Launcher 真实链路、同题 baseline/v2.1 对照、1280×720 实机尺寸、Launcher restart 一致性、fingerprint 核对（待 T9）；实验线（spike/predictive coding）依赖隔离环境未在本轮运行。
 - 环境说明：`tests/test_challenge_program_projection.py` 与 `tests/test_challenge_question_runs.py` 依赖 gitignored 本地数据目录 `挑战杯/`（`.gitignore:118`），该目录仅存在于根 main 工作区；验收 worktree 中此类测试因缺少该目录而无法收集，以根 main 工作区结果为准（159 passed 含上述文件）。
+
+### 2026-08-11 T8 收尾（旧 surface 与旧 writer 清理终检）
+
+- 删除孤儿 `web/src/design/route-css/research.tailwind.css`（11 行）：其 4 个 `@source` 目标（ResearchRoute/ResearchFlowCanvasRoute 及 styles）均已删除，且该 css 无任何 import 引用；合并 `e43e25e19` → main `6d78e095a`；
+- 终检结论：router 无旧挑战杯 route（`research`/`research/flow-canvas` 已清）；`Legacy*Redirect`（chat/memory/evolution）属其他域兼容跳转，不在挑战杯 T8 范围；`challenge-cup-agents/repair` 是团队 Agent 维护端点；`challenge_question_runs.py` register/publish 仅由 v2.1 服务调用（无旧 route 直连）；research-workflow 目录无孤儿组件（`ChallengeMvpProgressPanel`/`EvidenceGraphView` 均由 InspectorPane 引用）；`researchLegacySurfaceInventory` contract 覆盖 11 个已删旧文件断言；
+- 验证：前端 185 passed（research-workflow + TeamsRoute.layout + vuiShadcnRouteContract）、`tsc -b` exit 0、生产 build exit 0。
