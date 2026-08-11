@@ -198,7 +198,15 @@ function Close-ManagedWorkbenchForCanary {
             throw "Official Vibelution Launcher stop failed with exit code $($launcherProcess.ExitCode)."
         }
         try {
-            $status = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
+            # `stop` may retire the old control backend with the Workbench.  Do
+            # not keep polling its stale origin: re-read state after bootstrap.
+            $latestLauncherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json
+            $latestLauncherControlUrl = [string]$latestLauncherState.launcherControlUrl
+            if ([string]::IsNullOrWhiteSpace($latestLauncherControlUrl)) {
+                throw "Launcher control URL is unavailable after stop."
+            }
+            $latestLauncherOrigin = ([uri]$latestLauncherControlUrl).GetLeftPart([System.UriPartial]::Authority)
+            $status = Invoke-RestMethod -Uri "$latestLauncherOrigin/api/launcher/status" -TimeoutSec 15
             if ($status.overallState -eq "closed" -and $status.observedState -eq "closed") {
                 return [pscustomobject]@{
                     WasOpen = $true
@@ -208,6 +216,11 @@ function Close-ManagedWorkbenchForCanary {
             }
         } catch {
             $lastFailure = $_.Exception.Message
+            try {
+                $null = Ensure-LauncherControlForCanary
+            } catch {
+                $lastFailure = "$lastFailure; control recovery: $($_.Exception.Message)"
+            }
         }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
