@@ -11,7 +11,7 @@ def _seed_dist(tmp_path):
 
 
 def test_index_html_is_not_cached(tmp_path, monkeypatch):
-    monkeypatch.setattr("core.web.app.WEB_DIST", _seed_dist(tmp_path))
+    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: _seed_dist(tmp_path))
     client = TestClient(create_app())
 
     response = client.get("/")
@@ -21,7 +21,7 @@ def test_index_html_is_not_cached(tmp_path, monkeypatch):
 
 
 def test_spa_fallback_index_html_is_not_cached(tmp_path, monkeypatch):
-    monkeypatch.setattr("core.web.app.WEB_DIST", _seed_dist(tmp_path))
+    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: _seed_dist(tmp_path))
     client = TestClient(create_app())
 
     response = client.get("/chat")
