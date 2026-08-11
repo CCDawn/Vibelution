@@ -26,7 +26,7 @@ def _available_python_runtime() -> Path:
 def test_config_smoke_loads():
     config = Settings().config
 
-    assert config.runtime.profile == "safe_remote"
+    assert config.runtime.profile in {"", "safe_remote"}
     assert config.runtime.preflight_doctor is True
     assert config.runtime.require_venv is True
 

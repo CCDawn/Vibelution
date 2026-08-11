@@ -224,7 +224,7 @@ def test_static_assets_allow_same_origin_referer_on_custom_port(tmp_path, monkey
     (dist_dir / "index.html").write_text("<!doctype html><html><body>app</body></html>", encoding="utf-8")
     (assets_dir / "app.js").write_text("console.log('ok');", encoding="utf-8")
 
-    monkeypatch.setattr("core.web.app.WEB_DIST", dist_dir)
+    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: dist_dir)
     temp_client = TestClient(create_app(), base_url="http://127.0.0.1:8012")
 
     response = temp_client.get("/assets/app.js", headers={"Referer": "http://127.0.0.1:8012/"})
@@ -239,7 +239,7 @@ def test_static_assets_reject_cross_origin_referer(tmp_path, monkeypatch):
     (dist_dir / "index.html").write_text("<!doctype html><html><body>app</body></html>", encoding="utf-8")
     (assets_dir / "app.js").write_text("console.log('ok');", encoding="utf-8")
 
-    monkeypatch.setattr("core.web.app.WEB_DIST", dist_dir)
+    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: dist_dir)
     temp_client = TestClient(create_app(), base_url="http://127.0.0.1:8012")
 
     response = temp_client.get("/assets/app.js", headers={"Referer": "https://example.invalid/"})
@@ -4900,7 +4900,7 @@ def test_missing_static_asset_returns_404_instead_of_index(tmp_path, monkeypatch
     assets_dir.mkdir(parents=True, exist_ok=True)
     (dist_dir / "index.html").write_text("<!doctype html><html><body>app</body></html>", encoding="utf-8")
 
-    monkeypatch.setattr("core.web.app.WEB_DIST", dist_dir)
+    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: dist_dir)
     temp_client = TestClient(create_app())
 
     response = temp_client.get("/assets/FilePreview-missing.js")
@@ -4914,7 +4914,7 @@ def test_spa_route_still_falls_back_to_index_html(tmp_path, monkeypatch):
     index_html = "<!doctype html><html><body>app shell</body></html>"
     (dist_dir / "index.html").write_text(index_html, encoding="utf-8")
 
-    monkeypatch.setattr("core.web.app.WEB_DIST", dist_dir)
+    monkeypatch.setattr("core.web.route_bootstrap._web_dist", lambda: dist_dir)
     temp_client = TestClient(create_app())
 
     response = temp_client.get("/logs")

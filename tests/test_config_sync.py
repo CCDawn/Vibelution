@@ -246,6 +246,7 @@ def test_workbench_window_mode_normalizes_and_validates():
 
 
 def test_workbench_port_helpers_read_saved_config_without_settings_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(workbench_config, "_project_local_backend_port", lambda: None)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[workbench]\nbackend_port = 9101\nfrontend_port = 6200\n", encoding="utf-8")
     monkeypatch.setattr(workbench_config, "CONFIG_PATH", config_path)
@@ -265,6 +266,7 @@ def test_workbench_port_helpers_read_saved_config_without_settings_cache(monkeyp
 
 
 def test_workbench_port_helpers_keep_environment_overrides(monkeypatch, tmp_path):
+    monkeypatch.setattr(workbench_config, "_project_local_backend_port", lambda: None)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[workbench]\nbackend_port = 9101\nfrontend_port = 6200\n", encoding="utf-8")
     monkeypatch.setattr(workbench_config, "CONFIG_PATH", config_path)
@@ -278,6 +280,7 @@ def test_workbench_port_helpers_keep_environment_overrides(monkeypatch, tmp_path
 
 
 def test_workbench_port_helpers_ignore_invalid_agent_alias_overrides(monkeypatch, tmp_path):
+    monkeypatch.setattr(workbench_config, "_project_local_backend_port", lambda: None)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[workbench]\nbackend_port = 9101\nfrontend_port = 6200\n", encoding="utf-8")
     monkeypatch.setattr(workbench_config, "CONFIG_PATH", config_path)
