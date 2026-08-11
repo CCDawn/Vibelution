@@ -36,6 +36,22 @@ pytestmark = pytest.mark.serial
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
+def _assistant_turn_items(message: dict, item_type: str = "") -> list[dict]:
+    items = list(message.get("turnItems") or [])
+    if not item_type:
+        return items
+    return [item for item in items if str(item.get("type") or "") == item_type]
+
+
+def _assistant_visible_text(message: dict) -> str:
+    return "\n".join(
+        str(item.get("text") or "").strip()
+        for item in _assistant_turn_items(message)
+        if str(item.get("type") or "") in {"agent_message", "error"}
+        if str(item.get("text") or "").strip()
+    )
+
+
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -2030,7 +2046,7 @@ def test_agent_inbox_message_api_can_wake_target_agent_and_consume_message(tmp_p
     assert detail["messages"][-2]["metadata"]["kind"] == "agent_inbox_message"
     assert detail["messages"][-2]["metadata"]["messageId"] == payload["messageId"]
     assert detail["messages"][-2]["metadata"]["sourceAgentName"] == alpha["agentDisplayName"]
-    assert detail["messages"][-1]["content"] == "Beta 已收到 Alpha 的私信，并给出回复。"
+    assert _assistant_visible_text(detail["messages"][-1]) == "Beta 已收到 Alpha 的私信，并给出回复。"
     assert agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending") == []
     consumed = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="consumed")
     assert consumed[0]["messageId"] == payload["messageId"]
