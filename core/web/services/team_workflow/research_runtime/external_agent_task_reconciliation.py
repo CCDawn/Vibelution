@@ -10,6 +10,11 @@ from core.research.workflow.models import ActorKind
 from .agent_node_execution import SOURCE_NODE_TASKS
 from .agent_task_artifact_builder import build_agent_task_artifacts
 from .agent_task_budget_usage import collect_agent_task_budget_usage, parse_task_time
+from .budget_overrun_reconciliation import (
+    budget_overrun,
+    budget_overrun_context,
+    budget_overrun_summary,
+)
 from .external_agent_task_failure import (
     block_external_agent_node_run,
     is_recoverable_external_reconciliation_failure,
@@ -89,6 +94,30 @@ def _settle_then_block(
                 f"Budget settlement failed: {exc}"
             ),
             failure_context=failure_context,
+        )
+    reservation = next(
+        (
+            dict(item)
+            for item in settled.get("budgetReservations") or []
+            if item.get("reservationId") == node_run.get("budgetLedgerRef")
+        ),
+        None,
+    )
+    if budget_overrun(reservation):
+        context = budget_overrun_context(dict(reservation or {}))
+        context["terminalTaskFailure"] = {
+            "code": failure_code,
+            "summary": failure_summary,
+        }
+        if failure_context:
+            context["terminalFailureContext"] = dict(failure_context)
+        return block_external_agent_node_run(
+            store,
+            record=settled,
+            node_run=node_run,
+            failure_code="budget_exceeded",
+            failure_summary=budget_overrun_summary(reservation),
+            failure_context=context,
         )
     return block_external_agent_node_run(
         store,

@@ -6,6 +6,7 @@ from typing import Any
 
 from .agent_task_budget_usage import collect_agent_task_budget_usage
 from .budget_lifecycle import BudgetLifecycleError, settle_budget_records
+from .budget_overrun_reconciliation import budget_overrun, budget_overrun_context
 from .external_agent_task_lookup import load_external_agent_task
 from .node_execution_support import build_event, iso, utc_now
 from .store import WorkflowRunStore
@@ -113,6 +114,15 @@ def settle_failed_agent_task_budget(
             )
         except BudgetLifecycleError as exc:
             raise FailedAgentBudgetError(str(exc), code=exc.code) from exc
+        settled_reservation = next(
+            (
+                dict(item)
+                for item in reservations
+                if item.get("reservationId") == reservation_id
+            ),
+            {},
+        )
+        overrun = budget_overrun(settled_reservation)
         event = build_event(
             current,
             workflowId=current["workflowId"],
@@ -125,14 +135,30 @@ def settle_failed_agent_task_budget(
             summary={
                 "reservationId": reservation_id,
                 "actual": actual,
-                "outcome": "failed",
+                "charged": dict(settled_reservation.get("charged") or actual),
+                "outcome": "budget_exceeded" if overrun else "failed",
             },
         )
+        events = [*(current.get("events") or []), event]
+        if overrun:
+            events.append(
+                build_event(
+                    {**current, "events": events},
+                    workflowId=current["workflowId"],
+                    workflowVersionId=current["workflowVersionId"],
+                    checkpointId=(current.get("langGraph") or {}).get("checkpointId") or "",
+                    nodeId=str(node_run.get("nodeId") or ""),
+                    nodeRunId=str(node_run.get("nodeRunId") or ""),
+                    attempt=int(node_run.get("attempt") or 1),
+                    type="BudgetOverrun",
+                    summary=budget_overrun_context(settled_reservation),
+                )
+            )
         return {
             **current,
             "budgetLedgers": ledgers,
             "budgetReservations": reservations,
-            "events": [*(current.get("events") or []), event],
+            "events": events,
         }
 
     return store.mutate_run(str(record["runId"]), mutation)

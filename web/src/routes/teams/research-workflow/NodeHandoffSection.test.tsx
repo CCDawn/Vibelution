@@ -30,4 +30,13 @@ describe("NodeHandoffSection", () => {
     expect(markup).toContain("1 项产物");
     expect(markup).toContain("handoff-1");
   });
+
+  it("renders budget exhaustion as an operator action instead of an internal code", () => {
+    const markup = renderToStaticMarkup(
+      <NodeHandoffSection handoffs={[]} pending={false} blockedReason="budget_exceeded" />,
+    );
+
+    expect(markup).toContain("本阶段预算已用完");
+    expect(markup).not.toContain("budget_exceeded");
+  });
 });

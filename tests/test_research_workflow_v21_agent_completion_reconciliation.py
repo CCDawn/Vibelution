@@ -143,6 +143,8 @@ def _start_source_node(
     terminal: dict,
     observed_status: dict[str, str],
     monkeypatch,
+    *,
+    budget_request: dict[str, int] | None = None,
 ) -> None:
     monkeypatch.setattr(
         "core.web.services.team_workflow.source_collection.runs.start_source_collection_run",
@@ -190,7 +192,7 @@ def _start_source_node(
         "start_agent_task",
         payload={
             "idempotencyKey": "start-source-finding",
-            "budgetRequest": {
+            "budgetRequest": budget_request or {
                 "tokens": 100,
                 "toolCalls": 2,
                 "wallClockSeconds": 30,
@@ -264,6 +266,138 @@ def test_completed_external_source_task_advances_workflow_exactly_once(
     assert len(
         [item for item in replay["nodeRuns"] if item["nodeId"] == "source_extraction"]
     ) == 1
+
+
+def test_completed_task_exceeding_total_stage_budget_blocks_with_audited_overrun(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = ResearchWorkflowRuntimeService(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={"source_finder": "agent-source-finder"}
+        ),
+        idempotency_key="create-agent-budget-overrun",
+    )
+    terminal = _terminal_source_task()
+    observed_status = {"value": "running"}
+    _start_source_node(
+        service,
+        run,
+        terminal,
+        observed_status,
+        monkeypatch,
+        budget_request={
+            "tokens": 10000,
+            "toolCalls": 100,
+            "wallClockSeconds": 3600,
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.session_service.get_session_detail",
+        lambda *_args, **_kwargs: {
+            "id": terminal["sessionId"],
+            "currentPhase": "ready",
+            "updatedAt": "2026-08-09T10:00:10",
+            "llmUsage": {"totalTokens": 10001},
+        },
+    )
+    observed_status["value"] = "completed"
+
+    blocked = service.get_run(run["runId"])
+    replay = service.get_run(run["runId"])
+
+    source_run = next(
+        item for item in blocked["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
+    reservation = blocked["budgetReservations"][0]
+    ledger = next(
+        item
+        for item in blocked["budgetLedgers"]
+        if item["stageId"] == "knowledge_collection"
+    )
+    assert blocked["status"] == "blocked"
+    assert blocked["blockedReason"] == "budget_exceeded"
+    assert source_run["status"] == "blocked"
+    assert source_run["failureCode"] == "budget_exceeded"
+    assert "冻结预算" in source_run["failureSummary"]
+    assert reservation["status"] == "settled"
+    assert reservation["actual"]["tokens"] == 10001
+    assert reservation["charged"]["tokens"] == 10000
+    assert reservation["allocationOverrun"]["tokens"] == 1
+    assert reservation["overrun"]["tokens"] == 1
+    assert ledger["reserved"]["tokens"] == 0
+    assert ledger["consumed"]["tokens"] == 10000
+    assert ledger["remaining"]["tokens"] == 0
+    assert ledger["stopReason"] == "budget_exceeded"
+    assert not blocked["handoffs"]
+    assert not blocked["artifactManifests"]
+    assert {event["type"] for event in replay["events"]} >= {
+        "BudgetSettled",
+        "BudgetOverrun",
+    }
+
+
+def test_failed_task_overrun_uses_budget_exceeded_not_internal_settlement_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = ResearchWorkflowRuntimeService(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    run = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=_run_input(),
+        binding_layers=AgentBindingLayers(
+            workflowDefaults={"source_finder": "agent-source-finder"}
+        ),
+        idempotency_key="create-agent-failed-budget-overrun",
+    )
+    terminal = _terminal_source_task()
+    observed_status = {"value": "running"}
+    _start_source_node(
+        service,
+        run,
+        terminal,
+        observed_status,
+        monkeypatch,
+        budget_request={
+            "tokens": 10000,
+            "toolCalls": 100,
+            "wallClockSeconds": 3600,
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.session_service.get_session_detail",
+        lambda *_args, **_kwargs: {
+            "id": terminal["sessionId"],
+            "updatedAt": "2026-08-09T10:00:10",
+            "llmUsage": {"totalTokens": 10001},
+        },
+    )
+    observed_status["value"] = "interrupted"
+
+    blocked = service.get_run(run["runId"])
+
+    source_run = next(
+        item for item in blocked["nodeRuns"] if item["nodeId"] == "source_finding"
+    )
+    reservation = blocked["budgetReservations"][0]
+    assert blocked["blockedReason"] == "budget_exceeded"
+    assert source_run["failureCode"] == "budget_exceeded"
+    assert source_run["failureCode"] != "invalid_budget_settlement"
+    assert reservation["actual"]["tokens"] == 10001
+    assert reservation["overrun"] == {"tokens": 1}
+    assert {event["type"] for event in blocked["events"]} >= {
+        "BudgetSettled",
+        "BudgetOverrun",
+    }
 
 
 def test_source_task_review_disposition_defers_to_passed_artifact_gates(

@@ -967,7 +967,10 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     s = _service()
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    # Keep the temporary leaf shorter than the target leaf: pytest-xdist and
+    # Windows user profiles can otherwise push an otherwise valid target path
+    # across the legacy 260-character limit before ``os.replace`` runs.
+    fd, temp_name = tempfile.mkstemp(prefix=".tmp-", suffix="", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(encoded)

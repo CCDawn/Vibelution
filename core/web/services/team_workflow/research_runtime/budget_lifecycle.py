@@ -306,11 +306,10 @@ def settle_budget_records(
         or isinstance(value, bool)
         or not isinstance(value, int)
         or value < 0
-        or value > int(requested[key])
         for key, value in actual.items()
     ):
         raise BudgetLifecycleError(
-            "budgetUsage must fit within the reserved counters",
+            "budgetUsage must contain only known non-negative counters",
             code="invalid_budget_settlement",
         )
     ledgers = list(record.get("budgetLedgers") or [])
@@ -323,25 +322,64 @@ def settle_budget_records(
     consumed = dict(ledger.get("consumed") or {})
     for key, value in requested.items():
         reserved[key] = max(0, int(reserved.get(key) or 0) - value)
-    for key, value in actual.items():
+    available_after_release = {
+        key: max(
+            0,
+            int(limit)
+            - int(reserved.get(key) or 0)
+            - int(consumed.get(key) or 0),
+        )
+        for key, limit in ledger["limits"].items()
+    }
+    charged = {
+        key: min(int(value), int(available_after_release[key]))
+        for key, value in actual.items()
+    }
+    allocation_overrun = {
+        key: int(value) - int(requested[key])
+        for key, value in actual.items()
+        if int(value) > int(requested[key])
+    }
+    overrun = {
+        key: int(value) - int(available_after_release[key])
+        for key, value in actual.items()
+        if int(value) > int(available_after_release[key])
+    }
+    for key, value in charged.items():
         consumed[key] = int(consumed.get(key) or 0) + value
-    ledger.update(
-        {
-            "reserved": reserved,
-            "consumed": consumed,
-            "remaining": {
-                key: int(limit)
-                - int(reserved.get(key) or 0)
-                - int(consumed.get(key) or 0)
-                for key, limit in ledger["limits"].items()
-            },
-            "updatedAt": settled_at,
-        }
-    )
+    ledger_update = {
+        "reserved": reserved,
+        "consumed": consumed,
+        "remaining": {
+            key: int(limit)
+            - int(reserved.get(key) or 0)
+            - int(consumed.get(key) or 0)
+            for key, limit in ledger["limits"].items()
+        },
+        "updatedAt": settled_at,
+    }
+    if overrun:
+        ledger_update["stopReason"] = "budget_exceeded"
+    ledger.update(ledger_update)
     replace_by_id(ledgers, "budgetLedgerId", ledger["budgetLedgerId"], ledger)
     reservation.update(
         {"actual": dict(actual), "status": "settled", "settledAt": settled_at}
     )
+    if allocation_overrun:
+        reservation.update(
+            {
+                "charged": charged,
+                "allocationOverrun": allocation_overrun,
+            }
+        )
+    if overrun:
+        reservation.update(
+            {
+                "charged": charged,
+                "overrun": overrun,
+                "settlementOutcome": "budget_exceeded",
+            }
+        )
     replace_by_id(
         reservations,
         "reservationId",
