@@ -17,6 +17,7 @@ from .repository import ConversationUnitOfWork
 
 T = TypeVar("T")
 Mutation = Callable[[ConversationUnitOfWork], T]
+Maintenance = Callable[[sqlite3.Connection], T]
 
 
 class ConversationBackpressureError(RuntimeError):
@@ -35,6 +36,13 @@ class _Envelope(Generic[T]):
     force_flush: bool = False
 
 
+@dataclass
+class _MaintenanceEnvelope(Generic[T]):
+    operation: Maintenance[T]
+    future: Future[T]
+    enqueued_at: float
+
+
 _STOP = object()
 
 
@@ -50,7 +58,9 @@ class ConversationWriter:
         max_batch_delay_ms: int = 5,
     ) -> None:
         self._database = database
-        self._queue: queue.Queue[_Envelope[Any] | object] = queue.Queue(
+        self._queue: queue.Queue[
+            _Envelope[Any] | _MaintenanceEnvelope[Any] | object
+        ] = queue.Queue(
             maxsize=max(1, int(queue_capacity))
         )
         self._max_batch_size = max(1, int(max_batch_size))
@@ -68,6 +78,9 @@ class ConversationWriter:
         self._max_batch_observed = 0
         self._max_queue_depth = 0
         self._after_commit_callback_failures = 0
+        self._maintenance_wait_ms: deque[float] = deque(maxlen=512)
+        self._maintenance_runs = 0
+        self._failed_maintenance_runs = 0
 
     def start(self, *, timeout: float = 5) -> None:
         with self._state_lock:
@@ -100,23 +113,26 @@ class ConversationWriter:
             enqueued_at=time.perf_counter(),
             force_flush=force_flush,
         )
-        with self._state_lock:
-            if not self._accepting:
-                raise ConversationWriterClosedError(
-                    "Conversation writer is not accepting mutations."
-                )
-            try:
-                if timeout is None:
-                    self._queue.put(envelope)
-                else:
-                    self._queue.put(envelope, timeout=max(0, float(timeout)))
-            except queue.Full as exc:
-                raise ConversationBackpressureError(
-                    "Conversation writer queue is full."
-                ) from exc
-            depth = self._queue.qsize()
-        with self._metrics_lock:
-            self._max_queue_depth = max(self._max_queue_depth, depth)
+        self._enqueue(envelope, timeout=timeout)
+        return future
+
+    def submit_maintenance(
+        self,
+        operation: Maintenance[T],
+        *,
+        timeout: float | None = 0.25,
+    ) -> Future[T]:
+        """Serialize a maintenance operation on the sole writer connection."""
+
+        future: Future[T] = Future()
+        self._enqueue(
+            _MaintenanceEnvelope(
+                operation=operation,
+                future=future,
+                enqueued_at=time.perf_counter(),
+            ),
+            timeout=timeout,
+        )
         return future
 
     def flush(self, *, timeout: float = 5) -> None:
@@ -157,6 +173,12 @@ class ConversationWriter:
                 "maxBatchSize": self._max_batch_observed,
                 "queueWaitMsP95": _percentile(waits, 0.95),
                 "afterCommitCallbackFailures": self._after_commit_callback_failures,
+                "maintenanceRuns": self._maintenance_runs,
+                "failedMaintenanceRuns": self._failed_maintenance_runs,
+                "maintenanceQueueWaitMsP95": _percentile(
+                    sorted(self._maintenance_wait_ms),
+                    0.95,
+                ),
             }
 
     def _run(self) -> None:
@@ -167,16 +189,24 @@ class ConversationWriter:
             self._ready.set()
             return
         self._ready.set()
+        deferred: deque[_MaintenanceEnvelope[Any]] = deque()
         try:
             while True:
-                item = self._queue.get()
+                item = deferred.popleft() if deferred else self._queue.get()
                 if item is _STOP:
                     self._queue.task_done()
                     break
+                if isinstance(item, _MaintenanceEnvelope):
+                    self._process_maintenance(connection, item)
+                    self._queue.task_done()
+                    continue
                 batch: list[_Envelope[Any]] = [item]
                 stop_after_batch = False
+                deferred_maintenance: _MaintenanceEnvelope[Any] | None = None
                 if not item.force_flush:
-                    stop_after_batch = self._fill_batch(batch)
+                    stop_after_batch, deferred_maintenance = self._fill_batch(batch)
+                if deferred_maintenance is not None:
+                    deferred.append(deferred_maintenance)
                 self._process_batch(connection, batch)
                 for _envelope in batch:
                     self._queue.task_done()
@@ -185,7 +215,10 @@ class ConversationWriter:
         finally:
             connection.close()
 
-    def _fill_batch(self, batch: list[_Envelope[Any]]) -> bool:
+    def _fill_batch(
+        self,
+        batch: list[_Envelope[Any]],
+    ) -> tuple[bool, _MaintenanceEnvelope[Any] | None]:
         deadline = time.perf_counter() + self._max_batch_delay_s
         while len(batch) < self._max_batch_size:
             remaining = deadline - time.perf_counter()
@@ -197,11 +230,13 @@ class ConversationWriter:
                 break
             if item is _STOP:
                 self._queue.task_done()
-                return True
+                return True, None
+            if isinstance(item, _MaintenanceEnvelope):
+                return False, item
             batch.append(item)
             if item.force_flush:
                 break
-        return False
+        return False, None
 
     def _process_batch(
         self,
@@ -266,6 +301,49 @@ class ConversationWriter:
         with self._metrics_lock:
             self._committed_mutations += len(successful)
             self._failed_mutations += len(failures)
+
+    def _process_maintenance(
+        self,
+        connection: sqlite3.Connection,
+        envelope: _MaintenanceEnvelope[Any],
+    ) -> None:
+        with self._metrics_lock:
+            self._maintenance_runs += 1
+            self._maintenance_wait_ms.append(
+                (time.perf_counter() - envelope.enqueued_at) * 1000
+            )
+        try:
+            result = envelope.operation(connection)
+        except Exception as exc:  # noqa: BLE001 - every queued future needs a terminal outcome.
+            envelope.future.set_exception(exc)
+            with self._metrics_lock:
+                self._failed_maintenance_runs += 1
+        else:
+            envelope.future.set_result(result)
+
+    def _enqueue(
+        self,
+        envelope: _Envelope[Any] | _MaintenanceEnvelope[Any],
+        *,
+        timeout: float | None,
+    ) -> None:
+        with self._state_lock:
+            if not self._accepting:
+                raise ConversationWriterClosedError(
+                    "Conversation writer is not accepting mutations."
+                )
+            try:
+                if timeout is None:
+                    self._queue.put(envelope)
+                else:
+                    self._queue.put(envelope, timeout=max(0, float(timeout)))
+            except queue.Full as exc:
+                raise ConversationBackpressureError(
+                    "Conversation writer queue is full."
+                ) from exc
+            depth = self._queue.qsize()
+        with self._metrics_lock:
+            self._max_queue_depth = max(self._max_queue_depth, depth)
 
     def _record_after_commit_callback_failure(self, _exc: Exception) -> None:
         with self._metrics_lock:

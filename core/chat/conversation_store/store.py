@@ -19,10 +19,12 @@ class ConversationStore:
         max_batch_size: int = 32,
         max_batch_delay_ms: int = 5,
         busy_timeout_ms: int = 250,
+        read_pool_capacity: int = 4,
     ) -> None:
         self.database = ConversationDatabase(
             database_path,
             busy_timeout_ms=busy_timeout_ms,
+            read_pool_capacity=read_pool_capacity,
         )
         self.writer = ConversationWriter(
             self.database,
@@ -44,8 +46,22 @@ class ConversationStore:
     def close(self, *, timeout: float = 5) -> None:
         if not self._open:
             return
-        self.writer.close(timeout=timeout)
-        self._open = False
+        try:
+            self.writer.close(timeout=timeout)
+        finally:
+            self.database.close_read_pool()
+            self._open = False
+
+    def checkpoint_wal_passive(self, *, timeout: float = 5) -> dict[str, int | float | str]:
+        """Queue a non-blocking WAL checkpoint after pending writes in FIFO order."""
+
+        if not self._open:
+            raise RuntimeError("Conversation store is not open.")
+        future = self.writer.submit_maintenance(
+            self.database.passive_wal_checkpoint,
+            timeout=timeout,
+        )
+        return future.result(timeout=timeout)
 
     def __enter__(self) -> Self:
         self.open()
