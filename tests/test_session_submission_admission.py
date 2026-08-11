@@ -377,3 +377,96 @@ def test_journal_success_before_sqlite_ack_recovers_without_second_user_message(
         ]
     finally:
         store.close()
+
+
+def test_development_runtime_refuses_the_formal_project_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from core.web.services.session import admission
+
+    project_root = tmp_path / "project"
+    monkeypatch.setenv("VIBELUTION_SESSION_SQLITE_ADMISSION_ROOT", str(project_root))
+
+    with pytest.raises(admission.DevelopmentSubmissionAdmissionConfigurationError):
+        admission.get_development_submission_admission_runtime(project_root)
+
+
+def test_development_runtime_admits_one_journal_backed_submission(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from core.web.services.session import admission
+
+    project_root = tmp_path / "project"
+    development_root = tmp_path / "development-data"
+    monkeypatch.setenv("VIBELUTION_SESSION_SQLITE_ADMISSION_ROOT", str(development_root))
+    runtime = admission.get_development_submission_admission_runtime(project_root)
+    assert runtime is not None
+
+    def journal_lookup(record: dict[str, object]) -> dict[str, object] | None:
+        for event in load_conversation_events(project_root, str(record["sessionId"])):
+            if event.event_type != EVENT_USER_MESSAGE:
+                continue
+            metadata = dict((event.payload or {}).get("metadata") or {})
+            if metadata.get("clientSubmissionId") == record["clientSubmissionId"]:
+                return {
+                    "journalSequence": event.sequence,
+                    "journalEventId": event.event_id,
+                }
+        return None
+
+    def journal_append(record: dict[str, object]) -> dict[str, object]:
+        append_conversation_event(
+            project_root,
+            str(record["sessionId"]),
+            str(record["turnId"]),
+            EVENT_TURN_STARTED,
+            status="running",
+            correlation_id=str(record["clientSubmissionId"]),
+            visible_in_model=False,
+        )
+        event = append_conversation_event(
+            project_root,
+            str(record["sessionId"]),
+            str(record["turnId"]),
+            EVENT_USER_MESSAGE,
+            status="recorded",
+            correlation_id=str(record["clientSubmissionId"]),
+            payload={
+                "content": "development submission",
+                "metadata": {"clientSubmissionId": record["clientSubmissionId"]},
+            },
+        )
+        return {"journalSequence": event.sequence, "journalEventId": event.event_id}
+
+    try:
+        first = runtime.admit(
+            session_id="session-development",
+            agent={"agentId": "agent-development", "displayName": "Development Agent"},
+            conversation={"title": "Development conversation"},
+            client_submission_id="submission-development",
+            turn_id="turn-development",
+            journal_lookup=journal_lookup,
+            journal_append=journal_append,
+        )
+        second = runtime.admit(
+            session_id="session-development",
+            agent={"agentId": "agent-development", "displayName": "Development Agent"},
+            conversation={"title": "Development conversation"},
+            client_submission_id="submission-development",
+            turn_id="turn-new-must-not-replace",
+            journal_lookup=journal_lookup,
+            journal_append=journal_append,
+        )
+
+        assert first["journalDisposition"] == "appended"
+        assert second["journalDisposition"] == "already_journaled"
+        assert second["turnId"] == "turn-development"
+        assert [event.event_type for event in load_conversation_events(project_root, "session-development")] == [
+            EVENT_TURN_STARTED,
+            EVENT_USER_MESSAGE,
+        ]
+        assert (development_root / "conversation-control" / "session_admission.sqlite3").is_file()
+    finally:
+        admission.close_development_submission_admission_runtimes()
