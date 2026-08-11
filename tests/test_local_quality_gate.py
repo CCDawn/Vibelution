@@ -17,8 +17,41 @@ def test_pre_commit_is_thin_adapter() -> None:
         encoding="utf-8"
     )
     assert '"$repo_root/scripts/local_quality_gate.py" commit' in hook
+    assert "direct commits on main are blocked" in hook
     assert "pytest" not in hook
     assert "ruff" not in hook
+
+
+def test_commit_gate_blocks_direct_writes_on_main(git_repo: Path) -> None:
+    git(git_repo, "branch", "-M", "main")
+    (git_repo / "direct-main-change.txt").write_text("blocked\n", encoding="utf-8")
+    git(git_repo, "add", "direct-main-change.txt")
+
+    result = gate.run_commit_gate(git_repo)
+
+    assert result.outcome == "main_branch_direct_write_blocked"
+    assert result.exit_code == 1
+
+
+def test_pre_commit_blocks_main_before_dependency_checks(git_repo: Path) -> None:
+    git(git_repo, "branch", "-M", "main")
+    hook_dir = git_repo / ".githooks"
+    hook_dir.mkdir()
+    shutil.copyfile(
+        gate.PROJECT_ROOT / ".githooks" / "pre-commit",
+        hook_dir / "pre-commit",
+    )
+
+    result = subprocess.run(
+        [str(_git_sh_exe()), ".githooks/pre-commit"],
+        cwd=git_repo,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 1
+    assert "direct commits on main are blocked" in result.stderr
 
 
 def test_pre_commit_self_test_environment_removes_repository_local_git_variables(

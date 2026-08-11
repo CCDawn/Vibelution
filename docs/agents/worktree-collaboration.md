@@ -4,11 +4,11 @@ This document defines the default collaboration protocol for multiple Agents wor
 
 ## Work Surfaces
 
-- `<project-root>` is the durable local `main` development/integration workspace. Keep this path checked out on branch `main`; use it for local syncing, merging, final validation, project-memory serialization, and publishing only after the user explicitly authorizes a GitHub sync/release.
+- `<project-root>` is the durable local `main` integration workspace. Keep this path checked out on branch `main`; use it only for local syncing, fast-forward merging, final validation, and publishing after the user explicitly authorizes a GitHub sync/release. Direct development writes and commits on `main` are forbidden.
 - If `<project-root>` is found on a non-main branch, preserve or migrate that work into `<project-root-parent>\Vibelution-worktrees\<task-slug>` or a named stash, then restore the root path to `main` before continuing normal development or integration.
 - Development Agents use task-specific worktrees under `<project-root-parent>\Vibelution-worktrees\`.
 - If that external worktree root is unavailable, use `.claude/worktrees\<task-slug>` or another explicit task worktree path and record the actual path in `check`/`claim` evidence.
-- Each active `STANDARD_TASK` or `HIGH_RISK` task gets one worktree and one branch. `FAST_PATCH` docs, rules, tiny UI polish, focused tests, or narrow reversible fixes may stay in the current workspace when there is no active-scope collision and no branch risk. Do not reuse an old task worktree for a new goal.
+- Each active task, including `FAST_PATCH`, gets one task worktree and one `codex/<task-slug>` branch. `FAST_PATCH` may use a lighter validation path, but it may not stay in the `main` workspace. Do not reuse an old task worktree for a new goal.
 
 ## Starting A Task
 

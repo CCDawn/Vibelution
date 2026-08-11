@@ -41,6 +41,23 @@ def test_global_governance_uses_root_agents_and_docs_standards():
     assert not (PROJECT_ROOT / "core" / "core_prompt" / "SPEC.md").exists()
 
 
+def test_main_is_reserved_for_fast_forward_integration() -> None:
+    agents = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    standard = (PROJECT_ROOT / "docs" / "standards" / "development-standard.md").read_text(
+        encoding="utf-8"
+    )
+    collaboration = (PROJECT_ROOT / "docs" / "agents" / "worktree-collaboration.md").read_text(
+        encoding="utf-8"
+    )
+    loop = (PROJECT_ROOT / "docs" / "guides" / "loop.md").read_text(encoding="utf-8")
+
+    assert "禁止在根 `main` 直接写入任何变更" in agents
+    assert "Direct writes and commits on `main` are forbidden" in standard
+    assert "Direct development writes and commits on `main` are forbidden" in collaboration
+    assert "必须使用任务 worktree 与 `codex/<task-slug>` 分支" in loop
+    assert "FAST_PATCH may stay in the current workspace" not in standard
+
+
 def test_windows_no_console_red_line_is_normative():
     """Visible console popups are permanently forbidden for product runtime."""
 

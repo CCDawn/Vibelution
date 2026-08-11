@@ -2,6 +2,12 @@
 set -eu
 
 repo_root=$(git rev-parse --show-toplevel)
+current_branch=$(git branch --show-current 2>/dev/null || true)
+if [ "$current_branch" = "main" ]; then
+  echo "[pre-commit] direct commits on main are blocked; use a codex/<task-slug> worktree and merge with git merge --ff-only" >&2
+  exit 1
+fi
+
 if [ -x "$repo_root/.venv/Scripts/python.exe" ]; then
   project_python="$repo_root/.venv/Scripts/python.exe"
 elif [ -x "$repo_root/.venv/bin/python" ]; then
