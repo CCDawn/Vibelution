@@ -51,6 +51,18 @@ def _payload_for_kind(
     return dict(payload)
 
 
+def _relation_has_evidence_reference(relation: dict[str, Any]) -> bool:
+    references = relation.get("evidenceRefs") or relation.get("evidence_refs")
+    if isinstance(references, list):
+        return any(
+            isinstance(reference, str) and bool(reference.strip())
+            for reference in references
+        )
+    return isinstance(relation.get("evidenceRef"), str) and bool(
+        relation["evidenceRef"].strip()
+    )
+
+
 def validate_artifact_quality(
     record: dict[str, Any],
     *,
@@ -110,9 +122,32 @@ def validate_artifact_quality(
                 raise ArtifactQualityError(
                     "evidence relations require evidence gaps and counter-evidence"
                 )
+            relations = [
+                item
+                for key in (
+                    "candidateRelations",
+                    "candidate_relations",
+                    "edges",
+                    "sourceThemeEdges",
+                    "source_theme_edges",
+                    "topicRelations",
+                    "topic_relations",
+                )
+                for item in list(payload.get(key) or [])
+                if isinstance(item, dict)
+            ]
+            if not relations:
+                raise ArtifactQualityError(
+                    "evidence relations require at least one evidence-backed relation"
+                )
+            if any(not _relation_has_evidence_reference(item) for item in relations):
+                raise ArtifactQualityError(
+                    "every evidence relation requires an evidence reference"
+                )
             details = {
                 "evidenceGapCount": len(gaps),
                 "counterEvidenceCount": len(counter_refs),
+                "evidenceRelationCount": len(relations),
             }
         elif node_id == "hypothesis_design":
             payload = _payload_for_kind(manifests, payloads, "hypothesis_set")

@@ -15,7 +15,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from copy import deepcopy
 from typing import Any
 
 from ..source_collection_common import project_source_version_families
@@ -104,7 +103,6 @@ def _source_collection_stage_writeback_record_extractions(
 
 
 def _source_collection_stage_writeback_candidate_extractions(result: dict[str, Any]) -> list[dict[str, Any]]:
-    s = _service()
     extractions: list[dict[str, Any]] = []
     for key in (
         "candidateExtractions",
@@ -1692,7 +1690,6 @@ def _source_collection_stage_writeback_quality_summary(
     skipped: list[dict[str, Any]] | None = None,
     failed: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    s = _service()
     assessed_items = [item for item in list(assessed or []) if isinstance(item, dict)]
     skipped_items = [item for item in list(skipped or []) if isinstance(item, dict)]
     failed_items = [item for item in list(failed or []) if isinstance(item, dict)]
@@ -1749,11 +1746,128 @@ def _source_collection_stage_writeback_agent_graph_payload(result: dict[str, Any
             for key in ("nodes", "edges", "missingLinks", "unreviewedNodes", "clusters", "gaps", "qualityNotes", "scope")
             if result.get(key) is not None
         }
+    theme_nodes = (
+        result.get("themeNodes")
+        or result.get("theme_nodes")
+        or result.get("topicNodes")
+        or result.get("topic_nodes")
+        or result.get("themes")
+    )
+    normalized_theme_nodes = [
+        dict(item) for item in list(theme_nodes or []) if isinstance(item, dict)
+    ]
+    theme_ids = {
+        s._trim_text(
+            item.get("themeId")
+            or item.get("theme_id")
+            or item.get("topicId")
+            or item.get("topic_id")
+            or item.get("id"),
+            max_length=160,
+        )
+        for item in normalized_theme_nodes
+    }
+    theme_ids.discard("")
+
+    source_theme_edges = [
+        dict(item)
+        for item in list(
+            result.get("sourceThemeEdges")
+            or result.get("source_theme_edges")
+            or result.get("sourceTopicEdges")
+            or result.get("source_topic_edges")
+            or []
+        )
+        if isinstance(item, dict)
+    ]
+    topic_relations = [
+        dict(item)
+        for item in list(
+            result.get("topicRelations")
+            or result.get("topic_relations")
+            or result.get("themeRelations")
+            or result.get("theme_relations")
+            or []
+        )
+        if isinstance(item, dict)
+    ]
+    # Raw ``edges`` already belong to ``explicit_graph`` when present. Keep this
+    # list only for prompt-contract ``candidateRelations`` that need canonical
+    # candidate graph edge fields, otherwise an implicit graph would duplicate
+    # its raw edges during the merge below.
+    direct_edges: list[dict[str, Any]] = []
+    candidate_relations = [
+        dict(item)
+        for item in list(
+            result.get("candidateRelations") or result.get("candidate_relations") or []
+        )
+        if isinstance(item, dict)
+    ]
+    for item in candidate_relations:
+        source_id = s._trim_text(
+            item.get("from")
+            or item.get("source")
+            or item.get("sourceCandidateId")
+            or item.get("candidateId"),
+            max_length=160,
+        )
+        target_id = s._trim_text(
+            item.get("to")
+            or item.get("target")
+            or item.get("targetCandidateId")
+            or item.get("themeId"),
+            max_length=160,
+        )
+        relation = s._trim_text(
+            item.get("relation") or item.get("relationType") or item.get("type"),
+            max_length=160,
+        )
+        if not source_id or not target_id or not relation:
+            continue
+        evidence_refs = s._normalize_text_list(
+            item.get("evidenceRefs")
+            or item.get("evidence_refs")
+            or item.get("evidenceRef"),
+            max_items=64,
+            max_length=320,
+        )
+        if source_id in theme_ids and target_id in theme_ids:
+            topic_relations.append(
+                {
+                    "from": source_id,
+                    "to": target_id,
+                    "relation": relation,
+                    "evidenceRefs": evidence_refs,
+                }
+            )
+        elif target_id in theme_ids:
+            source_theme_edges.append(
+                {
+                    "candidateId": source_id,
+                    "themeId": target_id,
+                    "relation": relation,
+                    "evidenceRefs": evidence_refs,
+                }
+            )
+        else:
+            direct_edges.append(
+                {
+                    "sourceCandidateId": (
+                        s._source_collection_agent_graph_theme_node_id(source_id)
+                        if source_id in theme_ids
+                        else source_id
+                    ),
+                    "targetCandidateId": target_id,
+                    "relation": relation,
+                    "evidenceRefs": evidence_refs,
+                }
+            )
     relation_payload = {
         "relationCoverage": result.get("relationCoverage") or result.get("relation_coverage"),
-        "themeNodes": result.get("themeNodes") or result.get("theme_nodes") or result.get("topicNodes") or result.get("topic_nodes"),
-        "sourceThemeEdges": result.get("sourceThemeEdges") or result.get("source_theme_edges") or result.get("sourceTopicEdges") or result.get("source_topic_edges"),
-        "topicRelations": result.get("topicRelations") or result.get("topic_relations") or result.get("themeRelations") or result.get("theme_relations"),
+        "themeNodes": normalized_theme_nodes,
+        "sourceThemeEdges": source_theme_edges,
+        "topicRelations": topic_relations,
+        "edges": direct_edges,
     }
     relation_payload = {
         key: value
@@ -1764,7 +1878,10 @@ def _source_collection_stage_writeback_agent_graph_payload(result: dict[str, Any
         return relation_payload
     merged = dict(explicit_graph)
     for key, value in relation_payload.items():
-        merged.setdefault(key, value)
+        if isinstance(value, list) and isinstance(merged.get(key), list):
+            merged[key] = [*merged[key], *value]
+        else:
+            merged.setdefault(key, value)
     return merged
 
 
@@ -2747,7 +2864,6 @@ def _source_collection_stage_writeback_array_items(
     aliases: tuple[str, ...],
     containers: tuple[str, ...],
 ) -> list[dict[str, Any]]:
-    s = _service()
     items: list[dict[str, Any]] = []
     for key in aliases:
         value = payload.get(key)
@@ -2867,7 +2983,6 @@ def _normalize_source_collection_stage_writeback_result_metadata_value(value: An
 
 
 def _source_collection_stage_writeback_result_metadata_max_items(key: str, default: int) -> int:
-    s = _service()
     if key in {
         "candidateExtractions",
         "recordExtractions",
@@ -2916,7 +3031,7 @@ def _parse_source_collection_stage_writeback_result_text(text: str) -> dict[str,
     decoder = json.JSONDecoder()
     for match in re.finditer(r"\{", stripped):
         try:
-            candidate, end_index = decoder.raw_decode(stripped[match.start():])
+            candidate, _end_index = decoder.raw_decode(stripped[match.start():])
         except json.JSONDecodeError:
             continue
         if isinstance(candidate, dict):
