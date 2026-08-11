@@ -184,7 +184,16 @@ def get_launcher_status() -> dict[str, Any]:
     last_error_message = str(last_error.get("message") or "").strip()
     last_error_scope = str(last_error.get("scope") or "").strip()
     last_error_at = str(last_error.get("at") or "").strip()
-    failure_message = str(workbench.get("failureMessage") or "").strip() or last_error_message
+    workbench_confirms_open = bool(
+        workbench.get("observedState") == "open"
+        and workbench.get("backendHealthy")
+        and workbench.get("backendPortListening")
+        and not workbench.get("backendPortConflict")
+        and not workbench.get("frontendOrphaned")
+    )
+    failure_message = str(workbench.get("failureMessage") or "").strip()
+    if not failure_message and not workbench_confirms_open:
+        failure_message = last_error_message
     # Flat string fields for native tray JSON extractors (regex string matcher only).
     return {
         "launcher": {
@@ -1972,9 +1981,20 @@ def _observed_workbench() -> dict[str, Any]:
 
 
 def _status_observed_workbench(runtime_state: dict[str, Any]) -> dict[str, Any]:
-    if _runtime_manager_state_is_fresh(runtime_state):
+    if _runtime_manager_state_is_fresh(runtime_state) and _runtime_state_matches_effective_backend_port(runtime_state):
         return {}
     return _observed_workbench()
+
+
+def _runtime_state_matches_effective_backend_port(runtime_state: dict[str, Any]) -> bool:
+    """Keep the status fast path only when its runtime port still matches the active launch contract."""
+
+    workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    state_backend_port = _positive_int(workbench.get("backendPort"))
+    startup = get_launcher_startup_settings()
+    startup_workbench = startup.get("workbench") if isinstance(startup.get("workbench"), dict) else {}
+    effective_backend_port = _positive_int(startup_workbench.get("effectiveBackendPort"))
+    return bool(state_backend_port and effective_backend_port and state_backend_port == effective_backend_port)
 
 
 def _runtime_manager_state_is_fresh(runtime_state: dict[str, Any]) -> bool:
@@ -2057,10 +2077,19 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     manager_running = bool(runtime_state.get("daemonRunning"))
     runtime_command = runtime_state.get("command") if isinstance(runtime_state.get("command"), dict) else {}
     active_command_id = str(runtime_command.get("activeCommandId") or "").strip()
-    frontend_orphaned = bool(observed_or_state("frontendOrphaned", False))
+    observation_confirms_open_workbench = bool(
+        has_observation
+        and observed_state == "open"
+        and backend_healthy
+        and backend_port_listening
+        and not backend_port_conflict
+    )
+    frontend_orphaned = False if observation_confirms_open_workbench else bool(observed_or_state("frontendOrphaned", False))
     lifecycle_consistency = str(
         observed_or_state("lifecycleConsistency", "consistent") or "consistent"
     ).strip() or "consistent"
+    if observation_confirms_open_workbench:
+        lifecycle_consistency = "consistent"
     if desktop_window and bool(desktop_window.get("windowManaged")) and lifecycle_consistency == "browser_missing":
         # An active Electron workbench window is the managed frontend.  The
         # legacy browser process probe cannot observe it, so its stale
@@ -2095,7 +2124,13 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         phase = "opening"
     elif desired_state == "closed" and observed_state != "closed" and phase != "failed":
         phase = "closing"
-    failure_message = str(state_workbench.get("failureMessage") or "").strip()
+    failure_message = (
+        str(observed.get("failureMessage") or "").strip()
+        if observation_confirms_open_workbench
+        else str(state_workbench.get("failureMessage") or "").strip()
+    )
+    if observation_confirms_open_workbench and phase == "failed":
+        phase = "steady"
     # A non-empty failureMessage must win the status line. Dirty-main / start
     # failures previously left observedState=open + status "running" while the
     # tray showed no error, so users kept staring at a dead Edge window.
