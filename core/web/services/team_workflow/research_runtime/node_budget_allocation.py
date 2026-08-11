@@ -20,11 +20,16 @@ def build_agent_budget_request(
     record: dict[str, Any],
     node_id: str,
 ) -> dict[str, int]:
-    """Split current stage remaining budget across unfinished Agent nodes.
+    """Reserve current stage capacity across concurrently ready Agent nodes.
 
     The backend owns this allocation because the frozen stage ledger and node
     completion facts are runtime state.  The frontend receives the resulting
     request through the command capability and must not invent a budget.
+
+    A future node is not a competing reservation: each completed node settles
+    its actual usage and releases the unused balance before its successor is
+    scheduled.  Splitting against every unfinished node therefore makes a
+    serial pipeline fail even when the stage still has enough total budget.
     """
 
     definition = build_challenge_cup_workflow_definition()
@@ -54,27 +59,21 @@ def build_agent_budget_request(
             code="budget_stage_stopped",
         )
 
-    completed = {
-        str(item)
-        for item in record.get("completedNodeIds") or []
-        if str(item).strip()
-    }
-    completed.update(
-        str(item.get("nodeId") or "")
-        for item in record.get("nodeRuns") or []
-        if str(item.get("status") or "") in {"succeeded", "skipped"}
-    )
-    pending_agent_nodes = [
+    stage_agent_node_ids = {
         item.nodeId
         for item in definition.nodes
-        if item.stageId == node.stageId
-        and item.actorKind == ActorKind.AGENT
-        and item.nodeId not in completed
-    ]
-    if node_id not in pending_agent_nodes:
+        if item.stageId == node.stageId and item.actorKind == ActorKind.AGENT
+    }
+    ready_agent_node_ids = {
+        str(item.get("nodeId") or "")
+        for item in record.get("nodeRuns") or []
+        if str(item.get("status") or "") == "ready"
+        and str(item.get("nodeId") or "") in stage_agent_node_ids
+    }
+    if node_id not in ready_agent_node_ids:
         raise NodeBudgetAllocationError(
-            "当前 Agent 节点已完成，不可再次申请预算",
-            code="agent_node_already_completed",
+            "当前 Agent 节点尚未就绪，不可申请预算",
+            code="agent_node_not_ready",
         )
 
     remaining = ledger.get("remaining")
@@ -92,7 +91,7 @@ def build_agent_budget_request(
             code="budget_remaining_invalid",
         )
 
-    divisor = len(pending_agent_nodes)
+    divisor = len(ready_agent_node_ids)
     request = {
         str(counter): int(value) // divisor
         for counter, value in remaining.items()

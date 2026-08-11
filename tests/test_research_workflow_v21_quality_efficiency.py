@@ -139,6 +139,13 @@ def test_agent_completion_settles_budget_and_task_bundle_with_real_artifact(
         "core.web.services.team_workflow.source_collection.stage_session.start_source_collection_stage_session_task",
         fake_start_stage_task,
     )
+    monkeypatch.setattr(
+        "core.web.services.session_service.get_session_detail",
+        lambda *_args, **_kwargs: {
+            "id": "session-quality",
+            "agentId": "agent-source-finder",
+        },
+    )
     service.apply_node_command(
         run["runId"],
         "source_finding",
