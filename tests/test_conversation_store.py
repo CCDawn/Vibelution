@@ -1,0 +1,346 @@
+from __future__ import annotations
+
+import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import pytest
+
+import core.chat.conversation_store.database as conversation_database
+from core.chat.conversation_store import (
+    ConversationBackpressureError,
+    ConversationStore,
+    ConversationStoreUnavailableError,
+    assess_sqlite_wal_runtime,
+)
+
+
+@pytest.fixture
+def safe_sqlite_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        conversation_database.sqlite3,
+        "sqlite_version_info",
+        (3, 51, 3),
+    )
+
+
+def _open_store(
+    tmp_path: Path,
+    *,
+    queue_capacity: int = 64,
+    max_batch_size: int = 16,
+    max_batch_delay_ms: int = 5,
+) -> ConversationStore:
+    store = ConversationStore(
+        tmp_path / "workspace" / "chat" / "conversations.sqlite3",
+        queue_capacity=queue_capacity,
+        max_batch_size=max_batch_size,
+        max_batch_delay_ms=max_batch_delay_ms,
+    )
+    store.open()
+    return store
+
+
+def _create_agent(store: ConversationStore, agent_id: str = "agent-a") -> str:
+    result = store.repository.create_agent(
+        agent_id=agent_id,
+        display_name=f"Agent {agent_id}",
+        kind="assistant",
+        config={"modelId": "gpt-5.6-luna", "tools": ["read_file"]},
+        source="test",
+    ).result(timeout=3)
+    return str(result["configRevisionId"])
+
+
+def test_sqlite_runtime_gate_rejects_known_wal_reset_race_versions(tmp_path: Path):
+    unsafe = assess_sqlite_wal_runtime((3, 49, 1))
+    patched_backport = assess_sqlite_wal_runtime((3, 50, 7))
+    fixed = assess_sqlite_wal_runtime((3, 51, 3))
+
+    assert unsafe.safe is False
+    assert unsafe.code == "wal_reset_race"
+    assert patched_backport.safe is True
+    assert fixed.safe is True
+
+    store = ConversationStore(tmp_path / "conversations.sqlite3")
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            conversation_database.sqlite3,
+            "sqlite_version_info",
+            (3, 49, 1),
+        )
+        with pytest.raises(ConversationStoreUnavailableError, match="3.51.3"):
+            store.open()
+
+
+def test_initialize_creates_canonical_schema_and_query_only_readers(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        metadata = store.database.metadata()
+        with sqlite3.connect(store.database.path) as connection:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+        assert metadata["schemaVersion"] == 1
+        assert metadata["quickCheck"] == "ok"
+        assert {
+            "agents",
+            "agent_config_revisions",
+            "sessions",
+            "turns",
+            "turn_items",
+            "turn_item_chunks",
+            "checkpoints",
+        }.issubset(tables)
+        assert foreign_keys == []
+
+        with store.database.reader() as reader:
+            assert reader.execute("PRAGMA query_only").fetchone()[0] == 1
+            with pytest.raises(sqlite3.OperationalError, match="readonly"):
+                reader.execute(
+                    "INSERT INTO agents(agent_id, display_name, kind, status, created_at_ms, updated_at_ms) "
+                    "VALUES ('forbidden', 'Forbidden', 'assistant', 'active', 1, 1)"
+                )
+    finally:
+        store.close()
+
+
+def test_agent_revision_and_parent_session_binding_are_enforced(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        revision_a = _create_agent(store, "agent-a")
+        revision_b = _create_agent(store, "agent-b")
+        store.repository.create_session(
+            session_id="session-a",
+            agent_id="agent-a",
+            agent_config_revision_id=revision_a,
+            title="Agent A root",
+        ).result(timeout=3)
+        store.repository.create_session(
+            session_id="session-a-child",
+            agent_id="agent-a",
+            agent_config_revision_id=revision_a,
+            parent_session_id="session-a",
+            title="Agent A child",
+        ).result(timeout=3)
+
+        cross_agent = store.repository.create_session(
+            session_id="session-b-child",
+            agent_id="agent-b",
+            agent_config_revision_id=revision_b,
+            parent_session_id="session-a",
+            title="Invalid cross-agent child",
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            cross_agent.result(timeout=3)
+
+        sessions = store.repository.list_sessions(agent_id="agent-a")
+        assert [row["sessionId"] for row in sessions] == [
+            "session-a-child",
+            "session-a",
+        ]
+    finally:
+        store.close()
+
+
+def test_turn_item_revision_is_monotonic_and_keeps_one_stable_row(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_agent(store)
+        store.repository.create_session(
+            session_id="session-a",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Session A",
+        ).result(timeout=3)
+        turn = store.repository.begin_turn(
+            turn_id="turn-a",
+            session_id="session-a",
+            client_submission_id="submission-a",
+        ).result(timeout=3)
+
+        first = store.repository.upsert_turn_item(
+            item_id="tool-a",
+            turn_id="turn-a",
+            call_id="call-a",
+            revision=1,
+            kind="tool_call",
+            status="running",
+            payload={"toolName": "read_file"},
+        ).result(timeout=3)
+        terminal = store.repository.upsert_turn_item(
+            item_id="tool-a",
+            turn_id="turn-a",
+            call_id="call-a",
+            revision=2,
+            kind="tool_call",
+            status="completed",
+            payload={"toolName": "read_file", "summary": "ok"},
+        ).result(timeout=3)
+        stale = store.repository.upsert_turn_item(
+            item_id="tool-a",
+            turn_id="turn-a",
+            call_id="call-a",
+            revision=1,
+            kind="tool_call",
+            status="running",
+            payload={"toolName": "read_file"},
+        ).result(timeout=3)
+        terminal_guard = store.repository.upsert_turn_item(
+            item_id="tool-a",
+            turn_id="turn-a",
+            call_id="call-a",
+            revision=3,
+            kind="tool_call",
+            status="running",
+            payload={"toolName": "read_file"},
+        ).result(timeout=3)
+
+        items = store.repository.list_turn_items("turn-a")
+        assert turn["sequence"] == 1
+        assert first == {"outcome": "inserted", "sequence": 1, "revision": 1}
+        assert terminal == {"outcome": "updated", "sequence": 1, "revision": 2}
+        assert stale == {"outcome": "stale", "sequence": 1, "revision": 2}
+        assert terminal_guard == {"outcome": "terminal", "sequence": 1, "revision": 2}
+        assert len(items) == 1
+        assert items[0]["itemId"] == "tool-a"
+        assert items[0]["status"] == "completed"
+        assert items[0]["revision"] == 2
+    finally:
+        store.close()
+
+
+def test_writer_batches_mutations_and_runs_callbacks_only_after_commit(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path, max_batch_size=32, max_batch_delay_ms=30)
+    observed_after_commit: list[bool] = []
+    try:
+        futures = []
+        for index in range(12):
+            agent_id = f"agent-{index:02d}"
+
+            def mutation(unit_of_work, *, agent_id=agent_id):
+                result = unit_of_work.agents.create(
+                    agent_id=agent_id,
+                    display_name=agent_id,
+                    kind="assistant",
+                    config={"modelId": "test-model"},
+                    source="test",
+                )
+                unit_of_work.after_commit(
+                    lambda agent_id=agent_id: observed_after_commit.append(
+                        store.repository.get_agent(agent_id) is not None
+                    )
+                )
+                return result
+
+            futures.append(store.writer.submit(mutation))
+
+        for future in futures:
+            future.result(timeout=3)
+
+        metrics = store.writer.metrics()
+        assert observed_after_commit == [True] * 12
+        assert metrics["committedMutations"] == 12
+        assert metrics["maxBatchSize"] >= 2
+        assert metrics["queueWaitMsP95"] >= 0
+    finally:
+        store.close()
+
+
+def test_bounded_writer_queue_rejects_excess_work(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(
+        tmp_path,
+        queue_capacity=1,
+        max_batch_size=1,
+        max_batch_delay_ms=0,
+    )
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_mutation(_unit_of_work):
+        entered.set()
+        assert release.wait(timeout=3)
+        return "released"
+
+    try:
+        first = store.writer.submit(blocking_mutation)
+        assert entered.wait(timeout=1)
+        second = store.writer.submit(lambda _unit_of_work: "queued")
+        with pytest.raises(ConversationBackpressureError):
+            store.writer.submit(lambda _unit_of_work: "rejected", timeout=0)
+        release.set()
+        assert first.result(timeout=3) == "released"
+        assert second.result(timeout=3) == "queued"
+    finally:
+        release.set()
+        store.close()
+
+
+def test_32_sessions_concurrent_turn_writes_do_not_deadlock_or_lose_rows(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(
+        tmp_path,
+        queue_capacity=512,
+        max_batch_size=32,
+        max_batch_delay_ms=5,
+    )
+    try:
+        revision = _create_agent(store)
+        for session_index in range(32):
+            store.repository.create_session(
+                session_id=f"session-{session_index:02d}",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
+                title=f"Session {session_index:02d}",
+            ).result(timeout=3)
+
+        def submit_turn(session_index: int, turn_index: int):
+            return store.repository.begin_turn(
+                turn_id=f"turn-{session_index:02d}-{turn_index:02d}",
+                session_id=f"session-{session_index:02d}",
+                client_submission_id=f"submission-{session_index:02d}-{turn_index:02d}",
+            ).result(timeout=5)
+
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            futures = [
+                executor.submit(submit_turn, session_index, turn_index)
+                for session_index in range(32)
+                for turn_index in range(4)
+            ]
+            results = [future.result(timeout=10) for future in futures]
+
+        store.writer.flush(timeout=5)
+        assert len(results) == 128
+        for session_index in range(32):
+            turns = store.repository.list_turns(f"session-{session_index:02d}")
+            assert len(turns) == 4
+            assert sorted(turn["sequence"] for turn in turns) == [1, 2, 3, 4]
+        metrics = store.writer.metrics()
+        assert metrics["failedMutations"] == 0
+        assert metrics["maxQueueDepth"] <= 512
+    finally:
+        store.close()

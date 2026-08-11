@@ -1,0 +1,185 @@
+"""Schema contract for the canonical Agent conversation database.
+
+The package is intentionally isolated from the live chat path until the later
+cutover phases in the migration plan.  Every product write must eventually go
+through the single writer coordinator; this module only owns deterministic
+schema declarations and migration checksums.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+
+SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class Migration:
+    version: int
+    statements: tuple[str, ...]
+
+    @property
+    def checksum(self) -> str:
+        payload = "\n;\n".join(statement.strip() for statement in self.statements)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+_SCHEMA_V1_STATEMENTS = (
+    """
+    CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at_ms INTEGER NOT NULL,
+      checksum TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE conversation_store_meta (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      schema_version INTEGER NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE agents (
+      agent_id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      current_config_revision_id TEXT,
+      created_at_ms INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      archived_at_ms INTEGER,
+      FOREIGN KEY (agent_id, current_config_revision_id)
+        REFERENCES agent_config_revisions(agent_id, revision_id)
+        DEFERRABLE INITIALLY DEFERRED
+    )
+    """,
+    """
+    CREATE TABLE agent_config_revisions (
+      revision_id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      config_hash TEXT NOT NULL,
+      config_json TEXT NOT NULL,
+      source TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      UNIQUE (agent_id, revision_id),
+      UNIQUE (agent_id, config_hash),
+      FOREIGN KEY (agent_id) REFERENCES agents(agent_id) ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE sessions (
+      session_id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      parent_session_id TEXT,
+      agent_config_revision_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'ready',
+      recency_at_ms INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      next_turn_sequence INTEGER NOT NULL DEFAULT 0 CHECK (next_turn_sequence >= 0),
+      next_item_sequence INTEGER NOT NULL DEFAULT 0 CHECK (next_item_sequence >= 0),
+      created_at_ms INTEGER NOT NULL,
+      archived_at_ms INTEGER,
+      UNIQUE (agent_id, session_id),
+      FOREIGN KEY (agent_id) REFERENCES agents(agent_id) ON DELETE RESTRICT,
+      FOREIGN KEY (agent_id, agent_config_revision_id)
+        REFERENCES agent_config_revisions(agent_id, revision_id) ON DELETE RESTRICT,
+      FOREIGN KEY (agent_id, parent_session_id)
+        REFERENCES sessions(agent_id, session_id) ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE turns (
+      turn_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      client_submission_id TEXT,
+      sequence INTEGER NOT NULL CHECK (sequence >= 1),
+      status TEXT NOT NULL DEFAULT 'running',
+      started_at_ms INTEGER NOT NULL,
+      completed_at_ms INTEGER,
+      updated_at_ms INTEGER NOT NULL,
+      UNIQUE (session_id, sequence),
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX idx_turns_submission
+    ON turns(session_id, client_submission_id)
+    WHERE client_submission_id IS NOT NULL
+    """,
+    """
+    CREATE TABLE turn_items (
+      item_id TEXT PRIMARY KEY,
+      turn_id TEXT NOT NULL,
+      call_id TEXT,
+      sequence INTEGER NOT NULL CHECK (sequence >= 1),
+      revision INTEGER NOT NULL CHECK (revision >= 1),
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      UNIQUE (turn_id, sequence),
+      FOREIGN KEY (turn_id) REFERENCES turns(turn_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE turn_item_chunks (
+      item_id TEXT NOT NULL,
+      chunk_sequence INTEGER NOT NULL CHECK (chunk_sequence >= 1),
+      revision INTEGER NOT NULL CHECK (revision >= 1),
+      content TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (item_id, chunk_sequence),
+      FOREIGN KEY (item_id) REFERENCES turn_items(item_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE checkpoints (
+      checkpoint_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      turn_id TEXT,
+      parent_checkpoint_id TEXT,
+      trigger TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
+      FOREIGN KEY (turn_id) REFERENCES turns(turn_id) ON DELETE SET NULL,
+      FOREIGN KEY (parent_checkpoint_id)
+        REFERENCES checkpoints(checkpoint_id) ON DELETE SET NULL
+    )
+    """,
+    """
+    CREATE INDEX idx_sessions_agent_recency
+    ON sessions(agent_id, archived_at_ms, recency_at_ms DESC, session_id DESC)
+    """,
+    """
+    CREATE INDEX idx_sessions_parent
+    ON sessions(parent_session_id, recency_at_ms DESC)
+    """,
+    """
+    CREATE INDEX idx_turns_session_sequence
+    ON turns(session_id, sequence DESC)
+    """,
+    """
+    CREATE INDEX idx_items_turn_sequence
+    ON turn_items(turn_id, sequence ASC, revision DESC)
+    """,
+    """
+    CREATE INDEX idx_items_call
+    ON turn_items(turn_id, call_id)
+    WHERE call_id IS NOT NULL
+    """,
+    """
+    CREATE INDEX idx_checkpoints_session_created
+    ON checkpoints(session_id, created_at_ms DESC, checkpoint_id DESC)
+    """,
+)
+
+
+MIGRATIONS: tuple[Migration, ...] = (
+    Migration(version=1, statements=_SCHEMA_V1_STATEMENTS),
+)
