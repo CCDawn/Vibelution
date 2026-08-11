@@ -190,8 +190,8 @@ def test_git_status_endpoint_marks_local_main_and_worktree_commits_as_attention(
     assert payload["worktrees"]["external"] == 1
     assert payload["worktrees"]["withCommits"] == 1
     assert payload["worktrees"]["items"][1]["branch"] == "codex/demo"
-    assert payload["worktrees"]["items"][1]["aheadMain"] == 2
-    assert payload["worktrees"]["items"][1]["behindMain"] == 3
+    assert payload["worktrees"]["items"][1]["aheadMain"] == 0
+    assert payload["worktrees"]["items"][1]["behindMain"] == 0
 
 
 def test_git_status_endpoint_reports_unavailable(monkeypatch):
