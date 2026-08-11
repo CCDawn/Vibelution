@@ -98,12 +98,62 @@ function Assert-NoActiveWorkbenchWork {
         throw "Launcher control URL is unavailable; refusing to run a Workbench-close canary without an active-work check."
     }
     $launcherOrigin = ([uri]$launcherControlUrl).GetLeftPart([System.UriPartial]::Authority)
-    $status = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status"
+    $status = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
     $activeWorkCount = [int]$status.lifecycleProof.activeWorkRuns.count
     if ($activeWorkCount -gt 0) {
         throw "Active work blocks the Workbench-close canary. Complete or stop the active work before retrying."
     }
     return $activeWorkCount
+}
+
+function Close-ManagedWorkbenchForCanary {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ref]$RecoveryRequired
+    )
+
+    $launcherStatePath = Join-Path $projectDir ".runtime/launcher/state.json"
+    if (-not (Test-Path -LiteralPath $launcherStatePath)) {
+        throw "Launcher state is unavailable; refusing to quiesce the managed Workbench for a close canary."
+    }
+    $launcherState = Get-Content -LiteralPath $launcherStatePath -Raw | ConvertFrom-Json
+    $launcherControlUrl = [string]$launcherState.launcherControlUrl
+    if ([string]::IsNullOrWhiteSpace($launcherControlUrl)) {
+        throw "Launcher control URL is unavailable; refusing to quiesce the managed Workbench for a close canary."
+    }
+    $launcherOrigin = ([uri]$launcherControlUrl).GetLeftPart([System.UriPartial]::Authority)
+    $initialStatus = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
+    if ($initialStatus.overallState -eq "closed" -and $initialStatus.observedState -eq "closed") {
+        return [pscustomobject]@{
+            WasOpen = $false
+            OverallState = [string]$initialStatus.overallState
+            ObservedState = [string]$initialStatus.observedState
+        }
+    }
+
+    $launcherExecutable = Join-Path $env:LOCALAPPDATA "Vibelution/Launcher/VibelutionLauncher.exe"
+    if (-not (Test-Path -LiteralPath $launcherExecutable)) {
+        throw "Official Vibelution Launcher is missing; cannot quiesce the managed Workbench."
+    }
+    $launcherProcess = Start-Process -FilePath $launcherExecutable -ArgumentList @("--project", $projectDir, "stop") -WindowStyle Hidden -PassThru -Wait
+    if ($launcherProcess.ExitCode -ne 0) {
+        throw "Official Vibelution Launcher stop failed with exit code $($launcherProcess.ExitCode)."
+    }
+    $RecoveryRequired.Value = $true
+
+    $deadline = (Get-Date).AddSeconds($ShutdownTimeoutSeconds)
+    do {
+        $status = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
+        if ($status.overallState -eq "closed" -and $status.observedState -eq "closed") {
+            return [pscustomobject]@{
+                WasOpen = $true
+                OverallState = [string]$status.overallState
+                ObservedState = [string]$status.observedState
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    throw "Managed Workbench did not close before the packaged Workbench-close canary."
 }
 
 function Wait-ForDesktopRootProcess {
@@ -340,7 +390,7 @@ function Restore-ManagedWorkbench {
             $launcherControlUrl = [string]$launcherState.launcherControlUrl
             if (-not [string]::IsNullOrWhiteSpace($launcherControlUrl)) {
                 $launcherOrigin = ([uri]$launcherControlUrl).GetLeftPart([System.UriPartial]::Authority)
-                $status = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status"
+                $status = Invoke-RestMethod -Uri "$launcherOrigin/api/launcher/status" -TimeoutSec 15
                 if ($status.overallState -eq "ready" -and $status.observedState -eq "open") {
                     return [pscustomobject]@{
                         OverallState = [string]$status.overallState
@@ -369,9 +419,12 @@ $baselineProcessIds = @()
 $ownedProcessIds = @()
 $previousDeepLinkRegistration = $env:VIBELUTION_ELECTRON_REGISTER_DEEP_LINKS
 $nativeCloseMessagePosted = $false
+$managedWorkbenchWasOpenBeforeCanary = $false
 $recovery = $null
 
 try {
+    $managedWorkbenchState = Close-ManagedWorkbenchForCanary -RecoveryRequired ([ref]$managedWorkbenchWasOpenBeforeCanary)
+    $managedWorkbenchWasOpenBeforeCanary = [bool]$managedWorkbenchState.WasOpen
     $env:VIBELUTION_ELECTRON_REGISTER_DEEP_LINKS = "0"
     New-Item -ItemType Directory -Path $canaryUserDataRoot -Force | Out-Null
     Remove-Item -LiteralPath $canarySummaryPath -Force -ErrorAction SilentlyContinue
@@ -438,6 +491,7 @@ try {
         nativeCloseMessage = "WM_CLOSE"
         nativeCloseMessagePosted = $nativeCloseMessagePosted
         activeWorkCountBeforeClose = $activeWorkCount
+        managedWorkbenchWasOpenBeforeCanary = $managedWorkbenchWasOpenBeforeCanary
         closeId = $summary.closeId
         transactionPhase = $summary.phase
         normalCloseRequested = $normalCloseRequested
@@ -459,7 +513,7 @@ try {
             Stop-OwnedDesktopProcesses $remainingOwnedProcessIds
         }
     }
-    if ($nativeCloseMessagePosted -and $null -eq $recovery) {
+    if ($managedWorkbenchWasOpenBeforeCanary -and $null -eq $recovery) {
         try {
             $recovery = Restore-ManagedWorkbench
         } catch {
