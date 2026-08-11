@@ -706,7 +706,7 @@ def _conversation_requires_agent_materialization(conversation: dict[str, Any]) -
 
 def _sync_agent_directory_project_root() -> None:
     s = _service()
-    project_root = Path(__file__).resolve().parents[4]
+    project_root = s.PROJECT_ROOT
     if s.agent_directory_service.PROJECT_ROOT != project_root:
         s.agent_directory_service.PROJECT_ROOT = project_root
         s._invalidate_session_list_cache()
@@ -1228,7 +1228,6 @@ def create_chat_session(
             s._sync_agent_directory_project_root()
             agent = s.ensure_agent_for_session(
                 session_id,
-                display_name=normalized_title,
                 llm_bindings=normalized_llm_bindings,
                 session_workspace_path=str(conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)),
                 created_by=created_by,
