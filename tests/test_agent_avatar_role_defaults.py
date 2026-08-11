@@ -6,6 +6,7 @@ from core.web.services import agent_directory_service as s
 
 
 AVAILABLE = list(s.AGENT_AVATAR_FILENAMES)
+AVAILABLE_LEGACY = [name for name in s.AGENT_AVATAR_FILENAMES if not str(name).startswith("model-")]
 
 
 def _agent(
@@ -23,12 +24,14 @@ def _agent(
     }
 
 
-def _filename(agent: dict) -> str:
-    return s._default_agent_avatar_filename(agent, available_avatar_filenames=AVAILABLE)
+def _filename(agent: dict, *, legacy: bool = False) -> str:
+    available = AVAILABLE_LEGACY if legacy else AVAILABLE
+    return s._default_agent_avatar_filename(agent, available_avatar_filenames=available)
 
 
 def test_chat_session_agent_uses_session_avatar():
-    assert _filename(_agent(primary_mode="chat", role_key="")) == "01-session-agent.png"
+    assert _filename(_agent(primary_mode="chat", role_key="")) == "model-generic.svg"
+    assert _filename(_agent(primary_mode="chat", role_key=""), legacy=True) == "01-session-agent.png"
 
 
 def test_knowledge_steward_not_stolen_by_general_mode():
@@ -37,7 +40,8 @@ def test_knowledge_steward_not_stolen_by_general_mode():
         role_key="knowledge_steward",
         metadata={"systemRole": "knowledge_steward", "functionalDisplayName": "知识库管理员"},
     )
-    assert _filename(agent) == "15-anime-memory-steward-agent.png"
+    assert _filename(agent) == "model-generic.svg"
+    assert _filename(agent, legacy=True) == "15-anime-memory-steward-agent.png"
 
 
 def test_supervised_roles_are_distinguishable():
@@ -46,21 +50,24 @@ def test_supervised_roles_are_distinguishable():
             primary_mode="supervised_evolution",
             role_key="baseline",
             metadata={"supervisedRole": "baseline"},
-        )
+        ),
+        legacy=True,
     )
     candidate = _filename(
         _agent(
             primary_mode="supervised_evolution",
             role_key="candidate",
             metadata={"supervisedRole": "candidate"},
-        )
+        ),
+        legacy=True,
     )
     judge = _filename(
         _agent(
             primary_mode="supervised_evolution",
             role_key="judge",
             metadata={"supervisedRole": "judge"},
-        )
+        ),
+        legacy=True,
     )
     assert baseline == "03-inspect-agent.png"
     assert candidate == "12-anime-tool-executor-agent.png"
@@ -74,21 +81,24 @@ def test_self_evolution_subroles_not_collapsed_to_mode_face():
             primary_mode="self_evolution",
             role_key="executor",
             metadata={"selfEvolutionRole": "executor"},
-        )
+        ),
+        legacy=True,
     )
     observer = _filename(
         _agent(
             primary_mode="self_evolution",
             role_key="observer",
             metadata={"selfEvolutionRole": "observer"},
-        )
+        ),
+        legacy=True,
     )
     reviewer = _filename(
         _agent(
             primary_mode="self_evolution",
             role_key="reviewer",
             metadata={"selfEvolutionRole": "reviewer"},
-        )
+        ),
+        legacy=True,
     )
     assert executor == "12-anime-tool-executor-agent.png"
     assert observer == "16-anime-self-evolution-agent.png"
@@ -102,7 +112,8 @@ def test_capability_manager_uses_system_face():
         role_key="capability_manager",
         metadata={"functionalDisplayName": "能力管家"},
     )
-    assert _filename(agent) == "18-anime-system-service-agent.png"
+    assert _filename(agent) == "model-generic.svg"
+    assert _filename(agent, legacy=True) == "18-anime-system-service-agent.png"
 
 
 def test_ensure_does_not_override_custom_avatar(tmp_path, monkeypatch):
@@ -133,4 +144,4 @@ def test_ensure_does_not_override_custom_avatar(tmp_path, monkeypatch):
 def test_projection_fills_default_path_when_metadata_missing():
     agent = _agent(primary_mode="chat", role_key="")
     path = s.resolve_agent_avatar_path_for_projection(agent, available_avatar_filenames=AVAILABLE)
-    assert path == "workspace/avatars/01-session-agent.png"
+    assert path == "workspace/avatars/model-generic.svg"

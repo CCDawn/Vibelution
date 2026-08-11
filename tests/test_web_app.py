@@ -43,6 +43,7 @@ from core.web.services import (
     supervised_control_service,
     supervised_worktree_evolution_service,
 )
+from core.web.services.session import stream_capture
 from core.web.services.session import worker as session_worker
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 from tests.helpers.web_chat_state import (
@@ -7126,6 +7127,11 @@ def test_capture_session_ui_stream_flushes_slow_tiny_response_deltas(tmp_path, m
 
 def test_capture_session_ui_stream_batches_tiny_thought_deltas(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        stream_capture._SessionUiCaptureTextBatcher,
+        "_should_flush_thought",
+        lambda _self, _thought: False,
+    )
     live_updates: list[dict[str, object]] = []
 
     def fake_set_live_output(session_id: str, **kwargs):

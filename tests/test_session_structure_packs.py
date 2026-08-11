@@ -87,15 +87,15 @@ def test_facade_reexports_conversation_index_pack() -> None:
     assert facade._repair_agent_direct_session_collisions is conversation_index._repair_agent_direct_session_collisions
 
 
-def test_conversation_index_syncs_agent_directory_to_repository_root(monkeypatch) -> None:
+def test_conversation_index_syncs_agent_directory_to_session_project_root(monkeypatch) -> None:
     invalidated: list[bool] = []
     expected_root = conversation_index.Path(conversation_index.__file__).resolve().parents[4]
-    monkeypatch.setattr(facade.agent_directory_service, "PROJECT_ROOT", expected_root / "core")
+    monkeypatch.setattr(facade, "PROJECT_ROOT", expected_root / "core")
     monkeypatch.setattr(facade, "_invalidate_session_list_cache", lambda: invalidated.append(True))
 
     conversation_index._sync_agent_directory_project_root()
 
-    assert facade.agent_directory_service.PROJECT_ROOT == expected_root
+    assert facade.agent_directory_service.PROJECT_ROOT == expected_root / "core"
     assert invalidated == [True]
 
 

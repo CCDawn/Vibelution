@@ -1998,15 +1998,28 @@ def _recover_missing_conversation_from_workspace_locked(
             session_id=normalized_session_id,
         )
     else:
-        # Bare conversation so session-scoped settings (reasoning effort) can persist.
-        conversation = s._make_empty_conversation(
-            normalized_session_id,
-            title=normalized_session_id,
-            timestamp=s._now_timestamp(),
+        journal_agent_id = s._recover_agent_id_from_session_journal(
+            normalized_session_id
         )
-        if agent_id:
-            conversation["agent_id"] = agent_id
-            conversation["agentId"] = agent_id
+        journal_agent = (
+            s.get_agent(journal_agent_id, include_archived=True) if journal_agent_id else None
+        )
+        if isinstance(journal_agent, dict) and journal_agent:
+            conversation = s._agent_directory_conversation_record(
+                journal_agent,
+                session_id=normalized_session_id,
+            )
+            agent_id = journal_agent_id
+        else:
+            # Bare conversation so session-scoped settings (reasoning effort) can persist.
+            conversation = s._make_empty_conversation(
+                normalized_session_id,
+                title=normalized_session_id,
+                timestamp=s._now_timestamp(),
+            )
+            if agent_id:
+                conversation["agent_id"] = agent_id
+                conversation["agentId"] = agent_id
     conversations = payload.get("conversations")
     if not isinstance(conversations, list):
         conversations = []

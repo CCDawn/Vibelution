@@ -1520,6 +1520,7 @@ def update_session_reasoning_effort(
         source="session.reasoning_effort.update",
     ):
         raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
+    s._ensure_session_mutable(normalized_session_id)
     selected = s._session_fixed_model_choice(normalized_session_id)
     supported_efforts = {
         s.normalize_reasoning_effort(value)

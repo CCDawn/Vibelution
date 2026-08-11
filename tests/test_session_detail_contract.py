@@ -1002,16 +1002,16 @@ def test_persist_tool_trace_without_conclusion_stays_resumable(tmp_path, monkeyp
     )
 
     conversation = load_chat_state(tmp_path)["conversations"][0]
-    # A tool-backed generic greeting does not contain a conclusion or next
-    # action, so the existing terminal-state policy correctly leaves it
-    # resumable instead of presenting a false completion.
-    assert conversation["last_turn_status"] == "needs_continue"
+    # A tool-backed greeting that closes with a next-action offer ("有什么可以帮你")
+    # carries a next-action signal, so the terminal-state policy treats it as a
+    # completed turn (ready) instead of leaving it resumable.
+    assert conversation["last_turn_status"] == "ready"
 
     journal_events = load_conversation_events(tmp_path, "session-live")
     completed_event = next(item for item in reversed(journal_events) if item.event_type == "turn_completed")
-    assert completed_event.status == "needs_continue"
+    assert completed_event.status == "completed"
     assert completed_event.payload["resultStatus"] == "completed"
-    assert completed_event.payload["finalStatus"] == "needs_continue"
+    assert completed_event.payload["finalStatus"] == "completed"
 
     detail = session_service.get_session_detail("session-live")
     assistant = detail["messages"][-1]

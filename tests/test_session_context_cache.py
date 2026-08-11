@@ -1,5 +1,6 @@
 from core.chat.conversation_ledger import append_conversation_event
 from core.web.services import session_service
+from core.web.services.session import journal_bridge
 
 
 def test_cached_session_conversation_events_reuses_matching_signature(tmp_path, monkeypatch):
@@ -13,7 +14,7 @@ def test_cached_session_conversation_events_reuses_matching_signature(tmp_path, 
         source="test",
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    original_load = session_service.load_conversation_events
+    original_load = journal_bridge.load_conversation_events
     load_calls = 0
 
     def load_spy(project_root, requested_session_id):
@@ -21,7 +22,7 @@ def test_cached_session_conversation_events_reuses_matching_signature(tmp_path, 
         load_calls += 1
         return original_load(project_root, requested_session_id)
 
-    monkeypatch.setattr(session_service, "load_conversation_events", load_spy)
+    monkeypatch.setattr(journal_bridge, "load_conversation_events", load_spy)
 
     first = session_service._load_session_conversation_events_cached(session_id)
     second = session_service._load_session_conversation_events_cached(session_id)
@@ -42,7 +43,7 @@ def test_cached_session_conversation_events_invalidates_after_session_append(tmp
         source="test",
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    original_load = session_service.load_conversation_events
+    original_load = journal_bridge.load_conversation_events
     load_calls = 0
 
     def load_spy(project_root, requested_session_id):
@@ -50,7 +51,7 @@ def test_cached_session_conversation_events_invalidates_after_session_append(tmp
         load_calls += 1
         return original_load(project_root, requested_session_id)
 
-    monkeypatch.setattr(session_service, "load_conversation_events", load_spy)
+    monkeypatch.setattr(journal_bridge, "load_conversation_events", load_spy)
 
     before = session_service._load_session_conversation_events_cached(session_id)
     session_service._append_session_conversation_event(
