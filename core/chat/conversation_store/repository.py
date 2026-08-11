@@ -16,9 +16,6 @@ if TYPE_CHECKING:
     from .writer import ConversationWriter
 
 
-_TERMINAL_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
-
-
 class AgentConfigRevisionConflictError(RuntimeError):
     """A config update targeted a revision that is no longer current."""
 
@@ -357,228 +354,239 @@ class SessionDao:
         ]
 
 
-class TurnDao:
+class SessionEdgeDao:
+    """Control-plane-only session lineage; transcript lineage remains journaled."""
+
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
 
-    def begin(
+    def link(
         self,
         *,
-        turn_id: str,
-        session_id: str,
-        client_submission_id: str | None,
+        source_session_id: str,
+        target_session_id: str,
+        relation_kind: str,
     ) -> dict[str, Any]:
-        normalized_submission_id = str(client_submission_id or "").strip() or None
-        if normalized_submission_id is not None:
-            existing = self._connection.execute(
-                """
-                SELECT turn_id, sequence, status
-                FROM turns
-                WHERE session_id=? AND client_submission_id=?
-                """,
-                (session_id, normalized_submission_id),
-            ).fetchone()
-            if existing is not None:
-                return {
-                    "turnId": str(existing["turn_id"]),
-                    "sequence": int(existing["sequence"]),
-                    "status": str(existing["status"]),
-                    "outcome": "reused",
-                }
-        now_ms = _now_ms()
-        sequence_row = self._connection.execute(
-            """
-            UPDATE sessions
-            SET next_turn_sequence=next_turn_sequence+1,
-                recency_at_ms=?, updated_at_ms=?, status='running'
-            WHERE session_id=? AND archived_at_ms IS NULL
-            RETURNING next_turn_sequence
-            """,
-            (now_ms, now_ms, session_id),
-        ).fetchone()
-        if sequence_row is None:
-            raise sqlite3.IntegrityError("session does not exist or is archived")
-        sequence = int(sequence_row[0])
+        normalized_kind = str(relation_kind).strip()
+        if normalized_kind not in {"parent", "fork", "handoff"}:
+            raise ValueError("Unsupported session edge relation kind.")
         self._connection.execute(
             """
-            INSERT INTO turns(
-              turn_id, session_id, client_submission_id, sequence,
-              status, started_at_ms, updated_at_ms
-            ) VALUES (?, ?, ?, ?, 'running', ?, ?)
+            INSERT INTO session_edges(
+              source_session_id, target_session_id, relation_kind, created_at_ms
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(source_session_id, target_session_id, relation_kind) DO NOTHING
             """,
-            (
-                turn_id,
-                session_id,
-                normalized_submission_id,
-                sequence,
-                now_ms,
-                now_ms,
-            ),
+            (source_session_id, target_session_id, normalized_kind, _now_ms()),
         )
         return {
-            "turnId": turn_id,
-            "sequence": sequence,
-            "status": "running",
-            "outcome": "inserted",
+            "sourceSessionId": source_session_id,
+            "targetSessionId": target_session_id,
+            "relationKind": normalized_kind,
         }
 
-    def list_for_session(self, session_id: str) -> list[dict[str, Any]]:
-        rows = self._connection.execute(
-            """
-            SELECT turn_id, session_id, client_submission_id, sequence,
-                   status, started_at_ms, completed_at_ms, updated_at_ms
-            FROM turns WHERE session_id=? ORDER BY sequence ASC
-            """,
-            (session_id,),
-        ).fetchall()
-        return [
-            {
-                "turnId": str(row["turn_id"]),
-                "sessionId": str(row["session_id"]),
-                "clientSubmissionId": str(row["client_submission_id"] or ""),
-                "sequence": int(row["sequence"]),
-                "status": str(row["status"]),
-                "startedAtMs": int(row["started_at_ms"]),
-                "completedAtMs": (
-                    int(row["completed_at_ms"])
-                    if row["completed_at_ms"] is not None
-                    else None
-                ),
-                "updatedAtMs": int(row["updated_at_ms"]),
-            }
-            for row in rows
-        ]
 
+class SessionAdmissionDao:
+    """Idempotent submission-control records, never transcript persistence."""
 
-class TurnItemDao:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
 
-    def upsert(
+    def reserve(
         self,
         *,
-        item_id: str,
+        session_id: str,
+        agent_id: str,
+        agent_config_revision_id: str,
+        client_submission_id: str,
         turn_id: str,
-        call_id: str | None,
-        revision: int,
-        kind: str,
-        status: str,
-        payload: Mapping[str, Any],
+        expires_at_ms: int | None = None,
     ) -> dict[str, Any]:
-        incoming_revision = int(revision)
-        if incoming_revision < 1:
-            raise ValueError("turn item revision must be at least 1")
+        normalized_submission_id = str(client_submission_id).strip()
+        normalized_turn_id = str(turn_id).strip()
+        if not normalized_submission_id or not normalized_turn_id:
+            raise ValueError("Submission admission requires clientSubmissionId and turnId.")
         existing = self._connection.execute(
-            "SELECT sequence, revision, status FROM turn_items WHERE item_id=?",
-            (item_id,),
+            """
+            SELECT * FROM session_admissions
+            WHERE session_id=? AND client_submission_id=?
+            """,
+            (session_id, normalized_submission_id),
         ).fetchone()
         if existing is not None:
-            current_sequence = int(existing["sequence"])
-            current_revision = int(existing["revision"])
-            current_status = str(existing["status"])
-            if incoming_revision <= current_revision:
-                return {
-                    "outcome": "stale",
-                    "sequence": current_sequence,
-                    "revision": current_revision,
-                }
-            if current_status in _TERMINAL_STATUSES and status not in _TERMINAL_STATUSES:
-                return {
-                    "outcome": "terminal",
-                    "sequence": current_sequence,
-                    "revision": current_revision,
-                }
-            self._connection.execute(
-                """
-                UPDATE turn_items
-                SET call_id=?, revision=?, kind=?, status=?, payload_json=?, updated_at_ms=?
-                WHERE item_id=?
-                """,
-                (
-                    str(call_id or "").strip() or None,
-                    incoming_revision,
-                    kind,
-                    status,
-                    _canonical_json(payload),
-                    _now_ms(),
-                    item_id,
-                ),
-            )
-            return {
-                "outcome": "updated",
-                "sequence": current_sequence,
-                "revision": incoming_revision,
-            }
+            result = _admission_row(existing)
+            result["outcome"] = "reused"
+            return result
 
-        session_row = self._connection.execute(
-            "SELECT session_id FROM turns WHERE turn_id=?",
-            (turn_id,),
-        ).fetchone()
-        if session_row is None:
-            raise sqlite3.IntegrityError("turn does not exist")
-        sequence_row = self._connection.execute(
+        bound_session = self._connection.execute(
             """
-            UPDATE sessions
-            SET next_item_sequence=next_item_sequence+1, updated_at_ms=?
-            WHERE session_id=?
-            RETURNING next_item_sequence
+            SELECT agent_id, agent_config_revision_id
+            FROM sessions WHERE session_id=? AND archived_at_ms IS NULL
             """,
-            (_now_ms(), str(session_row[0])),
+            (session_id,),
         ).fetchone()
-        if sequence_row is None:
-            raise sqlite3.IntegrityError("session does not exist")
-        sequence = int(sequence_row[0])
+        if bound_session is None:
+            raise sqlite3.IntegrityError("session does not exist or is archived")
+        if (
+            str(bound_session["agent_id"]) != agent_id
+            or str(bound_session["agent_config_revision_id"])
+            != agent_config_revision_id
+        ):
+            raise ValueError("Session admission must use the session's frozen Agent config.")
         now_ms = _now_ms()
         self._connection.execute(
             """
-            INSERT INTO turn_items(
-              item_id, turn_id, call_id, sequence, revision,
-              kind, status, payload_json, created_at_ms, updated_at_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO session_admissions(
+              session_id, client_submission_id, turn_id, agent_id,
+              agent_config_revision_id, state, created_at_ms, updated_at_ms,
+              expires_at_ms
+            ) VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?, ?)
             """,
             (
-                item_id,
-                turn_id,
-                str(call_id or "").strip() or None,
-                sequence,
-                incoming_revision,
-                kind,
-                status,
-                _canonical_json(payload),
+                session_id,
+                normalized_submission_id,
+                normalized_turn_id,
+                agent_id,
+                agent_config_revision_id,
                 now_ms,
                 now_ms,
+                expires_at_ms,
             ),
         )
         return {
-            "outcome": "inserted",
-            "sequence": sequence,
-            "revision": incoming_revision,
+            "sessionId": session_id,
+            "clientSubmissionId": normalized_submission_id,
+            "turnId": normalized_turn_id,
+            "agentId": agent_id,
+            "agentConfigRevisionId": agent_config_revision_id,
+            "state": "reserved",
+            "journalSequence": None,
+            "journalEventId": "",
+            "projectedSequence": None,
+            "outcome": "reserved",
         }
 
-    def list_for_turn(self, turn_id: str) -> list[dict[str, Any]]:
-        rows = self._connection.execute(
+    def mark_journaled(
+        self,
+        *,
+        session_id: str,
+        client_submission_id: str,
+        journal_sequence: int,
+        journal_event_id: str,
+    ) -> dict[str, Any]:
+        row = self._require(session_id, client_submission_id)
+        state = str(row["state"])
+        if state in {"rejected", "expired"}:
+            raise ValueError(f"Cannot journal an admission in {state} state.")
+        if state == "projected":
+            return _admission_row(row)
+        incoming_sequence = int(journal_sequence)
+        if incoming_sequence < 1:
+            raise ValueError("Journal sequence must be positive.")
+        current_sequence = row["journal_sequence"]
+        if current_sequence is not None and incoming_sequence < int(current_sequence):
+            return _admission_row(row)
+        self._connection.execute(
             """
-            SELECT item_id, turn_id, call_id, sequence, revision,
-                   kind, status, payload_json, created_at_ms, updated_at_ms
-            FROM turn_items WHERE turn_id=? ORDER BY sequence ASC
+            UPDATE session_admissions
+            SET state='journaled', journal_sequence=?, journal_event_id=?, updated_at_ms=?
+            WHERE session_id=? AND client_submission_id=?
             """,
-            (turn_id,),
-        ).fetchall()
-        return [
-            {
-                "itemId": str(row["item_id"]),
-                "turnId": str(row["turn_id"]),
-                "callId": str(row["call_id"] or ""),
-                "sequence": int(row["sequence"]),
-                "revision": int(row["revision"]),
-                "kind": str(row["kind"]),
-                "status": str(row["status"]),
-                "payload": json.loads(str(row["payload_json"])),
-                "createdAtMs": int(row["created_at_ms"]),
-                "updatedAtMs": int(row["updated_at_ms"]),
-            }
-            for row in rows
-        ]
+            (
+                incoming_sequence,
+                str(journal_event_id).strip() or None,
+                _now_ms(),
+                session_id,
+                client_submission_id,
+            ),
+        )
+        return self._get_required(session_id, client_submission_id)
+
+    def mark_projected(
+        self,
+        *,
+        session_id: str,
+        client_submission_id: str,
+        journal_sequence: int,
+    ) -> dict[str, Any]:
+        row = self._require(session_id, client_submission_id)
+        state = str(row["state"])
+        if state not in {"journaled", "projected"}:
+            raise ValueError("Only a journaled admission can be projected.")
+        incoming_sequence = int(journal_sequence)
+        journal_sequence_value = row["journal_sequence"]
+        if journal_sequence_value is None or incoming_sequence < int(journal_sequence_value):
+            raise ValueError("Projection cannot precede the admitted journal sequence.")
+        now_ms = _now_ms()
+        self._connection.execute(
+            """
+            UPDATE session_admissions
+            SET state='projected',
+                projected_sequence=MAX(COALESCE(projected_sequence, 0), ?),
+                updated_at_ms=?
+            WHERE session_id=? AND client_submission_id=?
+            """,
+            (incoming_sequence, now_ms, session_id, client_submission_id),
+        )
+        self._connection.execute(
+            """
+            INSERT INTO session_projection_offsets(session_id, journal_sequence, updated_at_ms)
+            VALUES (?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+              journal_sequence=MAX(session_projection_offsets.journal_sequence, excluded.journal_sequence),
+              updated_at_ms=excluded.updated_at_ms
+            """,
+            (session_id, incoming_sequence, now_ms),
+        )
+        return self._get_required(session_id, client_submission_id)
+
+    def get(
+        self,
+        *,
+        session_id: str,
+        client_submission_id: str,
+    ) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            """
+            SELECT * FROM session_admissions
+            WHERE session_id=? AND client_submission_id=?
+            """,
+            (session_id, client_submission_id),
+        ).fetchone()
+        return _admission_row(row) if row is not None else None
+
+    def _require(self, session_id: str, client_submission_id: str) -> Any:
+        row = self._connection.execute(
+            """
+            SELECT * FROM session_admissions
+            WHERE session_id=? AND client_submission_id=?
+            """,
+            (session_id, client_submission_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Submission admission does not exist.")
+        return row
+
+    def _get_required(self, session_id: str, client_submission_id: str) -> dict[str, Any]:
+        result = self.get(
+            session_id=session_id,
+            client_submission_id=client_submission_id,
+        )
+        if result is None:
+            raise RuntimeError("Submission admission disappeared during the transaction.")
+        return result
+
+
+class SessionProjectionOffsetDao:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+
+    def get(self, session_id: str) -> int | None:
+        row = self._connection.execute(
+            "SELECT journal_sequence FROM session_projection_offsets WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        return int(row["journal_sequence"]) if row is not None else None
 
 
 class ConversationUnitOfWork:
@@ -587,8 +595,9 @@ class ConversationUnitOfWork:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.agents = AgentDao(connection)
         self.sessions = SessionDao(connection)
-        self.turns = TurnDao(connection)
-        self.items = TurnItemDao(connection)
+        self.session_edges = SessionEdgeDao(connection)
+        self.admissions = SessionAdmissionDao(connection)
+        self.projection_offsets = SessionProjectionOffsetDao(connection)
         self._after_commit: list[Callable[[], None]] = []
 
     def after_commit(self, callback: Callable[[], None]) -> None:
@@ -638,13 +647,44 @@ class ConversationRepository:
         )
 
     def create_session(self, **values: Any) -> Future[dict[str, Any]]:
-        return self._writer.submit(lambda unit_of_work: unit_of_work.sessions.create(**values))
+        frozen_values = dict(values)
 
-    def begin_turn(self, **values: Any) -> Future[dict[str, Any]]:
-        return self._writer.submit(lambda unit_of_work: unit_of_work.turns.begin(**values))
+        def create_with_parent_edge(unit_of_work: ConversationUnitOfWork) -> dict[str, Any]:
+            result = unit_of_work.sessions.create(**frozen_values)
+            parent_session_id = str(frozen_values.get("parent_session_id") or "").strip()
+            if parent_session_id:
+                unit_of_work.session_edges.link(
+                    source_session_id=parent_session_id,
+                    target_session_id=str(result["sessionId"]),
+                    relation_kind="parent",
+                )
+            return result
 
-    def upsert_turn_item(self, **values: Any) -> Future[dict[str, Any]]:
-        return self._writer.submit(lambda unit_of_work: unit_of_work.items.upsert(**values))
+        return self._writer.submit(create_with_parent_edge, force_flush=True)
+
+    def link_sessions(self, **values: Any) -> Future[dict[str, Any]]:
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.session_edges.link(**values),
+            force_flush=True,
+        )
+
+    def reserve_submission_admission(self, **values: Any) -> Future[dict[str, Any]]:
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.admissions.reserve(**values),
+            force_flush=True,
+        )
+
+    def mark_submission_journaled(self, **values: Any) -> Future[dict[str, Any]]:
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.admissions.mark_journaled(**values),
+            force_flush=True,
+        )
+
+    def mark_submission_projected(self, **values: Any) -> Future[dict[str, Any]]:
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.admissions.mark_projected(**values),
+            force_flush=True,
+        )
 
     def get_agent(self, agent_id: str) -> dict[str, Any] | None:
         with self._database.reader() as connection:
@@ -676,13 +716,21 @@ class ConversationRepository:
                 before=before,
             )
 
-    def list_turns(self, session_id: str) -> list[dict[str, Any]]:
+    def get_submission_admission(
+        self,
+        *,
+        session_id: str,
+        client_submission_id: str,
+    ) -> dict[str, Any] | None:
         with self._database.reader() as connection:
-            return TurnDao(connection).list_for_session(session_id)
+            return SessionAdmissionDao(connection).get(
+                session_id=session_id,
+                client_submission_id=client_submission_id,
+            )
 
-    def list_turn_items(self, turn_id: str) -> list[dict[str, Any]]:
+    def get_session_projection_offset(self, session_id: str) -> int | None:
         with self._database.reader() as connection:
-            return TurnItemDao(connection).list_for_turn(turn_id)
+            return SessionProjectionOffsetDao(connection).get(session_id)
 
 
 def _canonical_json(value: Mapping[str, Any]) -> str:
@@ -707,6 +755,28 @@ def _config_revision_row(row: Any) -> dict[str, Any] | None:
         "config": config,
         "source": str(row["source"]),
         "createdAtMs": int(row["created_at_ms"]),
+    }
+
+
+def _admission_row(row: Any) -> dict[str, Any]:
+    return {
+        "sessionId": str(row["session_id"]),
+        "clientSubmissionId": str(row["client_submission_id"]),
+        "turnId": str(row["turn_id"]),
+        "agentId": str(row["agent_id"]),
+        "agentConfigRevisionId": str(row["agent_config_revision_id"]),
+        "state": str(row["state"]),
+        "journalSequence": (
+            int(row["journal_sequence"])
+            if row["journal_sequence"] is not None
+            else None
+        ),
+        "journalEventId": str(row["journal_event_id"] or ""),
+        "projectedSequence": (
+            int(row["projected_sequence"])
+            if row["projected_sequence"] is not None
+            else None
+        ),
     }
 
 

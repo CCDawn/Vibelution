@@ -1,9 +1,10 @@
-"""Schema contract for the canonical Agent conversation database.
+"""Schema contract for the Agent/session SQLite control plane.
 
 The package is intentionally isolated from the live chat path until the later
-cutover phases in the migration plan.  Every product write must eventually go
-through the single writer coordinator; this module only owns deterministic
-schema declarations and migration checksums.
+cutover phases in the migration plan.  It holds Agent/config/session control
+metadata only; turn journal remains the durable transcript.  Every control
+write must go through the single writer coordinator; this module only owns
+deterministic schema declarations and migration checksums.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,66 @@ _SCHEMA_V1_STATEMENTS = (
 )
 
 
+# Version 2 deliberately adds only control-plane state.  The legacy transcript
+# tables remain readable for an isolated migration, but no live repository API
+# is allowed to write or read turns/items from SQLite.  Journal remains the
+# only durable conversation and tool-event source.
+_SCHEMA_V2_STATEMENTS = (
+    """
+    CREATE TABLE session_edges (
+      source_session_id TEXT NOT NULL,
+      target_session_id TEXT NOT NULL,
+      relation_kind TEXT NOT NULL
+        CHECK (relation_kind IN ('parent', 'fork', 'handoff')),
+      created_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (source_session_id, target_session_id, relation_kind),
+      FOREIGN KEY (source_session_id) REFERENCES sessions(session_id) ON DELETE RESTRICT,
+      FOREIGN KEY (target_session_id) REFERENCES sessions(session_id) ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE session_admissions (
+      session_id TEXT NOT NULL,
+      client_submission_id TEXT NOT NULL,
+      turn_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      agent_config_revision_id TEXT NOT NULL,
+      state TEXT NOT NULL
+        CHECK (state IN ('reserved', 'journaled', 'projected', 'rejected', 'expired')),
+      journal_sequence INTEGER,
+      journal_event_id TEXT,
+      projected_sequence INTEGER,
+      rejection_reason TEXT,
+      created_at_ms INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      expires_at_ms INTEGER,
+      PRIMARY KEY (session_id, client_submission_id),
+      UNIQUE (turn_id),
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE RESTRICT,
+      FOREIGN KEY (agent_id, agent_config_revision_id)
+        REFERENCES agent_config_revisions(agent_id, revision_id) ON DELETE RESTRICT
+    )
+    """,
+    """
+    CREATE TABLE session_projection_offsets (
+      session_id TEXT PRIMARY KEY,
+      journal_sequence INTEGER NOT NULL CHECK (journal_sequence >= 0),
+      updated_at_ms INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX idx_session_admissions_state_updated
+    ON session_admissions(state, updated_at_ms, session_id)
+    """,
+    """
+    CREATE INDEX idx_session_admissions_session_updated
+    ON session_admissions(session_id, updated_at_ms DESC)
+    """,
+)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, statements=_SCHEMA_V1_STATEMENTS),
+    Migration(version=2, statements=_SCHEMA_V2_STATEMENTS),
 )

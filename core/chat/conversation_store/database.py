@@ -180,6 +180,12 @@ class ConversationDatabase:
                         ") VALUES (1, 1, ?, ?)",
                         (now_ms, now_ms),
                     )
+                else:
+                    connection.execute(
+                        "UPDATE conversation_store_meta "
+                        "SET schema_version=?, updated_at_ms=? WHERE id=1",
+                        (migration.version, now_ms),
+                    )
                 connection.execute(f"PRAGMA user_version={migration.version}")
                 current_version = migration.version
             connection.commit()

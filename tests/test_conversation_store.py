@@ -113,7 +113,7 @@ def test_initialize_creates_canonical_schema_and_query_only_readers(
             }
             foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
 
-        assert metadata["schemaVersion"] == 1
+        assert metadata["schemaVersion"] == 2
         assert metadata["quickCheck"] == "ok"
         assert {
             "agents",
@@ -123,6 +123,9 @@ def test_initialize_creates_canonical_schema_and_query_only_readers(
             "turn_items",
             "turn_item_chunks",
             "checkpoints",
+            "session_edges",
+            "session_admissions",
+            "session_projection_offsets",
         }.issubset(tables)
         assert foreign_keys == []
 
@@ -291,11 +294,16 @@ def test_agent_revision_and_parent_session_binding_are_enforced(
             "session-a-child",
             "session-a",
         ]
+        with sqlite3.connect(store.database.path) as connection:
+            assert connection.execute(
+                "SELECT source_session_id, target_session_id, relation_kind "
+                "FROM session_edges"
+            ).fetchall() == [("session-a", "session-a-child", "parent")]
     finally:
         store.close()
 
 
-def test_turn_item_revision_is_monotonic_and_keeps_one_stable_row(
+def test_submission_admission_keeps_one_stable_control_record(
     tmp_path: Path,
     safe_sqlite_runtime: None,
 ):
@@ -308,59 +316,27 @@ def test_turn_item_revision_is_monotonic_and_keeps_one_stable_row(
             agent_config_revision_id=revision,
             title="Session A",
         ).result(timeout=3)
-        turn = store.repository.begin_turn(
+        first = store.repository.reserve_submission_admission(
             turn_id="turn-a",
             session_id="session-a",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            client_submission_id="submission-a",
+        ).result(timeout=3)
+        retried = store.repository.reserve_submission_admission(
+            turn_id="turn-must-not-replace-a",
+            session_id="session-a",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
             client_submission_id="submission-a",
         ).result(timeout=3)
 
-        first = store.repository.upsert_turn_item(
-            item_id="tool-a",
-            turn_id="turn-a",
-            call_id="call-a",
-            revision=1,
-            kind="tool_call",
-            status="running",
-            payload={"toolName": "read_file"},
-        ).result(timeout=3)
-        terminal = store.repository.upsert_turn_item(
-            item_id="tool-a",
-            turn_id="turn-a",
-            call_id="call-a",
-            revision=2,
-            kind="tool_call",
-            status="completed",
-            payload={"toolName": "read_file", "summary": "ok"},
-        ).result(timeout=3)
-        stale = store.repository.upsert_turn_item(
-            item_id="tool-a",
-            turn_id="turn-a",
-            call_id="call-a",
-            revision=1,
-            kind="tool_call",
-            status="running",
-            payload={"toolName": "read_file"},
-        ).result(timeout=3)
-        terminal_guard = store.repository.upsert_turn_item(
-            item_id="tool-a",
-            turn_id="turn-a",
-            call_id="call-a",
-            revision=3,
-            kind="tool_call",
-            status="running",
-            payload={"toolName": "read_file"},
-        ).result(timeout=3)
-
-        items = store.repository.list_turn_items("turn-a")
-        assert turn["sequence"] == 1
-        assert first == {"outcome": "inserted", "sequence": 1, "revision": 1}
-        assert terminal == {"outcome": "updated", "sequence": 1, "revision": 2}
-        assert stale == {"outcome": "stale", "sequence": 1, "revision": 2}
-        assert terminal_guard == {"outcome": "terminal", "sequence": 1, "revision": 2}
-        assert len(items) == 1
-        assert items[0]["itemId"] == "tool-a"
-        assert items[0]["status"] == "completed"
-        assert items[0]["revision"] == 2
+        assert first["outcome"] == "reserved"
+        assert retried["outcome"] == "reused"
+        assert retried["turnId"] == "turn-a"
+        assert store.repository.get_submission_admission(
+            session_id="session-a", client_submission_id="submission-a"
+        )["state"] == "reserved"
     finally:
         store.close()
 
@@ -485,7 +461,7 @@ def test_failed_maintenance_does_not_stop_the_single_writer_actor(
         store.close()
 
 
-def test_drained_store_reopens_with_canonical_agent_session_and_turn_data(
+def test_drained_store_reopens_with_agent_session_and_admission_data(
     tmp_path: Path,
     safe_sqlite_runtime: None,
 ):
@@ -500,9 +476,11 @@ def test_drained_store_reopens_with_canonical_agent_session_and_turn_data(
             agent_config_revision_id=revision,
             title="Reopen session",
         ).result(timeout=3)
-        store.repository.begin_turn(
+        store.repository.reserve_submission_admission(
             turn_id="turn-reopen",
             session_id="session-reopen",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
             client_submission_id="submission-reopen",
         ).result(timeout=3)
         assert store.checkpoint_wal_passive(timeout=3)["mode"] == "passive"
@@ -518,9 +496,12 @@ def test_drained_store_reopens_with_canonical_agent_session_and_turn_data(
         assert [row["sessionId"] for row in reopened.repository.list_sessions(agent_id="agent-a")] == [
             "session-reopen"
         ]
-        assert [row["turnId"] for row in reopened.repository.list_turns("session-reopen")] == [
-            "turn-reopen"
-        ]
+        admission = reopened.repository.get_submission_admission(
+            session_id="session-reopen",
+            client_submission_id="submission-reopen",
+        )
+        assert admission is not None
+        assert admission["turnId"] == "turn-reopen"
     finally:
         reopened.close()
 
@@ -638,7 +619,7 @@ def test_external_write_lock_is_diagnostic_and_writer_recovers(
         store.close()
 
 
-def test_32_sessions_concurrent_turn_writes_do_not_deadlock_or_lose_rows(
+def test_32_sessions_concurrent_admissions_do_not_deadlock_or_lose_records(
     tmp_path: Path,
     safe_sqlite_runtime: None,
 ):
@@ -658,16 +639,18 @@ def test_32_sessions_concurrent_turn_writes_do_not_deadlock_or_lose_rows(
                 title=f"Session {session_index:02d}",
             ).result(timeout=3)
 
-        def submit_turn(session_index: int, turn_index: int):
-            return store.repository.begin_turn(
+        def reserve_admission(session_index: int, turn_index: int):
+            return store.repository.reserve_submission_admission(
                 turn_id=f"turn-{session_index:02d}-{turn_index:02d}",
                 session_id=f"session-{session_index:02d}",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
                 client_submission_id=f"submission-{session_index:02d}-{turn_index:02d}",
             ).result(timeout=5)
 
         with ThreadPoolExecutor(max_workers=16) as executor:
             futures = [
-                executor.submit(submit_turn, session_index, turn_index)
+                executor.submit(reserve_admission, session_index, turn_index)
                 for session_index in range(32)
                 for turn_index in range(4)
             ]
@@ -676,9 +659,15 @@ def test_32_sessions_concurrent_turn_writes_do_not_deadlock_or_lose_rows(
         store.writer.flush(timeout=5)
         assert len(results) == 128
         for session_index in range(32):
-            turns = store.repository.list_turns(f"session-{session_index:02d}")
-            assert len(turns) == 4
-            assert sorted(turn["sequence"] for turn in turns) == [1, 2, 3, 4]
+            for turn_index in range(4):
+                admission = store.repository.get_submission_admission(
+                    session_id=f"session-{session_index:02d}",
+                    client_submission_id=(
+                        f"submission-{session_index:02d}-{turn_index:02d}"
+                    ),
+                )
+                assert admission is not None
+                assert admission["state"] == "reserved"
         metrics = store.writer.metrics()
         assert metrics["failedMutations"] == 0
         assert metrics["maxQueueDepth"] <= 512
@@ -717,18 +706,20 @@ def test_readers_and_single_writer_remain_consistent_under_concurrency(
             except Exception as exc:  # noqa: BLE001 - retained for the parent assertion.
                 reader_errors.append(exc)
 
-        def write_turn(index: int) -> dict[str, object]:
+        def reserve_admission(index: int) -> dict[str, object]:
             session_index = index % 32
             turn_index = index // 32
-            return store.repository.begin_turn(
+            return store.repository.reserve_submission_admission(
                 turn_id=f"turn-{session_index:02d}-{turn_index:02d}",
                 session_id=f"session-{session_index:02d}",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
                 client_submission_id=f"submission-{session_index:02d}-{turn_index:02d}",
             ).result(timeout=5)
 
         with ThreadPoolExecutor(max_workers=24) as executor:
             readers = [executor.submit(read_sessions, index) for index in range(8)]
-            writers = [executor.submit(write_turn, index) for index in range(128)]
+            writers = [executor.submit(reserve_admission, index) for index in range(128)]
             results = [future.result(timeout=10) for future in writers]
             stop_readers.set()
             for future in readers:
@@ -738,9 +729,16 @@ def test_readers_and_single_writer_remain_consistent_under_concurrency(
         assert reader_errors == []
         assert all(count > 0 for count in reader_counts)
         for session_index in range(32):
-            assert len(
-                store.repository.list_turns(f"session-{session_index:02d}")
-            ) == 4
+            assert all(
+                store.repository.get_submission_admission(
+                    session_id=f"session-{session_index:02d}",
+                    client_submission_id=(
+                        f"submission-{session_index:02d}-{turn_index:02d}"
+                    ),
+                )
+                is not None
+                for turn_index in range(4)
+            )
     finally:
         stop_readers.set()
         store.close()
