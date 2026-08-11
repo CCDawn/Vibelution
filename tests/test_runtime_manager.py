@@ -5634,6 +5634,15 @@ def test_run_launcher_action_routes_active_electron_session_to_desktop_action(mo
     )
     monkeypatch.setattr(
         workbench_controller,
+        "observe_workbench",
+        lambda **_kwargs: {
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPortConflict": False,
+        },
+    )
+    monkeypatch.setattr(
+        workbench_controller,
         "_submit_electron_window_action",
         lambda **kwargs: submitted.append(kwargs)
         or {"status": "accepted", "action": kwargs["action"]},
