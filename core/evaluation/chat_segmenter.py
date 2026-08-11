@@ -52,6 +52,9 @@ CONCLUSION_MARKERS = (
     "根因",
     "最终",
     "可以确定",
+    "已完成",
+    "任务完成",
+    "全部完成",
     "I conclude",
     "in summary",
 )
