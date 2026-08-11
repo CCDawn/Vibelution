@@ -693,17 +693,22 @@ class TaskAnalyzer:
                 raise FileNotFoundError(f"会话日志不存在: {path}")
             return path
 
-        log_dir = self.project_root / "log_info"
+        log_dirs = [
+            self.project_root / "logs" / "conversations",
+            self.project_root / "log_info",
+        ]
         if session_id:
-            candidate = log_dir / f"conversation_{session_id}.jsonl"
-            if not candidate.exists():
-                raise FileNotFoundError(f"未找到会话日志: {candidate}")
-            return candidate
+            for log_dir in log_dirs:
+                candidate = log_dir / f"conversation_{session_id}.jsonl"
+                if candidate.exists():
+                    return candidate
+            raise FileNotFoundError(f"未找到会话日志: {log_dir / f'conversation_{session_id}.jsonl'}")
 
-        candidates = sorted(log_dir.glob("conversation_*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if not candidates:
-            raise FileNotFoundError(f"目录中没有会话日志: {log_dir}")
-        return candidates[0]
+        for log_dir in log_dirs:
+            candidates = sorted(log_dir.glob("conversation_*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if candidates:
+                return candidates[0]
+        raise FileNotFoundError(f"目录中没有会话日志: {log_dirs}")
 
     def _load_jsonl_records(self, filepath: Path) -> List[Dict[str, Any]]:
         """读取 JSONL 记录。"""

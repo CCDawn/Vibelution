@@ -732,10 +732,10 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             id="conversation_logs",
             name_zh="会话日志",
             name_en="Conversation logs",
-            description_zh="删除 log_info/ 下的 conversation_*.jsonl 与 debug_*.log 等会话诊断文件。",
-            description_en="Delete conversation_*.jsonl, debug_*.log, and related session diagnostics under log_info/.",
-            detail_zh="log_info/ 中的会话与 debug 日志",
-            detail_en="conversation and debug logs in log_info/",
+            description_zh="删除 logs/conversations/ 与 logs/debug/ 下的 conversation_*.jsonl 与 debug_*.log 等会话诊断文件（含历史 log_info/）。",
+            description_en="Delete conversation_*.jsonl, debug_*.log, and related session diagnostics under logs/conversations/ and logs/debug/ (incl. legacy log_info/).",
+            detail_zh="logs/conversations/、logs/debug/ 与历史 log_info/ 中的会话日志",
+            detail_en="conversation and debug logs in logs/conversations/, logs/debug/, and legacy log_info/",
             risk="medium",
             default_selected=False,
             category="diagnostics",
@@ -747,10 +747,10 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             id="diagnostic_payloads",
             name_zh="诊断 payload 与报告",
             name_en="Diagnostic payloads and reports",
-            description_zh="删除 log_info/payloads/ 与 log_info/harness_reports/ 等诊断大对象。",
-            description_en="Delete large diagnostic payloads such as log_info/payloads/ and log_info/harness_reports/.",
-            detail_zh="log_info/payloads/、log_info/harness_reports/",
-            detail_en="log_info/payloads/, log_info/harness_reports/",
+            description_zh="删除 logs/conversations/payloads/ 与历史 log_info/payloads/、log_info/harness_reports/ 等诊断大对象。",
+            description_en="Delete large diagnostic payloads such as logs/conversations/payloads/ and legacy log_info/payloads/ and log_info/harness_reports/.",
+            detail_zh="logs/conversations/payloads/、log_info/payloads/、log_info/harness_reports/",
+            detail_en="logs/conversations/payloads/, log_info/payloads/, log_info/harness_reports/",
             risk="medium",
             default_selected=False,
             category="diagnostics",
@@ -1230,18 +1230,28 @@ def _execute_chat_history(candidate: ResetCandidate) -> ResetActionResult:
 
 
 def _collect_conversation_logs() -> list[ResetCandidate]:
-    root = PROJECT_ROOT / "log_info"
-    if not root.exists():
-        return [_candidate_for_path(root, kind="directory", missing=True)]
+    roots = [
+        PROJECT_ROOT / "logs" / "conversations",
+        PROJECT_ROOT / "logs" / "debug",
+        PROJECT_ROOT / "log_info",
+    ]
     candidates: list[ResetCandidate] = []
-    for path in _walk_project_paths(root):
-        if path.is_file() and _is_conversation_log_file(path):
-            candidates.append(_candidate_for_path(path, kind="file"))
+    found_root = False
+    for root in roots:
+        if not root.exists():
+            continue
+        found_root = True
+        for path in _walk_project_paths(root):
+            if path.is_file() and _is_conversation_log_file(path):
+                candidates.append(_candidate_for_path(path, kind="file"))
+    if not found_root:
+        return [_candidate_for_path(roots[0], kind="directory", missing=True)]
     return _dedupe_candidates(candidates)
 
 
 def _collect_diagnostic_payloads() -> list[ResetCandidate]:
     paths = [
+        PROJECT_ROOT / "logs" / "conversations" / "payloads",
         PROJECT_ROOT / "log_info" / "payloads",
         PROJECT_ROOT / "log_info" / "harness_reports",
     ]

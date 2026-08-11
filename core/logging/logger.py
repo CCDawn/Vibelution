@@ -1,39 +1,47 @@
 """
 日志模块 - 统一管理 Agent 运行时的调试日志和对话记录
 
-从 agent.py 中提取的日志组件，提供：
-- DebugLogger: 基于 Rich 的 Claude Code 级调试输出
+提供：
+- DebugLogger: 基于 Rich 的调试输出 + 文件落盘
 - ConversationLogger: 实时对话记录到 JSON 文件
 
-注意：
-- 统一的日志接口请使用 core.unified_logger.UnifiedLogger
-- 此模块保留 DebugLogger 和 ConversationLogger 独立功能
-
 使用方式:
-    # 统一日志（推荐）
-    from core.unified_logger import logger
+    # 统一调试日志（服务层推荐，未激活会话时自动降级落盘）
+    from core.logging import debug
+    debug.info("信息")
+    debug.error("错误", exc_info=str(exc))
+
+    # 会话事件记录（LLM / 工具 / 轮次）
+    from core.logging.unified_logger import logger
     logger.log_llm_request(messages)
 
-    # 调试日志
-    from core.logger import debug
-    debug.info("信息")
-    debug.tool_start("read_file", {"path": "test.py"})
-
-    # 向后兼容的 ConversationLogger
-    from core.logger import conversation_logger
-    conversation_logger.log_llm_response("response content")
+    # 对话 JSONL（由 DebugLogger / UnifiedLogger 内部转发）
+    from core.logging import conversation_logger
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import os
 import re
 import threading
-import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, Callable
+from typing import Any, Dict, Optional
+
+# ============================================================================
+# 落盘路径常量（统一到项目 logs/ 下，与 runtime_scenes 同根）
+# ============================================================================
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+LOG_ROOT = os.path.join(_PROJECT_ROOT, "logs")
+CONVERSATION_LOG_DIR = os.path.join(LOG_ROOT, "conversations")
+DEBUG_LOG_DIR = os.path.join(LOG_ROOT, "debug")
+
+_logger = logging.getLogger("core.logging.logger")
 
 # ============================================================================
 # UI 桥接 — 延迟获取 UIManager（打破循环导入）
@@ -137,7 +145,7 @@ class DebugLogger:
         if not self._file_handle:
             return
         try:
-            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            ts = datetime.now().isoformat(timespec="milliseconds")
             self._file_handle.write(f"[{ts}] [WARN] {context}: {error}\n")
             self._file_handle.flush()
         except Exception:
@@ -146,7 +154,7 @@ class DebugLogger:
     def start_session(self, session_id: str):
         """开始会话 — 打开 debug 日志文件"""
         try:
-            log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'log_info')
+            log_dir = DEBUG_LOG_DIR
             os.makedirs(log_dir, exist_ok=True)
             log_path = os.path.join(log_dir, f'debug_{session_id}.log')
             self._file_handle = open(log_path, 'a', encoding='utf-8', buffering=1)
@@ -169,7 +177,7 @@ class DebugLogger:
         """写入 debug 日志文件"""
         if self._file_handle:
             try:
-                ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                ts = datetime.now().isoformat(timespec="milliseconds")
                 self._file_handle.write(f"[{ts}] [{tag}] {msg}\n")
                 self._file_handle.flush()
             except Exception as exc:
@@ -386,10 +394,9 @@ class DebugLogger:
 # 全局 DebugLogger 实例
 debug = DebugLogger()
 
-# 统一导出：from core.logging import logger
-# 等价于 from core.logging.logger import debug
-# 方便所有模块统一导入：logger.info(...) / logger.debug(...) / logger.error(...)
-logger = debug
+# 统一导出：from core.logging import debug（DebugLogger 实例，服务层调试日志入口）
+# 注意：from core.logging import logger 得到的是 UnifiedLogger（会话事件日志），不是 DebugLogger。
+# 需要会话事件 API 时请使用 core.logging.unified_logger 的 logger；不要依赖本模块的 logger 别名。
 
 
 # ============================================================================
@@ -430,14 +437,13 @@ class ConversationLogger:
         self._parent_turn = None
         self._delegation_depth = 0
         self._inherited_session = False
-        self._log_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "log_info"
-        )
+        self._log_dir = CONVERSATION_LOG_DIR
         self._apply_env_context()
         self._ensure_log_dir()
         self._current_session_file = None
         self._turn_count = 0
         self._session_active = False
+        self._activation_lock = threading.RLock()
 
     def _apply_env_context(self):
         """从环境变量恢复跨进程日志上下文。"""
@@ -613,10 +619,19 @@ class ConversationLogger:
         """获取 ISO 格式的时间戳"""
         return datetime.now().isoformat(timespec="milliseconds")
 
+    def _activate_default(self) -> None:
+        """未显式 start_session 时，懒激活进程级默认会话，避免日志被静默丢弃。"""
+        with self._activation_lock:
+            if self._session_active:
+                return
+            if not self._session_file_stem:
+                self._session_file_stem = f"conversation_{self._session_id}"
+            self._session_active = True
+
     def _write(self, record: dict):
         """写入单条记录到文件（实时刷出）"""
         if not self._session_active:
-            return
+            self._activate_default()
         try:
             record = dict(record)
             record.setdefault("session_id", self._session_id)
@@ -631,7 +646,7 @@ class ConversationLogger:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 f.flush()
         except Exception as e:
-            print(f"[ConversationLogger] 写入失败: {e}")
+            _logger.warning("ConversationLogger write failed: %s", e)
 
     def start_session(self, metadata: dict = None):
         """记录会话开始"""

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from datetime import datetime
 from typing import Optional
 
 from core.logging.logger import debug
@@ -83,9 +84,6 @@ def setup_logging(level: str = "INFO", log_format: Optional[str] = None) -> logg
 
     return logging.getLogger("SelfEvolvingAgent")
 
-
-# 需要 datetime，但已在 agent.py 顶层导入
-from datetime import datetime
 
 __all__ = [
     "print_evolution_time",
