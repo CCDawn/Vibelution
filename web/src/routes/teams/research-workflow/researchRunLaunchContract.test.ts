@@ -38,13 +38,12 @@ function draft(overrides: Partial<ResearchRunLaunchDraft> = {}): ResearchRunLaun
 
 describe("buildResearchRunInput", () => {
   it("builds the complete immutable run contract with canonical teamId", () => {
-    expect(
-      buildResearchRunInput({
-        teamId: " team-1 ",
-        projectId: " project-1 ",
-        draft: draft(),
-      }),
-    ).toEqual({
+    const input = buildResearchRunInput({
+      teamId: " team-1 ",
+      projectId: " project-1 ",
+      draft: draft(),
+    });
+    expect(input).toMatchObject({
       teamId: "team-1",
       projectId: "project-1",
       questionId: "question-1",
@@ -54,8 +53,34 @@ describe("buildResearchRunInput", () => {
       competitionRuleVersion: "2026.1",
       environmentSnapshotRef: "env:2026-08-09",
       ...CONTRACT,
-      idempotencyKey: "create:team-1:project-1:question-1:sha256:brief",
     });
+    expect(input.idempotencyKey).toMatch(/^create:v2:[0-9a-f]{16}$/);
+  });
+
+  it("keeps retries stable but distinguishes changed run contracts", () => {
+    const base = buildResearchRunInput({
+      teamId: "team-1",
+      projectId: "project-1",
+      draft: draft(),
+    });
+    const retry = buildResearchRunInput({
+      teamId: "team-1",
+      projectId: "project-1",
+      draft: draft(),
+    });
+    const changedBudget = buildResearchRunInput({
+      teamId: "team-1",
+      projectId: "project-1",
+      draft: draft({
+        contractJson: JSON.stringify({
+          ...CONTRACT,
+          budgetPolicy: { toolCalls: 120 },
+        }),
+      }),
+    });
+
+    expect(retry.idempotencyKey).toBe(base.idempotencyKey);
+    expect(changedBudget.idempotencyKey).not.toBe(base.idempotencyKey);
   });
 
   it.each([
