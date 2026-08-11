@@ -460,6 +460,68 @@ def test_writer_runs_maintenance_between_queued_mutation_batches(
         store.close()
 
 
+def test_failed_maintenance_does_not_stop_the_single_writer_actor(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        failed = store.writer.submit_maintenance(
+            lambda _connection: (_ for _ in ()).throw(RuntimeError("planned fault"))
+        )
+        with pytest.raises(RuntimeError, match="planned fault"):
+            failed.result(timeout=3)
+
+        revision = _create_agent(store)
+        assert revision
+        metrics = store.writer.metrics()
+        assert metrics["maintenanceRuns"] == 1
+        assert metrics["failedMaintenanceRuns"] == 1
+        assert metrics["failedMutations"] == 0
+    finally:
+        store.close()
+
+
+def test_drained_store_reopens_with_canonical_agent_session_and_turn_data(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    database_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+    store = ConversationStore(database_path)
+    store.open()
+    try:
+        revision = _create_agent(store)
+        store.repository.create_session(
+            session_id="session-reopen",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Reopen session",
+        ).result(timeout=3)
+        store.repository.begin_turn(
+            turn_id="turn-reopen",
+            session_id="session-reopen",
+            client_submission_id="submission-reopen",
+        ).result(timeout=3)
+        assert store.checkpoint_wal_passive(timeout=3)["mode"] == "passive"
+        store.writer.flush(timeout=3)
+    finally:
+        store.close()
+
+    reopened = ConversationStore(database_path)
+    reopened.open()
+    try:
+        assert reopened.database.metadata()["quickCheck"] == "ok"
+        assert reopened.repository.get_agent("agent-a") is not None
+        assert [row["sessionId"] for row in reopened.repository.list_sessions(agent_id="agent-a")] == [
+            "session-reopen"
+        ]
+        assert [row["turnId"] for row in reopened.repository.list_turns("session-reopen")] == [
+            "turn-reopen"
+        ]
+    finally:
+        reopened.close()
+
+
 def test_bounded_writer_queue_rejects_excess_work(
     tmp_path: Path,
     safe_sqlite_runtime: None,
