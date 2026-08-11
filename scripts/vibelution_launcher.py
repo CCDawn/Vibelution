@@ -1345,14 +1345,14 @@ def _start_managed_browser(url: str) -> dict[str, object]:
         }
     executable = _edge_executable()
     WORKBENCH_BROWSER_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    # Edge is the user-visible Workbench surface.  The no-console policy applies
+    # to background service children, not this GUI process.
     process = subprocess.Popen(
         [executable, *_managed_edge_args(url, WORKBENCH_BROWSER_PROFILE_DIR)],
         cwd=str(PROJECT_ROOT),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        creationflags=_windows_creation_flags(),
-        startupinfo=_hidden_startup_info(),
     )
     app_identity = _apply_managed_browser_app_identity(int(process.pid), "workbench")
     window_pid = int(app_identity.get("windowPid") or process.pid)
