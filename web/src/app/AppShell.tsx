@@ -1656,7 +1656,7 @@ export function AppShell() {
     });
     if (!shouldArmBrowserProjectCloseGuard({
       closeBlocked,
-      electronDesktopShell: false,
+      electronDesktopShell: desktopShell,
     })) {
       clearPendingWorkbenchWindowCloseIntent();
       return;
@@ -1851,8 +1851,8 @@ export function AppShell() {
 
     function handlePageHide(event: PageTransitionEvent) {
       pagehideAtMsRef.current = Date.now();
-      const windowCloseIntent = consumePendingWorkbenchWindowCloseIntent();
-      if (!event.persisted && windowCloseIntent) {
+      const windowCloseIntent = desktopShell ? null : consumePendingWorkbenchWindowCloseIntent();
+      if (!desktopShell && !event.persisted && windowCloseIntent) {
         requestWorkbenchWindowCloseOnPageHide(windowCloseIntent);
       }
       emitBrowserTelemetry(
@@ -1863,6 +1863,7 @@ export function AppShell() {
           fields: {
             persisted: event.persisted,
             windowCloseIntent: windowCloseIntent ?? "",
+            desktopShell,
           },
         },
         { preferBeacon: true },
@@ -1874,7 +1875,7 @@ export function AppShell() {
       window.clearTimeout(snapshotTimer);
       window.removeEventListener("pagehide", handlePageHide);
     };
-  }, [emitBrowserTelemetry]);
+  }, [desktopShell, emitBrowserTelemetry]);
 
   useEffect(() => {
     emitBrowserTelemetry({
