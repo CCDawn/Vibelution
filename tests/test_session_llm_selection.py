@@ -10,6 +10,7 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import sessions as sessions_route
 from core.web.services import agent_config_workspace_service, agent_model_candidate_service, session_service
+from core.web.services.session import conversation_index
 from config.public_config import list_llm_model_options
 from config.llm_key_env import configured_llm_key_env_names
 
@@ -196,6 +197,16 @@ def test_session_reasoning_effort_recovers_missing_chat_state_from_workspace(mon
     monkeypatch.setattr(
         session_service,
         "_ensure_session_workspace",
+        lambda _sid: tmp_path,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_session_workspace_dir_if_present",
+        lambda _sid: tmp_path,
+    )
+    monkeypatch.setattr(
+        conversation_index,
+        "_session_workspace_dir_if_present",
         lambda _sid: tmp_path,
     )
     monkeypatch.setattr(

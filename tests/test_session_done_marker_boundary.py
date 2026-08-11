@@ -7,6 +7,15 @@ from core.ui.chat_state import CHAT_STATE_VERSION, load_chat_state, save_chat_st
 from core.web.services import agent_directory_service, session_service
 
 
+def _assistant_visible_text(message: dict) -> str:
+    return "\n".join(
+        str(item.get("text") or "").strip()
+        for item in list(message.get("turnItems") or [])
+        if str(item.get("type") or "") in {"agent_message", "error"}
+        if str(item.get("text") or "").strip()
+    )
+
+
 def _seed_session(root: Path) -> None:
     save_chat_state(
         root,
@@ -88,6 +97,6 @@ def test_bare_done_marker_keeps_previous_visible_continuation_reply(tmp_path, mo
     assert len(calls) == 2
     assistant = payload["messages"][-1]
     assert assistant["role"] == "assistant"
-    assert assistant["content"] == "结果如下：项目审查完成，核心问题集中在回答持久化。"
+    assert _assistant_visible_text(assistant) == "结果如下：项目审查完成，核心问题集中在回答持久化。"
     assert "outcome=done" not in str(payload)
     assert payload["activeTask"] is None

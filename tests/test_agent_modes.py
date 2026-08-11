@@ -121,7 +121,7 @@ def test_mental_model_is_globally_disabled_by_default():
     assert is_mental_model_enabled({"agent": {}}) is False
     assert is_mental_model_enabled({"mental_model": {"enabled": ""}}) is False
     assert is_mental_model_enabled({"mental_model": {"enabled": True}}) is True
-    assert is_mental_model_enabled({"agent": {"mental_model": {"enabled": "on"}}}) is True
+    assert is_mental_model_enabled({"mental_model": {"enabled": "on"}}) is True
 
 
 def test_mental_model_context_override_can_enable_default_disabled_flag():

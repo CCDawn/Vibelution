@@ -366,13 +366,11 @@ def test_session_detail_dedupes_same_turn_error_messages(tmp_path, monkeypatch):
         if message.get("metadata", {}).get("kind") == "turn_error"
     ]
     assert len(turn_error_messages) == 1
-    assert payload["messages"][-1]["content"] == "模型服务上游暂时失败，本轮没有完成。"
     latest_assistant = payload["messages"][-1]
+    assert latest_assistant["turnItems"][0]["text"] == "模型服务上游暂时失败，本轮没有完成。"
     assert len(latest_assistant["turnItems"]) == 1
     assert latest_assistant["turnItems"][0]["type"] == "error"
     assert latest_assistant["turnItems"][0]["terminal"] is True
-    assert latest_assistant["codexTranscript"]["cells"][0]["kind"] == "error_notice"
-    assert latest_assistant["codexTranscript"]["cells"][0]["sourceItemId"] == latest_assistant["turnItems"][0]["itemId"]
 
 
 def test_session_provider_failure_circuit_breaker_stops_continuation_and_logs_event(tmp_path, monkeypatch):

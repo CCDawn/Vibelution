@@ -512,6 +512,7 @@ def reset_agent_instance(
             previous_policy_id = str(agent.get("toolPolicyId") or s.DEFAULT_TOOL_POLICY_ID).strip() or s.DEFAULT_TOOL_POLICY_ID
             policy_id = s._default_tool_policy_id_for_agent(normalized_agent_id, str(agent.get("primaryMode") or ""))
             agent["toolPolicyId"] = policy_id
+            agent.pop("toolPolicy", None)
             policies = s._tool_policies(state)
             if previous_policy_id != s.DEFAULT_TOOL_POLICY_ID and s._count_policy_refs(state.get("agents") or [], "toolPolicyId", previous_policy_id) == 0:
                 policies.pop(previous_policy_id, None)
@@ -528,6 +529,7 @@ def reset_agent_instance(
             workspace_path = s._agent_workspace_relative_path(normalized_agent_id)
             agent["workspacePath"] = workspace_path
             agent["memoryPolicyId"] = policy_id
+            agent.pop("memoryPolicy", None)
             s._ensure_agent_workspace(workspace_path)
             policies = s._memory_policies(state)
             updated_memory_policy = s.default_memory_policy(policy_id, workspace_path)
