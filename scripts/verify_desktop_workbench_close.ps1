@@ -211,6 +211,9 @@ namespace Vibelution.DesktopCanary {
         public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
         [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool PostMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
     }
@@ -227,6 +230,7 @@ function Get-WorkbenchNativeWindows {
 
     Initialize-NativeWindowApi
     $matches = [System.Collections.Generic.List[object]]::new()
+    $foregroundWindowHandle = [Vibelution.DesktopCanary.NativeWindowApi]::GetForegroundWindow()
     $callback = [Vibelution.DesktopCanary.NativeWindowApi+EnumWindowsProc] {
         param([IntPtr]$Handle, [IntPtr]$Ignored)
 
@@ -249,6 +253,7 @@ function Get-WorkbenchNativeWindows {
                 Handle = $Handle
                 ProcessId = [int]$processId
                 Title = $titleBuilder.ToString()
+                IsForeground = ($Handle -eq $foregroundWindowHandle)
             })
         }
         return $true
@@ -271,11 +276,14 @@ function Wait-ForWorkbenchNativeWindow {
             return $matches[0]
         }
         if ($matches.Count -gt 1) {
-            throw "Workbench-close canary found more than one named Workbench window."
+            $foregroundMatches = @($matches | Where-Object { $_.IsForeground })
+            if ($foregroundMatches.Count -eq 1) {
+                return $foregroundMatches[0]
+            }
         }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
-    throw "Timed out waiting for the named Workbench native window."
+    throw "Timed out waiting for a unique named Workbench native window."
 }
 
 function Wait-ForNoWorkbenchNativeWindow {

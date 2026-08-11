@@ -74,6 +74,17 @@ def test_workbench_close_canary_normalizes_empty_owned_process_cleanup_collectio
     assert "if ($remainingOwnedProcessIds.Count -gt 0)" in cleanup_block
 
 
+def test_workbench_close_canary_uses_unique_foreground_window_when_titles_collide():
+    source = WORKBENCH_CLOSE_CANARY_SCRIPT.read_text(encoding="utf-8")
+
+    assert "GetForegroundWindow" in source
+    assert "$foregroundWindowHandle = [Vibelution.DesktopCanary.NativeWindowApi]::GetForegroundWindow()" in source
+    assert "IsForeground = ($Handle -eq $foregroundWindowHandle)" in source
+    assert "$foregroundMatches = @($matches | Where-Object { $_.IsForeground })" in source
+    assert "if ($foregroundMatches.Count -eq 1)" in source
+    assert "return $foregroundMatches[0]" in source
+
+
 def test_launcher_script_is_utf8_with_bom_for_windows_powershell_compatibility():
     assert LAUNCHER_SCRIPT.read_bytes().startswith(b"\xef\xbb\xbf")
 
