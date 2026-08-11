@@ -898,6 +898,8 @@ def _snapshot_should_persist_reconciliation(original_state: dict[str, Any], snap
         "lifecycleConsistency",
         "statusLine",
         "failureMessage",
+        "externalWindowOwner",
+        "closePhase",
     )
     return any(original_workbench.get(key) != snapshot_workbench.get(key) for key in workbench_keys)
 
@@ -1173,6 +1175,29 @@ def _close_request_already_satisfied(observation: dict[str, Any]) -> bool:
     return not live_backend_evidence and not live_browser_evidence
 
 
+def _backend_close_request_already_satisfied(observation: dict[str, Any]) -> bool:
+    return not (
+        bool(observation.get("backendAlive"))
+        or bool(observation.get("backendHealthy"))
+        or bool(observation.get("backendObserved"))
+        or bool(observation.get("backendPortListening"))
+        or int(observation.get("backendPortOwnerPid") or 0) > 0
+    )
+
+
+def _is_electron_external_window_owner(args: dict[str, Any]) -> bool:
+    return str(args.get("externalWindowOwner") or "").strip().lower() == "electron"
+
+
+def _electron_external_window_pending_ack(workbench: dict[str, Any], observation: dict[str, Any]) -> bool:
+    return (
+        str(workbench.get("externalWindowOwner") or "").strip().lower() == "electron"
+        and str(workbench.get("closePhase") or "").strip() == "window_close_authorized"
+        and bool(observation.get("browserWindowAlive"))
+        and _backend_close_request_already_satisfied(observation)
+    )
+
+
 def _backend_port_is_closed_for_fast_close(port: int) -> bool:
     if int(port or 0) <= 0:
         return True
@@ -1199,6 +1224,21 @@ def _cleanup_result_confirms_workbench_closed(cleanup_result: dict[str, Any], in
         or bool(initial_observation.get("backendPortListening"))
         or bool(initial_observation.get("browserWindowAlive"))
     ):
+        return False
+    return _backend_port_is_closed_for_fast_close(int(initial_observation.get("backendPort") or 0))
+
+
+def _cleanup_result_confirms_backend_closed(cleanup_result: dict[str, Any], initial_observation: dict[str, Any]) -> bool:
+    if not bool(cleanup_result.get("supported", True)):
+        return False
+    remaining = cleanup_result.get("remaining")
+    if not isinstance(remaining, list) or remaining:
+        return False
+    requested = cleanup_result.get("requested")
+    terminated = cleanup_result.get("terminated")
+    if not isinstance(requested, list) or not isinstance(terminated, list):
+        return False
+    if not requested and not _backend_close_request_already_satisfied(initial_observation):
         return False
     return _backend_port_is_closed_for_fast_close(int(initial_observation.get("backendPort") or 0))
 
@@ -1231,6 +1271,37 @@ def _closed_observation_from_cleanup_result(
     if not bool(cleanup_result.get("preserveBrowserWindowPid", False)):
         observation["browserWindowRecoveredPid"] = 0
         observation["browserWindowRecoverySource"] = ""
+    return observation
+
+
+def _electron_owned_backend_closed_observation(
+    initial_observation: dict[str, Any],
+    cleanup_result: dict[str, Any],
+) -> dict[str, Any]:
+    observation = dict(initial_observation)
+    browser_alive = bool(observation.get("browserWindowAlive"))
+    observation.update(
+        {
+            "backendPid": 0,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerKind": "",
+            "backendPortOwnerTrusted": False,
+            "backendPortOwnerResidual": False,
+            "backendPortConflict": False,
+            "observedState": "partial" if browser_alive else "closed",
+            "backendMissing": False,
+            "frontendOrphaned": False,
+            "lifecycleConsistency": "external_window_owner_pending_ack" if browser_alive else "consistent",
+            "closeVerificationSource": "backend_cleanup_result",
+        }
+    )
+    if bool(cleanup_result.get("preserveBrowserWindowPid", False)):
+        observation["browserWindowRecoveredPid"] = int(observation.get("browserWindowPid") or 0)
+        observation["browserWindowRecoverySource"] = "electron_external_owner"
     return observation
 
 
@@ -1697,6 +1768,27 @@ def load_runtime_snapshot() -> dict[str, Any]:
     consistency_fields = _workbench_consistency_fields(observation)
     orphaned_browser = bool(consistency_fields["frontendOrphaned"])
     browser_missing = bool(consistency_fields["browserMissing"])
+    electron_pending_ack = _electron_external_window_pending_ack(workbench, observation)
+    if electron_pending_ack:
+        desired_state = "closed"
+        observed_state = "partial"
+        phase = "closing"
+        consistency_fields = {
+            **consistency_fields,
+            "backendMissing": False,
+            "frontendOrphaned": False,
+            "lifecycleConsistency": "external_window_owner_pending_ack",
+        }
+        orphaned_browser = False
+        browser_missing = False
+    elif (
+        str(workbench.get("externalWindowOwner") or "").strip().lower() == "electron"
+        and str(workbench.get("closePhase") or "").strip() == "window_close_authorized"
+        and _backend_close_request_already_satisfied(observation)
+        and not bool(observation.get("browserWindowAlive"))
+    ):
+        workbench["externalWindowOwner"] = ""
+        workbench["closePhase"] = "window_closed_observed"
 
     if phase == "failed" and not _workbench_failure_should_stick(state, desired_state=desired_state, observed_state=observed_state):
         phase = "steady"
@@ -1706,7 +1798,7 @@ def load_runtime_snapshot() -> dict[str, Any]:
         phase = "closing"
         workbench["failureMessage"] = _workbench_orphaned_browser_failure_message(observation)
 
-    if (not manager_running or not active_command) and phase != "failed":
+    if not electron_pending_ack and (not manager_running or not active_command) and phase != "failed":
         if observed_state in {"open", "partial"} and desired_state != "open":
             desired_state = "open"
             phase = "steady"
@@ -1779,6 +1871,8 @@ def load_runtime_snapshot() -> dict[str, Any]:
             "backendMissing": bool(consistency_fields["backendMissing"]),
             "frontendOrphaned": bool(consistency_fields["frontendOrphaned"]),
             "lifecycleConsistency": str(consistency_fields["lifecycleConsistency"]),
+            "externalWindowOwner": "electron" if electron_pending_ack else str(workbench.get("externalWindowOwner") or ""),
+            "closePhase": str(workbench.get("closePhase") or ""),
             "sessionId": str(observation.get("sessionId") or "").strip(),
             "url": str(observation.get("url") or workbench.get("url") or "").strip(),
             "phase": phase,
@@ -3107,6 +3201,27 @@ class RuntimeManagerDaemon:
         consistency_fields = _workbench_consistency_fields(observation)
         orphaned_browser = bool(consistency_fields["frontendOrphaned"])
         browser_missing = bool(consistency_fields["browserMissing"])
+        electron_pending_ack = _electron_external_window_pending_ack(workbench, observation)
+        if electron_pending_ack:
+            desired_state = "closed"
+            observed_state = "partial"
+            phase = "closing"
+            consistency_fields = {
+                **consistency_fields,
+                "backendMissing": False,
+                "frontendOrphaned": False,
+                "lifecycleConsistency": "external_window_owner_pending_ack",
+            }
+            orphaned_browser = False
+            browser_missing = False
+        elif (
+            str(workbench.get("externalWindowOwner") or "").strip().lower() == "electron"
+            and str(workbench.get("closePhase") or "").strip() == "window_close_authorized"
+            and _backend_close_request_already_satisfied(observation)
+            and not bool(observation.get("browserWindowAlive"))
+        ):
+            workbench["externalWindowOwner"] = ""
+            workbench["closePhase"] = "window_closed_observed"
 
         if phase == "failed" and not _workbench_failure_should_stick(
             state,
@@ -3196,7 +3311,7 @@ class RuntimeManagerDaemon:
                 exclude_pids=_snapshot_residual_excluded_pids(observation, self._pid),
             )
 
-        if not active_command and phase != "failed":
+        if not electron_pending_ack and not active_command and phase != "failed":
             if observed_state in {"open", "partial"} and desired_state != "open":
                 desired_state = "open"
                 phase = "steady"
@@ -3245,6 +3360,8 @@ class RuntimeManagerDaemon:
                 "backendMissing": bool(consistency_fields["backendMissing"]),
                 "frontendOrphaned": bool(consistency_fields["frontendOrphaned"]),
                 "lifecycleConsistency": str(consistency_fields["lifecycleConsistency"]),
+                "externalWindowOwner": "electron" if electron_pending_ack else str(workbench.get("externalWindowOwner") or ""),
+                "closePhase": str(workbench.get("closePhase") or ""),
                 "url": str(observation.get("url") or workbench.get("url") or "").strip(),
                 "statusLine": _build_workbench_status_line(
                     desired_state=desired_state,
@@ -3882,6 +3999,184 @@ class RuntimeManagerDaemon:
             "closed": closed,
         }
 
+    def _handle_electron_owned_backend_close(
+        self,
+        *,
+        command_id: str,
+        args: dict[str, Any],
+        force: bool,
+    ) -> dict[str, Any]:
+        """Close only the backend while Electron retains the desktop window."""
+        lifecycle_timings_ms: dict[str, Any] = {}
+        close_started = time.monotonic()
+        command_type = "force_close_workbench" if force else "close_workbench"
+        reason = str(args.get("reason") or ("explicit_force_close" if force else "explicit_close")).strip()
+        source = str(args.get("source") or "").strip()
+        request_audit = _safe_lifecycle_request_audit(args)
+        request_fields = _lifecycle_request_event_fields(command_type, args)
+        observation_started = time.monotonic()
+        initial_observation = _observe_workbench_for_close()
+        lifecycle_timings_ms["initial_observation_ms"] = _elapsed_monotonic_ms(observation_started)
+
+        active_work_runs: list[dict[str, Any]] = []
+        force_stopped_runs: list[dict[str, Any]] = []
+        if force:
+            active_work_started = time.monotonic()
+            active_work_runs = _persistent_active_work_run_snapshots()
+            lifecycle_timings_ms["active_work_snapshot_ms"] = _elapsed_monotonic_ms(active_work_started)
+        evolution_close_started = time.monotonic()
+        closed_runs = _close_active_evolution_runs_for_shutdown()
+        lifecycle_timings_ms["evolution_close_ms"] = _elapsed_monotonic_ms(evolution_close_started)
+        if force:
+            force_stop_started = time.monotonic()
+            force_stopped_runs = _mark_persistent_active_work_runs_force_stopped(reason)
+            lifecycle_timings_ms["force_stop_work_runs_ms"] = _elapsed_monotonic_ms(force_stop_started)
+
+        state = load_state()
+        workbench = state.setdefault("workbench", {})
+        workbench.update(
+            {
+                "desiredState": "closed",
+                "phase": "closing",
+                "externalWindowOwner": "electron",
+                "closePhase": "backend_closing",
+                "lastReason": reason,
+                "lastSource": source,
+                "lastTransitionAt": now_iso(),
+                "lastRequestAudit": request_audit,
+                "failureMessage": "",
+            }
+        )
+        # Do not reconcile the initial observation here: its live Electron window is
+        # intentional and must not be classified as an orphan before backend cleanup.
+        save_state(state)
+
+        event_prefix = "workbench.force_close" if force else "workbench.close"
+        _append_event(
+            f"{event_prefix}.electron_backend_requested",
+            _close_verification_event_payload(initial_observation, command_id=command_id)
+            | request_fields
+            | {
+                "externalWindowOwner": "electron",
+                "activeWorkCount": len(active_work_runs),
+                "timingsMs": lifecycle_timings_ms,
+            },
+        )
+
+        already_backend_closed = _backend_close_request_already_satisfied(initial_observation)
+        if already_backend_closed:
+            cleanup_result: dict[str, Any] = {
+                "supported": True,
+                "requested": [],
+                "terminated": [],
+                "remaining": [],
+                "skipped": "backend_already_closed",
+                "preserveBrowserWindowPid": True,
+            }
+        else:
+            cleanup_started = time.monotonic()
+            cleanup_result = self._force_cleanup_workbench_processes(
+                initial_observation,
+                external_window_owner=True,
+            )
+            lifecycle_timings_ms["backend_cleanup_ms"] = _elapsed_monotonic_ms(cleanup_started)
+
+        backend_closed = _cleanup_result_confirms_backend_closed(cleanup_result, initial_observation)
+        lifecycle_timings_ms["backend_close_total_ms"] = _elapsed_monotonic_ms(close_started)
+        if not backend_closed:
+            message = "Workbench backend did not close; Electron window close is not authorized."
+            state = load_state()
+            state.setdefault("workbench", {}).update(
+                {
+                    "desiredState": "closed",
+                    "phase": "failed",
+                    "externalWindowOwner": "electron",
+                    "closePhase": "backend_close_failed",
+                    "failureMessage": message,
+                }
+            )
+            save_state(state)
+            _append_event(
+                f"{event_prefix}.electron_backend_failed",
+                _close_verification_event_payload(
+                    initial_observation,
+                    command_id=command_id,
+                    message=message,
+                    cleanup_result=cleanup_result,
+                )
+                | request_fields
+                | {"externalWindowOwner": "electron", "timingsMs": lifecycle_timings_ms},
+            )
+            return self._finish_command(
+                command_id,
+                ok=False,
+                message=message,
+                error_scope=command_type,
+                failure_message=message,
+                error_type="ElectronBackendCloseVerificationFailed",
+                result_data={
+                    "externalWindowOwner": "electron",
+                    "backendClosed": False,
+                    "closePhase": "backend_close_failed",
+                    "residualCleanup": cleanup_result,
+                    "closedEvolutionRuns": closed_runs,
+                    "forceStoppedWorkRuns": force_stopped_runs,
+                    "lifecycleTimingsMs": lifecycle_timings_ms,
+                    "closeRequest": request_fields,
+                },
+                reconcile_observation=initial_observation,
+            )
+
+        verification = _electron_owned_backend_closed_observation(initial_observation, cleanup_result)
+        state = load_state()
+        state.setdefault("workbench", {}).update(
+            {
+                "desiredState": "closed",
+                "observedState": str(verification.get("observedState") or "partial"),
+                "phase": "closing" if bool(verification.get("browserWindowAlive")) else "steady",
+                "externalWindowOwner": "electron" if bool(verification.get("browserWindowAlive")) else "",
+                "closePhase": "window_close_authorized" if bool(verification.get("browserWindowAlive")) else "window_closed_observed",
+                "lastReason": reason,
+                "lastSource": source,
+                "lastRequestAudit": request_audit,
+                "failureMessage": "",
+            }
+        )
+        save_state(state)
+        _append_event(
+            f"{event_prefix}.electron_backend_closed",
+            _close_verification_event_payload(
+                verification,
+                command_id=command_id,
+                cleanup_result=cleanup_result,
+            )
+            | request_fields
+            | {
+                "externalWindowOwner": "electron",
+                "closePhase": "window_close_authorized",
+                "timingsMs": lifecycle_timings_ms,
+            },
+        )
+        return self._finish_command(
+            command_id,
+            ok=True,
+            message="Workbench backend closed; waiting for Electron window acknowledgement.",
+            result_data={
+                "externalWindowOwner": "electron",
+                "backendClosed": True,
+                "closePhase": "window_close_authorized",
+                "residualCleanup": cleanup_result,
+                "protectedPids": cleanup_result.get("protectedPids", []),
+                "closedEvolutionRuns": closed_runs,
+                "forceStoppedWorkRuns": force_stopped_runs,
+                "activeWorkRuns": active_work_runs,
+                "alreadyBackendClosed": already_backend_closed,
+                "lifecycleTimingsMs": lifecycle_timings_ms,
+                "closeRequest": request_fields,
+            },
+            reconcile_observation=verification,
+        )
+
     def _handle_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         reason = str(args.get("reason") or "explicit_close").strip() or "explicit_close"
         source = str(args.get("source") or "").strip()
@@ -3894,6 +4189,12 @@ class RuntimeManagerDaemon:
         )
         if blocked is not None:
             return blocked
+        if _is_electron_external_window_owner(args):
+            return self._handle_electron_owned_backend_close(
+                command_id=command_id,
+                args=args,
+                force=False,
+            )
 
         state = load_state()
         workbench = state.setdefault("workbench", {})
@@ -4056,6 +4357,12 @@ class RuntimeManagerDaemon:
         return final_result
 
     def _handle_force_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        if _is_electron_external_window_owner(args):
+            return self._handle_electron_owned_backend_close(
+                command_id=command_id,
+                args=args,
+                force=True,
+            )
         lifecycle_timings_ms: dict[str, Any] = {}
         force_close_started = time.monotonic()
         reason = str(args.get("reason") or "explicit_force_close").strip() or "explicit_force_close"
@@ -4310,15 +4617,36 @@ class RuntimeManagerDaemon:
             exclude_pids=_snapshot_residual_excluded_pids(observe_workbench(), self._pid, include_workbench=False),
         )
 
-    def _force_cleanup_workbench_processes(self, observation: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _force_cleanup_workbench_processes(
+        self,
+        observation: dict[str, Any] | None = None,
+        *,
+        external_window_owner: bool = False,
+    ) -> dict[str, Any]:
         observed = observation if isinstance(observation, dict) else observe_workbench()
-        return terminate_workbench_processes(
+        excluded_pids = {os.getpid(), self._pid}
+        if external_window_owner:
+            for key in ("browserLaunchPid", "browserWindowPid"):
+                try:
+                    pid = int(observed.get(key) or 0)
+                except (TypeError, ValueError):
+                    pid = 0
+                if pid > 0:
+                    excluded_pids.add(pid)
+        cleanup_result = terminate_workbench_processes(
             project_root=PROJECT_ROOT,
-            browser_profile_dir=str(observed.get("browserProfileDir") or ""),
-            exclude_pids={os.getpid(), self._pid},
+            browser_profile_dir="" if external_window_owner else str(observed.get("browserProfileDir") or ""),
+            exclude_pids=excluded_pids,
             timeout_seconds=_FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS,
             verify_remaining_with_inventory=False,
         )
+        if not external_window_owner or not isinstance(cleanup_result, dict):
+            return cleanup_result
+        result = dict(cleanup_result)
+        result["protectedPids"] = sorted(pid for pid in excluded_pids if pid > 0)
+        result["preserveBrowserWindowPid"] = True
+        result["externalWindowOwner"] = "electron"
+        return result
 
     def _perform_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()

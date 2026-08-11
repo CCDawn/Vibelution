@@ -9466,6 +9466,222 @@ def test_handle_close_workbench_fails_when_post_close_verification_still_sees_br
     assert failed_payload["attempts"] == 1
 
 
+def test_electron_owned_normal_close_stops_backend_without_terminating_window_owner(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-electron-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    observation = {
+        "observedState": "open",
+        "backendPid": 41001,
+        "backendLaunchPid": 41001,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 8002,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 41001,
+        "backendPortOwnerTrusted": True,
+        "browserManaged": True,
+        "browserLaunchPid": 52001,
+        "browserWindowPid": 52002,
+        "browserWindowAlive": True,
+        "sessionId": "desktop-session-1",
+    }
+    cleanup_calls: list[dict] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda **_kwargs: dict(observation))
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **_kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(daemon, "_backend_port_is_closed_for_fast_close", lambda _port: True)
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: (_ for _ in ()).throw(AssertionError("Electron-owned close must not use the legacy window close path")),
+    )
+    monkeypatch.setattr(
+        daemon,
+        "terminate_workbench_processes",
+        lambda **kwargs: cleanup_calls.append(kwargs)
+        or {"supported": True, "requested": [41001], "terminated": [41001], "remaining": []},
+    )
+
+    result = runtime_daemon._handle_close_workbench(
+        command_id="cmd-electron-close",
+        args={"externalWindowOwner": "electron", "desktopSessionId": "desktop-session-1"},
+    )
+
+    assert result["ok"] is True
+    assert result["externalWindowOwner"] == "electron"
+    assert result["closePhase"] == "window_close_authorized"
+    assert result["backendClosed"] is True
+    assert state["workbench"]["desiredState"] == "closed"
+    assert state["workbench"]["observedState"] == "partial"
+    assert state["workbench"]["phase"] == "closing"
+    assert state["workbench"]["externalWindowOwner"] == "electron"
+    assert state["workbench"]["closePhase"] == "window_close_authorized"
+    assert cleanup_calls[0]["browser_profile_dir"] == ""
+    assert {runtime_daemon._pid, 52001, 52002}.issubset(set(cleanup_calls[0]["exclude_pids"]))
+
+
+def test_electron_owned_force_close_preserves_window_owner_and_records_force_stop(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-electron-force"},
+        "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+    }
+    observation = {
+        "observedState": "open",
+        "backendPid": 42001,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 8002,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 42001,
+        "backendPortOwnerTrusted": True,
+        "browserManaged": True,
+        "browserLaunchPid": 53001,
+        "browserWindowPid": 53002,
+        "browserWindowAlive": True,
+    }
+    cleanup_calls: list[dict] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda **_kwargs: dict(observation))
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **_kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(daemon, "_persistent_active_work_run_snapshots", lambda: [{"runId": "chat-run-1"}])
+    monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", list)
+    monkeypatch.setattr(daemon, "_mark_persistent_active_work_runs_force_stopped", lambda _reason: [{"runId": "chat-run-1"}])
+    monkeypatch.setattr(daemon, "_backend_port_is_closed_for_fast_close", lambda _port: True)
+    monkeypatch.setattr(
+        daemon,
+        "terminate_workbench_processes",
+        lambda **kwargs: cleanup_calls.append(kwargs)
+        or {"supported": True, "requested": [42001], "terminated": [42001], "remaining": []},
+    )
+
+    result = runtime_daemon._handle_force_close_workbench(
+        command_id="cmd-electron-force",
+        args={"externalWindowOwner": "electron", "desktopSessionId": "desktop-session-1"},
+    )
+
+    assert result["ok"] is True
+    assert result["externalWindowOwner"] == "electron"
+    assert result["activeWorkRuns"] == [{"runId": "chat-run-1"}]
+    assert result["forceStoppedWorkRuns"] == [{"runId": "chat-run-1"}]
+    assert {runtime_daemon._pid, 53001, 53002}.issubset(set(cleanup_calls[0]["exclude_pids"]))
+
+
+def test_runtime_snapshot_keeps_electron_owned_backend_close_pending_until_window_is_gone(monkeypatch):
+    state = {
+        "runtimeState": "running",
+        "daemonRunning": True,
+        "managerPid": 61001,
+        "command": {},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "partial",
+            "phase": "closing",
+            "externalWindowOwner": "electron",
+            "closePhase": "window_close_authorized",
+        },
+    }
+    observation = {
+        "observedState": "partial",
+        "backendPid": 0,
+        "backendAlive": False,
+        "backendHealthy": False,
+        "backendObserved": False,
+        "backendPort": 8002,
+        "backendPortListening": False,
+        "backendPortOwnerPid": 0,
+        "browserManaged": True,
+        "browserWindowPid": 62002,
+        "browserWindowAlive": True,
+        "lifecycleConsistency": "orphaned_browser",
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(observation))
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: True)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 61001)
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **_kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
+
+    snapshot = daemon.load_runtime_snapshot()
+
+    assert snapshot["workbench"]["desiredState"] == "closed"
+    assert snapshot["workbench"]["observedState"] == "partial"
+    assert snapshot["workbench"]["phase"] == "closing"
+    assert snapshot["workbench"]["externalWindowOwner"] == "electron"
+    assert snapshot["workbench"]["closePhase"] == "window_close_authorized"
+    assert snapshot["workbench"]["frontendOrphaned"] is False
+    assert snapshot["workbench"]["lifecycleConsistency"] == "external_window_owner_pending_ack"
+
+
+def test_runtime_snapshot_completes_electron_owned_close_after_window_exit(monkeypatch):
+    state = {
+        "runtimeState": "running",
+        "daemonRunning": True,
+        "managerPid": 61001,
+        "command": {},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "partial",
+            "phase": "closing",
+            "externalWindowOwner": "electron",
+            "closePhase": "window_close_authorized",
+        },
+    }
+    observation = {
+        "observedState": "closed",
+        "backendPid": 0,
+        "backendAlive": False,
+        "backendHealthy": False,
+        "backendObserved": False,
+        "backendPort": 8002,
+        "backendPortListening": False,
+        "backendPortOwnerPid": 0,
+        "browserManaged": True,
+        "browserWindowPid": 0,
+        "browserWindowAlive": False,
+        "lifecycleConsistency": "consistent",
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(observation))
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: True)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 61001)
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **_kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
+
+    snapshot = daemon.load_runtime_snapshot()
+
+    assert snapshot["workbench"]["desiredState"] == "closed"
+    assert snapshot["workbench"]["observedState"] == "closed"
+    assert snapshot["workbench"]["phase"] == "steady"
+    assert snapshot["workbench"]["externalWindowOwner"] == ""
+    assert snapshot["workbench"]["closePhase"] == "window_closed_observed"
+
+
 def test_handle_close_workbench_skips_residual_cleanup_for_plain_close_when_already_closed_without_residual(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
