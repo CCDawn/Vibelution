@@ -51,7 +51,7 @@ def _start_capability(record: dict) -> dict:
     )
 
 
-def test_start_agent_capability_carries_backend_allocated_budget_request() -> None:
+def test_start_agent_capability_reserves_current_stage_balance_for_sole_ready_node() -> None:
     capability = _start_capability(_record())
 
     assert capability == {
@@ -61,13 +61,37 @@ def test_start_agent_capability_carries_backend_allocated_budget_request() -> No
         "idempotencyKey": "agent-task:nr-run-budget-capability-source_finding-a1",
         "payload": {
             "budgetRequest": {
-                "tokens": 250,
-                "toolCalls": 3,
-                "wallClockSeconds": 30,
-                "experiments": 1,
-                "computeUnits": 5,
+                "tokens": 1000,
+                "toolCalls": 12,
+                "wallClockSeconds": 120,
+                "experiments": 4,
+                "computeUnits": 20,
             }
         },
+    }
+
+
+def test_start_agent_capability_splits_only_currently_ready_stage_peers() -> None:
+    record = _record()
+    record["nodeRuns"].append(
+        {
+            "nodeRunId": "nr-run-budget-capability-source_extraction-a1",
+            "nodeId": "source_extraction",
+            "attempt": 1,
+            "status": "ready",
+        }
+    )
+
+    capability = _start_capability(record)
+
+    assert capability["payload"] == {
+        "budgetRequest": {
+            "tokens": 500,
+            "toolCalls": 6,
+            "wallClockSeconds": 60,
+            "experiments": 2,
+            "computeUnits": 10,
+        }
     }
 
 
