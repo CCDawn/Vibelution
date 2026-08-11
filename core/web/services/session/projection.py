@@ -575,9 +575,7 @@ def _build_session_summary(
     # Keep default placeholders ("新会话" / "New session") so create→rename UX is not
     # prefilled with the Agent display name before the user can type a session title.
     # Agent identity stays on agentDisplayName / icon, not the tab title field.
-    if session_kind == "child":
-        display_title = task_title
-    elif not s._is_default_empty_session_title(task_title):
+    if session_kind == "child" or not s._is_default_empty_session_title(task_title):
         display_title = task_title
     elif agent_id:
         display_title = display_agent_name
