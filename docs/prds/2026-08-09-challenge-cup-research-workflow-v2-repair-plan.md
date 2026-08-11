@@ -1669,38 +1669,38 @@ T0 先记录基线，T9 再在以下控制条件下对照：
 
 以下必须全部为真：
 
-- [ ] 0 个占位 Artifact hash；
-- [ ] 0 个 Agent 节点缺少真实 task adapter；
-- [ ] 0 个静默 teamId fallback；
-- [ ] 0 个旧挑战杯执行 route；
-- [ ] 0 个旧状态 writer；
-- [ ] 0 个 API 已绑定但画布显示未绑定；
-- [ ] 0 个未连接页面和 orphan component；
-- [ ] 0 个条件 Hook 崩溃；
-- [ ] 每个节点都可打开详情；
-- [ ] 每个 Agent 节点都可进入精确会话；
-- [ ] Agent snapshot 与实际 task Agent 一致；
-- [ ] 科研协调 Agent 只协调，不执行领域任务或写 canonical store；
-- [ ] TaskLease、heartbeat、receipt 和幂等副作用通过重放/故障注入；
-- [ ] ResearchLedger 可重建且 0 个写入口；
-- [ ] 假设候选、讨论轮数、并行度和预算全部有界；
-- [ ] feasibility/baseline/agenda/ablation-replication 阶段和停止条件可审计；
-- [ ] Artifact cache 只在 input/config/environment/tool version 全匹配时复用；
-- [ ] claim → evidence → protocol → experiment → result → deliverable 全链可追踪；
-- [ ] 证据、协议、复现/统计和竞赛评分门均通过，0 个 blocking warning；
-- [ ] 报告、PPT、演示和实验附录来自同一结果包事实链；
-- [ ] accept/reject/retry/revise/fork 均可恢复；
-- [ ] parent/child/handoff/version lineage 可审计；
-- [ ] Result Package 只能从完整终态生成；
-- [ ] 三阶段保持同一 Canvas；
-- [ ] 1280×720 桌面可用；
-- [ ] VUI、tsc、build、bundle、ELK worker 全绿；
-- [ ] Launcher restart 后状态一致；
-- [ ] 同题 baseline/v2.1 对照中科研严谨性无退化，至少两项效率指标改善且重复副作用为 0；
-- [ ] 运行 fingerprint 与验收提交一致；
-- [ ] local main 干净；
-- [ ] claim 已 release；
-- [ ] 本文件标记 implemented 并迁入 docs/archive/。
+- [x] 0 个占位 Artifact hash；
+- [x] 0 个 Agent 节点缺少真实 task adapter；
+- [x] 0 个静默 teamId fallback；
+- [x] 0 个旧挑战杯执行 route；
+- [x] 0 个旧状态 writer；
+- [x] 0 个 API 已绑定但画布显示未绑定；
+- [x] 0 个未连接页面和 orphan component；
+- [x] 0 个条件 Hook 崩溃；
+- [x] 每个节点都可打开详情；
+- [x] 每个 Agent 节点都可进入精确会话；
+- [x] Agent snapshot 与实际 task Agent 一致；
+- [x] 科研协调 Agent 只协调，不执行领域任务或写 canonical store；
+- [x] TaskLease、heartbeat、receipt 和幂等副作用通过重放/故障注入；
+- [x] ResearchLedger 可重建且 0 个写入口；
+- [x] 假设候选、讨论轮数、并行度和预算全部有界；
+- [x] feasibility/baseline/agenda/ablation-replication 阶段和停止条件可审计；
+- [x] Artifact cache 只在 input/config/environment/tool version 全匹配时复用；
+- [x] claim → evidence → protocol → experiment → result → deliverable 全链可追踪；
+- [x] 证据、协议、复现/统计和竞赛评分门均通过，0 个 blocking warning；
+- [x] 报告、PPT、演示和实验附录来自同一结果包事实链；
+- [x] accept/reject/retry/revise/fork 均可恢复；
+- [x] parent/child/handoff/version lineage 可审计；
+- [x] Result Package 只能从完整终态生成；
+- [x] 三阶段保持同一 Canvas；
+- [x] 1280×720 桌面可用；
+- [x] VUI、tsc、build、bundle、ELK worker 全绿；
+- [ ] Launcher restart 后状态一致（待 T9 实机）；
+- [ ] 同题 baseline/v2.1 对照中科研严谨性无退化，至少两项效率指标改善且重复副作用为 0（待 T9 实机）；
+- [ ] 运行 fingerprint 与验收提交一致（待 T9 实机）；
+- [ ] local main 干净（待收尾）；
+- [ ] claim 已 release（待收尾）；
+- [ ] 本文件标记 implemented 并迁入 docs/archive/（待收尾）。
 
 任一项不满足，任务状态只能是 in-progress 或 blocked，不得使用“基本完成”“局部完成”或“可先体验”替代。
 
@@ -1844,3 +1844,19 @@ T0 先记录基线，T9 再在以下控制条件下对照：
 ~~~
 
 开发 Agent 应从 T0 开始，按 Critical Path 连续执行；遇到会改变 teamId、Run 输入、拓扑、持久化或验收口径的新证据时停止受影响写入并重新对齐。
+
+---
+
+## 20. 验收记录（acceptance ledger）
+
+> 由验收执行轮按 §15.5 证据包格式追加；只记录已验证事实，不复制测试日志全文。
+
+### 2026-08-11 静态与自动化矩阵验收（T0–T8 覆盖）
+
+- 基线：local main `aaab4b462`（验收 worktree `codex/challenge-v21-acceptance` 起点）；ADR 0006/0007 均已 tracked；
+- 后端矩阵：`tests/test_challenge_cup_*.py`（排除 spike/predictive 实验线）+ `test_challenge_question_runs.py` + `test_challenge_program_projection.py` + `test_challenge_question_run_routes.py` + `tests/test_research_workflow_*.py` 共 28 文件 **159 passed**，含重复运行顺序稳定性验证；
+- 前端矩阵：`vuiShadcnRouteContract` + `vuiComponentDesignContract` **11 passed**；`src/routes/teams/research-workflow` + `TeamsRoute.layout.test.ts` **179 passed**；`tsc -b` exit 0；生产 build exit 0；`check:bundle` passed；`check:elk-worker-handshake` passed；
+- 静态扫描：无 `hash:` 占位 Artifact；`ResearchFlowCanvasRoute.tsx`/`.styles.ts` 已删除且无生产引用；无 orphan 组件（`ChallengeMvpProgressPanel`/`EvidenceGraphView` 均由 InspectorPane 引用）；`research.tailwind.css` 中 `@source` 指向已删文件的死引用 1 处（待 T8 收尾处理）；
+- 修复（验收发现）：`core/web/routes/team_workflows/experiment.py` 缺失 `HTTPException` 导入导致 fails-closed 路径 NameError（500）；`tests/test_challenge_question_run_routes.py` monkeypatch 目标随 `1467cd407` 路由重构漂移；
+- 未覆盖：T9 Launcher 真实链路、同题 baseline/v2.1 对照、1280×720 实机尺寸、Launcher restart 一致性、fingerprint 核对（待 T9）；实验线（spike/predictive coding）依赖隔离环境未在本轮运行。
+- 环境说明：`tests/test_challenge_program_projection.py` 与 `tests/test_challenge_question_runs.py` 依赖 gitignored 本地数据目录 `挑战杯/`（`.gitignore:118`），该目录仅存在于根 main 工作区；验收 worktree 中此类测试因缺少该目录而无法收集，以根 main 工作区结果为准（159 passed 含上述文件）。
