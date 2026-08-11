@@ -980,7 +980,7 @@ def _build_turn_mental_snapshot(
 
     runtime_snapshot = None
     try:
-        from .runtime_service import _mental_state_summary
+        from ..runtime_service import _mental_state_summary
 
         runtime_snapshot = s._normalize_mental_snapshot(_mental_state_summary(lang))
     except Exception:
