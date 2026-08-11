@@ -274,7 +274,7 @@ def create_chat_review_candidate_from_session(session_id: str) -> dict:
             )
         )
 
-    service = s.ChatDatasetCaptureService(project_root= Path(__file__).resolve().parents[3])
+    service = s.ChatDatasetCaptureService(project_root=s.PROJECT_ROOT)
     try:
         candidate = service.capture_candidate(
             mode="chat",

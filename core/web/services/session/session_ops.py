@@ -35,6 +35,8 @@ def _build_chat_turn_records_from_messages(messages: list[dict[str, Any]]) -> li
             continue
         role = str(item.get("role") or "").strip().lower()
         content = s._sanitize_message_content(role, item.get("content") or "")
+        if not content and role == "assistant":
+            content = s._sanitize_message_content(role, _turn_items_visible_text(item))
         if not content:
             continue
         if role == "user":
@@ -62,6 +64,30 @@ def _build_chat_turn_records_from_messages(messages: list[dict[str, Any]]) -> li
         )
         pending_user_message = ""
     return turns
+
+
+def _turn_items_visible_text(message: dict[str, Any]) -> str:
+    """Extract the model-visible assistant text from turn items.
+
+    Turn-item converged assistant messages carry no ``content`` field; the
+    visible text lives in assistant_message / agent_message items. Mirror the
+    projection contract (kind + answer channel) used elsewhere.
+    """
+    parts: list[str] = []
+    for item in list(message.get("turnItems") or []):
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or item.get("type") or "").strip().lower()
+        channel = str(item.get("channel") or "").strip().lower()
+        phase = str(item.get("phase") or "").strip().lower()
+        if phase in {"commentary", "interim"}:
+            continue
+        if kind not in {"assistant_message", "agent_message", "error"} or channel not in {"", "answer"}:
+            continue
+        text = str(item.get("text") or "").strip()
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
 
 
 def _build_contextual_confirmation_prompt(
