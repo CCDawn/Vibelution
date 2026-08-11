@@ -145,7 +145,7 @@ def test_get_git_status_refreshes_working_tree_after_ttl_without_repeating_metad
             ("branch", "--no-merged", "main", "--format=%(refname:short)"): ok(),
         },
     )
-    ticks = iter([100.0, 100.0, 102.0, 102.0])
+    ticks = iter([100.0, 100.0, 200.0, 200.0])
     monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
     monkeypatch.setattr(git_status_service, "_monotonic", lambda: next(ticks))
 
