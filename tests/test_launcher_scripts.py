@@ -196,6 +196,47 @@ def test_python_launcher_workbench_window_applies_vibelution_app_identity():
     assert "browserWindowIconApplied" in source
 
 
+def test_python_launcher_workbench_browser_does_not_inherit_hidden_backend_spawn(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    calls: list[dict] = []
+
+    monkeypatch.setattr(launcher, "os", types.SimpleNamespace(name="nt", environ=os.environ))
+    monkeypatch.setattr(launcher, "WORKBENCH_BROWSER_PROFILE_DIR", tmp_path / "workbench-profile")
+    monkeypatch.setattr(launcher, "_edge_executable", lambda: "C:/Edge/msedge.exe")
+    monkeypatch.setattr(
+        launcher,
+        "_windows_creation_flags",
+        lambda **_kwargs: pytest.fail("visible Workbench browser must not inherit CREATE_NO_WINDOW"),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_hidden_startup_info",
+        lambda: pytest.fail("visible Workbench browser must not inherit SW_HIDE"),
+    )
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "Popen",
+        lambda args, **kwargs: calls.append({"args": args, "kwargs": kwargs}) or types.SimpleNamespace(pid=4736),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_apply_managed_browser_app_identity",
+        lambda pid, role: {"windowPid": pid, "appUserModelId": "Vibelution.Workbench"},
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "core.runtime_manager.workbench_controller",
+        types.SimpleNamespace(_converge_browser_windows=lambda pid, *, focus_kept: {}),
+    )
+
+    result = launcher._start_managed_browser("http://127.0.0.1:8002")
+
+    assert result["browserWindowPid"] == 4736
+    assert calls[0]["args"][0] == "C:/Edge/msedge.exe"
+    assert "creationflags" not in calls[0]["kwargs"]
+    assert "startupinfo" not in calls[0]["kwargs"]
+
+
 def test_python_launcher_workbench_identity_finds_the_profile_owned_window(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
 
