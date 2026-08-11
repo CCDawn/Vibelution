@@ -18,6 +18,36 @@ export type ResearchRunLaunchDraft = {
   contractJson: string;
 };
 
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(",")}}`;
+}
+
+function fingerprint64(value: string): string {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index));
+    hash = BigInt.asUintN(64, hash * prime);
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+export function buildResearchRunCreateIdempotencyKey(
+  input: Omit<CreateResearchWorkflowRunInput, "idempotencyKey">,
+): string {
+  return `create:v2:${fingerprint64(stableJson(input))}`;
+}
+
 export function buildResearchRunInput(options: {
   teamId: string;
   projectId: string;
@@ -71,11 +101,7 @@ export function buildResearchRunInput(options: {
     .split(/[\n,]/)
     .map((value) => value.trim())
     .filter(Boolean);
-  const keySeed = [required.teamId, required.projectId, required.questionId, required.researchBriefHash]
-    .join(":")
-    .replace(/[^a-zA-Z0-9:._-]/g, "-")
-    .slice(0, 180);
-  return {
+  const input: Omit<CreateResearchWorkflowRunInput, "idempotencyKey"> = {
     ...required,
     datasetRefs: datasets,
     metricContract: contract.metricContract as Record<string, unknown>,
@@ -87,6 +113,9 @@ export function buildResearchRunInput(options: {
     stopPolicy: contract.stopPolicy as Record<string, unknown>,
     modelRoutingPolicy,
     evaluationContract: contract.evaluationContract as Record<string, unknown>,
-    idempotencyKey: `create:${keySeed}`,
+  };
+  return {
+    ...input,
+    idempotencyKey: buildResearchRunCreateIdempotencyKey(input),
   };
 }
