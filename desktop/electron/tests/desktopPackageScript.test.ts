@@ -23,11 +23,23 @@ describe("desktop package script", () => {
   it("packages the desktop executable with the shared Vibelution icon", () => {
     const config = JSON.parse(readFileSync(electronBuilderConfigPath, "utf8")) as {
       files?: string[];
+      asarUnpack?: string[];
       win?: { icon?: string };
     };
 
     expect(config.win?.icon).toBe("../../assets/icons/vibelution.ico");
     expect(config.files).toContain("desktop-entry-catalog.json");
+    expect(config.files).toContain("package-provenance.json");
+    expect(config.asarUnpack).toContain("package-provenance.json");
+  });
+
+  it("generates a source-bound provenance manifest before packaging", () => {
+    const packageJson = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(packageJson.scripts?.["write:provenance"]).toContain("writePackageProvenance.js");
+    expect(packageJson.scripts?.["package:dir"]).toContain("npm run write:provenance");
   });
 
   it("provides a reusable package verification entrypoint", () => {
