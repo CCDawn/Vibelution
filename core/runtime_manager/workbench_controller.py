@@ -19,6 +19,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from config.workbench import configured_backend_port
 
@@ -746,6 +747,19 @@ def _recover_managed_browser_window_pid(profile_dir: str) -> int:
     return 0
 
 
+def _with_active_electron_window_projection(observation: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(observation)
+    try:
+        from core.launcher.desktop_session_store import latest_active_window_provider_projection
+
+        projection = latest_active_window_provider_projection()
+    except (OSError, TypeError, ValueError):
+        projection = {}
+    if isinstance(projection, dict) and projection:
+        payload.update(projection)
+    return with_window_provider_projection(payload)
+
+
 def observe_workbench(
     *,
     recover_browser_window: bool = True,
@@ -789,7 +803,7 @@ def observe_workbench(
         and browser_window_pid <= 0
         and not _port_is_listening_socket(port)
     ):
-        return with_window_provider_projection({
+        return _with_active_electron_window_projection({
             "launcherStatePresent": bool(launcher_state),
             "sessionId": str(launcher_state.get("sessionId") or "").strip(),
             "sessionRole": session_role,
@@ -856,7 +870,7 @@ def observe_workbench(
         and not browser_window_alive
         and not _port_is_listening_socket(port)
     ):
-        return with_window_provider_projection({
+        return _with_active_electron_window_projection({
             "launcherStatePresent": bool(launcher_state),
             "sessionId": str(launcher_state.get("sessionId") or "").strip(),
             "sessionRole": "launcher_control_surface" if launcher_browser_window_alive else session_role,
@@ -972,7 +986,7 @@ def observe_workbench(
     else:
         lifecycle_consistency = "consistent"
 
-    return with_window_provider_projection({
+    return _with_active_electron_window_projection({
         "launcherStatePresent": bool(launcher_state),
         "sessionId": str(launcher_state.get("sessionId") or "").strip(),
         "sessionRole": observed_session_role,
@@ -1144,6 +1158,51 @@ def _explicit_workbench_port_env_value() -> str:
     return raw_value if 0 < port < 65536 else ""
 
 
+def _latest_active_electron_desktop_session() -> dict[str, Any]:
+    """Return live Electron ownership evidence for this workspace, if present."""
+
+    try:
+        from core.launcher.desktop_session_store import latest_active_desktop_session
+
+        session = latest_active_desktop_session(
+            provider="electron",
+            workspace_root=str(PROJECT_ROOT),
+        )
+    except (OSError, TypeError, ValueError):
+        return {}
+    return session if isinstance(session, dict) else {}
+
+
+def _electron_window_action_for_launcher_action(action: str) -> str:
+    normalized = str(action or "").strip().lower()
+    if normalized in {"internal-start", "internal-restart", "start", "restart"}:
+        return "open_workbench"
+    if normalized in {"internal-focus", "focus"}:
+        return "focus_workbench"
+    return ""
+
+
+def _submit_electron_window_action(*, action: str, reason: str, session: dict[str, Any]) -> dict[str, Any]:
+    """Submit a Python-owned Desktop Action for the active Electron shell."""
+
+    from core.launcher.lifecycle_intent_store import submit_lifecycle_intent
+
+    return submit_lifecycle_intent(
+        {
+            "action": action,
+            "reason": reason,
+            "idempotencyKey": f"runtime-manager-electron-window:{action}:{uuid4().hex}",
+        },
+        actor_context={
+            "actorType": "runtime_manager",
+            "actorId": str(os.getpid()),
+            "sourceWorktree": str(PROJECT_ROOT),
+            "sourceTaskId": str(session.get("desktopSessionId") or ""),
+        },
+        active_work_runs=[],
+    )
+
+
 def run_launcher_action(
     action: str,
     *,
@@ -1151,7 +1210,10 @@ def run_launcher_action(
     cancel_check: Callable[[], bool] | None = None,
     allow_dirty_launch: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    args = _launcher_command_args(action, no_browser=no_browser)
+    electron_session = _latest_active_electron_desktop_session()
+    electron_window_action = _electron_window_action_for_launcher_action(action)
+    effective_no_browser = bool(no_browser or electron_session)
+    args = _launcher_command_args(action, no_browser=effective_no_browser)
     env = os.environ.copy()
     env["VIBELUTION_PORT"] = _explicit_workbench_port_env_value() or str(configured_backend_port())
     env[INTERNAL_LAUNCHER_ENV] = INTERNAL_LAUNCHER_VALUE
@@ -1168,7 +1230,7 @@ def run_launcher_action(
     _record_launcher_action_event(
         "launcher.action.requested",
         action=action,
-        no_browser=no_browser,
+        no_browser=effective_no_browser,
         env=env,
     )
     started_at = time.monotonic()
@@ -1183,7 +1245,7 @@ def run_launcher_action(
                     stdout_handle=stdout_handle,
                     stderr_handle=stderr_handle,
                     action=action,
-                    no_browser=no_browser,
+                    no_browser=effective_no_browser,
                     started_at=started_at,
                     cancel_check=cancel_check,
                 )
@@ -1191,7 +1253,7 @@ def run_launcher_action(
                 _record_launcher_action_event(
                     "launcher.action.failed",
                     action=action,
-                    no_browser=no_browser,
+                    no_browser=effective_no_browser,
                     env=env,
                     duration_ms=(time.monotonic() - started_at) * 1000,
                     error_type=type(exc).__name__,
@@ -1204,10 +1266,28 @@ def run_launcher_action(
             stdout=_read_capture_file(stdout_path),
             stderr=_read_capture_file(stderr_path),
         )
+        if completed.returncode == 0 and electron_session and electron_window_action:
+            intent = _submit_electron_window_action(
+                action=electron_window_action,
+                reason=f"{action}:electron_window_provider",
+                session=electron_session,
+            )
+            if str(intent.get("status") or "") != "accepted":
+                raise RuntimeError(
+                    "Electron window action was not accepted by the Launcher: "
+                    f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+                )
+            _record_launcher_action_event(
+                "launcher.action.electron_desktop_action_submitted",
+                action=action,
+                no_browser=effective_no_browser,
+                env=env,
+                stdout=f"desktopAction={electron_window_action}",
+            )
         _record_launcher_action_event(
             "launcher.action.completed",
             action=action,
-            no_browser=no_browser,
+            no_browser=effective_no_browser,
             env=env,
             return_code=completed.returncode,
             stdout=completed.stdout,

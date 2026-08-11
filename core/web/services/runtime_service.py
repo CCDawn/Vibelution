@@ -1157,10 +1157,14 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
     if not isinstance(workbench, dict):
         workbench = {}
     desktop_window = desktop_session_store.latest_active_workbench_projection()
+    if not desktop_window:
+        desktop_window = desktop_session_store.latest_active_window_provider_projection(
+            workspace_root=str(PROJECT_ROOT)
+        )
     if desktop_window:
-        # Electron is the managed workbench frontend on Linux.  Its session
-        # evidence supersedes the legacy browser-process probe, which cannot
-        # observe Electron and would otherwise leave the shell in partial state.
+        # Electron is the managed workbench frontend. Its session evidence
+        # supersedes the legacy browser-process probe, which cannot observe
+        # Electron and would otherwise leave the shell in partial state.
         workbench = {**workbench, **desktop_window}
 
     desired_state = str(workbench.get("desiredState") or "closed").strip() or "closed"

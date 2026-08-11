@@ -2007,6 +2007,8 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     state_workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
     observed = observed_workbench if isinstance(observed_workbench, dict) else {}
     desktop_window = _desktop_session_workbench_projection()
+    if not desktop_window:
+        desktop_window = _desktop_session_window_provider_projection()
     if desktop_window:
         observed = {**observed, **desktop_window}
     has_observation = bool(observed)
@@ -2164,6 +2166,10 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
 
 def _desktop_session_workbench_projection() -> dict[str, Any]:
     return desktop_session_store.latest_active_workbench_projection()
+
+
+def _desktop_session_window_provider_projection() -> dict[str, Any]:
+    return desktop_session_store.latest_active_window_provider_projection(workspace_root=str(PROJECT_ROOT))
 
 
 def _runtime_manager_payload(runtime_state: dict[str, Any]) -> dict[str, Any]:

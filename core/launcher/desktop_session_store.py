@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -239,33 +240,88 @@ def get_desktop_session(desktop_session_id: str) -> dict[str, Any]:
     return _public_session(row)
 
 
+def latest_active_desktop_session(
+    *,
+    provider: str = "",
+    workspace_root: str = "",
+    window_role: str = "",
+) -> dict[str, Any]:
+    """Return the newest live desktop session matching the optional scope."""
+
+    normalized_provider = _safe_text(provider, max_length=80)
+    normalized_window_role = _safe_text(window_role, max_length=80)
+    expected_workspace = _normalize_workspace_root(workspace_root)
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM desktop_sessions
+                WHERE status = 'active'
+                ORDER BY last_heartbeat_at DESC, updated_at DESC
+                LIMIT 32
+                """
+            ).fetchall()
+    except (OSError, sqlite3.Error):
+        return {}
+    for row in rows:
+        if not _lease_active(row):
+            continue
+        if normalized_provider and _safe_text(row["provider"], max_length=80) != normalized_provider:
+            continue
+        if expected_workspace and _normalize_workspace_root(row["workspace_root"]) != expected_workspace:
+            continue
+        if normalized_window_role:
+            windows = json.loads(row["windows_json"] or "{}")
+            if not isinstance(windows.get(normalized_window_role), dict):
+                continue
+        return _public_session(row)
+    return {}
+
+
 def latest_active_desktop_window(role: str) -> dict[str, Any]:
     normalized_role = _safe_text(role, max_length=80)
     if normalized_role not in WINDOW_ROLES:
         raise ValueError(f"unsupported desktop session window role: {normalized_role}")
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT * FROM desktop_sessions
-            WHERE status = 'active'
-            ORDER BY last_heartbeat_at DESC, updated_at DESC
-            LIMIT 20
-            """
-        ).fetchall()
-    for row in rows:
-        if not _lease_active(row):
-            continue
-        windows = json.loads(row["windows_json"] or "{}")
-        window = windows.get(normalized_role)
-        if not isinstance(window, dict):
-            continue
-        return {
-            **window,
-            "desktopSessionId": row["desktop_session_id"],
-            "desktopSessionRevision": int(row["revision"] or 0),
-            "desktopSessionLeaseExpiresAt": _lease_expires_at(str(row["last_heartbeat_at"] or "")).isoformat(),
-        }
+    session = latest_active_desktop_session(window_role=normalized_role)
+    if session:
+        window = session.get("windows", {}).get(normalized_role)
+        if isinstance(window, dict):
+            return {
+                **window,
+                "desktopSessionId": session["desktopSessionId"],
+                "desktopSessionRevision": int(session["revision"] or 0),
+                "desktopSessionLeaseExpiresAt": str(session["leaseExpiresAt"] or ""),
+            }
     return {}
+
+
+def latest_active_window_provider_projection(*, workspace_root: str = "") -> dict[str, Any]:
+    """Project the active Electron session, including launcher-only sessions."""
+
+    try:
+        session = latest_active_desktop_session(provider="electron", workspace_root=workspace_root)
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return {}
+    if not session:
+        return {}
+    windows = session.get("windows") if isinstance(session.get("windows"), dict) else {}
+    workbench = windows.get("workbench") if isinstance(windows.get("workbench"), dict) else {}
+    is_open = bool(workbench.get("open", False))
+    projection: dict[str, Any] = {
+        "browserWindowAlive": is_open,
+        "browserManaged": False,
+        "windowProvider": "electron",
+        "windowManaged": is_open,
+        "windowId": int(workbench.get("windowId") or 0),
+        "rendererProcessId": int(workbench.get("rendererProcessId") or 0),
+        "url": str(workbench.get("url") or "").strip(),
+        "desktopSessionId": str(session.get("desktopSessionId") or "").strip(),
+        "desktopSessionRevision": int(session.get("revision") or 0),
+        "desktopSessionLeaseExpiresAt": str(session.get("leaseExpiresAt") or "").strip(),
+    }
+    if workbench:
+        projection["observedState"] = "open" if is_open else "closed"
+    return projection
 
 
 def latest_active_workbench_projection() -> dict[str, Any]:
@@ -291,6 +347,16 @@ def latest_active_workbench_projection() -> dict[str, Any]:
         "desktopSessionRevision": int(window.get("desktopSessionRevision") or 0),
         "desktopSessionLeaseExpiresAt": str(window.get("desktopSessionLeaseExpiresAt") or "").strip(),
     }
+
+
+def _normalize_workspace_root(value: Any) -> str:
+    raw = _safe_text(value, max_length=1000)
+    if not raw:
+        return ""
+    try:
+        return os.path.normcase(os.path.abspath(raw)).rstrip("\\/")
+    except (OSError, TypeError, ValueError):
+        return raw.casefold().rstrip("\\/")
 
 
 def _ensure_session_row(conn: sqlite3.Connection, desktop_session_id: str, now: str) -> sqlite3.Row:

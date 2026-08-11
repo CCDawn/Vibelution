@@ -950,6 +950,13 @@ def _open_backend_ready_source(observation: dict[str, Any], *, launcher_confirme
     return "not_ready"
 
 
+def _open_window_ready(observation: dict[str, Any]) -> bool:
+    provider = str(observation.get("windowProvider") or "").strip().lower()
+    if provider == "electron":
+        return bool(observation.get("windowManaged")) and bool(observation.get("browserWindowAlive"))
+    return bool(observation.get("browserManaged")) and bool(observation.get("browserWindowAlive"))
+
+
 def _open_request_ready(observation: dict[str, Any], *, no_browser: bool, launcher_confirmed: bool = False) -> bool:
     if str(observation.get("observedState") or "closed") != "open":
         return False
@@ -957,9 +964,7 @@ def _open_request_ready(observation: dict[str, Any], *, no_browser: bool, launch
         return False
     if no_browser:
         return True
-    if not bool(observation.get("browserManaged")):
-        return False
-    return bool(observation.get("browserWindowAlive"))
+    return _open_window_ready(observation)
 
 
 def _restart_should_preserve_visible_browser(observation: dict[str, Any]) -> bool:
@@ -980,9 +985,7 @@ def _restart_should_preflight_frontend_build(observation: dict[str, Any], *, arg
 
 def _open_verification_failure_message(observation: dict[str, Any], *, no_browser: bool) -> str:
     backend_ready = _open_backend_ready(observation, launcher_confirmed=True)
-    browser_ready = bool(no_browser) or (
-        bool(observation.get("browserManaged")) and bool(observation.get("browserWindowAlive"))
-    )
+    browser_ready = bool(no_browser) or _open_window_ready(observation)
     parts = [
         "Workbench launcher exited successfully, but the workbench is not ready.",
         f"observedState={str(observation.get('observedState') or 'closed')}",
@@ -1065,9 +1068,7 @@ def _open_verification_should_retry_stale_session(observation: dict[str, Any], *
         return False
 
     backend_ready = _open_backend_ready(observation, launcher_confirmed=True)
-    browser_ready = bool(no_browser) or (
-        bool(observation.get("browserManaged")) and bool(observation.get("browserWindowAlive"))
-    )
+    browser_ready = bool(no_browser) or _open_window_ready(observation)
     return not backend_ready or not browser_ready
 
 
