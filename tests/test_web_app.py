@@ -6186,6 +6186,7 @@ def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
         "chat_turn",
         "chat_room_round",
         "self_evolution_run",
+        "self_evolution_autonomous_loop",
         "source_collection_run",
         "supervised_evolution_run",
         "supervised_worktree_evolution_run",
