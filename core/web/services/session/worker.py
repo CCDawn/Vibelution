@@ -171,6 +171,14 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         supplied_agent = None
     agent_instance = supplied_agent or (s.get_agent(agent_id, include_archived=False) if agent_id else None)
     historical_agent = None if agent_instance else (s.get_agent(agent_id, include_archived=True) if agent_id else None)
+    current_agent_status = ""
+    if agent_id:
+        try:
+            current_agent_status = str(
+                (s.get_agent(agent_id, include_archived=True) or {}).get("status") or ""
+            ).strip().lower()
+        except Exception:
+            current_agent_status = ""
     try:
         from core.runtime_status_flags import is_runtime_status_inject_enabled
 
@@ -521,8 +529,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     )
     s._set_session_turn_progress_live_output(session_id, "agent_prepare", turn_id=turn_id)
     try:
-        if agent_id and not agent_instance:
-            status = str((historical_agent or {}).get("status") or "").strip().lower()
+        if agent_id and (not agent_instance or current_agent_status == "archived"):
+            status = current_agent_status or str((historical_agent or {}).get("status") or "").strip().lower()
             reason = "archived_agent" if status == "archived" else "missing_agent"
             visible = s._session_agent_unavailable_message(reason, lang=s.get_web_language())
             s._record_session_agent_unavailable_event(
