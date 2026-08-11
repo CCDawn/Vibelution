@@ -57,6 +57,7 @@ def dispatch_workbench_close_transaction(transaction: dict[str, Any]) -> dict[st
             "expectedDesktopSessionRevision": int(transaction.get("expectedDesktopSessionRevision") or 0),
             "workbenchCloseId": str(transaction.get("closeId") or ""),
             "confirmationCloseId": str(transaction.get("confirmationCloseId") or ""),
+            "externalWindowOwner": "electron",
         },
     )
     return {
