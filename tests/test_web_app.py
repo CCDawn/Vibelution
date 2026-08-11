@@ -2913,7 +2913,7 @@ def test_session_user_image_attachment_vision_intent_blocks_unsupported_agent(tm
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in _assistant_visible_text(payload["messages"][-1])
+    assert "明确不支持图像输入" in str((payload.get("lastTurnError") or {}).get("message") or "")
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["last_turn_status"] == "failed"
 
@@ -3445,7 +3445,7 @@ def test_session_user_image_attachment_edit_intent_blocks_when_agent_cannot_read
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in _assistant_visible_text(payload["messages"][-1])
+    assert "明确不支持图像输入" in str((payload.get("lastTurnError") or {}).get("message") or "")
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
         if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
@@ -3520,7 +3520,7 @@ def test_session_recent_image_reference_blocks_when_agent_cannot_read_images(tmp
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "failed"
-    assert "明确不支持图像输入" in _assistant_visible_text(payload["messages"][-1])
+    assert "明确不支持图像输入" in str((payload.get("lastTurnError") or {}).get("message") or "")
     router_events = [
         kwargs for args, kwargs in recorded_scene_events
         if args[:3] == ("conversation", "image_attachment_capability", "conversation.image_attachment.capability_checked")
@@ -3744,7 +3744,7 @@ def test_session_recent_image_reference_without_history_asks_for_image(tmp_path,
     assert response.status_code == 202
     payload = response.json()
     assert payload["messages"][-2]["metadata"]["resolvedRecentImageReference"]["status"] == "missing"
-    assert "没有在当前会话里找到" in _assistant_visible_text(payload["messages"][-1])
+    assert "没有在当前会话里找到" in str((payload.get("lastTurnError") or {}).get("message") or "")
 
 
 def test_session_user_image_attachment_empty_text_with_unknown_capability_reaches_dialogue_llm(tmp_path, monkeypatch):
