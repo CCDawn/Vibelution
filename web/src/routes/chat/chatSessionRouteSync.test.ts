@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   shouldCanonicalizeUrlSessionSelection,
   shouldDeferUrlSessionSync,
+  shouldKeepExplicitSessionRouteOnNotFound,
 } from "./chatSessionRouteSync";
 
 describe("shouldCanonicalizeUrlSessionSelection", () => {
@@ -82,6 +83,29 @@ describe("shouldDeferUrlSessionSync", () => {
         intentSessionId: "grok",
         intentAtMs: 1_000,
         nowMs: 1_200,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldKeepExplicitSessionRouteOnNotFound", () => {
+  it("keeps a broken exact target instead of silently selecting another session", () => {
+    expect(
+      shouldKeepExplicitSessionRouteOnNotFound({
+        requestedSessionId: "session-workflow",
+        activeSessionId: "session-workflow",
+      }),
+    ).toBe(true);
+    expect(
+      shouldKeepExplicitSessionRouteOnNotFound({
+        requestedSessionId: "session-workflow",
+        activeSessionId: "session-other",
+      }),
+    ).toBe(false);
+    expect(
+      shouldKeepExplicitSessionRouteOnNotFound({
+        requestedSessionId: "",
+        activeSessionId: "session-workflow",
       }),
     ).toBe(false);
   });

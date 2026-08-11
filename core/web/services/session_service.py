@@ -364,7 +364,9 @@ from core.web.services.session.conversation_index import (
     _ensure_agent_directory_conversation_materialized,
     _ensure_session_conversation_record,
     _recover_agent_id_from_session_journal,
+    _recover_stage_task_workspace_conversation,
     _recover_missing_conversation_from_workspace_locked,
+    _session_workspace_dir_if_present,
     _is_session_workspace_intentionally_deleted,
     _mark_session_workspace_intentionally_deleted,
     _session_deleted_marker_path,
@@ -968,7 +970,49 @@ from core.web.services.session.publish import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_CHAT_STATE_LOCK = threading.RLock()
+
+
+class _ChatStateMutationLock:
+    """Serialize every facade-level chat-state mutation across processes.
+
+    Session packs historically used ``_CHAT_STATE_LOCK`` for thread safety, but
+    a separate backend process could load an old snapshot and overwrite a newly
+    created conversation after the local lock released.  The facade lock is the
+    common mutation boundary, so it also owns the durable file transaction for
+    its complete load/mutate/save lifetime.
+    """
+
+    def __init__(self) -> None:
+        self._thread_lock = threading.RLock()
+        self._local = threading.local()
+
+    def __enter__(self):
+        self._thread_lock.acquire()
+        transaction = chat_state_transaction(PROJECT_ROOT)
+        try:
+            transaction.__enter__()
+        except BaseException:
+            self._thread_lock.release()
+            raise
+        stack = getattr(self._local, "transactions", None)
+        if stack is None:
+            stack = []
+            self._local.transactions = stack
+        stack.append(transaction)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        stack = getattr(self._local, "transactions", [])
+        transaction = stack.pop()
+        try:
+            return transaction.__exit__(exc_type, exc_value, traceback)
+        finally:
+            if not stack:
+                self._local.transactions = []
+            self._thread_lock.release()
+
+
+_CHAT_STATE_LOCK = _ChatStateMutationLock()
 
 
 def session_agent_lifecycle_serialized(
