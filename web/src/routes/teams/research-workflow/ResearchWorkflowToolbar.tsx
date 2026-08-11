@@ -13,7 +13,7 @@ const STREAM_LABEL: Record<ResearchWorkflowStreamState, string> = {
 
 export function ResearchWorkflowToolbar(props: {
   teamName: string;
-  projectName: string;
+  questionId: string;
   runId: string;
   runStatus: string;
   nextAction: string;
@@ -31,7 +31,7 @@ export function ResearchWorkflowToolbar(props: {
     <div className={styles.root}>
       <div className={styles.context}>
         <strong className={styles.primary}>{props.teamName}</strong>
-        <span className={styles.truncated}>{props.projectName || "未选择研究项目"}</span>
+        {props.questionId ? <span className={styles.truncated}>{props.questionId}</span> : null}
         {props.runId ? <span className={styles.truncated}>{researchRunStatusLabel(props.runStatus)}</span> : null}
         {props.runId ? <span aria-label="事件连接状态">{STREAM_LABEL[props.streamState]}</span> : null}
         {props.nextAction ? <span className={styles.next}>下一步：{props.nextAction}</span> : null}

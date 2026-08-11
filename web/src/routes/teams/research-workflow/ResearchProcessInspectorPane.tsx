@@ -44,8 +44,6 @@ export function ResearchProcessInspectorPane(props: {
     run: WorkflowRunRecord | null;
     projection: WorkflowCanvasProjection | null;
     effectiveBindings: EffectiveAgentBinding[] | null;
-    activeProjectId: string;
-    projectLoading: boolean;
     nodeDetail: NodeDetailState;
     insights: ResearchWorkflowInsights;
     busy: boolean;
@@ -87,10 +85,7 @@ export function ResearchProcessInspectorPane(props: {
     return <ResearchAgentBindingPanel teamId={scope.teamId} run={state.run} effectiveBindings={state.effectiveBindings} lang="zh" />;
   }
   if (scope.panel === "launch") {
-    if (!state.activeProjectId) {
-      return <VStateSurface tone={state.projectLoading ? "loading" : "error"} title={state.projectLoading ? "加载研究项目" : "当前团队没有活动研究项目"} fill className={styles.fill} />;
-    }
-    return <ResearchRunLaunchPanel teamId={scope.teamId} projectId={state.activeProjectId} busy={state.busy} onSubmit={actions.submitRun} onCancel={() => actions.replaceParams({ panel: "node" })} />;
+    return <ResearchRunLaunchPanel teamId={scope.teamId} busy={state.busy} onSubmit={actions.submitRun} onCancel={() => actions.replaceParams({ panel: "node" })} />;
   }
   if (scope.panel === "evidence") {
     return state.run && scope.selectedNodeId === "evidence_relations"

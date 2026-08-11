@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>创建科研运行 · 题目唯一事实源</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: #f5f5f7;
+        color: #1d1d1f;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 920px; background: #f5f5f7; }
+      button, input { font: inherit; }
+      .shell { width: min(1040px, calc(100vw - 96px)); margin: 54px auto 72px; }
+      .page-header { display: flex; align-items: flex-end; justify-content: space-between; margin: 0 4px 26px; }
+      h1 { margin: 0; font-size: 28px; letter-spacing: -0.05em; font-weight: 680; }
+      .context { margin: 0; color: #6e6e73; font-size: 14px; }
+      .workspace { display: grid; grid-template-columns: minmax(0, 1.28fr) minmax(320px, .72fr); gap: 18px; align-items: start; }
+      .surface { background: rgba(255,255,255,.92); border: 1px solid #e5e5ea; border-radius: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.045); overflow: hidden; }
+      .section { padding: 24px; }
+      .section + .section { border-top: 1px solid #e5e5ea; }
+      .eyebrow { margin: 0 0 7px; color: #86868b; font-size: 12px; font-weight: 650; letter-spacing: .045em; }
+      h2 { margin: 0; font-size: 17px; letter-spacing: -0.025em; }
+      .question-list { display: grid; gap: 10px; margin-top: 16px; }
+      .question { width: 100%; border: 1px solid #d2d2d7; border-radius: 14px; background: #fff; padding: 16px; text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
+      .question:hover { border-color: #8ab4f8; box-shadow: 0 3px 12px rgba(0,113,227,.08); }
+      .question:focus-visible, .action:focus-visible, .secondary:focus-visible, input:focus-visible { outline: 3px solid rgba(0,113,227,.24); outline-offset: 2px; }
+      .question[aria-pressed="true"] { border-color: #0071e3; background: #f5f9ff; box-shadow: inset 0 0 0 1px #0071e3; }
+      .question-row { display: flex; align-items: center; gap: 9px; }
+      .question-id { color: #0071e3; font-size: 13px; font-weight: 720; }
+      .question-title { flex: 1; font-size: 16px; font-weight: 620; letter-spacing: -0.02em; }
+      .approved { border: 1px solid #b7cce8; border-radius: 999px; padding: 3px 8px; color: #285a8e; background: #f3f8ff; font-size: 12px; font-weight: 620; }
+      .question-detail { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e5ea; color: #515154; font-size: 13px; line-height: 1.55; }
+      .question[aria-pressed="true"] .question-detail { display: block; }
+      .derived { display: none; }
+      .derived.is-visible { display: block; }
+      .fact-row { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 12px; padding: 13px 0; border-bottom: 1px solid #ededf0; }
+      .fact-row:last-child { border-bottom: 0; padding-bottom: 0; }
+      .fact-label { color: #86868b; font-size: 13px; }
+      .fact-value { font-size: 14px; font-weight: 560; line-height: 1.45; }
+      .placeholder { padding: 4px 0 0; color: #86868b; font-size: 14px; }
+      .limits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; margin-top: 18px; }
+      .limit label { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; color: #424245; font-size: 13px; }
+      .limit output { color: #1d1d1f; font-variant-numeric: tabular-nums; font-weight: 650; }
+      input[type="range"] { width: 100%; margin: 0; accent-color: #0071e3; }
+      .actions { display: flex; justify-content: flex-end; gap: 10px; padding: 18px 24px 22px; border-top: 1px solid #e5e5ea; }
+      .secondary, .action { min-height: 36px; border-radius: 999px; padding: 0 16px; cursor: pointer; font-size: 14px; font-weight: 610; }
+      .secondary { border: 1px solid #d2d2d7; background: #fff; color: #1d1d1f; }
+      .secondary:hover { background: #f5f5f7; }
+      .action { border: 1px solid #0071e3; background: #0071e3; color: #fff; }
+      .action:hover:not(:disabled) { background: #0077ed; }
+      .action:disabled { cursor: not-allowed; border-color: #d2d2d7; background: #d2d2d7; color: #86868b; }
+      .status { display: none; margin: 0 24px 22px; border-radius: 12px; padding: 12px 14px; background: #eef7ff; color: #205b8f; font-size: 14px; }
+      .status.is-visible { display: block; }
+      .side-title { display: flex; align-items: center; gap: 8px; }
+      .step { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #f0f5fb; color: #386895; font-size: 12px; font-weight: 700; }
+      .side-list { display: grid; gap: 15px; margin: 18px 0 0; padding: 0; list-style: none; }
+      .side-list li { display: grid; grid-template-columns: 22px minmax(0,1fr); gap: 10px; color: #6e6e73; font-size: 14px; line-height: 1.45; }
+      .side-list strong { display: block; color: #1d1d1f; font-size: 14px; }
+      .side-list .dot { width: 8px; height: 8px; margin: 6px 0 0 7px; border-radius: 50%; background: #d2d2d7; }
+      .side-list .dot.active { background: #0071e3; }
+      .empty-note { margin: 0; color: #6e6e73; font-size: 14px; line-height: 1.55; }
+      @media (max-width: 980px) { body { min-width: 0; } .shell { width: min(100% - 32px, 680px); margin-top: 28px; } .workspace { grid-template-columns: 1fr; } .context { display: none; } }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="page-header">
+        <h1>创建科研运行</h1>
+        <p class="context">挑战杯 · 科研工作流</p>
+      </header>
+
+      <div class="workspace">
+        <section class="surface" aria-label="创建科研运行">
+          <div class="section">
+            <p class="eyebrow">研究命题</p>
+            <h2>选择已审核题目</h2>
+            <div class="question-list" role="group" aria-label="可启动题目">
+              <button class="question" type="button" aria-pressed="false" data-question="SCI-096">
+                <span class="question-row">
+                  <span class="question-id">SCI-096</span>
+                  <span class="question-title">大脑如何提取记忆？</span>
+                  <span class="approved">已审核</span>
+                </span>
+                <span class="question-detail">已通过题目审核，启动后将从该题目生成本次研究范围与运行合同。</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="section derived" id="derived" aria-live="polite">
+            <p class="eyebrow">本次研究</p>
+            <h2>SCI-096</h2>
+            <div class="fact-row"><span class="fact-label">题目审核</span><span class="fact-value">stage1-sci-096-v3 · 已通过</span></div>
+            <div class="fact-row"><span class="fact-label">研究范围</span><span class="fact-value">记忆提取机制的可证伪研究</span></div>
+          </div>
+
+          <div class="section">
+            <p class="eyebrow">安全上限</p>
+            <h2>本次运行</h2>
+            <div class="limits" aria-label="运行安全上限">
+              <div class="limit"><label for="tokens">每阶段令牌 <output id="tokens-output">250k</output></label><input id="tokens" type="range" min="100" max="500" step="50" value="250" /></div>
+              <div class="limit"><label for="total">总令牌 <output id="total-output">750k</output></label><input id="total" type="range" min="300" max="1500" step="50" value="750" /></div>
+              <div class="limit"><label for="calls">调用次数 <output id="calls-output">300</output></label><input id="calls" type="range" min="100" max="600" step="50" value="300" /></div>
+              <div class="limit"><label for="hours">最长运行 <output id="hours-output">6h</output></label><input id="hours" type="range" min="1" max="12" step="1" value="6" /></div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button class="secondary" type="button" id="cancel">取消</button>
+            <button class="action" type="button" id="create" disabled>创建运行</button>
+          </div>
+          <p class="status" id="status" role="status">运行草稿已创建</p>
+        </section>
+
+        <aside class="surface" aria-label="发起流程">
+          <div class="section">
+            <div class="side-title"><span class="step">1</span><h2>选择题目</h2></div>
+            <ul class="side-list">
+              <li><span class="dot active" id="select-dot"></span><span><strong id="selection-state">待选择</strong><span id="selection-copy">仅展示可启动的已审核题目</span></span></li>
+              <li><span class="dot"></span><span><strong>创建运行</strong>从题目生成研究范围与运行合同</span></li>
+              <li><span class="dot"></span><span><strong>进入工作流</strong>从资料寻找开始执行</span></li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+    </main>
+    <script>
+      const question = document.querySelector(".question");
+      const derived = document.getElementById("derived");
+      const create = document.getElementById("create");
+      const cancel = document.getElementById("cancel");
+      const status = document.getElementById("status");
+      const selectionState = document.getElementById("selection-state");
+      const selectionCopy = document.getElementById("selection-copy");
+      const selectDot = document.getElementById("select-dot");
+
+      question.addEventListener("click", () => {
+        const selected = question.getAttribute("aria-pressed") !== "true";
+        question.setAttribute("aria-pressed", String(selected));
+        derived.classList.toggle("is-visible", selected);
+        create.disabled = !selected;
+        status.classList.remove("is-visible");
+        selectionState.textContent = selected ? "SCI-096" : "待选择";
+        selectionCopy.textContent = selected ? "题目审核已通过" : "仅展示可启动的已审核题目";
+        selectDot.classList.toggle("active", !selected);
+      });
+
+      cancel.addEventListener("click", () => {
+        question.setAttribute("aria-pressed", "false");
+        derived.classList.remove("is-visible");
+        create.disabled = true;
+        status.classList.remove("is-visible");
+        selectionState.textContent = "待选择";
+        selectionCopy.textContent = "仅展示可启动的已审核题目";
+        selectDot.classList.add("active");
+      });
+
+      create.addEventListener("click", () => status.classList.add("is-visible"));
+      for (const input of document.querySelectorAll("input[type=range]")) {
+        const output = document.getElementById(`${input.id}-output`);
+        input.addEventListener("input", () => {
+          const suffix = input.id === "tokens" || input.id === "total" ? "k" : input.id === "hours" ? "h" : "";
+          output.textContent = `${input.value}${suffix}`;
+        });
+      }
+    </script>
+  </body>
+</html>

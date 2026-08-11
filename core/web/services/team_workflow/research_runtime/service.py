@@ -67,6 +67,11 @@ from .node_execution import heartbeat_node_execution, start_node_execution
 from .node_execution_support import NodeExecutionError, latest_node_run
 from .node_operational_projection import project_node_operations
 from .node_recovery import reconcile_expired_execution, retry_node_execution
+from .question_launch import (
+    QuestionLaunchError,
+    build_question_run_input,
+    list_question_launch_options,
+)
 from .research_ledger import project_research_ledger
 from .run_access import RunAccessError, require_run_access
 from .run_domain_queries import (
@@ -171,6 +176,42 @@ class ResearchWorkflowRuntimeService:
         if str(team_id or "").strip():
             runs = [r for r in runs if str(r.get("teamId") or "") == str(team_id).strip()]
         return {"workflowId": workflow_id, "runs": runs}
+
+    def get_question_launch_options(
+        self,
+        workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID,
+        *,
+        team_id: str,
+    ) -> dict[str, Any]:
+        self.get_definition(workflow_id)
+        try:
+            return {"workflowId": workflow_id, **list_question_launch_options(team_id)}
+        except QuestionLaunchError as exc:
+            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+
+    def create_question_run(
+        self,
+        workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID,
+        *,
+        team_id: str,
+        question_id: str,
+        safety_limits: Mapping[str, Any],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        self.get_definition(workflow_id)
+        try:
+            run_input = build_question_run_input(
+                team_id,
+                question_id=question_id,
+                safety_limits=safety_limits,
+            )
+        except QuestionLaunchError as exc:
+            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+        return self.create_run(
+            workflow_id,
+            run_input=run_input,
+            idempotency_key=idempotency_key,
+        )
 
     def _effective_binding_layers(self, workflow_id: str, team_id: str) -> AgentBindingLayers:
         """Controlled config (per workflow+team) merged over team-role defaults."""

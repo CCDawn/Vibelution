@@ -165,7 +165,7 @@ def test_create_run_idempotency_and_restart_preserve_same_initial_facts(tmp_path
     assert reopened["events"] == first["events"]
 
 
-def test_http_create_requires_full_frozen_input_contract(tmp_path: Path) -> None:
+def test_http_create_rejects_client_authored_frozen_contract(tmp_path: Path) -> None:
     store = WorkflowRunStore(tmp_path / "runs")
     reset_research_workflow_runtime_service_for_tests(
         run_store=store,
@@ -177,7 +177,7 @@ def test_http_create_requires_full_frozen_input_contract(tmp_path: Path) -> None
         f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/runs",
         json={"teamId": "acceptance-research-team"},
     )
-    accepted = client.post(
+    client_authored = client.post(
         f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/runs",
         json={
             **run_input_request(),
@@ -187,9 +187,7 @@ def test_http_create_requires_full_frozen_input_contract(tmp_path: Path) -> None
     )
 
     assert rejected.status_code == 422
-    assert accepted.status_code == 201
-    assert accepted.json()["nodeRuns"][0]["status"] == "ready"
-    assert accepted.json()["inputSnapshot"]["createdBy"] == "operator"
+    assert client_authored.status_code == 422
 
 
 def test_node_start_uses_one_durable_lease_and_rejects_owner_mismatch(

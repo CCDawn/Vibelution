@@ -10,7 +10,6 @@ import { useNodeDetailState } from "./useNodeDetailState";
 import { useResearchWorkflowCatalog } from "./useResearchWorkflowCatalog";
 import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
 import { useResearchWorkflowInsights } from "./useResearchWorkflowInsights";
-import { useResearchWorkflowProjectContext } from "./useResearchWorkflowProjectContext";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
 import { useResearchWorkflowWorkspace } from "./useResearchWorkflowWorkspace";
 import styles from "./ResearchProcessWorkspace.styles";
@@ -28,7 +27,6 @@ export function ResearchProcessWorkspace({
 }: ResearchProcessWorkspaceProps) {
   const location = useResearchWorkflowWorkspace(teamId);
   const runState = useResearchWorkflowRun(teamId, location.runId);
-  const project = useResearchWorkflowProjectContext(teamId);
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
   const nodeDetail = useNodeDetailState(
     teamId,
@@ -71,7 +69,7 @@ export function ResearchProcessWorkspace({
   const nextAction = runState.projection?.definition.nodes.find(
     (node) => node.nodeId === runtimeNodeId,
   )?.label ?? (location.runId ? "等待运行更新" : "创建运行");
-  const displayError = commands.error || runState.error || catalog.error || project.error;
+  const displayError = commands.error || runState.error || catalog.error;
   const commandBusy = runState.busy || commands.busy;
 
   return (
@@ -85,7 +83,7 @@ export function ResearchProcessWorkspace({
         toolbar={(
           <ResearchWorkflowToolbar
             teamName={teamName || teamId}
-            projectName={project.activeProjectName}
+            questionId={runState.run?.questionId || ""}
             runId={location.runId}
             runStatus={runState.run?.status || runState.projection?.run.status || ""}
             nextAction={nextAction}
@@ -93,8 +91,7 @@ export function ResearchProcessWorkspace({
             runOptions={catalog.runOptions}
             panel={location.panel}
             hasRuntimeNode={Boolean(runtimeNodeId)}
-            createDisabled={Boolean(runState.busy || project.loading || !project.activeProjectId)}
-            createDisabledReason={project.error || (!project.activeProjectId ? "请先选择活动研究项目" : undefined)}
+            createDisabled={runState.busy}
             onSelectRun={(runId) => location.replaceParams({ runId: runId || null, node: null, panel: "node" })}
             onOpenPanel={location.openPanel}
             onJumpToRuntime={jumpToRuntime}
@@ -126,8 +123,6 @@ export function ResearchProcessWorkspace({
               run: runState.run,
               projection: runState.projection,
               effectiveBindings: catalog.effectiveBindings,
-              activeProjectId: project.activeProjectId || "",
-              projectLoading: project.loading,
               nodeDetail: nodeDetail.state,
               insights,
               busy: commandBusy,

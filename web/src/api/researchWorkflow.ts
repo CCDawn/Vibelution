@@ -60,23 +60,31 @@ export type VersionedWorkflowCommand = RequiredTeamScope & {
 };
 
 export type CreateResearchWorkflowRunInput = RequiredTeamScope & {
-  projectId: string;
   questionId: string;
-  researchBriefHash: string;
-  datasetRefs: string[];
-  metricContract: Record<string, unknown>;
-  constraintSnapshot: Record<string, unknown>;
-  competitionRuleRef: string;
-  competitionRuleVersion: string;
-  trackAndRubricSnapshot: Record<string, unknown>;
-  researchObjectiveContract: Record<string, unknown>;
-  sourcePolicy: Record<string, unknown>;
-  budgetPolicy: Record<string, unknown>;
-  stopPolicy: Record<string, unknown>;
-  environmentSnapshotRef: string;
-  modelRoutingPolicy: Record<string, unknown>;
-  evaluationContract: Record<string, unknown>;
+  safetyLimits: ResearchWorkflowSafetyLimits;
   idempotencyKey: string;
+};
+
+export type ResearchWorkflowSafetyLimits = {
+  stageTokens: Record<"knowledge_collection" | "experiment_design" | "execution_iteration", number>;
+  toolCalls: number;
+  wallClockSeconds: number;
+  maxRetries: number;
+};
+
+export type ResearchWorkflowLaunchOption = {
+  questionId: string;
+  title: string;
+  scope: string;
+  catalogId: string;
+  reviewRunId: string;
+  artifactSha256: string;
+};
+
+export type ResearchWorkflowLaunchOptionsResponse = {
+  workflowId: string;
+  teamId: string;
+  questions: ResearchWorkflowLaunchOption[];
 };
 
 export type WorkflowEventsResponse = {
@@ -127,6 +135,15 @@ export async function listResearchWorkflowRuns(
 ): Promise<{ workflowId: string; runs: WorkflowRunRecord[] }> {
   return fetchJson(
     `/api/research/workflows/${encodeURIComponent(workflowId)}/runs${teamQuery(options.teamId)}`,
+  );
+}
+
+export async function fetchResearchWorkflowLaunchOptions(
+  workflowId: string = CHALLENGE_CUP_WORKFLOW_ID,
+  options: RequiredTeamScope,
+): Promise<ResearchWorkflowLaunchOptionsResponse> {
+  return fetchJson(
+    `/api/research/workflows/${encodeURIComponent(workflowId)}/launch-options${teamQuery(options.teamId)}`,
   );
 }
 

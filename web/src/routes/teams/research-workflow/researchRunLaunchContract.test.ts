@@ -1,124 +1,62 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildResearchRunInput,
-  type ResearchRunLaunchDraft,
-} from "./researchRunLaunchContract";
-
-const CONTRACT = {
-  metricContract: { primary: "score" },
-  constraintSnapshot: { offline: true },
-  trackAndRubricSnapshot: { track: "challenge-cup" },
-  researchObjectiveContract: { question: "q" },
-  sourcePolicy: { minimumPrimarySources: 3 },
-  budgetPolicy: { toolCalls: 20 },
-  stopPolicy: { maxNoImprovementRounds: 2 },
-  modelRoutingPolicy: {
-    source_discovery: "model-a",
-    extraction: "model-a",
-    reasoning: "model-a",
-    review: "model-a",
-    governance: "model-a",
-  },
-  evaluationContract: { requiredSeeds: [11, 29, 47] },
-};
-
-function draft(overrides: Partial<ResearchRunLaunchDraft> = {}): ResearchRunLaunchDraft {
-  return {
-    questionId: "question-1",
-    researchBriefHash: "sha256:brief",
-    datasetRefs: "dataset:a\ndataset:b, dataset:c",
-    competitionRuleRef: "rules/challenge-cup-2026",
-    competitionRuleVersion: "2026.1",
-    environmentSnapshotRef: "env:2026-08-09",
-    contractJson: JSON.stringify(CONTRACT),
-    ...overrides,
-  };
-}
+import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
+import { buildResearchRunInput } from "./researchRunLaunchContract";
 
 describe("buildResearchRunInput", () => {
-  it("builds the complete immutable run contract with canonical teamId", () => {
+  it("submits only the selected question and operator safety ceilings", () => {
     const input = buildResearchRunInput({
       teamId: " team-1 ",
-      projectId: " project-1 ",
-      draft: draft(),
+      questionId: " SCI-096 ",
+      safetyBudget: createResearchRunSafetyBudget(),
     });
-    expect(input).toMatchObject({
+
+    expect(input).toEqual({
       teamId: "team-1",
-      projectId: "project-1",
-      questionId: "question-1",
-      researchBriefHash: "sha256:brief",
-      datasetRefs: ["dataset:a", "dataset:b", "dataset:c"],
-      competitionRuleRef: "rules/challenge-cup-2026",
-      competitionRuleVersion: "2026.1",
-      environmentSnapshotRef: "env:2026-08-09",
-      ...CONTRACT,
+      questionId: "SCI-096",
+      safetyLimits: {
+        stageTokens: {
+          knowledge_collection: 250000,
+          experiment_design: 250000,
+          execution_iteration: 250000,
+        },
+        toolCalls: 300,
+        wallClockSeconds: 21600,
+        maxRetries: 2,
+      },
+      idempotencyKey: expect.stringMatching(/^create:v3:[0-9a-f]{16}$/),
     });
-    expect(input.idempotencyKey).toMatch(/^create:v2:[0-9a-f]{16}$/);
+    expect(input).not.toHaveProperty("projectId");
+    expect(input).not.toHaveProperty("researchBriefHash");
+    expect(input).not.toHaveProperty("modelRoutingPolicy");
   });
 
-  it("keeps retries stable but distinguishes changed run contracts", () => {
+  it("keeps retries stable and changes identity only for an allowed safety change", () => {
     const base = buildResearchRunInput({
       teamId: "team-1",
-      projectId: "project-1",
-      draft: draft(),
+      questionId: "SCI-096",
+      safetyBudget: createResearchRunSafetyBudget(),
     });
     const retry = buildResearchRunInput({
       teamId: "team-1",
-      projectId: "project-1",
-      draft: draft(),
+      questionId: "SCI-096",
+      safetyBudget: createResearchRunSafetyBudget(),
     });
-    const changedBudget = buildResearchRunInput({
+    const extended = buildResearchRunInput({
       teamId: "team-1",
-      projectId: "project-1",
-      draft: draft({
-        contractJson: JSON.stringify({
-          ...CONTRACT,
-          budgetPolicy: { toolCalls: 120 },
-        }),
-      }),
+      questionId: "SCI-096",
+      safetyBudget: createResearchRunSafetyBudget("extended"),
     });
 
     expect(retry.idempotencyKey).toBe(base.idempotencyKey);
-    expect(changedBudget.idempotencyKey).not.toBe(base.idempotencyKey);
+    expect(extended.idempotencyKey).not.toBe(base.idempotencyKey);
   });
 
   it.each([
-    ["teamId", { teamId: "", projectId: "project-1", draft: draft() }],
-    ["projectId", { teamId: "team-1", projectId: "", draft: draft() }],
-    ["questionId", { teamId: "team-1", projectId: "project-1", draft: draft({ questionId: "" }) }],
-  ])("rejects a missing %s instead of inventing a fallback", (field, options) => {
-    expect(() => buildResearchRunInput(options)).toThrow(`${field} 不能为空`);
-  });
-
-  it("rejects malformed and incomplete run contracts", () => {
-    expect(() =>
-      buildResearchRunInput({
-        teamId: "team-1",
-        projectId: "project-1",
-        draft: draft({ contractJson: "{" }),
-      }),
-    ).toThrow("运行合同 JSON 无效");
-
-    expect(() =>
-      buildResearchRunInput({
-        teamId: "team-1",
-        projectId: "project-1",
-        draft: draft({ contractJson: JSON.stringify({ ...CONTRACT, budgetPolicy: null }) }),
-      }),
-    ).toThrow("运行合同缺少 budgetPolicy");
-
-    expect(() =>
-      buildResearchRunInput({
-        teamId: "team-1",
-        projectId: "project-1",
-        draft: draft({
-          contractJson: JSON.stringify({
-            ...CONTRACT,
-            modelRoutingPolicy: { ...CONTRACT.modelRoutingPolicy, source_discovery: "" },
-          }),
-        }),
-      }),
-    ).toThrow("运行合同缺少 modelRoutingPolicy.source_discovery");
+    ["teamId", { teamId: "", questionId: "SCI-096" }],
+    ["questionId", { teamId: "team-1", questionId: "" }],
+  ])("rejects a missing %s", (field, values) => {
+    expect(() => buildResearchRunInput({ ...values, safetyBudget: createResearchRunSafetyBudget() }))
+      .toThrow(`${field} 不能为空`);
   });
 });

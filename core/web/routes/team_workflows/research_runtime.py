@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from fastapi import Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from core.web.services.team_workflow.research_runtime.event_stream import (
     iter_workflow_sse,
@@ -32,23 +32,20 @@ class TeamScopedPayload(BaseModel):
         return normalized
 
 
+class ResearchRunSafetyLimitsPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stageTokens: dict[str, int]
+    toolCalls: int = Field(..., ge=1)
+    wallClockSeconds: int = Field(..., ge=1)
+    maxRetries: int = Field(..., ge=1)
+
+
 class CreateRunPayload(TeamScopedPayload):
-    projectId: str = Field(..., min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
     questionId: str = Field(..., min_length=1)
-    researchBriefHash: str = Field(..., min_length=1)
-    datasetRefs: list[str]
-    metricContract: dict[str, Any]
-    constraintSnapshot: dict[str, Any]
-    competitionRuleRef: str = Field(..., min_length=1)
-    competitionRuleVersion: str = Field(..., min_length=1)
-    trackAndRubricSnapshot: dict[str, Any]
-    researchObjectiveContract: dict[str, Any]
-    sourcePolicy: dict[str, Any]
-    budgetPolicy: dict[str, Any]
-    stopPolicy: dict[str, Any]
-    environmentSnapshotRef: str = Field(..., min_length=1)
-    modelRoutingPolicy: dict[str, Any]
-    evaluationContract: dict[str, Any]
+    safetyLimits: ResearchRunSafetyLimitsPayload
     idempotencyKey: str = Field(..., min_length=1)
 
 
@@ -124,6 +121,8 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
         "invalid_node_state",
         "invalid_human_task_state",
         "command_not_allowed_for_node",
+        "research_project_question_mismatch",
+        "challenge_question_not_launchable",
     }:
         status = 409
     elif code in {
@@ -197,6 +196,20 @@ def research_workflow_runs(
     return _svc().list_runs(workflow_id, team_id=_canonical_team_id(team_id))
 
 
+@router.get("/research/workflows/{workflow_id}/launch-options")
+def research_workflow_launch_options(
+    workflow_id: str,
+    team_id: str = Query(..., alias="teamId", min_length=1),
+) -> dict:
+    try:
+        return _svc().get_question_launch_options(
+            workflow_id,
+            team_id=_canonical_team_id(team_id),
+        )
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+
+
 @router.get("/research/workflows/{workflow_id}/agent-bindings/effective")
 def research_workflow_effective_bindings(
     workflow_id: str,
@@ -227,12 +240,11 @@ def research_workflow_put_binding_config(
 @router.post("/research/workflows/{workflow_id}/runs", status_code=201)
 def research_workflow_create_run(workflow_id: str, payload: CreateRunPayload) -> dict:
     try:
-        return _svc().create_run(
+        return _svc().create_question_run(
             workflow_id,
-            run_input={
-                **payload.model_dump(exclude={"idempotencyKey"}),
-                "createdBy": "operator",
-            },
+            team_id=payload.teamId,
+            question_id=payload.questionId,
+            safety_limits=payload.safetyLimits.model_dump(),
             idempotency_key=payload.idempotencyKey,
         )
     except ResearchWorkflowError as exc:
