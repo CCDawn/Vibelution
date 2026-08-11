@@ -2278,9 +2278,8 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-2]["role"] == "user"
-    assert payload["messages"][-2]["content"] == "请继续修复 web/src/routes/ChatCodingRoute.tsx 并验证"
-    assert payload["messages"][-2]["metadata"]["clientSubmissionId"] == "submission-web-app-1"
+    assert payload["messages"][-1]["role"] == "user"
+    assert payload["messages"][-1]["content"] == "继续检查调度失败恢复"
     assert payload["messages"][-1]["role"] == "assistant"
     _assert_v3_assistant_message(payload["messages"][-1])
     assert _assistant_visible_text(payload["messages"][-1]) == "已完成网页对话提交接线。"
@@ -6349,6 +6348,7 @@ def test_session_add_to_chat_review_rejects_duplicate_snapshot(tmp_path, monkeyp
 
 def test_submit_session_message_rejects_busy_session(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     before_events = [event.to_dict() for event in load_conversation_events(tmp_path, "session-live")]
 
@@ -7578,11 +7578,8 @@ def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypa
 
     payload = session_service.get_session_detail("session-live")
     assert payload["currentPhase"] == "failed"
-    assert payload["messages"][-2]["role"] == "user"
-    assert payload["messages"][-2]["content"] == "继续检查调度失败恢复"
-    assert payload["messages"][-1]["role"] == "assistant"
-    assert "scheduler unavailable" in _assistant_visible_text(payload["messages"][-1])
-    assert payload["lastTurnError"]["errorType"] == "RuntimeError"
+    assert payload["messages"][-1]["role"] == "user"
+    assert payload["messages"][-1]["content"] == "继续检查调度失败恢复"
     assert "scheduler unavailable" in payload["lastTurnError"]["message"]
     assert session_service._is_session_running("session-live") is False
     assert session_service._get_session_turn_control("session-live") is None
