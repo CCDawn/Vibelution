@@ -52,4 +52,15 @@ describe("Electron main transactional Workbench close", () => {
       /if \(desktopCliArgs\.workbenchCloseCanary\) \{\s*await windowProvider\.openOrFocusWorkbench\(\);\s*return;\s*\}\s*startDesktopActionLoop\(paths, launcherBootstrap, windowProvider\);/
     );
   });
+
+  it("refreshes the Workbench URL from the current Launcher bootstrap before a desktop open action is acknowledged", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+
+    expect(source).toContain("async function openWorkbenchAtCurrentLauncherUrl(");
+    expect(source).toContain("const currentBootstrap = await bootstrapLauncherIfEnabled(paths)");
+    expect(source).toContain("resolveWorkbenchUrl(desktopEnvironment(), currentBootstrap.workbenchUrl)");
+    expect(source).toContain("currentWorkbenchUrl = workbenchUrl;");
+    expect(source).toContain("const workbenchUrl = currentWorkbenchUrl || resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl)");
+    expect(source).toContain("openOrFocusWorkbench: () => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider)");
+  });
 });

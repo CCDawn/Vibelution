@@ -338,6 +338,8 @@ ELECTRON_SUPERVISOR_EVENT_CODES = {
     "electron.launcher.supervisor.started",
     "electron.launcher.window.opened",
     "electron.workbench.window.opened",
+    "electron.workbench.navigation.ready",
+    "electron.workbench.navigation.failed",
     "electron.launcher_service.started",
     "electron.launcher_service.exited",
     "electron.desktop_action.claimed",

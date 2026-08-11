@@ -15,7 +15,11 @@ export type ElectronWindowOpenHandler = (details: ElectronWindowOpenRequest) => 
 export type ElectronWindowLike = {
   id: number;
   focus(): void;
+  show(): void;
+  hide(): void;
   close(): void;
+  destroy(): void;
+  loadURL(url: string): Promise<void>;
   isDestroyed(): boolean;
   isFocused(): boolean;
   on(event: string, listener: ElectronWindowEventListener): unknown;
@@ -64,15 +68,19 @@ export class ElectronWindowProvider {
   private readonly onWorkbenchClosed: () => void | Promise<void>;
   private readonly onWorkbenchFocusAttentionClear: () => void;
   private readonly onOsSessionEnd: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
+  private workbenchUrl: string;
+  private workbenchReadyUrl: string | null = null;
+  private workbenchNavigation: Promise<ManagedWindowState> | null = null;
   private workbenchCloseAuthorized = false;
   private workbenchCloseInFlight = false;
 
   constructor(
     private readonly paths: DesktopPaths,
     private readonly launcherUrl: string,
-    private readonly workbenchUrl: string,
+    workbenchUrl: string,
     options: ElectronWindowProviderOptions = {}
   ) {
+    this.workbenchUrl = workbenchUrl;
     this.createLauncherWindow = options.createLauncherWindow ?? missingWindowFactory("launcher");
     this.createWorkbenchWindow = options.createWorkbenchWindow ?? missingWindowFactory("workbench");
     this.reportState = options.reportState ?? (() => undefined);
@@ -96,15 +104,23 @@ export class ElectronWindowProvider {
     return this.reportAndReturn(this.stateFor("launcher"));
   }
 
-  async openOrFocusWorkbench(): Promise<ManagedWindowState> {
-    const workbenchOrigin = new URL(this.workbenchUrl).origin;
-    const safeUrl = assertLocalHttpUrl(this.workbenchUrl, workbenchOrigin);
-    if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
-      this.workbenchWindow = this.createWorkbenchWindow(safeUrl, this.paths);
-      this.attachWindowEvents("workbench", this.workbenchWindow);
+  async openOrFocusWorkbench(workbenchUrl = this.workbenchUrl): Promise<ManagedWindowState> {
+    const safeUrl = localWorkbenchUrl(workbenchUrl);
+    this.workbenchUrl = safeUrl;
+    if (this.workbenchNavigation !== null) {
+      await this.workbenchNavigation;
+      return this.openOrFocusWorkbench(safeUrl);
     }
-    this.workbenchWindow.focus();
-    return this.reportAndReturn(this.stateFor("workbench"));
+
+    const navigation = Promise.resolve().then(() => this.navigateWorkbench(safeUrl));
+    this.workbenchNavigation = navigation;
+    try {
+      return await navigation;
+    } finally {
+      if (this.workbenchNavigation === navigation) {
+        this.workbenchNavigation = null;
+      }
+    }
   }
 
   async focusWorkbench(): Promise<ManagedWindowState> {
@@ -116,11 +132,13 @@ export class ElectronWindowProvider {
   }
 
   isWorkbenchFocused(): boolean {
-    return Boolean(this.workbenchWindow && !this.workbenchWindow.isDestroyed() && this.workbenchWindow.isFocused());
+    return Boolean(
+      this.workbenchReadyUrl !== null && this.workbenchWindow && !this.workbenchWindow.isDestroyed() && this.workbenchWindow.isFocused()
+    );
   }
 
   setWorkbenchAttention(options: WorkbenchAttentionOptions): void {
-    if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
+    if (!this.workbenchWindow || this.workbenchWindow.isDestroyed() || this.workbenchReadyUrl === null) {
       return;
     }
 
@@ -206,6 +224,7 @@ export class ElectronWindowProvider {
       }
       if (role === "workbench" && this.workbenchWindow === window) {
         this.workbenchWindow = null;
+        this.workbenchReadyUrl = null;
         this.workbenchCloseAuthorized = false;
         this.workbenchCloseInFlight = false;
       }
@@ -231,6 +250,51 @@ export class ElectronWindowProvider {
     window.on("session-end", () => this.onOsSessionEnd("session-end", role));
   }
 
+  private async navigateWorkbench(safeUrl: string): Promise<ManagedWindowState> {
+    let workbenchWindow = this.workbenchWindow;
+    if (!workbenchWindow || workbenchWindow.isDestroyed()) {
+      workbenchWindow = this.createWorkbenchWindow(safeUrl, this.paths);
+      this.workbenchWindow = workbenchWindow;
+      this.workbenchReadyUrl = null;
+      this.attachWindowEvents("workbench", workbenchWindow);
+    }
+
+    if (this.workbenchReadyUrl !== safeUrl) {
+      this.workbenchReadyUrl = null;
+      workbenchWindow.hide();
+      try {
+        await workbenchWindow.loadURL(safeUrl);
+        if (workbenchWindow.isDestroyed() || this.workbenchWindow !== workbenchWindow) {
+          throw new Error("Workbench window closed before navigation completed");
+        }
+        this.workbenchReadyUrl = safeUrl;
+      } catch (error: unknown) {
+        this.discardFailedWorkbenchWindow(workbenchWindow);
+        throw navigationFailure(safeUrl, error);
+      }
+    }
+
+    workbenchWindow.show();
+    workbenchWindow.focus();
+    return this.reportAndReturn(this.stateFor("workbench"));
+  }
+
+  private discardFailedWorkbenchWindow(window: ElectronWindowLike): void {
+    if (this.workbenchWindow === window) {
+      this.workbenchWindow = null;
+      this.workbenchReadyUrl = null;
+      this.workbenchCloseAuthorized = false;
+      this.workbenchCloseInFlight = false;
+    }
+    if (!window.isDestroyed()) {
+      try {
+        window.destroy();
+      } catch {
+        // Preserve the original navigation failure for the desktop action result.
+      }
+    }
+  }
+
   private requestWorkbenchCloseTransaction(): void {
     if (this.workbenchCloseInFlight) {
       return;
@@ -250,7 +314,7 @@ export class ElectronWindowProvider {
     const workbenchOrigin = new URL(this.workbenchUrl).origin;
     window.webContents.setWindowOpenHandler((details) => {
       if (isManagedWorkbenchUrl(details.url, workbenchOrigin)) {
-        void this.openOrFocusWorkbench();
+        void this.openOrFocusWorkbench().catch(() => undefined);
       }
       return { action: "deny" };
     });
@@ -259,6 +323,9 @@ export class ElectronWindowProvider {
   private stateFor(role: ElectronWindowRole): ManagedWindowState {
     const window = role === "launcher" ? this.launcherWindow : this.workbenchWindow;
     if (!window || window.isDestroyed()) {
+      return closedWindowState(role);
+    }
+    if (role === "workbench" && this.workbenchReadyUrl === null) {
       return closedWindowState(role);
     }
     return {
@@ -290,6 +357,17 @@ function isManagedWorkbenchUrl(requestUrl: string, workbenchOrigin: string): boo
   } catch {
     return false;
   }
+}
+
+function localWorkbenchUrl(value: string): string {
+  const origin = new URL(value).origin;
+  return assertLocalHttpUrl(value, origin);
+}
+
+function navigationFailure(url: string, error: unknown): Error {
+  const origin = new URL(url).origin;
+  const detail = error instanceof Error ? error.message : String(error);
+  return new Error(`Workbench navigation failed for ${origin}: ${detail.slice(0, 300)}`);
 }
 
 function preventWindowClose(event: unknown): void {

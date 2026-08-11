@@ -64,9 +64,10 @@ describe("Electron desktop window icons", () => {
       title: "Vibelution Workbench",
       icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
       backgroundColor: "#f7fafc",
+      show: false,
       ...lightShellTitleBar
     });
-    expect(loadedUrls).toEqual(["http://127.0.0.1:8000"]);
+    expect(loadedUrls).toEqual([]);
   });
 
   it("defaults the desktop shell chrome to the light workbench theme", () => {
