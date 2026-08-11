@@ -91,6 +91,7 @@ htmlcov/
 /desktop/**/target/
 /desktop/**/out/
 /desktop/**/dist/
+/desktop/electron/package-provenance.json
 
 # --- Agent / Codex / review process outputs (generated) ---
 /.codex-temp/
