@@ -123,6 +123,14 @@ def session_reference_query_tool(
         if not isinstance(message, dict):
             continue
         content = str(message.get("content") or "")
+        if not content and str(message.get("role") or "").strip().lower() == "assistant":
+            content = "\n".join(
+                str(item.get("text") or "").strip()
+                for item in list(message.get("turnItems") or [])
+                if isinstance(item, dict)
+                and str(item.get("type") or "") in {"agent_message", "error"}
+                if str(item.get("text") or "").strip()
+            )
         thought = str(message.get("thought") or "")
         haystack = f"{content}\n{thought}".lower()
         if normalized_query and normalized_query not in haystack:

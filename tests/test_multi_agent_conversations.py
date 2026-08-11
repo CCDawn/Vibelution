@@ -2478,6 +2478,7 @@ def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, mon
         alpha["id"],
         "agent_message_tool",
         {
+            "target_session": beta["id"],
             "target_agent": beta["agentCode"],
             "content": "Beta，请从架构风险角度审查这轮改造。",
             "summary": "请求架构审查",
@@ -2485,7 +2486,6 @@ def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, mon
             "metadata_json": "{\"priority\":\"normal\"}",
         },
     )
-
     payload = json.loads(result)
     assert action is None
     assert payload["ok"] is True
@@ -2505,11 +2505,11 @@ def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, mon
     assert pending[0]["sourceAgentId"] == alpha["agentId"]
     assert pending[0]["sourceAgentCode"] == alpha["agentCode"]
     assert pending[0]["sourceSessionId"] == alpha["id"]
-    assert pending[0]["threadId"] == f"agent:{alpha['agentId']}->{beta['agentId']}"
+    assert pending[0]["threadId"] == f"session:{beta['id']}"
     assert pending[0]["kind"] == "agent_direct_message"
     assert pending[0]["createdBy"] == "kernel"
     assert pending[0]["summary"] == "请求架构审查"
-    assert pending[0]["content"] == "Beta，请从架构风险角度审查这轮改造。"
+    assert pending[0]["content"] == "请求架构审查"
     assert json.loads(pending[0]["metadata"]["agentToolMetadataJson"]) == {"priority": "normal"}
     assert pending[0]["metadata"]["sourceSurface"] == "agent_message_tool"
     assert pending[0]["metadata"]["kernelTaskId"] == payload["kernel"]["taskId"]
@@ -2612,6 +2612,7 @@ def test_agent_message_tool_resolves_ui_composite_agent_label(tmp_path, monkeypa
         alpha["id"],
         "agent_message_tool",
         {
+            "target_session": beta["id"],
             "target_agent": label,
             "content": "Beta，请确认 UI 复合标签也能投递。",
             "summary": "复合标签投递",
@@ -2648,6 +2649,7 @@ def test_agent_message_tool_resolves_common_agent_label_variants(tmp_path, monke
         alpha["id"],
         "agent_message_tool",
         {
+            "target_session": beta["id"],
             "target_agent": label,
             "content": "Beta，请确认常见标签格式也能投递。",
             "summary": "标签变体投递",
@@ -2677,6 +2679,7 @@ def test_agent_message_tool_resolves_unique_role_key_target(tmp_path, monkeypatc
         alpha["id"],
         "agent_message_tool",
         {
+            "target_session": beta["id"],
             "target_agent": "source_finder",
             "content": "请接收资料发现阶段的候选线索。",
             "summary": "资料获取交接",
@@ -2703,6 +2706,7 @@ def test_agent_message_tool_preserves_full_message_body(tmp_path, monkeypatch):
         alpha["id"],
         "agent_message_tool",
         {
+            "target_session": beta["id"],
             "target_agent": beta["agentId"],
             "content": full_report,
             "summary": "完整报告",
@@ -2715,7 +2719,7 @@ def test_agent_message_tool_preserves_full_message_body(tmp_path, monkeypatch):
     assert payload["ok"] is True
     assert payload["kernel"]["taskId"]
     pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
-    assert pending[0]["content"] == full_report
+    assert pending[0]["content"] == "完整报告"
 
 
 def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, monkeypatch):
@@ -2753,6 +2757,7 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
         alpha["id"],
         "agent_message_tool",
         {
+            "target_session": beta["id"],
             "target_agent": beta["agentId"],
             "content": "Beta，请接力回答 Alpha 的私信。",
             "wake_target": True,
@@ -2777,7 +2782,7 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
     assert detail["messages"][-2]["metadata"]["kind"] == "agent_inbox_message"
     assert detail["messages"][-2]["metadata"]["messageId"] == payload["messageId"]
     assert detail["messages"][-2]["metadata"]["sourceAgentName"] == alpha["agentDisplayName"]
-    assert detail["messages"][-1]["content"] == "Beta 已通过 agent_message_tool 接到私信。"
+    assert _assistant_visible_text(detail["messages"][-1]) == "Beta 已通过 agent_message_tool 接到私信。"
     assert agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending") == []
     consumed = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="consumed")
     assert consumed[0]["messageId"] == payload["messageId"]
@@ -3017,6 +3022,7 @@ def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp
         ceo["agent"]["directSessionId"],
         "agent_message_tool",
         {
+            "target_session": steward["agent"]["directSessionId"],
             "target_agent": steward["agent"]["agentCode"],
             "content": "请审查数据库试水团队的工具权限。",
             "summary": "能力权限审查",
@@ -3082,6 +3088,7 @@ def test_agent_message_tool_blocks_research_core_message_without_intent(tmp_path
         ceo["agent"]["directSessionId"],
         "agent_message_tool",
         {
+            "target_session": steward["agent"]["directSessionId"],
             "target_agent": steward["agent"]["agentCode"],
             "content": "请审查数据库试水团队的工具权限。",
             "summary": "能力权限审查",
@@ -3163,6 +3170,7 @@ def test_agent_message_tool_blocks_research_core_messages_without_allowed_policy
         advisor["agent"]["directSessionId"],
         "agent_message_tool",
         {
+            "target_session": ceo["agent"]["directSessionId"],
             "target_agent": ceo["agentId"],
             "content": "请 CEO 立刻执行这个组织任务。",
             "wake_target": False,
@@ -3213,6 +3221,7 @@ def test_agent_message_tool_blocks_outsider_to_research_core_agent(tmp_path, mon
         outsider["id"],
         "agent_message_tool",
         {
+            "target_session": steward["agent"]["directSessionId"],
             "target_agent": steward["agentId"],
             "content": "绕过组织图直接请求工具权限调整。",
             "wake_target": False,
@@ -3325,10 +3334,10 @@ def test_chat_room_completion_appends_visible_group_transcript_to_participant_se
         assert synced["metadata"]["kind"] == "group_room_transcript"
         assert synced["metadata"]["sourceRoomId"] == room["roomId"]
         assert synced["metadata"]["sourceRoundId"] == latest_round["roundId"]
-        assert "共通群聊" in synced["content"]
-        assert "同步到各自会话" in synced["content"]
-        assert own_title in synced["content"]
-        assert peer_title in synced["content"]
+        assert "共通群聊" in _assistant_visible_text(synced)
+        assert "同步到各自会话" in _assistant_visible_text(synced)
+        assert own_title in _assistant_visible_text(synced)
+        assert peer_title in _assistant_visible_text(synced)
 
     chat_room_service._sync_group_round_to_participant_sessions(detail, latest_round)
     alpha_messages_after_resync = session_service.get_session_detail("session-alpha")["messages"]

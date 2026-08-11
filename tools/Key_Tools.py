@@ -1753,34 +1753,33 @@ def _build_key_tools() -> List[BaseTool]:
 
     @tool
     def agent_message_tool(
-        target_agent: str,
         content: str,
+        target_session: str,
+        target_agent: str = "",
         summary: str = "",
         wake_target: bool = True,
         thread_id: str = "",
         metadata_json: str = "",
     ) -> str:
         """
-        【Agent 私信】从当前 Agent 向另一个 Agent 发送持久消息。
-
-        适合把发现、请求、审查意见或交接信息发给指定 Agent。目标可用 agentId、A001 这类稳定代号或唯一名称。
-        消息会写入目标 Agent 的 inbox；wake_target=True 时会尝试唤醒目标的空闲直聊会话。
-        如果任一方属于科研组织图，消息会先经过科研组织通讯边、messageType/intent、监督策略和唤醒规则校验。
+        向目标会话发送持久协作消息并唤醒它。
 
         Args:
-            target_agent: 目标 Agent 的 agentId、稳定代号或唯一名称
-            content: 要发送的消息正文
-            summary: 简短摘要，留空时使用正文摘要
-            wake_target: 是否尝试唤醒目标直聊会话，默认 True
-            thread_id: 可选线程 ID，用于后续串联同一议题
-            metadata_json: 可选 JSON 对象字符串，写入少量结构化元数据
+            content: 消息正文（必填）。
+            target_session: 目标会话 id（必填）。
+            target_agent: 可选的所有者校验（agentId / code / 唯一名称）。
+            summary: 列表/日志用短摘要。
+            wake_target: 是否立即唤醒目标会话（默认 True）。
+            thread_id: 可选线程 ID。
+            metadata_json: 可选 JSON 元数据。
 
         Returns:
-            JSON 格式的发送结果、messageId 和唤醒状态
+            JSON 格式的发送结果，含 messageId、targetSessionId、wakeStatus。
         """
         return _agent_message_impl(
-            target_agent=target_agent,
             content=content,
+            target_session=target_session,
+            target_agent=target_agent,
             summary=summary,
             wake_target=wake_target,
             thread_id=thread_id,
