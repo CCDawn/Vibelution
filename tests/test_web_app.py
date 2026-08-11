@@ -6741,6 +6741,7 @@ def test_session_same_turn_continuation_passes_durable_history_only_once(tmp_pat
 
 def test_source_collection_stage_task_enables_bounded_internal_auto_continue(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         session_service,
@@ -6759,7 +6760,7 @@ def test_source_collection_stage_task_enables_bounded_internal_auto_continue(tmp
             "outcome": "done",
         }
 
-    monkeypatch.setattr(session_service, "_run_session_continuation_loop", fake_run_session_continuation_loop)
+    monkeypatch.setattr(session_worker, "_run_session_continuation_loop", fake_run_session_continuation_loop)
 
     detail = session_service.submit_session_message(
         "session-live",
@@ -6785,6 +6786,7 @@ def test_source_collection_stage_task_enables_bounded_internal_auto_continue(tmp
 
 def test_source_collection_stage_task_continue_inherits_contract_and_tool_gate(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         session_service,
@@ -6803,7 +6805,7 @@ def test_source_collection_stage_task_continue_inherits_contract_and_tool_gate(t
             "outcome": "progress",
         }
 
-    monkeypatch.setattr(session_service, "_run_session_continuation_loop", fake_run_session_continuation_loop)
+    monkeypatch.setattr(session_worker, "_run_session_continuation_loop", fake_run_session_continuation_loop)
     checklist = [
         {"id": "read_candidates", "requiredTool": "source_collection_context_tool"},
         {"id": "write_extractions", "requiredTool": "source_collection_stage_writeback_tool"},
