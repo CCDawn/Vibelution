@@ -2314,6 +2314,45 @@ def test_chat_room_detail_reconciles_terminal_work_run_after_backend_restart(tmp
     assert chat_room_service.list_active_chat_room_work_runs() == []
 
 
+def test_chat_room_work_run_summary_closes_active_snapshot_when_room_is_missing(tmp_path, monkeypatch):
+    """A deleted room must not leave a running WorkRun blocking lifecycle actions."""
+
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    monkeypatch.setattr(chat_room_service, "utc_now_iso", lambda: "2026-08-11T02:20:00Z")
+    round_id = "round-missing-room-index"
+    store = chat_room_service._work_run_store()
+    store.persist_snapshot(
+        chat_room_service.RUN_KIND,
+        {
+            "runId": round_id,
+            "runKind": chat_room_service.RUN_KIND,
+            "roomId": "room-deleted-before-restart",
+            "roundId": round_id,
+            "status": "running",
+            "currentPhase": "running",
+            "runtimeStatus": "running",
+            "summary": "The old room is no longer present.",
+            "startedAt": "2026-08-10T17:14:11Z",
+            "updatedAt": "2026-08-10T17:14:11Z",
+            "finishedAt": "",
+        },
+        active_run_id=round_id,
+    )
+
+    summary = chat_room_service.load_chat_room_work_run_summary()
+
+    assert summary["active"] is None
+    assert summary["activeItems"] == []
+    assert summary["latest"]["runId"] == round_id
+    assert summary["latest"]["status"] == "stopped"
+    assert summary["latest"]["runtimeStatus"] == "orphaned_room_reconciled"
+    assert summary["latest"]["reconciliationSource"] == "missing_room_record"
+    assert store.load_run_index(chat_room_service.RUN_KIND)["activeRunId"] == ""
+
+
 @pytest.mark.parametrize(
     ("work_status", "expected_round_status", "expected_room_status"),
     [

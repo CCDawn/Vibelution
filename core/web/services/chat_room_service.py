@@ -1516,6 +1516,8 @@ def load_chat_room_work_run_summary() -> dict[str, Any]:
     store = _work_run_store()
     active_items = list_active_chat_room_work_runs()
     active = store.load_active_snapshot(RUN_KIND)
+    if not active_items and isinstance(active, dict):
+        active = _reconcile_missing_room_active_work_run(store, active)
     if not active and active_items:
         active = active_items[0]
     return {
@@ -1550,6 +1552,61 @@ def list_active_chat_room_work_runs() -> list[dict[str, Any]]:
             items.append(_chat_room_work_run_snapshot(room, round_payload, status=status))
     items.sort(key=lambda item: str(item.get("updatedAt") or item.get("startedAt") or ""))
     return items
+
+
+def _reconcile_missing_room_active_work_run(
+    store: work_run_store.WorkRunStore,
+    active_snapshot: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Close an indexed active round only after its persisted room is gone.
+
+    A WorkRun is an audit record, not an independent execution authority.  When
+    the room record no longer exists, leaving a ``running`` snapshot indexed as
+    active can indefinitely block a managed restart even though no task can be
+    stopped or resumed.  Preserve the snapshot and make the terminal reason
+    explicit instead of deleting it or guessing about a surviving room.
+    """
+
+    room_id = str(active_snapshot.get("roomId") or "").strip()
+    round_id = str(active_snapshot.get("roundId") or active_snapshot.get("runId") or "").strip()
+    if not room_id or not round_id:
+        return active_snapshot
+    try:
+        state = _store().load()
+    except Exception:
+        return active_snapshot
+    rooms = state.get("rooms") if isinstance(state, dict) else None
+    if not isinstance(rooms, list) or any(
+        isinstance(room, dict) and str(room.get("roomId") or "").strip() == room_id
+        for room in rooms
+    ):
+        return active_snapshot
+
+    status = str(active_snapshot.get("status") or active_snapshot.get("currentPhase") or "").strip().lower()
+    if status not in RUNNING_ROUND_STATUSES:
+        store.persist_snapshot(RUN_KIND, active_snapshot, active_run_id="")
+        return None
+
+    reconciled_at = utc_now_iso()
+    reason = text_for(
+        get_web_language(),
+        zh="关联群聊已不存在，已收口遗留运行记录。",
+        en="The linked chat room no longer exists, so the stale work run was closed.",
+    )
+    reconciled = dict(active_snapshot)
+    reconciled.update(
+        {
+            "status": "stopped",
+            "currentPhase": "stopped",
+            "runtimeStatus": "orphaned_room_reconciled",
+            "reconciliationSource": "missing_room_record",
+            "summary": reason,
+            "updatedAt": reconciled_at,
+            "finishedAt": reconciled_at,
+        }
+    )
+    store.persist_snapshot(RUN_KIND, reconciled, active_run_id="")
+    return None
 
 
 def force_stop_active_chat_room_rounds_for_shutdown(reason: str) -> list[dict[str, object]]:
