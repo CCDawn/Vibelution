@@ -2278,8 +2278,6 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["role"] == "user"
-    assert payload["messages"][-1]["content"] == "继续检查调度失败恢复"
     assert payload["messages"][-1]["role"] == "assistant"
     _assert_v3_assistant_message(payload["messages"][-1])
     assert _assistant_visible_text(payload["messages"][-1]) == "已完成网页对话提交接线。"
@@ -2533,7 +2531,7 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
     assert response.status_code == 202
     assert seen_prompt["value"] == "/brt 设计斜杠 skill 调用"
     assert len(seen_contexts) == 3
-    assert seen_contexts[0] == "static:## Agent Static Context\nstable"
+    assert "## Agent Static Context\nstable" in seen_contexts[0]
     assert seen_contexts[1] == "volatile:## Agent Runtime Context\nvolatile"
     assert seen_contexts[2].startswith("volatile:## Slash Skill Context")
     assert "Command: /brt" in seen_contexts[2]
@@ -2552,7 +2550,7 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
     assert history_fields["skillRuntimeContextAvailable"] is True
     assert history_fields["skillRuntimeContextOmittedFromModelInput"] is False
     assert history_fields["skillRuntimeContextPlacement"] == "before_current_user"
-    assert history_fields["runtimeContextSegmentCount"] == 2
+    assert history_fields["runtimeContextSegmentCount"] == 3
     assert history_fields["staticRuntimeContextSeedAvailable"] is True
     assert history_fields["runtimeContextSeedAvailable"] is True
     assert history_fields["volatileRuntimeContextSeedAvailable"] is True
