@@ -850,29 +850,30 @@ def test_launcher_error_detail_prioritizes_stderr_over_progress_stdout():
 
 
 def test_workbench_controller_trusts_only_launcher_marked_backend(monkeypatch):
+    processes = {
+        22416: process_inventory.RuntimeProcess(
+            pid=22416,
+            parent_pid=1,
+            kind="managed_workbench_backend",
+            name="pythonw.exe",
+            command_line="pythonw scripts/web_workbench.py --port 8000 --no-browser --managed-by-launcher",
+            cwd="C:/workspace",
+            port=8000,
+        ),
+        49780: process_inventory.RuntimeProcess(
+            pid=49780,
+            parent_pid=1,
+            kind="unmanaged_workbench",
+            name="python.exe",
+            command_line="python scripts/web_workbench.py --port 8000 --no-browser",
+            cwd="C:/workspace",
+            port=8000,
+        ),
+    }
     monkeypatch.setattr(
         workbench_controller,
-        "list_repo_runtime_processes",
-        lambda project_root: [
-            process_inventory.RuntimeProcess(
-                pid=22416,
-                parent_pid=1,
-                kind="managed_workbench_backend",
-                name="pythonw.exe",
-                command_line="pythonw scripts/web_workbench.py --port 8000 --no-browser --managed-by-launcher",
-                cwd=str(project_root),
-                port=8000,
-            ),
-            process_inventory.RuntimeProcess(
-                pid=49780,
-                parent_pid=1,
-                kind="unmanaged_workbench",
-                name="python.exe",
-                command_line="python scripts/web_workbench.py --port 8000 --no-browser",
-                cwd=str(project_root),
-                port=8000,
-            ),
-        ],
+        "repo_runtime_process_for_pid",
+        lambda pid, *, project_root: processes.get(pid),
     )
 
     assert workbench_controller._pid_is_repo_workbench_backend(22416) is True
