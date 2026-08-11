@@ -180,20 +180,31 @@ def agent_message_tool(
 
         target_agent_id = session_owner_agent_id
         source_agent_payload = get_agent(source_agent_id, include_archived=True) or {}
-        research_org_result = _try_send_research_org_message(
-            source_agent=source_agent_payload,
-            target_agent=target_agent_payload,
-            source_agent_id=source_agent_id,
-            source_session_id=source_session_id,
-            target_session_id=normalized_target_session,
-            content=message_body,
-            summary=summary,
-            wake_target=wake_target,
-            thread_id=thread_id,
-            metadata=metadata,
-        )
-        if research_org_result is not None:
-            return _json_result(research_org_result)
+        if source_agent_id != target_agent_id:
+            research_org_result = _try_send_research_org_message(
+                source_agent=source_agent_payload,
+                target_agent=target_agent_payload,
+                source_agent_id=source_agent_id,
+                source_session_id=source_session_id,
+                target_session_id=normalized_target_session,
+                content=message_body,
+                summary=summary,
+                wake_target=wake_target,
+                thread_id=thread_id,
+                metadata=metadata,
+            )
+            if research_org_result is not None:
+                return _json_result(research_org_result)
+            return _json_result(
+                _cross_agent_policy_blocked_result(
+                    source_agent_id=source_agent_id,
+                    source_session_id=source_session_id,
+                    target_agent=target_agent_payload,
+                    target_agent_id=target_agent_id,
+                    target_session_id=normalized_target_session,
+                    wake_target=wake_target,
+                )
+            )
 
         kernel_result = _send_direct_agent_message_via_kernel(
             source_agent=source_agent_payload,
@@ -630,11 +641,69 @@ def _try_send_research_org_message(
         "sourceSessionId": source_session_id,
         "targetAgentId": target_agent_id,
         "targetAgentCode": target_agent.get("agentCode") or "",
-        "targetSessionId": target_agent.get("directSessionId") or "",
+        "targetSessionId": str(
+            delivery.get("targetSessionId") or resolved_target_session or target_agent.get("directSessionId") or ""
+        ).strip(),
         "wakeStatus": delivery.get("wakeStatus") or ("blocked" if not allowed else ""),
         "reason": delivery.get("reason") or "",
         "delivery": delivery,
         "kernel": kernel_trace,
+    }
+
+
+def _cross_agent_policy_blocked_result(
+    *,
+    source_agent_id: str,
+    source_session_id: str,
+    target_agent: dict[str, Any],
+    target_agent_id: str,
+    target_session_id: str,
+    wake_target: bool,
+) -> dict[str, Any]:
+    reason = "cross_agent_policy_required"
+    resolved_target_session = str(target_session_id or "").strip()
+    delivery = {
+        "allowed": False,
+        "reason": reason,
+        "inboxMessageId": "",
+        "messageId": "",
+        "targetAgentId": target_agent_id,
+        "targetSessionId": resolved_target_session,
+        "wakeRequested": bool(wake_target),
+        "wakeStatus": "blocked",
+        "turnId": "",
+    }
+    _record_agent_message_tool_event(
+        {
+            "messageId": "",
+            "sourceAgentId": source_agent_id,
+            "sourceSessionId": source_session_id,
+            "targetAgentId": target_agent_id,
+            "targetSessionId": resolved_target_session,
+        },
+        delivery,
+        route="policy",
+        outcome="blocked",
+        extra_fields={"policyReason": reason},
+    )
+    return {
+        "ok": False,
+        "status": "blocked",
+        "route": "policy",
+        "error": "policy_blocked",
+        "message": "跨 Agent 协作消息必须先通过研究组织通信边策略授权。",
+        "messageId": "",
+        "sourceAgentId": source_agent_id,
+        "sourceSessionId": source_session_id,
+        "targetAgentId": target_agent_id,
+        "targetAgentCode": str(target_agent.get("agentCode") or "").strip(),
+        "targetSessionId": resolved_target_session,
+        "historyStatus": "rejected",
+        "inboxStatus": "not_recorded",
+        "wakeStatus": "blocked",
+        "reason": reason,
+        "delivery": delivery,
+        "kernel": {},
     }
 
 

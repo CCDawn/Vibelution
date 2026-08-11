@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from config.public_config import load_public_config
+from core.launcher import desktop_session_store
 from core.launcher import service as standalone_launcher_service
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.ui.chat_state import save_chat_state
@@ -46,6 +47,28 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(self_evolution_control_service, "_runtime_manager_live_control_enabled", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def isolate_live_desktop_session(monkeypatch: pytest.MonkeyPatch):
+    """Keep runtime-summary unit tests independent of a concurrently running Electron shell."""
+
+    default_db_path = desktop_session_store.DESKTOP_SESSION_DB_PATH
+    original_workbench_projection = desktop_session_store.latest_active_workbench_projection
+    original_provider_projection = desktop_session_store.latest_active_window_provider_projection
+
+    def workbench_projection():
+        if desktop_session_store.DESKTOP_SESSION_DB_PATH == default_db_path:
+            return {}
+        return original_workbench_projection()
+
+    def provider_projection(**kwargs):
+        if desktop_session_store.DESKTOP_SESSION_DB_PATH == default_db_path:
+            return {}
+        return original_provider_projection(**kwargs)
+
+    monkeypatch.setattr(desktop_session_store, "latest_active_workbench_projection", workbench_projection)
+    monkeypatch.setattr(desktop_session_store, "latest_active_window_provider_projection", provider_projection)
 
 
 @pytest.fixture(autouse=True)
@@ -836,6 +859,12 @@ def test_runtime_summary_uses_light_runtime_manager_snapshot(monkeypatch):
 def test_runtime_summary_labels_launcher_control_surface_separately(monkeypatch):
     monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(standalone_launcher_service.desktop_session_store, "latest_active_workbench_projection", lambda: {})
+    monkeypatch.setattr(
+        standalone_launcher_service.desktop_session_store,
+        "latest_active_window_provider_projection",
+        lambda **_kwargs: {},
+    )
     monkeypatch.setattr(
         runtime_service,
         "_load_runtime_manager_snapshot",

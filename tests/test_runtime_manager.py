@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.launcher import desktop_session_store
 from core.runtime_manager import cli as runtime_cli
 from core.runtime_manager import command_queue
 from core.runtime_manager import daemon
@@ -24,6 +25,13 @@ from core.runtime_manager import workbench_controller
 from core.runtime_manager.work_run_store import WorkRunStore
 
 pytestmark = pytest.mark.serial
+
+
+@pytest.fixture(autouse=True)
+def _isolate_live_desktop_session(monkeypatch):
+    """Keep unit observations independent of a concurrently running Electron shell."""
+
+    monkeypatch.setattr(desktop_session_store, "latest_active_window_provider_projection", lambda **_kwargs: {})
 
 
 def _repeat_last(items):

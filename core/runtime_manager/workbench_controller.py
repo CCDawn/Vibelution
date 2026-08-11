@@ -752,7 +752,7 @@ def _with_active_electron_window_projection(observation: dict[str, Any]) -> dict
     try:
         from core.launcher.desktop_session_store import latest_active_window_provider_projection
 
-        projection = latest_active_window_provider_projection()
+        projection = latest_active_window_provider_projection(workspace_root=str(PROJECT_ROOT))
     except (OSError, TypeError, ValueError):
         projection = {}
     if isinstance(projection, dict) and projection:
