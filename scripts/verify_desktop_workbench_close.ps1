@@ -500,11 +500,13 @@ try {
     } | ConvertTo-Json -Depth 4
 } finally {
     $remainingOwnedProcessIds = @(
-        Get-DesktopPackageProcesses |
-            Where-Object { $baselineProcessIds -notcontains [int]$_.ProcessId } |
-            ForEach-Object { [int]$_.ProcessId }
-        $ownedProcessIds
-    ) | Sort-Object -Unique
+        @(
+            Get-DesktopPackageProcesses |
+                Where-Object { $baselineProcessIds -notcontains [int]$_.ProcessId } |
+                ForEach-Object { [int]$_.ProcessId }
+            $ownedProcessIds
+        ) | Sort-Object -Unique
+    )
     if ($remainingOwnedProcessIds.Count -gt 0) {
         $null = Request-OwnedDesktopClose $remainingOwnedProcessIds
         try {

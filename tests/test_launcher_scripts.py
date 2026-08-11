@@ -66,6 +66,14 @@ def test_workbench_close_canary_quiesces_managed_workbench_before_packaged_run()
     assert active_work_check_index < package_verify_index < quiesce_index < package_start_index
 
 
+def test_workbench_close_canary_normalizes_empty_owned_process_cleanup_collection():
+    source = WORKBENCH_CLOSE_CANARY_SCRIPT.read_text(encoding="utf-8")
+    cleanup_block = source[source.index("} finally {") :]
+
+    assert "$remainingOwnedProcessIds = @(\n        @(\n" in cleanup_block
+    assert "if ($remainingOwnedProcessIds.Count -gt 0)" in cleanup_block
+
+
 def test_launcher_script_is_utf8_with_bom_for_windows_powershell_compatibility():
     assert LAUNCHER_SCRIPT.read_bytes().startswith(b"\xef\xbb\xbf")
 
