@@ -893,7 +893,7 @@ class PromptManager:
     @staticmethod
     def _is_readonly_log_diagnosis(prompt_mode: str, goal: str, core_context: str) -> bool:
         text = "\n".join(part for part in [goal or "", core_context or ""] if part).lower()
-        if "log_info" not in text:
+        if "log_info" not in text and "logs/conversations" not in text:
             return False
         if "conversation_" not in text and "debug_" not in text:
             return False
