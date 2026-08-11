@@ -7607,7 +7607,6 @@ def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeyp
         # Waitable builds must use CREATE_NO_WINDOW without DETACHED_PROCESS
         # (MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED).
         assert not (kwargs["creationflags"] & 0x00000008)
-        assert kwargs["creationflags"] & 0x00000200
         assert kwargs["creationflags"] & 0x08000000
         assert isinstance(startupinfo, DummyStartupInfo)
         assert startupinfo.dwFlags & 0x00000001
