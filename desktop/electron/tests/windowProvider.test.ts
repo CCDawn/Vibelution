@@ -250,6 +250,30 @@ describe("Electron window provider state", () => {
     expect(closeCallbacks).toBe(1);
   });
 
+  it("still sends the final close callback when the closed window state report fails", async () => {
+    let closeCallbacks = 0;
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      reportState: (state) => {
+        if (!state.open) {
+          return Promise.reject(new Error("launcher state report unavailable"));
+        }
+      },
+      onWorkbenchClosed: () => {
+        closeCallbacks += 1;
+      }
+    });
+    await provider.openOrFocusWorkbench();
+
+    workbenchWindow.emit("closed");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(closeCallbacks).toBe(1);
+  });
+
   it("reports Windows session-end signals without treating them as a confirmed window close", async () => {
     const sessionEndEvents: string[] = [];
     const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
