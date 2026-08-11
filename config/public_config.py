@@ -2219,7 +2219,19 @@ def save_public_config(public_config: dict, config_path: Path | None = None) -> 
         )
         temp_path = resolved_config_path.with_suffix(resolved_config_path.suffix + ".tmp")
         temp_path.write_text(dumps_public_config(cleaned_public_config, HEADER_LINES), encoding="utf-8")
-        temp_path.replace(resolved_config_path)
+        _replace_config_file_atomically(temp_path, resolved_config_path)
+
+
+def _replace_config_file_atomically(temp_path: Path, target_path: Path) -> None:
+    max_attempts = 5
+    for attempt in range(max_attempts):
+        try:
+            temp_path.replace(target_path)
+            return
+        except PermissionError:
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(0.15 * (attempt + 1))
 
 
 @contextmanager

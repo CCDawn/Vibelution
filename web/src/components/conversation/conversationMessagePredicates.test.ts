@@ -66,6 +66,22 @@ describe("conversationMessagePredicates", () => {it("classifies CLI Agent lifecy
     }))).toEqual([]);
   });
 
+  it("tolerates non-string research organization metadata without crashing", () => {
+    const chips = researchOrgMessageChips(message({
+      role: "user",
+      content: "[Agent 私信]",
+      metadata: {
+        kind: "agent_inbox_message",
+        inboxKind: "research_org_report",
+        researchOrgIntent: undefined,
+        researchOrgMessageType: 123,
+        researchOrgDeliveryMode: null,
+        wakeStatus: { unexpected: true },
+      },
+    }));
+    expect(chips).toEqual([]);
+  });
+
   it("extracts completed image artifact metadata only", () => {
     expect(imageArtifactForMessage(message({
       role: "assistant",

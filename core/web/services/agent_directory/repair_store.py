@@ -1297,6 +1297,47 @@ def _read_recent_jsonl(
     return [dict(item) for item in result]
 
 
+def _read_recent_jsonl_with_count(
+    path: Path,
+    *,
+    limit: int,
+    status: str = "",
+) -> tuple[list[dict[str, Any]], int]:
+    """Single reverse pass returning both the recent matching window and the
+    total matching count, so callers do not parse the same JSONL twice."""
+    s = _service()
+
+    normalized_limit = max(1, int(limit or 1))
+    if not path.exists():
+        return [], 0
+    normalized_status = str(status or "").strip().lower()
+    cache_key = (*s._jsonl_signature(path), normalized_limit, normalized_status)
+    cached = s._JSONL_RECENT_COUNT_CACHE.get(cache_key)
+    if cached is not None:
+        return [dict(item) for item in cached[0]], cached[1]
+    recent: list[dict[str, Any]] = []
+    count = 0
+    for line in s._iter_text_lines_reverse(path):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if normalized_status and str(payload.get("status") or "pending").strip().lower() != normalized_status:
+            continue
+        count += 1
+        if len(recent) < normalized_limit:
+            recent.append(payload)
+    result = list(reversed(recent))
+    if len(s._JSONL_RECENT_COUNT_CACHE) > 512:
+        s._JSONL_RECENT_COUNT_CACHE.clear()
+    s._JSONL_RECENT_COUNT_CACHE[cache_key] = ([dict(item) for item in result], count)
+    return [dict(item) for item in result], count
+
+
 def _record_agent_llm_binding_migration_event(agents: list[dict[str, Any]]) -> None:
     s = _service()
     try:

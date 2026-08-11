@@ -249,6 +249,7 @@ from .agent_directory.repair_store import (
     _project_root,
     _prompt_template_id_for_role,
     _read_recent_jsonl,
+    _read_recent_jsonl_with_count,
     _record_agent_llm_binding_migration_event,
     _record_agent_registry_load_failure,
     _record_knowledge_steward_repaired_event,
@@ -687,6 +688,7 @@ _REPAIRED_STATE_CACHE_SIGNATURE: tuple[str, bool, int, int] | None = None
 _REPAIRED_STATE_CACHE: dict[str, Any] | None = None
 _JSONL_RECENT_CACHE: dict[tuple[str, bool, int, int, int, str, bool], list[dict[str, Any]]] = {}
 _JSONL_COUNT_CACHE: dict[tuple[str, bool, int, int, str], int] = {}
+_JSONL_RECENT_COUNT_CACHE: dict[tuple[str, bool, int, int, int, str], tuple[list[dict[str, Any]], int]] = {}
 _AGENT_API_HYDRATION_CACHE_LOCK = threading.RLock()
 _AGENT_API_HYDRATION_CACHE_SIGNATURE: tuple[Any, ...] | None = None
 _AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE: tuple[Any, ...] | None = None
