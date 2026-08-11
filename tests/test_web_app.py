@@ -45,7 +45,12 @@ from core.web.services import (
 )
 from core.web.services.session import worker as session_worker
 from tests.helpers.chat_turn_harness import wait_for_matching_event
-from tests.helpers.web_chat_state import _bind_seeded_session_agent, _read_next_state_signals, _seed_chat_state
+from tests.helpers.web_chat_state import (
+    _bind_seeded_session_agent,
+    _bind_seeded_submittable_agent,
+    _read_next_state_signals,
+    _seed_chat_state,
+)
 
 pytestmark = pytest.mark.serial
 
@@ -2196,6 +2201,8 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     (tmp_path / "web" / "src" / "routes" / "ChatCodingRoute.tsx").write_text("export {};\n", encoding="utf-8")
     (tmp_path / "core" / "web" / "services" / "session_service.py").write_text("pass\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="done")
+    _bind_seeded_submittable_agent(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     base_config = session_service.get_config().model_copy(deep=True)
@@ -2421,6 +2428,7 @@ def test_session_submit_message_routes_slash_skill_into_scheduled_context(tmp_pa
 
 def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    _bind_seeded_submittable_agent(tmp_path)
     session_agent = agent_directory_service.create_agent_instance(
         display_name="Slash Skill Runtime Agent",
         primary_mode="chat",
@@ -4350,6 +4358,7 @@ def test_submit_session_message_does_not_promote_contextual_confirmation_to_task
             "metadata": {"source": "task_tool"},
         },
     )
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     class DummyAgent:
@@ -4400,6 +4409,7 @@ def test_submit_session_contextual_confirmation_preserves_raw_prompt(tmp_path, m
             "metadata": {"source": "task_tool", "outcome": "no_change"},
         },
     )
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     captured: dict[str, object] = {}
 
@@ -4450,6 +4460,7 @@ def test_submit_session_plain_confirmation_preserves_raw_prompt_without_agent_in
             "metadata": {"source": "task_tool", "last_user_message_filtered": True},
         },
     )
+    _bind_seeded_submittable_agent(tmp_path)
     _append_test_ledger_messages(
         tmp_path,
         "session-live",
@@ -4529,6 +4540,7 @@ def test_submit_session_agent_inbox_turn_preserves_inbox_prompt_without_history_
             "metadata": {"source": "task_tool"},
         },
     )
+    _bind_seeded_submittable_agent(tmp_path)
     _append_test_ledger_messages(
         tmp_path,
         "session-live",
@@ -4639,6 +4651,7 @@ def test_submit_session_continue_preserves_raw_prompt_when_active_task_goal_is_c
             "metadata": {"source": "task_tool"},
         },
     )
+    _bind_seeded_submittable_agent(tmp_path)
     _append_test_ledger_messages(
         tmp_path,
         "session-live",
@@ -4718,6 +4731,7 @@ def test_submit_session_continue_keeps_raw_prompt_while_task_state_prefers_newer
             },
         },
     )
+    _bind_seeded_submittable_agent(tmp_path)
     _append_test_ledger_messages(
         tmp_path,
         "session-live",
@@ -4807,6 +4821,7 @@ def test_submit_session_continue_keeps_raw_prompt_while_task_state_ignores_retry
             "metadata": {"source": "task_tool", "outcome": "failed_runtime"},
         },
     )
+    _bind_seeded_submittable_agent(tmp_path)
     _append_test_ledger_messages(
         tmp_path,
         "session-live",
@@ -6197,6 +6212,7 @@ def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
 
 def test_submit_session_message_captures_chat_review_candidate(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     _bind_live_session_agent(tmp_path)
@@ -6372,6 +6388,7 @@ def test_submit_session_message_rejects_busy_session(tmp_path, monkeypatch):
 
 def test_submit_session_message_rejects_blank_message_without_mutating_session(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     before_state = load_chat_state(tmp_path)
     before_events = [event.to_dict() for event in load_conversation_events(tmp_path, "session-live")]
@@ -7545,6 +7562,7 @@ def test_turn_circuit_breaker_records_next_state_signal_with_turn_id(tmp_path, m
 
 def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     _bind_live_session_agent(tmp_path)
@@ -7742,6 +7760,7 @@ def test_submit_session_interrupt_guidance_records_signal_and_stops(tmp_path, mo
 
 def test_request_stop_session_turn_reuses_active_work_run_when_controller_is_missing(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    _bind_seeded_submittable_agent(tmp_path)
     scene_events = []
 
     def record_scene_event(component, phase, event_code, **kwargs):
@@ -8721,6 +8740,7 @@ def test_session_detail_recovers_stale_running_legacy_messages(tmp_path, monkeyp
 
 def test_submit_session_message_persists_lease_conflict_notice_without_llm_call(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="idle")
+    _bind_seeded_submittable_agent(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     events: list[dict[str, object]] = []
     monkeypatch.setattr(
@@ -9860,6 +9880,7 @@ def test_submit_session_continue_keeps_raw_prompt_when_active_task_is_continue(t
             "metadata": {"source": "task_tool"},
         },
     )
+    _bind_seeded_submittable_agent(tmp_path)
     _append_test_ledger_messages(
         tmp_path,
         "session-live",

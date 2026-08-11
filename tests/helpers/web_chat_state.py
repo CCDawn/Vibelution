@@ -8,7 +8,29 @@ from core.chat.conversation_ledger import (
 )
 from core.evaluation.chat_next_state_signals import list_chat_next_state_signals
 from core.ui.chat_state import load_chat_state, save_chat_state
-from core.web.services import session_service
+from core.web.services import agent_directory_service, session_service
+
+
+def _bind_seeded_submittable_agent(project_root, *, session_id: str = "session-live"):
+    """Bind a dialogue agent with a context-window-capable model to a seeded session.
+
+    Submit fails closed (SessionValidationError -> 422) when the session has no
+    dialogue agent or the dialogue model lacks a resolvable max context window.
+    Bind the primary profile model (its provider carries context_window) so
+    message-submission tests can run turns.
+    """
+    cfg = session_service.get_config()
+    profile = cfg.llm.get_profile(role="primary")
+    primary_model_id, _entry = cfg.llm.get_model_library_entry_for_profile(profile)
+    dialogue_model_id = str(primary_model_id or "").strip()
+    agent = agent_directory_service.ensure_agent_for_session(
+        session_id,
+        display_name="真实会话",
+        llm_bindings={"dialogue": {"modelId": dialogue_model_id}},
+        prompt_template_id="prompt-chat-default",
+    )
+    _bind_seeded_session_agent(project_root, agent, session_id=session_id)
+    return agent
 
 
 def _seed_chat_state(project_root, *, task_status="reading", active_task=None, conversations=None):
