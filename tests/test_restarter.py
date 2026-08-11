@@ -421,7 +421,7 @@ class TestSpawnNewProcess:
                 # 验证 creationflags
                 call_kwargs = mock_popen.call_args[1]
                 assert 'creationflags' in call_kwargs
-                assert call_kwargs['creationflags'] == 0x00000008 | 0x00000200
+                assert call_kwargs['creationflags'] == 0x00000008 | 0x00000200 | 0x08000000
 
     def test_windows_env_passed(self, tmp_path):
         """Windows 下环境变量被传递"""
