@@ -148,14 +148,20 @@ def is_process_alive(pid: int) -> bool:
                     **no_window_subprocess_kwargs(),
                 )
                 return 'SUCCESS' in result.stdout or result.returncode == 0
-            except Exception:
+            except Exception as exc:
+                logging.getLogger("Restarter").warning(
+                    "检查进程 %s 存活状态失败（按已死亡处理）: %s", pid, exc
+                )
                 return False
         else:
             import subprocess
             try:
                 result = subprocess.run(['kill', '-0', str(pid)], capture_output=True, check=False)
                 return result.returncode == 0
-            except Exception:
+            except Exception as exc:
+                logging.getLogger("Restarter").warning(
+                    "检查进程 %s 存活状态失败（按已死亡处理）: %s", pid, exc
+                )
                 return False
 
     try:

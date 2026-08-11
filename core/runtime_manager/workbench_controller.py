@@ -30,7 +30,12 @@ from .constants import (
     PYTHON_LAUNCHER_SCRIPT_PATH,
 )
 from .process_inventory import list_repo_runtime_processes, managed_browser_process_payload
-from .scene_logging import append_runtime_manager_file_event, truncate_event_text
+from .scene_logging import (
+    append_runtime_manager_file_event,
+    record_runtime_manager_scene_event,
+    runtime_manager_event_phase,
+    truncate_event_text,
+)
 from .window_provider_state import window_provider_projection, with_window_provider_projection
 
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
@@ -1260,7 +1265,13 @@ def _record_launcher_action_event(
     if message:
         payload["message"] = truncate_event_text(message, limit=400)
     try:
-        append_runtime_manager_file_event(event_type, payload, suppress_io_errors=True)
+        event_at = append_runtime_manager_file_event(event_type, payload, suppress_io_errors=True)
+        record_runtime_manager_scene_event(
+            event_type,
+            payload,
+            phase=runtime_manager_event_phase(event_type),
+            occurred_at=event_at,
+        )
     except Exception as exc:
         _debug_logger.warning(f"Failed to record launcher action scene event: {exc}")
 

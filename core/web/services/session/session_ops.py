@@ -903,8 +903,11 @@ def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, An
     s = _service()
     try:
         s.reconcile_stale_chat_turn_work_runs()
-    except Exception:
-        pass
+    except Exception as exc:
+        s._debug_logger.warning(
+            f"stale running conversation reconciliation failed: {type(exc).__name__}: {exc}",
+            tag="RECONCILE",
+        )
 
     conversations = payload.get("conversations")
     if not isinstance(conversations, list):
