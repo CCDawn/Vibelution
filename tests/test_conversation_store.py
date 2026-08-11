@@ -32,12 +32,16 @@ def _open_store(
     queue_capacity: int = 64,
     max_batch_size: int = 16,
     max_batch_delay_ms: int = 5,
+    busy_timeout_ms: int = 250,
+    read_pool_capacity: int = 4,
 ) -> ConversationStore:
     store = ConversationStore(
         tmp_path / "workspace" / "chat" / "conversations.sqlite3",
         queue_capacity=queue_capacity,
         max_batch_size=max_batch_size,
         max_batch_delay_ms=max_batch_delay_ms,
+        busy_timeout_ms=busy_timeout_ms,
+        read_pool_capacity=read_pool_capacity,
     )
     store.open()
     return store
@@ -126,6 +130,66 @@ def test_initialize_creates_canonical_schema_and_query_only_readers(
                     "INSERT INTO agents(agent_id, display_name, kind, status, created_at_ms, updated_at_ms) "
                     "VALUES ('forbidden', 'Forbidden', 'assistant', 'active', 1, 1)"
                 )
+    finally:
+        store.close()
+
+
+def test_bounded_reader_admission_preserves_availability_and_reports_pressure(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(
+        tmp_path,
+        busy_timeout_ms=20,
+        read_pool_capacity=1,
+    )
+    reader_entered = threading.Event()
+    release_reader = threading.Event()
+
+    def hold_reader() -> None:
+        with store.database.reader() as reader:
+            assert reader.execute("SELECT 1").fetchone()[0] == 1
+            reader_entered.set()
+            assert release_reader.wait(timeout=3)
+
+    thread = threading.Thread(target=hold_reader, name="conversation-test-reader")
+    thread.start()
+    try:
+        assert reader_entered.wait(timeout=1)
+        with store.database.reader() as reader:
+            assert reader.execute("SELECT 1").fetchone()[0] == 1
+        release_reader.set()
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+
+        with store.database.reader() as reader:
+            assert reader.execute("SELECT 1").fetchone()[0] == 1
+
+        metrics = store.database.reader_metrics()
+        assert metrics["activeReaders"] == 0
+        assert metrics["maxPooledReaders"] == 1
+        assert metrics["overflowReaders"] == 1
+    finally:
+        release_reader.set()
+        thread.join(timeout=3)
+        store.close()
+
+
+def test_query_only_reader_pool_reuses_idle_connection(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path, read_pool_capacity=1)
+    try:
+        with store.database.reader() as reader:
+            assert reader.execute("SELECT 1").fetchone()[0] == 1
+        with store.database.reader() as reader:
+            assert reader.execute("SELECT 1").fetchone()[0] == 1
+
+        metrics = store.database.reader_metrics()
+        assert metrics["pooledConnectionOpens"] == 1
+        assert metrics["reusedPooledReaderLeases"] == 1
+        assert metrics["idlePooledReaders"] == 1
     finally:
         store.close()
 
@@ -279,6 +343,64 @@ def test_writer_batches_mutations_and_runs_callbacks_only_after_commit(
         assert metrics["maxBatchSize"] >= 2
         assert metrics["queueWaitMsP95"] >= 0
     finally:
+        store.close()
+
+
+def test_passive_wal_checkpoint_runs_through_the_writer_actor(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        _create_agent(store)
+
+        checkpoint = store.checkpoint_wal_passive(timeout=3)
+        writer_metrics = store.writer.metrics()
+
+        assert checkpoint["mode"] == "passive"
+        assert checkpoint["busy"] in {0, 1}
+        assert checkpoint["logPages"] >= 0
+        assert checkpoint["checkpointedPages"] >= 0
+        assert checkpoint["walBytes"] >= 0
+        assert checkpoint["durationMs"] >= 0
+        assert writer_metrics["maintenanceRuns"] == 1
+        assert writer_metrics["failedMaintenanceRuns"] == 0
+    finally:
+        store.close()
+
+
+def test_writer_runs_maintenance_between_queued_mutation_batches(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path, max_batch_size=1, max_batch_delay_ms=0)
+    entered_first = threading.Event()
+    release_first = threading.Event()
+    order: list[str] = []
+
+    def first_mutation(_unit_of_work):
+        entered_first.set()
+        assert release_first.wait(timeout=3)
+        order.append("first")
+        return "first"
+
+    try:
+        first = store.writer.submit(first_mutation)
+        assert entered_first.wait(timeout=1)
+        maintenance = store.writer.submit_maintenance(
+            lambda _connection: order.append("maintenance")
+        )
+        second = store.writer.submit(
+            lambda _unit_of_work: order.append("second")
+        )
+
+        release_first.set()
+        assert first.result(timeout=3) == "first"
+        assert maintenance.result(timeout=3) is None
+        assert second.result(timeout=3) is None
+        assert order == ["first", "maintenance", "second"]
+    finally:
+        release_first.set()
         store.close()
 
 
