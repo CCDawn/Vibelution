@@ -74,7 +74,7 @@
 ## 4. Execution Baseline
 
 - 工作分级为 `FAST_PATCH / STANDARD_TASK / HIGH_RISK`，使用足以保护正确性、并发与证据的最轻流程。
-- 写入前定位 owning surface、现有测试、用户改动和 active claim；禁止在根 `main` 直接写入任何变更。所有 development、mechanical 和文档/规则写入都必须转到任务 worktree，根 `main` 仅用于分支合入与合入后验证。
+- 写入前定位 owning surface、现有测试、用户改动和 active claim；禁止在根 `main` 直接写入任何变更。所有 development、mechanical 和文档/规则写入都必须转到任务 worktree，根 `main` 仅用于分支合入与合入后验证。任务 worktree 默认落在 `<project-root>/.worktrees/<task-slug>`；旧兄弟目录 `Vibelution-worktrees` 只读兼容，细则见 [协作规范](docs/agents/worktree-collaboration.md)。
 - 前端使用 TypeScript、Tailwind-first、VUI `V*` 产品 API 和 shadcn/Radix renderer；HeroUI 已移除。触及 UI 的写入前必须对齐 §2 前端红线；完成前跑相关 frontend contract（至少 `vuiShadcnRouteContract` 与触及的 route/layout 测试），不得以「先实现再迁 VUI」交付用户可见路径。
 - **`tsc -b` 不是「开发前默认闸」，是交付/重建闸（Agent 必须主动提前跑）**：
   - 仓库 **不会** 在打开项目、开始改代码或默认 pre-commit 时自动跑全量 `tsc -b`。`local_quality_gate.py commit` 以 staged 路径快检为主；pre-commit 额外校验 `web` 的 lock 一致性，**不**替你做 TypeScript 全量检查。
