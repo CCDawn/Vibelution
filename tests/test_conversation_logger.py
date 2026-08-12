@@ -87,6 +87,27 @@ def test_transcript_system_prompt_persists_only_hash_summary(tmp_path):
     assert hashlib.sha256(secret_prompt.encode("utf-8")).hexdigest() in transcript
 
 
+def test_lazy_activation_writes_without_explicit_start_session(tmp_path):
+    ConversationLogger._instance = None
+    logger = ConversationLogger()
+    logger._log_dir = str(tmp_path)
+    logger._current_session_file = None
+    logger._session_id = "lazy_session"
+    logger._turn_count = 0
+    logger._session_active = False
+    logger._ensure_log_dir()
+
+    logger.log_debug("INFO", "lazy activation smoke")
+
+    session_file = tmp_path / "conversation_lazy_session.jsonl"
+    assert session_file.exists()
+    record = json.loads(session_file.read_text(encoding="utf-8").splitlines()[-1])
+    assert record["type"] == "debug"
+    assert record["tag"] == "INFO"
+    assert record["message"] == "lazy activation smoke"
+    assert record["session_id"] == "lazy_session"
+
+
 def test_tool_result_keeps_main_log_compact_and_spills_raw_payload(tmp_path):
     logger = _fresh_logger(tmp_path)
     logger._turn_count = 1

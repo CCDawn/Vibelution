@@ -14,7 +14,7 @@ def test_log_roots_include_user_and_agent_summaries(tmp_path, monkeypatch):
     runtime_scene_log.parent.mkdir(parents=True, exist_ok=True)
     runtime_scene_log.write_text("ignored from runtime root summary\n", encoding="utf-8")
 
-    conversation_log = tmp_path / "log_info" / "conversation_debug.jsonl"
+    conversation_log = tmp_path / "logs" / "conversations" / "conversation_debug.jsonl"
     conversation_log.parent.mkdir(parents=True, exist_ok=True)
     conversation_log.write_text('{"type":"external_request"}\n', encoding="utf-8")
 
@@ -40,7 +40,7 @@ def test_health_diagnostics_groups_log_helpers_and_reset_hints(tmp_path, monkeyp
     runtime_scene_log = tmp_path / "logs" / "runtime_scenes" / "scene-a" / "raw" / "backend.log"
     runtime_scene_log.parent.mkdir(parents=True, exist_ok=True)
     runtime_scene_log.write_text("scene line\n", encoding="utf-8")
-    conversation_log = tmp_path / "log_info" / "conversation_debug.jsonl"
+    conversation_log = tmp_path / "logs" / "conversations" / "conversation_debug.jsonl"
     conversation_log.parent.mkdir(parents=True, exist_ok=True)
     conversation_log.write_text('{"type":"external_request"}\n', encoding="utf-8")
 
@@ -113,7 +113,7 @@ def test_health_diagnostics_groups_log_helpers_and_reset_hints(tmp_path, monkeyp
 
 
 def test_log_file_content_returns_user_summary_and_agent_anchor(tmp_path, monkeypatch):
-    conversation_log = tmp_path / "log_info" / "conversation_debug.jsonl"
+    conversation_log = tmp_path / "logs" / "conversations" / "conversation_debug.jsonl"
     conversation_log.parent.mkdir(parents=True, exist_ok=True)
     conversation_log.write_text(
         "\n".join(
