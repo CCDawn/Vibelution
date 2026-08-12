@@ -220,6 +220,37 @@ def test_adapter_uses_real_binding_and_settles_budget(tmp_path: Path) -> None:
             )
 
         class SettleRecordingPorts(RealDomainPorts):
+            def execute_agent_turn(self, *, action, handle):  # type: ignore[override]
+                from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+                    materialize_domain_artifact,
+                )
+
+                ref = materialize_domain_artifact(
+                    kind="source_candidate_batch",
+                    payload={
+                        "perspectives": ["p1", "p2"],
+                        "queries": ["q"],
+                        "candidateSources": [{"sourceId": "s1"}],
+                        "counterEvidenceCandidateSources": [
+                            {"sourceId": "c1", "perspective": "falsification"}
+                        ],
+                    },
+                    team_id="research-team",
+                    authority_run_id=action.run_id,
+                    root=tmp_path / "domain-artifacts",
+                )
+                self._artifact_root = tmp_path / "domain-artifacts"
+                return [ref]
+
+            def read_back_artifact(self, canonical_ref: str):  # type: ignore[override]
+                from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+                    read_domain_artifact,
+                )
+
+                return read_domain_artifact(
+                    canonical_ref, root=tmp_path / "domain-artifacts"
+                )
+
             def settle_budget(self, *, reservation, usage):
                 settled.append({"reservation": reservation, "usage": usage})
                 super().settle_budget(reservation=reservation, usage=usage)
@@ -273,6 +304,7 @@ def test_reserve_idempotent_same_action_reuses_reservation(tmp_path: Path) -> No
         _seed_run_with_binding(harness)
         ports = RealDomainPorts(harness.store)
         action = _action()
+        _seed_adapter(harness, action)  # ensures attempt FK target exists
         first = ports.reserve_budget(action=action, estimate_tokens=100)
         second = ports.reserve_budget(action=action, estimate_tokens=100)
         assert first["reservationId"] == second["reservationId"]

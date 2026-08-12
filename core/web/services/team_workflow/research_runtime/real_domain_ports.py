@@ -86,42 +86,33 @@ class RealDomainPorts:
     def reserve_budget(
         self, *, action: PendingAction, estimate_tokens: int
     ) -> dict[str, Any]:
-        reservation_id = f"reservation-{action.node_run_id}"
-        return {
-            "reservationId": reservation_id,
-            "actionId": action.action_id,
-            "nodeRunId": action.node_run_id,
-            "stageId": _stage_for(action.node_id),
-            "policyHash": action.budget_policy_hash or self._budget_policy_hash,
-            "reserved": {"estimatedTokens": estimate_tokens},
-            "status": "reserved",
-        }
-
-    def settle_budget(self, *, reservation: dict[str, Any], usage: dict[str, Any]) -> None:
-        reservation_id = str(reservation.get("reservationId") or "")
-        if not reservation_id:
-            return
-        now_ms = int(__import__("time").time() * 1000)
-        settled_json = json.dumps(
-            {"usage": usage, "source": "adapter-worker"}, ensure_ascii=False
+        from .budget_authority_adapter import (
+            BudgetAuthorityError,
+            reserve_budget_authority,
         )
 
-        def mutate(uow):
-            # budget_receipts.reservation_id 是唯一键；reserve 时已插入，settle 更新状态。
-            row = uow.repository.execute(
-                "SELECT receipt_id FROM budget_receipts WHERE reservation_id = ?",
-                (reservation_id,),
-            ).fetchone()
-            if row is None:
-                return
-            uow.repository.update_budget_receipt(
-                str(row[0]),
-                status="settled",
-                now_ms=now_ms,
-                settled_json=settled_json,
+        try:
+            return reserve_budget_authority(
+                self._store,
+                action=action,
+                estimate_tokens=estimate_tokens,
+                input_snapshot=self._run_input_snapshot(action.run_id),
             )
+        except BudgetAuthorityError as exc:
+            raise RuntimeError(str(exc)) from exc
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+    def settle_budget(self, *, reservation: dict[str, Any], usage: dict[str, Any]) -> None:
+        from .budget_authority_adapter import (
+            BudgetAuthorityError,
+            settle_budget_authority,
+        )
+
+        try:
+            settle_budget_authority(
+                self._store, reservation=reservation, usage=usage
+            )
+        except BudgetAuthorityError as exc:
+            raise RuntimeError(str(exc)) from exc
 
     # ------------------------------------------------------------ agent
 
