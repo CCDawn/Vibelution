@@ -137,13 +137,10 @@ def _payload_path(
     kind: str,
     content_hash: str,
 ) -> Path:
-    return (
-        _authority_root(root, authority)
-        / team_id
-        / authority_run_id
-        / kind
-        / f"{content_hash}.json"
-    )
+    # Keep paths short for Windows MAX_PATH; identity remains in the envelope
+    # and canonical ref (kind://team/run/hash).
+    _ = (team_id, authority_run_id, kind)
+    return _authority_root(root, authority) / content_hash[:2] / f"{content_hash}.json"
 
 
 def materialize_domain_artifact(
