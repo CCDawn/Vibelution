@@ -10,17 +10,11 @@ import {
 } from "../../../api/researchWorkflow";
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
-import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
-import {
-  applyFormalEvent,
-  emptyFormalEventReadModel,
-  hydrateFormalEventFromSnapshot,
-  type FormalEventReadModel,
-} from "./researchWorkflowEventReducer";
 import {
   snapshotToCanvasProjection,
   snapshotToRunRecord,
 } from "./researchWorkflowSnapshotProjection";
+import { useResearchWorkflowEventReplay } from "./useResearchWorkflowEventReplay";
 import { useResearchWorkflowEventStream } from "./useResearchWorkflowEventStream";
 import { useResearchWorkflowSnapshot } from "./useResearchWorkflowSnapshot";
 
@@ -45,9 +39,13 @@ export function useResearchWorkflowRun(
   runId: string,
 ): UseResearchWorkflowRunResult {
   const snapshotState = useResearchWorkflowSnapshot(teamId, runId);
-  const [eventState, setEventState] = useState<FormalEventReadModel>(() =>
-    emptyFormalEventReadModel(teamId, runId),
-  );
+  const replay = useResearchWorkflowEventReplay({
+    teamId,
+    runId,
+    enabled: Boolean(teamId.trim() && runId.trim() && snapshotState.snapshot),
+    latestEventSequence: snapshotState.snapshot?.latestEventSequence ?? 0,
+  });
+  const eventState = replay.model;
   const [definitionProjection, setDefinitionProjection] =
     useState<WorkflowCanvasProjection | null>(null);
   const [definitionError, setDefinitionError] = useState<string | null>(null);
@@ -71,21 +69,6 @@ export function useResearchWorkflowRun(
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    setEventState(emptyFormalEventReadModel(teamId, runId));
-  }, [runId, teamId]);
-
-  useEffect(() => {
-    if (!snapshotState.snapshot) return;
-    setEventState((current) =>
-      hydrateFormalEventFromSnapshot(current, {
-        teamId,
-        runId,
-        latestEventSequence: snapshotState.snapshot!.latestEventSequence,
-      }),
-    );
-  }, [runId, snapshotState.generation, snapshotState.snapshot, teamId]);
 
   useEffect(() => {
     const canonicalTeamId = teamId.trim();
@@ -122,26 +105,19 @@ export function useResearchWorkflowRun(
     };
   }, [runId, teamId]);
 
-  const onStreamEvent = useCallback(
-    (event: WorkflowEventEnvelope) => {
-      setEventState((current) => {
-        const next = applyFormalEvent(current, event);
-        if (next.resyncRequired) {
-          scheduleRefresh();
-        }
-        return next;
-      });
-    },
-    [scheduleRefresh],
-  );
+  useEffect(() => {
+    if (eventState.resyncRequired) {
+      scheduleRefresh();
+    }
+  }, [eventState.resyncRequired, scheduleRefresh]);
 
   const stream = useResearchWorkflowEventStream({
     teamId,
     runId,
     afterSequence: eventState.lastSequence,
-    initialAfterSequence: snapshotState.lastSequence,
-    onEvent: onStreamEvent,
-    enabled: Boolean(teamId.trim() && runId.trim()),
+    initialAfterSequence: eventState.lastSequence,
+    onEvent: replay.applyStreamEvent,
+    enabled: Boolean(teamId.trim() && runId.trim() && replay.ready),
   });
 
   const projection = useMemo(() => {
@@ -191,6 +167,7 @@ export function useResearchWorkflowRun(
   const error =
     snapshotState.error
     || definitionError
+    || replay.error
     || stream.error
     || (eventState.resyncRequired ? "工作流事件序列出现缺口，正在重新同步" : null);
 

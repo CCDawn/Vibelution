@@ -13,6 +13,7 @@ import type { ResearchWorkflowSnapshot } from "../../../api/types/research-workf
 
 const api = vi.hoisted(() => ({
   fetchResearchWorkflowSnapshot: vi.fn(),
+  replayResearchWorkflowEvents: vi.fn(),
   fetchResearchWorkflowDefinition: vi.fn(),
   createResearchWorkflowRun: vi.fn(),
   resolveResearchWorkflowHumanTask: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("../../../api/research-workflow/runs", () => ({
 }));
 
 vi.mock("../../../api/research-workflow/events", () => ({
+  replayResearchWorkflowEvents: api.replayResearchWorkflowEvents,
   researchWorkflowStreamUrl: api.researchWorkflowStreamUrl,
 }));
 
@@ -41,6 +43,7 @@ vi.mock("../../../api/researchWorkflow", () => ({
   resolveResearchWorkflowHumanTask: api.resolveResearchWorkflowHumanTask,
 }));
 
+import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
 
 function makeSnapshot(runId: string, sequence: number): ResearchWorkflowSnapshot {
@@ -91,6 +94,37 @@ function makeSnapshot(runId: string, sequence: number): ResearchWorkflowSnapshot
   };
 }
 
+function makeEnvelope(runId: string, sequence: number): WorkflowEventEnvelope {
+  return {
+    eventId: `evt-${runId}-${sequence}`,
+    sequence,
+    runId,
+    teamId: "research-team",
+    runVersion: 3,
+    type: sequence === 1 ? "run_created" : "command_accepted",
+    correlationId: "corr",
+    occurredAt: "2026-08-12T14:00:00.000Z",
+    payload: {},
+  };
+}
+
+function makeEventPage(runId: string, sequence: number) {
+  const events = Array.from({ length: sequence }, (_, index) =>
+    makeEnvelope(runId, index + 1),
+  );
+  return {
+    runId,
+    teamId: "research-team",
+    runVersion: 3,
+    latestEventSequence: sequence,
+    afterSequence: 0,
+    lastReturnedSequence: sequence,
+    hasMore: false,
+    nextAfterSequence: null,
+    events,
+  };
+}
+
 type HookValue = ReturnType<typeof useResearchWorkflowRun>;
 
 class FakeEventSource {
@@ -138,6 +172,9 @@ describe("useResearchWorkflowRun behavior", () => {
       workflowId: "challenge-cup-research",
       workflowVersionId: "wv-x",
     });
+    api.replayResearchWorkflowEvents.mockImplementation(async ({ runId }) =>
+      makeEventPage(runId, runId === "run-a" ? 3 : 1).events,
+    );
   });
 
   afterEach(async () => {
@@ -147,6 +184,20 @@ describe("useResearchWorkflowRun behavior", () => {
     container.remove();
     vi.unstubAllGlobals();
   });
+
+  async function flush() {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  async function waitUntil(predicate: () => boolean) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (predicate()) return;
+      await flush();
+    }
+    throw new Error("hook did not settle");
+  }
 
   async function renderWith(runId: string) {
     await act(async () => {
@@ -159,17 +210,19 @@ describe("useResearchWorkflowRun behavior", () => {
         />,
       );
     });
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await waitUntil(() => Boolean(latest?.run?.runId === runId && latest.lastSequence > 0));
   }
 
-  it("initial snapshot hydrates lastSequence without duplicating events", async () => {
+  it("replays committed events into the timeline before opening SSE", async () => {
     api.fetchResearchWorkflowSnapshot.mockResolvedValue(makeSnapshot("run-a", 3));
     await renderWith("run-a");
     expect(latest?.run?.runId).toBe("run-a");
-    expect(latest?.run?.events).toHaveLength(0);
+    expect(latest?.run?.events).toHaveLength(3);
     expect(latest?.lastSequence).toBe(3);
+    expect(api.replayResearchWorkflowEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-a", teamId: "research-team" }),
+    );
+    expect(FakeEventSource.instances.at(-1)?.url).toContain("afterSequence=3");
   });
 
   it("run switch resets sequence cursor for run B", async () => {
@@ -178,11 +231,12 @@ describe("useResearchWorkflowRun behavior", () => {
     );
 
     await renderWith("run-a");
-    expect(latest?.lastSequence).toBe(100);
+    expect(latest?.lastSequence).toBe(3);
 
     await renderWith("run-b");
     expect(latest?.run?.runId).toBe("run-b");
     expect(latest?.lastSequence).toBe(1);
+    expect(FakeEventSource.instances.at(-1)?.url).toContain("afterSequence=1");
   });
 
   it("slow previous run refresh does not overwrite new run", async () => {
@@ -202,9 +256,7 @@ describe("useResearchWorkflowRun behavior", () => {
     await act(async () => {
       root.render(<HookProbe runId="run-b" onValue={(v) => { latest = v; }} />);
     });
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await waitUntil(() => latest?.run?.runId === "run-b" && latest.lastSequence === 1);
     await act(async () => {
       resolveA(makeSnapshot("run-a", 5));
       await Promise.resolve();
