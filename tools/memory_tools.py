@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 # 导入统一工作区管理器
-from core.logging import debug_logger
+from core.logging import debug as _debug_logger
 from core.infrastructure.workspace_manager import get_workspace
 from core.orchestration.task_planner import get_task_manager
 
@@ -131,22 +131,22 @@ def _load_memory() -> dict:
 
 def _save_memory(memory: dict) -> bool:
     """保存记忆到文件"""
-    from core.logging import debug_logger
+    from core.logging import debug as _debug_logger
 
     memory_file = _get_memory_index_path()
     try:
         with open(memory_file, 'w', encoding='utf-8') as f:
             json.dump(memory, f, ensure_ascii=False, indent=2)
-        debug_logger.info(f"[记忆保存] 成功: {memory_file}")
+        _debug_logger.info(f"[记忆保存] 成功: {memory_file}")
         return True
     except IOError as e:
-        debug_logger.error(f"[ERROR] 记忆保存失败 (IOError): {e}")
+        _debug_logger.error(f"[ERROR] 记忆保存失败 (IOError): {e}")
         return False
     except TypeError as e:
-        debug_logger.error(f"[ERROR] 记忆保存失败 (序列化错误): {e}")
+        _debug_logger.error(f"[ERROR] 记忆保存失败 (序列化错误): {e}")
         return False
     except Exception as e:
-        debug_logger.error(f"[ERROR] 记忆保存失败 (未知错误): {e}")
+        _debug_logger.error(f"[ERROR] 记忆保存失败 (未知错误): {e}")
         return False
 
 
@@ -189,7 +189,7 @@ def get_current_goal_tool() -> str:
         if goal:
             return goal
     except Exception as exc:
-        debug_logger.warning(f"[目标读取] PromptManager 当前目标读取失败，回退到文件记忆: {type(exc).__name__}: {exc}")
+        _debug_logger.warning(f"[目标读取] PromptManager 当前目标读取失败，回退到文件记忆: {type(exc).__name__}: {exc}")
     return _load_memory().get("current_goal", "")
 
 
@@ -232,7 +232,7 @@ def commit_compressed_memory_tool(new_core_context: str, next_goal: str) -> str:
         pm.update_current_goal(next_goal)
         pm.update_state_memory(new_core_context)
     except Exception as exc:
-        debug_logger.warning(f"[记忆同步] PromptManager 同步失败，仅保存文件记忆: {type(exc).__name__}: {exc}")
+        _debug_logger.warning(f"[记忆同步] PromptManager 同步失败，仅保存文件记忆: {type(exc).__name__}: {exc}")
 
     if _save_memory(memory):
         return json.dumps({
@@ -259,7 +259,7 @@ def force_save_current_state(core_wisdom: str = "", next_goal: str = "") -> str:
     Returns:
         保存结果
     """
-    from core.logging import debug_logger
+    from core.logging import debug as _debug_logger
 
     try:
         memory = _load_memory()
@@ -281,10 +281,10 @@ def force_save_current_state(core_wisdom: str = "", next_goal: str = "") -> str:
             from core.prompt_manager import get_prompt_manager
             get_prompt_manager().update_current_goal(next_goal)
         except Exception as exc:
-            debug_logger.warning(f"[强制快照] PromptManager 当前目标同步失败，仅保存文件记忆: {type(exc).__name__}: {exc}")
+            _debug_logger.warning(f"[强制快照] PromptManager 当前目标同步失败，仅保存文件记忆: {type(exc).__name__}: {exc}")
 
         if _save_memory(memory):
-            debug_logger.warning("[强制快照] 记忆已保存")
+            _debug_logger.warning("[强制快照] 记忆已保存")
             return json.dumps({
                 "status": "success",
                 "message": "强制记忆快照完成",
@@ -292,14 +292,14 @@ def force_save_current_state(core_wisdom: str = "", next_goal: str = "") -> str:
                 "next_goal": next_goal
             }, ensure_ascii=False)
         else:
-            debug_logger.error("[ERROR] 强制记忆快照失败")
+            _debug_logger.error("[ERROR] 强制记忆快照失败")
             return json.dumps({
                 "status": "error",
                 "message": "强制记忆快照失败"
             }, ensure_ascii=False)
 
     except Exception as e:
-        debug_logger.error(f"[ERROR] 强制记忆快照异常: {e}")
+        _debug_logger.error(f"[ERROR] 强制记忆快照异常: {e}")
         return json.dumps({
             "status": "error",
             "message": f"强制记忆快照异常: {str(e)}"

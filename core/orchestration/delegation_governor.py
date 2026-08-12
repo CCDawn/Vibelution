@@ -17,7 +17,7 @@ from core.infrastructure.runtime_input import (
     build_delegation_evidence_message,
     build_delegation_failure_message,
 )
-from core.logging.logger import debug as _debug_logger
+from core.logging import debug as _debug_logger
 from core.orchestration.subagent_roles import (
     ALLOWED_SUBAGENT_TASK_TYPES,
     SubagentRoleNeed,
