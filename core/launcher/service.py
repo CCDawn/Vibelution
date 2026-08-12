@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
 from core.runtime_manager import command_queue, ensure_daemon_running, is_daemon_running, submit_command
@@ -144,6 +145,8 @@ class LauncherCommandResponse(TypedDict, total=False):
     operation: LauncherOperation
     message: str
     activeWorkRuns: list[dict[str, str]]
+    closeId: str
+    windowOwner: str
 
 
 class LauncherRequestAudit(TypedDict, total=False):
@@ -970,6 +973,117 @@ def submit_lifecycle_intent(payload: dict[str, Any], *, actor_context: dict[str,
     return result
 
 
+def _active_electron_workbench_session() -> dict[str, Any]:
+    """Return the live, close-transaction-capable Electron Workbench for this project."""
+
+    session = desktop_session_store.latest_active_desktop_session(
+        provider="electron",
+        workspace_root=str(PROJECT_ROOT),
+        window_role="workbench",
+    )
+    if not session:
+        return {}
+    windows = session.get("windows") if isinstance(session.get("windows"), dict) else {}
+    workbench = windows.get("workbench") if isinstance(windows.get("workbench"), dict) else {}
+    capabilities = session.get("capabilities") if isinstance(session.get("capabilities"), list) else []
+    if not bool(workbench.get("open")):
+        return {}
+    if "workbench_close.transaction.v1" not in capabilities:
+        return {}
+    if int(session.get("revision") or 0) <= 0:
+        return {}
+    return session
+
+
+def _queue_electron_workbench_close_action(
+    *,
+    transaction: dict[str, Any],
+    source: str,
+) -> dict[str, Any]:
+    """Persist the Electron-side half before its backend close command can finish."""
+
+    desktop_session_id = str(transaction.get("desktopSessionId") or "").strip()
+    close_id = str(transaction.get("closeId") or "").strip()
+    if not desktop_session_id or not close_id:
+        raise ValueError("Electron workbench close action requires a durable close transaction")
+    action_payload = {
+        "closeId": close_id,
+        "desktopSessionId": desktop_session_id,
+        "expectedDesktopSessionRevision": int(transaction.get("expectedDesktopSessionRevision") or 0),
+        "mode": str(transaction.get("mode") or "normal"),
+        "reason": str(transaction.get("reason") or ""),
+        "source": source,
+    }
+    return lifecycle_intent_store.submit_lifecycle_intent(
+        {
+            "action": "close_workbench",
+            "reason": str(transaction.get("reason") or "electron_workbench_close"),
+            "idempotencyKey": f"electron-workbench-close-action:{close_id}",
+        },
+        actor_context={
+            **trusted_lifecycle_actor_context(),
+            "actorType": "launcher_api",
+            "actorId": "launcher-electron-close-handoff",
+        },
+        active_work_runs=[],
+        desktop_action_payload=action_payload,
+    )
+
+
+def _submit_launcher_electron_workbench_close(
+    *,
+    force: bool,
+    reason: str,
+    request_audit: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bridge a Launcher lifecycle request into the durable Electron close protocol.
+
+    A normal close is dispatched directly.  For an explicit force stop with
+    active work, its own persisted normal transaction becomes the required
+    confirmation record before the force transaction is issued.
+    """
+
+    session = _active_electron_workbench_session()
+    if not session:
+        return {}
+    desktop_session_id = str(session.get("desktopSessionId") or "").strip()
+    close_key = f"launcher-electron-close:{desktop_session_id}:{uuid4().hex}"
+    normal = submit_workbench_close_transaction(
+        {
+            "desktopSessionId": desktop_session_id,
+            "idempotencyKey": f"{close_key}:normal",
+            "mode": "normal",
+            "reason": reason,
+        },
+        defer_backend_dispatch=True,
+    )
+    transaction = normal
+    if force and str(normal.get("phase") or "") == "confirmation_required":
+        transaction = submit_workbench_close_transaction(
+            {
+                "desktopSessionId": desktop_session_id,
+                "idempotencyKey": f"{close_key}:force",
+                "mode": "force",
+                "reason": reason,
+                "confirmationCloseId": str(normal.get("closeId") or ""),
+            },
+            defer_backend_dispatch=True,
+        )
+    if str(transaction.get("phase") or "") != "backend_closing":
+        raise RuntimeError("Launcher Electron close transaction did not enter backend closing")
+    action = _queue_electron_workbench_close_action(transaction=transaction, source="launcher_api")
+    if str(action.get("status") or "") != "accepted":
+        failed = lifecycle_intent_store.fail_workbench_close_transaction(
+            str(transaction.get("closeId") or ""),
+            code="electron_window_action_rejected",
+            message="Launcher could not persist the targeted Electron window-close action.",
+            result={"intentId": str(action.get("intentId") or ""), "status": str(action.get("status") or "")},
+        )
+        _record_workbench_close_event("failed", failed)
+        return failed
+    return _dispatch_persisted_workbench_close_transaction(transaction, request_audit=request_audit)
+
+
 def get_lifecycle_intent(intent_id: str) -> dict[str, Any]:
     intent = lifecycle_intent_store.get_lifecycle_intent(intent_id)
     if not intent.get("intentId"):
@@ -1106,7 +1220,12 @@ def close_desktop_session(desktop_session_id: str, payload: dict[str, Any]) -> d
     return desktop_session_store.close_desktop_session(desktop_session_id, payload)
 
 
-def submit_workbench_close_transaction(payload: dict[str, Any]) -> dict[str, Any]:
+def submit_workbench_close_transaction(
+    payload: dict[str, Any],
+    *,
+    defer_backend_dispatch: bool = False,
+    request_audit: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     desktop_session_id = str(payload.get("desktopSessionId") or "").strip()
     desktop_session = desktop_session_store.get_desktop_session(desktop_session_id)
     transaction = lifecycle_intent_store.submit_workbench_close_transaction(
@@ -1118,6 +1237,18 @@ def submit_workbench_close_transaction(payload: dict[str, Any]) -> dict[str, Any
         "confirmation_required" if transaction.get("phase") == "confirmation_required" else "persisted",
         transaction,
     )
+    if transaction.get("phase") != "backend_closing" or transaction.get("commandId") or defer_backend_dispatch:
+        return transaction
+    return _dispatch_persisted_workbench_close_transaction(transaction, request_audit=request_audit)
+
+
+def _dispatch_persisted_workbench_close_transaction(
+    transaction: dict[str, Any],
+    *,
+    request_audit: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Dispatch only a durable backend-closing transaction after its window handoff exists."""
+
     if transaction.get("phase") != "backend_closing" or transaction.get("commandId"):
         return transaction
     dispatch_payload = {
@@ -1129,7 +1260,13 @@ def submit_workbench_close_transaction(payload: dict[str, Any]) -> dict[str, Any
         "confirmationCloseId": str(transaction.get("confirmationCloseId") or ""),
     }
     try:
-        dispatch = lifecycle_action_dispatcher.dispatch_workbench_close_transaction(dispatch_payload)
+        if request_audit:
+            dispatch = lifecycle_action_dispatcher.dispatch_workbench_close_transaction(
+                dispatch_payload,
+                request_audit=request_audit,
+            )
+        else:
+            dispatch = lifecycle_action_dispatcher.dispatch_workbench_close_transaction(dispatch_payload)
     except Exception as exc:  # noqa: BLE001 - command queue is an external persistence boundary.
         failed = lifecycle_intent_store.fail_workbench_close_transaction(
             str(transaction.get("closeId") or ""),
@@ -1409,19 +1546,27 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
         ensure_started = time.monotonic()
         ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
-        command_args: dict[str, Any] = {
-            "reason": "launcher_stop_button",
-            "source": "launcher_api",
-            "stopManager": False,
-        }
-        if audit:
-            command_args["requestAudit"] = audit
         submit_started = time.monotonic()
-        command = submit_command(
-            "close_workbench",
-            args=command_args,
-            requested_by="launcher_api",
+        electron_transaction = _submit_launcher_electron_workbench_close(
+            force=False,
+            reason="launcher_stop_button",
+            request_audit=audit or None,
         )
+        if electron_transaction:
+            command = {"commandId": str(electron_transaction.get("commandId") or "")}
+        else:
+            command_args: dict[str, Any] = {
+                "reason": "launcher_stop_button",
+                "source": "launcher_api",
+                "stopManager": False,
+            }
+            if audit:
+                command_args["requestAudit"] = audit
+            command = submit_command(
+                "close_workbench",
+                args=command_args,
+                requested_by="launcher_api",
+            )
         prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
     except Exception as exc:
         prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
@@ -1451,14 +1596,17 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
         command_id=command_id,
         outcome="accepted",
     )
+    event_fields: dict[str, Any] = {"mode": "standalone_control_plane", "commandId": command_id}
+    if electron_transaction:
+        event_fields.update({"closeId": electron_transaction.get("closeId", ""), "windowOwner": "electron"})
     _record_launcher_event(
         "launcher.bundle.stop.accepted",
         phase="stop",
         message="Launcher project bundle stop queued through runtime manager.",
         outcome="accepted",
-        fields={"mode": "standalone_control_plane", "commandId": command_id},
+        fields=event_fields,
     )
-    return {
+    response: LauncherCommandResponse = {
         "accepted": True,
         "mode": "runtime_manager",
         "launcherMode": "standalone_control_plane",
@@ -1466,6 +1614,10 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
         "commandId": command_id,
         "message": "正在关闭项目工作台，Launcher 控制面会保持可再次启动。",
     }
+    if electron_transaction:
+        response["closeId"] = str(electron_transaction.get("closeId") or "")
+        response["windowOwner"] = "electron"
+    return response
 
 
 def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = None) -> LauncherCommandResponse:
@@ -1547,19 +1699,27 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         ensure_started = time.monotonic()
         ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
-        command_args: dict[str, Any] = {
-            "reason": "launcher_force_stop_button",
-            "source": "launcher_api",
-            "stopManager": False,
-        }
-        if audit:
-            command_args["requestAudit"] = audit
         submit_started = time.monotonic()
-        command = submit_command(
-            "force_close_workbench",
-            args=command_args,
-            requested_by="launcher_api",
+        electron_transaction = _submit_launcher_electron_workbench_close(
+            force=True,
+            reason="launcher_force_stop_button",
+            request_audit=audit or None,
         )
+        if electron_transaction:
+            command = {"commandId": str(electron_transaction.get("commandId") or "")}
+        else:
+            command_args: dict[str, Any] = {
+                "reason": "launcher_force_stop_button",
+                "source": "launcher_api",
+                "stopManager": False,
+            }
+            if audit:
+                command_args["requestAudit"] = audit
+            command = submit_command(
+                "force_close_workbench",
+                args=command_args,
+                requested_by="launcher_api",
+            )
         prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
     except Exception as exc:
         prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
@@ -1604,6 +1764,15 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         if residual_active_work_while_closed
         else "正在强制关闭项目工作台，Launcher 控制面会保持可再次启动。"
     )
+    accepted_fields: dict[str, Any] = {
+        "mode": "standalone_control_plane",
+        "commandId": command_id,
+        "activeWorkCount": len(active_work_runs),
+        "alreadyClosed": already_closed,
+        "residualActiveWorkWhileClosed": residual_active_work_while_closed,
+    }
+    if electron_transaction:
+        accepted_fields.update({"closeId": electron_transaction.get("closeId", ""), "windowOwner": "electron"})
     _record_launcher_event(
         "launcher.bundle.force_stop.accepted",
         phase="stop",
@@ -1614,15 +1783,9 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
             else "Launcher project bundle force-stop queued through runtime manager."
         ),
         outcome="accepted",
-        fields={
-            "mode": "standalone_control_plane",
-            "commandId": command_id,
-            "activeWorkCount": len(active_work_runs),
-            "alreadyClosed": already_closed,
-            "residualActiveWorkWhileClosed": residual_active_work_while_closed,
-        },
+        fields=accepted_fields,
     )
-    return {
+    response: LauncherCommandResponse = {
         "accepted": True,
         "mode": "runtime_manager",
         "launcherMode": "standalone_control_plane",
@@ -1632,6 +1795,10 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         "activeWorkCount": len(active_work_runs),
         "activeWorkRuns": active_work_runs[:8],
     }
+    if electron_transaction:
+        response["closeId"] = str(electron_transaction.get("closeId") or "")
+        response["windowOwner"] = "electron"
+    return response
 
 
 def _launcher_workbench_already_closed() -> bool:

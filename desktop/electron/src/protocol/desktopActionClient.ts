@@ -36,7 +36,7 @@ export type DesktopActionRunResult =
 export type DesktopWindowOperations = {
   openOrFocusWorkbench(): Promise<unknown>;
   focusWorkbench(): Promise<unknown>;
-  closeWorkbench(): Promise<unknown>;
+  closeWorkbench(payload: Record<string, unknown>): Promise<unknown>;
 };
 
 type DesktopActionEndpointTemplates = {
@@ -165,6 +165,21 @@ export async function runDesktopActionOnce(input: {
     return { claimed: false };
   }
 
+  const targetDesktopSessionId = String(action.payload.desktopSessionId || "").trim();
+  if (targetDesktopSessionId && targetDesktopSessionId !== input.desktopSessionId) {
+    await finishDesktopAction({
+      ...input,
+      actionId: action.actionId,
+      status: "fail",
+      result: {
+        reason: "desktop_action_target_mismatch",
+        targetDesktopSessionId,
+        desktopSessionId: input.desktopSessionId
+      }
+    });
+    return { claimed: true, actionId: action.actionId, action: action.action, status: "failed" };
+  }
+
   const operation = desktopWindowOperationForAction(action.action);
   if (operation === "none") {
     await finishDesktopAction({
@@ -180,7 +195,7 @@ export async function runDesktopActionOnce(input: {
   }
 
   try {
-    const windowState = await executeDesktopWindowOperation(operation, input.operations);
+    const windowState = await executeDesktopWindowOperation(operation, input.operations, action.payload);
     await finishDesktopAction({
       ...input,
       actionId: action.actionId,
@@ -203,12 +218,16 @@ export async function runDesktopActionOnce(input: {
   }
 }
 
-function executeDesktopWindowOperation(operation: Exclude<DesktopWindowOperation, "none">, operations: DesktopWindowOperations) {
+function executeDesktopWindowOperation(
+  operation: Exclude<DesktopWindowOperation, "none">,
+  operations: DesktopWindowOperations,
+  payload: Record<string, unknown>
+) {
   if (operation === "open_or_focus_workbench") {
     return operations.openOrFocusWorkbench();
   }
   if (operation === "focus_workbench") {
     return operations.focusWorkbench();
   }
-  return operations.closeWorkbench();
+  return operations.closeWorkbench(payload);
 }
