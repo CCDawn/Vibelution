@@ -656,6 +656,20 @@ def _bound_candidate_worktree(
     }
 
 
+def _factory_candidate_worktree(candidate: Path, **extra: object) -> dict:
+    checkpoint = _candidate_checkpoint_commit(candidate)
+    payload = {
+        "path": str(candidate),
+        "baseHead": checkpoint,
+        "checkpointCommit": checkpoint,
+        "checkpointRef": "",
+        "trackedDirty": False,
+        "untrackedFiles": [],
+    }
+    payload.update(extra)
+    return payload
+
+
 def _candidate_checkpoint_commit(candidate: Path) -> str:
     head = _run_git(candidate, "rev-parse", "HEAD")
     dirty = subprocess.run(
@@ -789,15 +803,7 @@ def test_supervised_worktree_flow_preserves_improved_candidate_and_records_merge
     _run_git(project_root, "commit", "-m", "init")
 
     def worktree_factory(root: Path, run_id: str) -> dict:
-        candidate = _make_candidate_repo(tmp_path, root)
-        return {
-            "path": str(candidate),
-            "baseHead": "base",
-            "checkpointCommit": "base",
-            "checkpointRef": "",
-            "trackedDirty": False,
-            "untrackedFiles": [],
-        }
+        return _factory_candidate_worktree(_make_candidate_repo(tmp_path, root))
 
     def modifier(worktree_path: Path, _: str, __: dict) -> dict:
         _run_git(worktree_path, "status", "--porcelain")
@@ -839,15 +845,7 @@ def test_supervised_worktree_flow_projects_six_steps_with_independent_rerun_sess
     evaluator_calls: list[dict[str, object]] = []
 
     def worktree_factory(root: Path, run_id: str) -> dict:
-        candidate = _make_candidate_repo(tmp_path, root)
-        return {
-            "path": str(candidate),
-            "baseHead": "base",
-            "checkpointCommit": "base",
-            "checkpointRef": "",
-            "trackedDirty": False,
-            "untrackedFiles": [],
-        }
+        return _factory_candidate_worktree(_make_candidate_repo(tmp_path, root))
 
     def evaluator(_: Path, bundle_name: str, role: str, context: dict) -> dict:
         evaluator_calls.append({"role": role, "session": context.get("conversationSessionId")})
@@ -930,15 +928,7 @@ def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp
     monkeypatch.setattr(service, "record_runtime_scene_event", record_scene_event)
 
     def worktree_factory(root: Path, run_id: str) -> dict:
-        candidate = _make_candidate_repo(tmp_path, root)
-        return {
-            "path": str(candidate),
-            "baseHead": "base",
-            "checkpointCommit": "base",
-            "checkpointRef": "",
-            "trackedDirty": False,
-            "untrackedFiles": [],
-        }
+        return _factory_candidate_worktree(_make_candidate_repo(tmp_path, root))
 
     def evaluator(_: Path, bundle_name: str, role: str, context: dict) -> dict:
         session_id = str(context.get("conversationSessionId") or "")
@@ -1110,15 +1100,7 @@ def test_self_origin_worktree_flow_carries_goal_and_requires_review(tmp_path):
     captured_prompt: dict[str, str] = {}
 
     def worktree_factory(root: Path, run_id: str) -> dict:
-        candidate = _make_candidate_repo(tmp_path, root)
-        return {
-            "path": str(candidate),
-            "baseHead": "base",
-            "checkpointCommit": "base",
-            "checkpointRef": "",
-            "trackedDirty": False,
-            "untrackedFiles": [],
-        }
+        return _factory_candidate_worktree(_make_candidate_repo(tmp_path, root))
 
     def modifier(_: Path, prompt: str, __: dict) -> dict:
         captured_prompt["value"] = prompt
@@ -1177,15 +1159,7 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
     calls: list[dict] = []
 
     def worktree_factory(root: Path, run_id: str) -> dict:
-        candidate = _make_candidate_repo(tmp_path, root)
-        return {
-            "path": str(candidate),
-            "baseHead": "base",
-            "checkpointCommit": "base",
-            "checkpointRef": "",
-            "trackedDirty": False,
-            "untrackedFiles": [],
-        }
+        return _factory_candidate_worktree(_make_candidate_repo(tmp_path, root))
 
     def fake_bindings() -> dict:
         return {
@@ -1305,7 +1279,8 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
     assert "# improved by candidate" in (candidate_path / "agent.py").read_text(encoding="utf-8")
     variant = snapshot["candidateWorktree"]["variant"]
     assert variant["bindingStatus"] == "verified"
-    assert variant["checkpointCommit"] == "base"
+    assert variant["checkpointCommit"] == snapshot["candidateWorktree"]["checkpointCommit"]
+    assert len(str(variant["checkpointCommit"])) == 40
     assert variant["variantId"].startswith("swte-variant-")
     assert len(variant["patchSha256"]) == 64
     assert variant["changedPaths"] == ["agent.py"]
@@ -1644,15 +1619,7 @@ def test_supervised_worktree_flow_stops_when_candidate_modifier_does_not_finish(
     calls = {"candidate_eval": 0}
 
     def worktree_factory(root: Path, run_id: str) -> dict:
-        candidate = _make_candidate_repo(tmp_path, root)
-        return {
-            "path": str(candidate),
-            "baseHead": "base",
-            "checkpointCommit": "base",
-            "checkpointRef": "",
-            "trackedDirty": False,
-            "untrackedFiles": [],
-        }
+        return _factory_candidate_worktree(_make_candidate_repo(tmp_path, root))
 
     def evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
         if role == "candidate":
