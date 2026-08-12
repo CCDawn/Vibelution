@@ -25,7 +25,7 @@ export function NodeHandoffSection(props: {
       {props.handoffs.map((handoff) => (
         <article className={styles.record} key={handoff.handoffId}>
           <strong>{handoff.fromNodeId} → {handoff.toNodeId}</strong>
-          <span>{handoff.status} · {handoff.outputArtifactRefs.length} 项产物</span>
+          <span>{handoff.status} · {(handoff.outputArtifactRefs ?? []).length} 项产物</span>
           {handoff.supersedesHandoffId ? <span>接替 {handoff.supersedesHandoffId}</span> : null}
         </article>
       ))}
