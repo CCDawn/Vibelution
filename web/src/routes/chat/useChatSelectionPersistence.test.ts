@@ -57,4 +57,17 @@ describe("useChatSelectionPersistence", () => {
       tabId: null,
     });
   });
+
+  it("does not restore an archived session from local selection storage", () => {
+    const archived = {
+      ...sessions[0],
+      hiddenFromIndex: true,
+      archiveState: { status: "archived" },
+    } as SessionSummary;
+
+    expect(resolveStoredDirectChatSelection({
+      agentId: "agent-luna",
+      sessionId: "session-luna-1",
+    }, [archived, sessions[1]])).toBeNull();
+  });
 });

@@ -31,6 +31,8 @@ export type UseChatSessionSelectionOptions = {
   latestDirectSessionSelectionAtRef: MutableRefObject<number>;
   /** Monotonic generation for the latest user tab selection (stale responses discarded). */
   directSessionSelectionGenerationRef: MutableRefObject<number>;
+  /** Permanently retired session ids for this mounted Chat surface. */
+  retiredDirectSessionIdsRef: MutableRefObject<ReadonlySet<string>>;
   reselectDirectSessionRef: MutableRefObject<(sessionId: string) => void>;
   activeSessionId: string | null | undefined;
   setActiveSession: (sessionId: string) => void;
@@ -67,6 +69,7 @@ export function useChatSessionSelection({
   latestDirectSessionSelectionRef,
   latestDirectSessionSelectionAtRef,
   directSessionSelectionGenerationRef,
+  retiredDirectSessionIdsRef,
   reselectDirectSessionRef,
   activeSessionId,
   setActiveSession,
@@ -132,7 +135,7 @@ export function useChatSessionSelection({
   const selectDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   reselectDirectSessionRef.current = (sessionId: string) => {
     const normalizedSessionId = String(sessionId || "").trim();
-    if (!normalizedSessionId) {
+    if (!normalizedSessionId || retiredDirectSessionIdsRef.current.has(normalizedSessionId)) {
       return;
     }
     latestDirectSessionSelectionRef.current = normalizedSessionId;
@@ -195,6 +198,9 @@ export function useChatSessionSelection({
       && !requestedRoomId
       && activeSessionId !== requestedSessionId
     ) {
+      if (retiredDirectSessionIdsRef.current.has(requestedSessionId)) {
+        return;
+      }
       // Optimistic switch sets active before React Router updates ?session=.
       // Do not stomp that intent back to the stale URL (looks "stuck" on terra).
       if (
@@ -230,6 +236,7 @@ export function useChatSessionSelection({
     if (
       requestedSessionId
       && !requestedRoomId
+      && !retiredDirectSessionIdsRef.current.has(requestedSessionId)
       && shouldCanonicalizeUrlSessionSelection({
         requestedSessionId,
         activeSessionId,
@@ -250,6 +257,7 @@ export function useChatSessionSelection({
     activeSessionId,
     latestDirectSessionSelectionAtRef,
     latestDirectSessionSelectionRef,
+    retiredDirectSessionIdsRef,
     requestedRoomId,
     requestedSessionId,
     reselectDirectSessionRef,

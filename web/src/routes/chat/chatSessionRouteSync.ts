@@ -62,3 +62,33 @@ export function shouldKeepExplicitSessionRouteOnNotFound(options: {
   const activeSessionId = String(options.activeSessionId || "").trim();
   return Boolean(requestedSessionId && activeSessionId && requestedSessionId === activeSessionId);
 }
+
+/**
+ * An archived session is intentionally absent from the normal Chat surface.
+ * Retire any active or URL selection that still points at it before a stale
+ * selection request can turn the successful archive into a read-only error.
+ */
+export function resolveArchivedSessionRouteTransition(options: {
+  archivedSessionIds: readonly string[];
+  activeSessionId: string | null | undefined;
+  requestedSessionId: string | null | undefined;
+  fallbackSessionId: string | null | undefined;
+}): {
+  shouldRetireSelection: boolean;
+  nextActiveSessionId: string;
+  nextRequestedSessionId: string;
+} {
+  const archivedSessionIds = new Set(
+    options.archivedSessionIds.map((sessionId) => String(sessionId || "").trim()).filter(Boolean),
+  );
+  const activeSessionId = String(options.activeSessionId || "").trim();
+  const requestedSessionId = String(options.requestedSessionId || "").trim();
+  const fallbackSessionId = String(options.fallbackSessionId || "").trim();
+  const activeSessionArchived = archivedSessionIds.has(activeSessionId);
+  const requestedSessionArchived = archivedSessionIds.has(requestedSessionId);
+  return {
+    shouldRetireSelection: activeSessionArchived || requestedSessionArchived,
+    nextActiveSessionId: activeSessionArchived ? fallbackSessionId : activeSessionId,
+    nextRequestedSessionId: requestedSessionArchived ? fallbackSessionId : requestedSessionId,
+  };
+}

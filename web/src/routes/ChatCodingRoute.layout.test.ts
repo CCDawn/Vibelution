@@ -2594,7 +2594,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("await queryClient.cancelQueries({ queryKey: queryKeys.agents() })");
     expect(routeSource).toContain("queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents)");
-    expect(routeSource).toContain("setActiveSession(fallbackSession?.id || \"\")");
+    expect(routeSource).toContain("resolveArchivedSessionRouteTransition");
+    expect(routeSource).toContain("retiredDirectSessionIdsRef");
+    expect(routeSource).toContain("updateSessionSummaryCaches(queryClient");
+    expect(routeSource).toContain("navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : \"\"}`, { replace: true })");
     expect(routeSource).toContain("previousActiveSessionId");
     expect(routeSource).toContain("previousSelectedAgentId");
     expect(routeSource).toContain("chatWorkspaceCache.afterAgentArchived()");
