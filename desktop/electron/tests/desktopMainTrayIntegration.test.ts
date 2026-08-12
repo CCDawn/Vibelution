@@ -5,16 +5,27 @@ import { describe, expect, it } from "vitest";
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 
 describe("Electron main tray integration", () => {
-  it("keeps one tray alive and only routes tray actions to the Launcher window", () => {
+  it("keeps one tray alive and routes native-parity tray actions through launcher control APIs", () => {
     expect(mainSource).toContain('from "./tray/desktopTray.js"');
     expect(mainSource).toContain("let desktopTray:");
     expect(mainSource).toContain("desktopTray = createDesktopTray(paths,");
     expect(mainSource).toContain("windowProvider?.openLauncher()");
+    expect(mainSource).toContain('runTrayLauncherPost("/api/launcher/start"');
+    expect(mainSource).toContain('runTrayLauncherPost(\n          "/api/launcher/stop"');
+    expect(mainSource).toContain('runTrayLauncherPost("/api/launcher/restart"');
+    expect(mainSource).toContain('runTrayLauncherPost("/api/launcher/rebuild-and-start"');
+    expect(mainSource).toContain("runTrayLauncherStatus()");
+    expect(mainSource).toContain('path: "/api/launcher/force-stop"');
+    expect(mainSource).toContain("requestDesktopShellExit()");
+
     const trayStart = mainSource.indexOf("desktopTray = createDesktopTray(paths,");
     const trayEnd = mainSource.indexOf("await windowProvider.openLauncher()", trayStart);
     const traySource = mainSource.slice(trayStart, trayEnd);
-    expect(traySource).not.toContain("requestDesktopShellExit()");
-    expect(traySource).not.toContain("quit:");
+    expect(traySource).toContain("quit:");
+    expect(traySource).toContain("stopAll:");
+    expect(traySource).toContain("startProject:");
+    expect(traySource).toContain("showStatus:");
+    expect(traySource).toContain("requestDesktopShellExit()");
   });
 
   it("destroys the tray only after shutdown is approved", () => {
@@ -25,5 +36,16 @@ describe("Electron main tray integration", () => {
     expect(beforeQuitSource).toContain("if (shutdownApproved)");
     expect(beforeQuitSource).toContain("desktopTray?.destroy()");
     expect(beforeQuitSource).toContain("desktopTray = null");
+  });
+
+  it("fails closed before authorization but fails open after shutdown was approved", () => {
+    expect(mainSource).toContain("DESKTOP_SHELL_EXIT_BUDGET_MS");
+    expect(mainSource).not.toContain("failOpenOnActiveWorkError: true");
+    expect(mainSource).toContain("pendingWorkbenchCloseAck = null");
+    expect(mainSource).toContain("forcing Electron quit");
+    expect(mainSource).toContain("stopOwnedPythonLauncherService()");
+    expect(mainSource).toContain("stop python launcher on exit budget fail-open");
+    expect(mainSource).toContain('可先用托盘“停止全部”');
+    expect(mainSource).toContain("WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS");
   });
 });

@@ -226,6 +226,7 @@ import {
 import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
+import { buildComposerContextRingModel } from "./composerContextModel";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { useChatWorkbenchCatalogQueries } from "./useChatWorkbenchCatalogQueries";
@@ -1923,6 +1924,7 @@ export function ChatCodingRoute() {
     upperBoundCacheCompositionPercent,
     cachePromptCompositionTotalTokens,
     cachePromptDonutSegments,
+    cachePromptCompositionSegments,
     cacheCompositionPercent,
     averageCacheObservedTurnCount,
     cacheCompositionAverageValue,
@@ -1942,6 +1944,27 @@ export function ChatCodingRoute() {
     cacheDetailAvailable,
     activeSessionId,
   });
+  const composerContextRing = useMemo(() => {
+    const usageUsed = lastContextComposition?.totalTokens ?? detail?.contextUsage?.used ?? 0;
+    const usageLimit = lastContextComposition?.limitTokens ?? detail?.contextUsage?.limit ?? 0;
+    return buildComposerContextRingModel({
+      usageUsed,
+      usageLimit,
+      hitPercent: cacheCompositionPercent,
+      detailAvailable: cacheDetailAvailable,
+      segments: cachePromptCompositionSegments,
+      lang,
+    });
+  }, [
+    cacheCompositionPercent,
+    cacheDetailAvailable,
+    cachePromptCompositionSegments,
+    detail?.contextUsage?.limit,
+    detail?.contextUsage?.used,
+    lang,
+    lastContextComposition?.limitTokens,
+    lastContextComposition?.totalTokens,
+  ]);
   const pendingToolGovernanceApproval = useMemo(
     () => (detail?.pendingToolGovernanceRequests ?? []).find((request) => request.status === "pending_review") ?? null,
     [detail?.pendingToolGovernanceRequests],
@@ -3406,6 +3429,8 @@ export function ChatCodingRoute() {
                   },
                 } : undefined,
                 llmControl: sessionLlmControl,
+                composerContextRing,
+                onOpenComposerContextDetail: cacheDetailAvailable ? openCacheDetail : undefined,
                 slashCommandSuggestions,
                 cancelComposerModeLabel: t("cancelEditMessage"),
                 turnError: detail.lastTurnError,

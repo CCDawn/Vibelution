@@ -28,9 +28,9 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toMatch(/<button\b/);
   });
 
-  it("isolates the 1s top clock and volatile runtime poll from whole-shell re-renders", () => {
-    expect(shellSource).toContain('from "./AppShellTopClock"');
-    expect(shellSource).toContain("<AppShellTopClock");
+  it("keeps the top bar free of per-second tickers and isolates the volatile runtime poll", () => {
+    // The brand-block live clock was removed (visual noise); keep it from coming back inline.
+    expect(shellSource).not.toContain("AppShellTopClock");
     expect(shellSource).not.toContain("setClockNow");
     expect(shellSource).not.toContain("setInterval(() => {\n      setClockNow");
     expect(shellSource).toContain("shareRuntimeSummaryIfOnlyVolatileChanged");
@@ -69,7 +69,7 @@ describe("AppShell layout contract", () => {
     );
     expect(topBarBlock).toContain("pointer-events: auto");
     expect(topBarBlock).toMatch(/(?:^|\n)\s*-webkit-app-region:\s*no-drag\s*;/);
-    // Whole-bar drag is forbidden; only brand/clock chrome may opt in later.
+    // Whole-bar drag is forbidden; only brand chrome may opt in later.
     expect(topBarBlock).not.toMatch(/(?:^|\n)\s*-webkit-app-region:\s*drag\s*;/);
 
     // Real specificity on interactive descendants (not only :where).
@@ -81,9 +81,6 @@ describe("AppShell layout contract", () => {
     // No extra Electron drag strips under the nav band (titleBarOverlay owns window chrome).
     expect(shellStyles).not.toContain(
       ':where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .brandCopy',
-    );
-    expect(shellStyles).not.toContain(
-      ':where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar .topClock',
     );
 
     const navBlock = shellStyles.slice(
@@ -180,7 +177,7 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("align-self: center");
     expect(shellStyles).toContain("@media (max-width: 1279px)");
     expect(shellStyles).toContain("@media (max-width: 1180px)");
-    expect(shellStyles).toContain(".topClock time");
+    expect(shellStyles).not.toContain(".topClock");
     expect(shellStyles).toContain("@media (max-width: 980px)");
     expect(shellStyles).toContain("overscroll-behavior-x: contain");
     expect(shellStyles).toContain(".returnButton");
@@ -210,7 +207,6 @@ describe("AppShell layout contract", () => {
       shellStyles.indexOf("@media (max-width: 1279px)"),
       shellStyles.indexOf("@media (max-width: 1180px)"),
     );
-    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).topClock time");
     expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryToneChip");
     expect(compactDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
     expect(compactDesktopBlock).toContain("display: none");
@@ -219,7 +215,6 @@ describe("AppShell layout contract", () => {
       shellStyles.indexOf("@media (max-width: 1180px)"),
       shellStyles.indexOf("@media (max-width: 980px)"),
     );
-    expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).topClock time");
     expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).statusSummaryToneChip");
     expect(narrowDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
 
@@ -694,7 +689,6 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps the global shell usable on narrow screens", () => {
-    expect(styles.topClock).toBeTypeOf("string");
     expect(styles.utilityTriggerLabel).toBeTypeOf("string");
     expect(styles.statusBadgeLabel).toBeTypeOf("string");
     expect(styles.nav).toContain("max-[639px]:hidden");

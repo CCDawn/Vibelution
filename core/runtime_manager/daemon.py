@@ -603,6 +603,24 @@ def _elapsed_monotonic_ms(started_at: float) -> float:
     return round(max(0.0, (time.monotonic() - started_at) * 1000.0), 1)
 
 
+def _bounded_launcher_startup_telemetry(result: Any) -> dict[str, Any] | None:
+    raw = getattr(result, "startup_telemetry", None)
+    if not isinstance(raw, dict):
+        return None
+    timings = raw.get("timingsMs") if isinstance(raw.get("timingsMs"), dict) else {}
+    bounded_timings = {
+        str(key)[:80]: round(max(0.0, float(value)), 1)
+        for key, value in list(timings.items())[:16]
+        if isinstance(value, (int, float))
+    }
+    return {
+        "startupTraceId": str(raw.get("startupTraceId") or "")[:96],
+        "outcome": str(raw.get("outcome") or "")[:32],
+        "failureStage": str(raw.get("failureStage") or "")[:80],
+        "timingsMs": bounded_timings,
+    }
+
+
 def _command_runtime_timing_fields(
     payload: dict[str, Any],
     *,
@@ -3618,6 +3636,9 @@ class RuntimeManagerDaemon:
         else:
             result = open_workbench(no_browser=no_browser, cancel_check=cancel_check)
         lifecycle_timings_ms["launcher_action_ms"] = _elapsed_monotonic_ms(launcher_started)
+        launcher_startup = _bounded_launcher_startup_telemetry(result)
+        if launcher_startup is not None:
+            lifecycle_timings_ms["launcherStartup"] = launcher_startup
         interrupt = _active_lifecycle_interrupt(command_id)
         if interrupt or int(result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:
             return self._finish_interrupted_lifecycle_command(
@@ -3660,6 +3681,9 @@ class RuntimeManagerDaemon:
                 browser_restart_started = time.monotonic()
                 restart_result = restart_workbench(no_browser=no_browser, cancel_check=cancel_check)
                 lifecycle_timings_ms["browser_missing_restart_ms"] = _elapsed_monotonic_ms(browser_restart_started)
+                restart_startup = _bounded_launcher_startup_telemetry(restart_result)
+                if restart_startup is not None:
+                    lifecycle_timings_ms["browserMissingRestartStartup"] = restart_startup
                 interrupt = _active_lifecycle_interrupt(command_id)
                 if interrupt or int(restart_result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:
                     return self._finish_interrupted_lifecycle_command(
@@ -3733,6 +3757,9 @@ class RuntimeManagerDaemon:
                 else:
                     retry_result = open_workbench(no_browser=no_browser, cancel_check=cancel_check)
                 lifecycle_timings_ms["launcher_retry_ms"] = _elapsed_monotonic_ms(retry_launcher_started)
+                retry_startup = _bounded_launcher_startup_telemetry(retry_result)
+                if retry_startup is not None:
+                    lifecycle_timings_ms["launcherRetryStartup"] = retry_startup
                 interrupt = _active_lifecycle_interrupt(command_id)
                 if interrupt or int(retry_result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:
                     return self._finish_interrupted_lifecycle_command(

@@ -256,13 +256,36 @@ describe("chat active turn layer", () => {
   });
 
   it("requests one authoritative index refresh only for terminal active layers", () => {
+    const answerItem = {
+      id: "answer:1",
+      itemId: "answer",
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "agent_message",
+      phase: "final_answer",
+      status: "completed",
+      revision: 1,
+      sequence: 1,
+      terminal: true,
+      text: "DONE",
+      createdAt: "2026-08-10T00:00:00Z",
+      updatedAt: "2026-08-10T00:00:00Z",
+    } satisfies SessionTurnItem;
     const layer = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,
-      assistantDelta({ done: true, ledgerSeq: 9 }),
+      assistantDelta({ done: true, ledgerSeq: 9, turnItems: [answerItem] }),
     );
     expect(activeTurnTerminalRefreshKey(layer)).toBe("turn-1:completed:9");
     expect(activeTurnTerminalRefreshKey({ ...layer!, status: "running" })).toBe("");
     expect(activeTurnTerminalRefreshKey(undefined)).toBe("");
+  });
+
+  it("clears the layer when done arrives with no visible turnItems", () => {
+    expect(mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({ done: true, ledgerSeq: 9, turnItems: [] }),
+    )).toBeUndefined();
   });
 
   it("requests an authoritative index refresh when persisted detail settles a still-running layer", () => {
@@ -315,6 +338,53 @@ describe("chat active turn layer", () => {
 
     expect(bound?.clientSubmissionId).toBe("submission-1");
     expect(activeTurnLayerToConversationMessage(bound)?.metadata?.clientSubmissionId).toBe("submission-1");
+  });
+
+  it("creates optimistic layers with empty turnItems and processStage metadata", () => {
+    const optimistic = createOptimisticActiveTurnLayer({
+      sessionId: "session-1",
+      turnId: "optimistic-submit",
+      clientSubmissionId: "submission-1",
+      updatedAt: "2026-08-10T00:00:00Z",
+    });
+    expect(optimistic).toMatchObject({
+      status: "pending",
+      processStage: "user_submit",
+      turnItems: [],
+    });
+    const message = activeTurnLayerToConversationMessage(optimistic);
+    expect(message).toMatchObject({
+      role: "assistant",
+      status: "pending",
+      turnItems: [],
+      metadata: {
+        processStage: "user_submit",
+        activeStatusSource: "optimistic_submit",
+      },
+    });
+  });
+
+  it("keeps in-flight empty turnItems without injecting a status-only package", () => {
+    const optimistic = createOptimisticActiveTurnLayer({
+      sessionId: "session-1",
+      turnId: "optimistic-submit",
+      updatedAt: "2026-08-10T00:00:00Z",
+    });
+    const running = mergeAssistantDeltaIntoActiveTurnLayer(
+      optimistic,
+      assistantDelta({
+        turnId: "turn-1",
+        stage: "model_thinking",
+        turnItems: [],
+        done: false,
+      }),
+    );
+    expect(running).toMatchObject({
+      status: "running",
+      processStage: "model_thinking",
+      turnItems: [],
+    });
+    expect(activeTurnLayerToConversationMessage(running)?.metadata?.processStage).toBe("model_thinking");
   });
 
   it("keeps AgentMessage projection behind the shared conversation adapter", () => {

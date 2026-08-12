@@ -37,4 +37,19 @@ describe("conversationActiveTurnStatusPresentation", () => {
     expect(bar.find((item) => item.phase === "thinking")?.current).toBe(true);
     expect(bar.filter((item) => item.reached)).toHaveLength(4);
   });
+
+  it("falls back to metadata.processStage then pending/running defaults", () => {
+    expect(resolveActiveTurnProgressStage({
+      turnItems: [],
+      metadata: { processStage: "user_submit" },
+    })).toBe("user_submit");
+    expect(resolveActiveTurnProgressStage({
+      turnItems: [],
+      status: "pending",
+    })).toBe("user_submit");
+    expect(resolveActiveTurnProgressStage({
+      turnItems: [],
+      status: "running",
+    })).toBe("running");
+  });
 });

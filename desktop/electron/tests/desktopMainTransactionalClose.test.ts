@@ -69,11 +69,14 @@ describe("Electron main transactional Workbench close", () => {
     expect(actionOpenStart).toBeGreaterThanOrEqual(0);
     expect(actionOpenEnd).toBeGreaterThan(actionOpenStart);
     expect(actionOpenSource).not.toContain("bootstrapLauncherIfEnabled(paths)");
-    expect(actionOpenSource).toContain("resolveWorkbenchUrl(desktopEnvironment(), bootstrap.workbenchUrl)");
+    expect(actionOpenSource).toContain("payloadUrl || bootstrap.workbenchUrl");
+    expect(actionOpenSource).toContain("resolveWorkbenchUrl(desktopEnvironment(), payloadUrl || bootstrap.workbenchUrl)");
     expect(actionOpenSource).toContain("currentWorkbenchUrl = workbenchUrl;");
     expect(actionOpenSource).toContain("await provider.openOrFocusWorkbench(workbenchUrl)");
     expect(source).toContain("const workbenchUrl = currentWorkbenchUrl || resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl)");
-    expect(source).toContain("openOrFocusWorkbench: () => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider)");
+    expect(source).toContain(
+      "openOrFocusWorkbench: (payload) => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, payload)"
+    );
   });
 
   it("repairs one rejected close submit by refreshing the session control context before showing a retry dialog", () => {

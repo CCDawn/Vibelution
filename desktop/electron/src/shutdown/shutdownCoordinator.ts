@@ -7,15 +7,28 @@ export type ActiveWorkStatus = {
 
 export type ShutdownDecision =
   | { allowed: true; reason: "no_active_work"; stopPythonLauncher: boolean }
-  | { allowed: false; reason: "active_work_running"; message: string };
+  | { allowed: false; reason: "active_work_running" | "active_work_status_unavailable"; message: string };
+
+type ApprovedShutdownDecision = Extract<ShutdownDecision, { allowed: true }>;
+type DeniedShutdownDecision = Extract<ShutdownDecision, { allowed: false }>;
 
 const ACTIVE_WORK_BLOCK_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。";
+const ACTIVE_WORK_STATUS_UNAVAILABLE_MESSAGE = "暂时无法确认是否有进行中的任务，已取消退出。请稍后重试。";
 
 export async function decideShutdown(input: {
   ownershipMode: BootstrapOwnershipMode;
   activeWorkStatus: () => Promise<ActiveWorkStatus>;
 }): Promise<ShutdownDecision> {
-  const activeWork = await input.activeWorkStatus();
+  let activeWork: ActiveWorkStatus;
+  try {
+    activeWork = await input.activeWorkStatus();
+  } catch {
+    return {
+      allowed: false,
+      reason: "active_work_status_unavailable",
+      message: ACTIVE_WORK_STATUS_UNAVAILABLE_MESSAGE
+    };
+  }
   if (activeWork.active) {
     return {
       allowed: false,
@@ -28,6 +41,25 @@ export async function decideShutdown(input: {
     reason: "no_active_work",
     stopPythonLauncher: input.ownershipMode === "started"
   };
+}
+
+export async function executeShutdownAuthorizationBoundary(input: {
+  authorize: () => Promise<ShutdownDecision>;
+  onDenied: (decision: DeniedShutdownDecision) => void | Promise<void>;
+  runApproved: (decision: ApprovedShutdownDecision) => Promise<void>;
+  failOpenAfterApproval: (decision: ApprovedShutdownDecision, error: unknown) => Promise<void>;
+}): Promise<ShutdownDecision> {
+  const decision = await input.authorize();
+  if (!decision.allowed) {
+    await input.onDenied(decision);
+    return decision;
+  }
+  try {
+    await input.runApproved(decision);
+  } catch (error: unknown) {
+    await input.failOpenAfterApproval(decision, error);
+  }
+  return decision;
 }
 
 export async function fetchLauncherActiveWorkStatus(input: {

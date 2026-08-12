@@ -14,7 +14,7 @@ def _active_electron_session() -> dict[str, str]:
 
 def test_open_workbench_uses_desktop_action_without_restarting_healthy_backend(monkeypatch):
     submitted: list[dict] = []
-    events: list[str] = []
+    events: list[tuple[str, dict]] = []
 
     monkeypatch.setattr(
         workbench_controller,
@@ -43,7 +43,7 @@ def test_open_workbench_uses_desktop_action_without_restarting_healthy_backend(m
     monkeypatch.setattr(
         workbench_controller,
         "_record_launcher_action_event",
-        lambda event_type, **_kwargs: events.append(event_type),
+        lambda event_type, **kwargs: events.append((event_type, kwargs)),
     )
 
     result = workbench_controller.run_launcher_action("internal-start")
@@ -56,12 +56,17 @@ def test_open_workbench_uses_desktop_action_without_restarting_healthy_backend(m
             "session": {"desktopSessionId": "electron-session-1"},
         }
     ]
-    assert events == [
+    assert [event_type for event_type, _payload in events] == [
         "launcher.action.requested",
         "launcher.action.electron_backend_reused",
         "launcher.action.electron_desktop_action_submitted",
         "launcher.action.completed",
+        "launcher.action.startup_summary",
     ]
+    requested_payload = next(payload for event_type, payload in events if event_type == "launcher.action.requested")
+    summary_payload = next(payload for event_type, payload in events if event_type == "launcher.action.startup_summary")
+    assert requested_payload["env"]["VIBELUTION_STARTUP_TRACE_ID"] == summary_payload["startup_trace_id"]
+    assert summary_payload["outcome"] == "succeeded"
 
 
 def test_open_workbench_starts_backend_before_desktop_action_when_not_ready(monkeypatch):
@@ -131,11 +136,16 @@ def test_first_open_uses_packaged_electron_after_headless_backend_start(monkeypa
 
     assert result.returncode == 0
     assert "--no-browser" in launcher_calls[0]["args"][0]
-    assert bootstraps == [{"env": launcher_calls[0]["kwargs"]["env"], "action": "internal-start"}]
+    assert len(bootstraps) == 1
+    assert bootstraps[0]["env"] == launcher_calls[0]["kwargs"]["env"]
+    assert bootstraps[0]["action"] == "internal-start"
+    assert bootstraps[0]["no_browser"] is True
+    assert bootstraps[0]["startup_telemetry"]["startupTraceId"].startswith("launcher-startup-")
     assert events == [
         "launcher.action.requested",
         "launcher.action.electron_first_start_succeeded",
         "launcher.action.completed",
+        "launcher.action.startup_summary",
     ]
 
 
@@ -165,6 +175,7 @@ def test_first_open_uses_edge_only_when_packaged_electron_is_missing(monkeypatch
         "launcher.action.requested",
         "launcher.action.edge_fallback_package_missing",
         "launcher.action.completed",
+        "launcher.action.startup_summary",
     ]
 
 
@@ -214,3 +225,176 @@ def test_explicit_headless_open_never_bootstraps_packaged_electron(monkeypatch):
 
     assert result.returncode == 0
     assert "--no-browser" in launcher_calls[0]["args"][0]
+
+
+def test_submit_electron_window_action_includes_observed_workbench_url(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_submit(payload, *, actor_context, active_work_runs, desktop_action_payload=None):
+        captured["desktop_action_payload"] = desktop_action_payload
+        return {"status": "accepted", "action": payload.get("action")}
+
+    monkeypatch.setattr(
+        "core.launcher.lifecycle_intent_store.submit_lifecycle_intent",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda **_kwargs: {
+            "url": "http://127.0.0.1:8002/",
+            "backendPort": 8002,
+            "backendObserved": True,
+            "backendHealthy": True,
+            "backendPortListening": True,
+            "launcherStatePresent": True,
+        },
+    )
+
+    result = workbench_controller._submit_electron_window_action(
+        action="open_workbench",
+        reason="test:open",
+        session={"desktopSessionId": "electron-session-1"},
+    )
+
+    assert result["status"] == "accepted"
+    assert captured["desktop_action_payload"] == {
+        "desktopSessionId": "electron-session-1",
+        "workbenchUrl": "http://127.0.0.1:8002/",
+        "backendPort": 8002,
+    }
+
+
+def test_submit_electron_window_action_omits_url_when_observation_fails(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_submit(payload, *, actor_context, active_work_runs, desktop_action_payload=None):
+        captured["desktop_action_payload"] = desktop_action_payload
+        return {"status": "accepted", "action": payload.get("action")}
+
+    monkeypatch.setattr(
+        "core.launcher.lifecycle_intent_store.submit_lifecycle_intent",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("observe unavailable")),
+    )
+
+    result = workbench_controller._submit_electron_window_action(
+        action="open_workbench",
+        reason="test:open",
+        session={"desktopSessionId": "electron-session-1"},
+    )
+
+    assert result["status"] == "accepted"
+    assert captured["desktop_action_payload"] == {"desktopSessionId": "electron-session-1"}
+    assert "workbenchUrl" not in captured["desktop_action_payload"]
+
+
+def test_electron_desktop_action_payload_prefers_live_port_over_stale_url(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda **_kwargs: {
+            "url": "http://127.0.0.1:8000",
+            "backendPort": 8000,
+            "backendObserved": False,
+            "backendHealthy": False,
+            "backendPortListening": False,
+            "launcherStatePresent": True,
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 8002)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_port_is_listening_socket",
+        lambda port: int(port) == 8002,
+    )
+
+    payload = workbench_controller._electron_desktop_action_payload(
+        action="open_workbench",
+        session={"desktopSessionId": "electron-session-1"},
+    )
+
+    assert payload == {
+        "desktopSessionId": "electron-session-1",
+        "workbenchUrl": "http://127.0.0.1:8002",
+        "backendPort": 8002,
+    }
+
+
+def test_electron_desktop_action_payload_omits_dead_url_when_no_live_port(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda **_kwargs: {
+            "url": "http://127.0.0.1:8000",
+            "backendPort": 8000,
+            "backendObserved": False,
+            "backendHealthy": False,
+            "backendPortListening": False,
+            "launcherStatePresent": True,
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 8000)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda _port: False)
+
+    payload = workbench_controller._electron_desktop_action_payload(
+        action="open_workbench",
+        session={"desktopSessionId": "electron-session-1"},
+    )
+
+    assert payload == {"desktopSessionId": "electron-session-1"}
+    assert "workbenchUrl" not in payload
+
+
+def test_observe_workbench_retargets_stale_url_to_live_ports_json(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "url": "http://127.0.0.1:8000",
+            "host": "127.0.0.1",
+            "backendPort": 8000,
+            "port": 8000,
+            "backendPid": 0,
+            "backendLaunchPid": 0,
+            "sessionRole": "workbench",
+            "browserManaged": False,
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 8002)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_port_is_listening_socket",
+        lambda port: int(port) == 8002,
+    )
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 4242 if int(port) == 8002 else 0)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda _pid: False)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda _url: True)
+    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda _pid: "managed_workbench_backend")
+    monkeypatch.setattr(workbench_controller, "_is_browser_window_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        workbench_controller,
+        "window_provider_projection",
+        lambda state: {
+            "windowProfileDir": "",
+            "browserManaged": False,
+        },
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_with_active_electron_window_projection",
+        lambda payload: payload,
+    )
+
+    snapshot = workbench_controller.observe_workbench(
+        recover_browser_window=False,
+        recover_browser_window_for_backend_observed=False,
+    )
+
+    assert snapshot["url"] == "http://127.0.0.1:8002"
+    assert snapshot["backendPort"] == 8002
+    assert snapshot["backendPortListening"] is True
