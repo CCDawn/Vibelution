@@ -20,7 +20,10 @@ from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker im
 from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import (
     AgentActionAdapter,
 )
-from core.web.services.team_workflow.research_runtime.domain_ports import AgentTaskHandle
+from core.web.services.team_workflow.research_runtime.domain_ports import (
+    AgentTaskHandle,
+    ArtifactReadBack,
+)
 from core.web.services.team_workflow.research_runtime.real_domain_ports import (
     RealDomainPorts,
 )
@@ -220,36 +223,42 @@ def test_adapter_uses_real_binding_and_settles_budget(tmp_path: Path) -> None:
             )
 
         class SettleRecordingPorts(RealDomainPorts):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._artifact_store: dict[str, ArtifactReadBack] = {}
+
             def execute_agent_turn(self, *, action, handle):  # type: ignore[override]
-                from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
-                    materialize_domain_artifact,
+                from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+                    canonical_sha256,
                 )
 
-                ref = materialize_domain_artifact(
-                    kind="source_candidate_batch",
-                    payload={
-                        "perspectives": ["p1", "p2"],
-                        "queries": ["q"],
-                        "candidateSources": [{"sourceId": "s1"}],
-                        "counterEvidenceCandidateSources": [
-                            {"sourceId": "c1", "perspective": "falsification"}
-                        ],
-                    },
-                    team_id="research-team",
-                    authority_run_id=action.run_id,
-                    root=tmp_path / "domain-artifacts",
+                payload = {
+                    "teamId": "research-team",
+                    "sourceCollectionRunId": action.run_id,
+                    "candidates": [{"sourceId": "s1"}],
+                    "candidateCount": 1,
+                }
+                content_hash = canonical_sha256(payload)
+                canonical_ref = (
+                    f"source_candidate_batch://research-team/{action.run_id}/{content_hash}"
                 )
-                self._artifact_root = tmp_path / "domain-artifacts"
-                return [ref]
+                self._artifact_store[canonical_ref] = ArtifactReadBack(
+                    canonical_ref=canonical_ref,
+                    version="1.0.0",
+                    content_hash=content_hash,
+                    domain_revision=content_hash[:32],
+                )
+                return [
+                    {
+                        "canonicalRef": canonical_ref,
+                        "kind": "source_candidate_batch",
+                        "sha256": content_hash,
+                        "version": "1.0.0",
+                    }
+                ]
 
             def read_back_artifact(self, canonical_ref: str):  # type: ignore[override]
-                from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
-                    read_domain_artifact,
-                )
-
-                return read_domain_artifact(
-                    canonical_ref, root=tmp_path / "domain-artifacts"
-                )
+                return self._artifact_store.get(canonical_ref)
 
             def settle_budget(self, *, reservation, usage):
                 settled.append({"reservation": reservation, "usage": usage})

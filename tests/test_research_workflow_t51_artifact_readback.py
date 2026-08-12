@@ -1,8 +1,11 @@
-"""T5.1-2 RED: real Artifact read-back + required-output contract.
+"""T5.1-2: real Artifact read-back + required-output contract.
 
 Synthetic read-back (any non-empty ref → version=1.0, empty hash) must die.
 Required producesArtifactKinds with zero materialized refs must block.
 System nodes must not succeed with empty refs / empty runnerId.
+
+Read-back is authority-scoped via Source Collection candidates — never a
+parallel domain_artifacts filesystem.
 """
 
 from __future__ import annotations
@@ -49,56 +52,134 @@ def test_artifact_readback_registry_rejects_missing_kind() -> None:
     assert read_domain_artifact("not_a_registered_kind:abc") is None
 
 
-def test_materialize_then_read_back_returns_real_hash_and_revision(tmp_path: Path) -> None:
+def _seed_scoped_sc_candidates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    team_name: str = "T51 Readback Team",
+    sc_run_id: str = "sc-run-1",
+    workflow_run_id: str = "wf-run-1",
+) -> str:
+    from tests._support.team_workflow.helpers import _use_tmp_project_root
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    import core.infrastructure.path_containment as path_containment
+
+    monkeypatch.setattr(path_containment, "PROJECT_ROOT", tmp_path)
+
+    from core.web.services import agent_directory_service, team_service
+    from core.web.services.team_workflow.source_collection.candidates import (
+        register_candidate_source,
+    )
+
+    agent = agent_directory_service.create_agent_instance(
+        display_name="T51 Readback Agent",
+        role_key="source_finder",
+        created_by="t51-readback",
+    )
+    team = team_service.create_team(
+        name=team_name,
+        members=[{"agentId": agent["agentId"], "role": "source_finder"}],
+    )
+    team_id = str(team["teamId"])
+    register_candidate_source(
+        team_id,
+        {
+            "title": "Scoped paper",
+            "sourceUrl": "https://doi.org/10.0/t51-readback",
+            "candidateType": "source_manifest",
+            "sourceKind": "paper",
+            "metadata": {
+                "sourceCollectionRunId": sc_run_id,
+                "workflowRunId": workflow_run_id,
+            },
+        },
+    )
+    return team_id
+
+
+def test_seeded_sc_candidate_read_back_returns_real_hash_and_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
-        materialize_domain_artifact,
+        build_canonical_ref,
+        load_scoped_artifact_payload,
         read_domain_artifact,
     )
-
-    root = tmp_path / "domain-artifacts"
-    payload = {
-        "perspectives": ["p1", "p2"],
-        "queries": ["q1"],
-        "candidateSources": [{"sourceId": "s1"}],
-        "counterEvidenceCandidateSources": [{"sourceId": "c1", "perspective": "falsification"}],
-    }
-    ref = materialize_domain_artifact(
-        kind="source_candidate_batch",
-        payload=payload,
-        team_id="research-team",
-        authority_run_id="sc-run-1",
-        root=root,
+    from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+        canonical_sha256,
     )
-    assert ref["kind"] == "source_candidate_batch"
-    assert len(ref["sha256"]) == 64
-    assert ref["canonicalRef"]
 
-    read_back = read_domain_artifact(ref["canonicalRef"], root=root)
+    team_id = _seed_scoped_sc_candidates(tmp_path, monkeypatch)
+    payload = load_scoped_artifact_payload(
+        "source_candidate_batch",
+        team_id=team_id,
+        authority_run_id="sc-run-1",
+        workflow_run_id="",
+    )
+    assert payload is not None
+    assert int(payload.get("candidateCount") or 0) >= 1
+    content_hash = canonical_sha256(payload)
+    ref = build_canonical_ref(
+        kind="source_candidate_batch",
+        team_id=team_id,
+        authority_run_id="sc-run-1",
+        content_hash=content_hash,
+    )
+
+    read_back = read_domain_artifact(ref)
     assert read_back is not None
-    assert read_back.content_hash == ref["sha256"]
+    assert read_back.content_hash == content_hash
     assert read_back.version
     assert read_back.domain_revision
     assert read_back.content_hash != ""
     assert read_back.domain_revision != ""
 
 
-def test_read_back_hash_mismatch_path_returns_none(tmp_path: Path) -> None:
+def test_read_back_rejects_forged_team_run_and_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
-        materialize_domain_artifact,
+        build_canonical_ref,
+        load_scoped_artifact_payload,
         read_domain_artifact,
     )
-
-    root = tmp_path / "domain-artifacts"
-    ref = materialize_domain_artifact(
-        kind="evidence_card_batch",
-        payload={"evidenceCards": [{"sourceId": "s1", "claim": "c", "citationLocator": {"page": 1}}]},
-        team_id="research-team",
-        authority_run_id="sc-run-1",
-        root=root,
+    from core.web.services.team_workflow.research_runtime.human_gate_artifacts import (
+        canonical_sha256,
     )
-    # Corrupt the identity in the canonical ref.
-    bad_ref = ref["canonicalRef"].replace(ref["sha256"][:16], "0" * 16)
-    assert read_domain_artifact(bad_ref, root=root) is None
+
+    team_id = _seed_scoped_sc_candidates(tmp_path, monkeypatch)
+    payload = load_scoped_artifact_payload(
+        "source_candidate_batch",
+        team_id=team_id,
+        authority_run_id="sc-run-1",
+        workflow_run_id="",
+    )
+    assert payload is not None
+    content_hash = canonical_sha256(payload)
+    real_ref = build_canonical_ref(
+        kind="source_candidate_batch",
+        team_id=team_id,
+        authority_run_id="sc-run-1",
+        content_hash=content_hash,
+    )
+    assert read_domain_artifact(real_ref) is not None
+
+    forged_team_run = build_canonical_ref(
+        kind="source_candidate_batch",
+        team_id="team-forged",
+        authority_run_id="sc-run-forged",
+        content_hash=content_hash,
+    )
+    assert read_domain_artifact(forged_team_run) is None
+
+    forged_hash = build_canonical_ref(
+        kind="source_candidate_batch",
+        team_id=team_id,
+        authority_run_id="sc-run-1",
+        content_hash=("0" * 64),
+    )
+    assert read_domain_artifact(forged_hash) is None
 
 
 def test_agent_verify_blocks_when_required_outputs_missing() -> None:
@@ -128,7 +209,11 @@ def test_agent_verify_blocks_when_required_outputs_missing() -> None:
 def test_agent_verify_blocks_empty_hash_readback() -> None:
     ports = FakeDomainPorts()
     ports.turn_results_by_action["act-hash"] = [
-        {"canonicalRef": "source_candidate_batch:abc", "kind": "source_candidate_batch", "sha256": "a" * 64}
+        {
+            "canonicalRef": "source_candidate_batch:abc",
+            "kind": "source_candidate_batch",
+            "sha256": "a" * 64,
+        }
     ]
     ports.artifact_store["source_candidate_batch:abc"] = ArtifactReadBack(
         canonical_ref="source_candidate_batch:abc",

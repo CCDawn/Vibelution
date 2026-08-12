@@ -67,7 +67,8 @@ def fetch_evidence_cards_stats(
     input_snapshot: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any] | None:
     """Evidence Store authority: claim evidence cards for relations readiness."""
-    _ = input_snapshot
+    snapshot = dict(input_snapshot or {})
+    sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
     try:
         from core.infrastructure.path_containment import PROJECT_ROOT
         from core.research.evidence import ClaimEvidenceStore
@@ -76,16 +77,34 @@ def fetch_evidence_cards_stats(
         records = store.list(team_id)
         if not records:
             return None
+        scoped: list[dict[str, Any]] = []
         missing: list[str] = []
         for item in records:
+            if not isinstance(item, dict):
+                continue
+            item_run = str(item.get("sourceCollectionRunId") or "").strip()
+            item_workflow = str(item.get("workflowRunId") or "").strip()
+            if sc_run_id and item_run and item_run != sc_run_id:
+                continue
+            if item_workflow and item_workflow != run_id:
+                continue
+            # Require explicit scope for this workflow or SC run.
+            if sc_run_id:
+                if item_run != sc_run_id and item_workflow != run_id:
+                    continue
+            elif item_workflow != run_id:
+                continue
+            scoped.append(item)
             evidence_id = str(item.get("claimEvidenceId") or item.get("claimId") or "")
             if not str(item.get("quote") or "").strip() or not str(
                 item.get("sourceId") or ""
             ).strip():
                 if evidence_id:
                     missing.append(evidence_id)
+        if not scoped:
+            return None
         return {
-            "card_count": len(records),
+            "card_count": len(scoped),
             "missing_minimal_fields": missing,
             "teamId": team_id,
             "runId": run_id,
@@ -100,44 +119,32 @@ def fetch_evidence_graph_stats(
     *,
     input_snapshot: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any] | None:
-    """Evidence/Knowledge projection for graph completeness."""
-    _ = (team_id, run_id, input_snapshot)
+    """Evidence/Knowledge projection for graph completeness (SC run scoped)."""
+    snapshot = dict(input_snapshot or {})
+    sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
+    if not sc_run_id:
+        return None
     try:
-        from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
-            default_artifact_root,
-            resolve_artifact_authority,
+        from core.web.services.team_workflow.source_collection.runs import (
+            get_source_collection_summary,
         )
 
-        spec = resolve_artifact_authority("evidence_relation_graph")
-        if spec is None:
+        summary = get_source_collection_summary(team_id, run_id=sc_run_id)
+        graph = summary.get("candidateGraph") or summary.get("graph") or {}
+        if not isinstance(graph, dict):
             return None
-        root = default_artifact_root() / spec.authority / team_id
-        if not root.is_dir():
-            # Content-addressed layout: authority/<hh>/<hash>.json
-            alt_root = default_artifact_root() / spec.authority
-            if not alt_root.is_dir():
-                return None
-            graph_files = []
-            for path in alt_root.rglob("*.json"):
-                try:
-                    envelope = json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError, TypeError):
-                    continue
-                if (
-                    isinstance(envelope, dict)
-                    and str(envelope.get("kind") or "") == "evidence_relation_graph"
-                    and str(envelope.get("teamId") or "") == team_id
-                ):
-                    graph_files.append(path)
-        else:
-            graph_files = list(root.rglob("evidence_relation_graph/*.json"))
-        if not graph_files:
+        nodes = list(graph.get("nodes") or [])
+        edges = list(graph.get("edges") or [])
+        if not nodes and not edges:
             return None
         return {
-            "graph_count": len(graph_files),
-            "blocking_missing_links": 0,
+            "graph_count": 1,
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "blocking_missing_links": int(graph.get("missingLinkCount") or 0),
             "teamId": team_id,
             "runId": run_id,
+            "sourceCollectionRunId": sc_run_id,
         }
     except Exception:
         return None

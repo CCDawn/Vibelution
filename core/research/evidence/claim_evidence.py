@@ -245,7 +245,7 @@ def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     model_ref = _optional_text(payload.get("modelRef"), 300)
     if extraction_method == "model" and not model_ref:
         raise ClaimEvidenceError("modelRef is required for model-extracted evidence.")
-    return {
+    normalized: dict[str, Any] = {
         "claimId": _required_text(payload.get("claimId"), "claimId", 200),
         "candidateId": _required_text(payload.get("candidateId"), "candidateId", 200),
         "sourceId": _required_text(payload.get("sourceId"), "sourceId", 500),
@@ -259,6 +259,14 @@ def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "extractorAgentId": _required_text(payload.get("extractorAgentId"), "extractorAgentId", 200),
         "modelRef": model_ref,
     }
+    # Optional run-scope tags so workflow collectors can exclude unscoped history.
+    source_collection_run_id = _optional_text(payload.get("sourceCollectionRunId"), 160)
+    workflow_run_id = _optional_text(payload.get("workflowRunId"), 160)
+    if source_collection_run_id:
+        normalized["sourceCollectionRunId"] = source_collection_run_id
+    if workflow_run_id:
+        normalized["workflowRunId"] = workflow_run_id
+    return normalized
 
 
 def _locator(value: Any) -> dict[str, Any]:
