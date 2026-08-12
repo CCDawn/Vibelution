@@ -9,12 +9,9 @@ export function createLauncherWindow(url: string, paths: DesktopPaths): BrowserW
     title: "Vibelution Launcher",
     icon: resolveWorkspaceIconPath(paths),
     backgroundColor: "#f7fafc",
-    titleBarStyle: "hidden",
-    titleBarOverlay: {
-      color: "#f7fafc",
-      symbolColor: "#475467",
-      height: 34
-    },
+    titleBarStyle: "default",
+    skipTaskbar: false,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: resolvePreloadPath(paths),
       contextIsolation: true,
