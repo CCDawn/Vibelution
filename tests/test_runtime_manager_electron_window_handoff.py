@@ -190,3 +190,27 @@ def test_first_open_does_not_silently_fall_back_to_edge_when_packaged_electron_f
         workbench_controller.run_launcher_action("internal-start")
 
     assert "--no-browser" in launcher_calls[0]["args"][0]
+
+
+def test_explicit_headless_open_never_bootstraps_packaged_electron(monkeypatch):
+    launcher_calls: list[dict] = []
+
+    monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: {})
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: Path("Vibelution.exe"))
+    monkeypatch.setattr(
+        workbench_controller,
+        "_run_waitable_launcher_process",
+        lambda *args, **kwargs: launcher_calls.append({"args": args, "kwargs": kwargs})
+        or subprocess.CompletedProcess(args=["launcher"], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_bootstrap_packaged_electron_workbench",
+        lambda **_kwargs: pytest.fail("explicit headless open must not launch Electron"),
+    )
+    monkeypatch.setattr(workbench_controller, "_record_launcher_action_event", lambda *_args, **_kwargs: None)
+
+    result = workbench_controller.run_launcher_action("internal-start", no_browser=True)
+
+    assert result.returncode == 0
+    assert "--no-browser" in launcher_calls[0]["args"][0]
