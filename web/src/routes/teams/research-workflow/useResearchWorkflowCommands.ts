@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 
+import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import type {
   CreateResearchWorkflowRunInput,
   WorkflowRunRecord,
@@ -12,12 +13,42 @@ import {
 
 type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
 
+const LEGACY_TO_FORMAL_COMMAND: Record<string, CommandOffer["command"]> = {
+  start_agent_task: "start_node",
+  retry_execution: "retry_node",
+  rebind_node: "rebind_node",
+  fork_evidence_remediation: "fork_revision",
+  accept_handoff: "resolve_human_task",
+  reject_handoff: "resolve_human_task",
+  revise: "resolve_human_task",
+};
+
+function findFormalOffer(
+  offers: CommandOffer[] | undefined,
+  legacyCommand: string,
+  nodeId: string | null,
+): CommandOffer | null {
+  if (!offers?.length) return null;
+  const formalKind = LEGACY_TO_FORMAL_COMMAND[legacyCommand];
+  if (!formalKind) return null;
+  return (
+    offers.find(
+      (offer) =>
+        offer.command === formalKind
+        && offer.available
+        && (offer.nodeId == null || offer.nodeId === nodeId),
+    ) ?? null
+  );
+}
+
 export function useResearchWorkflowCommands(options: {
   teamId: string;
   runId: string;
   selectedNodeId: string | null;
   run: WorkflowRunRecord | null;
   nodeDetail: ResearchWorkflowNodeDetail | null;
+  commandOffers?: CommandOffer[];
+  submitFormalOffer?: (offer: CommandOffer) => Promise<unknown>;
   createRun: (input: CreateResearchWorkflowRunInput) => Promise<WorkflowRunRecord>;
   resolveHuman: (
     taskId: string,
@@ -32,6 +63,8 @@ export function useResearchWorkflowCommands(options: {
     selectedNodeId,
     run,
     nodeDetail,
+    commandOffers,
+    submitFormalOffer,
     createRun,
     resolveHuman,
     refresh,
@@ -122,6 +155,43 @@ export function useResearchWorkflowCommands(options: {
         setError(reason.message);
         throw reason;
       }
+
+      const formalOffer = findFormalOffer(commandOffers, command, selectedNodeId);
+      if (formalOffer && submitFormalOffer) {
+        setBusy(true);
+        setError(null);
+        try {
+          const receipt = await submitFormalOffer({
+            ...formalOffer,
+            payload: { ...(formalOffer.payload ?? {}), ...(payload ?? {}) },
+          });
+          if (command === "fork_evidence_remediation") {
+            const childRunIds = (receipt as { childRunIds?: unknown }).childRunIds;
+            const childRunId = Array.isArray(childRunIds)
+              ? childRunIds
+                  .map((item) => String(item).trim())
+                  .filter((item) => item && item !== runId)
+                  .at(-1) ?? null
+              : childRunIdFromCommandResult(
+                  { command, message: "ok", raw: receipt as Record<string, unknown> },
+                  runId,
+                );
+            if (!childRunId) {
+              throw new Error("证据补救子运行已提交，但响应缺少 childRunIds，无法安全跳转");
+            }
+            replaceParams({ runId: childRunId, node: "source_extraction", panel: "node" });
+            return;
+          }
+          await refresh();
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+          throw reason;
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
+
       const capability = nodeDetail?.commands.find((item) => item.command === command);
       if (!capability) {
         const reason = new Error(`命令「${command}」后端未声明能力`);
@@ -160,7 +230,19 @@ export function useResearchWorkflowCommands(options: {
         setBusy(false);
       }
     },
-    [nodeDetail, pendingTaskId, refresh, replaceParams, resolveCurrentHumanTask, run, runId, selectedNodeId, teamId],
+    [
+      commandOffers,
+      nodeDetail,
+      pendingTaskId,
+      refresh,
+      replaceParams,
+      resolveCurrentHumanTask,
+      run,
+      runId,
+      selectedNodeId,
+      submitFormalOffer,
+      teamId,
+    ],
   );
 
   return {
