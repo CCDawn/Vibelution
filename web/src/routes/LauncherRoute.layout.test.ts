@@ -16,6 +16,9 @@ import startupSettingsPanelStyles from "./LauncherStartupSettingsPanel.styles";
 import processMonitorPanelSource from "./LauncherProcessMonitorPanel.tsx?raw";
 import processMonitorPanelStylesSource from "./LauncherProcessMonitorPanel.styles.ts?raw";
 import processMonitorPanelStyles from "./LauncherProcessMonitorPanel.styles";
+import branchInstancesPanelSource from "./LauncherBranchInstancesPanel.tsx?raw";
+import branchInstancesPanelStylesSource from "./LauncherBranchInstancesPanel.styles.ts?raw";
+import branchInstancesPanelStyles from "./LauncherBranchInstancesPanel.styles";
 import stylesSource from "./LauncherRoute.styles.ts?raw";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 import launcherApiSource from "../api/launcher.ts?raw";
@@ -32,6 +35,7 @@ const launcherPanelStylesSource = [
   projectMaintenancePanelStylesSource,
   startupSettingsPanelStylesSource,
   processMonitorPanelStylesSource,
+  branchInstancesPanelStylesSource,
 ].join("\n");
 
 const sourceSlice = (source: string, startMarker: string, endMarker: string): string => {
@@ -47,6 +51,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
     expect(developerModePanelSource).toContain("from \"../components/vui\"");
     expect(startupSettingsPanelSource).toContain("from \"../components/vui\"");
+    expect(branchInstancesPanelSource).toContain("from \"../components/vui\"");
+    expect(branchInstancesPanelStyles.statusTable).toBeTypeOf("string");
     expect(developerModePanelSource).toContain('from "./LauncherDeveloperModePanel.styles"');
     expect(diagnosticsPanelSource).toContain('from "./LauncherDiagnosticsPanel.styles"');
     expect(projectMaintenancePanelSource).toContain('from "./LauncherProjectMaintenancePanel.styles"');
@@ -118,6 +124,8 @@ describe("LauncherRoute layout contract", () => {
 
   it("uses the typed launcher lifecycle API client", () => {
     expect(routeSource).toContain("getLauncherStatus");
+    expect(routeSource).toContain("getLauncherBranchInstances");
+    expect(launcherApiSource).toContain("branch-instances");
     // Lifecycle start/stop/force-stop/restart share one action path with AppShell.
     expect(routeSource).toContain('useWorkbenchLifecycleActions("launcher_route")');
     expect(routeSource).toContain("requestLifecycle(operation)");
@@ -238,13 +246,15 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("puts process monitor and startup settings before collapsed advanced tools", () => {
+    const branchIndex = routeSource.indexOf("<LauncherBranchInstancesPanel");
     const processIndex = routeSource.indexOf("<LauncherProcessMonitorPanel");
     const settingsIndex = routeSource.indexOf("<LauncherStartupSettingsPanel");
     const advancedIndex = routeSource.indexOf("className={styles.advancedFold}");
     const maintenanceIndex = routeSource.indexOf("<LauncherProjectMaintenancePanel");
     const developerIndex = routeSource.indexOf("<LauncherDeveloperModePanel");
     const diagnosticsIndex = routeSource.indexOf("<LauncherDiagnosticsPanel");
-    expect(processIndex).toBeGreaterThan(0);
+    expect(branchIndex).toBeGreaterThan(0);
+    expect(processIndex).toBeGreaterThan(branchIndex);
     expect(settingsIndex).toBeGreaterThan(processIndex);
     expect(advancedIndex).toBeGreaterThan(settingsIndex);
     expect(maintenanceIndex).toBeGreaterThan(advancedIndex);

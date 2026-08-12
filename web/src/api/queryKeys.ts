@@ -4,6 +4,7 @@ export const queryKeys = {
   usageSummary: (scope = "global", sessionId = "", agentId = "", provider = "", model = "") =>
     ["usage", "summary", scope, sessionId, agentId, provider, model] as const,
   launcherStatus: () => ["launcher", "status"] as const,
+  launcherBranchInstances: () => ["launcher", "branch-instances"] as const,
   launcherDeveloperNoiseOverview: () => ["launcher", "developer-mode", "noise-overview"] as const,
   launcherMaintenanceSummary: () => ["launcher", "maintenance", "reset", "summary"] as const,
   backendHealth: () => ["runtime", "backend-health"] as const,
