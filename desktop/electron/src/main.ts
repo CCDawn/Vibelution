@@ -55,6 +55,7 @@ import {
 } from "./process/launcherServiceClient.js";
 import {
   completeBootstrapWithoutWaitingForTelemetry,
+  drainTelemetryWithDeadline,
   scheduleTelemetryWithoutWaiting,
   type LauncherBootstrapResult
 } from "./process/launcherBootstrap.js";
@@ -1547,13 +1548,15 @@ app.whenReady()
     }
   })
   .catch(async (error: unknown) => {
-    await recordElectronStartupSummaryOnce(launcherBootstrap, {
-      outcome: "failed",
-      failureStage: electronStartupStage,
-      errorType: error instanceof Error ? error.name : "Error",
-      desktopSessionRegistered,
-      workbenchOpen: false
-    });
+    await drainTelemetryWithDeadline(() =>
+      recordElectronStartupSummaryOnce(launcherBootstrap, {
+        outcome: "failed",
+        failureStage: electronStartupStage,
+        errorType: error instanceof Error ? error.name : "Error",
+        desktopSessionRegistered,
+        workbenchOpen: false
+      })
+    );
     console.error(error instanceof Error ? error.message : String(error));
     app.quit();
   });

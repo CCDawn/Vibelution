@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { completeBootstrapWithoutWaitingForTelemetry } from "../src/process/launcherBootstrap.js";
+import {
+  completeBootstrapWithoutWaitingForTelemetry,
+  drainTelemetryWithDeadline
+} from "../src/process/launcherBootstrap.js";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
@@ -27,6 +30,27 @@ describe("Electron main startup telemetry", () => {
     await telemetryPending;
   });
 
+  it("bounds terminal telemetry drain when control-plane I/O never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const recordTelemetry = vi.fn(() => new Promise<void>(() => undefined));
+      let completed = false;
+      const drain = drainTelemetryWithDeadline(recordTelemetry, 50).then(() => {
+        completed = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(49);
+      expect(recordTelemetry).toHaveBeenCalledTimes(1);
+      expect(completed).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await drain;
+      expect(completed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("correlates bounded startup stages with the Python startup trace", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
@@ -43,6 +67,7 @@ describe("Electron main startup telemetry", () => {
     expect(source).not.toMatch(
       /await recordElectronStartupSummaryOnce\(launcherBootstrap,\s*\{\s*outcome: "succeeded"/u
     );
+    expect(source).toContain("await drainTelemetryWithDeadline(");
   });
 
   it("emits one terminal summary for success or bounded failure without logging command lines", () => {
