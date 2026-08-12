@@ -576,24 +576,66 @@ def _runtime_observation(path: Path) -> dict[str, Any]:
         or ""
     ).strip()
     backend_port = _positive_int(
-        workbench.get("backendPort") or launcher_state.get("backendPort") or launcher_state.get("launcherControlPort")
+        workbench.get("backendPort") or launcher_state.get("backendPort")
     )
     pids = {
-        "backend": _positive_int(workbench.get("backendPid") or launcher_state.get("backendPid")),
-        "window": _positive_int(
+        "backend": _live_pid(workbench.get("backendPid") or launcher_state.get("backendPid")),
+        "window": _live_pid(
             workbench.get("browserWindowPid")
             or launcher_state.get("browserWindowPid")
             or launcher_state.get("windowPid")
         ),
-        "manager": _positive_int(manager_state.get("managerPid") or launcher_state.get("managerPid")),
+        "manager": _live_pid(manager_state.get("managerPid") or launcher_state.get("managerPid")),
     }
-    alive = observed_state.lower() in {"open", "running", "healthy"} or any(pids.values())
+    # Stale JSON often keeps observedState=open after this checkout died.
+    # A leftover port number may now belong to another instance.
+    alive = bool(pids["backend"])
+    if not alive and observed_state.lower() in {"open", "running", "healthy"}:
+        observed_state = "idle"
     return {
         "observedState": observed_state,
         "port": backend_port,
         "pids": pids,
         "alive": alive,
     }
+
+
+def _live_pid(value: Any) -> int:
+    pid = _positive_int(value)
+    return pid if pid and _pid_is_alive(pid) else 0
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if int(pid or 0) <= 0:
+        return False
+    if os.name == "nt":
+        return _pid_is_alive_windows(int(pid))
+    try:
+        os.kill(int(pid), 0)
+    except OSError:
+        return False
+    return True
+
+
+def _pid_is_alive_windows(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = None
+    for access in (0x1000, 0x0400):
+        handle = kernel32.OpenProcess(access, False, int(pid))
+        if handle:
+            break
+    if not handle:
+        return False
+    try:
+        exit_code = wintypes.DWORD()
+        if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)) == 0:
+            return False
+        return int(exit_code.value) == 259
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _instance_payload(

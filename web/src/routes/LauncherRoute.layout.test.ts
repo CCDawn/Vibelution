@@ -154,6 +154,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("const controlPlaneIdle = isControlPlaneIdle(evidence)");
     expect(routeSource).toContain("const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled)");
     expect(routeSource).toContain("const busy = controlBusy || supervisorMutation.isPending");
+    expect(routeSource).toContain("const projectSummary = selectedIsCurrent");
     expect(routeSource).toContain("const startDisabled = selectedIsCurrent");
     expect(routeSource).toContain("const startDisabledReason = launcherStatusDisconnected");
     expect(routeSource).toContain("startDisabledReason");
@@ -326,8 +327,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("technicalDetailAvailable");
     expect(routeSource).toContain("lifecycleDetailShort");
     expect(routeSource).toContain("noticeTextShort");
-    expect(routeSource).toContain("meta={lifecycleDetailShort || copy.subtitle}");
-    expect(routeSource).toContain("meta={lifecycleDetailShort || copy.subtitle}");
+    expect(routeSource).toContain("lifecycleDetailShort || copy.subtitle");
+    expect(routeSource).toContain("selectedAlive ? copy.lifecycleRunningDetail : copy.lifecycleClosedDetail");
     expect(routeSource).toContain("VDenseOpsPage");
     expect(routeSource).toContain('data-vui-domain-recipe="launcher-workbench"');
     expect(routeSource).toContain("<VTooltip content={notice.text}");
