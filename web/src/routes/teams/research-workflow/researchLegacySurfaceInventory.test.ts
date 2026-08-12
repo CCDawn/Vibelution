@@ -49,15 +49,27 @@ describe("research workflow legacy cleanup", () => {
     expect(existsSync(resolve(routesRoot, "teams/research-workflow/useResearchWorkflowSnapshot.ts"))).toBe(true);
     expect(existsSync(resolve(routesRoot, "teams/research-workflow/useResearchWorkflowEventStream.ts"))).toBe(true);
     expect(existsSync(resolve(routesRoot, "teams/research-workflow/useResearchWorkflowCommand.ts"))).toBe(true);
+    expect(existsSync(resolve(routesRoot, "teams/research-workflow/useResearchWorkflowEventReplay.ts"))).toBe(true);
     expect(existsSync(resolve(webSrc, "api/research-workflow/commands.ts"))).toBe(true);
   });
 
   it("hard-switches run read path away from legacy canvas fetch", () => {
     expect(runHookSource).toContain("useResearchWorkflowSnapshot");
     expect(runHookSource).toContain("useResearchWorkflowEventStream");
-    expect(runHookSource).toContain("hydrateFormalEventFromSnapshot");
+    expect(runHookSource).toContain("useResearchWorkflowEventReplay");
     expect(runHookSource).not.toContain("fetchResearchWorkflowCanvas");
     expect(runHookSource).not.toContain("fetchResearchWorkflowRun");
+  });
+
+  it("listens to formal SSE event types instead of legacy names", () => {
+    const sseTypes = readFileSync(
+      resolve(routesRoot, "teams/research-workflow/researchWorkflowSseEventTypes.ts"),
+      "utf8",
+    );
+    expect(sseTypes).toContain("run_created");
+    expect(sseTypes).toContain("node_starting");
+    expect(sseTypes).not.toContain("run.queued");
+    expect(sseTypes).not.toContain("NodeRunTransitioned");
   });
 
   it("hard-switches inspector reads and commands onto formal NodeDetail/Offer", () => {

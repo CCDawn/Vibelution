@@ -43,6 +43,34 @@ export async function fetchResearchWorkflowEvents(options: {
   return (await response.json()) as EventPage;
 }
 
+const MAX_REPLAY_PAGES = 32;
+
+export async function replayResearchWorkflowEvents(options: {
+  runId: string;
+  teamId: string;
+  signal?: AbortSignal;
+}): Promise<WorkflowEventEnvelope[]> {
+  const events: WorkflowEventEnvelope[] = [];
+  let afterSequence = 0;
+  for (let pageIndex = 0; pageIndex < MAX_REPLAY_PAGES; pageIndex += 1) {
+    const page = await fetchResearchWorkflowEvents({
+      runId: options.runId,
+      teamId: options.teamId,
+      afterSequence,
+      signal: options.signal,
+    });
+    events.push(...(page.events ?? []));
+    if (!page.hasMore || page.nextAfterSequence == null) {
+      return events.sort((left, right) => left.sequence - right.sequence);
+    }
+    if (page.nextAfterSequence <= afterSequence) {
+      throw new Error("events_replay_cursor_stuck");
+    }
+    afterSequence = page.nextAfterSequence;
+  }
+  throw new Error("events_replay_truncated");
+}
+
 export function researchWorkflowStreamUrl(options: {
   runId: string;
   teamId: string;

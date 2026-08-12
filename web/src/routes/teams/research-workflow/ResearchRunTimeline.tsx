@@ -1,5 +1,6 @@
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
+import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
 import { VEmptyState, VPanelHeader, VSurface } from "../../../components/vui";
 import { buildResearchTimelineGroups } from "./researchWorkflowTimelineModel";
 import { ResearchWorkflowInsightsPanel } from "./ResearchWorkflowInsightsPanel";
@@ -12,7 +13,9 @@ export function ResearchRunTimeline(props: {
   projection: WorkflowCanvasProjection | null;
   insights: ResearchWorkflowInsights;
 }) {
-  const groups = buildResearchTimelineGroups(props.run?.events);
+  const groups = buildResearchTimelineGroups(
+    (props.run?.events ?? []) as WorkflowEventEnvelope[],
+  );
   return (
     <div className={styles.root}>
       <ResearchCriticalPathPanel projection={props.projection} insights={props.insights} />
