@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from core.infrastructure import git_process
+from core.infrastructure.instance_display_name import (
+    assign_instance_display_names,
+    current_instance_display,
+)
 
 BRANCH_POOL_NAME = ".worktrees"
 RETIRED_DIR_NAME = "_retired"
@@ -179,12 +183,17 @@ def list_branch_instances(checkout: Path | str) -> dict[str, Any]:
         seen_ids.add(instance_id)
 
     items.sort(key=_instance_sort_key)
+    assign_instance_display_names(items)
     current_id = next((item["id"] for item in items if item["current"]), "main")
+    current_display = current_instance_display(items)
     return {
         "schemaVersion": 1,
         "integrationRoot": str(layout.integration_root),
         "branchPool": str(layout.branch_pool),
         "currentId": current_id,
+        "currentShortName": current_display["shortName"],
+        "currentWorkbenchTitle": current_display["workbenchTitle"],
+        "currentLauncherTitle": current_display["launcherTitle"],
         "items": items,
     }
 
