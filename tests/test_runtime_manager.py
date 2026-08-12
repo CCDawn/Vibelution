@@ -5587,6 +5587,7 @@ def test_terminate_workbench_processes_reports_cleanup_stage_timings(monkeypatch
 @pytest.fixture
 def no_active_electron_desktop_session(monkeypatch):
     monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: None)
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
 
 
 def test_electron_session_bootstrap_waits_for_primary_instance_handoff(monkeypatch):
