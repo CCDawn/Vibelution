@@ -38,6 +38,7 @@ from .workflow_problem import (
     WorkflowProblem,
     WorkflowProblemCategory,
 )
+from .workflow_snapshot import ResearchWorkflowSnapshot
 
 __all__ = [
     "ActorReadiness",
@@ -64,6 +65,7 @@ __all__ = [
     "ReadinessBlocker",
     "Remediation",
     "RemediationKind",
+    "ResearchWorkflowSnapshot",
     "ResearchBudgetLedger",
     "ResearchSubtask",
     "ResearchTaskBundle",
