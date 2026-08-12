@@ -125,6 +125,7 @@ def build_workflow_runtime(
         readiness_context=lambda: readiness_context,
         clock=clock,
         wake_worker=wake_worker,
+        coordinator_factory=lambda: coordinator,
     )
     graph_worker = GraphDispatchWorker(
         store=store,
