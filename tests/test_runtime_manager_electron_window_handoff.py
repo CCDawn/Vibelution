@@ -214,3 +214,176 @@ def test_explicit_headless_open_never_bootstraps_packaged_electron(monkeypatch):
 
     assert result.returncode == 0
     assert "--no-browser" in launcher_calls[0]["args"][0]
+
+
+def test_submit_electron_window_action_includes_observed_workbench_url(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_submit(payload, *, actor_context, active_work_runs, desktop_action_payload=None):
+        captured["desktop_action_payload"] = desktop_action_payload
+        return {"status": "accepted", "action": payload.get("action")}
+
+    monkeypatch.setattr(
+        "core.launcher.lifecycle_intent_store.submit_lifecycle_intent",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda **_kwargs: {
+            "url": "http://127.0.0.1:8002/",
+            "backendPort": 8002,
+            "backendObserved": True,
+            "backendHealthy": True,
+            "backendPortListening": True,
+            "launcherStatePresent": True,
+        },
+    )
+
+    result = workbench_controller._submit_electron_window_action(
+        action="open_workbench",
+        reason="test:open",
+        session={"desktopSessionId": "electron-session-1"},
+    )
+
+    assert result["status"] == "accepted"
+    assert captured["desktop_action_payload"] == {
+        "desktopSessionId": "electron-session-1",
+        "workbenchUrl": "http://127.0.0.1:8002/",
+        "backendPort": 8002,
+    }
+
+
+def test_submit_electron_window_action_omits_url_when_observation_fails(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_submit(payload, *, actor_context, active_work_runs, desktop_action_payload=None):
+        captured["desktop_action_payload"] = desktop_action_payload
+        return {"status": "accepted", "action": payload.get("action")}
+
+    monkeypatch.setattr(
+        "core.launcher.lifecycle_intent_store.submit_lifecycle_intent",
+        fake_submit,
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("observe unavailable")),
+    )
+
+    result = workbench_controller._submit_electron_window_action(
+        action="open_workbench",
+        reason="test:open",
+        session={"desktopSessionId": "electron-session-1"},
+    )
+
+    assert result["status"] == "accepted"
+    assert captured["desktop_action_payload"] == {"desktopSessionId": "electron-session-1"}
+    assert "workbenchUrl" not in captured["desktop_action_payload"]
+
+
+def test_electron_desktop_action_payload_prefers_live_port_over_stale_url(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda **_kwargs: {
+            "url": "http://127.0.0.1:8000",
+            "backendPort": 8000,
+            "backendObserved": False,
+            "backendHealthy": False,
+            "backendPortListening": False,
+            "launcherStatePresent": True,
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 8002)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_port_is_listening_socket",
+        lambda port: int(port) == 8002,
+    )
+
+    payload = workbench_controller._electron_desktop_action_payload(
+        action="open_workbench",
+        session={"desktopSessionId": "electron-session-1"},
+    )
+
+    assert payload == {
+        "desktopSessionId": "electron-session-1",
+        "workbenchUrl": "http://127.0.0.1:8002",
+        "backendPort": 8002,
+    }
+
+
+def test_electron_desktop_action_payload_omits_dead_url_when_no_live_port(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda **_kwargs: {
+            "url": "http://127.0.0.1:8000",
+            "backendPort": 8000,
+            "backendObserved": False,
+            "backendHealthy": False,
+            "backendPortListening": False,
+            "launcherStatePresent": True,
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 8000)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda _port: False)
+
+    payload = workbench_controller._electron_desktop_action_payload(
+        action="open_workbench",
+        session={"desktopSessionId": "electron-session-1"},
+    )
+
+    assert payload == {"desktopSessionId": "electron-session-1"}
+    assert "workbenchUrl" not in payload
+
+
+def test_observe_workbench_retargets_stale_url_to_live_ports_json(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "url": "http://127.0.0.1:8000",
+            "host": "127.0.0.1",
+            "backendPort": 8000,
+            "port": 8000,
+            "backendPid": 0,
+            "backendLaunchPid": 0,
+            "sessionRole": "workbench",
+            "browserManaged": False,
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 8002)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_port_is_listening_socket",
+        lambda port: int(port) == 8002,
+    )
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 4242 if int(port) == 8002 else 0)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda _pid: False)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda _url: True)
+    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda _pid: "managed_workbench_backend")
+    monkeypatch.setattr(workbench_controller, "_is_browser_window_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        workbench_controller,
+        "window_provider_projection",
+        lambda state: {
+            "windowProfileDir": "",
+            "browserManaged": False,
+        },
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_with_active_electron_window_projection",
+        lambda payload: payload,
+    )
+
+    snapshot = workbench_controller.observe_workbench(
+        recover_browser_window=False,
+        recover_browser_window_for_backend_observed=False,
+    )
+
+    assert snapshot["url"] == "http://127.0.0.1:8002"
+    assert snapshot["backendPort"] == 8002
+    assert snapshot["backendPortListening"] is True

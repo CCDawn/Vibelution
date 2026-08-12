@@ -25,6 +25,7 @@ from uuid import uuid4
 from config.workbench import configured_backend_port
 
 from .constants import (
+    DEFAULT_HOST,
     DEFAULT_URL,
     LAUNCHER_SCRIPT_PATH as LAUNCHER_SCRIPT_PATH,
     LAUNCHER_STATE_PATH,
@@ -624,6 +625,59 @@ def _port_for_url(url: str) -> int:
     return 0
 
 
+def _positive_tcp_port(value: object) -> int:
+    try:
+        port = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return port if 0 < port < 65536 else 0
+
+
+def _workbench_url_for_port(port: int, *, host: str = "", source_url: str = "") -> str:
+    resolved_host = str(host or "").strip()
+    if not resolved_host:
+        try:
+            parsed = urllib.parse.urlparse(str(source_url or ""))
+            resolved_host = str(parsed.hostname or "").strip()
+        except ValueError:
+            resolved_host = ""
+    if not resolved_host:
+        resolved_host = DEFAULT_HOST
+    return f"http://{resolved_host}:{int(port)}"
+
+
+def _reconcile_workbench_endpoint(
+    url: str,
+    port: int,
+    launcher_state: dict[str, Any],
+) -> tuple[str, int]:
+    """Prefer a live backendPort / ports.json over a stale state.json url."""
+
+    current_port = _positive_tcp_port(port) or _port_for_url(url)
+    if current_port > 0 and _port_is_listening_socket(current_port):
+        return (str(url or "").strip() or _workbench_url_for_port(current_port), current_port)
+
+    candidates: list[int] = []
+    for key in ("backendPort", "port", "preferredBackendPort"):
+        candidate = _positive_tcp_port(launcher_state.get(key))
+        if candidate > 0 and candidate not in candidates:
+            candidates.append(candidate)
+    configured = _positive_tcp_port(configured_backend_port())
+    if configured > 0 and configured not in candidates:
+        candidates.append(configured)
+
+    host = str(launcher_state.get("host") or "").strip()
+    for candidate in candidates:
+        if candidate == current_port:
+            continue
+        if _port_is_listening_socket(candidate):
+            return (
+                _workbench_url_for_port(candidate, host=host, source_url=url),
+                candidate,
+            )
+    return (str(url or "").strip() or DEFAULT_URL, current_port)
+
+
 def _listening_pid_for_port_windows(port: int) -> int:
     if port <= 0:
         return 0
@@ -798,6 +852,8 @@ def observe_workbench(
     browser_managed = bool(window_projection.get("browserManaged"))
 
     port = _port_for_url(url)
+    # state.json url can lag behind a relocated listener (e.g. :8000 url vs :8002 ports.json).
+    url, port = _reconcile_workbench_endpoint(url, port, launcher_state)
     launcher_browser_window_alive = _is_browser_window_alive(launcher_browser_window_pid)
     if (
         session_role == "launcher_control_surface"
@@ -1341,6 +1397,64 @@ def _can_reuse_backend_for_electron_window_open(*, action: str, session: dict[st
     )
 
 
+def _electron_desktop_action_payload(*, action: str, session: dict[str, Any]) -> dict[str, Any]:
+    """Build Electron desktop-action payload, attaching live Workbench URL when known."""
+
+    payload: dict[str, Any] = {
+        "desktopSessionId": str(session.get("desktopSessionId") or ""),
+    }
+    if str(action or "").strip().lower() not in {"open_workbench"}:
+        return payload
+
+    try:
+        observation = observe_workbench(
+            recover_browser_window=False,
+            recover_browser_window_for_backend_observed=False,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        # Never invent :8000 when observation fails; Electron falls back to bootstrap/env.
+        return payload
+    if not isinstance(observation, dict):
+        return payload
+
+    url = str(observation.get("url") or "").strip()
+    port = _positive_tcp_port(observation.get("backendPort")) or _port_for_url(url)
+    url_port = _port_for_url(url) or port
+    listening = bool(observation.get("backendPortListening"))
+    if url_port > 0 and url_port != port:
+        # Observation url/port disagree — trust listening probes over the stale url.
+        listening = False
+    if not listening and url_port > 0:
+        listening = _port_is_listening_socket(url_port)
+        if listening:
+            port = url_port
+    if not listening:
+        # Prefer live ports.json / configured port over a dead state.json url (:8000).
+        for candidate in (port, _positive_tcp_port(configured_backend_port())):
+            if candidate <= 0 or candidate == url_port:
+                continue
+            if _port_is_listening_socket(candidate):
+                port = candidate
+                url = _workbench_url_for_port(candidate, source_url=url)
+                listening = True
+                break
+        else:
+            # Do not hand Electron a URL whose port is not listening.
+            url = ""
+    live_backend = bool(
+        observation.get("backendObserved")
+        or listening
+        or observation.get("backendHealthy")
+    )
+    if not url and live_backend and listening and 0 < port < 65536:
+        url = _workbench_url_for_port(port)
+    if url and listening:
+        payload["workbenchUrl"] = url
+    if 0 < port < 65536 and (listening or live_backend):
+        payload["backendPort"] = port
+    return payload
+
+
 def _submit_electron_window_action(*, action: str, reason: str, session: dict[str, Any]) -> dict[str, Any]:
     """Submit a Python-owned Desktop Action for the active Electron shell."""
 
@@ -1359,7 +1473,7 @@ def _submit_electron_window_action(*, action: str, reason: str, session: dict[st
             "sourceTaskId": str(session.get("desktopSessionId") or ""),
         },
         active_work_runs=[],
-        desktop_action_payload={"desktopSessionId": str(session.get("desktopSessionId") or "")},
+        desktop_action_payload=_electron_desktop_action_payload(action=action, session=session),
     )
 
 
