@@ -26,8 +26,20 @@ internal static class VibelutionLauncher
             }
 
             bool created;
+            bool waitForRestart = Environment.GetEnvironmentVariable("VIBELUTION_TRAY_RESTART_WAIT") == "1";
             using (var mutex = new Mutex(true, "Global\\Vibelution.Launcher.Tray", out created))
             {
+                if (!created && waitForRestart)
+                {
+                    try
+                    {
+                        created = mutex.WaitOne(8000, false);
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        created = true;
+                    }
+                }
                 if (!created || ElectronOwnsDesktopTray(projectDir))
                 {
                     // Already running as a tray app; do not open the full Launcher window.
@@ -80,6 +92,10 @@ internal static class VibelutionLauncher
         {
             var menu = new ContextMenuStrip();
             menu.Items.Add(MenuItem("打开控制台", delegate { QueueOpenConsole(); }));
+            var freshnessItem = DisabledMenuItem("Launcher 版本未知");
+            menu.Items.Add(freshnessItem);
+            menu.Items.Add(MenuItem("重启 Launcher", delegate { QueueRestartLauncher(); }));
+            menu.Opening += delegate { RefreshFreshnessItem(freshnessItem); };
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(BranchActionMenu("启动", "start"));
             menu.Items.Add(BranchActionMenu("停止", "stop"));
@@ -257,6 +273,50 @@ internal static class VibelutionLauncher
                     {
                         ShowWarning("打开控制台失败：" + ShortMessage(ex.Message));
                     }
+                }
+            );
+        }
+
+        private void RefreshFreshnessItem(ToolStripMenuItem item)
+        {
+            try
+            {
+                EnsureLauncherBackend();
+                string body = GetLauncher("/api/launcher/freshness");
+                string label = ExtractJsonString(body, "label");
+                item.Text = string.IsNullOrWhiteSpace(label) ? "Launcher 版本未知" : label;
+            }
+            catch
+            {
+                item.Text = "Launcher 版本未知";
+            }
+        }
+
+        private void QueueRestartLauncher()
+        {
+            ThreadPool.QueueUserWorkItem(
+                delegate
+                {
+                    try
+                    {
+                        ShowInfo("正在重启 Launcher，以加载最新本地代码…");
+                        string exe = Application.ExecutablePath;
+                        string args = "--action launcher --project " + Quote(projectDir);
+                        var start = new ProcessStartInfo();
+                        start.FileName = exe;
+                        start.Arguments = args;
+                        start.WorkingDirectory = projectDir;
+                        start.UseShellExecute = false;
+                        start.CreateNoWindow = true;
+                        start.Environment["VIBELUTION_TRAY_RESTART_WAIT"] = "1";
+                        Process.Start(start);
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowWarning("重启 Launcher 失败：" + ShortMessage(ex.Message));
+                        return;
+                    }
+                    QueueExitLauncher(false);
                 }
             );
         }

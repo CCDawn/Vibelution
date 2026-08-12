@@ -74,10 +74,12 @@ function createActions() {
       { id: "main", label: "主", startable: false, stoppable: true },
       { id: "worktree:task", label: "task", startable: true, stoppable: false }
     ]),
+    getFreshness: vi.fn().mockResolvedValue({ current: false, label: "Launcher 落后本地 main · aaa111 → bbb222" }),
     startInstance: vi.fn(),
     stopInstance: vi.fn(),
     restartProject: vi.fn(),
     rebuildAndStart: vi.fn(),
+    restartLauncher: vi.fn(),
     showStatus: vi.fn(),
     quit: vi.fn(),
     stopAll: vi.fn()
@@ -110,6 +112,8 @@ describe("Electron desktop tray", () => {
 
     expect(topLabels(menuTemplates[0])).toEqual([
       DESKTOP_TRAY_MENU_LABELS.openLauncher,
+      DESKTOP_TRAY_MENU_LABELS.freshnessUnknown,
+      DESKTOP_TRAY_MENU_LABELS.restartLauncher,
       "separator",
       DESKTOP_TRAY_MENU_LABELS.startProject,
       DESKTOP_TRAY_MENU_LABELS.stopProject,
@@ -127,23 +131,29 @@ describe("Electron desktop tray", () => {
     });
 
     const refreshed = menuTemplates[menuTemplates.length - 1];
-    const startMenu = refreshed[2]?.submenu as Array<Record<string, unknown>>;
-    const stopMenu = refreshed[3]?.submenu as Array<Record<string, unknown>>;
+    expect(topLabels(refreshed).slice(1, 3)).toEqual([
+      "Launcher 落后本地 main · aaa111 → bbb222",
+      DESKTOP_TRAY_MENU_LABELS.restartLauncher
+    ]);
+    const startMenu = refreshed[4]?.submenu as Array<Record<string, unknown>>;
+    const stopMenu = refreshed[5]?.submenu as Array<Record<string, unknown>>;
     expect(startMenu.map((item) => item.label)).toEqual(["task"]);
     expect(stopMenu.map((item) => item.label)).toEqual(["主"]);
 
     (startMenu[0].click as () => void)();
     (stopMenu[0].click as () => void)();
     (refreshed[0].click as () => void)();
-    (refreshed[4].click as () => void)();
-    (refreshed[5].click as () => void)();
+    (refreshed[2].click as () => void)();
     (refreshed[6].click as () => void)();
+    (refreshed[7].click as () => void)();
     (refreshed[8].click as () => void)();
-    (refreshed[9].click as () => void)();
+    (refreshed[10].click as () => void)();
+    (refreshed[11].click as () => void)();
 
     expect(actions.startInstance).toHaveBeenCalledWith("worktree:task", "task");
     expect(actions.stopInstance).toHaveBeenCalledWith("main", "主");
     expect(actions.openLauncher).toHaveBeenCalledTimes(1);
+    expect(actions.restartLauncher).toHaveBeenCalledTimes(1);
     expect(actions.restartProject).toHaveBeenCalledTimes(1);
     expect(actions.rebuildAndStart).toHaveBeenCalledTimes(1);
     expect(actions.showStatus).toHaveBeenCalledTimes(1);

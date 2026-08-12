@@ -178,6 +178,14 @@ class LauncherSupervisorCommandResponse(TypedDict, total=False):
     blockers: list[str]
 
 
+def get_launcher_freshness() -> dict[str, Any]:
+    """Return whether this Launcher process still matches local Git HEAD."""
+
+    from core.launcher.freshness import get_launcher_freshness as _freshness
+
+    return _freshness()
+
+
 def list_launcher_branch_instances() -> dict[str, Any]:
     """Return Git-governed branch instances for the Launcher first screen."""
 

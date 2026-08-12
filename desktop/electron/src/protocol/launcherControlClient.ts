@@ -163,6 +163,44 @@ export function classifyTrayBranchInstances(payload: unknown): TrayBranchInstanc
   return items;
 }
 
+export type LauncherFreshness = {
+  current: boolean | null;
+  label: string;
+  runningShort?: string;
+  headShort?: string;
+};
+
+export async function fetchLauncherFreshness(input: {
+  launcherOrigin: string;
+  controlToken: string;
+  fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
+}): Promise<LauncherFreshness> {
+  const response = await boundedDesktopControlFetch({
+    fetchImpl: input.fetchImpl,
+    resource: `${launcherOriginBase(input.launcherOrigin)}/api/launcher/freshness`,
+    operation: "launcher freshness",
+    requestTimeoutMs: input.requestTimeoutMs,
+    init: {
+      method: "GET",
+      headers: {
+        "X-Vibelution-Control-Token": input.controlToken
+      }
+    }
+  });
+  if (!response.ok) {
+    throw new Error(await readFailureDetail(response));
+  }
+  const payload = (await response.json()) as Record<string, unknown>;
+  const current = payload.current;
+  return {
+    current: current === true ? true : current === false ? false : null,
+    label: typeof payload.label === "string" && payload.label.trim() ? payload.label.trim() : "Launcher 版本未知",
+    runningShort: typeof payload.runningShort === "string" ? payload.runningShort : "",
+    headShort: typeof payload.headShort === "string" ? payload.headShort : ""
+  };
+}
+
 export async function fetchLauncherBranchInstances(input: {
   launcherOrigin: string;
   controlToken: string;
