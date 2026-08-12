@@ -32,6 +32,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { listPendingSessionToolApprovals } from "../../api/chat";
 import { fetchJson } from "../../api/client";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
+import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import {
   listProjectAgentBusTimeline,
@@ -217,9 +218,10 @@ import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useChatSessionSelection } from "./useChatSessionSelection";
 import {
-  resolveArchivedSessionRouteTransition,
+  resolveAuthoritativeArchivedSessionIds,
   shouldKeepExplicitSessionRouteOnNotFound,
 } from "./chatSessionRouteSync";
+import { useChatArchivedAgentRetirement } from "./useChatArchivedAgentRetirement";
 import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
@@ -1353,9 +1355,28 @@ export function ChatCodingRoute() {
     },
   });
 
+  const retireArchivedAgentSessions = useChatArchivedAgentRetirement({
+    activeSessionId,
+    clearSessionTransientUiState,
+    directSessionSelectionGenerationRef,
+    forgetSessionDetailPaint,
+    latestDirectSessionSelectionAtRef,
+    latestDirectSessionSelectionRef,
+    pathname: location.pathname,
+    navigate,
+    queryClient,
+    removeSessionWorkspace,
+    requestedSessionId,
+    retiredDirectSessionIdsRef,
+    setActiveSession,
+    setSelectedAgentId,
+    setSessionComposerErrors,
+    search: location.search,
+  });
+
   const archiveAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+      fetchJson<AgentArchiveResponse>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
         method: "DELETE",
       }),
     onMutate: async (payload) => {
@@ -1369,100 +1390,43 @@ export function ChatCodingRoute() {
       const previousSessions = sessionsQuery.data;
       const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const remainingAgents = (previousAgents ?? []).filter((agent) => agent.agentId !== payload.agentId);
-      const remainingAgentIds = new Set(remainingAgents.map((agent) => agent.agentId));
       const archivedSessionIds = (sessionsQuery.data ?? [])
         .filter((session) => String(session.agentId || "").trim() === payload.agentId)
         .map((session) => session.id);
-      const archivedSessionIdSet = new Set(archivedSessionIds);
-      const currentActiveSession = (sessionsQuery.data ?? []).find((session) => session.id === activeSessionId);
-      const fallbackSession = (
-        currentActiveSession
-        && remainingAgentIds.has(String(currentActiveSession.agentId || "").trim())
-        && isVisibleDirectSession(currentActiveSession)
-      )
-        ? currentActiveSession
-        : (sessionsQuery.data ?? []).find(
-          (session) => (
-            !archivedSessionIdSet.has(session.id)
-            && remainingAgentIds.has(String(session.agentId || "").trim())
-            && isVisibleDirectSession(session)
-          ),
-        );
-      const fallbackAgentId = String(
-        fallbackSession?.agentId
-        || remainingAgents.find((agent) => String(agent.status || "").trim() !== "archived")?.agentId
-        || "",
-      ).trim();
-      const archiveRouteTransition = resolveArchivedSessionRouteTransition({
-        archivedSessionIds,
-        activeSessionId,
-        requestedSessionId,
-        fallbackSessionId: fallbackSession?.id,
-      });
-      const latestIntentArchived = archivedSessionIdSet.has(latestDirectSessionSelectionRef.current);
-      if (archiveRouteTransition.shouldRetireSelection || latestIntentArchived) {
-        const retiredSessionIds = new Set(retiredDirectSessionIdsRef.current);
-        archivedSessionIds.forEach((sessionId) => retiredSessionIds.add(sessionId));
-        while (retiredSessionIds.size > 64) {
-          const oldestSessionId = retiredSessionIds.values().next().value;
-          if (!oldestSessionId) {
-            break;
-          }
-          retiredSessionIds.delete(oldestSessionId);
-        }
-        retiredDirectSessionIdsRef.current = retiredSessionIds;
-        directSessionSelectionGenerationRef.current += 1;
-        latestDirectSessionSelectionRef.current = fallbackSession?.id || "";
-        latestDirectSessionSelectionAtRef.current = Date.now();
-      }
 
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents);
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        sessions?.filter((session) => !archivedSessionIdSet.has(session.id)),
-      );
-      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        archivedSessionIds.reduce(
-          (current, sessionId) => removeDeletedSessionFromConversations(current, sessionId),
-          conversations,
-        ),
-      );
-      archivedSessionIds.forEach((sessionId) => {
-        clearSessionTransientUiState(sessionId);
-        forgetSessionDetailPaint(sessionId);
-        removeSessionWorkspace(sessionId, fallbackSession?.id || null);
+      retireArchivedAgentSessions({
+        agentId: payload.agentId,
+        archivedSessionIds,
+        sessions: sessionsQuery.data ?? [],
+        remainingAgents,
       });
       setAgentContextMenu(null);
-      setSelectedAgentId((current) => current === payload.agentId ? fallbackAgentId : current);
-      if (archiveRouteTransition.nextActiveSessionId !== activeSessionId) {
-        setActiveSession(archiveRouteTransition.nextActiveSessionId);
-      }
-      if (archiveRouteTransition.nextRequestedSessionId !== requestedSessionId) {
-        const nextSearchParams = new URLSearchParams(location.search);
-        if (archiveRouteTransition.nextRequestedSessionId) {
-          nextSearchParams.set("session", archiveRouteTransition.nextRequestedSessionId);
-        } else {
-          nextSearchParams.delete("session");
-        }
-        const nextSearch = nextSearchParams.toString();
-        navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
-      }
-      setSessionComposerErrors((current) => {
-        const next: Record<string, string> = { ...current, __sessions__: "" };
-        archivedSessionIds.forEach((sessionId) => delete next[sessionId]);
-        return next;
-      });
       return {
         previousActiveSessionId,
         previousAgents,
         previousSelectedAgentId,
         previousSessions,
         previousConversations,
+        optimisticArchivedSessionIds: archivedSessionIds,
       };
     },
-    onSuccess: (agent) => {
+    onSuccess: (agent, _variables, context) => {
+      const archivedSessionIds = resolveAuthoritativeArchivedSessionIds({
+        optimisticSessionIds: context?.optimisticArchivedSessionIds,
+        archiveSummary: agent.archiveSummary,
+      });
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
         current?.filter((item) => item.agentId !== agent.agentId),
       );
+      const remainingAgents = (queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [])
+        .filter((item) => item.agentId !== agent.agentId);
+      retireArchivedAgentSessions({
+        agentId: agent.agentId,
+        archivedSessionIds,
+        sessions: queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? context?.previousSessions ?? [],
+        remainingAgents,
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: "",

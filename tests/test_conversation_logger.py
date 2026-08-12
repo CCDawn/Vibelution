@@ -122,6 +122,28 @@ def test_debug_level_records_are_not_persisted(tmp_path):
     assert debug_records[0]["level"] == "INFO"
 
 
+def test_debug_level_records_persist_when_verbose_env_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_LOG_LEVEL", "DEBUG")
+    ConversationLogger._instance = None
+    logger = ConversationLogger()
+    logger._log_dir = str(tmp_path)
+    logger._current_session_file = None
+    logger._session_id = "debug_env"
+    logger._turn_count = 0
+    logger._session_active = False
+    logger._ensure_log_dir()
+    logger.start_session()
+
+    logger.log_debug("RAW", "content length probe", "DEBUG")
+    logger.log_debug("INFO", "service info stays", "INFO")
+
+    lines = (tmp_path / "conversation_debug_env.jsonl").read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines]
+    debug_records = [r for r in records if r["type"] == "debug"]
+    assert [r["tag"] for r in debug_records] == ["RAW", "INFO"]
+    assert debug_records[0]["level"] == "DEBUG"
+
+
 def test_timestamps_are_utc_iso(tmp_path):
     logger = _fresh_logger(tmp_path)
 

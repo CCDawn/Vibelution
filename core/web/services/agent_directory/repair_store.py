@@ -625,6 +625,10 @@ def _ensure_knowledge_steward_agent(
         tool_policies[s.KNOWLEDGE_STEWARD_TOOL_POLICY_ID] = tool_policy
         changed = True
         repaired_fields.append("toolPolicy")
+    if agent.get("toolPolicy") != tool_policy:
+        agent["toolPolicy"] = tool_policy
+        changed = True
+        repaired_fields.append("toolPolicy")
     if memory_policies.get(s.KNOWLEDGE_STEWARD_MEMORY_POLICY_ID) != memory_policy:
         memory_policies[s.KNOWLEDGE_STEWARD_MEMORY_POLICY_ID] = memory_policy
         changed = True

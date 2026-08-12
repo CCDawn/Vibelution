@@ -3887,7 +3887,39 @@ class SelfEvolvingAgent:
             level="error",
             fields=scene_fields,
         )
+        self._announce_scene_diagnostic_package()
         return failure
+
+    def _resolve_current_scene_dir_for_diagnostic(self):
+        """解析当前运行时场景目录（CLI/无 UI 模式下排查入口提示用）。"""
+        try:
+            from core.web.services.runtime_scene.record import _resolve_current_runtime_scene_dir
+
+            return _resolve_current_runtime_scene_dir()
+        except Exception:
+            return None
+
+    def _announce_scene_diagnostic_package(self) -> None:
+        """失败时提示场景诊断包入口（UI 模式已有场景页导航；CLI 模式给出文件路径）。"""
+        try:
+            scene_dir = self._resolve_current_scene_dir_for_diagnostic()
+            if scene_dir is None:
+                return
+            ui = get_ui()
+            if ui is None or not hasattr(ui, "add_log"):
+                return
+            try:
+                from core.runtime_manager.constants import PROJECT_ROOT
+
+                display_path = os.path.relpath(str(scene_dir), str(PROJECT_ROOT)).replace("\\", "/")
+            except Exception:
+                display_path = str(scene_dir)
+            ui.add_log(
+                f"诊断包: {display_path}/（先读 package_index.json，再按推荐顺序展开）",
+                "ERROR",
+            )
+        except Exception:
+            pass
 
     def _invoke_llm(self, messages: list, *, replay_state: Any = None) -> Optional[Any]:
         """调用 LLM（带错误分类、自动重试）"""

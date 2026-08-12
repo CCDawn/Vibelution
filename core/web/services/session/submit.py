@@ -74,7 +74,9 @@ def _append_initial_session_journal_markers(
 
     def append(record: dict[str, Any]) -> dict[str, Any]:
         record_turn_id = str(record.get("turnId") or normalized_turn_id).strip()
+        timings: dict[str, float] = {}
         if not matching_events(s.EVENT_TURN_STARTED):
+            turn_started_at = s._perf_counter()
             s._append_session_conversation_event(
                 normalized_session_id,
                 record_turn_id,
@@ -89,11 +91,13 @@ def _append_initial_session_journal_markers(
                 visible_in_model=False,
                 correlation_id=normalized_submission_id,
             )
+            timings["turnStartedJournalMs"] = s._elapsed_ms(turn_started_at)
         existing_user_events = matching_events(s.EVENT_USER_MESSAGE)
-        user_event = (
-            existing_user_events[-1]
-            if existing_user_events
-            else s._append_session_conversation_event(
+        if existing_user_events:
+            user_event = existing_user_events[-1]
+        else:
+            user_message_started_at = s._perf_counter()
+            user_event = s._append_session_conversation_event(
                 normalized_session_id,
                 record_turn_id,
                 s.EVENT_USER_MESSAGE,
@@ -102,10 +106,11 @@ def _append_initial_session_journal_markers(
                 source="submit_session_message",
                 correlation_id=normalized_submission_id,
             )
-        )
+            timings["userMessageJournalMs"] = s._elapsed_ms(user_message_started_at)
         return {
             "journalSequence": int(getattr(user_event, "sequence", 0) or 0),
             "journalEventId": str(getattr(user_event, "event_id", "") or "").strip(),
+            **timings,
         }
 
     runtime = get_development_submission_admission_runtime(s.PROJECT_ROOT)
@@ -526,6 +531,11 @@ def submit_session_message(
     if admitted_turn_id and admitted_turn_id != turn_control.turn_id:
         raise RuntimeError("Submission admission turn identity changed during journal append.")
     submit_timing_fields["initialJournalMarkersMs"] = s._elapsed_ms(stage_started_at)
+    submit_timing_fields.setdefault("turnStartedJournalMs", 0)
+    submit_timing_fields.setdefault("userMessageJournalMs", 0)
+    for journal_timing_field in ("turnStartedJournalMs", "userMessageJournalMs"):
+        if journal_timing_field in journal_receipt:
+            submit_timing_fields[journal_timing_field] = journal_receipt[journal_timing_field]
     submit_timing_fields["sessionAdmissionDisposition"] = str(
         journal_receipt.get("admissionDisposition") or "disabled"
     )
