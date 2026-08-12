@@ -36,7 +36,10 @@ class _OperatorBoundCommandService:
         if current_server_operator() is not None:
             return self._inner.submit(request)
         operator_id = str(request.requested_by.actor_id or "").strip() or "test-operator"
-        with server_operator_scope(operator_id):
+        with server_operator_scope(
+            operator_id,
+            roles=("operator", "admin"),
+        ):
             return self._inner.submit(request)
 
     def __getattr__(self, name: str):

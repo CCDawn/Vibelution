@@ -20,7 +20,7 @@ class Migration:
         return hashlib.sha256("\n".join(self.statements).encode("utf-8")).hexdigest()
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -148,7 +148,8 @@ MIGRATIONS: tuple[Migration, ...] = (
               command_id TEXT,
               node_run_id TEXT,
               action_kind TEXT NOT NULL CHECK (action_kind IN (
-                'graph_dispatch','adapter_dispatch','event_publish','reconcile'
+                'graph_dispatch','adapter_dispatch','event_publish','reconcile',
+                'checkpoint_fork'
               )),
               idempotency_key TEXT NOT NULL UNIQUE,
               payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
@@ -308,6 +309,47 @@ MIGRATIONS: tuple[Migration, ...] = (
               FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE
             )
             """,
+        ),
+    ),
+    # Additive: accept budget reservation terminal status `voided` (crash /
+    # compensation). Existing v1 DBs rebuild the table; new DBs apply v1 then v2.
+    # Tests recreate the ledger DB and therefore pick this up automatically.
+    Migration(
+        version=2,
+        statements=(
+            """
+            CREATE TABLE budget_receipts__v2 (
+              receipt_id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              node_run_id TEXT NOT NULL,
+              reservation_id TEXT NOT NULL UNIQUE,
+              stage_id TEXT NOT NULL,
+              policy_hash TEXT NOT NULL,
+              reserved_json TEXT NOT NULL CHECK (json_valid(reserved_json)),
+              settled_json TEXT CHECK (settled_json IS NULL OR json_valid(settled_json)),
+              status TEXT NOT NULL CHECK (status IN (
+                'reserved','settled','released','failed','voided'
+              )),
+              created_at_ms INTEGER NOT NULL,
+              updated_at_ms INTEGER NOT NULL,
+              FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE RESTRICT,
+              FOREIGN KEY (node_run_id) REFERENCES node_attempts(node_run_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            INSERT INTO budget_receipts__v2 (
+              receipt_id, run_id, node_run_id, reservation_id, stage_id,
+              policy_hash, reserved_json, settled_json, status,
+              created_at_ms, updated_at_ms
+            )
+            SELECT
+              receipt_id, run_id, node_run_id, reservation_id, stage_id,
+              policy_hash, reserved_json, settled_json, status,
+              created_at_ms, updated_at_ms
+            FROM budget_receipts
+            """,
+            "DROP TABLE budget_receipts",
+            "ALTER TABLE budget_receipts__v2 RENAME TO budget_receipts",
         ),
     ),
 )

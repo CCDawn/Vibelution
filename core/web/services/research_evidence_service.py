@@ -122,7 +122,8 @@ def list_research_question_trees(team_id: str) -> dict[str, Any]:
 
 
 def _store() -> ClaimEvidenceStore:
-    return ClaimEvidenceStore(Path(PROJECT_ROOT))
+    # Resolve at call time so test PROJECT_ROOT monkeypatches take effect.
+    return ClaimEvidenceStore(Path(team_service.PROJECT_ROOT))
 
 
 def _question_tree_store() -> ResearchQuestionTreeStore:

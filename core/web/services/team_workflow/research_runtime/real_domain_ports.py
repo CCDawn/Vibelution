@@ -101,18 +101,48 @@ class RealDomainPorts:
         except BudgetAuthorityError as exc:
             raise RuntimeError(str(exc)) from exc
 
-    def settle_budget(self, *, reservation: dict[str, Any], usage: dict[str, Any]) -> None:
+    def settle_budget(self, *, reservation: dict[str, Any], usage: dict[str, Any]) -> dict[str, Any]:
+        """Settle reserved budget. Raises RuntimeError on failure (callers must
+        treat any raised exception as a hard settle failure)."""
         from .budget_authority_adapter import (
             BudgetAuthorityError,
             settle_budget_authority,
         )
 
         try:
-            settle_budget_authority(
+            return settle_budget_authority(
                 self._store, reservation=reservation, usage=usage
             )
         except BudgetAuthorityError as exc:
-            raise RuntimeError(str(exc)) from exc
+            raise RuntimeError(f"budget_settle_failed:{exc.code}:{exc}") from exc
+
+    def void_budget(
+        self,
+        *,
+        reservation: dict[str, Any],
+        reason: str = "compensation_void",
+        correlation_id: str | None = None,
+    ) -> None:
+        from .budget_authority_adapter import void_budget_reservation
+
+        void_budget_reservation(
+            self._store,
+            reservation,
+            reason=reason,
+            correlation_id=correlation_id,
+        )
+
+    def release_budget(
+        self,
+        *,
+        reservation: dict[str, Any],
+        reason: str = "unused_release",
+    ) -> None:
+        from .budget_authority_adapter import release_budget_reservation
+
+        release_budget_reservation(
+            self._store, reservation, reason=reason
+        )
 
     # ------------------------------------------------------------ agent
 
@@ -165,7 +195,56 @@ class RealDomainPorts:
     def execute_system_action(
         self, *, action: PendingAction
     ) -> tuple[list[dict[str, str]], dict[str, Any]]:
-        return _execute_real_system_action(action)
+        return _execute_real_system_action(
+            action,
+            input_snapshot=self._run_input_snapshot(action.run_id),
+        )
+
+    def execute_run_smoke(
+        self,
+        *,
+        run_id: str,
+        plan_id: str,
+        team_id: str = "",
+        domain_payload: dict[str, Any] | None = None,
+        action_id: str = "",
+    ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+        """System Smoke observation — writes ``smoke_evidence`` only.
+
+        ``smoke_gate`` remains Human: release is ``smoke_release`` via human resolve.
+        """
+        snapshot = self._run_input_snapshot(run_id)
+        resolved_team = str(team_id or snapshot.get("teamId") or "").strip()
+        if not resolved_team:
+            raise RuntimeError("run_smoke requires teamId")
+        resolved_plan = str(plan_id or "").strip()
+        if not resolved_plan:
+            request = _system_request_payload(
+                snapshot, node_id="smoke_gate", alias="smokeGate"
+            )
+            resolved_plan = str(
+                request.get("planId") or snapshot.get("planId") or ""
+            ).strip()
+        if not resolved_plan:
+            raise RuntimeError("run_smoke requires planId")
+        payload = dict(domain_payload or {})
+        if not payload:
+            request = _system_request_payload(
+                snapshot, node_id="smoke_gate", alias="smokeGate"
+            )
+            payload = {
+                key: value
+                for key, value in request.items()
+                if key not in {"idempotencyKey", "planId"}
+            }
+        return _ledger_run_smoke(
+            run_id=run_id,
+            team_id=resolved_team,
+            plan_id=resolved_plan,
+            source_collection_run_id=str(snapshot.get("sourceCollectionRunId") or ""),
+            domain_payload=payload,
+            action_id=action_id,
+        )
 
 
 def _stage_for(node_id: str) -> str:
@@ -391,13 +470,360 @@ def _read_back_real_artifact(canonical_ref: str) -> ArtifactReadBack | None:
 
 def _execute_real_system_action(
     action: PendingAction,
+    *,
+    input_snapshot: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
-    """System nodes must materialize real artifacts with a non-empty runnerId.
+    """Dispatch System nodes to the same domain executors the UI adapters use.
 
-    Full controlled_run / result_package executors remain owned by their domain
-    adapters; the production port refuses silent empty success.
+    Returns ``(materialized_refs, meta)`` where ``meta`` must include a non-empty
+    ``runnerId`` for ``SystemActionAdapter.verify``. Silent empty success is
+    forbidden — missing inputs or incomplete domain results raise.
+
+    ``smoke_gate`` is ActorKind.HUMAN — Smoke domain execution is
+    :meth:`RealDomainPorts.execute_run_smoke`, not a SystemActionAdapter path.
     """
     node_id = str(action.node_id or "").strip()
+    snapshot = dict(input_snapshot or {})
+    if node_id == "controlled_run":
+        return _ledger_controlled_run(action, snapshot)
+    if node_id == "result_package":
+        return _ledger_result_package(action, snapshot)
+    if node_id == "smoke_gate":
+        raise RuntimeError(
+            "smoke_gate is a Human gate; use execute_run_smoke for Smoke evidence "
+            "and Human resolve for smoke_release"
+        )
     raise RuntimeError(
         f"system node {node_id} has no system executor wired for Ledger production path"
     )
+
+
+def _persist_workflow_artifact(
+    *,
+    kind: str,
+    team_id: str,
+    workflow_run_id: str,
+    source_collection_run_id: str,
+    payload: dict[str, Any],
+    artifact_identity: str,
+) -> None:
+    from .workflow_artifact_store import put_workflow_artifact
+
+    put_workflow_artifact(
+        team_id,
+        kind=kind,
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_collection_run_id or workflow_run_id,
+        payload=payload,
+        artifact_identity=artifact_identity,
+    )
+
+
+def _collect_kind_refs(
+    kinds: tuple[str, ...],
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    source_collection_run_id: str,
+) -> list[dict[str, str]]:
+    """Collect refs for an explicit kind set (not full node producesArtifactKinds)."""
+    from .artifact_readback_registry import (
+        build_canonical_ref,
+        load_scoped_artifact_payload,
+    )
+    from .human_gate_artifacts import canonical_sha256
+
+    authority_run_id = (
+        str(source_collection_run_id or "").strip()
+        or str(workflow_run_id or "").strip()
+    )
+    if not team_id or not authority_run_id:
+        raise RuntimeError("team_id and run scope are required to collect artifact refs")
+    refs: list[dict[str, str]] = []
+    for kind in kinds:
+        payload = load_scoped_artifact_payload(
+            kind,
+            team_id=team_id,
+            authority_run_id=authority_run_id,
+            workflow_run_id=str(workflow_run_id or "").strip(),
+        )
+        if payload is None:
+            continue
+        content_hash = canonical_sha256(payload)
+        refs.append(
+            {
+                "canonicalRef": build_canonical_ref(
+                    kind=kind,
+                    team_id=team_id,
+                    authority_run_id=authority_run_id,
+                    content_hash=content_hash,
+                ),
+                "kind": kind,
+                "sha256": content_hash,
+                "version": "1.0.0",
+            }
+        )
+    return refs
+
+
+def _system_request_payload(
+    snapshot: dict[str, Any], *, node_id: str, alias: str
+) -> dict[str, Any]:
+    """Resolve operator/domain request fields frozen into the run input snapshot."""
+    nested = snapshot.get(alias)
+    if isinstance(nested, dict):
+        return dict(nested)
+    requests = snapshot.get("systemActionRequests")
+    if isinstance(requests, dict):
+        node_payload = requests.get(node_id)
+        if isinstance(node_payload, dict):
+            return dict(node_payload)
+    return {}
+
+
+def _collect_system_artifact_refs(
+    node_id: str,
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    source_collection_run_id: str,
+) -> list[dict[str, str]]:
+    from .agent_turn_completion import collect_required_artifact_refs
+
+    refs = collect_required_artifact_refs(
+        node_id,
+        team_id=team_id,
+        workflow_run_id=workflow_run_id,
+        source_collection_run_id=source_collection_run_id,
+    )
+    if not refs:
+        raise RuntimeError(
+            f"system node {node_id} produced no readable artifact refs"
+        )
+    return refs
+
+
+def _ledger_controlled_run(
+    action: PendingAction,
+    snapshot: dict[str, Any],
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    """Ledger path for controlled_run — same domain call as UI system adapter."""
+    from core.research.workflow.contracts import (
+        ContractValidationError,
+        ExperimentCampaign,
+    )
+    from core.web.services.team_workflow.experiment_api.full_run import (
+        execute_experiment_full_run,
+    )
+
+    team_id = str(snapshot.get("teamId") or "").strip()
+    if not team_id:
+        raise RuntimeError("controlled_run requires teamId in input snapshot")
+    request = _system_request_payload(
+        snapshot, node_id="controlled_run", alias="controlledRun"
+    )
+    plan_id = str(
+        request.get("planId") or snapshot.get("planId") or ""
+    ).strip()
+    if not plan_id:
+        raise RuntimeError("controlled_run requires planId")
+    campaign_raw = request.get("campaign")
+    if campaign_raw is None:
+        campaign_raw = snapshot.get("campaign")
+    if not isinstance(campaign_raw, dict):
+        raise RuntimeError("controlled_run requires an ExperimentCampaign")
+
+    domain_payload = {
+        key: value
+        for key, value in request.items()
+        if key not in {"idempotencyKey", "planId", "campaign"}
+    }
+    result = execute_experiment_full_run(team_id, plan_id, domain_payload)
+    execution = dict(result.get("execution") or {})
+    execution_id = str(execution.get("executionId") or "").strip()
+    if not execution_id or execution.get("status") != "completed":
+        raise RuntimeError("controlled run did not return a completed execution")
+
+    result_ref = f"experiment-run:{execution_id}"
+    try:
+        ExperimentCampaign.from_dict(
+            {
+                **campaign_raw,
+                "runId": action.run_id,
+                "experimentRunRefs": [result_ref],
+                "resultArtifactRefs": [result_ref],
+            }
+        )
+    except ContractValidationError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
+    artifact_payload = {
+        "teamId": team_id,
+        "workflowRunId": action.run_id,
+        "sourceCollectionRunId": sc_run_id or action.run_id,
+        "planId": plan_id,
+        "executionId": execution_id,
+        "observationRef": result_ref,
+        "execution": execution,
+        "campaign": {
+            **campaign_raw,
+            "runId": action.run_id,
+            "experimentRunRefs": [result_ref],
+            "resultArtifactRefs": [result_ref],
+        },
+    }
+    _persist_workflow_artifact(
+        kind="run_artifacts",
+        team_id=team_id,
+        workflow_run_id=action.run_id,
+        source_collection_run_id=sc_run_id,
+        artifact_identity=action.node_run_id or action.action_id,
+        payload=artifact_payload,
+    )
+    refs = _collect_system_artifact_refs(
+        "controlled_run",
+        team_id=team_id,
+        workflow_run_id=action.run_id,
+        source_collection_run_id=sc_run_id,
+    )
+    runner_id = str(
+        execution.get("adapterId")
+        or result.get("adapterId")
+        or execution.get("runnerId")
+        or "formal_runner"
+    ).strip()
+    if not runner_id:
+        raise RuntimeError("controlled_run requires a non-empty runnerId")
+    return refs, {
+        "systemActionId": f"sys-{action.action_id}",
+        "runnerId": runner_id,
+        "executionId": execution_id,
+        "planId": plan_id,
+        "observationRef": result_ref,
+    }
+
+
+def _ledger_result_package(
+    action: PendingAction,
+    snapshot: dict[str, Any],
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    """Ledger path for result_package — same builder as UI system adapter."""
+    from .result_package import ResultPackageError, build_result_package
+
+    team_id = str(snapshot.get("teamId") or "").strip()
+    if not team_id:
+        raise RuntimeError("result_package requires teamId in input snapshot")
+    request = _system_request_payload(
+        snapshot, node_id="result_package", alias="resultPackage"
+    )
+    record = request.get("workflowRecord")
+    if not isinstance(record, dict):
+        record = snapshot.get("workflowRunProjection")
+    if not isinstance(record, dict):
+        raise RuntimeError(
+            "result_package requires a workflow run projection in input snapshot"
+        )
+    research_ledger = request.get("researchLedger")
+    if not isinstance(research_ledger, dict):
+        research_ledger = snapshot.get("researchLedger")
+    if not isinstance(research_ledger, dict):
+        research_ledger = {}
+
+    try:
+        package = build_result_package(record, research_ledger=research_ledger)
+    except ResultPackageError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if not isinstance(package, dict) or not str(package.get("packageId") or "").strip():
+        raise RuntimeError("result_package builder returned an incomplete package")
+
+    sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
+    artifact_payload = {
+        "teamId": team_id,
+        "workflowRunId": action.run_id,
+        "sourceCollectionRunId": sc_run_id or action.run_id,
+        "package": package,
+    }
+    _persist_workflow_artifact(
+        kind="research_result_package",
+        team_id=team_id,
+        workflow_run_id=action.run_id,
+        source_collection_run_id=sc_run_id,
+        artifact_identity=action.node_run_id or action.action_id,
+        payload=artifact_payload,
+    )
+    refs = _collect_system_artifact_refs(
+        "result_package",
+        team_id=team_id,
+        workflow_run_id=action.run_id,
+        source_collection_run_id=sc_run_id,
+    )
+    return refs, {
+        "systemActionId": f"sys-{action.action_id}",
+        "runnerId": "package_builder",
+        "packageId": str(package["packageId"]),
+        "factChainHash": str(package.get("factChainHash") or ""),
+        "observationRef": str(
+            package.get("packageId") or f"research_result_package:{action.action_id}"
+        ),
+    }
+
+
+def _ledger_run_smoke(
+    *,
+    run_id: str,
+    team_id: str,
+    plan_id: str,
+    source_collection_run_id: str = "",
+    domain_payload: dict[str, Any] | None = None,
+    action_id: str = "",
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    """System Smoke execution: persist ``smoke_evidence`` only (Human releases)."""
+    from core.web.services.team_workflow.experiment_api.smoke import (
+        run_experiment_smoke_run,
+    )
+
+    result = run_experiment_smoke_run(team_id, plan_id, dict(domain_payload or {}))
+    smoke_run = dict(result.get("smokeRun") or {})
+    smoke_run_id = str(smoke_run.get("smokeRunId") or "").strip()
+    status = str(result.get("status") or smoke_run.get("status") or "").strip()
+    if not smoke_run_id:
+        raise RuntimeError("Smoke result has no smokeRunId")
+
+    sc_run_id = str(source_collection_run_id or "").strip()
+    artifact_payload = {
+        "teamId": team_id,
+        "workflowRunId": run_id,
+        "sourceCollectionRunId": sc_run_id or run_id,
+        "nodeId": "smoke_gate",
+        "planId": plan_id,
+        "status": status or "unknown",
+        "smokeRunId": smoke_run_id,
+        "observationRef": f"smoke-run:{smoke_run_id}",
+        "artifactHash": str(smoke_run.get("artifactHash") or ""),
+    }
+    _persist_workflow_artifact(
+        kind="smoke_evidence",
+        team_id=team_id,
+        workflow_run_id=run_id,
+        source_collection_run_id=sc_run_id,
+        artifact_identity=action_id or smoke_run_id,
+        payload=artifact_payload,
+    )
+    refs = _collect_kind_refs(
+        ("smoke_evidence",),
+        team_id=team_id,
+        workflow_run_id=run_id,
+        source_collection_run_id=sc_run_id,
+    )
+    if not refs:
+        raise RuntimeError("run_smoke produced no readable smoke_evidence refs")
+    return refs, {
+        "systemActionId": f"sys-{action_id or smoke_run_id}",
+        "runnerId": "smoke_runner",
+        "smokeRunId": smoke_run_id,
+        "planId": plan_id,
+        "observationRef": f"smoke-run:{smoke_run_id}",
+        "status": status or "unknown",
+        "command": "run_smoke",
+    }

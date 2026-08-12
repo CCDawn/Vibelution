@@ -196,7 +196,9 @@ def settle_budget_authority(
     *,
     reservation: dict[str, Any],
     usage: dict[str, Any],
-) -> None:
+) -> dict[str, Any]:
+    """Settle a reserved budget. Raises BudgetAuthorityError on failure so
+    callers can detect settle failure without inspecting side effects."""
     reservation_id = str(reservation.get("reservationId") or "").strip()
     if not reservation_id:
         raise BudgetAuthorityError(
@@ -207,6 +209,11 @@ def settle_budget_authority(
         {"usage": usage, "source": "budget-authority-adapter"},
         ensure_ascii=False,
     )
+    outcome: dict[str, Any] = {
+        "reservationId": reservation_id,
+        "status": "settled",
+        "idempotent": False,
+    }
 
     def mutate(uow):
         row = uow.repository.execute(
@@ -218,22 +225,40 @@ def settle_budget_authority(
                 f"budget receipt missing for {reservation_id}",
                 code="budget_settle_missing",
             )
-        if str(row[1] or "") == "settled":
+        current = str(row[1] or "")
+        if current == "settled":
+            outcome["idempotent"] = True
+            outcome["receiptId"] = str(row[0])
             return
+        if current in {"released", "voided", "failed"}:
+            raise BudgetAuthorityError(
+                f"budget receipt {reservation_id} is terminal ({current}); cannot settle",
+                code="budget_settle_terminal",
+            )
         uow.repository.update_budget_receipt(
             str(row[0]),
             status="settled",
             now_ms=now_ms,
             settled_json=settled_json,
         )
+        outcome["receiptId"] = str(row[0])
 
     store.submit(mutate, force_flush=True).result(timeout=30)
+    return outcome
+
+
+_TERMINAL_BUDGET_STATUSES = frozenset(
+    {"settled", "released", "failed", "voided"}
+)
 
 
 def release_budget_reservation(
     store: WorkflowLedgerStore,
     reservation: dict[str, Any],
+    *,
+    reason: str = "unused_release",
 ) -> None:
+    """Intentional cancel/release of an unused reservation -> `released`."""
     reservation_id = str(reservation.get("reservationId") or "").strip()
     if not reservation_id:
         return
@@ -246,16 +271,69 @@ def release_budget_reservation(
         ).fetchone()
         if row is None:
             return
-        if str(row[1] or "") in {"settled", "released", "failed"}:
+        if str(row[1] or "") in _TERMINAL_BUDGET_STATUSES:
             return
         uow.repository.update_budget_receipt(
             str(row[0]),
             status="released",
             now_ms=now_ms,
             settled_json=json.dumps(
-                {"reason": "unused_release", "source": "budget-authority-adapter"},
+                {
+                    "reason": reason,
+                    "source": "budget-authority-adapter",
+                    "terminal": "released",
+                },
                 ensure_ascii=False,
             ),
+        )
+
+    store.submit(mutate, force_flush=True).result(timeout=30)
+
+
+def void_budget_reservation(
+    store: WorkflowLedgerStore,
+    reservation: dict[str, Any],
+    *,
+    reason: str = "compensation_void",
+    correlation_id: str | None = None,
+) -> None:
+    """Crash/compensation path for an unused reservation -> `voided`.
+
+    Architecture 9.3: user cancel without consumption is `released`; abnormal
+    compensation is `voided` with reason/correlationId.
+    """
+    reservation_id = str(reservation.get("reservationId") or "").strip()
+    if not reservation_id:
+        return
+    now_ms = int(time.time() * 1000)
+    corr = str(
+        correlation_id
+        or reservation.get("correlationId")
+        or reservation.get("actionId")
+        or ""
+    ).strip()
+
+    def mutate(uow):
+        row = uow.repository.execute(
+            "SELECT receipt_id, status FROM budget_receipts WHERE reservation_id = ?",
+            (reservation_id,),
+        ).fetchone()
+        if row is None:
+            return
+        if str(row[1] or "") in _TERMINAL_BUDGET_STATUSES:
+            return
+        payload = {
+            "reason": reason,
+            "source": "budget-authority-adapter",
+            "terminal": "voided",
+        }
+        if corr:
+            payload["correlationId"] = corr
+        uow.repository.update_budget_receipt(
+            str(row[0]),
+            status="voided",
+            now_ms=now_ms,
+            settled_json=json.dumps(payload, ensure_ascii=False),
         )
 
     store.submit(mutate, force_flush=True).result(timeout=30)

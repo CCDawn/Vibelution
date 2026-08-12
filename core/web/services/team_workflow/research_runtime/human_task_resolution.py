@@ -244,6 +244,42 @@ def resolve_human_task(
         created_at=now,
         gate_context=gate_context,
     )
+    if node_id == "smoke_gate" and decision == "accept":
+        # Human owns release only; System run_smoke already wrote smoke_evidence.
+        from .workflow_artifact_store import put_workflow_artifact
+
+        release_payload = next(
+            (
+                payload
+                for artifact_id, payload in artifact_payloads.items()
+                if str(artifact_id).startswith("smoke_release:")
+            ),
+            None,
+        )
+        if isinstance(release_payload, dict) and release_payload:
+            put_workflow_artifact(
+                str(record["teamId"]),
+                kind="smoke_release",
+                workflow_run_id=str(record["runId"]),
+                source_collection_run_id=str(
+                    (record.get("inputSnapshot") or {}).get("sourceCollectionRunId")
+                    or record["runId"]
+                ),
+                payload={
+                    "teamId": str(record["teamId"]),
+                    "workflowRunId": str(record["runId"]),
+                    "sourceCollectionRunId": str(
+                        (record.get("inputSnapshot") or {}).get("sourceCollectionRunId")
+                        or record["runId"]
+                    ),
+                    **release_payload,
+                },
+                artifact_identity=str(
+                    task.get("taskId")
+                    or node_run.get("nodeRunId")
+                    or f"{node_id}:{decision}"
+                ),
+            )
     completed_ids = [
         *[item for item in record.get("completedNodeIds") or [] if item != node_id],
         node_id,

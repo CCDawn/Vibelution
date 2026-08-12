@@ -138,8 +138,26 @@ def execute_smoke_action(
         "nodeId": "smoke_gate",
         "planId": plan_id,
         "frozenProtocolRef": frozen_manifest["artifactId"],
+        "teamId": str(record.get("teamId") or ""),
+        "workflowRunId": str(record["runId"]),
+        "sourceCollectionRunId": str(
+            (record.get("inputSnapshot") or {}).get("sourceCollectionRunId")
+            or record["runId"]
+        ),
         **observation,
     }
+    from .workflow_artifact_store import put_workflow_artifact
+
+    put_workflow_artifact(
+        str(record["teamId"]),
+        kind="smoke_evidence",
+        workflow_run_id=str(record["runId"]),
+        source_collection_run_id=str(
+            artifact_payload.get("sourceCollectionRunId") or record["runId"]
+        ),
+        payload=artifact_payload,
+        artifact_identity=str(action.get("actionId") or smoke_run_id),
+    )
     manifest = build_system_artifact(
         record=record,
         node_run=node_run,

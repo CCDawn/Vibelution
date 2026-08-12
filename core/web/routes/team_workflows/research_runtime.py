@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import Header, HTTPException, Query
+from fastapi import Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from core.web.services.team_workflow.research_runtime.event_stream import (
     iter_workflow_sse,
     parse_last_event_id,
+)
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    current_server_operator,
+    server_operator_scope_from_http,
 )
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
@@ -107,7 +111,9 @@ def _canonical_team_id(value: str) -> str:
 
 def _map_error(exc: ResearchWorkflowError) -> HTTPException:
     code = exc.code
-    if code.startswith("unknown") or code in {
+    if code == "command_forbidden":
+        status = 403
+    elif code.startswith("unknown") or code in {
         "team_scope_mismatch",
         "handoff_not_found",
         "task_not_found",
@@ -145,6 +151,7 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
     else:
         status = 422
     return HTTPException(status_code=status, detail={"code": code, "message": str(exc)})
+
 
 
 def _authorize_run(
@@ -404,6 +411,7 @@ def research_workflow_cancel_task_bundle(
     run_id: str,
     bundle_id: str,
     payload: TaskBundleCancelPayload,
+    request: Request,
 ) -> dict:
     _authorize_run(
         run_id,
@@ -411,12 +419,18 @@ def research_workflow_cancel_task_bundle(
         expected_run_version=payload.expectedRunVersion,
     )
     try:
-        return _svc().cancel_task_bundle(
-            run_id,
-            bundle_id,
-            reason=payload.reason,
-            idempotency_key=payload.idempotencyKey,
-        )
+        with server_operator_scope_from_http(request):
+            return _svc().cancel_task_bundle(
+                run_id,
+                bundle_id,
+                reason=payload.reason,
+                idempotency_key=payload.idempotencyKey,
+            )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 
@@ -425,6 +439,7 @@ def research_workflow_cancel_task_bundle(
 def research_workflow_reconcile_task_bundles(
     run_id: str,
     payload: VersionedCommandPayload,
+    request: Request,
 ) -> dict:
     _authorize_run(
         run_id,
@@ -432,80 +447,133 @@ def research_workflow_reconcile_task_bundles(
         expected_run_version=payload.expectedRunVersion,
     )
     try:
-        return _svc().reconcile_task_bundles(run_id)
+        with server_operator_scope_from_http(request):
+            return _svc().reconcile_task_bundles(run_id)
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 
 
 @router.post("/research/workflow-runs/{run_id}/commands")
-def research_workflow_command(run_id: str, payload: CommandPayload) -> dict:
+def research_workflow_command(
+    run_id: str,
+    payload: CommandPayload,
+    request: Request,
+) -> dict:
     _authorize_run(
         run_id,
         payload.teamId,
         expected_run_version=payload.expectedRunVersion,
     )
     try:
-        return _svc().apply_command(
-            run_id,
-            payload.command,
-            idempotency_key=payload.idempotencyKey,
-            payload=payload.payload,
-        )
+        with server_operator_scope_from_http(request):
+            return _svc().apply_command(
+                run_id,
+                payload.command,
+                idempotency_key=payload.idempotencyKey,
+                payload=payload.payload,
+            )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 
 
 @router.post("/research/workflow-runs/{run_id}/human-tasks/{task_id}/resolve")
-def research_workflow_human_resolve(run_id: str, task_id: str, payload: HumanTaskResolvePayload) -> dict:
+def research_workflow_human_resolve(
+    run_id: str,
+    task_id: str,
+    payload: HumanTaskResolvePayload,
+    request: Request,
+) -> dict:
     _authorize_run(
         run_id,
         payload.teamId,
         expected_run_version=payload.expectedRunVersion,
     )
     try:
-        return _svc().resolve_human_task(
-            run_id,
-            task_id,
-            decision=payload.decision,
-            resolved_by="operator",
-            idempotency_key=payload.idempotencyKey,
-        )
+        with server_operator_scope_from_http(request):
+            operator = current_server_operator()
+            resolved_by = (
+                str(operator.operator_id).strip() if operator is not None else ""
+            ) or "operator"
+            return _svc().resolve_human_task(
+                run_id,
+                task_id,
+                decision=payload.decision,
+                resolved_by=resolved_by,
+                idempotency_key=payload.idempotencyKey,
+            )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 
 
 @router.post("/research/workflow-runs/{run_id}/nodes/{node_id}/commands")
-def research_workflow_node_command(run_id: str, node_id: str, payload: NodeCommandPayload) -> dict:
+def research_workflow_node_command(
+    run_id: str,
+    node_id: str,
+    payload: NodeCommandPayload,
+    request: Request,
+) -> dict:
     _authorize_run(
         run_id,
         payload.teamId,
         expected_run_version=payload.expectedRunVersion,
     )
     try:
-        return _svc().apply_node_command(
-            run_id,
-            node_id,
-            payload.command,
-            payload=_node_command_body(payload),
-        )
+        with server_operator_scope_from_http(request):
+            return _svc().apply_node_command(
+                run_id,
+                node_id,
+                payload.command,
+                payload=_node_command_body(payload),
+            )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 
 
 @router.put("/research/workflow-runs/{run_id}/nodes/{node_id}/session-binding")
-def research_workflow_session_binding(run_id: str, node_id: str, payload: SessionBindingPayload) -> dict:
+def research_workflow_session_binding(
+    run_id: str,
+    node_id: str,
+    payload: SessionBindingPayload,
+    request: Request,
+) -> dict:
     _authorize_run(
         run_id,
         payload.teamId,
         expected_run_version=payload.expectedRunVersion,
     )
     try:
-        return _svc().put_session_binding(
-            run_id,
-            node_id,
-            payload.model_dump(
-                exclude={"teamId", "expectedRunVersion"},
-            ),
-        )
+        with server_operator_scope_from_http(request):
+            return _svc().put_session_binding(
+                run_id,
+                node_id,
+                payload.model_dump(
+                    exclude={"teamId", "expectedRunVersion"},
+                ),
+            )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+        ) from exc
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc

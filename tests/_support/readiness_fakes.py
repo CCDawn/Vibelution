@@ -134,8 +134,11 @@ class FakeDomainContext(DomainReadinessContext):
         self._note("domain_revision_vector")
         return self.revision_vector
 
-    def question_snapshot(self, team_id: str, question_id: str) -> Mapping[str, Any] | None:
+    def question_snapshot(
+        self, team_id: str, question_id: str, *, run_id: str | None = None
+    ) -> Mapping[str, Any] | None:
         self._note("question_snapshot")
+        _ = (team_id, question_id, run_id)
         return self._question
 
     def candidate_stats(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:

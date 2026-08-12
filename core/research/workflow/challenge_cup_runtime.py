@@ -443,8 +443,16 @@ class ChallengeCupGraphCoordinator:
         try:
             child_config = self._config(child_thread_id)
             existing = graph.get_state(child_config)
-            if (existing.values or {}) and _checkpoint_id_of(existing):
-                raise RuntimeError("child thread already exists with state")
+            existing_checkpoint_id = _checkpoint_id_of(existing)
+            if (existing.values or {}) and existing_checkpoint_id:
+                # Crash-replay idempotency: fork I/O succeeded but Ledger ack
+                # may have failed; same child_run_id with matching resume is OK.
+                existing_next = [str(node_id) for node_id in existing.next or ()]
+                if existing_next == [resume_node_id]:
+                    return existing_checkpoint_id
+                raise RuntimeError(
+                    "child LangGraph thread already exists with a different state"
+                )
             source_config = {
                 "configurable": {
                     "thread_id": source_thread_id,

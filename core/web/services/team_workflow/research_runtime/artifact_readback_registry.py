@@ -288,6 +288,8 @@ def _load_scoped_evidence(
             workflow_run_id=workflow_run_id,
         )
     ]
+    if not scoped:
+        return None
     if not _records_pass_strict_scope(
         scoped, team_id=team_id, authority_run_id=authority_run_id
     ):
@@ -387,11 +389,12 @@ def load_scoped_artifact_payload(
     team_id: str,
     authority_run_id: str,
     workflow_run_id: str = "",
+    content_hash: str = "",
 ) -> dict[str, Any] | None:
     """Load a deterministic scoped payload for hashing / read-back.
 
-    Returns None when the kind is unknown or store records violate team/run scope.
-    Empty-but-scoped payloads are allowed (hash of empty batch).
+    Returns None when the kind is unknown, unwired to a store authority, or
+    store records violate team/run scope.
     """
     normalized_kind = str(kind or "").strip()
     if resolve_artifact_authority(normalized_kind) is None:
@@ -450,13 +453,29 @@ def load_scoped_artifact_payload(
             "candidateGraphId": str(graph.get("candidateGraphId") or ""),
         }
 
+    # Experiment / result-package / smoke kinds: formal workflow_artifact_store.
+    if normalized_kind in {
+        "run_artifacts",
+        "research_result_package",
+        "smoke_evidence",
+        "smoke_release",
+        "frozen_protocol",
+        "evaluation_report",
+    }:
+        from .workflow_artifact_store import load_workflow_artifact_payload
+
+        return load_workflow_artifact_payload(
+            normalized_kind,
+            team_id=normalized_team,
+            authority_run_id=normalized_authority,
+            workflow_run_id=normalized_workflow,
+            content_hash=content_hash,
+        )
+
     # Other kinds are not yet wired to a production store authority.
-    return {
-        "teamId": normalized_team,
-        "sourceCollectionRunId": normalized_authority,
-        "kind": normalized_kind,
-        "records": [],
-    }
+    # Never invent empty records / hashes for unwired kinds — that would make
+    # forged or missing team/run refs look like successful read-back.
+    return None
 
 
 def read_domain_artifact(
@@ -480,6 +499,7 @@ def read_domain_artifact(
         team_id=team_id,
         authority_run_id=authority_run_id,
         workflow_run_id="",
+        content_hash=content_hash,
     )
     if payload is None:
         return None

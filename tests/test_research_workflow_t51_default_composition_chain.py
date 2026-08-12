@@ -1,9 +1,10 @@
-"""T5.1-8: default composition root three-node production gate.
+"""T5.1-8: deterministic composition integration gate (not a production gate).
 
-build_workflow_runtime() without agent_task_factory / domain_overrides must
-drive source_finding → source_extraction → evidence_relations with canonical
-Session/Task/Turn, domain Artifact materialization, Ledger receipts, and
-accepted Handoffs.
+build_workflow_runtime() without agent_task_factory / domain_overrides drives
+source_finding → source_extraction → evidence_relations with real Session/
+Task/Turn anchors and Ledger receipts. This gate stubs only model decisions;
+canonical tool calls still pass through the real Agent tool lifecycle and
+production source-collection writeback tool.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from core.web.services.team_workflow.research_runtime.operator_authorization imp
 from core.web.services.team_workflow.research_runtime.runtime_factory import (
     build_workflow_runtime,
 )
+from tests._support.llm_turn_stub import install_fast_stage_writeback_llm_stub
 from tests._support.team_workflow.helpers import (
     _use_fake_local_research_config,
     _use_tmp_project_root,
@@ -157,7 +159,7 @@ def _seed_run(store, *, team_id: str, project_id: str, agents: dict[str, str]) -
     store.submit(mutate, force_flush=True).result(timeout=10)
 
 
-def _drive_until_node_succeeded(runtime, node_id: str, *, max_ticks: int = 40) -> None:
+def _drive_until_node_succeeded(runtime, node_id: str, *, max_ticks: int = 80) -> None:
     for _ in range(max_ticks):
         attempt = runtime.store.latest_attempt("run-t518", node_id)
         if attempt is not None and attempt.status == "succeeded":
@@ -184,27 +186,27 @@ def _drive_until_node_succeeded(runtime, node_id: str, *, max_ticks: int = 40) -
     )
 
 
-@pytest.mark.xfail(
-    reason="awaiting P1 model-stub gate",
-    strict=False,
-)
-def test_default_composition_three_node_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _ensure_session_context_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session submit fails closed without a resolvable dialogue context window."""
+    from core.web.services import session_service
+
+    monkeypatch.setattr(
+        session_service,
+        "_session_context_limit_payload",
+        lambda conversation=None: {"limit": 65536, "source": "t518-stub"},
+    )
+
+
+def test_deterministic_composition_integration_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     import core.infrastructure.path_containment as path_containment
-    from core.web.services import session_service
 
     monkeypatch.setattr(path_containment, "PROJECT_ROOT", tmp_path)
-
-    def fake_submit_session_message(session_id, content, **kwargs):
-        return {
-            "accepted": True,
-            "sessionId": session_id,
-            "turnId": f"turn-stub-{session_id[-8:]}",
-            "status": "running",
-        }
-
-    monkeypatch.setattr(session_service, "submit_session_message", fake_submit_session_message)
+    _ensure_session_context_window(monkeypatch)
+    stub_counters = install_fast_stage_writeback_llm_stub(monkeypatch)
 
     seeded = _seed_team_and_agents(tmp_path)
     runtime = build_workflow_runtime(
@@ -220,7 +222,7 @@ def test_default_composition_three_node_chain(tmp_path: Path, monkeypatch: pytes
             agents=seeded,
         )
 
-        with server_operator_scope("u-1"):
+        with server_operator_scope("u-1", roles=("operator",)):
             receipt = runtime.command_service.submit(
                 CommandRequest(
                     command_id="cmd-t518",
@@ -273,22 +275,10 @@ def test_default_composition_three_node_chain(tmp_path: Path, monkeypatch: pytes
         assert len(str(receipts[0][2])) == 64
         assert str(receipts[0][3]).strip()
 
-        # Seed raw records so extraction stage preflight can open.
+        # Extraction preflight requires raw records; finding writeback materializes them.
         run_snap = json.loads(runtime.store.get_run("run-t518").input_snapshot_json)
         sc_run_id = str(run_snap.get("sourceCollectionRunId") or "")
         assert sc_run_id
-        from core.web.services import data_processing_service
-
-        data_processing_service.add_record(
-            sc_run_id,
-            {
-                "sourceType": "paper",
-                "sourceRef": "https://doi.org/10.0000/t518",
-                "title": "T518 raw source",
-                "summary": "Seeded for extraction stage preflight.",
-                "metadata": {"doi": "10.0000/t518"},
-            },
-        )
 
         _drive_until_node_succeeded(runtime, "source_extraction")
         extraction = runtime.store.latest_attempt("run-t518", "source_extraction")
@@ -306,6 +296,7 @@ def test_default_composition_three_node_chain(tmp_path: Path, monkeypatch: pytes
         _drive_until_node_succeeded(runtime, "evidence_relations")
         relations = runtime.store.latest_attempt("run-t518", "evidence_relations")
         assert relations is not None and relations.status == "succeeded"
+        assert int(stub_counters["writeback_calls"]) >= 3
 
         outbox = runtime.store.submit(
             lambda uow: uow.repository.execute(
@@ -332,3 +323,50 @@ def test_legacy_injected_factory_chain_renamed_away() -> None:
 
     assert not hasattr(mod, "test_full_chain_no_fakes")
     assert hasattr(mod, "test_full_chain_with_injected_task_factory")
+
+
+def test_tool_dispatch_writeback_guard_fails_closed() -> None:
+    """Missing required writeback remains a fail-closed session condition."""
+    from core.web.services.session.signals_format import _required_tool_progress_missing
+    from core.web.services.team_workflow.source_collection.stage_writeback import (
+        writeback_source_collection_stage_session_task,
+    )
+    from core.web.services.team_workflow.source_collection_stage_tasks import (
+        source_collection_stage_task_writeback_contract,
+    )
+
+    assert callable(writeback_source_collection_stage_session_task)
+    contract = source_collection_stage_task_writeback_contract(
+        "team-canary",
+        "run-canary",
+        "task-canary",
+        stage_id="finding",
+        agent_id="agent-canary",
+        agent_role="source_finder",
+        schema_version=1,
+    )
+    assert contract.get("contractKind") == "source_collection_stage_session_task_writeback"
+    required_tool = str(contract.get("toolName") or "").strip()
+    assert required_tool == "source_collection_stage_writeback_tool"
+
+    missing = _required_tool_progress_missing(
+        {
+            "raw_output": "done without tools",
+            "tool_call_count": 0,
+        },
+        require_tool_progress=True,
+        required_tool_names=[required_tool],
+        observed_tool_names=set(),
+    )
+    assert missing is True
+
+    present = _required_tool_progress_missing(
+        {
+            "raw_output": "done with writeback",
+            "tool_call_count": 1,
+        },
+        require_tool_progress=True,
+        required_tool_names=[required_tool],
+        observed_tool_names={required_tool},
+    )
+    assert present is False

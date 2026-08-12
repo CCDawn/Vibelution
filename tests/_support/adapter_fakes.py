@@ -66,9 +66,11 @@ class FakeDomainPorts:
             "reserved": {"estimatedTokens": estimate_tokens},
         }
 
-    def settle_budget(self, *, reservation: dict[str, Any], usage: dict[str, Any]) -> None:
+    def settle_budget(self, *, reservation: dict[str, Any], usage: dict[str, Any]) -> dict[str, Any]:
         self.calls.append("settle_budget")
-        self.settled.append(str(reservation.get("reservationId") or ""))
+        rid = str(reservation.get("reservationId") or "")
+        self.settled.append(rid)
+        return {"reservationId": rid, "status": "settled", "idempotent": False}
 
     def create_agent_task(self, *, action: PendingAction) -> AgentTaskHandle:
         existing = self.tasks_by_action.get(action.action_id)

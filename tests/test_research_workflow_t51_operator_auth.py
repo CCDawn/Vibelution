@@ -67,7 +67,7 @@ def test_server_context_authorizes_high_impact_command(tmp_path: Path) -> None:
         harness.seed_run()
         # Body may still carry a placeholder; authority is the server context.
         request = _cancel_request(actor=ActorRef("user", "operator-server-1"))
-        with server_operator_scope("operator-server-1"):
+        with server_operator_scope("operator-server-1", roles=("operator",)):
             receipt = harness.command_service.submit(request)
         assert receipt.status == "accepted"
         run = harness.store.get_run("run-test")

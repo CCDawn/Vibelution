@@ -186,8 +186,10 @@ class WorkflowCommandService:
         """Authorize high-impact commands from server request context only.
 
         Client body ``requestedBy`` must never self-declare operator authority.
+        Privileged roles are required for high-impact commands.
         """
         from .operator_authorization import current_server_operator
+        from .operator_permissions import require_operator_permission
 
         context = current_server_operator()
         if context is None or not context.operator_id:
@@ -199,6 +201,14 @@ class WorkflowCommandService:
         body_id = str(getattr(actor, "actor_id", "") or "").strip()
         if body_type in {"operator", "user"} and body_id and body_id != context.operator_id:
             raise CommandForbiddenError("command_forbidden")
+        try:
+            require_operator_permission(
+                operator_id=context.operator_id,
+                roles=context.roles,
+                command=request.command.value,
+            )
+        except PermissionError as exc:
+            raise CommandForbiddenError("command_forbidden") from exc
 
     def _replay(self, existing: Any, request_hash: str) -> CommandReceipt:
         if existing.request_hash != request_hash:
@@ -789,13 +799,6 @@ class WorkflowCommandService:
         uow.repository.insert_run(child)
 
         node_run_id = f"nr-{child_run_id}-{from_node_id}-a1"
-        child_attempt = _node_attempt_for_dispatch(
-            node_run_id=node_run_id,
-            run_id=child_run_id,
-            node_id=from_node_id,
-            attempt=1,
-            binding_snapshot_id=None,
-        )
         uow.repository.insert_attempt(
             _attempt_record(
                 node_run_id=node_run_id,
@@ -808,71 +811,61 @@ class WorkflowCommandService:
                 started_at_ms=now_ms,
             )
         )
+        # Durable checkpoint fork outbox — child graph_dispatch is inserted only
+        # after CheckpointForkWorker succeeds (crash-safe; no after_commit/daemon).
         uow.repository.insert_outbox(
-            _graph_dispatch_record(
-                uow=uow,
-                run=child,
-                attempt=child_attempt,
+            _checkpoint_fork_record(
+                run_id=child_run_id,
                 command_id=command_id,
+                node_run_id=node_run_id,
+                parent_run_id=parent.run_id,
+                checkpoint_id=checkpoint_id,
+                resume_node_id=from_node_id,
                 now_ms=now_ms,
             )
         )
-
-        # Checkpoint I/O is scheduled post-commit — never inside this transaction.
-        if self._coordinator_factory is not None:
-            from .fork_coordinator import schedule_post_commit_fork
-
-            store = self._store
-            parent_run_id = parent.run_id
-            resume_node = from_node_id
-            ckpt = checkpoint_id
-
-            def on_failure(exc: Exception) -> None:
-                import threading
-
-                def mark(uow2):
-                    uow2.repository.execute(
-                        "UPDATE workflow_runs SET status = 'reconciliation_required', "
-                        "blocked_problem_json = ?, updated_at_ms = ? WHERE run_id = ?",
-                        (
-                            json.dumps(
-                                {
-                                    "code": "checkpoint_fork_failed",
-                                    "detail": str(exc),
-                                    "parentRunId": parent_run_id,
-                                    "checkpointId": ckpt,
-                                },
-                                ensure_ascii=False,
-                            ),
-                            self._clock(),
-                            child_run_id,
-                        ),
-                    )
-
-                def mark_async() -> None:
-                    # after_commit runs on the Ledger writer thread — never
-                    # call store.submit().result() inline (deadlock).
-                    try:
-                        store.submit(mark, force_flush=True).result(timeout=30)
-                    except Exception:
-                        return
-
-                threading.Thread(
-                    target=mark_async,
-                    name=f"fork-reconcile-{child_run_id}",
-                    daemon=True,
-                ).start()
-
-            schedule_post_commit_fork(
-                uow,
-                coordinator_factory=self._coordinator_factory,
-                parent_run_id=parent_run_id,
-                checkpoint_id=ckpt,
-                child_run_id=child_run_id,
-                resume_node_id=resume_node,
-                on_failure=on_failure,
-            )
         return child_run_id
+
+
+def _checkpoint_fork_record(
+    *,
+    run_id: str,
+    command_id: str,
+    node_run_id: str,
+    parent_run_id: str,
+    checkpoint_id: str,
+    resume_node_id: str,
+    now_ms: int,
+) -> Any:
+    from core.research.workflow.ledger import OutboxRecord
+
+    from .ids import new_id
+
+    payload = {
+        "parentRunId": parent_run_id,
+        "checkpointId": checkpoint_id,
+        "childRunId": run_id,
+        "resumeNodeId": resume_node_id,
+        "commandId": command_id,
+        "nodeRunId": node_run_id,
+    }
+    return OutboxRecord(
+        action_id=new_id("act"),
+        run_id=run_id,
+        command_id=command_id,
+        node_run_id=node_run_id,
+        action_kind="checkpoint_fork",
+        idempotency_key=f"checkpoint_fork:{run_id}:{checkpoint_id}",
+        payload_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        status="pending",
+        attempt_count=0,
+        available_at_ms=now_ms,
+        lease_owner=None,
+        lease_expires_at_ms=None,
+        last_problem_json=None,
+        created_at_ms=now_ms,
+        updated_at_ms=now_ms,
+    )
 
 
 def _bump(uow, request: CommandRequest, *, event_count: int, now_ms: int) -> tuple[int, int]:

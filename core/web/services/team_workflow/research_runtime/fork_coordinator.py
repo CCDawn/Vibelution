@@ -79,7 +79,12 @@ def execute_checkpoint_fork(
     resume_node_id: str,
     state_patch: dict[str, Any] | None = None,
 ) -> str:
-    """Call LangGraph fork outside any Ledger writer transaction."""
+    """Call LangGraph fork outside any Ledger writer transaction.
+
+    Idempotent for crash replay: if the child thread already has a checkpoint
+    scheduled at ``resume_node_id`` (fork I/O succeeded, Ledger ack pending),
+    returns that checkpoint id instead of failing into reconciliation.
+    """
     validate_parent_checkpoint(
         coordinator,
         parent_run_id=parent_run_id,

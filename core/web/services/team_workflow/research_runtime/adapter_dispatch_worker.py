@@ -114,16 +114,10 @@ class AdapterDispatchWorker:
                 # Turn still running — requeue without failing the attempt.
                 self._requeue_or_fail(outbox, f"turn_not_ready:{exc}")
                 return
-            # Release unused reservation if execute reserved then crashed.
-            try:
-                from .budget_authority_adapter import release_budget_reservation
-
-                release_budget_reservation(
-                    self._store,
-                    {"reservationId": f"reservation-{action.node_run_id}"},
-                )
-            except Exception:
-                pass
+            # Compensation-void unused reservation if execute reserved then crashed.
+            self._void_unused_reservation(
+                action, reason="execute_exception_compensation"
+            )
             self._fail_attempt(
                 outbox,
                 action,
@@ -135,6 +129,9 @@ class AdapterDispatchWorker:
             )
             return
         if result.outcome != "succeeded":
+            self._void_unused_reservation(
+                action, reason="execute_failed_compensation"
+            )
             self._fail_attempt(
                 outbox,
                 action,
@@ -145,6 +142,9 @@ class AdapterDispatchWorker:
         try:
             verified = adapter.verify(action, result)
         except Exception as exc:
+            self._void_unused_reservation(
+                action, reason="verify_exception_compensation"
+            )
             self._fail_attempt(
                 outbox,
                 action,
@@ -152,6 +152,9 @@ class AdapterDispatchWorker:
             )
             return
         if verified.outcome != "succeeded":
+            self._void_unused_reservation(
+                action, reason="verify_blocked_compensation"
+            )
             self._block_attempt(
                 outbox,
                 action,
@@ -443,6 +446,27 @@ class AdapterDispatchWorker:
 
     # ------------------------------------------------------------ failures
 
+    def _void_unused_reservation(self, action: PendingAction, *, reason: str) -> None:
+        """Void any still-reserved budget receipt for this attempt (compensation).
+
+        Intentional cancel uses release_budget_reservation -> `released` and is
+        not routed through this path. Missing/already-terminal receipts are no-ops.
+        """
+        try:
+            from .budget_authority_adapter import void_budget_reservation
+
+            void_budget_reservation(
+                self._store,
+                {
+                    "reservationId": f"reservation-{action.node_run_id}",
+                    "actionId": action.action_id,
+                },
+                reason=reason,
+                correlation_id=action.action_id,
+            )
+        except Exception:
+            pass
+
     def _settle_domain_budget(
         self,
         outbox: Any,
@@ -451,18 +475,101 @@ class AdapterDispatchWorker:
         usage: dict[str, Any],
     ) -> None:
         """After the ledger receipt commits, settle the domain budget authority.
-        A settle failure never rolls back the committed receipt; record a
-        diagnostic problem for later reconciliation (T5.1-5 deepens this)."""
+
+        A settle failure never rolls back the committed receipt. Mark the run
+        (and attempt problem) reconciliation_required and insert an open
+        recovery_record — do not only set last_problem.
+        """
         try:
-            self._ports.settle_budget(reservation=reservation, usage=usage)
+            result = self._ports.settle_budget(reservation=reservation, usage=usage)
+            if isinstance(result, dict) and result.get("status") not in (None, "settled"):
+                raise RuntimeError(
+                    f"budget settle returned non-settled status: {result.get('status')}"
+                )
         except Exception as exc:
-            self.last_problem = {
+            problem = {
                 "code": "budget_settle_failed",
                 "detail": str(exc),
                 "reservationId": str(reservation.get("reservationId") or ""),
                 "actionId": action.action_id,
                 "nodeRunId": action.node_run_id,
+                "outboxActionId": getattr(outbox, "action_id", None),
             }
+            self.last_problem = problem
+            self._mark_budget_settle_reconciliation(action, problem)
+
+
+    def _mark_budget_settle_reconciliation(
+        self, action: PendingAction, problem: dict[str, Any]
+    ) -> None:
+        """Persist settle-failure reconciliation evidence on run + recovery_records."""
+        now_ms = self._now()
+        problem_json = json.dumps(problem, ensure_ascii=False)
+        recovery_id = new_id("rec")
+
+        def mutate(uow):
+            run = uow.repository.get_run(action.run_id)
+            if run is not None:
+                try:
+                    from core.research.workflow.transitions import RunStatus
+
+                    if str(run.status) != RunStatus.RECONCILIATION_REQUIRED.value:
+                        uow.repository.update_run_status(
+                            action.run_id,
+                            run.team_id,
+                            RunStatus.RECONCILIATION_REQUIRED.value,
+                            now_ms,
+                            blocked_problem_json=problem_json,
+                        )
+                    else:
+                        uow.repository.execute(
+                            "UPDATE workflow_runs SET blocked_problem_json = ?, "
+                            "updated_at_ms = ? WHERE run_id = ?",
+                            (problem_json, now_ms, action.run_id),
+                        )
+                except ValueError:
+                    # Illegal transition (e.g. already terminal): still record evidence.
+                    uow.repository.execute(
+                        "UPDATE workflow_runs SET blocked_problem_json = ?, "
+                        "updated_at_ms = ? WHERE run_id = ?",
+                        (problem_json, now_ms, action.run_id),
+                    )
+
+            if uow.repository.get_attempt(action.node_run_id) is not None:
+                # Attempt may already be succeeded post-commit; keep status but
+                # attach the settle problem for operators / readiness.
+                uow.repository.execute(
+                    "UPDATE node_attempts SET problem_json = ?, updated_at_ms = ? "
+                    "WHERE node_run_id = ?",
+                    (problem_json, now_ms, action.node_run_id),
+                )
+
+            existing = uow.repository.execute(
+                "SELECT recovery_id FROM recovery_records "
+                "WHERE run_id = ? AND problem_code = ? AND status = 'open' "
+                "AND evidence_json LIKE ?",
+                (
+                    action.run_id,
+                    "budget_settle_failed",
+                    f"%{action.node_run_id}%",
+                ),
+            ).fetchone()
+            if existing is None:
+                uow.repository.execute(
+                    "INSERT INTO recovery_records ("
+                    "recovery_id, run_id, problem_code, evidence_json, status, "
+                    "resolution_json, created_at_ms, resolved_at_ms"
+                    ") VALUES (?, ?, ?, ?, 'open', NULL, ?, NULL)",
+                    (
+                        recovery_id,
+                        action.run_id,
+                        "budget_settle_failed",
+                        problem_json,
+                        now_ms,
+                    ),
+                )
+
+        self._store.submit(mutate, force_flush=True).result(timeout=30)
 
     def _block_attempt(self, outbox: Any, action: PendingAction, code: str, detail: str) -> None:
         now_ms = self._now()
