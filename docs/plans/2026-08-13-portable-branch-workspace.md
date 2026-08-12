@@ -247,7 +247,7 @@ Git 步骤（只在集成根上操作）：
 | C | `git worktree move` 迁移 + gitignore | 活 worktree 都在仓内池。已落地：`migrate_legacy_branch_workspaces`，`.gitignore` 含 `.worktrees/` |
 | D | 兼容扫描旧兄弟目录 | 新 worktree add 不再写外面。已落地：产品写入点改仓内池，旧兄弟只读兼容 |
 | E | 整树晋升服务（替换本流程的拷文件合入） | merge 后 main 树等于候选 HEAD；可 revert |
-| F | 文档升格 | 与实现一致后再改规范 |
+| F | 文档升格 | 与实现一致后再改规范。已落地：协作规范 / 开发标准 / Launcher 文案改仓内 `.worktrees` |
 | G | 端口隔离后的按行启停 | 双实例不同端口 |
 
 A 到 B 让多分支看得见。C 是文件夹统一。E 是优秀子树变成 main。G 单独授权。

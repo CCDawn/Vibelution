@@ -1560,6 +1560,21 @@ def test_python_launcher_runtime_identity_allows_task_worktree_branch(monkeypatc
     assert identity["commit"] == "b" * 40
 
 
+def test_python_launcher_treats_in_repo_worktrees_as_task_checkouts(tmp_path):
+    launcher = _load_python_launcher()
+    in_repo = tmp_path / "project" / ".worktrees" / "feat-task"
+    retired = tmp_path / "project" / ".worktrees" / "_retired" / "old"
+    legacy = tmp_path / "Vibelution-worktrees" / "legacy-task"
+    in_repo.mkdir(parents=True)
+    retired.mkdir(parents=True)
+    legacy.mkdir(parents=True)
+
+    assert launcher._path_looks_like_task_worktree(in_repo) is True
+    assert launcher._path_looks_like_task_worktree(retired) is False
+    assert launcher._path_looks_like_task_worktree(legacy) is True
+    assert launcher._path_looks_like_task_worktree(tmp_path / "project") is False
+
+
 def test_python_launcher_subprocess_text_kwargs_replace_invalid_utf8():
     launcher = _load_python_launcher()
     kwargs = launcher._subprocess_text_kwargs()

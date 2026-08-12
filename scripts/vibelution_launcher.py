@@ -637,6 +637,8 @@ def _path_looks_like_task_worktree(root: Path) -> bool:
 
     parts = [part.lower() for part in Path(root).resolve().parts]
     for index, part in enumerate(parts):
+        if part == ".worktrees" and index + 1 < len(parts) and parts[index + 1] != "_retired":
+            return True
         if part in {"vibelution-worktrees", ".claude"} and index + 1 < len(parts):
             if part == "vibelution-worktrees":
                 return True
@@ -692,7 +694,7 @@ def _assert_launcher_branch_allowed(branch: str, *, resolved_root: Path, git_com
         "Launcher start/restart requires the integration checkout on local main, "
         f"but current branch is {branch or '<detached>'}. "
         "Restore root with `git checkout main`, or launch a task worktree via "
-        "`--project <...\\Vibelution-worktrees\\<slug>>`. "
+        "`--project <...\\.worktrees\\<slug>>`. "
         f"Emergency override: set {ALLOW_NON_MAIN_LAUNCH_ENV}=1."
     )
 

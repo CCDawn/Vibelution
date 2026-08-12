@@ -5,9 +5,10 @@ This document defines the default collaboration protocol for multiple Agents wor
 ## Work Surfaces
 
 - `<project-root>` is the durable local `main` integration workspace. Keep this path checked out on branch `main`; use it only for local syncing, fast-forward merging, final validation, and publishing after the user explicitly authorizes a GitHub sync/release. Direct development writes and commits on `main` are forbidden.
-- If `<project-root>` is found on a non-main branch, preserve or migrate that work into `<project-root-parent>\Vibelution-worktrees\<task-slug>` or a named stash, then restore the root path to `main` before continuing normal development or integration.
-- Development Agents use task-specific worktrees under `<project-root-parent>\Vibelution-worktrees\`.
-- If that external worktree root is unavailable, use `.claude/worktrees\<task-slug>` or another explicit task worktree path and record the actual path in `check`/`claim` evidence.
+- If `<project-root>` is found on a non-main branch, preserve or migrate that work into `<project-root>\.worktrees\<task-slug>` or a named stash, then restore the root path to `main` before continuing normal development or integration.
+- Development Agents use task-specific worktrees under `<project-root>\.worktrees\`. Resolve the pool with `core.infrastructure.branch_workspace`; do not hardcode a username, Desktop, or sibling folder.
+- The old sibling folder `<project-root-parent>\Vibelution-worktrees\` is read-only compatibility. Do not create new checkouts there. Live trees can move with `migrate_legacy_branch_workspaces`.
+- If the in-repo pool is unavailable, use `.claude/worktrees\<task-slug>` or another explicit task worktree path and record the actual path in `check`/`claim` evidence.
 - Each active task, including `FAST_PATCH`, gets one task worktree and one `codex/<task-slug>` branch. `FAST_PATCH` may use a lighter validation path, but it may not stay in the `main` workspace. Do not reuse an old task worktree for a new goal.
 
 ## Starting A Task
@@ -16,7 +17,7 @@ For `STANDARD_TASK` and `HIGH_RISK`, create a task branch from the current local
 
 ```powershell
 cd <project-root>
-git worktree add <project-root-parent>\Vibelution-worktrees\<task-slug> -b codex/<task-slug> main
+git worktree add .worktrees/<task-slug> -b codex/<task-slug> main
 ```
 
 Use `git fetch origin` only as a read-only observation step unless the user explicitly asks to align with GitHub. Do not reset, rebase, or create task branches from `origin/main` by default.
@@ -95,7 +96,7 @@ After a task has been merged into local `main`, validated, and confirmed to have
 
 ```powershell
 cd <project-root>
-git worktree remove <project-root-parent>\Vibelution-worktrees\<task-slug>
+git worktree remove .worktrees/<task-slug>
 git branch -d codex/<task-slug>
 git worktree prune
 ```
