@@ -158,6 +158,7 @@ NODE_ATTEMPT_TRANSITIONS: dict[NodeAttemptStatus, frozenset[NodeAttemptStatus]] 
         {
             NodeAttemptStatus.RUNNING,
             NodeAttemptStatus.WAITING_HUMAN,
+            NodeAttemptStatus.SUCCEEDED,
             NodeAttemptStatus.BLOCKED,
             NodeAttemptStatus.FAILED,
             NodeAttemptStatus.CANCELLED,
