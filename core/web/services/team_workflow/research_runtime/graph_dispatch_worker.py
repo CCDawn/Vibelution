@@ -78,6 +78,12 @@ class GraphDispatchWorker:
             # checkpoint 与 Ledger 不漂移），只标记 attempt 状态。
             self._mark_attempt_outcome(action, dispatch)
             return
+
+        # Crash recovery: upstream attempt/handoff already committed, but successor
+        # attempt was not created. Do not re-invoke LangGraph resume.
+        if self._recover_half_advanced_successor(action, dispatch):
+            return
+
         try:
             if dispatch.dispatch_kind == "start":
                 result = self._start_or_recover(dispatch)
@@ -89,13 +95,290 @@ class GraphDispatchWorker:
         except Exception as exc:
             self._requeue_or_fail(action, str(exc))
             return
+
+        # T5.1-4: commit upstream success + Handoff accepted FIRST so successor
+        # readiness observes accepted handoffs. Domain readiness stays outside
+        # the writer transaction.
+        pending = result.pending_action
+        needs_successor = False
+        if pending is not None:
+            latest = self._store.latest_attempt(dispatch.run_id, pending.node_id)
+            needs_successor = latest is None or latest.attempt != pending.attempt
+            pending = self._pending_with_node_binding(pending)
+
+        if (
+            dispatch.dispatch_kind in ("resume_action", "resume_human")
+            and dispatch.receipt is not None
+            and dispatch.receipt.outcome == "succeeded"
+            and needs_successor
+        ):
+            self._commit_upstream_accept(action, dispatch, result)
+            readiness_hint = self._precheck_readiness(dispatch, pending)
+            try:
+                self._commit_successor_dispatch(
+                    dispatch, result, pending, readiness_hint, action=action
+                )
+            except Exception as exc:
+                self._requeue_or_fail(action, f"successor_commit_failed:{exc}")
+                raise
+            return
+
         readiness_hint = None
-        if result.pending_action is not None:
-            latest = self._store.latest_attempt(dispatch.run_id, result.pending_action.node_id)
-            is_new_node = latest is None or latest.attempt != result.pending_action.attempt
-            if is_new_node:
-                readiness_hint = self._precheck_readiness(dispatch, result.pending_action)
+        if pending is not None and needs_successor:
+            readiness_hint = self._precheck_readiness(dispatch, pending)
+        if pending is not None and pending is not result.pending_action:
+            from dataclasses import replace as _replace
+
+            result = _replace(result, pending_action=pending)
         self._commit_dispatch(action, dispatch, result, readiness_hint)
+
+    def _recover_half_advanced_successor(self, action: Any, dispatch: GraphDispatch) -> bool:
+        """Return True when this action finished recovery without re-resume."""
+        if dispatch.dispatch_kind not in ("resume_action", "resume_human"):
+            return False
+        if dispatch.receipt is None or dispatch.receipt.outcome != "succeeded":
+            return False
+        attempt = self._store.submit(
+            lambda uow: uow.repository.get_attempt(dispatch.node_run_id),
+            force_flush=True,
+        ).result(timeout=10)
+        if attempt is None or attempt.status != NodeAttemptStatus.SUCCEEDED.value:
+            return False
+        handoff = self._store.submit(
+            lambda uow: uow.repository.get_handoff_by_from_node(
+                dispatch.run_id, dispatch.node_run_id
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        if handoff is None or str(handoff[8]) != "accepted":
+            return False
+        successors = successor_map().get(dispatch.node_id, ())
+        if not successors:
+            # Terminal: just ack the outbox.
+            now_ms = self._now()
+
+            def ack_only(uow):
+                uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
+
+            self._store.submit(ack_only, force_flush=True).result(timeout=30)
+            return True
+        successor_id = successors[0]
+        latest = self._store.latest_attempt(dispatch.run_id, successor_id)
+        if latest is not None:
+            # Successor already present — ack and stop.
+            now_ms = self._now()
+
+            def ack_only(uow):
+                uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
+
+            self._store.submit(ack_only, force_flush=True).result(timeout=30)
+            return True
+
+        snapshot = self._coordinator.snapshot(dispatch.run_id)
+        values = dict(snapshot.get("values") or {})
+        values.setdefault("run_id", dispatch.run_id)
+        values.setdefault("input_snapshot_hash", dispatch.input_snapshot_hash)
+        values.setdefault("budget_policy_hash", dispatch.budget_policy_hash)
+        pending = self._pending_with_node_binding(
+            build_pending_action(values, successor_id)
+        )
+        readiness_hint = self._precheck_readiness(dispatch, pending)
+        result = GraphDispatchResult(
+            dispatch_kind=dispatch.dispatch_kind,
+            pending_action=pending,
+            next_node_ids=(successor_id,),
+            checkpoint_id=str(snapshot.get("checkpointId") or ""),
+            state=values,
+        )
+        try:
+            self._commit_successor_dispatch(
+                dispatch, result, pending, readiness_hint, action=action
+            )
+        except Exception as exc:
+            self._requeue_or_fail(action, f"successor_commit_failed:{exc}")
+            raise
+        return True
+
+    def _pending_with_node_binding(self, pending: Any) -> Any:
+        """Force successor PendingAction to use that node's frozen binding."""
+        from dataclasses import replace
+
+        from .graph_dispatch_factory import binding_snapshot_id_for_node
+
+        run = self._store.get_run(pending.run_id)
+        if run is None or not run.input_snapshot_json:
+            return pending
+        try:
+            input_snapshot = json.loads(run.input_snapshot_json)
+        except (TypeError, ValueError):
+            return pending
+        if not isinstance(input_snapshot, dict):
+            return pending
+        snap_id = binding_snapshot_id_for_node(input_snapshot, pending.node_id)
+        if snap_id == pending.binding_snapshot_id:
+            return pending
+        return replace(pending, binding_snapshot_id=snap_id)
+
+    def _commit_upstream_accept(
+        self,
+        action: Any,
+        dispatch: GraphDispatch,
+        result: GraphDispatchResult,
+    ) -> None:
+        """Mark attempt succeeded and accept handoff BEFORE successor readiness.
+
+        Intentionally does NOT ack the graph outbox yet: if successor commit
+        crashes, lease expiry / requeue can recover without a half-advance.
+        """
+        _ = (action, result)
+        now_ms = self._now()
+
+        def mutate(uow):
+            attempt = uow.repository.get_attempt(dispatch.node_run_id)
+            if (
+                attempt is not None
+                and str(attempt.status) != NodeAttemptStatus.SUCCEEDED.value
+            ):
+                uow.repository.update_attempt_status(
+                    dispatch.node_run_id,
+                    NodeAttemptStatus.SUCCEEDED.value,
+                    now_ms,
+                    finished_at_ms=now_ms,
+                )
+            handoff = uow.repository.get_handoff_by_from_node(
+                dispatch.run_id, dispatch.node_run_id
+            )
+            if handoff is None:
+                return
+            status = str(handoff[8] or "")
+            if status == "accepted":
+                return
+            if status == "pending":
+                uow.repository.update_handoff_status(handoff[0], "ready", now_ms)
+                status = "ready"
+            if status in {"ready", "waiting_human"}:
+                uow.repository.update_handoff_status(
+                    handoff[0],
+                    "accepted",
+                    now_ms,
+                    accepted_by_json=json.dumps(
+                        {"actorType": "system", "actorId": "graph-worker"}
+                    ),
+                )
+
+        self._store.submit(mutate, force_flush=True).result(timeout=30)
+
+    def _commit_successor_dispatch(
+        self,
+        dispatch: GraphDispatch,
+        result: GraphDispatchResult,
+        pending: Any,
+        readiness_hint: tuple[bool, list[Any]] | None,
+        *,
+        action: Any | None = None,
+    ) -> None:
+        """Ack graph outbox + create successor attempt / adapter outbox."""
+        now_ms = self._now()
+
+        def mutate(uow):
+            if action is not None:
+                acked = uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
+                if not acked:
+                    return
+            latest = uow.repository.latest_attempt(dispatch.run_id, pending.node_id)
+            if latest is not None and latest.attempt == pending.attempt:
+                # Already created (crash recovery idempotent path).
+                if latest.status == "dispatching":
+                    try:
+                        uow.repository.insert_outbox(
+                            _adapter_dispatch_record(
+                                pending=pending,
+                                run_id=dispatch.run_id,
+                                command_id=(
+                                    action.command_id
+                                    if action is not None
+                                    else dispatch.command_id
+                                ),
+                                now_ms=now_ms,
+                            )
+                        )
+                    except Exception:
+                        pass
+                return
+            if readiness_hint is None:
+                ready, blockers = True, []
+            else:
+                ready, blockers = readiness_hint
+            command_id = (
+                (action.command_id if action is not None else None)
+                or dispatch.command_id
+                or "cmd-recovery"
+            )
+            if not ready:
+                uow.repository.insert_attempt(
+                    _attempt_for_pending(
+                        pending,
+                        command_id=command_id,
+                        now_ms=now_ms,
+                        status="blocked",
+                        problem_json=json.dumps(
+                            {
+                                "code": "auto_advance_not_ready",
+                                "detail": "; ".join(
+                                    str(b.get("code") or b) for b in blockers
+                                ),
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                )
+                blocked_sequence = uow.repository.advance_last_sequence(
+                    dispatch.run_id, 1, now_ms
+                )
+                if blocked_sequence is not None:
+                    blocked_run = uow.repository.get_run(dispatch.run_id)
+                    blocked_run_version = blocked_run.run_version if blocked_run else 1
+                    uow.repository.insert_event(
+                        _event_record_for(
+                            run_id=dispatch.run_id,
+                            sequence=blocked_sequence,
+                            run_version=blocked_run_version,
+                            event_id=new_id("evt"),
+                            event_type="node_blocked",
+                            correlation_id=pending.action_id,
+                            payload={
+                                "nodeRunId": pending.node_run_id,
+                                "nodeId": pending.node_id,
+                                "autoAdvanceBlocked": True,
+                                "blockers": [
+                                    str(b.get("code") or b) for b in blockers
+                                ],
+                            },
+                            now_ms=now_ms,
+                        )
+                    )
+                return
+            uow.repository.insert_attempt(
+                _attempt_for_pending(
+                    pending,
+                    command_id=command_id,
+                    now_ms=now_ms,
+                )
+            )
+            try:
+                uow.repository.insert_outbox(
+                    _adapter_dispatch_record(
+                        pending=pending,
+                        run_id=dispatch.run_id,
+                        command_id=command_id,
+                        now_ms=now_ms,
+                    )
+                )
+            except Exception:
+                pass
+            _ = result
+
+        self._store.submit(mutate, force_flush=True).result(timeout=30)
 
     def _precheck_readiness(self, dispatch: GraphDispatch, pending: Any):
         """Evaluate readiness for an auto-advanced successor OUTSIDE the writer
