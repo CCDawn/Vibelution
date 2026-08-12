@@ -800,14 +800,9 @@ def _infer_toml_array_indent(lines: List[str], start: int, end: int) -> str:
 
 
 def _harness_worktree_root(repo_root: Path) -> Path:
-    resolved_repo_root = repo_root.resolve()
-    worktree_root = (
-        resolved_repo_root.parent / f"{resolved_repo_root.name}-worktrees"
-    ).resolve()
-    if worktree_root == resolved_repo_root or worktree_root.is_relative_to(
-        resolved_repo_root
-    ):
-        raise RuntimeError("harness worktree 根目录不得位于主项目目录内")
+    from core.infrastructure.branch_workspace import branch_pool_write_root
+
+    worktree_root = branch_pool_write_root(repo_root)
     worktree_root.mkdir(parents=True, exist_ok=True)
     return worktree_root
 

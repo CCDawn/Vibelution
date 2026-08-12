@@ -209,9 +209,18 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
   }
 
   function renderResearchProcessWorkflowSurface() {
+    const teamId = String(selectedTeam?.teamId || "").trim();
+    if (!teamId) {
+      return (
+        <ResearchWorkflowErrorSurface
+          lang={lang}
+          message="缺少 teamId，无法打开科研流程"
+        />
+      );
+    }
     return (
       <ResearchProcessWorkspace
-        teamId={String(selectedTeam?.teamId || "")}
+        teamId={teamId}
         teamName={String(selectedTeam?.name || "")}
         linkedChatRoomId={String(selectedTeam?.linkedChatRoomId || "")}
       />

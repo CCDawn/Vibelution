@@ -391,11 +391,50 @@ def terminate_unmanaged_workbench_processes(
     }
 
 
+def _expand_known_workbench_pids(
+    known_pids: Iterable[int],
+    *,
+    project_root: Path | str,
+    excluded: set[int],
+) -> tuple[list[RuntimeProcess], set[int]]:
+    """Resolve known backend PIDs and their children without a full process_iter."""
+
+    repo_candidates: list[RuntimeProcess] = []
+    target_pids: set[int] = set()
+    seen: set[int] = set()
+    for raw_pid in known_pids:
+        pid = int(raw_pid or 0)
+        if pid <= 0 or pid in excluded or pid in seen:
+            continue
+        seen.add(pid)
+        classified = repo_runtime_process_for_pid(pid, project_root=project_root)
+        if classified is not None:
+            repo_candidates.append(classified)
+        target_pids.add(pid)
+        if psutil is None:
+            continue
+        try:
+            children = psutil.Process(pid).children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        for child in children:
+            child_pid = int(getattr(child, "pid", 0) or 0)
+            if child_pid <= 0 or child_pid in excluded or child_pid in seen:
+                continue
+            seen.add(child_pid)
+            target_pids.add(child_pid)
+            child_classified = repo_runtime_process_for_pid(child_pid, project_root=project_root)
+            if child_classified is not None:
+                repo_candidates.append(child_classified)
+    return repo_candidates, target_pids
+
+
 def terminate_workbench_processes(
     *,
     project_root: Path | str = PROJECT_ROOT,
     browser_profile_dir: Path | str = "",
     exclude_pids: Iterable[int] | None = None,
+    known_pids: Iterable[int] | None = None,
     timeout_seconds: float = 5.0,
     verify_remaining_with_inventory: bool = True,
 ) -> dict[str, Any]:
@@ -423,13 +462,21 @@ def terminate_workbench_processes(
 
     excluded = {int(pid) for pid in (exclude_pids or []) if int(pid) > 0}
     candidate_scan_started = time.perf_counter()
-    repo_candidates = [
-        item
-        for item in list_repo_runtime_processes(project_root=project_root)
-        if item.kind in {"managed_workbench_backend", "unmanaged_workbench", "unmanaged_frontend_dev_server"}
-        and item.pid not in excluded
-    ]
-    target_pids = _target_process_tree_pids(repo_candidates, excluded=excluded)
+    known = {int(pid) for pid in (known_pids or []) if int(pid) > 0}
+    if known:
+        repo_candidates, target_pids = _expand_known_workbench_pids(
+            known,
+            project_root=project_root,
+            excluded=excluded,
+        )
+    else:
+        repo_candidates = [
+            item
+            for item in list_repo_runtime_processes(project_root=project_root)
+            if item.kind in {"managed_workbench_backend", "unmanaged_workbench", "unmanaged_frontend_dev_server"}
+            and item.pid not in excluded
+        ]
+        target_pids = _target_process_tree_pids(repo_candidates, excluded=excluded)
 
     browser_candidates: list[dict[str, Any]] = []
     profile_text = str(browser_profile_dir or "").strip()

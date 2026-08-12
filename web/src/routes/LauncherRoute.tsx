@@ -2,10 +2,12 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, LoaderCircle, Play, RefreshCw } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  getLauncherBranchInstances,
   getLauncherStatus,
+  type LauncherBranchInstance,
   getLauncherDeveloperNoiseOverview,
   getLauncherMaintenanceSummary,
   applyLauncherDeveloperCleanup,
@@ -43,9 +45,6 @@ import {
   shouldBlockProjectWindowClose,
 } from "../app/projectCloseGuard";
 import { useStableBeforeUnload } from "../app/useStableBeforeUnload";
-import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
-import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
-import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VDenseOpsPage, VStateSurface, VTooltip } from "../components/vui";
 import {
@@ -56,6 +55,9 @@ import { useShellI18n } from "../i18n/useShellI18n";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
 /** T4: secondary launcher panels load as route packs — keep lifecycle shell first. */
+import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
+import { LauncherProcessMonitorPanel, type LauncherProcessRow } from "./LauncherProcessMonitorPanel";
+
 const LauncherStartupSettingsPanel = lazy(() =>
   import("./LauncherStartupSettingsPanel").then((module) => ({ default: module.LauncherStartupSettingsPanel })),
 );
@@ -70,13 +72,6 @@ const LauncherDiagnosticsPanel = lazy(() =>
 );
 
 const LAUNCHER_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.launcher;
-const LAUNCHER_RAIL_PANE: PaneSpec = {
-  id: "rail",
-  defaultWidth: 340,
-  minWidth: 300,
-  maxWidth: 420,
-};
-const LAUNCHER_PANES: PaneSpec[] = [LAUNCHER_RAIL_PANE];
 
 type LauncherNotice = {
   tone: "neutral" | "success" | "warning" | "error";
@@ -200,15 +195,7 @@ type LauncherStatusWithGuardian = Awaited<ReturnType<typeof getLauncherStatus>> 
   };
 };
 
-type StatusRow = {
-  id: string;
-  label: string;
-  status: string;
-  role: string;
-  detail: string;
-  technical: string;
-  ok: boolean;
-};
+type StatusRow = LauncherProcessRow;
 
 type LauncherCopy = {
   controlLimited: string;
@@ -348,6 +335,29 @@ type LauncherCopy = {
   backendUnavailableSummary: string;
   backendPortUnavailableSummary: string;
   lifecycleEvidenceIncomplete: string;
+  processMonitor: string;
+  processMonitorHint: string;
+  branchInstances: string;
+  branchInstancesHint: string;
+  branchColumn: string;
+  instanceState: string;
+  instanceKind: string;
+  instancePath: string;
+  currentInstance: string;
+  legacyCheckout: string;
+  retiredCheckout: string;
+  notCheckedOut: string;
+  selectedInstance: string;
+  instanceNoObservation: string;
+  ownership: string;
+  residualCount: string;
+  residualProcess: string;
+  ownedProcess: string;
+  leftoverProcess: string;
+  controlSurface: string;
+  advancedFold: string;
+  advancedFoldHint: string;
+  effectiveValue: string;
 };
 
 type LifecycleDisplay = {
@@ -410,6 +420,77 @@ function stateTone(state: string, ok = true) {
 
 function boolText(value: boolean | undefined, yes: string, no: string) {
   return value ? yes : no;
+}
+
+function displayPid(value: unknown) {
+  const pid = Number(value || 0);
+  return Number.isFinite(pid) && pid > 0 ? String(pid) : "-";
+}
+
+function displayPort(value: unknown) {
+  const port = Number(value || 0);
+  return Number.isFinite(port) && port > 0 ? String(port) : "-";
+}
+
+function observationProcessRows(
+  instance: LauncherBranchInstance | undefined,
+  copy: LauncherCopy,
+  uiLang: "zh" | "en",
+): LauncherProcessRow[] {
+  if (!instance) {
+    return [];
+  }
+  if (!instance.checkedOut) {
+    return [
+      {
+        id: `${instance.id}-missing`,
+        label: instance.branch || instance.id,
+        status: copy.notCheckedOut,
+        pid: "-",
+        port: "-",
+        ownership: copy.notCheckedOut,
+        detail: copy.instanceNoObservation,
+        technical: instance.id,
+        ok: false,
+        tone: "neutral",
+      },
+    ];
+  }
+  const pids = instance.pids;
+  return [
+    {
+      id: `${instance.id}-backend`,
+      label: uiLang === "zh" ? "后端" : "Backend",
+      status: instance.alive ? humanState("running", uiLang) : humanState("stopped", uiLang),
+      pid: displayPid(pids.backend),
+      port: displayPort(instance.port),
+      ownership: copy.ownedProcess,
+      detail: instance.observedState || copy.instanceNoObservation,
+      technical: `${instance.path} · port ${displayPort(instance.port)}`,
+      ok: instance.alive,
+      tone: instance.alive ? "success" : "neutral",
+    },
+    {
+      id: `${instance.id}-window`,
+      label: uiLang === "zh" ? "窗口" : "Window",
+      status: displayPid(pids.window) === "-" ? humanState("stopped", uiLang) : humanState("running", uiLang),
+      pid: displayPid(pids.window),
+      port: "-",
+      ownership: copy.ownedProcess,
+      detail: instance.displayPath || instance.path,
+      technical: `pid ${displayPid(pids.window)}`,
+      ok: pids.window > 0,
+      tone: pids.window > 0 ? "success" : "neutral",
+    },
+  ];
+}
+
+function residualKindLabel(kind: string, lang: "zh" | "en") {
+  const labels: Record<string, { zh: string; en: string }> = {
+    unmanaged_workbench: { zh: "未托管工作台", en: "Unmanaged workbench" },
+    unmanaged_frontend_dev_server: { zh: "未托管前端开发服务", en: "Unmanaged frontend dev server" },
+  };
+  return labels[kind]?.[lang] ?? kind;
 }
 
 function normalizeMaintenanceProfileId(value: unknown): LauncherMaintenanceProfileId | null {
@@ -900,21 +981,6 @@ export function LauncherRoute() {
   const pageVisible = usePageVisibility();
   const { request: requestLifecycle } = useWorkbenchLifecycleActions("launcher_route");
   const locale = lang === "zh" ? "zh-CN" : "en-US";
-  const {
-    layoutRef: launcherLayoutRef,
-    widths: launcherPaneWidths,
-    draggingPaneId: launcherDraggingPaneId,
-    startResize: startLauncherRailResize,
-    onResizeKeyDown: onLauncherRailResizeKeyDown,
-  } = usePersistedPaneResize({
-    layoutId: LAUNCHER_LAYOUT_ID,
-    panes: LAUNCHER_PANES,
-    preserveMainMinWidth: 420,
-  });
-  const launcherRailWidth = launcherPaneWidths.rail ?? LAUNCHER_RAIL_PANE.defaultWidth;
-  const launcherLayoutStyle = {
-    ["--launcher-rail-width" as string]: `${launcherRailWidth}px`,
-  } as CSSProperties;
   const copy = lang === "zh"
     ? {
         eyebrow: "Launcher",
@@ -983,8 +1049,31 @@ export function LauncherRoute() {
         useWaitAction: "等待当前操作完成",
         useCheckAction: "查看诊断",
         lifecycle: "生命周期",
-        keyStatus: "关键状态",
-        matrix: "项目组成",
+        keyStatus: "托管进程",
+        matrix: "进程监控",
+        processMonitor: "进程监控",
+        processMonitorHint: "托管进程与残留子进程",
+        branchInstances: "分支实例",
+        branchInstancesHint: "本地分支与 worktree；点选一行查看该实例进程",
+        branchColumn: "分支",
+        instanceState: "状态",
+        instanceKind: "类型",
+        instancePath: "路径",
+        currentInstance: "当前 main",
+        legacyCheckout: "旧目录",
+        retiredCheckout: "退役",
+        notCheckedOut: "未打开",
+        selectedInstance: "选中实例",
+        instanceNoObservation: "该实例没有运行时观察，进程表只描述当前 Launcher 项目。",
+        ownership: "归属",
+        residualCount: "残留进程",
+        residualProcess: "残留",
+        ownedProcess: "托管",
+        leftoverProcess: "残留子进程",
+        controlSurface: "Launcher 控制面",
+        advancedFold: "高级",
+        advancedFoldHint: "维护恢复、开发沙盒和诊断",
+        effectiveValue: "生效",
         controlPlane: "维护范围",
         controlEvidence: "证据",
         guardian: "托管明细",
@@ -1219,8 +1308,31 @@ export function LauncherRoute() {
         useWaitAction: "Wait for the current operation",
         useCheckAction: "Check diagnostics",
         lifecycle: "Lifecycle",
-        keyStatus: "Key Status",
-        matrix: "Project Parts",
+        keyStatus: "Managed processes",
+        matrix: "Process monitor",
+        processMonitor: "Process monitor",
+        processMonitorHint: "Owned and leftover child processes",
+        branchInstances: "Branch instances",
+        branchInstancesHint: "Local branches and worktrees; select a row to inspect that instance",
+        branchColumn: "Branch",
+        instanceState: "State",
+        instanceKind: "Kind",
+        instancePath: "Path",
+        currentInstance: "Current main",
+        legacyCheckout: "Legacy path",
+        retiredCheckout: "Retired",
+        notCheckedOut: "Not checked out",
+        selectedInstance: "Selected instance",
+        instanceNoObservation: "This instance has no runtime observation. The process table still describes the current Launcher project.",
+        ownership: "Owner",
+        residualCount: "Leftover processes",
+        residualProcess: "Leftover",
+        ownedProcess: "Owned",
+        leftoverProcess: "Leftover child process",
+        controlSurface: "Launcher control plane",
+        advancedFold: "Advanced",
+        advancedFoldHint: "Recovery, developer sandbox, and diagnostics",
+        effectiveValue: "Effective",
         controlPlane: "Maintenance Scope",
         controlEvidence: "Evidence",
         guardian: "Managed Details",
@@ -1409,6 +1521,12 @@ export function LauncherRoute() {
     },
     refetchIntervalInBackground: true,
   });
+  const branchInstancesQuery = useQuery({
+    queryKey: queryKeys.launcherBranchInstances(),
+    queryFn: getLauncherBranchInstances,
+    refetchInterval: pageVisible ? 20_000 : false,
+  });
+  const [selectedInstanceId, setSelectedInstanceId] = useState("");
   const developerNoiseQuery = useQuery({
     queryKey: queryKeys.launcherDeveloperNoiseOverview(),
     queryFn: getLauncherDeveloperNoiseOverview,
@@ -1849,91 +1967,130 @@ export function LauncherRoute() {
       confirm: true,
     });
   };
+  const residualItems = status?.lifecycleProof.residualProcesses?.items ?? [];
+  const residualCount = Math.max(status?.lifecycleProof.residualProcesses?.count ?? 0, residualItems.length);
   const statusRows = useMemo<StatusRow[]>(() => {
     const componentById = new Map(componentRows.map((component) => [component.id, component]));
     const backend = componentById.get("backend");
     const frontend = componentById.get("frontend");
     const browser = componentById.get("browser");
-    return [
+    const controlPort = startupSettings?.launcher.effectiveControlPort || status?.launcher.controlPlane.port || 0;
+    const controlPid = status?.launcher.controlPlane.pid;
+    const backendPid = bundle?.backend.pid || backend?.pid || 0;
+    const windowPid = bundle?.browser.windowPid || browser?.pid || 0;
+    const managerPid = status?.runtimeManager.managerPid || 0;
+    const ownedRows: StatusRow[] = [
       {
-        id: "project",
-        label: componentLabel("project", uiLang),
-        status: projectSummary,
-        role: lang === "zh" ? "整体可用性" : "Overall availability",
-        detail: launcherStatusDisconnected ? copy.stoppedProjectDetail : summarizeLauncherMessage(lifecycleDisplay.detail || bundle?.statusLine || status?.launcher.message, copy, uiLang) || "-",
-        technical: `${copy.desired}: ${humanState(bundle?.desiredState, uiLang)} · ${copy.observed}: ${humanState(bundle?.observedState, uiLang)} · mode ${bundle?.mode || "-"}`,
-        ok: Boolean(launcherStatusDisconnected || (bundle && bundle?.overallState !== "failed")),
+        id: "launcher_control",
+        label: copy.controlSurface,
+        status: launcherStatusDisconnected ? humanState("stopped", uiLang) : humanState("running", uiLang),
+        pid: displayPid(controlPid),
+        port: displayPort(controlPort),
+        ownership: copy.ownedProcess,
+        detail: launcherStatusDisconnected
+          ? copy.launcherOffline
+          : (lang === "zh" ? "当前 Launcher 控制面。" : "Current Launcher control plane."),
+        technical: `${copy.pid} ${displayPid(controlPid)} · ${copy.port} ${displayPort(controlPort)}`,
+        ok: !launcherStatusDisconnected,
+        tone: launcherStatusDisconnected ? "warning" : "success",
       },
       {
         id: "backend",
         label: componentLabel("backend", uiLang),
         status: launcherStatusDisconnected ? humanState("stopped", uiLang) : humanState(backend?.state || (bundle?.backend.healthy ? "healthy" : "-"), uiLang),
-        role: lang === "zh" ? "处理 API 与静态资源" : "Serves API and static files",
+        pid: displayPid(backendPid),
+        port: displayPort(bundle?.backend.port),
+        ownership: copy.ownedProcess,
         detail: launcherStatusDisconnected
           ? copy.stoppedBackendDetail
           : bundle?.backend.healthy
           ? (lang === "zh" ? "后端已监听，工作台可以访问。" : "Backend is listening and reachable.")
           : (lang === "zh" ? "后端未确认可用。" : "Backend is not confirmed ready."),
-        technical: `${copy.pid} ${bundle?.backend.pid || backend?.pid || "-"} · ${copy.port} ${bundle?.backend.port || "-"} · ${copy.owner} ${bundle?.backend.portOwnerPid || "-"} · ${copy.listening}: ${boolText(bundle?.backend.portListening, copy.yes, copy.no)}`,
+        technical: `${copy.pid} ${displayPid(backendPid)} · ${copy.port} ${displayPort(bundle?.backend.port)} · ${copy.owner} ${displayPid(bundle?.backend.portOwnerPid)} · ${copy.listening}: ${boolText(bundle?.backend.portListening, copy.yes, copy.no)}`,
         ok: Boolean(!launcherStatusDisconnected && (backend?.ok ?? bundle?.backend.healthy)),
-      },
-      {
-        id: "frontend",
-        label: componentLabel("frontend", uiLang),
-        status: humanState(frontend?.state || (bundle?.frontend.distReady ? "ready" : "-"), uiLang),
-        role: lang === "zh" ? "提供前端页面" : "Provides web UI",
-        detail: launcherStatusDisconnected
-          ? copy.stoppedFrontendDetail
-          : bundle?.frontend.distReady
-          ? (lang === "zh" ? "前端资源已就绪。" : "Frontend assets are ready.")
-          : (lang === "zh" ? "前端资源还未构建。" : "Frontend assets are not built yet."),
-        technical: `dist ${boolText(bundle?.frontend.distReady, copy.yes, copy.no)} · orphaned ${boolText(bundle?.frontend.orphaned, copy.yes, copy.no)} · mode ${bundle?.frontend.mode || "-"} · ${copy.pid} ${frontend?.pid || "-"}`,
-        ok: Boolean(frontend?.ok ?? bundle?.frontend.distReady),
+        tone: stateTone(backend?.state || (bundle?.backend.healthy ? "healthy" : "stopped"), Boolean(!launcherStatusDisconnected && (backend?.ok ?? bundle?.backend.healthy))),
       },
       {
         id: "browser",
         label: componentLabel("browser", uiLang),
         status: humanState(launcherStatusDisconnected ? "stopped" : browser?.state || (bundle?.browser.alive ? "alive" : "stopped"), uiLang),
-        role: lang === "zh" ? "承载工作台窗口" : "Hosts the workbench window",
+        pid: displayPid(windowPid),
+        port: "-",
+        ownership: copy.ownedProcess,
         detail: launcherStatusDisconnected
           ? copy.stoppedBrowserDetail
           : bundle?.browser.alive
           ? (lang === "zh" ? "工作台窗口由 Launcher 管理。" : "Workbench window is managed by Launcher.")
           : (lang === "zh" ? "工作台窗口未打开。" : "Workbench window is not open."),
-        technical: `${copy.pid} ${bundle?.browser.windowPid || browser?.pid || "-"} · managed ${boolText(bundle?.browser.managed, copy.yes, copy.no)} · ${browser?.detail || "-"}`,
+        technical: `${copy.pid} ${displayPid(windowPid)} · managed ${boolText(bundle?.browser.managed, copy.yes, copy.no)} · ${browser?.detail || "-"}`,
         ok: Boolean(launcherStatusDisconnected || (browser?.ok ?? !bundle?.browser.alive)),
+        tone: stateTone(bundle?.browser.alive ? "running" : "stopped", Boolean(bundle?.browser.alive || launcherStatusDisconnected)),
       },
       {
         id: "runtime_manager",
         label: componentLabel("runtime_manager", uiLang),
         status: humanState(status?.runtimeManager.runtimeState || "-", uiLang),
-        role: lang === "zh" ? "执行启动、停止、重启" : "Runs start, stop, restart",
+        pid: displayPid(managerPid),
+        port: "-",
+        ownership: copy.ownedProcess,
         detail: status?.runtimeManager.running
           ? (lang === "zh" ? "生命周期管理器正在维护项目。" : "Lifecycle manager is maintaining the project.")
           : (lang === "zh" ? "生命周期管理器未运行。" : "Lifecycle manager is not running."),
-        technical: `${copy.pid} ${status?.runtimeManager.managerPid || "-"} · state ${status?.runtimeManager.stateVersion ?? "-"} · ${evidence?.state.updatedAt ? compactDate(evidence.state.updatedAt, locale) : "-"}`,
+        technical: `${copy.pid} ${displayPid(managerPid)} · state ${status?.runtimeManager.stateVersion ?? "-"} · ${evidence?.state.updatedAt ? compactDate(evidence.state.updatedAt, locale) : "-"}`,
         ok: Boolean(status?.runtimeManager.running),
+        tone: stateTone(status?.runtimeManager.runtimeState || "idle", Boolean(status?.runtimeManager.running)),
       },
       {
-        id: "supervisor",
-        label: componentLabel("supervisor", uiLang),
-        status: guardian?.supervisor?.blocking === false && guardian.supervisor.impact
-          ? humanState(guardian.supervisor.impact, uiLang)
-          : humanState(guardian?.supervisor?.status || "-", uiLang),
-        role: copy.notBlocking,
-        detail: guardian?.supervisor?.userMessage
-          ? guardian.supervisor.userMessage
-          : guardian?.supervisor?.alive
-          ? (lang === "zh" ? "后台守护检查仍在运行。" : "Background monitor is running.")
-          : (lang === "zh" ? "后台守护检查未运行，不影响当前项目使用。" : "Background monitor is stopped; project use is not blocked."),
-        technical: `${copy.pid} ${guardian?.supervisor?.pid || "-"} · ${guardian?.mode || "-"} · ${guardian?.supervisor?.detail || guardian?.statusLine || "-"}`,
-        ok: true,
+        id: "frontend",
+        label: componentLabel("frontend", uiLang),
+        status: humanState(frontend?.state || (bundle?.frontend.distReady ? "ready" : "-"), uiLang),
+        pid: displayPid(frontend?.pid),
+        port: displayPort(startupSettings?.workbench.effectiveFrontendPort),
+        ownership: copy.ownedProcess,
+        detail: launcherStatusDisconnected
+          ? copy.stoppedFrontendDetail
+          : bundle?.frontend.distReady
+          ? (lang === "zh" ? "前端资源已就绪。" : "Frontend assets are ready.")
+          : (lang === "zh" ? "前端资源还未构建。" : "Frontend assets are not built yet."),
+        technical: `dist ${boolText(bundle?.frontend.distReady, copy.yes, copy.no)} · orphaned ${boolText(bundle?.frontend.orphaned, copy.yes, copy.no)} · mode ${bundle?.frontend.mode || "-"}`,
+        ok: Boolean(frontend?.ok ?? bundle?.frontend.distReady),
+        tone: stateTone(frontend?.state || (bundle?.frontend.distReady ? "ready" : "missing"), Boolean(frontend?.ok ?? bundle?.frontend.distReady)),
       },
     ];
-  }, [bundle, componentRows, copy, evidence?.state.updatedAt, guardian, lang, launcherStatusDisconnected, locale, projectSummary, status, uiLang, lifecycleDisplay.detail]);
+    const leftoverRows = residualItems.map((item, index) => {
+      const kind = String(item.kind || "residual");
+      return {
+        id: `residual-${item.pid || index}-${kind}`,
+        label: residualKindLabel(kind, uiLang),
+        status: humanState("running", uiLang),
+        pid: displayPid(item.pid),
+        port: displayPort(item.port),
+        ownership: copy.residualProcess,
+        detail: copy.leftoverProcess,
+        technical: `${kind} · ${copy.pid} ${displayPid(item.pid)} · parent ${displayPid(item.parentPid)} · ${item.commandLine || item.name || "-"}`,
+        ok: false,
+        tone: "warning" as const,
+      };
+    });
+    return [...ownedRows, ...leftoverRows];
+  }, [bundle, componentRows, copy, evidence?.state.updatedAt, lang, launcherStatusDisconnected, locale, residualItems, startupSettings, status, uiLang]);
 
-  const keyStatusRows = statusRows.filter((row) => ["project", "backend", "frontend", "browser"].includes(row.id));
-  const diagnosticStatusRows = statusRows.filter((row) => !["project", "backend", "frontend", "browser"].includes(row.id));
+  const keyStatusRows = statusRows;
+  const branchItems = branchInstancesQuery.data?.items ?? [];
+  const currentInstanceId = branchInstancesQuery.data?.currentId || "main";
+  const selectedBranchId = branchItems.some((item) => item.id === selectedInstanceId)
+    ? selectedInstanceId
+    : currentInstanceId;
+  const selectedBranch = branchItems.find((item) => item.id === selectedBranchId);
+  const inspectSelectedInstance = Boolean(selectedBranch && !selectedBranch.current);
+  const selectedProcessRows = inspectSelectedInstance
+    ? observationProcessRows(selectedBranch, copy, uiLang)
+    : keyStatusRows;
+  const selectedProcessHint = inspectSelectedInstance
+    ? `${copy.selectedInstance}: ${selectedBranch?.branch || selectedBranchId}`
+    : copy.processMonitorHint;
+  const selectedResidualCount = inspectSelectedInstance ? 0 : residualCount;
+  const diagnosticStatusRows = statusRows.filter((row) => row.id === "runtime_manager");
   const activeCommand = evidence?.state.activeCommand;
   const recovery = evidence?.recovery;
   const recentResults = (evidence?.results.recent ?? []).slice(0, 3);
@@ -2181,40 +2338,21 @@ export function LauncherRoute() {
           </div>
         </div>
       )}
-      toolbarSlot={(
-        <div className={styles.opsToolbarStack}>
-          <div className={styles.summaryStrip} data-tone={launcherStatusDisconnected ? "neutral" : headerTone}>
-            <Metric label={copy.lifecycleStatus} value={projectSummary} helper={lifecycleDetailShort} helperTitle={lifecycleDisplay.detail} tone={lifecycleDisplay.tone} />
-            <Metric label={copy.activeWork} value={activeWorkSummary} helper={activeWorkDetailShort} helperTitle={activeWorkDetail} tone={restartQueuePending || activeWorkCount > 0 ? "warning" : "success"} />
-            <Metric label={copy.launcherStatus} value={controlSummary} helper={controlDetail} tone={launcherControlLimited ? "warning" : status ? "success" : "neutral"} />
-            <Metric
-              label={copy.userAction}
-              value={recovery?.active ? copy.recovery : nextAction}
-              helper={recovery?.active ? summarizeLauncherMessage(recovery.statusLine || humanCommandType(recovery.commandType, uiLang), copy, uiLang) : nextActionDetailShort}
-              helperTitle={recovery?.active ? recovery.statusLine || humanCommandType(recovery.commandType, uiLang) : nextActionDetail}
-              tone={recovery?.active ? (recovery.resultOk === false ? "warning" : "success") : projectIsOpen ? "success" : projectIsChanging ? "warning" : "neutral"}
-            />
-          </div>
-
-          <VTooltip content={userGuideDetail} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">
-            <div className={styles.userGuide} data-tone={userGuideTone} tabIndex={0}>
-              <span>{copy.userGuide}</span>
-              <strong>{userGuideTitle}</strong>
-              <em>{actionLockLabel}</em>
-            </div>
-          </VTooltip>
-
-          <div className={styles.dangerZone}>
-            <span>{copy.forceStop}</span>
-            <small>
-              {forceStopDisabled
-                ? forceStopDisabledReason
-                : `${copy.forceStopHint} · ${copy.powerMenu}`}
-            </small>
-          </div>
-        </div>
-      )}
     >
+      <LauncherBranchInstancesPanel
+        copy={copy}
+        items={branchItems}
+        selectedId={selectedBranchId}
+        onSelect={setSelectedInstanceId}
+      />
+      <LauncherProcessMonitorPanel
+        copy={{
+          ...copy,
+          processMonitorHint: selectedProcessHint,
+        }}
+        rows={selectedProcessRows}
+        residualCount={selectedResidualCount}
+      />
       <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
         <LauncherStartupSettingsPanel
           copy={copy}
@@ -2230,43 +2368,6 @@ export function LauncherRoute() {
           pendingWindowMode={pendingWindowMode}
           onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
           onWindowModeChange={(request) => workbenchWindowSaveMutation.mutate(request)}
-        />
-
-        <LauncherProjectMaintenancePanel
-          copy={copy}
-          summary={maintenanceSummaryQuery.data}
-          maintenanceProfile={maintenanceProfile}
-          plan={maintenancePlan}
-          loading={maintenanceSummaryQuery.isLoading || maintenanceSummaryQuery.isFetching}
-          previewPending={maintenancePreviewMutation.isPending}
-          applyPending={maintenanceApplyMutation.isPending}
-          onProfileChange={(profile) => {
-            setMaintenanceProfile(profile);
-          }}
-          onPreview={previewMaintenancePlan}
-          onApply={applyMaintenancePlan}
-        />
-
-        <LauncherDeveloperModePanel
-          copy={copy}
-          setting={developerModeSetting}
-          noiseOverview={developerNoiseQuery.data}
-          selectedAction={selectedCleanupAction}
-          plan={cleanupPlan}
-          pending={developerModeMutation.isPending}
-          noiseLoading={developerNoiseQuery.isFetching}
-          previewPending={cleanupPreviewMutation.isPending}
-          applyPending={cleanupApplyMutation.isPending}
-          resetPending={resetDeveloperSandboxMutation.isPending}
-          onToggle={toggleDeveloperMode}
-          onReset={resetDeveloperSandbox}
-          onRefreshNoise={() => void developerNoiseQuery.refetch()}
-          onSelectAction={(action) => {
-            setSelectedCleanupAction(action);
-            setCleanupPlan(null);
-          }}
-          onPreview={previewDeveloperCleanup}
-          onApply={applyDeveloperCleanup}
         />
       </Suspense>
 
@@ -2292,103 +2393,77 @@ export function LauncherRoute() {
       ) : null}
 
       <div
-        ref={launcherLayoutRef}
         className={styles.workspace}
-        style={launcherLayoutStyle}
         data-vui-recipe="launcher-workbench"
         data-vui-layout-id={LAUNCHER_LAYOUT_ID}
         data-vui-region="launcher-workspace"
       >
-        <section className={`${styles.panel} ${styles.matrixPanel}`}>
-          <div className={styles.panelHeader}>
-            <p className={styles.panelEyebrow}>{copy.lifecycle}</p>
-            <strong>{copy.keyStatus}</strong>
+        <details className={styles.advancedFold}>
+          <summary>
+            <span>{copy.advancedFold}</span>
+            <strong>{copy.advancedFoldHint}</strong>
+          </summary>
+          <div className={styles.advancedFoldBody}>
+            <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
+              <LauncherProjectMaintenancePanel
+                copy={copy}
+                summary={maintenanceSummaryQuery.data}
+                maintenanceProfile={maintenanceProfile}
+                plan={maintenancePlan}
+                loading={maintenanceSummaryQuery.isLoading || maintenanceSummaryQuery.isFetching}
+                previewPending={maintenancePreviewMutation.isPending}
+                applyPending={maintenanceApplyMutation.isPending}
+                onProfileChange={(profile) => {
+                  setMaintenanceProfile(profile);
+                }}
+                onPreview={previewMaintenancePlan}
+                onApply={applyMaintenancePlan}
+              />
+              <LauncherDeveloperModePanel
+                copy={copy}
+                setting={developerModeSetting}
+                noiseOverview={developerNoiseQuery.data}
+                selectedAction={selectedCleanupAction}
+                plan={cleanupPlan}
+                pending={developerModeMutation.isPending}
+                noiseLoading={developerNoiseQuery.isFetching}
+                previewPending={cleanupPreviewMutation.isPending}
+                applyPending={cleanupApplyMutation.isPending}
+                resetPending={resetDeveloperSandboxMutation.isPending}
+                onToggle={toggleDeveloperMode}
+                onReset={resetDeveloperSandbox}
+                onRefreshNoise={() => void developerNoiseQuery.refetch()}
+                onSelectAction={(action) => {
+                  setSelectedCleanupAction(action);
+                  setCleanupPlan(null);
+                }}
+                onPreview={previewDeveloperCleanup}
+                onApply={applyDeveloperCleanup}
+              />
+              <LauncherDiagnosticsPanel
+                copy={copy}
+                controlPlaneStatus={humanState(status?.runtimeManager.runtimeState, uiLang)}
+                controlPlaneSpecs={controlPlaneSpecs}
+                controlEvidenceStatus={evidence?.state.runtimeState || "-"}
+                controlEvidenceSpecs={controlEvidenceSpecs}
+                recoveryLine={recoveryLine}
+                activeCommandLine={activeCommandLine}
+                queueItemCount={recentResults.length + recentEvents.length}
+                queueItems={diagnosticQueueItems}
+                guardianProgress={guardianProgress}
+                guardianOwnedCount={guardian?.ownedCount ?? 0}
+                guardianAdapterCount={guardian?.adapterCount ?? 0}
+                guardianRows={guardianResponsibilityRows}
+                diagnosticSpecs={diagnosticSpecs}
+                busy={busy}
+                canRequestSupervisorReattach={canRequestSupervisorReattach}
+                supervisorPending={supervisorMutation.isPending}
+                onReattachSupervisor={() => supervisorMutation.mutate()}
+              />
+            </Suspense>
           </div>
-          <div className={styles.guardStrip} data-tone={restartQueuePending || activeWorkCount > 0 ? "warning" : "success"}>
-            <span>{copy.activeWork}</span>
-            <strong>{activeWorkCount > 0 ? `${copy.activeTasks}: ${activeWorkCount}` : copy.noActiveWork}</strong>
-            <small>{restartQueue?.statusLine || (activeWorkCount > 0 ? copy.activeWorkSummary : copy.noActiveWorkSummary)}</small>
-          </div>
-          <div className={styles.panelHeader}>
-            <p className={styles.panelEyebrow}>{copy.matrix}</p>
-            <strong>{copy.matrix}</strong>
-          </div>
-          <div className={styles.statusTable} role="table" aria-label={copy.matrix}>
-            <div className={styles.statusHead} role="row">
-              <span role="columnheader">{copy.unit}</span>
-              <span role="columnheader">{copy.state}</span>
-              <span role="columnheader">{copy.mode}</span>
-              <span role="columnheader">{copy.detail}</span>
-            </div>
-            {keyStatusRows.map((row) => (
-              <VTooltip key={row.id} content={row.technical} width="wide">
-                <div className={styles.statusRow} role="row" data-tone={stateTone(row.status, row.ok)} tabIndex={0}>
-                  <span role="cell"><strong>{row.label}</strong></span>
-                  <span role="cell">{row.status}</span>
-                  <span role="cell">{row.role}</span>
-                  <span role="cell">{row.detail}</span>
-                </div>
-              </VTooltip>
-            ))}
-          </div>
-        </section>
-
-        <PaneResizeHandle
-          label={lang === "zh" ? "调整启动器诊断栏宽度" : "Resize launcher diagnostics rail"}
-          valueNow={launcherRailWidth}
-          valueMin={LAUNCHER_RAIL_PANE.minWidth}
-          valueMax={LAUNCHER_RAIL_PANE.maxWidth}
-          active={launcherDraggingPaneId === "rail"}
-          className={styles.railResizeHandle}
-          onPointerDown={(event) => startLauncherRailResize("rail", event, { direction: -1 })}
-          onKeyDown={(event) => onLauncherRailResizeKeyDown("rail", event, { direction: -1 })}
-        />
-
-        <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
-          <LauncherDiagnosticsPanel
-            copy={copy}
-            controlPlaneStatus={humanState(status?.runtimeManager.runtimeState, uiLang)}
-            controlPlaneSpecs={controlPlaneSpecs}
-            controlEvidenceStatus={evidence?.state.runtimeState || "-"}
-            controlEvidenceSpecs={controlEvidenceSpecs}
-            recoveryLine={recoveryLine}
-            activeCommandLine={activeCommandLine}
-            queueItemCount={recentResults.length + recentEvents.length}
-            queueItems={diagnosticQueueItems}
-            guardianProgress={guardianProgress}
-            guardianOwnedCount={guardian?.ownedCount ?? 0}
-            guardianAdapterCount={guardian?.adapterCount ?? 0}
-            guardianRows={guardianResponsibilityRows}
-            diagnosticSpecs={diagnosticSpecs}
-            busy={busy}
-            canRequestSupervisorReattach={canRequestSupervisorReattach}
-            supervisorPending={supervisorMutation.isPending}
-            onReattachSupervisor={() => supervisorMutation.mutate()}
-          />
-        </Suspense>
+        </details>
       </div>
     </VDenseOpsPage>
   );
-}
-
-function Metric({
-  label,
-  value,
-  helper,
-  helperTitle,
-  tone,
-}: {
-  label: string;
-  value: string;
-  helper?: string;
-  helperTitle?: string;
-  tone?: "neutral" | "success" | "warning" | "error";
-}) {
-  const metric = (
-    <div className={styles.metric} data-tone={tone || "neutral"} tabIndex={helper ? 0 : undefined}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-  return helper ? <VTooltip content={helperTitle || helper} width="wide">{metric}</VTooltip> : metric;
 }

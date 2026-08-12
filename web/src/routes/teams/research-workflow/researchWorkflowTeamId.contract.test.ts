@@ -4,22 +4,15 @@ import { fetchJson } from "../../../api/client";
 import {
   createResearchWorkflowRun,
   fetchEffectiveAgentBindings,
-  fetchResearchWorkflowCanvas,
   fetchResearchWorkflowBudget,
   fetchResearchWorkflowEvaluation,
-  fetchResearchWorkflowEvents,
   fetchResearchWorkflowExperimentCampaigns,
   fetchResearchWorkflowHandoffs,
   fetchResearchWorkflowHypotheses,
-  fetchResearchWorkflowNodeDetail,
   fetchResearchWorkflowResearchLedger,
-  fetchResearchWorkflowRun,
   listResearchWorkflowRuns,
-  postResearchWorkflowCommand,
-  postResearchWorkflowNodeCommand,
   putResearchWorkflowAgentBindings,
-  putResearchWorkflowSessionBinding,
-  resolveResearchWorkflowHumanTask,
+  submitResearchWorkflowCommand,
 } from "../../../api/researchWorkflow";
 
 vi.mock("../../../api/client", () => ({
@@ -59,7 +52,23 @@ describe("researchWorkflow teamId contract", () => {
     await expect(
       fetchEffectiveAgentBindings("challenge-cup-research", { teamId: "" }),
     ).rejects.toThrow("teamId is required");
-    await expect(createResearchWorkflowRun({ teamId: "\t" })).rejects.toThrow("teamId is required");
+    await expect(
+      createResearchWorkflowRun({
+        teamId: "\t",
+        questionId: "SCI-096",
+        safetyLimits: {
+          stageTokens: {
+            knowledge_collection: 1,
+            experiment_design: 1,
+            execution_iteration: 1,
+          },
+          toolCalls: 1,
+          wallClockSeconds: 1,
+          maxRetries: 1,
+        },
+        idempotencyKey: "create-1",
+      }),
+    ).rejects.toThrow("teamId is required");
     await expect(
       putResearchWorkflowAgentBindings("challenge-cup-research", {
         teamId: " ",
@@ -69,15 +78,9 @@ describe("researchWorkflow teamId contract", () => {
     expect(mockedFetchJson).not.toHaveBeenCalled();
   });
 
-  it("scopes every run query and versions every run command", async () => {
+  it("scopes every retained domain projection query", async () => {
     mockedFetchJson.mockResolvedValue({});
 
-    await fetchResearchWorkflowRun("run-1", { teamId: "research-team" });
-    await fetchResearchWorkflowCanvas("run-1", { teamId: "research-team" });
-    await fetchResearchWorkflowNodeDetail("run-1", "source_finding", {
-      teamId: "research-team",
-    });
-    await fetchResearchWorkflowEvents("run-1", { teamId: "research-team", afterSequence: 7 });
     await fetchResearchWorkflowHandoffs("run-1", { teamId: "research-team" });
     await fetchResearchWorkflowResearchLedger("run-1", { teamId: "research-team" });
     await fetchResearchWorkflowBudget("run-1", { teamId: "research-team" });
@@ -87,95 +90,45 @@ describe("researchWorkflow teamId contract", () => {
 
     expect(mockedFetchJson).toHaveBeenNthCalledWith(
       1,
-      "/api/research/workflow-runs/run-1?teamId=research-team",
-    );
-    expect(mockedFetchJson).toHaveBeenNthCalledWith(
-      2,
-      "/api/research/workflow-runs/run-1/canvas?teamId=research-team",
-    );
-    expect(mockedFetchJson).toHaveBeenNthCalledWith(
-      3,
-      "/api/research/workflow-runs/run-1/nodes/source_finding?teamId=research-team",
-    );
-    expect(mockedFetchJson).toHaveBeenNthCalledWith(
-      4,
-      "/api/research/workflow-runs/run-1/events?teamId=research-team&afterSequence=7",
-    );
-    expect(mockedFetchJson).toHaveBeenNthCalledWith(
-      5,
       "/api/research/workflow-runs/run-1/handoffs?teamId=research-team",
     );
     expect(mockedFetchJson).toHaveBeenNthCalledWith(
-      6,
+      2,
       "/api/research/workflow-runs/run-1/research-ledger?teamId=research-team",
     );
     expect(mockedFetchJson).toHaveBeenNthCalledWith(
-      7,
+      3,
       "/api/research/workflow-runs/run-1/budget?teamId=research-team",
     );
     expect(mockedFetchJson).toHaveBeenNthCalledWith(
-      8,
+      4,
       "/api/research/workflow-runs/run-1/hypotheses?teamId=research-team",
     );
     expect(mockedFetchJson).toHaveBeenNthCalledWith(
-      9,
+      5,
       "/api/research/workflow-runs/run-1/experiment-campaigns?teamId=research-team",
     );
     expect(mockedFetchJson).toHaveBeenNthCalledWith(
-      10,
+      6,
       "/api/research/workflow-runs/run-1/evaluation?teamId=research-team",
     );
-
-    const command = {
-      teamId: "research-team",
-      idempotencyKey: "command-1",
-      expectedRunVersion: 4,
-    };
-    await postResearchWorkflowCommand("run-1", { ...command, command: "cancel", payload: {} });
-    await postResearchWorkflowNodeCommand("run-1", "source_finding", {
-      ...command,
-      command: "start_agent_task",
-      payload: {},
-    });
-    await resolveResearchWorkflowHumanTask("run-1", "task-1", {
-      ...command,
-      decision: "accept",
-    });
-    await putResearchWorkflowSessionBinding("run-1", "source_finding", {
-      ...command,
-      sessionId: "session-1",
-      taskId: "task-1",
-      turnId: "turn-1",
-    });
-
-    for (const call of mockedFetchJson.mock.calls.slice(10)) {
-      const init = call[1] as RequestInit;
-      const body = JSON.parse(String(init.body));
-      expect(init.headers).toEqual({ "Content-Type": "application/json" });
-      expect(body).toMatchObject(command);
-    }
   });
 
   it("sends create-run payloads as JSON objects", async () => {
     mockedFetchJson.mockResolvedValue({ runId: "run-1" });
     await createResearchWorkflowRun({
       teamId: "research-team",
-      projectId: "research-project",
       questionId: "question-1",
-      researchBriefHash: "sha256:brief",
-      datasetRefs: [],
-      metricContract: {},
-      constraintSnapshot: {},
-      competitionRuleRef: "rules/ref",
-      competitionRuleVersion: "v1",
-      trackAndRubricSnapshot: {},
-      researchObjectiveContract: {},
-      sourcePolicy: {},
-      budgetPolicy: {},
-      stopPolicy: {},
-      environmentSnapshotRef: "environment/ref",
-      modelRoutingPolicy: {},
-      evaluationContract: {},
+      safetyLimits: {
+        stageTokens: {
+          knowledge_collection: 250000,
+          experiment_design: 250000,
+          execution_iteration: 250000,
+        },
+        toolCalls: 300,
+        wallClockSeconds: 21600,
+        maxRetries: 2,
+      },
       idempotencyKey: "create-run-1",
     });
 
@@ -185,6 +138,40 @@ describe("researchWorkflow teamId contract", () => {
       teamId: "research-team",
       questionId: "question-1",
       idempotencyKey: "create-run-1",
+    });
+  });
+
+  it("posts typed commands only to the canonical commands entry", async () => {
+    mockedFetchJson.mockResolvedValue({
+      commandId: "cmd-1",
+      runId: "run-1",
+      status: "accepted",
+      acceptedRunVersion: 4,
+      idempotencyKey: "command-1",
+      latestEventSequence: 2,
+      problem: null,
+    });
+    await submitResearchWorkflowCommand({
+      teamId: "research-team",
+      runId: "run-1",
+      command: "cancel_run",
+      expectedRunVersion: 4,
+      idempotencyKey: "command-1",
+      nodeId: "source_finding",
+      payload: {},
+    });
+    expect(mockedFetchJson).toHaveBeenCalledTimes(1);
+    const [url, init] = mockedFetchJson.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/research/workflow-runs/run-1/commands");
+    expect(url).not.toContain("/nodes/");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(String(init.body));
+    expect(body).toMatchObject({
+      teamId: "research-team",
+      command: "cancel_run",
+      expectedRunVersion: 4,
+      idempotencyKey: "command-1",
+      nodeId: "source_finding",
     });
   });
 });

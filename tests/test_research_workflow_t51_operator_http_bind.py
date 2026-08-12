@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -40,16 +37,6 @@ def _service(tmp_path: Path):
         checkpoint_path=str(tmp_path / "ckpt.sqlite"),
         durable_index=DurableWorkflowIndex(tmp_path / "runs" / "_index"),
     )
-
-
-def _client_for(svc) -> tuple[TestClient, object]:
-    app = FastAPI()
-    app.include_router(research_runtime_routes.router, prefix="/api")
-    mock_svc = MagicMock(wraps=svc)
-    mock_svc.authorize_run_access.side_effect = svc.authorize_run_access
-    original = research_runtime_routes._svc
-    research_runtime_routes._svc = lambda: mock_svc  # type: ignore[assignment]
-    return TestClient(app), original
 
 
 def test_legacy_cancel_without_operator_context_is_forbidden(tmp_path: Path) -> None:
@@ -89,16 +76,17 @@ def test_legacy_cancel_operator_role_is_allowed(tmp_path: Path) -> None:
     assert updated["status"] == "cancelled"
 
 
-def test_http_client_operator_headers_alone_cannot_authorize(tmp_path: Path) -> None:
-    svc = _service(tmp_path)
-    run = svc.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_baseline_run_input(),
-        idempotency_key="idem-http-4",
-    )
-    team_id = str(run.get("teamId") or _baseline_run_input().get("teamId") or "")
-    client, original = _client_for(svc)
-    try:
+def test_http_client_operator_headers_alone_cannot_authorize(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services.team_workflow.research_runtime.run_creation import create_run
+    from tests._support.workflow_ledger_http import ledger_http_client
+
+    with ledger_http_client(tmp_path, monkeypatch) as (client, _runtime):
+        run = create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=_baseline_run_input(),
+            idempotency_key="idem-http-4",
+        )
+        team_id = str(run.get("teamId") or _baseline_run_input().get("teamId") or "")
         forged = client.post(
             f"/api/research/workflow-runs/{run['runId']}/commands",
             headers={
@@ -109,35 +97,32 @@ def test_http_client_operator_headers_alone_cannot_authorize(tmp_path: Path) -> 
                 "teamId": team_id,
                 "idempotencyKey": "http-cancel-forged",
                 "expectedRunVersion": int(run.get("runVersion") or 1),
-                "command": "cancel",
+                "command": "cancel_run",
                 "payload": {},
             },
         )
         assert forged.status_code == 403
         assert forged.json()["detail"]["code"] == "command_forbidden"
-        assert svc.get_run(run["runId"])["status"] != "cancelled"
-    finally:
-        research_runtime_routes._svc = original  # type: ignore[assignment]
 
 
 def test_http_control_token_binds_server_operator_not_client_roles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from core.web.services.team_workflow.research_runtime.run_creation import create_run
+    from tests._support.workflow_ledger_http import ledger_http_client
+
     monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "viewer")
-    svc = _service(tmp_path)
-    run = svc.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_baseline_run_input(),
-        idempotency_key="idem-http-5",
-    )
-    team_id = str(run.get("teamId") or _baseline_run_input().get("teamId") or "")
-    client, original = _client_for(svc)
-    try:
+    with ledger_http_client(tmp_path, monkeypatch) as (client, _runtime):
+        run = create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=_baseline_run_input(),
+            idempotency_key="idem-http-5",
+        )
+        team_id = str(run.get("teamId") or _baseline_run_input().get("teamId") or "")
         denied = client.post(
             f"/api/research/workflow-runs/{run['runId']}/commands",
             headers={
                 CONTROL_TOKEN_HEADER: get_control_token(),
-                # Client claims operator, but server env roles are viewer-only.
                 OPERATOR_ID_HEADER: "forged-op",
                 OPERATOR_ROLES_HEADER: "operator,admin",
             },
@@ -145,29 +130,28 @@ def test_http_control_token_binds_server_operator_not_client_roles(
                 "teamId": team_id,
                 "idempotencyKey": "http-cancel-viewer-server",
                 "expectedRunVersion": int(run.get("runVersion") or 1),
-                "command": "cancel",
+                "command": "cancel_run",
                 "payload": {},
             },
         )
         assert denied.status_code == 403
         assert denied.json()["detail"]["code"] == "command_forbidden"
-    finally:
-        research_runtime_routes._svc = original  # type: ignore[assignment]
 
 
 def test_http_control_token_with_server_operator_role_allows_cancel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from core.web.services.team_workflow.research_runtime.run_creation import create_run
+    from tests._support.workflow_ledger_http import ledger_http_client
+
     monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "operator")
-    svc = _service(tmp_path)
-    run = svc.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_baseline_run_input(),
-        idempotency_key="idem-http-6",
-    )
-    team_id = str(run.get("teamId") or _baseline_run_input().get("teamId") or "")
-    client, original = _client_for(svc)
-    try:
+    with ledger_http_client(tmp_path, monkeypatch) as (client, _runtime):
+        run = create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=_baseline_run_input(),
+            idempotency_key="idem-http-6",
+        )
+        team_id = str(run.get("teamId") or _baseline_run_input().get("teamId") or "")
         allowed = client.post(
             f"/api/research/workflow-runs/{run['runId']}/commands",
             headers={CONTROL_TOKEN_HEADER: get_control_token()},
@@ -175,53 +159,65 @@ def test_http_control_token_with_server_operator_role_allows_cancel(
                 "teamId": team_id,
                 "idempotencyKey": "http-cancel-ok",
                 "expectedRunVersion": int(run.get("runVersion") or 1),
-                "command": "cancel",
+                "command": "cancel_run",
                 "payload": {},
             },
         )
-        assert allowed.status_code == 200
-        assert allowed.json()["status"] == "cancelled"
-    finally:
-        research_runtime_routes._svc = original  # type: ignore[assignment]
+        assert allowed.status_code == 202, allowed.text
+        body = allowed.json()
+        assert body["status"] == "accepted"
+        assert body["runId"] == run["runId"]
+        assert body["acceptedRunVersion"] >= int(run.get("runVersion") or 1)
 
 
 def test_http_human_resolve_binds_server_principal_resolved_by(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from core.research.workflow.contracts import CommandReceipt
     from core.web.services.team_workflow.research_runtime.operator_authorization import (
         CONTROL_OPERATOR_ID_ENV,
     )
+    from tests._support.workflow_ledger_http import ledger_http_client
 
     monkeypatch.setenv(CONTROL_OPERATOR_ID_ENV, "principal-op-42")
     monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "operator")
-    svc = _service(tmp_path)
-    run = svc.create_run(
-        CHALLENGE_CUP_WORKFLOW_ID,
-        run_input=_baseline_run_input(),
-        idempotency_key="idem-http-resolve-1",
-    )
-    team_id = str(run.get("teamId") or _baseline_run_input().get("teamId") or "")
-    client, original = _client_for(svc)
-    try:
-        mock_svc = research_runtime_routes._svc()
-        mock_svc.resolve_human_task.return_value = {"runId": run["runId"], "ok": True}
-        response = client.post(
-            f"/api/research/workflow-runs/{run['runId']}/human-tasks/ht-1/resolve",
-            headers={
-                CONTROL_TOKEN_HEADER: get_control_token(),
-                OPERATOR_ID_HEADER: "forged-client-op",
-            },
-            json={
-                "teamId": team_id,
-                "idempotencyKey": "http-resolve-1",
-                "expectedRunVersion": int(run.get("runVersion") or 1),
-                "decision": "accept",
-            },
-        )
-        assert response.status_code == 200
-        kwargs = mock_svc.resolve_human_task.call_args.kwargs
-        assert kwargs["resolved_by"] == "principal-op-42"
-        assert kwargs["resolved_by"] != "forged-client-op"
-        assert kwargs["resolved_by"] != "operator"
-    finally:
-        research_runtime_routes._svc = original  # type: ignore[assignment]
+    captured: dict[str, object] = {}
+
+    class _FakeCommandService:
+        def submit(self, request):
+            captured["request"] = request
+            return CommandReceipt(
+                command_id="cmd-test",
+                run_id=request.run_id,
+                status="accepted",
+                accepted_run_version=request.expected_run_version,
+                idempotency_key=request.idempotency_key,
+                latest_event_sequence=1,
+                problem=None,
+            )
+
+    original = research_runtime_routes.get_command_service
+    with ledger_http_client(tmp_path, monkeypatch) as (client, _runtime):
+        research_runtime_routes.get_command_service = lambda: _FakeCommandService()  # type: ignore[assignment]
+        try:
+            response = client.post(
+                "/api/research/workflow-runs/run-http-resolve/commands",
+                headers={
+                    CONTROL_TOKEN_HEADER: get_control_token(),
+                    OPERATOR_ID_HEADER: "forged-client-op",
+                },
+                json={
+                    "teamId": "research-team",
+                    "nodeId": "knowledge_handoff",
+                    "idempotencyKey": "http-resolve-1",
+                    "expectedRunVersion": 1,
+                    "command": "resolve_human_task",
+                    "payload": {"taskId": "ht-1", "decision": "accept"},
+                },
+            )
+            assert response.status_code == 202, response.text
+            request = captured["request"]
+            assert request.requested_by.actor_id == "principal-op-42"
+            assert request.requested_by.actor_id != "forged-client-op"
+        finally:
+            research_runtime_routes.get_command_service = original  # type: ignore[assignment]

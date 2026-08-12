@@ -8,13 +8,13 @@
  */
 import { useCallback, useState } from "react";
 
+import { fetchResearchWorkflowResearchLedger } from "../../../api/research-workflow";
 import {
   VButton,
   VEmptyState,
   VStateSurface,
   VSurface,
 } from "../../../components/vui";
-import { executeNodeCommand } from "./nodeCommandAdapter";
 import styles from "./EvidenceGraphView.styles";
 
 export type EvidenceGraphViewProps = {
@@ -141,17 +141,14 @@ export function EvidenceGraphContent({ graph }: { graph: EvidenceGraphDto }) {
   );
 }
 
-export function EvidenceGraphView({ runId, nodeId, teamId, runVersion }: EvidenceGraphViewProps) {
+export function EvidenceGraphView({ runId, teamId }: EvidenceGraphViewProps) {
   const [state, setState] = useState<LoadState>({ kind: "idle" });
 
   const loadGraph = useCallback(() => {
     setState({ kind: "loading" });
-    executeNodeCommand(
-      { runId, nodeId, teamId, runVersion },
-      { command: "open_evidence_graph", available: true, reason: "" },
-    )
-      .then((result) => {
-        const graph = (result.raw?.graph ?? {}) as EvidenceGraphDto;
+    fetchResearchWorkflowResearchLedger(runId, { teamId })
+      .then((ledger) => {
+        const graph = (ledger.graph ?? {}) as EvidenceGraphDto;
         setState({
           kind: "ready",
           graph: {
@@ -163,7 +160,7 @@ export function EvidenceGraphView({ runId, nodeId, teamId, runVersion }: Evidenc
       .catch((err: unknown) => {
         setState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
       });
-  }, [runId, nodeId, teamId, runVersion]);
+  }, [runId, teamId]);
 
   if (state.kind === "idle") {
     return (

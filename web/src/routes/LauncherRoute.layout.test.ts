@@ -13,6 +13,12 @@ import projectMaintenancePanelStyles from "./LauncherProjectMaintenancePanel.sty
 import startupSettingsPanelSource from "./LauncherStartupSettingsPanel.tsx?raw";
 import startupSettingsPanelStylesSource from "./LauncherStartupSettingsPanel.styles.ts?raw";
 import startupSettingsPanelStyles from "./LauncherStartupSettingsPanel.styles";
+import processMonitorPanelSource from "./LauncherProcessMonitorPanel.tsx?raw";
+import processMonitorPanelStylesSource from "./LauncherProcessMonitorPanel.styles.ts?raw";
+import processMonitorPanelStyles from "./LauncherProcessMonitorPanel.styles";
+import branchInstancesPanelSource from "./LauncherBranchInstancesPanel.tsx?raw";
+import branchInstancesPanelStylesSource from "./LauncherBranchInstancesPanel.styles.ts?raw";
+import branchInstancesPanelStyles from "./LauncherBranchInstancesPanel.styles";
 import stylesSource from "./LauncherRoute.styles.ts?raw";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 import launcherApiSource from "../api/launcher.ts?raw";
@@ -28,6 +34,8 @@ const launcherPanelStylesSource = [
   diagnosticsPanelStylesSource,
   projectMaintenancePanelStylesSource,
   startupSettingsPanelStylesSource,
+  processMonitorPanelStylesSource,
+  branchInstancesPanelStylesSource,
 ].join("\n");
 
 const sourceSlice = (source: string, startMarker: string, endMarker: string): string => {
@@ -43,6 +51,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
     expect(developerModePanelSource).toContain("from \"../components/vui\"");
     expect(startupSettingsPanelSource).toContain("from \"../components/vui\"");
+    expect(branchInstancesPanelSource).toContain("from \"../components/vui\"");
+    expect(branchInstancesPanelStyles.statusTable).toBeTypeOf("string");
     expect(developerModePanelSource).toContain('from "./LauncherDeveloperModePanel.styles"');
     expect(diagnosticsPanelSource).toContain('from "./LauncherDiagnosticsPanel.styles"');
     expect(projectMaintenancePanelSource).toContain('from "./LauncherProjectMaintenancePanel.styles"');
@@ -114,6 +124,8 @@ describe("LauncherRoute layout contract", () => {
 
   it("uses the typed launcher lifecycle API client", () => {
     expect(routeSource).toContain("getLauncherStatus");
+    expect(routeSource).toContain("getLauncherBranchInstances");
+    expect(launcherApiSource).toContain("branch-instances");
     // Lifecycle start/stop/force-stop/restart share one action path with AppShell.
     expect(routeSource).toContain('useWorkbenchLifecycleActions("launcher_route")');
     expect(routeSource).toContain("requestLifecycle(operation)");
@@ -167,11 +179,9 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("renders a dense lifecycle console rather than a landing page", () => {
-    expect(routeSource).toContain("summaryStrip");
-    expect(routeSource).toContain("userGuide");
-    expect(routeSource).toContain("guardStrip");
-    expect(routeSource).toContain("statusTable");
-    expect(routeSource).toContain("matrixPanel");
+    expect(routeSource).toContain("LauncherProcessMonitorPanel");
+    expect(routeSource).toContain("advancedFold");
+    expect(processMonitorPanelSource).toContain("statusTable");
     expect(routeSource).toContain("LauncherDiagnosticsPanel");
     expect(diagnosticsPanelSource).toContain("specGrid");
     expect(routeSource).toContain("projectBundle");
@@ -207,9 +217,11 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("guardian?.supervisor?.stderrPath");
     expect(routeSource).not.toContain("hero");
     expect(routeSource).not.toContain("cardGrid");
-    expect(styles.summaryStrip).toBeTypeOf("string");
-    expect(styles.userGuide).toBeTypeOf("string");
+    expect(styles.advancedFold).toBeTypeOf("string");
+    expect(processMonitorPanelStyles.statusTable).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingsStrip).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingsPrimary).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingsSecondary).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingsHeader).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingField).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingToggle).toBeTypeOf("string");
@@ -231,6 +243,28 @@ describe("LauncherRoute layout contract", () => {
     expect(diagnosticsPanelStyles.diagnosticSection).toBeTypeOf("string");
     expect(diagnosticsPanelStyles.recoveryLine).toBeTypeOf("string");
     expect(diagnosticsPanelStyles.specGrid).toBeTypeOf("string");
+  });
+
+  it("puts process monitor and startup settings before collapsed advanced tools", () => {
+    const branchIndex = routeSource.indexOf("<LauncherBranchInstancesPanel");
+    const processIndex = routeSource.indexOf("<LauncherProcessMonitorPanel");
+    const settingsIndex = routeSource.indexOf("<LauncherStartupSettingsPanel");
+    const advancedIndex = routeSource.indexOf("className={styles.advancedFold}");
+    const maintenanceIndex = routeSource.indexOf("<LauncherProjectMaintenancePanel");
+    const developerIndex = routeSource.indexOf("<LauncherDeveloperModePanel");
+    const diagnosticsIndex = routeSource.indexOf("<LauncherDiagnosticsPanel");
+    expect(branchIndex).toBeGreaterThan(0);
+    expect(processIndex).toBeGreaterThan(branchIndex);
+    expect(settingsIndex).toBeGreaterThan(processIndex);
+    expect(advancedIndex).toBeGreaterThan(settingsIndex);
+    expect(maintenanceIndex).toBeGreaterThan(advancedIndex);
+    expect(developerIndex).toBeGreaterThan(maintenanceIndex);
+    expect(diagnosticsIndex).toBeGreaterThan(developerIndex);
+    expect(routeSource).not.toContain("toolbarSlot");
+    expect(routeSource).not.toContain("<details open");
+    expect(routeSource).toContain("residualProcesses");
+    expect(startupSettingsPanelSource).toContain("settingsPrimary");
+    expect(startupSettingsPanelSource).toContain("effectiveValue");
     expect(developerModePanelStyles.dangerButton).toBeTypeOf("string");
     expect(launcherPanelStylesSource).toContain("settingsStrip");
     expect(launcherPanelStylesSource).toContain("developerPanel");
@@ -273,10 +307,12 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("advancedDetails");
     expect(routeSource).toContain("advancedDiagnostics");
     expect(routeSource).toContain("internalMigrationDetails");
-    expect(routeSource).toContain("<VTooltip key={row.id} content={row.technical} width=\"wide\">");
+    expect(processMonitorPanelSource).toContain("<VTooltip key={row.id} content={row.technical} width=\"wide\">");
+    expect(processMonitorPanelSource).toContain("<span role=\"columnheader\">{copy.pid}</span>");
+    expect(processMonitorPanelSource).toContain("<span role=\"columnheader\">{copy.port}</span>");
+    expect(processMonitorPanelSource).toContain("<span role=\"columnheader\">{copy.ownership}</span>");
     expect(routeSource).not.toContain("部分接管");
     expect(routeSource).not.toContain("Partially owned");
-    expect(routeSource).not.toContain("<span role=\"columnheader\">{copy.pid}</span>");
     expect(routeSource).not.toContain("helper={`${copy.queue}:");
     expect(styles.metric).toBeTypeOf("string");
   });
@@ -289,20 +325,20 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("technicalDetailAvailable");
     expect(routeSource).toContain("lifecycleDetailShort");
     expect(routeSource).toContain("noticeTextShort");
-    expect(routeSource).toContain("helperTitle={lifecycleDisplay.detail}");
+    expect(routeSource).toContain("meta={lifecycleDetailShort || copy.subtitle}");
     expect(routeSource).toContain("meta={lifecycleDetailShort || copy.subtitle}");
     expect(routeSource).toContain("VDenseOpsPage");
     expect(routeSource).toContain('data-vui-domain-recipe="launcher-workbench"');
     expect(routeSource).toContain("<VTooltip content={notice.text}");
-    expect(routeSource).toContain("<VTooltip key={row.id} content={row.technical} width=\"wide\">");
+    expect(processMonitorPanelSource).toContain("<VTooltip key={row.id} content={row.technical} width=\"wide\">");
     expect(routeSource).not.toContain("<p className={styles.subtitle}>{lifecycleDisplay.detail || copy.subtitle}</p>");
     expect(routeSource).not.toContain("<small>{userGuideDetail}</small>");
     expect(routeSource).not.toContain("{notice.text !== noticeTextShort ? <span>{copy.technicalDetailAvailable}</span> : null}");
   });
 
   it("keeps guidance terse while preserving detail in the shared hover surface", () => {
-    expect(routeSource).toContain('<VTooltip content={userGuideDetail}');
-    expect(routeSource).toContain('className={styles.userGuide} data-tone={userGuideTone} tabIndex={0}');
+    expect(routeSource).toContain("<VTooltip content={statusBarBlockerReason}");
+    expect(routeSource).toContain("className={styles.statusBarReason} data-tone={userGuideTone} tabIndex={0}");
     expect(routeSource).not.toContain('title={userGuideDetail}');
     expect(routeStylesSource).toContain("userGuide:");
     expect(routeStylesSource).toContain("overflow-wrap-anywhere");
@@ -370,10 +406,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("[&_[data-vui=button]]:[max-width:100%]");
     expect(routeStylesSource).toContain("[&_[data-vui=button]]:[white-space:nowrap]");
 
-    expect(styles.workspace).toContain("var(--launcher-rail-width,clamp(300px,26vw,420px))");
-    expect(styles.workspace).toContain("max-[1200px]:grid-cols-[minmax(0,1fr)]");
-    expect(styles.railResizeHandle).toContain("max-[1200px]:hidden");
-    expect(routeSource).toContain("PaneResizeHandle");
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(styles.advancedFold).toContain("overflow-hidden");
+    expect(routeSource).not.toContain("PaneResizeHandle");
     expect(styles.statusBar).toContain("w-full");
     expect(styles.statusBar).toContain("max-w-none");
     expect(styles.statusBar).not.toContain("w-[min(760px,58vw)]");
@@ -382,6 +417,7 @@ describe("LauncherRoute layout contract", () => {
 
     expect(startupSettingsPanelStyles.settingsStrip).toContain("mx-2");
     expect(startupSettingsPanelStyles.settingsStrip).toContain("overflow-hidden");
+    expect(startupSettingsPanelStyles.settingsPrimary).toContain("grid-cols-");
     expect(startupSettingsPanelStyles.settingsSaveButton).toContain("justify-self-start");
     expect(startupSettingsPanelStyles.settingsStrip).not.toContain("mx-3");
 
@@ -423,8 +459,10 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("keeps internal lifecycle fields out of the first-read labels", () => {
-    expect(routeSource).toContain('matrix: "项目组成"');
-    expect(routeSource).toContain('keyStatus: "关键状态"');
+    expect(routeSource).toContain('matrix: "进程监控"');
+    expect(routeSource).toContain('keyStatus: "托管进程"');
+    expect(routeSource).toContain('processMonitor: "进程监控"');
+    expect(routeSource).toContain('advancedFold: "高级"');
     expect(routeSource).toContain('controlPlane: "维护范围"');
     expect(routeSource).toContain('guardian: "托管明细"');
     expect(routeSource).toContain('advancedDiagnostics: "高级诊断"');
@@ -433,7 +471,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('userGuideBlocked: "先等任务完成"');
     expect(routeSource).toContain('actionsLocked: "停止/重启已保护"');
     expect(routeSource).toContain('diagnosticsCollapsedHint: "排查时展开"');
-    expect(routeSource).toContain("后台守护检查未运行，不影响当前项目使用。");
+    expect(routeSource).toContain("托管进程与残留子进程");
     expect(routeSource).toContain("Launcher 正在维护项目启动、停止、重启、后端、窗口和日志证据。");
     expect(routeSource).toContain("有任务运行时，Launcher 会拒绝停止或重启");
     expect(routeSource).not.toContain("任务结束后自动重启");
@@ -448,6 +486,7 @@ describe("LauncherRoute layout contract", () => {
 
   it("keeps command streams and guardian details collapsed by default", () => {
     expect(routeSource).toContain("LauncherDiagnosticsPanel");
+    expect(routeSource).toContain("className={styles.advancedFold}");
     expect(diagnosticsPanelSource).toContain("<details className={`${styles.panel} ${styles.diagnosticsPanel}`}>");
     expect(diagnosticsPanelSource).not.toContain("<details open");
     expect(routeSource).toContain("queueAndEvents");
@@ -538,7 +577,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('<VTooltip content={statusBarBlockerReason}');
 
     const statusBarStart = routeSource.indexOf('<div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>');
-    const statusBarEnd = routeSource.indexOf('<div className={styles.summaryStrip}', statusBarStart);
+    const statusBarEnd = routeSource.indexOf("<LauncherProcessMonitorPanel", statusBarStart);
     expect(statusBarStart).toBeGreaterThanOrEqual(0);
     expect(statusBarEnd).toBeGreaterThan(statusBarStart);
     const statusBarActions = routeSource.slice(statusBarStart, statusBarEnd);
@@ -555,10 +594,11 @@ describe("LauncherRoute layout contract", () => {
     expect(statusBarActions).toContain('variant="labeled"');
     expect(statusBarActions).toContain("copy.powerMenu");
 
-    // Danger zone is guidance only; force-stop lives in VWorkbenchPowerMenu.
-    expect(routeSource).toContain("styles.dangerZone");
+    // Force-stop stays in VWorkbenchPowerMenu; it is not a first-screen banner.
+    expect(routeSource).not.toContain("styles.dangerZone");
     expect(routeSource).not.toContain("styles.dangerActions");
-    expect(routeSource).toContain("copy.forceStopHint");
+    expect(routeSource).toContain("forceStopHint:");
+    expect(routeSource).toContain("showForceStop");
   });
 
   it("lets Launcher own startup settings without restarting immediately", () => {

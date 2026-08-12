@@ -67,7 +67,7 @@ def _build_service(
         calls.append(("integrate", deepcopy(context)))
         return {
             "status": "committed",
-            "mechanism": "controlled_candidate_commit",
+            "mechanism": "git_merge_ff",
             "baseCommit": context["candidate"]["baseCommit"],
             "commitSha": "d" * 40,
             "candidateVariantId": context["candidate"]["variantId"],
@@ -257,7 +257,7 @@ def test_explicit_user_reapproval_retries_failed_integration_then_cleans(tmp_pat
             raise RuntimeError("git author identity is missing")
         return {
             "status": "committed",
-            "mechanism": "controlled_candidate_commit",
+            "mechanism": "git_merge_ff",
             "baseCommit": context["candidate"]["baseCommit"],
             "commitSha": "d" * 40,
             "candidateVariantId": context["candidate"]["variantId"],

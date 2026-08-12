@@ -20,7 +20,11 @@ const styles = {
   settingToggle: "inline-flex min-h-7 min-w-0 items-center gap-1.5 whitespace-nowrap pb-px [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&_input]:m-0 [&_input]:h-3.5 [&_input]:w-3.5",
   settingsHeader: "grid self-center gap-0.5 [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>strong]:text-[var(--fg-primary)] [&>small]:min-w-0 [&>small]:truncate [&>small]:[font-size:var(--vui-font-xs)] [&>small]:text-[var(--fg-secondary)]",
   settingsSaveButton: `${primaryControl} justify-self-start py-[3px]`,
-  settingsStrip: `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full grid-cols-[minmax(104px,0.76fr)_minmax(92px,0.6fr)_repeat(3,minmax(74px,0.5fr))_max-content_minmax(96px,0.62fr)_minmax(100px,0.64fr)_max-content_max-content_max-content] items-end gap-1 self-start overflow-hidden ${panelSurface} px-2 py-1.5 max-[1320px]:grid-cols-[minmax(112px,max-content)_minmax(118px,max-content)_repeat(2,minmax(92px,1fr))_max-content] max-[1040px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[620px]:grid-cols-[minmax(0,1fr)] [&>small]:col-span-full`,
+  settingsStrip: `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full gap-1.5 self-start overflow-hidden ${panelSurface} px-2 py-1.5`,
+  settingsPrimary:
+    "grid min-w-0 max-w-full grid-cols-[minmax(96px,max-content)_minmax(118px,0.7fr)_repeat(3,minmax(88px,0.55fr))_max-content_minmax(120px,0.7fr)_max-content] items-end gap-1.5 max-[1180px]:grid-cols-[minmax(96px,max-content)_minmax(118px,0.8fr)_repeat(3,minmax(88px,1fr))] max-[860px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[620px]:grid-cols-[minmax(0,1fr)]",
+  settingsSecondary:
+    "grid min-w-0 max-w-full grid-cols-[minmax(140px,0.5fr)_repeat(2,max-content)] items-center gap-1.5 max-[620px]:grid-cols-[minmax(0,1fr)]",
   spin: "animate-spin",
 } as const;
 

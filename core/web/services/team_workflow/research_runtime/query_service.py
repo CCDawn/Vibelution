@@ -28,6 +28,7 @@ from .command_offer_builder import build_command_offers
 from .projection_builder import ProjectionInputs, build_research_workflow_snapshot
 from .readiness import NodeReadinessService
 from .readiness.common import DomainReadinessContext
+from .run_catalog import catalog_dict_from_run
 
 
 class WorkflowQueryError(RuntimeError):
@@ -84,6 +85,17 @@ class WorkflowQueryService:
         self._clock_iso = clock_iso or _default_iso_clock
         self._evaluated_at_ms = evaluated_at_ms
         self._definition = definition or build_challenge_cup_workflow_definition()
+
+    def list_runs(self, *, team_id: str, workflow_id: str) -> dict[str, Any]:
+        scoped_team = _require_team_id(team_id)
+        try:
+            records = self._store.list_runs_for_team(scoped_team, workflow_id)
+        except (WorkflowLedgerUnavailableError, WorkflowLedgerClosedError) as exc:
+            raise WorkflowLedgerUnavailable(str(exc)) from exc
+        return {
+            "workflowId": workflow_id,
+            "runs": [catalog_dict_from_run(item) for item in records],
+        }
 
     def get_snapshot(self, *, team_id: str, run_id: str) -> ResearchWorkflowSnapshot:
         scoped_team = _require_team_id(team_id)

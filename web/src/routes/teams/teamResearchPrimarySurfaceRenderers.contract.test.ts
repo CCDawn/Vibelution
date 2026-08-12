@@ -48,4 +48,10 @@ describe("teamResearchPrimarySurfaceRenderers extraction", () => {
     expect(renderersSource).not.toContain("TeamResearchStageStandalonePagePanel");
     expect(renderersSource).toContain("embeddedInBoard");
   });
+
+  it("does not mount ResearchProcessWorkspace without a teamId", () => {
+    expect(renderersSource).toContain("缺少 teamId，无法打开科研流程");
+    expect(renderersSource).toMatch(/if\s*\(\s*!teamId\s*\)/);
+    expect(renderersSource).not.toContain('teamId={String(selectedTeam?.teamId || "")}');
+  });
 });

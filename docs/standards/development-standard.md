@@ -207,11 +207,13 @@ The root workspace:
 
 is the local `main` integration workspace. It is for syncing, fast-forward merging, final validation, reviewed publication, and remote sync. Every source, test, documentation, rule, memory, configuration, and `FAST_PATCH` write belongs in a task worktree. Direct writes and commits on `main` are forbidden; `main` must remain clean except for the transient state of an explicit merge operation.
 
-This root path is the durable local development-main checkout and must stay checked out on branch `main`. Do not leave `<project-root>` on a task branch, unresolved merge, or long-lived dirty experiment. If root is found on a non-main branch, first preserve or migrate that branch's dirty work into `<project-root-parent>\Vibelution-worktrees\<task-slug>` or a named stash, then restore root to `main` before continuing normal development or integration. A separate `main` worktree may be used only as a short-lived recovery exception while root is blocked, and it should be retired once root has been restored.
+This root path is the durable local development-main checkout and must stay checked out on branch `main`. Do not leave `<project-root>` on a task branch, unresolved merge, or long-lived dirty experiment. If root is found on a non-main branch, first preserve or migrate that branch's dirty work into `<project-root>\.worktrees\<task-slug>` or a named stash, then restore root to `main` before continuing normal development or integration. A separate `main` worktree may be used only as a short-lived recovery exception while root is blocked, and it should be retired once root has been restored.
 
 Default task worktree path:
 
-`<project-root-parent>\Vibelution-worktrees\<task-slug>`
+`<project-root>\.worktrees\<task-slug>`
+
+The old sibling folder `<project-root-parent>\Vibelution-worktrees\` is read-only compatibility. New checkouts belong in the in-repo pool.
 
 Default task branch:
 
@@ -225,7 +227,7 @@ Typical start:
 
 ```powershell
 cd <project-root>
-git worktree add <project-root-parent>\Vibelution-worktrees\<task-slug> -b codex/<task-slug> main
+git worktree add .worktrees/<task-slug> -b codex/<task-slug> main
 ```
 
 Before editing hot files, shared scopes, or any `STANDARD_TASK` / `HIGH_RISK` work in a multi-session project, use the project memory guard to inspect active work and, when needed, reserve a narrow write scope:

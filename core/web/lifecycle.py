@@ -126,6 +126,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_external_agent_reconcile_task = asyncio.create_task(
         reconcile_external_agent_tasks_forever()
     )
+    startup_workflow_runtime_task = asyncio.create_task(
+        asyncio.to_thread(_start_research_workflow_runtime)
+    )
 
     def consume_startup_task_result(task: asyncio.Task[Any], *, message: str) -> None:
         try:
@@ -168,6 +171,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="Running-code fingerprint snapshot failed during startup."
         )
     )
+    startup_workflow_runtime_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Research workflow Ledger runtime failed during startup."
+        )
+    )
     try:
         # Emit after tasks are scheduled so open-path diagnosis can see pre-yield cost.
         try:
@@ -208,6 +216,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_agent_inbox_recovery_task,
             startup_external_agent_reconcile_task,
             startup_code_fingerprint_task,
+            startup_workflow_runtime_task,
         ):
             if startup_task is None:
                 continue
@@ -220,7 +229,24 @@ async def web_workbench_lifespan(app: FastAPI | None):
         )
 
         await asyncio.to_thread(shutdown_cli_agent_terminal_sessions)
+        await asyncio.to_thread(_stop_research_workflow_runtime)
         loop.set_exception_handler(previous_handler)
+
+
+def _start_research_workflow_runtime() -> str:
+    from .services.team_workflow.research_runtime.runtime_factory import (
+        start_production_workflow_runtime,
+    )
+
+    return start_production_workflow_runtime()
+
+
+def _stop_research_workflow_runtime() -> None:
+    from .services.team_workflow.research_runtime.runtime_factory import (
+        stop_production_workflow_runtime,
+    )
+
+    stop_production_workflow_runtime()
 
 
 def _write_running_code_fingerprint_on_startup() -> None:

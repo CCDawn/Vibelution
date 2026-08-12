@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
-import { cancelRuntimeLifecycleCommand, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
+import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
+import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
@@ -55,6 +56,11 @@ import {
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { resolvePollingInterval, useStartupWarmup } from "./pollingPolicy";
 import { recoverFromBuiltAssetResourceError, recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
+import {
+  isModifiedPrimaryNavClick,
+  resolveUnmodifiedShellNavHref,
+  shellNavAnchorFromEventTarget,
+} from "./shellPrimaryNavClick";
 import {
   nextWorkbenchTheme,
   readStoredWorkbenchTheme,
@@ -150,11 +156,6 @@ function shellMobileNavClass(pathname: string, to: string) {
   return isShellPrimaryNavActive(pathname, to)
     ? `${styles.mobileRouteLink} ${styles.mobileRouteLinkActive}`
     : styles.mobileRouteLink;
-}
-
-/** True when the click should keep native browser behavior (new tab, etc.). */
-function isModifiedPrimaryNavClick(event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; button: number }): boolean {
-  return event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0;
 }
 
 let chatRoutePreloadPromise: Promise<unknown> | null = null;
@@ -749,6 +750,12 @@ export function AppShell() {
     queryKey: queryKeys.configPublic(),
     queryFn: ({ signal }) => fetchJson<ConfigSummary>("/api/config/public", { signal }),
   });
+  const branchInstancesQuery = useQuery({
+    queryKey: queryKeys.launcherBranchInstances(),
+    queryFn: getLocalBranchInstances,
+    staleTime: 15_000,
+  });
+  const workbenchWindowTitle = currentInstanceWindowTitle("workbench", branchInstancesQuery.data);
   const themeBackgroundImageUrl = configThemeBackgroundImageUrl(configQuery.data);
   const themeBackgroundReadability = configThemeBackgroundReadability(
     configQuery.data,
@@ -1084,30 +1091,34 @@ export function AppShell() {
     }
   }, [emitBrowserTelemetry, navigate]);
 
+  const navigatePrimaryNav = useCallback((to: string) => {
+    emitBrowserTelemetry({
+      phase: "navigation",
+      eventCode: "browser.primary_nav.click",
+      message: `Primary navigation click to ${to}`,
+      fields: {
+        to,
+        fromPathname: routerLocationRef.current.pathname,
+      },
+    });
+    if (to === "/chat" || to.startsWith("/chat?")) {
+      preloadChatRouteForNav("click");
+    }
+    if (routeLocationKey(routerLocationRef.current) !== to) {
+      navigate(to);
+    }
+  }, [emitBrowserTelemetry, navigate]);
+
   const handlePrimaryNavClick = useCallback(
     (event: ReactMouseEvent<HTMLAnchorElement>, to: string) => {
-      if (isModifiedPrimaryNavClick(event)) {
+      if (event.defaultPrevented || isModifiedPrimaryNavClick(event)) {
         return;
       }
       // Force SPA navigation so Electron/title-bar hit testing cannot leave a focused but inert link.
       event.preventDefault();
-      emitBrowserTelemetry({
-        phase: "navigation",
-        eventCode: "browser.primary_nav.click",
-        message: `Primary navigation click to ${to}`,
-        fields: {
-          to,
-          fromPathname: routerLocationRef.current.pathname,
-        },
-      });
-      if (to === "/chat") {
-        preloadChatRouteForNav("click");
-      }
-      if (routeLocationKey(routerLocationRef.current) !== to) {
-        navigate(to);
-      }
+      navigatePrimaryNav(to);
     },
-    [emitBrowserTelemetry, navigate],
+    [navigatePrimaryNav],
   );
 
   const cancelSupersededLifecycleCommand = useCallback((commandId: string, action: "shutdown" | "restart") => {
@@ -1683,8 +1694,8 @@ export function AppShell() {
 
   useEffect(() => {
     applyWorkbenchDocumentLanguage(document, lang);
-    document.title = t("appTitle");
-  }, [lang, t]);
+    document.title = workbenchWindowTitle;
+  }, [lang, workbenchWindowTitle]);
 
   useEffect(() => {
     setFetchJsonFailureReporter((failure) => {
@@ -1782,6 +1793,17 @@ export function AppShell() {
     const handlePageShow = () => scheduleRecovery("pageshow");
     const handlePopState = () => scheduleRecovery("popstate");
     const handleDocumentClick = (event: MouseEvent) => {
+      const navLink = shellNavAnchorFromEventTarget(event.target);
+      if (navLink && !isModifiedPrimaryNavClick(event)) {
+        const to = resolveUnmodifiedShellNavHref(navLink.getAttribute("href"), window.location.origin);
+        if (to) {
+          // Capture-phase preventDefault stops Electron from doing a full document
+          // load of /teams (blank #f7fafc window) when React's onClick does not fire.
+          event.preventDefault();
+          navigatePrimaryNav(to);
+        }
+        return;
+      }
       const target = event.target;
       // Never fight intentional SPA navigation or shell controls — capture-phase
       // desync recovery used to race NavLink clicks and snap the route back.
@@ -1819,7 +1841,7 @@ export function AppShell() {
       window.removeEventListener("click", handleDocumentClick, true);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [recoverRouterLocationDesync]);
+  }, [navigatePrimaryNav, recoverRouterLocationDesync]);
 
   useEffect(() => {
     const snapshotTimer = window.setTimeout(() => {

@@ -24,6 +24,7 @@ from .adapters.domain_adapters import register_default_adapters
 from .checkpoint_fork_worker import CheckpointForkWorker
 from .command_service import WorkflowCommandService
 from .formal_read_runtime import configure_formal_read_runtime, wake_stream_readers
+from .formal_write_runtime import configure_formal_write_runtime
 from .graph_dispatch_worker import GraphDispatchWorker
 from .real_domain_ports import RealDomainPorts
 from .real_readiness_context import RealDomainReadinessContext
@@ -143,6 +144,7 @@ def build_workflow_runtime(
         wake_worker=combined_wake,
         coordinator_factory=lambda: coordinator,
     )
+    configure_formal_write_runtime(store=store, command_service=command_service)
     graph_worker = GraphDispatchWorker(
         store=store,
         coordinator=coordinator,
@@ -177,3 +179,41 @@ def build_workflow_runtime(
         adapter_worker=adapter_worker,
         fork_worker=fork_worker,
     )
+
+
+_PRODUCTION: WorkflowRuntime | None = None
+
+
+def start_production_workflow_runtime() -> str:
+    """Open the Ledger-backed runtime or fail closed (no JSON fallback)."""
+    global _PRODUCTION
+    from core.research.workflow.migration.manifest import is_activated
+
+    from .formal_write_runtime import mark_migration_required, reset_formal_write_runtime_for_tests
+    from .paths import (
+        legacy_json_runs_exist,
+        research_workflow_data_root,
+        workflow_ledger_path,
+    )
+
+    if _PRODUCTION is not None:
+        return "ready"
+    data_root = research_workflow_data_root()
+    data_root.mkdir(parents=True, exist_ok=True)
+    if legacy_json_runs_exist(data_root) and not is_activated(data_root):
+        mark_migration_required()
+        return "migration_required"
+    try:
+        _PRODUCTION = build_workflow_runtime(workflow_ledger_path(data_root))
+    except Exception:
+        reset_formal_write_runtime_for_tests()
+        return "unavailable"
+    return "ready"
+
+
+def stop_production_workflow_runtime() -> None:
+    global _PRODUCTION
+    runtime = _PRODUCTION
+    _PRODUCTION = None
+    if runtime is not None:
+        runtime.close()
