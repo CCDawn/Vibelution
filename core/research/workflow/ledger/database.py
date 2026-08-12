@@ -38,7 +38,8 @@ class WorkflowLedgerDatabase:
         self.busy_timeout_ms = max(1, int(busy_timeout_ms))
         self.read_pool_capacity = max(1, int(read_pool_capacity))
         self._reader_slots = threading.BoundedSemaphore(self.read_pool_capacity)
-        self._reader_local = threading.local()
+        self._reader_connections: dict[int, Any] = {}
+        self._reader_lock = threading.Lock()
         self._closed = False
         self._writer: Any = None
 
@@ -70,6 +71,7 @@ class WorkflowLedgerDatabase:
         writer = self._writer
         if writer is not None:
             writer.close()
+        self.close_all_readers()
 
     def open_reader(self) -> Any:
         if self._closed:
@@ -79,9 +81,11 @@ class WorkflowLedgerDatabase:
 
     def acquire_read_connection(self) -> Any:
         """Thread-local pooled read-only connection (overflow allowed, no wait)."""
-        cached = getattr(self._reader_local, "connection", None)
-        if cached is not None:
-            return cached
+        thread_id = threading.get_ident()
+        with self._reader_lock:
+            cached = self._reader_connections.get(thread_id)
+            if cached is not None:
+                return cached
         if not self._reader_slots.acquire(blocking=False):
             return self.open_reader()
         try:
@@ -89,17 +93,31 @@ class WorkflowLedgerDatabase:
         except Exception:
             self._reader_slots.release()
             raise
-        self._reader_local.connection = connection
+        with self._reader_lock:
+            self._reader_connections[thread_id] = connection
         return connection
 
     def release_read_connection(self, connection: Any) -> None:
-        if getattr(self._reader_local, "connection", None) is connection:
-            return
+        thread_id = threading.get_ident()
+        with self._reader_lock:
+            if self._reader_connections.get(thread_id) is connection:
+                return
         try:
             connection.close()
         except Exception:
             return
         self._reader_slots.release()
+
+    def close_all_readers(self) -> None:
+        """Close every pooled reader connection (fixes WinError 32 on close)."""
+        with self._reader_lock:
+            connections = list(self._reader_connections.values())
+            self._reader_connections.clear()
+        for connection in connections:
+            try:
+                connection.close()
+            except Exception:
+                continue
 
     def _require_runtime_capabilities(self, connection: Any) -> None:
         try:
