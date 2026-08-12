@@ -15,6 +15,15 @@ pytestmark = pytest.mark.serial
 
 
 @pytest.fixture(autouse=True)
+def isolate_residual_process_scan(monkeypatch):
+    monkeypatch.setattr(
+        launcher_service,
+        "_residual_processes_payload",
+        lambda **_kwargs: {"count": 0, "items": []},
+    )
+
+
+@pytest.fixture(autouse=True)
 def isolate_desktop_session_store(tmp_path, monkeypatch):
     """Keep launcher status tests independent from a developer's live desktop session."""
     from core.launcher import desktop_session_store
@@ -1592,6 +1601,64 @@ def test_launcher_startup_settings_reports_workbench_window_size_env_override(tm
     assert setting["workbench"]["windowSize"] == "1600x900"
     assert setting["workbench"]["effectiveWindowSize"] == "1280x800"
     assert setting["workbench"]["windowSizeEnvOverride"] == "1280x800"
+
+
+def test_launcher_startup_settings_includes_custom_window_size_in_options(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[workbench]\nwindow_size = "960x600"\n', encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_WORKBENCH_WINDOW_SIZE", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_SIZE", raising=False)
+
+    setting = launcher_service.get_launcher_startup_settings()
+    sizes = [item["size"] for item in setting["workbench"]["windowSizeOptions"]]
+
+    assert setting["workbench"]["windowSize"] == "960x600"
+    assert "auto" in sizes
+    assert "960x600" in sizes
+
+
+def test_lifecycle_proof_projects_residual_process_inventory(monkeypatch):
+    monkeypatch.setattr(
+        launcher_service,
+        "_residual_processes_payload",
+        lambda **_kwargs: {
+            "count": 1,
+            "items": [
+                {
+                    "pid": 44100,
+                    "parentPid": 1200,
+                    "kind": "unmanaged_workbench",
+                    "name": "python.exe",
+                    "commandLine": "python -m uvicorn",
+                    "cwd": "C:/repo",
+                    "port": 8001,
+                }
+            ],
+        },
+    )
+
+    proof = launcher_service._lifecycle_proof(
+        runtime_manager={"running": True, "managerPid": 200},
+        workbench={
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendPortConflict": False,
+            "backendPid": 300,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "browserWindowPid": 400,
+            "statusLine": "ready",
+        },
+        active_work_runs=[],
+    )
+
+    assert proof["residualProcesses"]["count"] == 1
+    assert proof["residualProcesses"]["items"][0]["pid"] == 44100
+    assert proof["residualProcesses"]["items"][0]["kind"] == "unmanaged_workbench"
 
 
 def test_launcher_startup_settings_rejects_invalid_workbench_window_size(tmp_path, monkeypatch):
