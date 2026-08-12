@@ -9,46 +9,47 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
-import type { ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
-
-const adapter = vi.hoisted(() => ({
-  executeNodeCommand: vi.fn(),
-  childRunIdFromCommandResult: vi.fn(),
-}));
-
-vi.mock("./nodeCommandAdapter", () => adapter);
-
+import type { CommandOffer } from "../../../api/types/research-workflow/commands";
+import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
+
+const offer: CommandOffer = {
+  command: "start_node",
+  nodeId: "source_finding",
+  available: true,
+  label: "启动 资料寻找",
+  reasonCode: "ready",
+  blockerIds: [],
+  idempotencyKey: "offer:run-parent:source_finding:start_node:v9",
+  expectedRunVersion: 9,
+  payload: {},
+};
 
 type HookValue = ReturnType<typeof useResearchWorkflowCommands>;
 
 function Probe(props: {
-  replaceParams: (patch: Record<string, string | null | undefined>) => void;
+  submitFormalOffer?: (next: CommandOffer) => Promise<unknown>;
   refresh: () => Promise<void>;
   onValue: (value: HookValue) => void;
 }) {
   const value = useResearchWorkflowCommands({
     teamId: "research-team",
     runId: "run-parent",
-    selectedNodeId: "source_extraction",
+    selectedNodeId: "source_finding",
     run: {
       runId: "run-parent",
       runVersion: 9,
       humanTasks: [],
     } as WorkflowRunRecord,
     nodeDetail: {
-      commands: [{
-        command: "fork_evidence_remediation",
-        available: true,
-        reason: "",
-        idempotencyKey: "remediate-1",
-        payload: { evidenceGapCandidateIds: ["candidate-a"] },
-      }],
+      nodeId: "source_finding",
+      commandOffers: [offer],
     } as ResearchWorkflowNodeDetail,
+    commandOffers: [offer],
+    submitFormalOffer: props.submitFormalOffer,
     createRun: vi.fn(),
-    resolveHuman: vi.fn(),
     refresh: props.refresh,
-    replaceParams: props.replaceParams,
+    replaceParams: vi.fn(),
   });
   props.onValue(value);
   return null;
@@ -72,61 +73,53 @@ describe("useResearchWorkflowCommands", () => {
     container.remove();
   });
 
-  async function render(replaceParams: ReturnType<typeof vi.fn>, refresh: ReturnType<typeof vi.fn>) {
+  async function render(
+    refresh: ReturnType<typeof vi.fn>,
+    submitFormalOffer?: (next: CommandOffer) => Promise<unknown>,
+  ) {
     await act(async () => {
-      root.render(<Probe replaceParams={replaceParams} refresh={refresh} onValue={(value) => { latest = value; }} />);
+      root.render(
+        <Probe
+          submitFormalOffer={submitFormalOffer}
+          refresh={refresh}
+          onValue={(value) => {
+            latest = value;
+          }}
+        />,
+      );
     });
   }
 
-  it("navigates to the remediation child run instead of refreshing the superseded parent", async () => {
-    const replaceParams = vi.fn();
+  it("submits the signed CommandOffer and refreshes the snapshot", async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
-    adapter.executeNodeCommand.mockResolvedValue({
-      command: "fork_evidence_remediation",
-      message: "ok",
-      raw: { childRunIds: ["run-child"] },
-    });
-    adapter.childRunIdFromCommandResult.mockReturnValue("run-child");
-    await render(replaceParams, refresh);
+    const submitFormalOffer = vi.fn().mockResolvedValue({ commandId: "cmd-1" });
+    await render(refresh, submitFormalOffer);
 
     await act(async () => {
-      await latest!.runInspectorCommand("fork_evidence_remediation", {
-        operatorReason: "补齐正文证据锚点",
-      });
+      await latest!.submitOffer(offer);
     });
 
-    expect(replaceParams).toHaveBeenCalledWith({
-      runId: "run-child",
-      node: "source_extraction",
-      panel: "node",
-    });
-    expect(refresh).not.toHaveBeenCalled();
+    expect(submitFormalOffer).toHaveBeenCalledWith(offer);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(latest!.error).toBeNull();
   });
 
-  it("fails visibly when the backend response has no child run id", async () => {
-    const replaceParams = vi.fn();
+  it("fails visibly when the formal command channel is missing", async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
-    adapter.executeNodeCommand.mockResolvedValue({
-      command: "fork_evidence_remediation",
-      message: "ok",
-      raw: { childRunIds: [] },
-    });
-    adapter.childRunIdFromCommandResult.mockReturnValue(null);
-    await render(replaceParams, refresh);
+    await render(refresh);
 
     let captured: unknown;
     await act(async () => {
       try {
-        await latest!.runInspectorCommand("fork_evidence_remediation");
+        await latest!.submitOffer(offer);
       } catch (reason) {
         captured = reason;
       }
     });
 
     expect(captured).toBeInstanceOf(Error);
-    expect((captured as Error).message).toContain("响应缺少 childRunIds");
-    expect(replaceParams).not.toHaveBeenCalled();
+    expect((captured as Error).message).toContain("正式命令通道未就绪");
     expect(refresh).not.toHaveBeenCalled();
-    expect(latest!.error).toContain("响应缺少 childRunIds");
+    expect(latest!.error).toContain("正式命令通道未就绪");
   });
 });

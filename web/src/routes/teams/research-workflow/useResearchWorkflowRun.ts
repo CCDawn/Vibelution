@@ -1,33 +1,29 @@
-/** Canonical Run read model: initial HTTP snapshot plus SSE deltas, no polling fallback. */
-import { useCallback, useEffect, useRef, useState } from "react";
+/** Canonical Run read model: formal snapshot plus SSE deltas, no polling fallback. */
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createResearchWorkflowRun,
-  fetchResearchWorkflowCanvas,
   fetchResearchWorkflowDefinition,
-  fetchResearchWorkflowRun,
   resolveResearchWorkflowHumanTask,
   type CreateResearchWorkflowRunInput,
   type WorkflowRunRecord,
 } from "../../../api/researchWorkflow";
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
+import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import {
-  applyEventBatch,
-  applyInitialRunEvents,
-  emptyEventReadModel,
-  type EventReadModelState,
-  type WorkflowEventLike,
-} from "./researchWorkflowEventReducer";
-import {
-  useResearchWorkflowStream,
-  type ResearchWorkflowStreamState,
-} from "./useResearchWorkflowStream";
+  snapshotToCanvasProjection,
+  snapshotToRunRecord,
+} from "./researchWorkflowSnapshotProjection";
+import { useResearchWorkflowEventReplay } from "./useResearchWorkflowEventReplay";
+import { useResearchWorkflowEventStream } from "./useResearchWorkflowEventStream";
+import { useResearchWorkflowSnapshot } from "./useResearchWorkflowSnapshot";
 
 export type UseResearchWorkflowRunResult = {
   projection: WorkflowCanvasProjection | null;
   run: WorkflowRunRecord | null;
+  commandOffers: CommandOffer[];
   error: string | null;
-  streamState: ResearchWorkflowStreamState;
+  streamState: ReturnType<typeof useResearchWorkflowEventStream>["state"];
   busy: boolean;
   lastSequence: number;
   refresh: () => Promise<void>;
@@ -42,34 +38,51 @@ export function useResearchWorkflowRun(
   teamId: string,
   runId: string,
 ): UseResearchWorkflowRunResult {
-  const [projection, setProjection] = useState<WorkflowCanvasProjection | null>(null);
-  const [run, setRun] = useState<WorkflowRunRecord | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const snapshotState = useResearchWorkflowSnapshot(teamId, runId);
+  const replay = useResearchWorkflowEventReplay({
+    teamId,
+    runId,
+    enabled: Boolean(teamId.trim() && runId.trim() && snapshotState.snapshot),
+    latestEventSequence: snapshotState.snapshot?.latestEventSequence ?? 0,
+  });
+  const eventState = replay.model;
+  const [definitionProjection, setDefinitionProjection] =
+    useState<WorkflowCanvasProjection | null>(null);
+  const [definitionError, setDefinitionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [lastSequence, setLastSequence] = useState(0);
   const mountedRef = useRef(true);
-  const scopeRef = useRef({ teamId, runId });
-  const refreshGenerationRef = useRef(0);
-  const eventStateRef = useRef<EventReadModelState>(emptyEventReadModel(runId));
+  const runRef = useRef<WorkflowRunRecord | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  scopeRef.current = { teamId, runId };
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimerRef.current) return;
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void snapshotState.refresh();
+    }, 80);
+  }, [snapshotState.refresh]);
 
-  const refresh = useCallback(async () => {
-    const generation = ++refreshGenerationRef.current;
-    const scope = { ...scopeRef.current };
-    const canonicalTeamId = scope.teamId.trim();
-    if (!canonicalTeamId) {
-      setProjection(null);
-      setRun(null);
-      setLoadError("缺少 teamId，无法读取科研流程");
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const canonicalTeamId = teamId.trim();
+    if (runId.trim() || !canonicalTeamId) {
+      setDefinitionProjection(null);
+      setDefinitionError(null);
       return;
     }
-    try {
-      if (!scope.runId) {
+    let cancelled = false;
+    void (async () => {
+      try {
         const definition = await fetchResearchWorkflowDefinition();
-        if (!mountedRef.current || generation !== refreshGenerationRef.current) return;
-        setProjection({
+        if (cancelled || !mountedRef.current) return;
+        setDefinitionProjection({
           definition: definition.definition,
           run: {
             runId: null,
@@ -81,114 +94,45 @@ export function useResearchWorkflowRun(
             pendingHumanTasks: [],
           },
         });
-        setRun(null);
-        eventStateRef.current = emptyEventReadModel("");
-        setLastSequence(0);
-        setLoadError(null);
-        return;
+        setDefinitionError(null);
+      } catch (reason) {
+        if (cancelled || !mountedRef.current) return;
+        setDefinitionError(reason instanceof Error ? reason.message : String(reason));
       }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, teamId]);
 
-      const [record, canvas] = await Promise.all([
-        fetchResearchWorkflowRun(scope.runId, { teamId: canonicalTeamId }),
-        fetchResearchWorkflowCanvas(scope.runId, { teamId: canonicalTeamId }),
-      ]);
-      if (
-        !mountedRef.current ||
-        generation !== refreshGenerationRef.current ||
-        scopeRef.current.runId !== scope.runId ||
-        scopeRef.current.teamId.trim() !== canonicalTeamId
-      ) {
-        return;
-      }
-      const eventState = applyInitialRunEvents(
-        scope.runId,
-        record.events as WorkflowEventLike[] | undefined,
-        eventStateRef.current.runId === scope.runId ? eventStateRef.current.events : [],
-      );
-      eventStateRef.current = eventState;
-      setLastSequence(eventState.lastSequence);
-      setRun({ ...record, events: eventState.events });
-      setProjection({
-        definition: canvas.definition,
-        run: {
-          ...canvas.run,
-          runId: record.runId,
-          teamId: record.teamId,
-          runVersion: record.runVersion,
-          status: record.status as WorkflowCanvasProjection["run"]["status"],
-          runtimeCurrentNodeIds: record.runtimeCurrentNodeIds ?? [],
-          pendingHumanTasks: (record.humanTasks ?? [])
-            .filter((task) => String(task.status) === "pending")
-            .map((task) => ({
-              taskId: String(task.taskId ?? ""),
-              nodeId: String(task.nodeId ?? ""),
-              status: String(task.status ?? ""),
-              prompt: String(task.prompt ?? ""),
-            })),
-        },
-      });
-      setLoadError(null);
-    } catch (error) {
-      if (mountedRef.current && generation === refreshGenerationRef.current) {
-        setLoadError(error instanceof Error ? error.message : String(error));
-      }
-    }
-  }, []);
-
-  const scheduleRefresh = useCallback(() => {
-    if (refreshTimerRef.current) return;
-    refreshTimerRef.current = setTimeout(() => {
-      refreshTimerRef.current = null;
-      void refresh();
-    }, 80);
-  }, [refresh]);
-
-  const onStreamDelta = useCallback(
-    (event: WorkflowEventLike) => {
-      const activeRunId = scopeRef.current.runId;
-      if (!activeRunId) return;
-      const next = applyEventBatch(eventStateRef.current, {
-        runId: activeRunId,
-        events: [event],
-      });
-      eventStateRef.current = next;
-      setLastSequence(next.lastSequence);
-      setRun((current) =>
-        current?.runId === activeRunId ? { ...current, events: next.events } : current,
-      );
+  useEffect(() => {
+    if (eventState.resyncRequired) {
       scheduleRefresh();
-    },
-    [scheduleRefresh],
-  );
+    }
+  }, [eventState.resyncRequired, scheduleRefresh]);
 
-  const onStreamSnapshot = useCallback(
-    (cursor: number) => {
-      if (cursor > eventStateRef.current.lastSequence) scheduleRefresh();
-    },
-    [scheduleRefresh],
-  );
-
-  const stream = useResearchWorkflowStream({
+  const stream = useResearchWorkflowEventStream({
     teamId,
     runId,
-    onDelta: onStreamDelta,
-    onSnapshot: onStreamSnapshot,
+    afterSequence: eventState.lastSequence,
+    initialAfterSequence: eventState.lastSequence,
+    onEvent: replay.applyStreamEvent,
+    enabled: Boolean(teamId.trim() && runId.trim() && replay.ready),
   });
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    };
-  }, []);
+  const projection = useMemo(() => {
+    if (snapshotState.snapshot) {
+      return snapshotToCanvasProjection(snapshotState.snapshot);
+    }
+    return definitionProjection;
+  }, [definitionProjection, snapshotState.snapshot]);
 
-  useEffect(() => {
-    eventStateRef.current = emptyEventReadModel(runId);
-    setLastSequence(0);
-    refreshGenerationRef.current += 1;
-    void refresh();
-  }, [refresh, runId, teamId]);
+  const run = useMemo(() => {
+    if (!snapshotState.snapshot) return null;
+    return snapshotToRunRecord(snapshotState.snapshot, eventState.events);
+  }, [eventState.events, snapshotState.snapshot]);
+
+  runRef.current = run;
 
   const createRun = useCallback(async (input: CreateResearchWorkflowRunInput) => {
     setBusy(true);
@@ -201,7 +145,7 @@ export function useResearchWorkflowRun(
 
   const resolveHuman = useCallback(
     async (taskId: string, decision: "accept" | "reject" | "revise") => {
-      const current = run;
+      const current = runRef.current;
       if (!current) throw new Error("当前没有可操作的工作流运行");
       setBusy(true);
       try {
@@ -211,23 +155,31 @@ export function useResearchWorkflowRun(
           idempotencyKey: `human:${current.runId}:${taskId}:${decision}:v${current.runVersion}`,
           decision,
         });
-        await refresh();
+        await snapshotState.refresh();
         return updated;
       } finally {
         if (mountedRef.current) setBusy(false);
       }
     },
-    [refresh, run],
+    [snapshotState.refresh],
   );
+
+  const error =
+    snapshotState.error
+    || definitionError
+    || replay.error
+    || stream.error
+    || (eventState.resyncRequired ? "工作流事件序列出现缺口，正在重新同步" : null);
 
   return {
     projection,
     run,
-    error: loadError || stream.error,
+    commandOffers: snapshotState.snapshot?.commandOffers ?? [],
+    error,
     streamState: stream.state,
     busy,
-    lastSequence,
-    refresh,
+    lastSequence: eventState.lastSequence,
+    refresh: snapshotState.refresh,
     createRun,
     resolveHuman,
   };

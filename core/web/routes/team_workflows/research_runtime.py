@@ -8,13 +8,24 @@ from fastapi import Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from core.web.services.team_workflow.research_runtime.event_stream import (
-    iter_workflow_sse,
-    parse_last_event_id,
+from core.web.services.team_workflow.research_runtime.formal_read_runtime import (
+    FormalReadRuntimeUnavailable,
+    get_event_replay_service,
+    get_event_stream_service,
+    get_query_service,
 )
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
     current_server_operator,
     server_operator_scope_from_http,
+)
+from core.web.services.team_workflow.research_runtime.query_service import (
+    RunNotFoundError as QueryRunNotFoundError,
+    TeamScopeMismatchError as QueryTeamScopeMismatchError,
+    WorkflowLedgerUnavailable,
+    WorkflowQueryError,
+)
+from core.web.services.team_workflow.research_runtime.event_stream_service import (
+    InvalidLastEventIdError,
 )
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
@@ -146,11 +157,49 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
         "runtime_unavailable",
         "checkpointer_unavailable",
         "agent_task_service_unavailable",
+        "workflow_ledger_unavailable",
     }:
         status = 503
     else:
         status = 422
     return HTTPException(status_code=status, detail={"code": code, "message": str(exc)})
+
+
+def _map_query_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, FormalReadRuntimeUnavailable):
+        return HTTPException(
+            status_code=503,
+            detail={"code": "workflow_ledger_unavailable", "message": str(exc)},
+        )
+    if isinstance(exc, WorkflowLedgerUnavailable):
+        return HTTPException(
+            status_code=503,
+            detail={"code": "workflow_ledger_unavailable", "message": str(exc)},
+        )
+    if isinstance(exc, (QueryTeamScopeMismatchError, QueryRunNotFoundError)):
+        return HTTPException(
+            status_code=404,
+            detail={"code": getattr(exc, "code", "run_not_found"), "message": str(exc)},
+        )
+    if isinstance(exc, InvalidLastEventIdError):
+        return HTTPException(
+            status_code=422,
+            detail={"code": "invalid_event_cursor", "message": str(exc)},
+        )
+    if isinstance(exc, WorkflowQueryError):
+        status = (
+            404
+            if exc.code in {"team_scope_mismatch", "run_not_found", "unknown_node"}
+            else 422
+        )
+        return HTTPException(
+            status_code=status,
+            detail={"code": exc.code, "message": str(exc)},
+        )
+    return HTTPException(
+        status_code=500,
+        detail={"code": "workflow_query_error", "message": str(exc)},
+    )
 
 
 
@@ -278,17 +327,35 @@ def research_workflow_run_canvas(
         raise _map_error(exc) from exc
 
 
+@router.get("/research/workflow-runs/{run_id}/snapshot")
+def research_workflow_run_snapshot(
+    run_id: str,
+    team_id: str = Query(..., alias="teamId", min_length=1),
+) -> dict:
+    try:
+        snapshot = get_query_service().get_snapshot(
+            team_id=_canonical_team_id(team_id),
+            run_id=run_id,
+        )
+        return snapshot.to_dict()
+    except Exception as exc:
+        raise _map_query_error(exc) from exc
+
+
 @router.get("/research/workflow-runs/{run_id}/nodes/{node_id}")
 def research_workflow_node_detail(
     run_id: str,
     node_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
-    _authorize_run(run_id, team_id)
     try:
-        return _svc().get_node_detail(run_id, node_id)
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
+        return get_query_service().get_node_detail(
+            team_id=_canonical_team_id(team_id),
+            run_id=run_id,
+            node_id=node_id,
+        ).to_dict()
+    except Exception as exc:
+        raise _map_query_error(exc) from exc
 
 
 @router.get("/research/workflow-runs/{run_id}/events")
@@ -296,33 +363,58 @@ def research_workflow_events(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
     after_sequence: int = Query(0, alias="afterSequence"),
+    limit: int = Query(500, ge=1, le=2000),
 ) -> dict:
-    _authorize_run(run_id, team_id)
     try:
-        return _svc().list_events(run_id, after_sequence=after_sequence)
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
+        page = get_event_replay_service().list_events(
+            team_id=_canonical_team_id(team_id),
+            run_id=run_id,
+            after_sequence=after_sequence,
+            limit=limit,
+        )
+        return page.to_dict()
+    except FormalReadRuntimeUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "workflow_ledger_unavailable",
+                "message": "formal workflow event replay requires Workflow Ledger",
+            },
+        )
+    except Exception as exc:
+        raise _map_query_error(exc) from exc
 
 
 @router.get("/research/workflow-runs/{run_id}/stream")
 def research_workflow_event_stream(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
+    after_sequence: int | None = Query(None, alias="afterSequence"),
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
 ) -> StreamingResponse:
+    scoped = _canonical_team_id(team_id)
     try:
-        parse_last_event_id(last_event_id)
-        _authorize_run(run_id, team_id)
-    except ValueError as exc:
+        stream = get_event_stream_service()
+        # Validate cursor/scope without materializing the full replay.
+        stream.validate_stream_request(
+            team_id=scoped,
+            run_id=run_id,
+            after_sequence=after_sequence,
+            last_event_id=last_event_id,
+        )
+    except FormalReadRuntimeUnavailable as exc:
         raise HTTPException(
-            status_code=422,
-            detail={"code": "invalid_event_cursor", "message": str(exc)},
+            status_code=503,
+            detail={"code": "workflow_ledger_unavailable", "message": str(exc)},
         ) from exc
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
+    except Exception as exc:
+        raise _map_query_error(exc) from exc
+
     return StreamingResponse(
-        iter_workflow_sse(
-            lambda: _svc().authorize_run_access(run_id, team_id=team_id),
+        stream.iter_sse(
+            team_id=scoped,
+            run_id=run_id,
+            after_sequence=after_sequence,
             last_event_id=last_event_id,
         ),
         media_type="text/event-stream",

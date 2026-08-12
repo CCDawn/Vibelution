@@ -1,7 +1,124 @@
 /**
- * Single owner for research workflow event merge / dedupe.
- * Used by the hook and future SSE apply path (applyEventBatch).
+ * Formal event merge reducer (T6).
+ * Keeps legacy helpers below for pre-T7 pages; formal path uses applyFormalEvent.
  */
+
+import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
+
+export type FormalEventReadModel = {
+  generation: number;
+  teamId: string;
+  runId: string;
+  events: WorkflowEventEnvelope[];
+  lastSequence: number;
+  seenEventIds: Record<string, true>;
+  resyncRequired: boolean;
+  pendingRequestId: string | null;
+  commandError: string | null;
+};
+
+export function emptyFormalEventReadModel(
+  teamId = "",
+  runId = "",
+): FormalEventReadModel {
+  return {
+    generation: 0,
+    teamId,
+    runId,
+    events: [],
+    lastSequence: 0,
+    seenEventIds: {},
+    resyncRequired: false,
+    pendingRequestId: null,
+    commandError: null,
+  };
+}
+
+export function switchFormalEventScope(
+  state: FormalEventReadModel,
+  options: { teamId: string; runId: string },
+): FormalEventReadModel {
+  return {
+    ...emptyFormalEventReadModel(options.teamId, options.runId),
+    generation: state.generation + 1,
+  };
+}
+
+/**
+ * Hydrate the formal event cursor from Snapshot.latestEventSequence.
+ * Does not fabricate events — only advances lastSequence so SSE afterSequence
+ * starts at latest+1 without a false gap.
+ */
+export function hydrateFormalEventFromSnapshot(
+  state: FormalEventReadModel,
+  options: {
+    teamId: string;
+    runId: string;
+    latestEventSequence: number;
+  },
+): FormalEventReadModel {
+  const latest = Number(options.latestEventSequence);
+  const lastSequence =
+    Number.isFinite(latest) && latest > 0 ? Math.floor(latest) : 0;
+  return {
+    ...emptyFormalEventReadModel(options.teamId, options.runId),
+    generation: state.generation + 1,
+    lastSequence,
+  };
+}
+
+export function applyFormalEvent(
+  state: FormalEventReadModel,
+  event: WorkflowEventEnvelope,
+): FormalEventReadModel {
+  if (state.resyncRequired) {
+    return state;
+  }
+  if (event.runId !== state.runId || event.teamId !== state.teamId) {
+    return state;
+  }
+  const eventId = String(event.eventId || "").trim();
+  if (eventId && state.seenEventIds[eventId]) {
+    return state;
+  }
+  const sequence = Number(event.sequence);
+  if (!Number.isFinite(sequence) || sequence <= 0) {
+    return state;
+  }
+  if (sequence <= state.lastSequence) {
+    return state;
+  }
+  if (sequence > state.lastSequence + 1) {
+    return { ...state, resyncRequired: true };
+  }
+  const seenEventIds = eventId
+    ? { ...state.seenEventIds, [eventId]: true as const }
+    : state.seenEventIds;
+  return {
+    ...state,
+    events: [...state.events, event],
+    lastSequence: sequence,
+    seenEventIds,
+  };
+}
+
+export function applyFormalEventBatch(
+  state: FormalEventReadModel,
+  events: WorkflowEventEnvelope[],
+): FormalEventReadModel {
+  return events.reduce((current, event) => applyFormalEvent(current, event), state);
+}
+
+export function acceptFormalGeneration(
+  state: FormalEventReadModel,
+  generation: number,
+): boolean {
+  return state.generation === generation;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Legacy helpers retained for pre-T7 pages (not a conversion layer).         */
+/* -------------------------------------------------------------------------- */
 
 export type WorkflowEventLike = {
   eventId?: string;
@@ -27,9 +144,6 @@ function eventKey(event: WorkflowEventLike): string {
   return `anon:${JSON.stringify(event)}`;
 }
 
-/**
- * Merge events by eventId (preferred) or sequence; keep order by sequence then eventId.
- */
 export function mergeEventsByIdentity(
   existing: WorkflowEventLike[],
   incoming: WorkflowEventLike[],
@@ -53,32 +167,20 @@ export function maxSequence(events: WorkflowEventLike[]): number {
   return events.reduce((max, evt) => Math.max(max, Number(evt.sequence) || 0), 0);
 }
 
-/**
- * Unified batch apply entry (polling + future SSE).
- * - Resets when runId changes
- * - Dedupes by eventId/sequence
- * - Does not invent a second run status authority
- */
 export function applyEventBatch(
   state: EventReadModelState,
   options: {
     runId: string;
     events?: WorkflowEventLike[] | null;
-    /** When true, treat `events` as the full authority list for this run. */
     replace?: boolean;
   },
 ): EventReadModelState {
   const runId = String(options.runId || "");
-  const base =
-    runId && state.runId === runId
-      ? state
-      : emptyEventReadModel(runId);
-
+  const base = runId && state.runId === runId ? state : emptyEventReadModel(runId);
   const incoming = Array.isArray(options.events) ? options.events : [];
   const merged = options.replace
     ? mergeEventsByIdentity([], incoming)
     : mergeEventsByIdentity(base.events, incoming);
-
   return {
     runId,
     events: merged,
@@ -86,10 +188,6 @@ export function applyEventBatch(
   };
 }
 
-/**
- * Initial load: full record.events is authority; do not also concat the same
- * incremental page without dedupe (avoids 3 → 6 duplicates).
- */
 export function applyInitialRunEvents(
   runId: string,
   recordEvents: WorkflowEventLike[] | null | undefined,
@@ -97,7 +195,6 @@ export function applyInitialRunEvents(
 ): EventReadModelState {
   const fromRecord = Array.isArray(recordEvents) ? recordEvents : [];
   const fromIncremental = Array.isArray(incrementalEvents) ? incrementalEvents : [];
-  // Prefer record as base; merge incremental for any extra newer events only.
   return applyEventBatch(emptyEventReadModel(runId), {
     runId,
     events: [...fromRecord, ...fromIncremental],

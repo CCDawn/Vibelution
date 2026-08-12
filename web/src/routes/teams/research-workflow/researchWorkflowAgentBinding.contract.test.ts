@@ -73,8 +73,8 @@ describe("researchWorkflowAgentBinding.contract", () => {
   });
 
   it("node inspector exposes only backend-declared node commands", () => {
-    expect(inspectorSource).toContain("detail.commands");
-    expect(commandSectionSource).toContain("capabilities");
+    expect(inspectorSource).toContain("detail.commandOffers");
+    expect(commandSectionSource).toContain("offers");
     expect(inspectorSource).not.toContain("onOpenPanel");
     expect(inspectorSource).not.toContain("drawerPanel");
   });

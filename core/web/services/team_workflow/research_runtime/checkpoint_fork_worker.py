@@ -30,12 +30,24 @@ class CheckpointForkWorker:
         owner_id: str = "checkpoint-fork-worker",
         lease_ms: int = 30_000,
         now_provider: Callable[[], int] | None = None,
+        commit_hook: Callable[[], None] | None = None,
     ) -> None:
         self._store = store
         self._coordinator = coordinator
         self._owner = owner_id
         self._lease_ms = lease_ms
         self._now = now_provider or (lambda: int(time.time() * 1000))
+        self._commit_hook = commit_hook
+
+    def _submit(self, mutate, *, force_flush: bool = True):
+        hook = self._commit_hook
+
+        def wrapped(uow):
+            if hook is not None:
+                uow.after_commit(hook)
+            return mutate(uow)
+
+        return self._store.submit(wrapped, force_flush=force_flush)
 
     def run_once(self, limit: int = 8) -> int:
         leased = outbox_api.lease_ready_actions(
@@ -141,7 +153,7 @@ class CheckpointForkWorker:
                 )
             uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        self._submit(mutate, force_flush=True).result(timeout=30)
 
     def _fail_fork(
         self,
@@ -177,4 +189,4 @@ class CheckpointForkWorker:
                         finished_at_ms=now_ms,
                     )
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        self._submit(mutate, force_flush=True).result(timeout=30)

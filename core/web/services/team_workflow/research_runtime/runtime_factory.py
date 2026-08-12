@@ -23,6 +23,7 @@ from .adapter_dispatch_worker import AdapterDispatchWorker
 from .adapters.domain_adapters import register_default_adapters
 from .checkpoint_fork_worker import CheckpointForkWorker
 from .command_service import WorkflowCommandService
+from .formal_read_runtime import configure_formal_read_runtime, wake_stream_readers
 from .graph_dispatch_worker import GraphDispatchWorker
 from .real_domain_ports import RealDomainPorts
 from .real_readiness_context import RealDomainReadinessContext
@@ -122,12 +123,24 @@ def build_workflow_runtime(
         service_overrides=domain_overrides,
     )
 
+    # Formal read must be configured before wake paths reference the stream notifier.
+    configure_formal_read_runtime(
+        store=store,
+        readiness_service=readiness,
+        readiness_context=lambda: readiness_context,
+    )
+
+    def combined_wake() -> None:
+        if wake_worker is not None:
+            wake_worker()
+        wake_stream_readers()
+
     command_service = WorkflowCommandService(
         store=store,
         readiness_service=readiness,
         readiness_context=lambda: readiness_context,
         clock=clock,
-        wake_worker=wake_worker,
+        wake_worker=combined_wake,
         coordinator_factory=lambda: coordinator,
     )
     graph_worker = GraphDispatchWorker(
@@ -136,6 +149,7 @@ def build_workflow_runtime(
         owner_id="graph-worker",
         readiness_service=readiness,
         readiness_context=lambda: readiness_context,
+        commit_hook=wake_stream_readers,
     )
     adapter_worker = AdapterDispatchWorker(
         store=store,
@@ -143,11 +157,13 @@ def build_workflow_runtime(
         ports=ports,
         owner_id="adapter-worker",
         successor_fn=lambda node_id: successor_map().get(node_id, ()),
+        after_commit_hook=wake_stream_readers,
     )
     fork_worker = CheckpointForkWorker(
         store=store,
         coordinator=coordinator,
         owner_id="checkpoint-fork-worker",
+        commit_hook=wake_stream_readers,
     )
     return WorkflowRuntime(
         store=store,
