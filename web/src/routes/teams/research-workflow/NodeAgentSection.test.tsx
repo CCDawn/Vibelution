@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
-import type { ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
+import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 import { NodeAgentSection } from "./NodeAgentSection";
 
 describe("NodeAgentSection", () => {
@@ -11,16 +11,14 @@ describe("NodeAgentSection", () => {
     const detail = {
       nodeId: "source_finding",
       primaryRoleKey: "source_finder",
-      bindingSnapshot: {
-        agentId: "agent-finder",
-        displayName: "资料检索 Agent",
-        resolvedFrom: "node_override",
-      },
-      sessionBinding: {
-        sessionId: "session-1",
-        status: "bound",
-      },
-    } as unknown as ResearchWorkflowNodeDetail;
+      agentId: "agent-finder",
+      displayName: "资料检索 Agent",
+      resolvedFrom: "node_override",
+      sessionId: "session-1",
+      taskId: "task-1",
+      turnId: "turn-1",
+      sessionAnchorDegraded: false,
+    } as ResearchWorkflowNodeDetail;
 
     const markup = renderToStaticMarkup(
       <MemoryRouter>
