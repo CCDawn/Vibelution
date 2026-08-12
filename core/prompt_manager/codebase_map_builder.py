@@ -22,7 +22,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 
-from core.logging import debug_logger
+from core.logging import debug as _debug_logger
 
 _SCAN_DIRS = ["tools", "core", "tests", "config"]
 
@@ -512,9 +512,9 @@ def scan_and_build_codebase_map(project_root: Optional[Path] = None, force: bool
     map_path = _get_codebase_map_path()
     try:
         map_path.write_text(content, encoding="utf-8")
-        debug_logger.info(f"[CodebaseMap] 地图已写入: {map_path}")
+        _debug_logger.info(f"[CodebaseMap] 地图已写入: {map_path}")
     except Exception as e:
-        debug_logger.warning(f"[CodebaseMap] 写入失败: {e}")
+        _debug_logger.warning(f"[CodebaseMap] 写入失败: {e}")
 
     # 写入 .meta 文件
     _write_meta(map_path, files, timestamp)
@@ -640,9 +640,9 @@ def _update_map_file(map_path: Path, new_content: str, project_root: Path):
 
     try:
         map_path.write_text(new_content, encoding="utf-8")
-        debug_logger.info("[CodebaseMap] 增量更新完成")
+        _debug_logger.info("[CodebaseMap] 增量更新完成")
     except Exception as e:
-        debug_logger.warning(f"[CodebaseMap] 增量写入失败: {e}")
+        _debug_logger.warning(f"[CodebaseMap] 增量写入失败: {e}")
 
 
 def _replace_file_entry_in_map(content: str, filepath: str, new_entry: str) -> str:

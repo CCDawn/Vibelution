@@ -300,8 +300,8 @@ class PromptManager:
         # 从 config.toml 读取默认章节列表
         self._default_sections = self._load_default_sections_from_config()
 
-        from core.logging import debug_logger
-        debug_logger.info(
+        from core.logging import debug as _debug_logger
+        _debug_logger.info(
             f"[PromptManager] 初始化 - 静态: {self._static_root}, "
             f"workspace={'启用' if enable_workspace else '禁用'}"
         )
@@ -354,8 +354,8 @@ class PromptManager:
         # MEMORY 章节：compute 引用 self._build_context
         self._sections["MEMORY"] = make_memory_section(self._build_context)
 
-        from core.logging import debug_logger
-        debug_logger.debug(
+        from core.logging import debug as _debug_logger
+        _debug_logger.debug(
             f"[PromptManager] 注册默认章节: {list(self._sections.keys())}"
         )
 
@@ -364,8 +364,8 @@ class PromptManager:
         self._sections[section.name] = section
         self._section_cache.invalidate(section.name)
         self._invalidate_build_reuse_cache()
-        from core.logging import debug_logger
-        debug_logger.debug(
+        from core.logging import debug as _debug_logger
+        _debug_logger.debug(
             f"[PromptManager] 注册章节: {section.name} "
             f"(priority={section.priority}, cache_break={section.cache_break})"
         )
@@ -527,8 +527,8 @@ class PromptManager:
         if reuse_allowed:
             self._store_reusable_build(cache_key, sp, self._last_index, self._last_build_summary)
 
-        from core.logging import debug_logger
-        debug_logger.info(
+        from core.logging import debug as _debug_logger
+        _debug_logger.info(
             f"[PromptManager] 构建完成 (sections={len(selected)}, "
             f"len={len(prompt_text)}, "
             f"cache={self._section_cache.stats})"
@@ -1072,8 +1072,8 @@ class PromptManager:
         except Exception:
             pass
         try:
-            from core.logging import debug_logger
-            debug_logger.info(f"[prompt_build] {message}")
+            from core.logging import debug as _debug_logger
+            _debug_logger.info(f"[prompt_build] {message}")
         except Exception:
             pass
         if assembly.get("assemblyMode") != "legacy_observe":
@@ -1113,8 +1113,8 @@ class PromptManager:
             components: 要激活的章节名称列表，如 ["SOUL", "SPEC", "MEMORY"]
         """
         if not components:
-            from core.logging import debug_logger
-            debug_logger.debug("[PromptManager] select_components 收到空列表，重置为默认")
+            from core.logging import debug as _debug_logger
+            _debug_logger.debug("[PromptManager] select_components 收到空列表，重置为默认")
             self._active_sections_override = None
             self._invalidate_build_reuse_cache()
             return
@@ -1124,11 +1124,11 @@ class PromptManager:
         if known:
             self._active_sections_override = known
             self._invalidate_build_reuse_cache()
-            from core.logging import debug_logger
-            debug_logger.info(f"[PromptManager] 动态切换章节: {known}")
+            from core.logging import debug as _debug_logger
+            _debug_logger.info(f"[PromptManager] 动态切换章节: {known}")
         else:
-            from core.logging import debug_logger
-            debug_logger.warning(
+            from core.logging import debug as _debug_logger
+            _debug_logger.warning(
                 f"[PromptManager] 未知章节: {components}，保持当前不变"
             )
 
@@ -1193,8 +1193,8 @@ class PromptManager:
         self.current_goal = normalized_goal
         self._section_cache.invalidate("MEMORY")
         self._invalidate_build_reuse_cache()
-        from core.logging import debug_logger
-        debug_logger.debug(
+        from core.logging import debug as _debug_logger
+        _debug_logger.debug(
             f"[PromptManager] current_goal 更新: {normalized_goal[:80]}"
         )
 
@@ -1214,8 +1214,8 @@ class PromptManager:
             self.state_memory = normalized
             self._section_cache.invalidate("MEMORY")
             self._invalidate_build_reuse_cache()
-            from core.logging import debug_logger
-            debug_logger.debug(
+            from core.logging import debug as _debug_logger
+            _debug_logger.debug(
                 f"[PromptManager] state_memory 更新，长度={len(normalized)}"
             )
 
@@ -1249,11 +1249,11 @@ class PromptManager:
         try:
             state_memory_path = self._dynamic_root / "STATE_MEMORY.md"
             state_memory_path.write_text(memory_text, encoding="utf-8")
-            from core.logging import debug_logger
-            debug_logger.info(f"[PromptManager] state_memory 已落盘: {state_memory_path}")
+            from core.logging import debug as _debug_logger
+            _debug_logger.info(f"[PromptManager] state_memory 已落盘: {state_memory_path}")
         except Exception as e:
-            from core.logging import debug_logger
-            debug_logger.warning(f"[PromptManager] state_memory 落盘失败: {e}")
+            from core.logging import debug as _debug_logger
+            _debug_logger.warning(f"[PromptManager] state_memory 落盘失败: {e}")
 
     def _load_persisted_state_memory(self):
         try:
@@ -1266,13 +1266,13 @@ class PromptManager:
                 if content:
                     self.state_memory = content
                     self._last_persisted_state_memory = content
-                    from core.logging import debug_logger
-                    debug_logger.info(
+                    from core.logging import debug as _debug_logger
+                    _debug_logger.info(
                         f"[PromptManager] 从会话恢复 state_memory，长度={len(content)}"
                     )
         except Exception as e:
-            from core.logging import debug_logger
-            debug_logger.warning(f"[PromptManager] 恢复 state_memory 失败: {e}")
+            from core.logging import debug as _debug_logger
+            _debug_logger.warning(f"[PromptManager] 恢复 state_memory 失败: {e}")
 
     # ------------------------------------------------------------------------
     # 默认配置
@@ -1283,8 +1283,8 @@ class PromptManager:
             from config import get_config
             components = get_config().prompt.default_components
             if components:
-                from core.logging import debug_logger
-                debug_logger.info(f"[PromptManager] 从 config 加载默认章节: {components}")
+                from core.logging import debug as _debug_logger
+                _debug_logger.info(f"[PromptManager] 从 config 加载默认章节: {components}")
                 return components
         except Exception:
             pass
@@ -1305,12 +1305,12 @@ class PromptManager:
 
         try:
             path.write_text(default_content, encoding="utf-8")
-            from core.logging import debug_logger
-            debug_logger.info(f"[PromptManager] 自动生成默认模板: workspace/prompts/{name}")
+            from core.logging import debug as _debug_logger
+            _debug_logger.info(f"[PromptManager] 自动生成默认模板: workspace/prompts/{name}")
             return False
         except Exception as e:
-            from core.logging import debug_logger
-            debug_logger.warning(f"[PromptManager] 生成 {name} 失败: {e}")
+            from core.logging import debug as _debug_logger
+            _debug_logger.warning(f"[PromptManager] 生成 {name} 失败: {e}")
             return False
 
     def _get_default_template(self, name: str) -> Optional[str]:
@@ -1343,8 +1343,8 @@ class PromptManager:
         """清除章节缓存。name 为 None 则清除全部。"""
         self._section_cache.invalidate(name)
         self._invalidate_build_reuse_cache()
-        from core.logging import debug_logger
-        debug_logger.debug(
+        from core.logging import debug as _debug_logger
+        _debug_logger.debug(
             f"[PromptManager] 清除缓存: {name or '全部'}"
         )
 

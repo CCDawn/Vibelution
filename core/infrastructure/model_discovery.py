@@ -22,7 +22,7 @@ from typing import Optional, Dict, Any
 from enum import Enum
 
 
-from core.logging import debug_logger
+from core.logging import debug as _debug_logger
 
 
 class DiscoveryStatus(Enum):
@@ -164,7 +164,7 @@ class ModelDiscovery:
             ModelInfo: 模型信息
         """
         if not self.enabled:
-            debug_logger.info("模型动态发现已禁用，使用配置文件中的值")
+            _debug_logger.info("模型动态发现已禁用，使用配置文件中的值")
             return self._create_skipped_info()
 
         # 尝试各个端点
@@ -174,11 +174,11 @@ class ModelDiscovery:
                 if result.status == DiscoveryStatus.SUCCESS:
                     return result
             except Exception as e:
-                debug_logger.debug(f"尝试端点 {endpoint} 失败: {e}")
+                _debug_logger.debug(f"尝试端点 {endpoint} 失败: {e}")
                 continue
 
         # 所有端点都失败，返回 fallback
-        debug_logger.warning("模型发现失败，使用 fallback 值")
+        _debug_logger.warning("模型发现失败，使用 fallback 值")
         return self._create_fallback_info()
 
     async def _try_endpoint(self, endpoint: str) -> ModelInfo:
@@ -197,7 +197,7 @@ class ModelDiscovery:
         if endpoint.startswith("v1/"):
             endpoint = endpoint[3:]  # 去掉 "v1/"
         url = f"{self.api_base}/{endpoint}"
-        debug_logger.info(f"尝试模型发现: {url}")
+        _debug_logger.info(f"尝试模型发现: {url}")
 
         headers = {}
         if self.api_key:
@@ -208,7 +208,7 @@ class ModelDiscovery:
             response.raise_for_status()
 
             data = response.json()
-            debug_logger.debug(f"收到响应: {data}")
+            _debug_logger.debug(f"收到响应: {data}")
 
             return self._parse_response(data, endpoint)
 
@@ -263,7 +263,7 @@ class ModelDiscovery:
         model_name = target_model.get("id", self.model_name or "unknown")
 
         if context_window <= 0:
-            debug_logger.warning(
+            _debug_logger.warning(
                 f"模型 {model_name} 未在发现响应中提供 context_window（禁止默认兜底）"
             )
             return ModelInfo(
@@ -348,7 +348,7 @@ class ModelDiscovery:
             emergency_summary_chars=emergency_summary,
         )
 
-        debug_logger.info(
+        _debug_logger.info(
             f"模型发现成功: {model_name}\n"
             f"  - context_window: {context_window}\n"
             f"  - suggested_max_tokens: {suggested_max_tokens}\n"

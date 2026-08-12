@@ -22,7 +22,7 @@ from core.research import ResearchThemeDiscoveryService
 from core.infrastructure.workspace_manager import get_workspace
 from core.chat.chat_task_types import trim_lines
 from core.ui.chat_state import load_chat_state
-from core.logging.logger import debug as _debug_logger
+from core.logging import debug as _debug_logger
 from config.public_config import build_effective_config, load_public_config
 from . import agent_directory_service, agent_mode_binding_service, prompt_template_service, research_organization_service, session_service, team_service
 from .config_service import _profile_label

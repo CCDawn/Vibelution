@@ -4043,7 +4043,6 @@ def _ledger_latest_preview_messages_for_session(
         )
     except Exception:
         preview_slice = None
-    print('SLICEDBG', normalized_session_id, repr(preview_slice))
     if preview_slice is not None and bool(preview_slice.safe):
         visible_messages = list(preview_slice.visible_messages or [])
         preview_messages = s._normalize_latest_preview_messages(
@@ -4059,7 +4058,6 @@ def _ledger_latest_preview_messages_for_session(
             return preview_messages, bool(visible_messages)
 
     visible_messages = s._ledger_visible_messages_for_session(normalized_session_id)
-    print('LEDDBG', normalized_session_id, repr(visible_messages))
     return (
         s._normalize_latest_preview_messages(
             normalized_session_id,
