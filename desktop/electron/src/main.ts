@@ -28,6 +28,7 @@ import {
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
 import {
+  fetchLauncherBranchInstances,
   fetchLauncherStatusSummary,
   formatLauncherStatusSummary,
   postLauncherControl,
@@ -1395,14 +1396,20 @@ async function resolveTrayLauncherControlContext(): Promise<DesktopActionLoopCon
   return resolveDesktopActionLoopContext(launcherBootstrap);
 }
 
-async function runTrayLauncherPost(path: LauncherControlPostPath, label: string, trigger?: string): Promise<void> {
+async function runTrayLauncherPost(
+  path: LauncherControlPostPath,
+  label: string,
+  trigger?: string,
+  body?: Record<string, unknown>
+): Promise<void> {
   try {
     const context = await resolveTrayLauncherControlContext();
     await postLauncherControl({
       launcherOrigin: context.launcherOrigin,
       controlToken: context.controlToken,
       path,
-      trigger
+      trigger,
+      body
     });
     notifyDesktopTray("Vibelution", `${label}请求已发送。`);
   } catch (error: unknown) {
@@ -1510,8 +1517,8 @@ app.whenReady()
     }
     const deepLinkRegistration = registerPackagedDeepLinks(paths);
     launcherBootstrap = await bootstrapLauncherIfEnabled(paths);
-    electronStartupStage = "launcher_window_ready";
-    const launcherWindowStartedAtMs = performance.now();
+    electronStartupStage = "tray_ready";
+    const trayStartedAtMs = performance.now();
     windowProvider = createWindowProvider(paths, launcherBootstrap);
     desktopTray = createDesktopTray(paths, {
       openLauncher: () => {
@@ -1519,14 +1526,24 @@ app.whenReady()
           console.warn(error instanceof Error ? error.message : String(error));
         });
       },
-      startProject: () => {
-        void runTrayLauncherPost("/api/launcher/start", DESKTOP_TRAY_MENU_LABELS.startProject);
+      listInstances: async () => {
+        const context = await resolveTrayLauncherControlContext();
+        return fetchLauncherBranchInstances(context);
       },
-      stopProject: () => {
+      startInstance: (instanceId, label) => {
         void runTrayLauncherPost(
-          "/api/launcher/stop",
-          DESKTOP_TRAY_MENU_LABELS.stopProject,
-          "electron_tray_stop_project"
+          "/api/launcher/branch-instances/start",
+          `启动 ${label}`,
+          "electron_tray_start_instance",
+          { instanceId }
+        );
+      },
+      stopInstance: (instanceId, label) => {
+        void runTrayLauncherPost(
+          "/api/launcher/branch-instances/stop",
+          `停止 ${label}`,
+          "electron_tray_stop_instance",
+          { instanceId }
         );
       },
       restartProject: () => {
@@ -1548,7 +1565,6 @@ app.whenReady()
       }
     });
     claimElectronDesktopShellOwner(paths.workspaceRoot);
-    await windowProvider.openLauncher();
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.tray.created",
       message: "Electron system tray created.",
@@ -1573,12 +1589,12 @@ app.whenReady()
       }
     });
     await recordElectronSupervisorEvent(launcherBootstrap, {
-      eventCode: "electron.launcher.window.opened",
-      message: "Launcher window opened by Electron.",
+      eventCode: "electron.tray.ready",
+      message: "Lightweight tray started without opening the Launcher window.",
       fields: electronStartupFields({
         provider: "electron",
-        stage: "launcher_window_ready",
-        stageDurationMs: electronStageElapsedMs(launcherWindowStartedAtMs)
+        stage: "tray_ready",
+        stageDurationMs: electronStageElapsedMs(trayStartedAtMs)
       })
     });
     const rawUrl = findVibelutionDeepLinkArg(process.argv.slice(1));
@@ -1632,7 +1648,6 @@ app.on("second-instance", (_event, argv) => {
     requestOpenWorkbench();
     return;
   }
-  void windowProvider?.openLauncher();
 });
 
 app.on("open-url", (event, rawUrl) => {
@@ -1655,7 +1670,5 @@ app.on("before-quit", (event) => {
 });
 
 app.on("window-all-closed", () => {
-  void requestDesktopShellExit("workbench_window_close").catch((error: unknown) => {
-    console.warn(error instanceof Error ? error.message : String(error));
-  });
+  // Keep the lightweight tray app running after the Launcher/workbench windows close.
 });

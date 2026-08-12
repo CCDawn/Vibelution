@@ -5,7 +5,16 @@ export type LauncherControlPostPath =
   | "/api/launcher/stop"
   | "/api/launcher/restart"
   | "/api/launcher/rebuild-and-start"
-  | "/api/launcher/force-stop";
+  | "/api/launcher/force-stop"
+  | "/api/launcher/branch-instances/start"
+  | "/api/launcher/branch-instances/stop";
+
+export type TrayBranchInstance = {
+  id: string;
+  label: string;
+  startable: boolean;
+  stoppable: boolean;
+};
 
 export type LauncherStatusSummary = {
   overallState: string;
@@ -59,6 +68,7 @@ export async function postLauncherControl(input: {
   controlToken: string;
   path: LauncherControlPostPath;
   trigger?: string;
+  body?: Record<string, unknown>;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }): Promise<void> {
@@ -68,6 +78,9 @@ export async function postLauncherControl(input: {
   if (input.trigger) {
     headers["X-Vibelution-Launcher-Trigger"] = input.trigger;
   }
+  if (input.body) {
+    headers["Content-Type"] = "application/json";
+  }
   const response = await boundedDesktopControlFetch({
     fetchImpl: input.fetchImpl,
     resource: `${launcherOriginBase(input.launcherOrigin)}${input.path}`,
@@ -75,7 +88,8 @@ export async function postLauncherControl(input: {
     requestTimeoutMs: input.requestTimeoutMs,
     init: {
       method: "POST",
-      headers
+      headers,
+      body: input.body ? JSON.stringify(input.body) : undefined
     }
   });
   if (!response.ok) {
@@ -118,6 +132,59 @@ export async function fetchLauncherStatusSummary(input: {
     readNestedString(payload, ["workbench", "lifecycleConsistency"]) ||
     "unknown";
   return { overallState, observedState, lifecycleConsistency };
+}
+
+export function classifyTrayBranchInstances(payload: unknown): TrayBranchInstance[] {
+  if (!isRecord(payload) || !Array.isArray(payload.items)) {
+    return [];
+  }
+  const items: TrayBranchInstance[] = [];
+  for (const raw of payload.items) {
+    if (!isRecord(raw)) {
+      continue;
+    }
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    if (!id) {
+      continue;
+    }
+    const shortName = typeof raw.shortName === "string" ? raw.shortName.trim() : "";
+    const branch = typeof raw.branch === "string" ? raw.branch.trim() : "";
+    const kind = typeof raw.kind === "string" ? raw.kind.trim() : "";
+    const checkedOut = raw.checkedOut === true;
+    const alive = raw.alive === true;
+    const startable = checkedOut && !alive && kind !== "retired" && kind !== "local_branch";
+    items.push({
+      id,
+      label: shortName || branch || id,
+      startable,
+      stoppable: alive
+    });
+  }
+  return items;
+}
+
+export async function fetchLauncherBranchInstances(input: {
+  launcherOrigin: string;
+  controlToken: string;
+  fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
+}): Promise<TrayBranchInstance[]> {
+  const response = await boundedDesktopControlFetch({
+    fetchImpl: input.fetchImpl,
+    resource: `${launcherOriginBase(input.launcherOrigin)}/api/launcher/branch-instances`,
+    operation: "launcher branch instances",
+    requestTimeoutMs: input.requestTimeoutMs,
+    init: {
+      method: "GET",
+      headers: {
+        "X-Vibelution-Control-Token": input.controlToken
+      }
+    }
+  });
+  if (!response.ok) {
+    throw new Error(await readFailureDetail(response));
+  }
+  return classifyTrayBranchInstances(await response.json());
 }
 
 export function formatLauncherStatusSummary(summary: LauncherStatusSummary): string {
