@@ -344,17 +344,22 @@ def _require_canonical_session(*, session_id: str, agent_id: str) -> None:
 
 
 def _read_back_real_artifact(canonical_ref: str) -> ArtifactReadBack | None:
+    from .artifact_readback_registry import read_domain_artifact
+
     if not canonical_ref:
         return None
-    return ArtifactReadBack(
-        canonical_ref=canonical_ref,
-        version="1.0",
-        content_hash="",
-        domain_revision="",
-    )
+    return read_domain_artifact(canonical_ref)
 
 
 def _execute_real_system_action(
     action: PendingAction,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
-    return [], {"systemActionId": action.action_id, "runnerId": ""}
+    """System nodes must materialize real artifacts with a non-empty runnerId.
+
+    Full controlled_run / result_package executors remain owned by their domain
+    adapters; the production port refuses silent empty success.
+    """
+    node_id = str(action.node_id or "").strip()
+    raise RuntimeError(
+        f"system node {node_id} has no system executor wired for Ledger production path"
+    )
