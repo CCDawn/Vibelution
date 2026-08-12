@@ -42,6 +42,7 @@ from core.runtime_manager.workbench_controller import _is_process_alive, observe
 from core.runtime_manager.window_provider_state import window_provider_projection
 from . import desktop_session_store, lifecycle_action_dispatcher, lifecycle_intent_store
 from . import developer_mode as launcher_developer_mode
+from .branch_instance_cleanup import BranchInstanceCleanupError
 from .branch_instance_lifecycle import BranchInstanceLifecycleError
 from . import maintenance_reset as launcher_maintenance_reset
 
@@ -180,9 +181,22 @@ class LauncherSupervisorCommandResponse(TypedDict, total=False):
 def list_launcher_branch_instances() -> dict[str, Any]:
     """Return Git-governed branch instances for the Launcher first screen."""
 
+    from core.launcher.branch_instance_cleanup import annotate_cleanup_metadata
     from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
 
-    return list_overlayed_branch_instances()
+    return annotate_cleanup_metadata(list_overlayed_branch_instances())
+
+
+def cleanup_launcher_branch_instances(
+    instance_ids: list[str],
+    *,
+    confirm: bool,
+) -> dict[str, Any]:
+    """Stop and delete selected local branch instances after explicit confirm."""
+
+    from core.launcher.branch_instance_cleanup import cleanup_branch_instances
+
+    return cleanup_branch_instances(instance_ids, confirm=confirm)
 
 
 def request_branch_instance_operation(

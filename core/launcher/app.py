@@ -14,6 +14,7 @@ from core.web.routes.runtime import BrowserTelemetryPayload
 from core.web.services import runtime_scene_service
 from . import service as launcher_service
 from .api_contract import (
+    BranchInstanceCleanupPayload,
     BranchInstanceLifecyclePayload,
     DesktopActionClaimPayload,
     DesktopActionResultPayload,
@@ -156,6 +157,20 @@ def launcher_branch_instance_force_stop(payload: BranchInstanceLifecyclePayload,
 @router.post("/api/launcher/branch-instances/restart", status_code=202)
 def launcher_branch_instance_restart(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
     return _branch_instance_lifecycle_response(payload, "restart", request)
+
+
+@router.post("/api/launcher/branch-instances/cleanup")
+def launcher_branch_instances_cleanup(payload: BranchInstanceCleanupPayload) -> dict:
+    try:
+        return launcher_service.cleanup_launcher_branch_instances(
+            payload.instanceIds,
+            confirm=payload.confirm,
+        )
+    except launcher_service.BranchInstanceCleanupError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
 
 
 @router.get("/api/launcher/settings/workbench-window")

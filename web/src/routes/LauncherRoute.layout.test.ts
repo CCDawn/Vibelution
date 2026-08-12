@@ -126,6 +126,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("getLauncherStatus");
     expect(routeSource).toContain("getLauncherBranchInstances");
     expect(launcherApiSource).toContain("branch-instances");
+    expect(launcherApiSource).toContain("requestBranchInstanceCleanup");
+    expect(branchInstancesPanelSource).toContain("VConfirmDialog");
+    expect(branchInstancesPanelSource).toContain("BRANCH_INSTANCE_PAGE_SIZE");
     // Lifecycle start/stop/force-stop/restart share one action path with AppShell.
     expect(routeSource).toContain('useWorkbenchLifecycleActions("launcher_route")');
     expect(routeSource).toContain("requestLifecycle(operation)");

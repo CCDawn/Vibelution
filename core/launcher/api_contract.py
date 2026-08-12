@@ -59,6 +59,11 @@ class BranchInstanceLifecyclePayload(BaseModel):
     instanceId: str
 
 
+class BranchInstanceCleanupPayload(BaseModel):
+    instanceIds: list[str] = Field(default_factory=list)
+    confirm: bool = False
+
+
 class WorkbenchCloseTransactionPayload(BaseModel):
     desktopSessionId: str
     idempotencyKey: str
