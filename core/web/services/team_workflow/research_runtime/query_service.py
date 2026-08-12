@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlencode
 
 from core.research.workflow.contracts import ResearchWorkflowSnapshot
 from core.research.workflow.contracts.workflow_snapshot import (
@@ -135,18 +136,32 @@ class WorkflowQueryService:
     def get_node_detail(
         self, *, team_id: str, run_id: str, node_id: str
     ) -> ResearchWorkflowNodeDetail:
-        snap = self.get_snapshot(team_id=team_id, run_id=run_id)
         node = next(
             (item for item in self._definition.nodes if item.nodeId == node_id),
             None,
         )
         if node is None:
             raise NodeNotFoundError(node_id)
+
+        def load(_repo: WorkflowLedgerRepository):
+            snap = self.get_snapshot(team_id=team_id, run_id=run_id)
+            attempts = snap.node_attempts.get(node_id, ())
+            latest = attempts[-1] if attempts else None
+            anchor = _load_anchor(
+                self._store,
+                latest.node_run_id if latest is not None else None,
+            )
+            return snap, latest, anchor
+
+        if hasattr(self._store, "read"):
+            snap, latest, anchor = self._store.read(load)
+        else:
+            snap, latest, anchor = load(self._store)  # type: ignore[arg-type]
         attempts = snap.node_attempts.get(node_id, ())
-        latest = attempts[-1] if attempts else None
         offers = tuple(
             offer for offer in snap.command_offers if offer.node_id == node_id
         )
+        session = _session_fields(anchor, actor_kind=node.actorKind.value)
         return ResearchWorkflowNodeDetail(
             run_id=run_id,
             team_id=team_id,
@@ -165,6 +180,27 @@ class WorkflowQueryService:
             command_offers=offers,
             latest_event_sequence=snap.latest_event_sequence,
             generated_at=snap.generated_at,
+            agent_id=session["agent_id"],
+            display_name=session["display_name"],
+            resolved_from=session["resolved_from"],
+            session_id=session["session_id"],
+            task_id=session["task_id"],
+            turn_id=session["turn_id"],
+            session_attempt=session["session_attempt"],
+            chat_deep_link=_chat_deep_link(
+                team_id=team_id,
+                run_id=run_id,
+                node_id=node_id,
+                session_id=session["session_id"],
+                task_id=session["task_id"],
+                turn_id=session["turn_id"],
+            ),
+            session_anchor_degraded=session["degraded"],
+            blocked_reason=(
+                str(snap.run.terminal_reason or "")
+                if latest is not None and latest.status == "blocked"
+                else ""
+            ),
         )
 
     def _read_bundle(self, run_id: str):
@@ -271,3 +307,76 @@ def _budget_receipt_summary(row: tuple) -> dict[str, Any]:
         "createdAtMs": row[9],
         "updatedAtMs": row[10],
     }
+
+
+def _load_anchor(store: Any, node_run_id: str | None) -> tuple | None:
+    if not node_run_id:
+        return None
+
+    def load(repo: WorkflowLedgerRepository):
+        return repo.get_anchor_by_node_run(node_run_id)
+
+    if hasattr(store, "read"):
+        return store.read(load)
+    return load(store)
+
+
+def _session_fields(anchor: tuple | None, *, actor_kind: str) -> dict[str, Any]:
+    agent_id = str(anchor[3] or "").strip() if anchor is not None else ""
+    session_id = str(anchor[5] or "").strip() if anchor is not None else ""
+    session_attempt = anchor[6] if anchor is not None else None
+    task_id = str(anchor[7] or "").strip() if anchor is not None else ""
+    turn_id = str(anchor[8] or "").strip() if anchor is not None else ""
+    complete = bool(session_id and task_id and turn_id)
+    display_name = ""
+    if agent_id:
+        try:
+            from core.web.services.agent_directory_service import get_agent
+
+            agent = get_agent(agent_id)
+            if isinstance(agent, dict):
+                display_name = str(
+                    agent.get("displayName") or agent.get("agentName") or agent_id
+                )
+        except (ImportError, KeyError, OSError, TypeError, ValueError):
+            display_name = agent_id
+    return {
+        "agent_id": agent_id or None,
+        "display_name": display_name or agent_id,
+        "resolved_from": "workflow_default" if agent_id else "unbound",
+        "session_id": session_id or None,
+        "task_id": task_id or None,
+        "turn_id": turn_id or None,
+        "session_attempt": int(session_attempt) if session_attempt is not None else None,
+        "degraded": actor_kind == "agent" and not complete,
+    }
+
+
+def _chat_deep_link(
+    *,
+    team_id: str,
+    run_id: str,
+    node_id: str,
+    session_id: str | None,
+    task_id: str | None,
+    turn_id: str | None,
+) -> str | None:
+    if not (session_id and task_id and turn_id):
+        return None
+    return_to = "/teams?" + urlencode(
+        {
+            "teamId": team_id,
+            "researchView": "workflow",
+            "runId": run_id,
+            "node": node_id,
+        }
+    )
+    return "/chat?" + urlencode(
+        {
+            "session": session_id,
+            "focusTask": task_id,
+            "focusTurn": turn_id,
+            "returnTo": return_to,
+            "returnLabel": "返回科研流程",
+        }
+    )

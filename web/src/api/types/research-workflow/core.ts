@@ -95,6 +95,17 @@ export type ResearchWorkflowNodeDetail = {
   commandOffers: import("./commands").CommandOffer[];
   latestEventSequence: number;
   generatedAt: string;
+  agentId?: string | null;
+  displayName?: string;
+  resolvedFrom?: string;
+  sessionId?: string | null;
+  taskId?: string | null;
+  turnId?: string | null;
+  sessionAttempt?: number | null;
+  chatDeepLink?: string | null;
+  sessionAnchorDegraded?: boolean;
+  blockedReason?: string;
+  nodeAttempt?: number;
 };
 
 export type ResearchWorkflowSnapshot = {
