@@ -1,0 +1,702 @@
+"""Workflow Ledger repository — SQL only, no domain calls, no network/IO.
+
+Every mutation runs inside a caller-provided transaction (the unit of work).
+Status strings are validated by callers through core.research.workflow
+transitions before reaching SQL; this module never accepts arbitrary statuses
+for domain objects (guarded by transition functions used in service layer).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .records import (
+    CommandRecord,
+    EventRecord,
+    NodeAttemptRecord,
+    OutboxRecord,
+    RunRecord,
+)
+
+
+def _row_run(row: Any) -> RunRecord | None:
+    if row is None:
+        return None
+    return RunRecord(
+        run_id=str(row[0]),
+        team_id=str(row[1]),
+        workflow_id=str(row[2]),
+        workflow_version_id=str(row[3]),
+        thread_id=str(row[4]),
+        project_id=str(row[5]),
+        question_id=str(row[6]),
+        status=str(row[7]),
+        run_version=int(row[8]),
+        last_event_sequence=int(row[9]),
+        input_snapshot_json=str(row[10]),
+        input_snapshot_hash=str(row[11]),
+        safety_limits_json=str(row[12]),
+        binding_snapshot_set_id=str(row[13]),
+        active_node_id=row[14],
+        parent_run_id=row[15],
+        forked_from_checkpoint_id=row[16],
+        completion_kind=row[17],
+        terminal_reason=row[18],
+        blocked_problem_json=row[19],
+        created_at_ms=int(row[20]),
+        updated_at_ms=int(row[21]),
+        completed_at_ms=row[22],
+    )
+
+
+class WorkflowLedgerRepository:
+    def __init__(self, connection: Any) -> None:
+        self.connection = connection
+
+    def execute(self, sql: str, params: tuple = ()) -> Any:
+        return self.connection.execute(sql, params)
+
+    # ---------------------------------------------------------------- runs
+
+    def insert_run(self, run: RunRecord) -> None:
+        self.execute(
+            """
+            INSERT INTO workflow_runs (
+              run_id, team_id, workflow_id, workflow_version_id, thread_id,
+              project_id, question_id, status, run_version, last_event_sequence,
+              input_snapshot_json, input_snapshot_hash, safety_limits_json,
+              binding_snapshot_set_id, active_node_id, parent_run_id,
+              forked_from_checkpoint_id, completion_kind, terminal_reason,
+              blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run.run_id,
+                run.team_id,
+                run.workflow_id,
+                run.workflow_version_id,
+                run.thread_id,
+                run.project_id,
+                run.question_id,
+                run.status,
+                run.run_version,
+                run.last_event_sequence,
+                run.input_snapshot_json,
+                run.input_snapshot_hash,
+                run.safety_limits_json,
+                run.binding_snapshot_set_id,
+                run.active_node_id,
+                run.parent_run_id,
+                run.forked_from_checkpoint_id,
+                run.completion_kind,
+                run.terminal_reason,
+                run.blocked_problem_json,
+                run.created_at_ms,
+                run.updated_at_ms,
+                run.completed_at_ms,
+            ),
+        )
+
+    def get_run(self, run_id: str) -> RunRecord | None:
+        row = self.execute(
+            """
+            SELECT run_id, team_id, workflow_id, workflow_version_id, thread_id,
+                   project_id, question_id, status, run_version, last_event_sequence,
+                   input_snapshot_json, input_snapshot_hash, safety_limits_json,
+                   binding_snapshot_set_id, active_node_id, parent_run_id,
+                   forked_from_checkpoint_id, completion_kind, terminal_reason,
+                   blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms
+            FROM workflow_runs WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        return _row_run(row)
+
+    def bump_run_version(
+        self,
+        run_id: str,
+        team_id: str,
+        expected_version: int,
+        event_count: int,
+        now_ms: int,
+    ) -> tuple[int, int] | None:
+        """Conditional version + sequence bump; returns (new_version, last_sequence)."""
+        row = self.execute(
+            """
+            UPDATE workflow_runs
+            SET run_version = run_version + 1,
+                last_event_sequence = last_event_sequence + :event_count,
+                updated_at_ms = :now
+            WHERE run_id = :run_id
+              AND team_id = :team_id
+              AND run_version = :expected_version
+            RETURNING run_version, last_event_sequence
+            """,
+            {
+                "event_count": event_count,
+                "now": now_ms,
+                "run_id": run_id,
+                "team_id": team_id,
+                "expected_version": expected_version,
+            },
+        ).fetchone()
+        if row is None:
+            return None
+        return int(row[0]), int(row[1])
+
+    def update_run_status(
+        self,
+        run_id: str,
+        team_id: str,
+        status: str,
+        now_ms: int,
+        *,
+        active_node_id: str | None = None,
+        completion_kind: str | None = None,
+        terminal_reason: str | None = None,
+        blocked_problem_json: str | None = None,
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE workflow_runs
+            SET status = :status,
+                active_node_id = COALESCE(:active_node_id, active_node_id),
+                completion_kind = :completion_kind,
+                terminal_reason = :terminal_reason,
+                blocked_problem_json = :blocked_problem_json,
+                completed_at_ms = CASE WHEN :terminal = 1 THEN :now ELSE completed_at_ms END,
+                updated_at_ms = :now
+            WHERE run_id = :run_id AND team_id = :team_id
+            """,
+            {
+                "status": status,
+                "active_node_id": active_node_id,
+                "completion_kind": completion_kind,
+                "terminal_reason": terminal_reason,
+                "blocked_problem_json": blocked_problem_json,
+                "terminal": 1 if status in ("succeeded", "failed", "cancelled", "archived") else 0,
+                "now": now_ms,
+                "run_id": run_id,
+                "team_id": team_id,
+            },
+        )
+        return cursor.rowcount > 0
+
+    def list_runs_for_team(self, team_id: str, workflow_id: str) -> list[RunRecord]:
+        rows = self.execute(
+            """
+            SELECT run_id, team_id, workflow_id, workflow_version_id, thread_id,
+                   project_id, question_id, status, run_version, last_event_sequence,
+                   input_snapshot_json, input_snapshot_hash, safety_limits_json,
+                   binding_snapshot_set_id, active_node_id, parent_run_id,
+                   forked_from_checkpoint_id, completion_kind, terminal_reason,
+                   blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms
+            FROM workflow_runs
+            WHERE team_id = ? AND workflow_id = ?
+            ORDER BY created_at_ms DESC, run_id DESC
+            """,
+            (team_id, workflow_id),
+        ).fetchall()
+        return [record for row in rows if (record := _row_run(row)) is not None]
+
+    # ------------------------------------------------------------ commands
+
+    def insert_command(self, command: CommandRecord) -> None:
+        self.execute(
+            """
+            INSERT INTO workflow_commands (
+              command_id, run_id, team_id, node_id, command_kind,
+              expected_run_version, accepted_run_version, idempotency_key,
+              request_hash, request_json, requested_by_json, status,
+              result_json, problem_json, created_at_ms, completed_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                command.command_id,
+                command.run_id,
+                command.team_id,
+                command.node_id,
+                command.command_kind,
+                command.expected_run_version,
+                command.accepted_run_version,
+                command.idempotency_key,
+                command.request_hash,
+                command.request_json,
+                command.requested_by_json,
+                command.status,
+                command.result_json,
+                command.problem_json,
+                command.created_at_ms,
+                command.completed_at_ms,
+            ),
+        )
+
+    def find_command_by_idempotency(self, run_id: str, idempotency_key: str) -> CommandRecord | None:
+        row = self.execute(
+            """
+            SELECT command_id, run_id, team_id, node_id, command_kind,
+                   expected_run_version, accepted_run_version, idempotency_key,
+                   request_hash, request_json, requested_by_json, status,
+                   result_json, problem_json, created_at_ms, completed_at_ms
+            FROM workflow_commands
+            WHERE run_id = ? AND idempotency_key = ?
+            """,
+            (run_id, idempotency_key),
+        ).fetchone()
+        if row is None:
+            return None
+        return CommandRecord(
+            command_id=str(row[0]),
+            run_id=str(row[1]),
+            team_id=str(row[2]),
+            node_id=row[3],
+            command_kind=str(row[4]),
+            expected_run_version=int(row[5]),
+            accepted_run_version=row[6],
+            idempotency_key=str(row[7]),
+            request_hash=str(row[8]),
+            request_json=str(row[9]),
+            requested_by_json=str(row[10]),
+            status=str(row[11]),
+            result_json=row[12],
+            problem_json=row[13],
+            created_at_ms=int(row[14]),
+            completed_at_ms=row[15],
+        )
+
+    def get_command(self, command_id: str) -> CommandRecord | None:
+        row = self.execute(
+            """
+            SELECT command_id, run_id, team_id, node_id, command_kind,
+                   expected_run_version, accepted_run_version, idempotency_key,
+                   request_hash, request_json, requested_by_json, status,
+                   result_json, problem_json, created_at_ms, completed_at_ms
+            FROM workflow_commands WHERE command_id = ?
+            """,
+            (command_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return CommandRecord(
+            command_id=str(row[0]),
+            run_id=str(row[1]),
+            team_id=str(row[2]),
+            node_id=row[3],
+            command_kind=str(row[4]),
+            expected_run_version=int(row[5]),
+            accepted_run_version=row[6],
+            idempotency_key=str(row[7]),
+            request_hash=str(row[8]),
+            request_json=str(row[9]),
+            requested_by_json=str(row[10]),
+            status=str(row[11]),
+            result_json=row[12],
+            problem_json=row[13],
+            created_at_ms=int(row[14]),
+            completed_at_ms=row[15],
+        )
+
+    def complete_command(
+        self,
+        command_id: str,
+        status: str,
+        now_ms: int,
+        *,
+        result_json: str | None = None,
+        problem_json: str | None = None,
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE workflow_commands
+            SET status = ?, result_json = COALESCE(?, result_json),
+                problem_json = COALESCE(?, problem_json),
+                completed_at_ms = ?
+            WHERE command_id = ?
+            """,
+            (status, result_json, problem_json, now_ms, command_id),
+        )
+        return cursor.rowcount > 0
+
+    # ------------------------------------------------------------ attempts
+
+    def insert_attempt(self, attempt: NodeAttemptRecord) -> None:
+        self.execute(
+            """
+            INSERT INTO node_attempts (
+              node_run_id, run_id, node_id, attempt, actor_kind, status,
+              command_id, binding_snapshot_id, input_snapshot_hash,
+              pending_action_id, execution_anchor_id, retry_of_node_run_id,
+              problem_json, started_at_ms, updated_at_ms, finished_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt.node_run_id,
+                attempt.run_id,
+                attempt.node_id,
+                attempt.attempt,
+                attempt.actor_kind,
+                attempt.status,
+                attempt.command_id,
+                attempt.binding_snapshot_id,
+                attempt.input_snapshot_hash,
+                attempt.pending_action_id,
+                attempt.execution_anchor_id,
+                attempt.retry_of_node_run_id,
+                attempt.problem_json,
+                attempt.started_at_ms,
+                attempt.updated_at_ms,
+                attempt.finished_at_ms,
+            ),
+        )
+
+    def get_attempt(self, node_run_id: str) -> NodeAttemptRecord | None:
+        row = self.execute(
+            """
+            SELECT node_run_id, run_id, node_id, attempt, actor_kind, status,
+                   command_id, binding_snapshot_id, input_snapshot_hash,
+                   pending_action_id, execution_anchor_id, retry_of_node_run_id,
+                   problem_json, started_at_ms, updated_at_ms, finished_at_ms
+            FROM node_attempts WHERE node_run_id = ?
+            """,
+            (node_run_id,),
+        ).fetchone()
+        return self._row_attempt(row)
+
+    def latest_attempt(self, run_id: str, node_id: str) -> NodeAttemptRecord | None:
+        row = self.execute(
+            """
+            SELECT node_run_id, run_id, node_id, attempt, actor_kind, status,
+                   command_id, binding_snapshot_id, input_snapshot_hash,
+                   pending_action_id, execution_anchor_id, retry_of_node_run_id,
+                   problem_json, started_at_ms, updated_at_ms, finished_at_ms
+            FROM node_attempts
+            WHERE run_id = ? AND node_id = ?
+            ORDER BY attempt DESC LIMIT 1
+            """,
+            (run_id, node_id),
+        ).fetchone()
+        return self._row_attempt(row)
+
+    def list_attempts(self, run_id: str) -> list[NodeAttemptRecord]:
+        rows = self.execute(
+            """
+            SELECT node_run_id, run_id, node_id, attempt, actor_kind, status,
+                   command_id, binding_snapshot_id, input_snapshot_hash,
+                   pending_action_id, execution_anchor_id, retry_of_node_run_id,
+                   problem_json, started_at_ms, updated_at_ms, finished_at_ms
+            FROM node_attempts
+            WHERE run_id = ?
+            ORDER BY attempt, node_id
+            """,
+            (run_id,),
+        ).fetchall()
+        return [record for row in rows if (record := self._row_attempt(row)) is not None]
+
+    def update_attempt_status(
+        self,
+        node_run_id: str,
+        status: str,
+        now_ms: int,
+        *,
+        pending_action_id: str | None = None,
+        execution_anchor_id: str | None = None,
+        problem_json: str | None = None,
+        finished_at_ms: int | None = None,
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE node_attempts
+            SET status = ?,
+                pending_action_id = COALESCE(?, pending_action_id),
+                execution_anchor_id = COALESCE(?, execution_anchor_id),
+                problem_json = COALESCE(?, problem_json),
+                finished_at_ms = CASE WHEN ? IS NOT NULL THEN ? ELSE finished_at_ms END,
+                updated_at_ms = ?
+            WHERE node_run_id = ?
+            """,
+            (
+                status,
+                pending_action_id,
+                execution_anchor_id,
+                problem_json,
+                finished_at_ms,
+                finished_at_ms,
+                now_ms,
+                node_run_id,
+            ),
+        )
+        return cursor.rowcount > 0
+
+    @staticmethod
+    def _row_attempt(row: Any) -> NodeAttemptRecord | None:
+        if row is None:
+            return None
+        return NodeAttemptRecord(
+            node_run_id=str(row[0]),
+            run_id=str(row[1]),
+            node_id=str(row[2]),
+            attempt=int(row[3]),
+            actor_kind=str(row[4]),
+            status=str(row[5]),
+            command_id=str(row[6]),
+            binding_snapshot_id=row[7],
+            input_snapshot_hash=str(row[8]),
+            pending_action_id=row[9],
+            execution_anchor_id=row[10],
+            retry_of_node_run_id=row[11],
+            problem_json=row[12],
+            started_at_ms=int(row[13]),
+            updated_at_ms=int(row[14]),
+            finished_at_ms=row[15],
+        )
+
+    # ------------------------------------------------------------- events
+
+    def insert_event(self, event: EventRecord) -> None:
+        self.execute(
+            """
+            INSERT INTO workflow_events (
+              run_id, sequence, event_id, run_version, event_type, actor_json,
+              correlation_id, causation_id, payload_json, occurred_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.run_id,
+                event.sequence,
+                event.event_id,
+                event.run_version,
+                event.event_type,
+                event.actor_json,
+                event.correlation_id,
+                event.causation_id,
+                event.payload_json,
+                event.occurred_at_ms,
+            ),
+        )
+
+    def list_events(self, run_id: str, after_sequence: int = 0, limit: int = 500) -> list[EventRecord]:
+        rows = self.execute(
+            """
+            SELECT run_id, sequence, event_id, run_version, event_type, actor_json,
+                   correlation_id, causation_id, payload_json, occurred_at_ms
+            FROM workflow_events
+            WHERE run_id = ? AND sequence > ?
+            ORDER BY sequence ASC LIMIT ?
+            """,
+            (run_id, after_sequence, limit),
+        ).fetchall()
+        return [
+            EventRecord(
+                run_id=str(row[0]),
+                sequence=int(row[1]),
+                event_id=str(row[2]),
+                run_version=int(row[3]),
+                event_type=str(row[4]),
+                actor_json=str(row[5]),
+                correlation_id=str(row[6]),
+                causation_id=row[7],
+                payload_json=str(row[8]),
+                occurred_at_ms=int(row[9]),
+            )
+            for row in rows
+        ]
+
+    def latest_event_sequence(self, run_id: str) -> int:
+        row = self.execute(
+            "SELECT COALESCE(MAX(sequence), 0) FROM workflow_events WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    # ------------------------------------------------------------- outbox
+
+    def insert_outbox(self, outbox: OutboxRecord) -> None:
+        self.execute(
+            """
+            INSERT INTO outbox_actions (
+              action_id, run_id, command_id, node_run_id, action_kind,
+              idempotency_key, payload_json, status, attempt_count,
+              available_at_ms, lease_owner, lease_expires_at_ms,
+              last_problem_json, created_at_ms, updated_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                outbox.action_id,
+                outbox.run_id,
+                outbox.command_id,
+                outbox.node_run_id,
+                outbox.action_kind,
+                outbox.idempotency_key,
+                outbox.payload_json,
+                outbox.status,
+                outbox.attempt_count,
+                outbox.available_at_ms,
+                outbox.lease_owner,
+                outbox.lease_expires_at_ms,
+                outbox.last_problem_json,
+                outbox.created_at_ms,
+                outbox.updated_at_ms,
+            ),
+        )
+
+    def lease_outbox_actions(
+        self,
+        *,
+        owner: str,
+        now_ms: int,
+        limit: int = 8,
+        lease_ms: int = 30_000,
+        action_kinds: tuple[str, ...] | None = None,
+    ) -> list[OutboxRecord]:
+        kind_filter = ""
+        params: list[Any] = []
+        if action_kinds:
+            placeholders = ",".join("?" for _ in action_kinds)
+            kind_filter = f"AND action_kind IN ({placeholders})"
+            params.extend(action_kinds)
+        rows = self.execute(
+            f"""
+            SELECT action_id, run_id, command_id, node_run_id, action_kind,
+                   idempotency_key, payload_json, status, attempt_count,
+                   available_at_ms, lease_owner, lease_expires_at_ms,
+                   last_problem_json, created_at_ms, updated_at_ms
+            FROM outbox_actions
+            WHERE status = 'pending'
+              AND available_at_ms <= ?
+              {kind_filter}
+              AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms < ?)
+            ORDER BY available_at_ms ASC, action_id ASC
+            LIMIT ?
+            """,
+            (*params, now_ms, now_ms, limit),
+        ).fetchall()
+        leased: list[OutboxRecord] = []
+        for row in rows:
+            action_id = str(row[0])
+            updated = self.execute(
+                """
+                UPDATE outbox_actions
+                SET status = 'leased', lease_owner = ?, lease_expires_at_ms = ?,
+                    attempt_count = attempt_count + 1, updated_at_ms = ?
+                WHERE action_id = ? AND status = 'pending'
+                """,
+                (owner, now_ms + lease_ms, now_ms, action_id),
+            )
+            if updated.rowcount != 1:
+                continue
+            leased.append(self._row_outbox(row))
+        return leased
+
+    def get_outbox(self, action_id: str) -> OutboxRecord | None:
+        row = self.execute(
+            """
+            SELECT action_id, run_id, command_id, node_run_id, action_kind,
+                   idempotency_key, payload_json, status, attempt_count,
+                   available_at_ms, lease_owner, lease_expires_at_ms,
+                   last_problem_json, created_at_ms, updated_at_ms
+            FROM outbox_actions WHERE action_id = ?
+            """,
+            (action_id,),
+        ).fetchone()
+        return self._row_outbox(row)
+
+    def ack_outbox(
+        self,
+        action_id: str,
+        owner: str,
+        now_ms: int,
+        *,
+        status: str = "succeeded",
+        problem_json: str | None = None,
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE outbox_actions
+            SET status = ?, last_problem_json = COALESCE(?, last_problem_json),
+                updated_at_ms = ?
+            WHERE action_id = ? AND lease_owner = ?
+            """,
+            (status, problem_json, now_ms, action_id, owner),
+        )
+        return cursor.rowcount > 0
+
+    def requeue_outbox(
+        self,
+        action_id: str,
+        owner: str,
+        now_ms: int,
+        *,
+        retry_at_ms: int,
+        problem_json: str,
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE outbox_actions
+            SET status = 'pending', lease_owner = NULL, lease_expires_at_ms = NULL,
+                available_at_ms = ?, last_problem_json = ?, updated_at_ms = ?
+            WHERE action_id = ? AND lease_owner = ?
+            """,
+            (retry_at_ms, problem_json, now_ms, action_id, owner),
+        )
+        return cursor.rowcount > 0
+
+    def fail_outbox(self, action_id: str, owner: str, now_ms: int, problem_json: str) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE outbox_actions
+            SET status = 'failed', last_problem_json = ?, updated_at_ms = ?
+            WHERE action_id = ? AND lease_owner = ?
+            """,
+            (problem_json, now_ms, action_id, owner),
+        )
+        return cursor.rowcount > 0
+
+    def list_pending_outbox(self, run_id: str | None = None, limit: int = 200) -> list[OutboxRecord]:
+        if run_id is None:
+            rows = self.execute(
+                """
+                SELECT action_id, run_id, command_id, node_run_id, action_kind,
+                       idempotency_key, payload_json, status, attempt_count,
+                       available_at_ms, lease_owner, lease_expires_at_ms,
+                       last_problem_json, created_at_ms, updated_at_ms
+                FROM outbox_actions
+                WHERE status = 'pending' ORDER BY available_at_ms ASC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        else:
+            rows = self.execute(
+                """
+                SELECT action_id, run_id, command_id, node_run_id, action_kind,
+                       idempotency_key, payload_json, status, attempt_count,
+                       available_at_ms, lease_owner, lease_expires_at_ms,
+                       last_problem_json, created_at_ms, updated_at_ms
+                FROM outbox_actions
+                WHERE run_id = ? AND status = 'pending'
+                ORDER BY available_at_ms ASC LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        return [record for row in rows if (record := self._row_outbox(row)) is not None]
+
+    @staticmethod
+    def _row_outbox(row: Any) -> OutboxRecord | None:
+        if row is None:
+            return None
+        return OutboxRecord(
+            action_id=str(row[0]),
+            run_id=str(row[1]),
+            command_id=row[2],
+            node_run_id=row[3],
+            action_kind=str(row[4]),
+            idempotency_key=str(row[5]),
+            payload_json=str(row[6]),
+            status=str(row[7]),
+            attempt_count=int(row[8]),
+            available_at_ms=int(row[9]),
+            lease_owner=row[10],
+            lease_expires_at_ms=row[11],
+            last_problem_json=row[12],
+            created_at_ms=int(row[13]),
+            updated_at_ms=int(row[14]),
+        )
