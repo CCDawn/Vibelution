@@ -8,6 +8,7 @@ for domain objects (guarded by transition functions used in service layer).
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from .records import (
@@ -55,6 +56,10 @@ class WorkflowLedgerRepository:
 
     def execute(self, sql: str, params: tuple = ()) -> Any:
         return self.connection.execute(sql, params)
+
+    def affected(self) -> int:
+        row = self.execute('SELECT changes()').fetchone()
+        return int(row[0]) if row else 0
 
     # ---------------------------------------------------------------- runs
 
@@ -180,7 +185,7 @@ class WorkflowLedgerRepository:
                 "team_id": team_id,
             },
         )
-        return cursor.rowcount > 0
+        return self.affected() > 0
 
     def list_runs_for_team(self, team_id: str, workflow_id: str) -> list[RunRecord]:
         rows = self.execute(
@@ -198,6 +203,32 @@ class WorkflowLedgerRepository:
             (team_id, workflow_id),
         ).fetchall()
         return [record for row in rows if (record := _row_run(row)) is not None]
+
+    def update_run_safety_limits(
+        self, run_id: str, team_id: str, safety_limits_json: str, now_ms: int
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE workflow_runs
+            SET safety_limits_json = ?, updated_at_ms = ?
+            WHERE run_id = ? AND team_id = ?
+            """,
+            (safety_limits_json, now_ms, run_id, team_id),
+        )
+        return self.affected() > 0
+
+    def update_run_binding_set(
+        self, run_id: str, team_id: str, binding_snapshot_set_id: str, now_ms: int
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE workflow_runs
+            SET binding_snapshot_set_id = ?, updated_at_ms = ?
+            WHERE run_id = ? AND team_id = ?
+            """,
+            (binding_snapshot_set_id, now_ms, run_id, team_id),
+        )
+        return self.affected() > 0
 
     # ------------------------------------------------------------ commands
 
@@ -315,7 +346,7 @@ class WorkflowLedgerRepository:
             """,
             (status, result_json, problem_json, now_ms, command_id),
         )
-        return cursor.rowcount > 0
+        return self.affected() > 0
 
     # ------------------------------------------------------------ attempts
 
@@ -425,7 +456,7 @@ class WorkflowLedgerRepository:
                 node_run_id,
             ),
         )
-        return cursor.rowcount > 0
+        return self.affected() > 0
 
     @staticmethod
     def _row_attempt(row: Any) -> NodeAttemptRecord | None:
@@ -561,10 +592,10 @@ class WorkflowLedgerRepository:
                    available_at_ms, lease_owner, lease_expires_at_ms,
                    last_problem_json, created_at_ms, updated_at_ms
             FROM outbox_actions
-            WHERE status = 'pending'
+            WHERE status IN ('pending', 'leased')
               AND available_at_ms <= ?
               {kind_filter}
-              AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms < ?)
+              AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms <= ?)
             ORDER BY available_at_ms ASC, action_id ASC
             LIMIT ?
             """,
@@ -578,13 +609,26 @@ class WorkflowLedgerRepository:
                 UPDATE outbox_actions
                 SET status = 'leased', lease_owner = ?, lease_expires_at_ms = ?,
                     attempt_count = attempt_count + 1, updated_at_ms = ?
-                WHERE action_id = ? AND status = 'pending'
+                WHERE action_id = ? AND status IN ('pending', 'leased')
+                  AND (lease_expires_at_ms IS NULL OR lease_expires_at_ms <= ?)
                 """,
-                (owner, now_ms + lease_ms, now_ms, action_id),
+                (owner, now_ms + lease_ms, now_ms, action_id, now_ms),
             )
-            if updated.rowcount != 1:
+            if self.affected() != 1:
                 continue
-            leased.append(self._row_outbox(row))
+            record = self._row_outbox(row)
+            if record is None:
+                continue
+            leased.append(
+                replace(
+                    record,
+                    status="leased",
+                    attempt_count=record.attempt_count + 1,
+                    lease_owner=owner,
+                    lease_expires_at_ms=now_ms + lease_ms,
+                    updated_at_ms=now_ms,
+                )
+            )
         return leased
 
     def get_outbox(self, action_id: str) -> OutboxRecord | None:
@@ -618,7 +662,7 @@ class WorkflowLedgerRepository:
             """,
             (status, problem_json, now_ms, action_id, owner),
         )
-        return cursor.rowcount > 0
+        return self.affected() > 0
 
     def requeue_outbox(
         self,
@@ -638,7 +682,7 @@ class WorkflowLedgerRepository:
             """,
             (retry_at_ms, problem_json, now_ms, action_id, owner),
         )
-        return cursor.rowcount > 0
+        return self.affected() > 0
 
     def fail_outbox(self, action_id: str, owner: str, now_ms: int, problem_json: str) -> bool:
         cursor = self.execute(
@@ -649,7 +693,7 @@ class WorkflowLedgerRepository:
             """,
             (problem_json, now_ms, action_id, owner),
         )
-        return cursor.rowcount > 0
+        return self.affected() > 0
 
     def list_pending_outbox(self, run_id: str | None = None, limit: int = 200) -> list[OutboxRecord]:
         if run_id is None:
@@ -700,3 +744,66 @@ class WorkflowLedgerRepository:
             created_at_ms=int(row[13]),
             updated_at_ms=int(row[14]),
         )
+
+    # -------------------------------------------------------- human tasks
+
+    def insert_human_task(
+        self,
+        *,
+        task_id: str,
+        run_id: str,
+        node_run_id: str,
+        handoff_id: str | None,
+        task_kind: str,
+        prompt_json: str,
+        created_at_ms: int,
+    ) -> None:
+        self.execute(
+            """
+            INSERT INTO human_tasks (
+              task_id, run_id, node_run_id, handoff_id, task_kind, prompt_json,
+              status, decision_json, created_at_ms, resolved_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, ?, NULL)
+            """,
+            (task_id, run_id, node_run_id, handoff_id, task_kind, prompt_json, created_at_ms),
+        )
+
+    def get_human_task(self, task_id: str) -> tuple | None:
+        return self.execute(
+            """
+            SELECT task_id, run_id, node_run_id, handoff_id, task_kind,
+                   prompt_json, status, decision_json, created_at_ms, resolved_at_ms
+            FROM human_tasks WHERE task_id = ?
+            """,
+            (task_id,),
+        ).fetchone()
+
+    def list_pending_human_tasks(self, run_id: str) -> list[tuple]:
+        return self.execute(
+            """
+            SELECT task_id, run_id, node_run_id, handoff_id, task_kind,
+                   prompt_json, status, decision_json, created_at_ms, resolved_at_ms
+            FROM human_tasks
+            WHERE run_id = ? AND status = 'pending'
+            ORDER BY created_at_ms ASC
+            """,
+            (run_id,),
+        ).fetchall()
+
+    def update_human_task_decision(
+        self,
+        task_id: str,
+        status: str,
+        now_ms: int,
+        *,
+        decision_json: str | None = None,
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE human_tasks
+            SET status = ?, decision_json = COALESCE(?, decision_json), resolved_at_ms = ?
+            WHERE task_id = ? AND status = 'pending'
+            """,
+            (status, decision_json, now_ms, task_id),
+        )
+        return self.affected() > 0
