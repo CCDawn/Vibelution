@@ -14,6 +14,7 @@ from core.web.routes.runtime import BrowserTelemetryPayload
 from core.web.services import runtime_scene_service
 from . import service as launcher_service
 from .api_contract import (
+    BranchInstanceLifecyclePayload,
     DesktopActionClaimPayload,
     DesktopActionResultPayload,
     DesktopSessionPayload,
@@ -110,6 +111,51 @@ def launcher_status() -> dict:
 @router.get("/api/launcher/branch-instances")
 def launcher_branch_instances() -> dict:
     return launcher_service.list_launcher_branch_instances()
+
+
+
+def _branch_instance_lifecycle_response(payload: BranchInstanceLifecyclePayload, operation: str, request: Request):
+    try:
+        return launcher_service.request_branch_instance_operation(
+            payload.instanceId,
+            operation,
+            _request_audit(request, operation=operation),
+        )
+    except launcher_service.BranchInstanceLifecycleError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    except launcher_service.LauncherActiveWorkBlocked as exc:
+        code = "active_work_restart_blocked" if operation == "restart" else "active_work_stop_blocked"
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": code,
+                "message": exc.message,
+                "activeWorkRuns": exc.active_work_runs,
+            },
+        ) from exc
+
+
+@router.post("/api/launcher/branch-instances/start", status_code=202)
+def launcher_branch_instance_start(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
+    return _branch_instance_lifecycle_response(payload, "start", request)
+
+
+@router.post("/api/launcher/branch-instances/stop", status_code=202)
+def launcher_branch_instance_stop(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
+    return _branch_instance_lifecycle_response(payload, "stop", request)
+
+
+@router.post("/api/launcher/branch-instances/force-stop", status_code=202)
+def launcher_branch_instance_force_stop(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
+    return _branch_instance_lifecycle_response(payload, "force-stop", request)
+
+
+@router.post("/api/launcher/branch-instances/restart", status_code=202)
+def launcher_branch_instance_restart(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
+    return _branch_instance_lifecycle_response(payload, "restart", request)
 
 
 @router.get("/api/launcher/settings/workbench-window")

@@ -14,6 +14,7 @@ import type {
   LauncherMaintenancePreviewResponse,
   LauncherMaintenanceSummary,
   LauncherControlResponse,
+  LauncherOperation,
   LauncherStartupSettings as BaseLauncherStartupSettings,
   LauncherStatus as BaseLauncherStatus,
   RuntimeLifecycleCancelRequest,
@@ -71,6 +72,8 @@ export type LauncherBranchInstance = {
   alive: boolean;
   observedState: string;
   port: number;
+  controlPort?: number;
+  url?: string;
   shortName?: string;
   workbenchTitle?: string;
   launcherTitle?: string;
@@ -198,6 +201,22 @@ export function getLauncherBranchInstances() {
 
 export function getLocalBranchInstances() {
   return fetchJson<LauncherBranchInstances>("/api/launcher/branch-instances");
+}
+
+export function requestBranchInstanceLifecycle(
+  instanceId: string,
+  operation: LauncherOperation,
+  trigger?: string,
+) {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (trigger) {
+    headers.set("X-Vibelution-Launcher-Trigger", trigger);
+  }
+  return fetchLauncherJson<LauncherControlResponse>(`branch-instances/${operation}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ instanceId }),
+  });
 }
 
 export function startLauncherBundle() {

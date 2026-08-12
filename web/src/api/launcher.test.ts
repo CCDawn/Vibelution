@@ -5,6 +5,7 @@ import {
   cancelRuntimeLifecycleCommand,
   forceStopLauncherBundle,
   getLauncherBranchInstances,
+  requestBranchInstanceLifecycle,
   getLauncherStatus,
   getRuntimeSummary,
   launcherEndpoint,
@@ -85,6 +86,36 @@ describe("launcher api helpers", () => {
 
     expect(payload.schemaVersion).toBe(1);
     expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/launcher/branch-instances");
+  });
+
+  it("starts a selected branch instance through the guarded launcher endpoint", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accepted: true, operation: "start", instanceId: "worktree:task", port: 8001 }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await requestBranchInstanceLifecycle("worktree:task", "start");
+
+    expect(payload.instanceId).toBe("worktree:task");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/branch-instances/start");
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(requestInit.method).toBe("POST");
+    expect(requestInit.body).toBe(JSON.stringify({ instanceId: "worktree:task" }));
   });
 
   it("fetches the workbench runtime summary directly instead of through launcher control", async () => {

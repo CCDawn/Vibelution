@@ -129,6 +129,7 @@ describe("LauncherRoute layout contract", () => {
     // Lifecycle start/stop/force-stop/restart share one action path with AppShell.
     expect(routeSource).toContain('useWorkbenchLifecycleActions("launcher_route")');
     expect(routeSource).toContain("requestLifecycle(operation)");
+    expect(routeSource).toContain("requestBranchInstanceLifecycle");
     expect(routeSource).not.toContain("startLauncherBundle");
     expect(routeSource).not.toContain("stopLauncherBundle");
     expect(routeSource).not.toContain("forceStopLauncherBundle");
@@ -153,22 +154,22 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("const controlPlaneIdle = isControlPlaneIdle(evidence)");
     expect(routeSource).toContain("const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled)");
     expect(routeSource).toContain("const busy = controlBusy || supervisorMutation.isPending");
-    expect(routeSource).toContain("const startDisabled = launcherStatusDisconnected || busy || !controlPlaneIdle || projectIsOpen || projectIsChanging");
+    expect(routeSource).toContain("const startDisabled = selectedIsCurrent");
     expect(routeSource).toContain("const startDisabledReason = launcherStatusDisconnected");
     expect(routeSource).toContain("startDisabledReason");
     expect(routeSource).toContain("startDisabledBusy");
     expect(routeSource).toContain("disabledReason={startDisabledReason}");
     expect(routeSource).toContain("tooltip={copy.start}");
-    expect(routeSource).toContain("const destructiveActionDisabled = busy || !controlPlaneIdle || activeWorkCount > 0 || projectIsChanging || projectIsClosed");
+    expect(routeSource).toContain("const destructiveActionDisabled = selectedIsCurrent");
     expect(routeSource).toContain("lifecycleActionDisabledActiveWork");
-    expect(routeSource).toContain("const stopDisabled = destructiveActionDisabled || closeCommandInFlight");
-    expect(routeSource).toContain("const stopDisabledReason = projectIsClosed");
+    expect(routeSource).toContain("const stopDisabled = selectedIsCurrent");
+    expect(routeSource).toContain("const stopDisabledReason = selectedIsCurrent");
     expect(routeSource).toContain("stopDisabledClosed");
     expect(routeSource).toContain("stopDisabledInFlight");
     expect(routeSource).toContain("restartDisabledClosed");
     expect(routeSource).toContain("actionsStartOnly");
     expect(routeSource).toContain("controlPlaneHasCommandType(evidence, [\"close_workbench\", \"force_close_workbench\"])");
-    expect(routeSource).toContain("const forceStopDisabled = busy || projectIsClosed || closeCommandInFlight");
+    expect(routeSource).toContain("const forceStopDisabled = selectedIsCurrent");
     expect(routeSource).toContain("forceStopDisabledReason");
     expect(routeSource).toContain("forceStopDisabledInFlight");
     // Unified power menu owns restart/stop/force-stop; no parallel status-bar tooltips for them.

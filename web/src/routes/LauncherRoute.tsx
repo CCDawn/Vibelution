@@ -6,6 +6,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getLauncherBranchInstances,
+  requestBranchInstanceLifecycle,
   getLauncherStatus,
   type LauncherBranchInstance,
   getLauncherDeveloperNoiseOverview,
@@ -1527,6 +1528,20 @@ export function LauncherRoute() {
     refetchInterval: pageVisible ? 20_000 : false,
   });
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
+  const branchItems = branchInstancesQuery.data?.items ?? [];
+  const currentInstanceId = branchInstancesQuery.data?.currentId || "main";
+  const selectedBranchId = branchItems.some((item) => item.id === selectedInstanceId)
+    ? selectedInstanceId
+    : currentInstanceId;
+  const selectedBranch = branchItems.find((item) => item.id === selectedBranchId);
+  const selectedIsCurrent = !selectedBranch || selectedBranch.current;
+  const selectedStartable = Boolean(
+    selectedBranch
+    && selectedBranch.checkedOut
+    && selectedBranch.kind !== "retired"
+    && selectedBranch.kind !== "local_branch",
+  );
+  const selectedAlive = Boolean(selectedBranch?.alive);
   const developerNoiseQuery = useQuery({
     queryKey: queryKeys.launcherDeveloperNoiseOverview(),
     queryFn: getLauncherDeveloperNoiseOverview,
@@ -1540,7 +1555,12 @@ export function LauncherRoute() {
     refetchInterval: false,
   });
   const controlMutation = useMutation({
-    mutationFn: async (operation: LauncherOperation) => requestLifecycle(operation),
+    mutationFn: async (operation: LauncherOperation) => {
+      if (selectedBranch && !selectedBranch.current) {
+        return requestBranchInstanceLifecycle(selectedBranch.id, operation);
+      }
+      return requestLifecycle(operation);
+    },
     onMutate: (operation) => {
       setLastControlOperation(operation);
       markControlledProjectLifecycleOperation(operation);
@@ -1578,6 +1598,7 @@ export function LauncherRoute() {
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherBranchInstances() });
     },
     onError: (error, operation) => {
       postLauncherLifecycleControlTelemetry(operation, "request_failed", {
@@ -1779,16 +1800,24 @@ export function LauncherRoute() {
   const controlPlaneIdle = isControlPlaneIdle(evidence);
   const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled);
   const busy = controlBusy || supervisorMutation.isPending;
-  const startDisabled = launcherStatusDisconnected || busy || !controlPlaneIdle || projectIsOpen || projectIsChanging;
+  const startDisabled = selectedIsCurrent
+    ? launcherStatusDisconnected || busy || !controlPlaneIdle || projectIsOpen || projectIsChanging
+    : launcherStatusDisconnected || controlMutation.isPending || !selectedStartable || selectedAlive;
   const startDisabledReason = launcherStatusDisconnected
     ? copy.loadFailed
-    : busy || !controlPlaneIdle
-      ? copy.startDisabledBusy
-      : projectIsOpen
-      ? copy.startDisabledRunning
-      : projectIsChanging
-        ? copy.startDisabledChanging
-        : copy.startDisabled;
+    : selectedIsCurrent
+      ? busy || !controlPlaneIdle
+        ? copy.startDisabledBusy
+        : projectIsOpen
+        ? copy.startDisabledRunning
+        : projectIsChanging
+          ? copy.startDisabledChanging
+          : copy.startDisabled
+      : !selectedStartable
+        ? (selectedBranch?.kind === "retired" ? copy.retiredCheckout : copy.notCheckedOut)
+        : selectedAlive
+          ? copy.startDisabledRunning
+          : copy.startDisabled;
   const projectSummary = lifecycleDisplay.label;
   const launcherSummary = !status
     ? copy.launcherOffline
@@ -1823,26 +1852,44 @@ export function LauncherRoute() {
     trackedCommand?.operation === "stop"
     || trackedCommand?.operation === "force-stop"
     || controlPlaneHasCommandType(evidence, ["close_workbench", "force_close_workbench"]);
-  const destructiveActionDisabled = busy || !controlPlaneIdle || activeWorkCount > 0 || projectIsChanging || projectIsClosed;
-  const destructiveActionDisabledReason = activeWorkCount > 0
-    ? copy.lifecycleActionDisabledActiveWork
-    : projectIsClosed
-      ? copy.restartDisabledClosed
-      : projectIsChanging
-        ? copy.startDisabledChanging
-        : copy.startDisabledBusy;
-  const stopDisabled = destructiveActionDisabled || closeCommandInFlight;
-  const stopDisabledReason = projectIsClosed
-    ? copy.stopDisabledClosed
-    : closeCommandInFlight
-      ? copy.stopDisabledInFlight
-      : destructiveActionDisabledReason;
-  const forceStopDisabled = busy || projectIsClosed || closeCommandInFlight;
-  const forceStopDisabledReason = projectIsClosed
-    ? copy.forceStopDisabledClosed
-    : closeCommandInFlight
-      ? copy.forceStopDisabledInFlight
-      : copy.startDisabledBusy;
+  const destructiveActionDisabled = selectedIsCurrent
+    ? busy || !controlPlaneIdle || activeWorkCount > 0 || projectIsChanging || projectIsClosed
+    : controlMutation.isPending || !selectedAlive;
+  const destructiveActionDisabledReason = selectedIsCurrent
+    ? activeWorkCount > 0
+      ? copy.lifecycleActionDisabledActiveWork
+      : projectIsClosed
+        ? copy.restartDisabledClosed
+        : projectIsChanging
+          ? copy.startDisabledChanging
+          : copy.startDisabledBusy
+    : selectedAlive
+      ? copy.startDisabledBusy
+      : copy.stopDisabledClosed;
+  const stopDisabled = selectedIsCurrent
+    ? destructiveActionDisabled || closeCommandInFlight
+    : controlMutation.isPending || !selectedAlive;
+  const stopDisabledReason = selectedIsCurrent
+    ? projectIsClosed
+      ? copy.stopDisabledClosed
+      : closeCommandInFlight
+        ? copy.stopDisabledInFlight
+        : destructiveActionDisabledReason
+    : selectedAlive
+      ? copy.startDisabledBusy
+      : copy.stopDisabledClosed;
+  const forceStopDisabled = selectedIsCurrent
+    ? busy || projectIsClosed || closeCommandInFlight
+    : controlMutation.isPending || !selectedAlive;
+  const forceStopDisabledReason = selectedIsCurrent
+    ? projectIsClosed
+      ? copy.forceStopDisabledClosed
+      : closeCommandInFlight
+        ? copy.forceStopDisabledInFlight
+        : copy.startDisabledBusy
+    : selectedAlive
+      ? copy.startDisabledBusy
+      : copy.forceStopDisabledClosed;
   const activeWorkDetail = activeWorkCount > 0
     ? `${copy.activeTasks}: ${activeWorkCount}${activeWorkKinds.length ? ` · ${activeWorkKinds.join(", ")}` : ""}${restartQueue?.statusLine ? ` · ${restartQueue.statusLine}` : ""}`
     : restartQueue?.statusLine
@@ -2076,12 +2123,6 @@ export function LauncherRoute() {
   }, [bundle, componentRows, copy, evidence?.state.updatedAt, lang, launcherStatusDisconnected, locale, residualItems, startupSettings, status, uiLang]);
 
   const keyStatusRows = statusRows;
-  const branchItems = branchInstancesQuery.data?.items ?? [];
-  const currentInstanceId = branchInstancesQuery.data?.currentId || "main";
-  const selectedBranchId = branchItems.some((item) => item.id === selectedInstanceId)
-    ? selectedInstanceId
-    : currentInstanceId;
-  const selectedBranch = branchItems.find((item) => item.id === selectedBranchId);
   const inspectSelectedInstance = Boolean(selectedBranch && !selectedBranch.current);
   const selectedProcessRows = inspectSelectedInstance
     ? observationProcessRows(selectedBranch, copy, uiLang)
@@ -2327,9 +2368,9 @@ export function LauncherRoute() {
                 controlMutation.mutate("force-stop");
               }}
             />
-            {bundle?.url ? (
+            {(selectedIsCurrent ? bundle?.url : (selectedBranch?.url || (selectedBranch && selectedBranch.port > 0 ? `http://127.0.0.1:${selectedBranch.port}` : ""))) ? (
               <VTooltip content={copy.open} width="compact">
-                <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer">
+                <a className={styles.statusBarButton} href={selectedIsCurrent ? String(bundle?.url || "") : String(selectedBranch?.url || (selectedBranch && selectedBranch.port > 0 ? `http://127.0.0.1:${selectedBranch.port}` : ""))} target="_blank" rel="noreferrer">
                   <ExternalLink size={15} />
                   <span>{copy.open}</span>
                 </a>

@@ -55,6 +55,10 @@ class LifecycleIntentPayload(BaseModel):
     idempotencyKey: str
 
 
+class BranchInstanceLifecyclePayload(BaseModel):
+    instanceId: str
+
+
 class WorkbenchCloseTransactionPayload(BaseModel):
     desktopSessionId: str
     idempotencyKey: str
