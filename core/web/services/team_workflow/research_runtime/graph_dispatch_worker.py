@@ -171,6 +171,30 @@ class GraphDispatchWorker:
             acked = uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
             if not acked:
                 return
+            if (
+                dispatch.dispatch_kind in ("resume_action", "resume_human")
+                and dispatch.receipt is not None
+                and dispatch.receipt.outcome == "succeeded"
+            ):
+                # resume 成功：当前 attempt 完成，人工门 Handoff accepted。
+                uow.repository.update_attempt_status(
+                    dispatch.node_run_id,
+                    NodeAttemptStatus.SUCCEEDED.value,
+                    now_ms,
+                    finished_at_ms=now_ms,
+                )
+                handoff = uow.repository.get_handoff_by_from_node(
+                    dispatch.run_id, dispatch.node_run_id
+                )
+                if handoff is not None:
+                    uow.repository.update_handoff_status(
+                        handoff[0],
+                        "accepted",
+                        now_ms,
+                        accepted_by_json=json.dumps(
+                            {"actorType": "system", "actorId": "graph-worker"}
+                        ),
+                    )
             if result.pending_action:
                 pending = result.pending_action
                 latest = uow.repository.latest_attempt(dispatch.run_id, pending.node_id)

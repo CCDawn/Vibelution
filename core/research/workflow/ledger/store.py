@@ -113,6 +113,17 @@ class WorkflowLedgerStore:
         finally:
             self._database.release_read_connection(connection)
 
+    def list_attempts_for_all(self, run_ids: list[str]) -> list[NodeAttemptRecord]:
+        records: list[NodeAttemptRecord] = []
+        connection = self._database.acquire_read_connection()
+        try:
+            repository = self._repository(connection)
+            for run_id in run_ids:
+                records.extend(repository.list_attempts(run_id))
+            return records
+        finally:
+            self._database.release_read_connection(connection)
+
     def list_pending_outbox(self, run_id: str | None = None, limit: int = 200) -> list[OutboxRecord]:
         connection = self._database.acquire_read_connection()
         try:

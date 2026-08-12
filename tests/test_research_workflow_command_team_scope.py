@@ -124,8 +124,9 @@ def test_resolve_human_task_accept_path(tmp_path: Path) -> None:
 
         row = harness.store.submit(read, force_flush=True).result(timeout=10)
         assert row is not None and row[6] == "accepted"
+        # 决策后不直接伪造 attempt 成功：正式推进走 graph resume（T5 契约）。
         attempts = harness.store.list_attempts("run-test")
-        assert attempts[0].status == "succeeded"
+        assert attempts[0].status == "starting"
     finally:
         harness.close()
 

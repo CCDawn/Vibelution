@@ -149,6 +149,21 @@ class WorkflowLedgerRepository:
             return None
         return int(row[0]), int(row[1])
 
+    def advance_last_sequence(self, run_id: str, count: int, now_ms: int) -> int | None:
+        """Worker-side sequence advancement without a runVersion bump."""
+        row = self.execute(
+            """
+            UPDATE workflow_runs
+            SET last_event_sequence = last_event_sequence + ?, updated_at_ms = ?
+            WHERE run_id = ?
+            RETURNING last_event_sequence
+            """,
+            (count, now_ms, run_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return int(row[0])
+
     def update_run_status(
         self,
         run_id: str,
@@ -580,11 +595,12 @@ class WorkflowLedgerRepository:
         action_kinds: tuple[str, ...] | None = None,
     ) -> list[OutboxRecord]:
         kind_filter = ""
-        params: list[Any] = []
+        params: list[Any] = [now_ms]
         if action_kinds:
             placeholders = ",".join("?" for _ in action_kinds)
             kind_filter = f"AND action_kind IN ({placeholders})"
             params.extend(action_kinds)
+        params.extend([now_ms, limit])
         rows = self.execute(
             f"""
             SELECT action_id, run_id, command_id, node_run_id, action_kind,
@@ -599,7 +615,7 @@ class WorkflowLedgerRepository:
             ORDER BY available_at_ms ASC, action_id ASC
             LIMIT ?
             """,
-            (*params, now_ms, now_ms, limit),
+            tuple(params),
         ).fetchall()
         leased: list[OutboxRecord] = []
         for row in rows:
@@ -807,3 +823,306 @@ class WorkflowLedgerRepository:
             (status, decision_json, now_ms, task_id),
         )
         return self.affected() > 0
+
+    # --------------------------------------------------- anchors/receipts
+
+    def insert_anchor(
+        self,
+        *,
+        anchor_id: str,
+        node_run_id: str,
+        actor_kind: str,
+        anchor_json: str,
+        created_at_ms: int,
+        agent_id: str | None = None,
+        role_key: str | None = None,
+        session_id: str | None = None,
+        session_attempt: int | None = None,
+        task_id: str | None = None,
+        turn_id: str | None = None,
+        system_action_id: str | None = None,
+        human_task_id: str | None = None,
+        checkpoint_id: str | None = None,
+        status: str = "bound",
+    ) -> None:
+        self.execute(
+            """
+            INSERT INTO execution_anchors (
+              anchor_id, node_run_id, actor_kind, agent_id, role_key,
+              session_id, session_attempt, task_id, turn_id,
+              system_action_id, human_task_id, checkpoint_id, status,
+              anchor_json, created_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                anchor_id,
+                node_run_id,
+                actor_kind,
+                agent_id,
+                role_key,
+                session_id,
+                session_attempt,
+                task_id,
+                turn_id,
+                system_action_id,
+                human_task_id,
+                checkpoint_id,
+                status,
+                anchor_json,
+                created_at_ms,
+            ),
+        )
+
+    def get_anchor_by_node_run(self, node_run_id: str) -> tuple | None:
+        return self.execute(
+            """
+            SELECT anchor_id, node_run_id, actor_kind, agent_id, role_key,
+                   session_id, session_attempt, task_id, turn_id,
+                   system_action_id, human_task_id, checkpoint_id, status,
+                   anchor_json, created_at_ms
+            FROM execution_anchors WHERE node_run_id = ?
+            """,
+            (node_run_id,),
+        ).fetchone()
+
+    def insert_artifact_receipt(
+        self,
+        *,
+        receipt_id: str,
+        run_id: str,
+        node_run_id: str,
+        team_id: str,
+        artifact_kind: str,
+        canonical_ref_json: str,
+        artifact_version: str,
+        sha256: str,
+        domain_revision: str,
+        materialized: int,
+        verified_at_ms: int,
+    ) -> None:
+        self.execute(
+            """
+            INSERT INTO artifact_receipts (
+              receipt_id, run_id, node_run_id, team_id, artifact_kind,
+              canonical_ref_json, artifact_version, sha256, domain_revision,
+              materialized, verified_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                receipt_id,
+                run_id,
+                node_run_id,
+                team_id,
+                artifact_kind,
+                canonical_ref_json,
+                artifact_version,
+                sha256,
+                domain_revision,
+                materialized,
+                verified_at_ms,
+            ),
+        )
+
+    def get_artifact_receipt(self, receipt_id: str) -> tuple | None:
+        return self.execute(
+            """
+            SELECT receipt_id, run_id, node_run_id, team_id, artifact_kind,
+                   canonical_ref_json, artifact_version, sha256, domain_revision,
+                   materialized, verified_at_ms
+            FROM artifact_receipts WHERE receipt_id = ?
+            """,
+            (receipt_id,),
+        ).fetchone()
+
+    def list_receipts_for_node_run(self, node_run_id: str) -> list[tuple]:
+        return self.execute(
+            """
+            SELECT receipt_id, run_id, node_run_id, team_id, artifact_kind,
+                   canonical_ref_json, artifact_version, sha256, domain_revision,
+                   materialized, verified_at_ms
+            FROM artifact_receipts WHERE node_run_id = ?
+            ORDER BY verified_at_ms ASC
+            """,
+            (node_run_id,),
+        ).fetchall()
+
+    def insert_budget_receipt(
+        self,
+        *,
+        receipt_id: str,
+        run_id: str,
+        node_run_id: str,
+        reservation_id: str,
+        stage_id: str,
+        policy_hash: str,
+        reserved_json: str,
+        created_at_ms: int,
+    ) -> None:
+        self.execute(
+            """
+            INSERT INTO budget_receipts (
+              receipt_id, run_id, node_run_id, reservation_id, stage_id,
+              policy_hash, reserved_json, settled_json, status,
+              created_at_ms, updated_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'reserved', ?, ?)
+            """,
+            (
+                receipt_id,
+                run_id,
+                node_run_id,
+                reservation_id,
+                stage_id,
+                policy_hash,
+                reserved_json,
+                created_at_ms,
+                created_at_ms,
+            ),
+        )
+
+    def update_budget_receipt(
+        self,
+        receipt_id: str,
+        *,
+        status: str,
+        now_ms: int,
+        settled_json: str | None = None,
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE budget_receipts
+            SET status = ?, settled_json = COALESCE(?, settled_json), updated_at_ms = ?
+            WHERE receipt_id = ?
+            """,
+            (status, settled_json, now_ms, receipt_id),
+        )
+        return self.affected() > 0
+
+    def get_budget_receipt(self, receipt_id: str) -> tuple | None:
+        return self.execute(
+            """
+            SELECT receipt_id, run_id, node_run_id, reservation_id, stage_id,
+                   policy_hash, reserved_json, settled_json, status,
+                   created_at_ms, updated_at_ms
+            FROM budget_receipts WHERE receipt_id = ?
+            """,
+            (receipt_id,),
+        ).fetchone()
+
+    # ---------------------------------------------------------- handoffs
+
+    def insert_handoff(
+        self,
+        *,
+        handoff_id: str,
+        run_id: str,
+        edge_id: str,
+        from_node_run_id: str,
+        to_node_id: str,
+        to_node_run_id: str | None,
+        gate_kind: str,
+        input_snapshot_hash: str,
+        offered_at_ms: int,
+    ) -> None:
+        self.execute(
+            """
+            INSERT INTO handoffs (
+              handoff_id, run_id, edge_id, from_node_run_id, to_node_id,
+              to_node_run_id, gate_kind, input_snapshot_hash, status,
+              accepted_by_json, rejection_problem_json, supersedes_handoff_id,
+              offered_at_ms, accepted_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, ?, NULL)
+            """,
+            (
+                handoff_id,
+                run_id,
+                edge_id,
+                from_node_run_id,
+                to_node_id,
+                to_node_run_id,
+                gate_kind,
+                input_snapshot_hash,
+                offered_at_ms,
+            ),
+        )
+
+    def get_handoff(self, handoff_id: str) -> tuple | None:
+        return self.execute(
+            """
+            SELECT handoff_id, run_id, edge_id, from_node_run_id, to_node_id,
+                   to_node_run_id, gate_kind, input_snapshot_hash, status,
+                   accepted_by_json, rejection_problem_json, supersedes_handoff_id,
+                   offered_at_ms, accepted_at_ms
+            FROM handoffs WHERE handoff_id = ?
+            """,
+            (handoff_id,),
+        ).fetchone()
+
+    def list_handoffs_for_node(self, run_id: str, to_node_id: str) -> list[tuple]:
+        return self.execute(
+            """
+            SELECT handoff_id, run_id, edge_id, from_node_run_id, to_node_id,
+                   to_node_run_id, gate_kind, input_snapshot_hash, status,
+                   accepted_by_json, rejection_problem_json, supersedes_handoff_id,
+                   offered_at_ms, accepted_at_ms
+            FROM handoffs
+            WHERE run_id = ? AND to_node_id = ?
+            ORDER BY offered_at_ms ASC
+            """,
+            (run_id, to_node_id),
+        ).fetchall()
+
+    def get_handoff_by_from_node(self, run_id: str, from_node_run_id: str) -> tuple | None:
+        return self.execute(
+            """
+            SELECT handoff_id, run_id, edge_id, from_node_run_id, to_node_id,
+                   to_node_run_id, gate_kind, input_snapshot_hash, status,
+                   accepted_by_json, rejection_problem_json, supersedes_handoff_id,
+                   offered_at_ms, accepted_at_ms
+            FROM handoffs
+            WHERE run_id = ? AND from_node_run_id = ?
+            ORDER BY offered_at_ms DESC LIMIT 1
+            """,
+            (run_id, from_node_run_id),
+        ).fetchone()
+
+    def update_handoff_status(
+        self,
+        handoff_id: str,
+        status: str,
+        now_ms: int,
+        *,
+        accepted_by_json: str | None = None,
+        rejection_problem_json: str | None = None,
+        accepted_at_ms: int | None = None,
+    ) -> bool:
+        cursor = self.execute(
+            """
+            UPDATE handoffs
+            SET status = ?,
+                accepted_by_json = COALESCE(?, accepted_by_json),
+                rejection_problem_json = COALESCE(?, rejection_problem_json),
+                accepted_at_ms = COALESCE(?, accepted_at_ms)
+            WHERE handoff_id = ?
+            """,
+            (status, accepted_by_json, rejection_problem_json, accepted_at_ms, handoff_id),
+        )
+        return self.affected() > 0
+
+    def insert_handoff_receipt(self, handoff_id: str, receipt_id: str, ordinal: int) -> None:
+        self.execute(
+            """
+            INSERT INTO handoff_receipts (handoff_id, receipt_id, ordinal)
+            VALUES (?, ?, ?)
+            """,
+            (handoff_id, receipt_id, ordinal),
+        )
+
+    def list_handoff_receipts(self, handoff_id: str) -> list[str]:
+        rows = self.execute(
+            """
+            SELECT receipt_id FROM handoff_receipts
+            WHERE handoff_id = ? ORDER BY ordinal ASC
+            """,
+            (handoff_id,),
+        ).fetchall()
+        return [str(row[0]) for row in rows]

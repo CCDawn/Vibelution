@@ -419,16 +419,25 @@ class WorkflowCommandService:
         uow.repository.update_human_task_decision(
             task_id, target, now_ms, decision_json=decision_json
         )
-        uow.repository.update_attempt_status(
-            str(row[2]),
-            (
-                NodeAttemptStatus.SUCCEEDED.value
-                if decision == "accept"
-                else NodeAttemptStatus.CANCELLED.value
-            ),
-            now_ms,
-            finished_at_ms=now_ms,
-        )
+        # 人工决策后通过正式 graph resume 推进（T5 契约：Human 节点可恢复）。
+        attempt = uow.repository.get_attempt(str(row[2]))
+        pending_action_id = attempt.pending_action_id if attempt else None
+        if pending_action_id:
+            from core.research.workflow.contracts import ExecutionReceipt
+
+            receipt = ExecutionReceipt(
+                action_id=pending_action_id,
+                node_run_id=str(row[2]),
+                outcome="succeeded" if decision == "accept" else "failed",
+                artifact_receipt_ids=(),
+                execution_anchor_id=None,
+                budget_receipt_id=None,
+                problem=None,
+                completed_at_ms=now_ms,
+            )
+            uow.repository.insert_outbox(
+                _human_resume_dispatch(uow, request, str(row[2]), receipt, command_id, now_ms)
+            )
         uow.repository.insert_event(
             _event_record(
                 run_id=request.run_id,
@@ -715,3 +724,35 @@ def _receipt(
 def _input_snapshot_hash(uow, run_id: str) -> str:
     run = uow.repository.get_run(run_id)
     return run.input_snapshot_hash if run else ""
+
+
+def _human_resume_dispatch(uow, request: CommandRequest, node_run_id: str, receipt: Any, command_id: str, now_ms: int):
+    from core.research.workflow.ledger import OutboxRecord
+
+    return OutboxRecord(
+        action_id=new_id("act"),
+        run_id=request.run_id,
+        command_id=command_id,
+        node_run_id=node_run_id,
+        action_kind="graph_dispatch",
+        idempotency_key=f"graph:resume-human:{receipt.action_id}",
+        payload_json=json.dumps(
+            {
+                "actionId": new_id("act"),
+                "runId": request.run_id,
+                "nodeRunId": node_run_id,
+                "nodeId": request.node_id,
+                "attempt": 1,
+                "dispatchKind": "resume_human",
+                "receipt": receipt.to_dict(),
+            }
+        ),
+        status="pending",
+        attempt_count=0,
+        available_at_ms=now_ms,
+        lease_owner=None,
+        lease_expires_at_ms=None,
+        last_problem_json=None,
+        created_at_ms=now_ms,
+        updated_at_ms=now_ms,
+    )
