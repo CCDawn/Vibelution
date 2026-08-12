@@ -99,6 +99,10 @@ class AdapterDispatchWorker:
                 self._commit_human(outbox, action, verified)
             else:
                 self._commit_verified(outbox, action, verified, usage=result.usage)
+            if verified.budget_receipt:
+                # ledger 提交后结算领域预算权威；settle 失败不回滚已提交 receipt，
+                # 由领域侧保留 reservation 供对账。
+                self._settle_domain_budget(verified.budget_receipt, result.usage)
         except Exception as exc:
             # commit 前 crash：outbox 保留 pending（可重领取），领域侧幂等。
             self._requeue_or_fail(outbox, str(exc))
@@ -352,6 +356,15 @@ class AdapterDispatchWorker:
         self._store.submit(mutate, force_flush=True).result(timeout=30)
 
     # ------------------------------------------------------------ failures
+
+    def _settle_domain_budget(self, reservation: dict[str, Any], usage: dict[str, Any]) -> None:
+        """After the ledger receipt commits, settle the domain budget authority.
+        A settle failure never rolls back the committed receipt; the domain
+        authority keeps the reservation for later reconciliation."""
+        try:
+            self._ports.settle_budget(reservation=reservation, usage=usage)
+        except Exception:
+            return
 
     def _block_attempt(self, outbox: Any, action: PendingAction, code: str, detail: str) -> None:
         now_ms = self._now()

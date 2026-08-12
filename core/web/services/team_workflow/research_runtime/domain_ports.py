@@ -1,5 +1,10 @@
-"""Domain service ports for adapters (real wiring lands with T7 routes;
-tests inject fakes that assert ordering and idempotency)."""
+"""Domain service ports for adapters.
+
+Tests inject fakes that assert ordering and idempotency; the production
+composition root injects :class:`RealDomainPorts` (real binding snapshot
+resolution, real Agent session/task/turn creation, and real budget
+reservation/settlement against the Workflow Ledger budget_receipts).
+"""
 
 from __future__ import annotations
 
@@ -45,8 +50,26 @@ class ArtifactReadBack:
     domain_revision: str
 
 
+@dataclass(frozen=True)
+class BindingResolution:
+    agent_id: str
+    role_key: str
+    binding_snapshot_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "agentId": self.agent_id,
+            "roleKey": self.role_key,
+        }
+        if self.binding_snapshot_id:
+            payload["bindingSnapshotId"] = self.binding_snapshot_id
+        return payload
+
+
 class DomainPorts(Protocol):
     def read_back_input(self, action: PendingAction) -> ReadBackVerdict: ...
+
+    def resolve_binding(self, action: PendingAction) -> BindingResolution: ...
 
     def reserve_budget(
         self, *, action: PendingAction, estimate_tokens: int

@@ -42,16 +42,17 @@ class AgentActionAdapter:
                 outcome="failed",
                 problem={"code": "actor_mismatch", "detail": "agent adapter got non-agent action"},
             )
+        binding = self._ports.resolve_binding(action)
         reservation = self._ports.reserve_budget(
             action=action, estimate_tokens=self._estimate_tokens
         )
         handle = self._ports.create_agent_task(action=action)
         refs = self._ports.execute_agent_turn(action=action, handle=handle)
         anchor = {
-            "agentId": _agent_id(action),
-            "roleKey": "",
+            **binding.to_dict(),
             **handle.to_dict(),
             "actionId": action.action_id,
+            "reservationId": str(reservation.get("reservationId") or ""),
         }
         return AdapterResult(
             action_id=action.action_id,
@@ -59,6 +60,7 @@ class AgentActionAdapter:
             materialized_refs=tuple(refs),
             anchor=anchor,
             usage={"estimate_tokens": self._estimate_tokens},
+            reserved=dict(reservation),
         )
 
     def verify(self, action: PendingAction, result: AdapterResult) -> VerifiedDomainResult:
@@ -98,15 +100,25 @@ class AgentActionAdapter:
                     "domainRevision": read_back.domain_revision,
                 }
             )
+        reserved = result.reserved or {}
+        reservation_id = str(
+            reserved.get("reservationId")
+            or (result.anchor or {}).get("reservationId")
+            or f"res-{action.action_id}"
+        )
         return VerifiedDomainResult(
             action_id=action.action_id,
             outcome="succeeded",
             artifact_receipts=tuple(receipts),
             anchor=result.anchor,
             budget_receipt={
-                "reservationId": f"res-{action.action_id}",
-                "stageId": _stage_for(action.node_id),
-                "reserved": {"estimatedTokens": self._estimate_tokens},
+                "reservationId": reservation_id,
+                "stageId": str(
+                    reserved.get("stageId") or _stage_for(action.node_id)
+                ),
+                "reserved": dict(
+                    reserved.get("reserved") or {"estimatedTokens": self._estimate_tokens}
+                ),
             },
         )
 
@@ -166,6 +178,7 @@ class SystemActionAdapter:
             materialized_refs=tuple(refs),
             anchor={"systemActionId": str(anchor.get("systemActionId") or action.action_id), "actionId": action.action_id},
             usage={"compute": str(anchor.get("runnerId") or "")},
+            reserved=dict(reservation),
         )
 
     def verify(self, action: PendingAction, result: AdapterResult) -> VerifiedDomainResult:
@@ -190,21 +203,19 @@ class SystemActionAdapter:
                     "domainRevision": read_back.domain_revision,
                 }
             )
+        reserved = result.reserved or {}
+        reservation_id = str(reserved.get("reservationId") or f"res-{action.action_id}")
         return VerifiedDomainResult(
             action_id=action.action_id,
             outcome="succeeded",
             artifact_receipts=tuple(receipts),
             anchor=result.anchor,
             budget_receipt={
-                "reservationId": f"res-{action.action_id}",
-                "stageId": _stage_for(action.node_id),
-                "reserved": {"estimatedTokens": 0},
+                "reservationId": reservation_id,
+                "stageId": str(reserved.get("stageId") or _stage_for(action.node_id)),
+                "reserved": dict(reserved.get("reserved") or {"estimatedTokens": 0}),
             },
         )
-
-
-def _agent_id(action: PendingAction) -> str:
-    return f"agent-{action.node_id}"
 
 
 _STAGE_BY_NODE: dict[str, str] = {

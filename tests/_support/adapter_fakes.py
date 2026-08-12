@@ -14,6 +14,7 @@ from core.research.workflow.contracts import PendingAction
 from core.web.services.team_workflow.research_runtime.domain_ports import (
     AgentTaskHandle,
     ArtifactReadBack,
+    BindingResolution,
     HumanTaskHandle,
     ReadBackVerdict,
 )
@@ -33,6 +34,7 @@ class FakeDomainPorts:
         self.artifact_store: dict[str, ArtifactReadBack] = {}
         self.reservations: list[str] = []
         self.settled: list[str] = []
+        self.bindings_by_action: dict[str, dict[str, Any]] = {}
         self.fail_input_readback = False
         self.fail_artifact_hash = False
 
@@ -43,6 +45,17 @@ class FakeDomainPorts:
         if self.fail_input_readback or self.input_ok.get(action.action_id) is False:
             return ReadBackVerdict(ok=False, detail="input changed", revision_vector=self.revision_vector)
         return ReadBackVerdict(ok=self.read_back_ok, detail=self.read_back_detail, revision_vector=self.revision_vector)
+
+    def resolve_binding(self, action: PendingAction) -> BindingResolution:
+        self.calls.append("resolve_binding")
+        agent_id = str(self.bindings_by_action.get(action.action_id, {}).get("agentId") or f"agent-{action.node_id}")
+        role_key = str(self.bindings_by_action.get(action.action_id, {}).get("roleKey") or action.node_id)
+        snapshot_id = self.bindings_by_action.get(action.action_id, {}).get("bindingSnapshotId")
+        return BindingResolution(
+            agent_id=agent_id,
+            role_key=role_key,
+            binding_snapshot_id=snapshot_id,
+        )
 
     def reserve_budget(self, *, action: PendingAction, estimate_tokens: int) -> dict[str, Any]:
         self.calls.append("reserve_budget")
