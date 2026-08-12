@@ -137,6 +137,7 @@ from .runtime_scene.record import (
     _update_backend_api_manifest,
     _update_browser_manifest,
     _update_ignored_browser_telemetry_manifest,
+    _refresh_active_scene_package_if_due,
     _update_runtime_scene_package_manifest,
     _update_runtime_scene_package_manifest_lightweight,
     delete_runtime_scenes,
@@ -297,6 +298,7 @@ LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 MAX_TEXT_CHARS = 200_000
 MAX_PACKAGE_INDEX_SEARCH_TEXT_CHARS = 6_000
 JSONL_FILE_CACHE_LIMIT = 256
+SCENE_PACKAGE_REFRESH_INTERVAL_SECONDS = 30.0
 RUNTIME_SCENE_PROMPT_INDEX_CACHE_TTL_SECONDS = 5.0
 BROWSER_TELEMETRY_RAW_PATH = "raw/browser.telemetry.log"
 BROWSER_TELEMETRY_COMPONENT = "browser_page"
