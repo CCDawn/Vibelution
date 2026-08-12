@@ -499,6 +499,7 @@ def test_extract_source_collection_candidates_keeps_assignment_open_when_batch_i
 
 def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
 
     response = team_workflow_orchestration_service.start_source_collection_run(
@@ -699,6 +700,7 @@ def test_source_collection_prompt_cache_resolves_provider_first_schema_v2(monkey
 
 def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
 
     response = team_workflow_orchestration_service.start_source_collection_run(
@@ -712,6 +714,7 @@ def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, 
 
 def test_start_source_collection_run_maps_roles_to_team_canvas_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     coordinator = session_service.create_chat_session(title="Coordinator")
     other_research_agent = session_service.create_chat_session(title="Other Research Agent")
     finder = session_service.create_chat_session(title="Source Finder")
@@ -745,6 +748,7 @@ def test_start_source_collection_run_maps_roles_to_team_canvas_agents(tmp_path, 
 
 def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
 
     response = team_workflow_orchestration_service.start_source_collection_run(
@@ -6229,6 +6233,7 @@ def test_source_collection_stage_tools_record_failure_runtime_events(tmp_path, m
 
 def test_execute_source_collection_search_writes_records_and_imports_candidates(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", _fake_source_search_response)
     team = team_service.create_team(name="ai科学研究团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -6314,6 +6319,7 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
 
 def test_execute_source_collection_search_rejects_low_relevance_results_before_storage(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(
         team_workflow_orchestration_service,
         "_execute_source_collection_query",
@@ -6357,6 +6363,7 @@ def test_execute_source_collection_search_rejects_low_relevance_results_before_s
 
 def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     events = _capture_workflow_events(monkeypatch)
     source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
     monkeypatch.setattr(
@@ -6414,6 +6421,7 @@ def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, m
 
 def test_execute_source_collection_search_does_not_mark_downstream_assignments_as_running_search(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
     monkeypatch.setattr(
         team_workflow_orchestration_service,
@@ -6460,6 +6468,7 @@ def test_execute_source_collection_search_does_not_mark_downstream_assignments_a
 
 def test_execute_source_collection_search_skips_existing_query_without_force(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     calls = []
 
     def fake_search(query, *, max_results, provider):
@@ -6491,6 +6500,7 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
 
 def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_queries(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     calls = []
 
     def fake_search(query, *, max_results, provider):
@@ -6530,6 +6540,7 @@ def test_execute_source_collection_search_limits_failed_provider_attempt_to_max_
 
 def test_execute_source_collection_search_advances_after_no_record_output(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     calls = []
 
     def fake_search(query, *, max_results, provider):
@@ -6572,6 +6583,7 @@ def test_execute_source_collection_search_advances_after_no_record_output(tmp_pa
 
 def test_execute_source_collection_search_records_output_per_query(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
 
     def fake_search(query, *, max_results, provider):
         query_id = str(query.get("queryId") or "query")
@@ -6619,6 +6631,7 @@ def test_execute_source_collection_search_records_output_per_query(tmp_path, mon
 
 def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
     monkeypatch.setattr(
         team_workflow_orchestration_service,
@@ -6672,6 +6685,7 @@ def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun
 
 def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_query(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     responses = [
         {
             "provider": "crossref_rest_api",
@@ -6755,6 +6769,7 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
 
 def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     search_calls = _stub_source_collection_search_background(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
 
@@ -6810,6 +6825,7 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
 
 def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
 
     def fake_search(query, *, max_results, provider):
@@ -6869,6 +6885,7 @@ def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, mon
 
 def test_research_stage_status_recovers_stale_running_source_collection_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     events = _capture_workflow_events(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
 
@@ -6934,6 +6951,7 @@ def test_research_stage_status_recovers_stale_running_source_collection_round(tm
 
 def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     search_calls = _stub_source_collection_search_background(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
 
@@ -6962,6 +6980,7 @@ def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp
 
 def test_start_research_stage_round_does_not_auto_start_team_coordination_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
     team = team_service.create_team(name="ai科学研究团队", members=[{"agentId": agent["agentId"], "role": "research_coordination"}])
@@ -6986,6 +7005,7 @@ def test_start_research_stage_round_does_not_auto_start_team_coordination_round(
 
 def test_retry_research_stage_round_coordination_starts_room_and_clears_warning(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
     start = team_workflow_orchestration_service.start_research_stage_round(
@@ -7009,6 +7029,7 @@ def test_retry_research_stage_round_coordination_starts_room_and_clears_warning(
 
 def test_start_research_stage_round_new_round_inherits_previous_topic_and_links_upstream(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     search_calls = _stub_source_collection_search_background(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
     first = team_workflow_orchestration_service.start_research_stage_round(
@@ -7117,6 +7138,7 @@ def test_start_iteration_stage_round_requires_frozen_design_and_result(
 
 def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
     team = team_service.create_team(name="ai科学研究团队", members=[{"agentId": agent["agentId"], "role": "research_coordination"}])
@@ -7783,11 +7805,13 @@ def test_challenge_stage_task_uses_configured_agent_model_without_official_evide
     monkeypatch,
 ):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(
         team_workflow_orchestration_service,
         "load_public_config",
         lambda: {
             "llm": {
+                        "schema_version": 1,
                 "profiles": {},
                 "model_library": {
                     "relay_openai/gpt-5.6-luna": {
@@ -7869,11 +7893,13 @@ def test_challenge_stage_task_uses_configured_agent_model_without_official_evide
 
 def test_challenge_source_run_derives_required_policy_from_official_prompt_cache_route(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(
         team_workflow_orchestration_service,
         "load_public_config",
         lambda: {
             "llm": {
+                        "schema_version": 1,
                 "profiles": {},
                 "model_library": {
                     "dashscope_main/qwen3.6-plus": {
@@ -7918,11 +7944,13 @@ def test_challenge_source_run_derives_required_policy_from_official_prompt_cache
 
 def test_legacy_challenge_stage_task_recovers_policy_from_prompt_cache_snapshot(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(
         team_workflow_orchestration_service,
         "load_public_config",
         lambda: {
             "llm": {
+                        "schema_version": 1,
                 "profiles": {},
                 "model_library": {
                     "dashscope_main/qwen3.6-plus": {
@@ -8000,11 +8028,13 @@ def test_legacy_challenge_stage_task_recovers_policy_from_prompt_cache_snapshot(
 
 def test_challenge_qwen_stage_task_records_bounded_canonical_evidence(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(
         team_workflow_orchestration_service,
         "load_public_config",
         lambda: {
             "llm": {
+                "schema_version": 1,
                 "profiles": {},
                 "model_library": {
                     "dashscope_main/qwen3.6-plus": {
