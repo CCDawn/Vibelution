@@ -34,4 +34,12 @@ describe("useChatAgentDirectoryActions contract", () => {
     expect(routeSource).toContain("agentRenameDraft");
     expect(routeSource).toContain("submitAgentRename");
   });
+
+  it("blocks only a duplicate archive for the same Agent", () => {
+    expect(actionsSource).toContain("isAgentArchivePending: (agentId: string) => boolean");
+    expect(actionsSource).toContain("isAgentArchivePending(agentId)");
+    expect(actionsSource).not.toContain("archiveAgentPending: boolean");
+    expect(routeSource).toContain("isAgentArchivePending,");
+    expect(routeSource).toContain("enqueueAgentArchive(variables.agentId)");
+  });
 });

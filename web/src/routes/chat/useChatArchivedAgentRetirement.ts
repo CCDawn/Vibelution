@@ -4,6 +4,7 @@ import type { NavigateFunction } from "react-router-dom";
 
 import { queryKeys } from "../../api/queryKeys";
 import type { AgentInstance, ConversationSummary, SessionSummary } from "../../api/types";
+import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
 import { updateSessionSummaryCaches } from "../chatSessionIndexQuery";
 import { isVisibleDirectSession } from "../conversationIndexModel";
 import { removeDeletedSessionFromConversations } from "./chatSessionDetailHelpers";
@@ -62,12 +63,12 @@ export function useChatArchivedAgentRetirement({
     const archivedSessionIds = [...new Set(
       options.archivedSessionIds.map((sessionId) => String(sessionId || "").trim()).filter(Boolean),
     )];
-    if (!archivedSessionIds.length) {
-      return;
-    }
     const archivedSessionIdSet = new Set(archivedSessionIds);
     const remainingAgentIds = new Set(options.remainingAgents.map((agent) => agent.agentId));
-    const currentActiveSession = options.sessions.find((session) => session.id === activeSessionId);
+    const currentActiveSessionId = String(
+      useChatWorkbenchStore.getState().activeSessionId || activeSessionId || "",
+    ).trim();
+    const currentActiveSession = options.sessions.find((session) => session.id === currentActiveSessionId);
     const fallbackSession = (
       currentActiveSession
       && remainingAgentIds.has(String(currentActiveSession.agentId || "").trim())
@@ -88,7 +89,7 @@ export function useChatArchivedAgentRetirement({
     ).trim();
     const archiveRouteTransition = resolveArchivedSessionRouteTransition({
       archivedSessionIds,
-      activeSessionId,
+      activeSessionId: currentActiveSessionId,
       requestedSessionId,
       fallbackSessionId: fallbackSession?.id,
     });
@@ -124,7 +125,7 @@ export function useChatArchivedAgentRetirement({
       removeSessionWorkspace(sessionId, fallbackSession?.id || null);
     });
     setSelectedAgentId((current) => current === options.agentId ? fallbackAgentId : current);
-    if (archiveRouteTransition.nextActiveSessionId !== activeSessionId) {
+    if (archiveRouteTransition.nextActiveSessionId !== currentActiveSessionId) {
       setActiveSession(archiveRouteTransition.nextActiveSessionId);
     }
     if (archiveRouteTransition.nextRequestedSessionId !== requestedSessionId) {
