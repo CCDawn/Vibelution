@@ -41,8 +41,7 @@ NetworkConfig,
     HealthConfig,
     SkinConfig,
     SoundConfig,
-    PromptConfig,
-get_provider_api_key_env,)
+    PromptConfig,)
 from .llm_security import is_llm_local_network_base_url
 from .paths import ensure_global_config_initialized, resolve_config_path
 from .providers import (
@@ -914,8 +913,6 @@ class ConfigLoader:
     def _load_from_env(
         self,
         prefix: str = "AGENT_",
-        base_provider: str = "",
-        allow_legacy_llm_provider_materialization: bool = True,
     ) -> Dict[str, Any]:
         """
         从环境变量加载配置
@@ -1196,14 +1193,8 @@ class ConfigLoader:
                 current = current.setdefault(part, {})
             current[parts[-1]] = value
 
-        def remap_legacy_provider_path(path: str) -> str:
-            legacy_prefix = "llm.providers.default."
-            if path.startswith(legacy_prefix):
-                return "llm.profiles.primary.provider." + path[len(legacy_prefix):]
-            return path
-
         def is_blocked_v2_llm_path(path: str) -> bool:
-            if allow_legacy_llm_provider_materialization or not path.startswith("llm."):
+            if not path.startswith("llm."):
                 return False
             leaf = path.rsplit(".", 1)[-1]
             is_credential = leaf in {"api_key", "api_key_env", "credential_ref"}
@@ -1213,8 +1204,6 @@ class ConfigLoader:
         for env_var, path in env_mappings.items():
             value = os.environ.get(env_var)
             if value is not None:
-                if allow_legacy_llm_provider_materialization:
-                    path = remap_legacy_provider_path(path)
                 if is_blocked_v2_llm_path(path):
                     continue
                 if path in bool_keys:
@@ -1238,8 +1227,6 @@ class ConfigLoader:
             if not env_var.startswith(llm_prefix):
                 continue
             path = env_var[len(prefix):].lower().replace("__", ".")
-            if allow_legacy_llm_provider_materialization:
-                path = remap_legacy_provider_path(path)
             if is_blocked_v2_llm_path(path):
                 continue
             value = raw_value
@@ -1260,15 +1247,6 @@ class ConfigLoader:
                     pass
             assign_path(config, path, value)
             touched = True
-
-        if allow_legacy_llm_provider_materialization:
-            effective_provider = base_provider
-            provider_env_var = get_provider_api_key_env(effective_provider)
-            if provider_env_var:
-                provider_api_key = os.environ.get(provider_env_var)
-                if provider_api_key:
-                    assign_path(config, "llm.profiles.primary.provider.api_key", provider_api_key)
-                    touched = True
 
         if not touched:
             return {}
@@ -1297,10 +1275,7 @@ class ConfigLoader:
             config = self._apply_dict(config, toml_config, allow_schema_transition=True)
 
         # 3. 从环境变量加载（较高优先级，会覆盖 TOML）
-        env_config = self._load_from_env(
-            base_provider=config.llm.get_provider(role="primary").kind,
-            allow_legacy_llm_provider_materialization=config.llm.schema_version == 1,
-        )
+        env_config = self._load_from_env()
         if env_config:
             config = self._apply_dict(config, env_config)
 
@@ -1325,12 +1300,6 @@ class ConfigLoader:
                 config = apply_runtime_profile(config)
                 if runtime_overrides:
                     config = self._apply_dict(config, {"runtime": runtime_overrides})
-
-        if config.llm.schema_version == 1:
-            for provider in config.llm.providers.values():
-                resolved_api_key = provider.resolve_api_key()
-                if resolved_api_key:
-                    provider.api_key = resolved_api_key
         return config
 
     def _flatten_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:

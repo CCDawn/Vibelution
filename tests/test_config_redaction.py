@@ -171,7 +171,10 @@ def test_env_overrides_toml_for_api_key(tmp_path, monkeypatch):
 
     config = ConfigLoader(str(config_file)).load()
 
-    assert config.llm.get_provider(role="primary").api_key == "env-test-key"
+    provider = config.llm.get_provider(role="primary")
+    assert provider.api_key == ""
+    assert provider.api_key_env == "MINIMAX_API_KEY"
+    assert config.get_api_key() == "env-test-key"
 
 
 def test_env_overrides_toml_for_non_secret_fields(tmp_path, monkeypatch):
