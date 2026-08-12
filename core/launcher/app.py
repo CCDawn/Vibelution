@@ -109,6 +109,11 @@ def launcher_status() -> dict:
     return launcher_service.get_launcher_status()
 
 
+@router.get("/api/launcher/freshness")
+def launcher_freshness() -> dict:
+    return launcher_service.get_launcher_freshness()
+
+
 @router.get("/api/launcher/branch-instances")
 def launcher_branch_instances() -> dict:
     return launcher_service.list_launcher_branch_instances()
@@ -537,6 +542,9 @@ def create_launcher_app() -> FastAPI:
             status_code=503,
         )
 
+    from core.launcher.freshness import capture_launcher_start_identity
+
+    capture_launcher_start_identity()
     return app
 
 

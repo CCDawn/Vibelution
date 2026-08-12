@@ -29,6 +29,7 @@ import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths }
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
 import {
   fetchLauncherBranchInstances,
+  fetchLauncherFreshness,
   fetchLauncherStatusSummary,
   formatLauncherStatusSummary,
   postLauncherControl,
@@ -1396,6 +1397,19 @@ async function resolveTrayLauncherControlContext(): Promise<DesktopActionLoopCon
   return resolveDesktopActionLoopContext(launcherBootstrap);
 }
 
+async function restartLauncherShell(): Promise<void> {
+  notifyDesktopTray("Vibelution", "正在重启 Launcher，以加载最新本地代码…");
+  try {
+    await stopOwnedPythonLauncherService();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止旧 Launcher 服务失败，仍将重启：${detail.slice(0, 220)}`, "warning");
+  }
+  app.relaunch();
+  shutdownApproved = true;
+  app.exit(0);
+}
+
 async function runTrayLauncherPost(
   path: LauncherControlPostPath,
   label: string,
@@ -1529,6 +1543,13 @@ app.whenReady()
       listInstances: async () => {
         const context = await resolveTrayLauncherControlContext();
         return fetchLauncherBranchInstances(context);
+      },
+      getFreshness: async () => {
+        const context = await resolveTrayLauncherControlContext();
+        return fetchLauncherFreshness(context);
+      },
+      restartLauncher: () => {
+        void restartLauncherShell();
       },
       startInstance: (instanceId, label) => {
         void runTrayLauncherPost(

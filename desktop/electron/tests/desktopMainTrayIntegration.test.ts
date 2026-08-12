@@ -29,8 +29,12 @@ describe("Electron main tray integration", () => {
     expect(traySource).toContain("startInstance:");
     expect(traySource).toContain("stopInstance:");
     expect(traySource).toContain("listInstances:");
+    expect(traySource).toContain("getFreshness:");
+    expect(traySource).toContain("restartLauncher:");
     expect(traySource).toContain("showStatus:");
     expect(traySource).toContain("requestDesktopShellExit()");
+    expect(mainSource).toContain("restartLauncherShell");
+    expect(mainSource).toContain("app.relaunch()");
   });
 
   it("destroys the tray only after shutdown is approved", () => {

@@ -80,6 +80,11 @@ def launcher_status() -> dict:
     return launcher_service.get_launcher_status()
 
 
+@router.get("/launcher/freshness")
+def launcher_freshness() -> dict:
+    return launcher_service.get_launcher_freshness()
+
+
 @router.get("/launcher/branch-instances")
 def launcher_branch_instances() -> dict:
     return launcher_service.list_launcher_branch_instances()

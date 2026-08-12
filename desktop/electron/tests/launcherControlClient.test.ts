@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyTrayBranchInstances,
   fetchLauncherBranchInstances,
+  fetchLauncherFreshness,
   fetchLauncherStatusSummary,
   formatLauncherStatusSummary,
   postLauncherControl
@@ -152,5 +153,29 @@ describe("tray branch instance classification", () => {
     });
     expect(requests[0].url).toBe("http://127.0.0.1:8765/api/launcher/branch-instances/start");
     expect(requests[0].init.body).toBe(JSON.stringify({ instanceId: "worktree:task" }));
+  });
+});
+
+describe("launcher freshness", () => {
+  it("reads the tray freshness label from the launcher control plane", async () => {
+    const summary = await fetchLauncherFreshness({
+      launcherOrigin: "http://127.0.0.1:8765/launcher",
+      controlToken: "token",
+      fetchImpl: async (url) => {
+        expect(String(url)).toBe("http://127.0.0.1:8765/api/launcher/freshness");
+        return jsonResponse({
+          current: false,
+          label: "Launcher 落后本地 main · aaa111 → bbb222",
+          runningShort: "aaa111",
+          headShort: "bbb222"
+        });
+      }
+    });
+    expect(summary).toEqual({
+      current: false,
+      label: "Launcher 落后本地 main · aaa111 → bbb222",
+      runningShort: "aaa111",
+      headShort: "bbb222"
+    });
   });
 });
