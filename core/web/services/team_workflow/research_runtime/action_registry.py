@@ -45,6 +45,7 @@ class AdapterResult:
     materialized_refs: tuple[dict[str, str], ...] = ()
     anchor: dict[str, Any] | None = None
     usage: dict[str, Any] = field(default_factory=dict)
+    reserved: dict[str, Any] = field(default_factory=dict)
     problem: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -56,6 +57,8 @@ class AdapterResult:
         }
         if self.anchor:
             payload["anchor"] = dict(self.anchor)
+        if self.reserved:
+            payload["reserved"] = dict(self.reserved)
         if self.problem:
             payload["problem"] = dict(self.problem)
         return payload
