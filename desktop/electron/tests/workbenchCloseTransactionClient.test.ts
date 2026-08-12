@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   acknowledgeWorkbenchCloseWindowClosed,
   fetchWorkbenchCloseTransaction,
+  isRecoverableWorkbenchCloseTransactionControlRejection,
   retryRejectedWorkbenchCloseSubmitOnce,
   submitWorkbenchCloseTransaction,
   WorkbenchCloseTransactionRequestError
@@ -143,5 +144,26 @@ describe("workbench close transaction client", () => {
       )
     ).rejects.toMatchObject({ operation: "submit", status: 401 });
     expect({ submits, recoveries }).toEqual({ submits: 2, recoveries: 1 });
+  });
+
+  it("identifies only rejected requests for the requested transaction operation", () => {
+    expect(
+      isRecoverableWorkbenchCloseTransactionControlRejection(
+        new WorkbenchCloseTransactionRequestError("fetch", 403),
+        "fetch"
+      )
+    ).toBe(true);
+    expect(
+      isRecoverableWorkbenchCloseTransactionControlRejection(
+        new WorkbenchCloseTransactionRequestError("submit", 403),
+        "fetch"
+      )
+    ).toBe(false);
+    expect(
+      isRecoverableWorkbenchCloseTransactionControlRejection(
+        new WorkbenchCloseTransactionRequestError("fetch", 500),
+        "fetch"
+      )
+    ).toBe(false);
   });
 });

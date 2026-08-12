@@ -24,6 +24,13 @@ def isolate_desktop_session_store(tmp_path, monkeypatch):
         "DESKTOP_SESSION_DB_PATH",
         tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
     )
+    from core.launcher import lifecycle_intent_store
+
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "LIFECYCLE_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "lifecycle.sqlite3",
+    )
 
 
 def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):
@@ -90,6 +97,13 @@ def test_workbench_close_transaction_is_durable_idempotent_and_requires_confirme
         lifecycle_intent_store,
         "LIFECYCLE_DB_PATH",
         tmp_path / ".runtime" / "launcher" / "lifecycle.sqlite3",
+    )
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
     )
     session = launcher_service.register_desktop_session(
         {
@@ -201,6 +215,13 @@ def test_workbench_close_transaction_requires_matching_closed_window_ack(tmp_pat
         "LIFECYCLE_DB_PATH",
         tmp_path / ".runtime" / "launcher" / "lifecycle.sqlite3",
     )
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
     session = launcher_service.register_desktop_session(
         {
             "desktopSessionId": "desktop-close-ack-1",
@@ -279,6 +300,13 @@ def test_workbench_close_transaction_reconciles_backend_failure_without_authoriz
         lifecycle_intent_store,
         "LIFECYCLE_DB_PATH",
         tmp_path / ".runtime" / "launcher" / "lifecycle.sqlite3",
+    )
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
     )
     session = launcher_service.register_desktop_session(
         {
@@ -1790,6 +1818,231 @@ def test_launcher_force_stop_queues_command_with_active_work_details(tmp_path, m
     accepted_event = next(event for event in events if event[0] == "launcher.bundle.force_stop.accepted")
     assert requested_event[1]["fields"]["activeWorkCount"] == 1
     assert accepted_event[1]["fields"]["commandId"] == "cmd-force-close"
+
+
+def test_launcher_stop_routes_a_live_electron_workbench_through_a_targeted_transaction(tmp_path, monkeypatch):
+    """A Launcher stop must never strand an Electron-owned Workbench window."""
+    from core.launcher import lifecycle_action_dispatcher, lifecycle_intent_store
+
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "LIFECYCLE_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "lifecycle.sqlite3",
+    )
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
+    session = launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "electron-launcher-stop-1",
+            "provider": "electron",
+            "workspaceRoot": str(launcher_service.PROJECT_ROOT),
+            "capabilities": ["workbench_close.transaction.v1"],
+        }
+    )
+    launcher_service.update_desktop_session_window(
+        "electron-launcher-stop-1",
+        "workbench",
+        {"revision": session["revision"], "open": True, "windowId": 42},
+    )
+    dispatched: list[dict[str, object]] = []
+    generic_commands: list[tuple[object, object, object]] = []
+
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: False)
+    monkeypatch.setattr(launcher_service, "ensure_runtime_manager_daemon_alive", lambda: {"ensured": True})
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda *args, **kwargs: generic_commands.append((args, kwargs, None))
+        or (_ for _ in ()).throw(AssertionError("Electron close must not use the generic command path")),
+    )
+    monkeypatch.setattr(launcher_service, "append_runtime_manager_file_event", lambda *args, **kwargs: "")
+
+    def dispatch(transaction: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        # The action must already exist before the backend can be stopped.
+        assert lifecycle_intent_store.claim_desktop_action(desktop_session_id="wrong-electron", lease_seconds=30) == {}
+        action = lifecycle_intent_store.claim_desktop_action(
+            desktop_session_id="electron-launcher-stop-1",
+            lease_seconds=30,
+        )
+        assert action["action"] == "close_workbench"
+        assert action["payload"] == {
+            "closeId": transaction["closeId"],
+            "desktopSessionId": "electron-launcher-stop-1",
+            "expectedDesktopSessionRevision": transaction["expectedDesktopSessionRevision"],
+            "mode": "normal",
+            "reason": "launcher_stop_button",
+            "source": "launcher_api",
+            "sourceRunId": "",
+            "sourceTaskId": "",
+        }
+        assert lifecycle_intent_store.ack_desktop_action(
+            action["actionId"],
+            desktop_session_id="electron-launcher-stop-1",
+            result={"accepted": True},
+        )["status"] == "succeeded"
+        dispatched.append(transaction)
+        return {"dispatched": True, "accepted": True, "commandId": "cmd-electron-stop-1"}
+
+    monkeypatch.setattr(lifecycle_action_dispatcher, "dispatch_workbench_close_transaction", dispatch)
+
+    response = launcher_service.request_launcher_stop()
+
+    assert response["accepted"] is True
+    assert response["operation"] == "stop"
+    assert response["commandId"] == "cmd-electron-stop-1"
+    assert response["closeId"] == dispatched[0]["closeId"]
+    assert response["windowOwner"] == "electron"
+    assert generic_commands == []
+    assert dispatched == [
+        {
+            "closeId": response["closeId"],
+            "desktopSessionId": "electron-launcher-stop-1",
+            "expectedDesktopSessionRevision": dispatched[0]["expectedDesktopSessionRevision"],
+            "mode": "normal",
+            "reason": "launcher_stop_button",
+            "confirmationCloseId": "",
+        }
+    ]
+
+
+def test_launcher_force_stop_uses_a_durable_confirmation_before_forcing_an_electron_close(tmp_path, monkeypatch):
+    """The explicit force-stop button is auditable confirmation, not a direct process kill."""
+    from core.launcher import lifecycle_action_dispatcher, lifecycle_intent_store
+
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "LIFECYCLE_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "lifecycle.sqlite3",
+    )
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
+    session = launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "electron-launcher-force-1",
+            "provider": "electron",
+            "workspaceRoot": str(launcher_service.PROJECT_ROOT),
+            "capabilities": ["workbench_close.transaction.v1"],
+        }
+    )
+    launcher_service.update_desktop_session_window(
+        "electron-launcher-force-1",
+        "workbench",
+        {"revision": session["revision"], "open": True, "windowId": 43},
+    )
+    active_work = [{"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "chat-1"}]
+    dispatched: list[dict[str, object]] = []
+
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: active_work)
+    monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: False)
+    monkeypatch.setattr(launcher_service, "ensure_runtime_manager_daemon_alive", lambda: {"ensured": True})
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Electron force close must not use the generic command path")),
+    )
+    monkeypatch.setattr(launcher_service, "append_runtime_manager_file_event", lambda *args, **kwargs: "")
+
+    def dispatch(transaction: dict[str, object], **_kwargs: object) -> dict[str, object]:
+        action = lifecycle_intent_store.claim_desktop_action(
+            desktop_session_id="electron-launcher-force-1",
+            lease_seconds=30,
+        )
+        assert action["payload"]["closeId"] == transaction["closeId"]
+        assert action["payload"]["mode"] == "force"
+        assert lifecycle_intent_store.ack_desktop_action(
+            action["actionId"],
+            desktop_session_id="electron-launcher-force-1",
+            result={"accepted": True},
+        )["status"] == "succeeded"
+        dispatched.append(transaction)
+        return {"dispatched": True, "accepted": True, "commandId": "cmd-electron-force-1"}
+
+    monkeypatch.setattr(lifecycle_action_dispatcher, "dispatch_workbench_close_transaction", dispatch)
+
+    response = launcher_service.request_launcher_force_stop()
+
+    assert response["accepted"] is True
+    assert response["operation"] == "force-stop"
+    assert response["commandId"] == "cmd-electron-force-1"
+    assert response["windowOwner"] == "electron"
+    assert dispatched[0]["mode"] == "force"
+    confirmation = lifecycle_intent_store.get_workbench_close_transaction(str(dispatched[0]["confirmationCloseId"]))
+    assert confirmation["phase"] == "confirmation_required"
+    assert confirmation["mode"] == "normal"
+    assert confirmation["activeWorkCount"] == 1
+
+
+def test_targeted_desktop_action_cannot_be_claimed_by_another_electron_session(tmp_path, monkeypatch):
+    """A close action must not be stolen by a different live Electron shell."""
+    from core.launcher import lifecycle_intent_store
+
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", tmp_path / "launcher" / "lifecycle.sqlite3")
+    created = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "close_workbench", "reason": "pytest", "idempotencyKey": "targeted-close-1"},
+        actor_context={"actorType": "launcher_api", "actorId": "launcher", "sourceRunId": "", "sourceTaskId": ""},
+        active_work_runs=[],
+        desktop_action_payload={"desktopSessionId": "electron-target", "closeId": "workbench-close-target"},
+    )
+
+    assert created["status"] == "accepted"
+    assert lifecycle_intent_store.claim_desktop_action(desktop_session_id="electron-other", lease_seconds=30) == {}
+    claimed = lifecycle_intent_store.claim_desktop_action(desktop_session_id="electron-target", lease_seconds=30)
+    assert claimed["targetDesktopSessionId"] == "electron-target"
+    assert claimed["payload"]["closeId"] == "workbench-close-target"
+
+
+def test_launcher_electron_close_does_not_dispatch_backend_when_window_handoff_cannot_persist(tmp_path, monkeypatch):
+    """A persisted backend close without its Electron handoff would recreate the stranded-window bug."""
+    from core.launcher import lifecycle_action_dispatcher, lifecycle_intent_store
+
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", tmp_path / "launcher" / "lifecycle.sqlite3")
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / "launcher" / "desktop_sessions.sqlite3",
+    )
+    session = launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "electron-handoff-failure",
+            "provider": "electron",
+            "workspaceRoot": str(launcher_service.PROJECT_ROOT),
+            "capabilities": ["workbench_close.transaction.v1"],
+        }
+    )
+    launcher_service.update_desktop_session_window(
+        "electron-handoff-failure",
+        "workbench",
+        {"revision": session["revision"], "open": True},
+    )
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(
+        launcher_service,
+        "_queue_electron_workbench_close_action",
+        lambda **_kwargs: {"status": "rejected", "intentId": "intent-rejected"},
+    )
+    monkeypatch.setattr(
+        lifecycle_action_dispatcher,
+        "dispatch_workbench_close_transaction",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not dispatch backend without Electron action")),
+    )
+
+    result = launcher_service._submit_launcher_electron_workbench_close(force=False, reason="pytest")
+
+    assert result["phase"] == "failed"
+    assert result["failureCode"] == "electron_window_action_rejected"
 
 
 def test_launcher_stop_records_request_audit(monkeypatch):

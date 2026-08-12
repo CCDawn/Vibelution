@@ -54,12 +54,24 @@ export async function retryRejectedWorkbenchCloseSubmitOnce<T>(
   }
 }
 
+/**
+ * A control token can expire between a desktop action claim and one of its
+ * transaction requests.  Callers may recover that local control context only
+ * when the Launcher has rejected the request before processing it.
+ */
+export function isRecoverableWorkbenchCloseTransactionControlRejection(
+  error: unknown,
+  operation?: WorkbenchCloseTransactionRequestOperation
+): error is WorkbenchCloseTransactionRequestError {
+  return error instanceof WorkbenchCloseTransactionRequestError
+    && (operation === undefined || error.operation === operation)
+    && (error.status === 401 || error.status === 403);
+}
+
 function isRecoverableWorkbenchCloseSubmitRejection(
   error: unknown
 ): error is WorkbenchCloseTransactionRequestError {
-  return error instanceof WorkbenchCloseTransactionRequestError
-    && error.operation === "submit"
-    && (error.status === 401 || error.status === 403);
+  return isRecoverableWorkbenchCloseTransactionControlRejection(error, "submit");
 }
 
 type WorkbenchCloseTransactionRequest = {

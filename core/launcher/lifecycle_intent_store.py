@@ -71,6 +71,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
           intent_id TEXT NOT NULL REFERENCES lifecycle_intents(intent_id),
           action TEXT NOT NULL,
           status TEXT NOT NULL,
+          target_desktop_session_id TEXT NOT NULL DEFAULT '',
           payload_json TEXT NOT NULL,
           claimed_by TEXT NOT NULL DEFAULT '',
           claimed_at TEXT NOT NULL DEFAULT '',
@@ -115,6 +116,13 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     )
     _ensure_column(conn, "lifecycle_intents", "result_json", "TEXT NOT NULL DEFAULT '{}'")
     _ensure_column(conn, "lifecycle_intents", "completed_at", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "desktop_actions", "target_desktop_session_id", "TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_desktop_actions_target_claim
+        ON desktop_actions(target_desktop_session_id, status, lease_expires_at, created_at)
+        """
+    )
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -132,6 +140,7 @@ def submit_lifecycle_intent(
     *,
     actor_context: dict[str, Any],
     active_work_runs: list[dict[str, Any]],
+    desktop_action_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     action = _safe_text(payload.get("action"), max_length=80)
     if action not in ALLOWED_ACTIONS:
@@ -200,21 +209,25 @@ def submit_lifecycle_intent(
             ),
         )
         if status == "accepted" and action in DESKTOP_ACTIONS:
+            action_payload = {
+                "sourceRunId": intent["sourceRunId"],
+                "sourceTaskId": intent["sourceTaskId"],
+            }
+            if desktop_action_payload:
+                action_payload.update(desktop_action_payload)
+            target_desktop_session_id = _safe_text(action_payload.get("desktopSessionId"), max_length=160)
             conn.execute(
                 """
                 INSERT INTO desktop_actions (
-                  action_id, intent_id, action, status, payload_json, created_at, updated_at
-                ) VALUES (?, ?, ?, 'pending', ?, ?, ?)
+                  action_id, intent_id, action, status, target_desktop_session_id, payload_json, created_at, updated_at
+                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)
                 """,
                 (
                     f"desktop-action-{uuid4().hex}",
                     intent_id,
                     action,
-                    json.dumps(
-                        {"sourceRunId": intent["sourceRunId"], "sourceTaskId": intent["sourceTaskId"]},
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
+                    target_desktop_session_id,
+                    json.dumps(action_payload, ensure_ascii=False, sort_keys=True),
                     now,
                     now,
                 ),
@@ -656,6 +669,9 @@ def _deadline_after_seconds(seconds: int) -> str:
 
 def claim_desktop_action(*, desktop_session_id: str, lease_seconds: int = 30) -> dict[str, Any]:
     now = _now_iso()
+    normalized_desktop_session_id = _safe_text(desktop_session_id, max_length=160)
+    if not normalized_desktop_session_id:
+        return {}
     lease_expires_at = datetime.now(timezone.utc).timestamp() + max(1, int(lease_seconds))
     with _connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -663,11 +679,12 @@ def claim_desktop_action(*, desktop_session_id: str, lease_seconds: int = 30) ->
         row = conn.execute(
             """
             SELECT * FROM desktop_actions
-            WHERE status = 'pending' OR (status = 'claimed' AND lease_expires_at < ? AND claim_attempt < 3)
+            WHERE (status = 'pending' OR (status = 'claimed' AND lease_expires_at < ? AND claim_attempt < 3))
+              AND (target_desktop_session_id = '' OR target_desktop_session_id = ?)
             ORDER BY created_at ASC
             LIMIT 1
             """,
-            (now,),
+            (now, normalized_desktop_session_id),
         ).fetchone()
         if row is None:
             conn.execute("COMMIT")
@@ -685,7 +702,7 @@ def claim_desktop_action(*, desktop_session_id: str, lease_seconds: int = 30) ->
                 updated_at = ?
             WHERE action_id = ?
             """,
-            (_safe_text(desktop_session_id, max_length=160), now, expires_iso, now, action_id),
+            (normalized_desktop_session_id, now, expires_iso, now, action_id),
         )
         claimed = conn.execute("SELECT * FROM desktop_actions WHERE action_id = ?", (action_id,)).fetchone()
         conn.execute("COMMIT")
@@ -771,6 +788,7 @@ def _public_desktop_action(row: sqlite3.Row | None) -> dict[str, Any]:
         "intentId": row["intent_id"],
         "action": row["action"],
         "status": row["status"],
+        "targetDesktopSessionId": row["target_desktop_session_id"],
         "payload": json.loads(row["payload_json"]),
         "claimedBy": row["claimed_by"],
         "leaseExpiresAt": row["lease_expires_at"],
