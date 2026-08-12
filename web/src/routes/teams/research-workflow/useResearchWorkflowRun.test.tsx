@@ -9,54 +9,63 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
+import type { ResearchWorkflowSnapshot } from "../../../api/types/research-workflow/core";
 
 const api = vi.hoisted(() => ({
-  fetchResearchWorkflowRun: vi.fn(),
-  fetchResearchWorkflowCanvas: vi.fn(),
-  fetchResearchWorkflowEvents: vi.fn(),
+  fetchResearchWorkflowSnapshot: vi.fn(),
   fetchResearchWorkflowDefinition: vi.fn(),
   createResearchWorkflowRun: vi.fn(),
   resolveResearchWorkflowHumanTask: vi.fn(),
   researchWorkflowStreamUrl: vi.fn(
-    (runId: string, options: { teamId: string }) =>
-      `/api/research/workflow-runs/${runId}/stream?teamId=${options.teamId}`,
+    (options: { runId: string; teamId: string; afterSequence?: number }) => {
+      const qs = new URLSearchParams({ teamId: options.teamId });
+      if (options.afterSequence != null) {
+        qs.set("afterSequence", String(options.afterSequence));
+      }
+      return `/api/research/workflow-runs/${options.runId}/stream?${qs.toString()}`;
+    },
   ),
 }));
 
-vi.mock("../../../api/researchWorkflow", () => api);
+vi.mock("../../../api/research-workflow/runs", () => ({
+  fetchResearchWorkflowSnapshot: api.fetchResearchWorkflowSnapshot,
+}));
+
+vi.mock("../../../api/research-workflow/events", () => ({
+  researchWorkflowStreamUrl: api.researchWorkflowStreamUrl,
+}));
+
+vi.mock("../../../api/researchWorkflow", () => ({
+  fetchResearchWorkflowDefinition: api.fetchResearchWorkflowDefinition,
+  createResearchWorkflowRun: api.createResearchWorkflowRun,
+  resolveResearchWorkflowHumanTask: api.resolveResearchWorkflowHumanTask,
+}));
 
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
 
-function makeEvents(n: number) {
-  return Array.from({ length: n }, (_, i) => ({
-    eventId: `evt-${i + 1}`,
-    sequence: i + 1,
-    type: "node.waiting_human",
-  }));
-}
-
-function makeRun(runId: string, events = makeEvents(3)): WorkflowRunRecord {
+function makeSnapshot(runId: string, sequence: number): ResearchWorkflowSnapshot {
   return {
-    runId,
-    workflowId: "challenge-cup-research",
-    workflowVersionId: "wv-x",
-    teamId: "research-team",
-    projectId: "project-1",
-    questionId: "question-1",
-    runVersion: 3,
-    status: "waiting_human",
-    runtimeCurrentNodeIds: ["knowledge_handoff"],
-    events: events as WorkflowRunRecord["events"],
-    humanTasks: [],
-    handoffs: [],
-    bindingSnapshots: [],
-    sessionBindings: {},
-  } as WorkflowRunRecord;
-}
-
-function makeCanvas(runId: string) {
-  return {
+    run: {
+      runId,
+      teamId: "research-team",
+      workflowId: "challenge-cup-research",
+      workflowVersionId: "wv-x",
+      threadId: "thread-1",
+      projectId: "project-1",
+      questionId: "question-1",
+      status: "waiting_human",
+      runVersion: 3,
+      inputSnapshotHash: "a".repeat(64),
+      bindingSnapshotSetId: "binding-set-1",
+      activeNodeId: "knowledge_handoff",
+      parentRunId: null,
+      forkedFromCheckpointId: null,
+      completionKind: null,
+      terminalReason: null,
+      createdAtMs: 1,
+      updatedAtMs: 1,
+      completedAtMs: null,
+    },
     definition: {
       workflowId: "challenge-cup-research",
       schemaVersion: "1.0.0",
@@ -66,15 +75,19 @@ function makeCanvas(runId: string) {
       nodes: [],
       edges: [],
     },
-    run: {
-      runId,
-      teamId: "research-team",
-      runVersion: 3,
-      status: "waiting_human" as const,
-      runtimeCurrentNodeIds: ["knowledge_handoff"],
-      nodeRuns: {},
-      pendingHumanTasks: [],
+    nodeAttempts: {},
+    activeNodeIds: ["knowledge_handoff"],
+    pendingHumanTasks: [],
+    commandOffers: [],
+    handoffSummary: { countsByStatus: {}, refs: [], count: 0 },
+    agentBindingSummary: {
+      bindingSnapshotSetId: "binding-set-1",
+      bindingSnapshotIds: [],
+      count: 0,
     },
+    budgetSummary: { safetyLimits: {}, receiptRefs: [], receiptCount: 0 },
+    latestEventSequence: sequence,
+    generatedAt: "2026-08-12T14:00:00.000Z",
   };
 }
 
@@ -120,9 +133,8 @@ describe("useResearchWorkflowRun behavior", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     latest = null;
-    api.fetchResearchWorkflowEvents.mockResolvedValue({ events: [], snapshot: null });
     api.fetchResearchWorkflowDefinition.mockResolvedValue({
-      definition: makeCanvas("").definition,
+      definition: makeSnapshot("", 0).definition,
       workflowId: "challenge-cup-research",
       workflowVersionId: "wv-x",
     });
@@ -147,26 +159,23 @@ describe("useResearchWorkflowRun behavior", () => {
         />,
       );
     });
-    // flush microtasks from effects
     await act(async () => {
       await Promise.resolve();
     });
   }
 
-  it("initial load of 3 events stays 3 not 6", async () => {
-    const events = makeEvents(3);
-    api.fetchResearchWorkflowRun.mockResolvedValue(makeRun("run-a", events));
-    api.fetchResearchWorkflowCanvas.mockResolvedValue(makeCanvas("run-a"));
+  it("initial snapshot hydrates lastSequence without duplicating events", async () => {
+    api.fetchResearchWorkflowSnapshot.mockResolvedValue(makeSnapshot("run-a", 3));
     await renderWith("run-a");
-    expect(latest?.run?.events).toHaveLength(3);
+    expect(latest?.run?.runId).toBe("run-a");
+    expect(latest?.run?.events).toHaveLength(0);
     expect(latest?.lastSequence).toBe(3);
   });
 
   it("run switch resets sequence cursor for run B", async () => {
-    api.fetchResearchWorkflowRun.mockImplementation(async (id: string) =>
-      makeRun(id, id === "run-a" ? makeEvents(100).slice(99) : makeEvents(1)),
+    api.fetchResearchWorkflowSnapshot.mockImplementation(async ({ runId }) =>
+      makeSnapshot(runId, runId === "run-a" ? 100 : 1),
     );
-    api.fetchResearchWorkflowCanvas.mockImplementation(async (id: string) => makeCanvas(id));
 
     await renderWith("run-a");
     expect(latest?.lastSequence).toBe(100);
@@ -177,35 +186,30 @@ describe("useResearchWorkflowRun behavior", () => {
   });
 
   it("slow previous run refresh does not overwrite new run", async () => {
-    let resolveA: (v: WorkflowRunRecord) => void = () => {};
-    api.fetchResearchWorkflowRun.mockImplementation((id: string) => {
-      if (id === "run-a") {
-        return new Promise<WorkflowRunRecord>((resolve) => {
+    let resolveA: (value: ResearchWorkflowSnapshot) => void = () => {};
+    api.fetchResearchWorkflowSnapshot.mockImplementation(async ({ runId }) => {
+      if (runId === "run-a") {
+        return new Promise<ResearchWorkflowSnapshot>((resolve) => {
           resolveA = resolve;
         });
       }
-      return Promise.resolve(makeRun("run-b", makeEvents(1)));
+      return makeSnapshot("run-b", 1);
     });
-    api.fetchResearchWorkflowCanvas.mockImplementation(async (id: string) => makeCanvas(id));
 
     await act(async () => {
-      root.render(
-        <HookProbe runId="run-a" onValue={(v) => { latest = v; }} />,
-      );
+      root.render(<HookProbe runId="run-a" onValue={(v) => { latest = v; }} />);
     });
     await act(async () => {
-      root.render(
-        <HookProbe runId="run-b" onValue={(v) => { latest = v; }} />,
-      );
+      root.render(<HookProbe runId="run-b" onValue={(v) => { latest = v; }} />);
     });
     await act(async () => {
       await Promise.resolve();
     });
     await act(async () => {
-      resolveA(makeRun("run-a", makeEvents(5)));
+      resolveA(makeSnapshot("run-a", 5));
       await Promise.resolve();
     });
     expect(latest?.run?.runId).toBe("run-b");
-    expect(latest?.run?.events).toHaveLength(1);
+    expect(latest?.lastSequence).toBe(1);
   });
 });
