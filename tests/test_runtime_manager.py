@@ -5589,6 +5589,58 @@ def no_active_electron_desktop_session(monkeypatch):
     monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: None)
 
 
+def test_electron_session_bootstrap_waits_for_primary_instance_handoff(monkeypatch):
+    sessions = iter([None, {"desktopSessionId": "electron-primary"}])
+
+    class ExitedSecondInstance:
+        returncode = 0
+
+        @staticmethod
+        def poll():
+            return 0
+
+    monkeypatch.setattr(
+        workbench_controller,
+        "_latest_active_electron_desktop_session",
+        lambda: next(sessions),
+    )
+    monkeypatch.setattr(workbench_controller.time, "sleep", lambda _seconds: None)
+
+    session = workbench_controller._await_electron_desktop_session(
+        ExitedSecondInstance(),
+        timeout_seconds=0.1,
+    )
+
+    assert session["desktopSessionId"] == "electron-primary"
+
+
+def test_electron_workbench_open_waits_for_primary_instance_after_handoff(monkeypatch):
+    sessions = iter(
+        [
+            {"windows": {"workbench": {"open": False}}},
+            {"desktopSessionId": "electron-primary", "windows": {"workbench": {"open": True}}},
+        ]
+    )
+
+    class ExitedSecondInstance:
+        returncode = 0
+
+        @staticmethod
+        def poll():
+            return 0
+
+    monkeypatch.setattr(desktop_session_store, "get_desktop_session", lambda _session_id: next(sessions))
+    monkeypatch.setattr(workbench_controller.time, "sleep", lambda _seconds: None)
+
+    session = workbench_controller._await_electron_workbench_open(
+        ExitedSecondInstance(),
+        desktop_session_id="electron-primary",
+        timeout_seconds=0.1,
+    )
+
+    assert session["desktopSessionId"] == "electron-primary"
+
+
 def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch, no_active_electron_desktop_session):
     captured = {}
     events: list[tuple[str, dict]] = []
