@@ -489,7 +489,9 @@ class ChallengeCupGraphCoordinator:
         interrupts = getattr(state, "interrupts", None) or ()
         if interrupts:
             # checkpoint 中的 interrupt payload 是权威 PendingAction。
-            pending = PendingAction.from_dict(dict(interrupts[0].value or {}))
+            # restart/retry 会先消费旧 interrupt 再写入新 attempt 的 interrupt；
+            # 取最后一个（最新写入）作为权威 pending。
+            pending = PendingAction.from_dict(dict(interrupts[-1].value or {}))
         return GraphDispatchResult(
             dispatch_kind=dispatch.dispatch_kind,
             pending_action=pending,

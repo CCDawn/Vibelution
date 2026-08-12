@@ -711,6 +711,20 @@ class WorkflowLedgerRepository:
         )
         return self.affected() > 0
 
+    def cancel_outbox_by_node_run(self, node_run_id: str, now_ms: int) -> int:
+        """Cancel pending adapter/graph outbox for a node run whose attempt is
+        already terminal (a retry supersedes it and must not run twice)."""
+        cursor = self.execute(
+            """
+            UPDATE outbox_actions
+            SET status = 'cancelled', lease_owner = NULL, lease_expires_at_ms = NULL,
+                updated_at_ms = ?
+            WHERE node_run_id = ? AND status IN ('pending', 'leased')
+            """,
+            (now_ms, node_run_id),
+        )
+        return self.affected()
+
     def list_pending_outbox(self, run_id: str | None = None, limit: int = 200) -> list[OutboxRecord]:
         if run_id is None:
             rows = self.execute(
