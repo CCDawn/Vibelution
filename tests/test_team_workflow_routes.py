@@ -59,6 +59,7 @@ def _approve_candidate_for_experiment(
 def _fake_local_research_public_config(*, prompt_cache_mode="explicit_cache_control", model_library: dict | None = None):
     return {
         "llm": {
+            "schema_version": 1,
             "profiles": {},
             "model_library": model_library or {
                 "houmo_qwen35_9b_agent": {

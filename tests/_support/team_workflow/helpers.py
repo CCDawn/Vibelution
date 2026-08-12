@@ -267,6 +267,7 @@ def _use_fake_local_research_config(monkeypatch):
         "load_public_config",
         lambda: {
             "llm": {
+                "schema_version": 1,
                 "profiles": {},
                 "model_library": {
                     "houmo_qwen35_9b_agent": {
