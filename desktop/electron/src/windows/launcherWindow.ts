@@ -11,6 +11,7 @@ export function createLauncherWindow(url: string, paths: DesktopPaths): BrowserW
     backgroundColor: "#f7fafc",
     titleBarStyle: "default",
     skipTaskbar: false,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: resolvePreloadPath(paths),
       contextIsolation: true,
