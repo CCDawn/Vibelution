@@ -426,6 +426,10 @@ class ConversationLogger:
         except (TypeError, ValueError):
             self._delegation_depth = 0
 
+        self._debug_recording_enabled = (
+            str(os.environ.get("VIBELUTION_LOG_LEVEL", "") or "").strip().upper() == "DEBUG"
+        )
+
     def _ensure_log_dir(self):
         """确保日志目录存在"""
         os.makedirs(self._log_dir, exist_ok=True)
@@ -858,8 +862,8 @@ class ConversationLogger:
         self._write(record)
 
     def log_debug(self, tag: str, message: str, level: str = "INFO"):
-        """记录 debug/warning/info/system 级别事件（DEBUG 级仅 UI 展示，不落盘）"""
-        if level == "DEBUG":
+        """记录 debug/warning/info/system 级别事件（DEBUG 级仅 UI 展示，不落盘；设置 VIBELUTION_LOG_LEVEL=DEBUG 可开启落盘）"""
+        if level == "DEBUG" and not getattr(self, "_debug_recording_enabled", False):
             return
         record = {
             "type": "debug",

@@ -21,7 +21,7 @@ from core.logging.logger import ConversationLogger
 
 ## 落盘约定（统一）
 
-- 会话 JSONL：项目根 `logs/conversations/conversation_*.jsonl`（结构化事件 + 服务层 debug 转发，`DEBUG` 级不落盘）
+- 会话 JSONL：项目根 `logs/conversations/conversation_*.jsonl`（结构化事件 + 服务层 debug 转发，`DEBUG` 级默认不落盘；设置环境变量 `VIBELUTION_LOG_LEVEL=DEBUG` 可开启 DEBUG 落盘，用于深度现场调试）
 - Runtime scene 事件：`logs/runtime_scenes/`（UTC ISO 事件流）
 - Transcript：workspace home `logs/transcripts/transcript_*.md`（人读展示，保留本地时间）
 - 时间戳：机器可读事件统一 **UTC ISO**（`2026-08-12T01:30:00.123+00:00`）；UI/展示层保留本地时间
