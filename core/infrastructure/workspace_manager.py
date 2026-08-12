@@ -137,9 +137,9 @@ class WorkspaceManager:
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
-            from core.logging import debug_logger
+            from core.logging import debug as _debug_logger
 
-            debug_logger.info(f"[Workspace] 确保目录: {d}")
+            _debug_logger.info(f"[Workspace] 确保目录: {d}")
 
         # 将合法目录注册到 PathSandbox，防止文件创建时被误拦
         try:
@@ -148,8 +148,8 @@ class WorkspaceManager:
             for d in dirs:
                 sv.path_sandbox.add_allowed_directory(str(d))
         except Exception as exc:
-            from core.logging import debug_logger
-            debug_logger.warning(f"[Workspace] 注册合法目录到安全沙箱失败: {type(exc).__name__}: {exc}")
+            from core.logging import debug as _debug_logger
+            _debug_logger.warning(f"[Workspace] 注册合法目录到安全沙箱失败: {type(exc).__name__}: {exc}")
             pass
 
     def _init_database(self):
@@ -301,9 +301,9 @@ class WorkspaceManager:
         conn.commit()
         conn.close()
 
-        from core.logging import debug_logger
+        from core.logging import debug as _debug_logger
 
-        debug_logger.info(f"[Workspace] 数据库初始化: {self._db_path}")
+        _debug_logger.info(f"[Workspace] 数据库初始化: {self._db_path}")
 
     @contextmanager
     def get_db_connection(self):
@@ -481,9 +481,9 @@ class WorkspaceManager:
                 """, (module_path, insight, generation, now, now))
             return True
         except Exception as e:
-            from core.logging import debug_logger
+            from core.logging import debug as _debug_logger
 
-            debug_logger.error(f"[Workspace] 刻印代码库认知失败: {e}")
+            _debug_logger.error(f"[Workspace] 刻印代码库认知失败: {e}")
             return False
 
     def get_all_codebase_knowledge(self) -> List[Dict]:
@@ -526,9 +526,9 @@ class WorkspaceManager:
                 """, (generation, category, title, content, importance, now))
             return True
         except Exception as e:
-            from core.logging import debug_logger
+            from core.logging import debug as _debug_logger
 
-            debug_logger.error(f"[Workspace] 写入长期记忆失败: {e}")
+            _debug_logger.error(f"[Workspace] 写入长期记忆失败: {e}")
             return False
 
     def get_memories_by_generation(self, generation: int) -> list:
@@ -609,9 +609,9 @@ class WorkspaceManager:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            from core.logging import debug_logger
+            from core.logging import debug as _debug_logger
 
-            debug_logger.error(f"[Workspace] 写入记忆索引失败: {e}")
+            _debug_logger.error(f"[Workspace] 写入记忆索引失败: {e}")
             return False
 
     # ==================== 提示词文件操作 ====================
@@ -640,9 +640,9 @@ class WorkspaceManager:
                 f.write(content)
             return True
         except Exception as e:
-            from core.logging import debug_logger
+            from core.logging import debug as _debug_logger
 
-            debug_logger.error(f"[Workspace] 写入提示词失败: {e}")
+            _debug_logger.error(f"[Workspace] 写入提示词失败: {e}")
             return False
 
     def write_research_prompt(self, filename: str, content: str) -> bool:
@@ -654,9 +654,9 @@ class WorkspaceManager:
                 f.write(content)
             return True
         except Exception as e:
-            from core.logging import debug_logger
+            from core.logging import debug as _debug_logger
 
-            debug_logger.error(f"[Workspace] 写入科研提示词失败: {e}")
+            _debug_logger.error(f"[Workspace] 写入科研提示词失败: {e}")
             return False
 
     def read_research_agent_config(self) -> Dict[str, Any]:
@@ -678,9 +678,9 @@ class WorkspaceManager:
                 f.write("\n")
             return True
         except Exception as e:
-            from core.logging import debug_logger
+            from core.logging import debug as _debug_logger
 
-            debug_logger.error(f"[Workspace] 写入科研 agent 模板绑定失败: {e}")
+            _debug_logger.error(f"[Workspace] 写入科研 agent 模板绑定失败: {e}")
             return False
 
     def read_research_flow_canvas(self) -> Dict[str, Any]:
@@ -702,9 +702,9 @@ class WorkspaceManager:
                 f.write("\n")
             return True
         except Exception as e:
-            from core.logging import debug_logger
+            from core.logging import debug as _debug_logger
 
-            debug_logger.error(f"[Workspace] 写入科研流程画布失败: {e}")
+            _debug_logger.error(f"[Workspace] 写入科研流程画布失败: {e}")
             return False
 
     def read_research_organization(self) -> Dict[str, Any]:
@@ -726,9 +726,9 @@ class WorkspaceManager:
                 f.write("\n")
             return True
         except Exception as e:
-            from core.logging import debug_logger
+            from core.logging import debug as _debug_logger
 
-            debug_logger.error(f"[Workspace] 写入科研组织图失败: {e}")
+            _debug_logger.error(f"[Workspace] 写入科研组织图失败: {e}")
             return False
 
     # ==================== 状态报告 ====================
