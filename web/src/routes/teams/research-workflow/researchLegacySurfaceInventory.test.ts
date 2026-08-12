@@ -59,4 +59,30 @@ describe("research workflow legacy cleanup", () => {
     expect(runHookSource).not.toContain("fetchResearchWorkflowCanvas");
     expect(runHookSource).not.toContain("fetchResearchWorkflowRun");
   });
+
+  it("hard-switches inspector reads and commands onto formal NodeDetail/Offer", () => {
+    const inspector = readFileSync(
+      resolve(routesRoot, "teams/research-workflow/ResearchProcessNodeInspector.tsx"),
+      "utf8",
+    );
+    const nodeDetail = readFileSync(
+      resolve(routesRoot, "teams/research-workflow/useNodeDetailState.ts"),
+      "utf8",
+    );
+    const commands = readFileSync(
+      resolve(routesRoot, "teams/research-workflow/useResearchWorkflowCommands.ts"),
+      "utf8",
+    );
+    const commandSection = readFileSync(
+      resolve(routesRoot, "teams/research-workflow/NodeCommandSection.tsx"),
+      "utf8",
+    );
+    expect(inspector).toContain("detail.commandOffers");
+    expect(inspector).toContain("onOffer");
+    expect(inspector).not.toContain("onCommand");
+    expect(nodeDetail).toContain("api/research-workflow/runs");
+    expect(commands).toContain("submitFormalOffer");
+    expect(commands).not.toContain("executeNodeCommand");
+    expect(commandSection).not.toContain("EvidenceRemediationDialog");
+  });
 });

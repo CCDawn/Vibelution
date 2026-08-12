@@ -28,8 +28,9 @@ describe("researchWorkflowNoDuplicateSurface", () => {
 
   it("has no fake-command fallback error (commands are backend-declared)", () => {
     expect(commandSource).not.toContain("WIRED_COMMANDS");
-    // Commands are executed through the real backend adapter only.
-    expect(commandSource).toContain("executeNodeCommand");
-    expect(commandSource).toContain("runInspectorCommand");
+    expect(commandSource).toContain("submitFormalOffer");
+    expect(commandSource).toContain("submitOffer");
+    expect(commandSource).not.toContain("executeNodeCommand");
+    expect(commandSource).not.toContain("runInspectorCommand");
   });
 });

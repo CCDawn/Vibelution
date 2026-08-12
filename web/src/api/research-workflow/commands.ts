@@ -25,7 +25,6 @@ export async function submitResearchWorkflowCommandOffer(options: {
   const body = {
     teamId,
     command: offer.command,
-    nodeId: offer.nodeId,
     expectedRunVersion: offer.expectedRunVersion,
     idempotencyKey: offer.idempotencyKey,
     payload: offer.payload ?? {},

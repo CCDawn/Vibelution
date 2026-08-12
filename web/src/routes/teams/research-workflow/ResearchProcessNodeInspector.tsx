@@ -1,14 +1,14 @@
-import type { NodeHandoffRecord, ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
+import type { NodeHandoffRecord } from "../../../api/types/researchWorkflow";
+import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 import { VEmptyState, VSurface } from "../../../components/vui";
 import type { NodeAdapterSpec } from "./nodeAdapterModel";
 import { NodeAgentSection } from "./NodeAgentSection";
-import { NodeArtifactSection } from "./NodeArtifactSection";
 import { NodeCommandSection } from "./NodeCommandSection";
-import { NodeExecutionSection } from "./NodeExecutionSection";
 import { NodeHandoffSection } from "./NodeHandoffSection";
 import { NodeSessionSection } from "./NodeSessionSection";
 import { researchActorLabel, researchStageLabel } from "./researchNodePresentation";
 import styles from "./ResearchProcessNodeInspector.styles";
+import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 
 export type ResearchProcessNodeInspectorProps = {
   nodeId: string | null;
@@ -17,7 +17,7 @@ export type ResearchProcessNodeInspectorProps = {
   handoffs?: NodeHandoffRecord[];
   handoffPending: boolean;
   busy: boolean;
-  onCommand: (command: string, payload?: Record<string, unknown>) => Promise<void>;
+  onOffer: (offer: CommandOffer) => Promise<void>;
 };
 
 export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspectorProps) {
@@ -39,6 +39,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
   }
 
   const { adapter, detail } = props;
+  const attempt = detail.nodeAttempt || detail.latestAttempt?.attempt || 0;
   return (
     <VSurface tone="panel" className={styles.root} data-vui="node-inspector">
       <header>
@@ -47,15 +48,21 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
         <div className={styles.meta}>
           {researchActorLabel(adapter.actorKind)}
           {detail.runtimeCurrent ? " · 运行当前" : ""}
-          {detail.nodeAttempt ? ` · 第 ${detail.nodeAttempt} 次尝试` : ""}
+          {attempt ? ` · 第 ${attempt} 次尝试` : ""}
         </div>
       </header>
       {adapter.actorKind === "agent" ? <NodeAgentSection detail={detail} /> : null}
       {adapter.actorKind === "agent" ? <NodeSessionSection detail={detail} /> : null}
-      <NodeHandoffSection handoffs={props.handoffs ?? []} pending={props.handoffPending} blockedReason={detail.blockedReason} />
-      <NodeArtifactSection artifacts={detail.artifacts} />
-      <NodeExecutionSection detail={detail} />
-      <NodeCommandSection capabilities={detail.commands} busy={props.busy} onCommand={props.onCommand} />
+      <NodeHandoffSection
+        handoffs={props.handoffs ?? []}
+        pending={props.handoffPending}
+        blockedReason={detail.blockedReason || ""}
+      />
+      <NodeCommandSection
+        offers={detail.commandOffers ?? []}
+        busy={props.busy}
+        onOffer={props.onOffer}
+      />
     </VSurface>
   );
 }

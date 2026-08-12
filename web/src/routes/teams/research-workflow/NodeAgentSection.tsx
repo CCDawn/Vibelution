@@ -1,18 +1,17 @@
-import type { ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
+import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 import { TeamSourceCollectionStageAgentsPanel } from "../source-collection/ui/TeamSourceCollectionStageAgentsPanel";
 import { buildResearchAgentCard } from "./researchAgentCardModel";
 
 export function NodeAgentSection({ detail }: { detail: ResearchWorkflowNodeDetail }) {
-  const snapshot = detail.bindingSnapshot ?? {};
-  const agentId = String(snapshot.agentId || "");
+  const agentId = String(detail.agentId || "");
   const card = buildResearchAgentCard({
     nodeId: detail.nodeId,
     roleKey: detail.primaryRoleKey,
     roleLabel: detail.label,
     agentId,
-    agentName: String(snapshot.displayName || agentId),
-    resolvedFrom: String(snapshot.resolvedFrom || "unbound"),
-    sessionBound: Boolean(detail.sessionBinding?.sessionId && detail.sessionBinding.status === "bound"),
+    agentName: String(detail.displayName || agentId),
+    resolvedFrom: String(detail.resolvedFrom || "unbound"),
+    sessionBound: Boolean(detail.sessionId && !detail.sessionAnchorDegraded),
   });
   return (
     <section data-vui="node-agent-section">

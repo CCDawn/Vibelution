@@ -10,8 +10,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { fetchResearchWorkflowNodeDetail } from "../../../api/researchWorkflow";
-import type { ResearchWorkflowNodeDetail } from "../../../api/types/researchWorkflow";
+import { fetchResearchWorkflowNodeDetail } from "../../../api/research-workflow/runs";
+import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 
 export type NodeDetailState =
   | { kind: "idle" }
@@ -38,7 +38,9 @@ export function useNodeDetailState(
       const gen = ++fetchGenRef.current;
       setState({ kind: "loading" });
       try {
-        const detail = await fetchResearchWorkflowNodeDetail(targetRunId, targetNodeId, {
+        const detail = await fetchResearchWorkflowNodeDetail({
+          runId: targetRunId,
+          nodeId: targetNodeId,
           teamId,
         });
         if (gen !== fetchGenRef.current) {
@@ -64,8 +66,6 @@ export function useNodeDetailState(
   );
 
   useEffect(() => {
-    // Selection change: invalidate any in-flight fetch and clear the previous
-    // detail immediately (no cross-node flash).
     fetchGenRef.current += 1;
     if (!runId || !nodeId) {
       setState({ kind: "idle" });
@@ -80,9 +80,6 @@ export function useNodeDetailState(
     }
   }, [runId, nodeId]);
 
-  // Render-time alignment: a ready/empty/error state belongs to the node it
-  // was fetched for. While the effect below is still in flight the previous
-  // node's detail must never surface on the new selection.
   let visible = state;
   if (visible.kind !== "idle" && visible.kind !== "loading") {
     if (visible.kind === "ready") {
