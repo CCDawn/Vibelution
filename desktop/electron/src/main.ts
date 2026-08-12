@@ -2,6 +2,7 @@ import { Notification, app, dialog, ipcMain, nativeImage, nativeTheme, type Brow
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { performance } from "node:perf_hooks";
 import { singleInstanceDecision } from "./appLock.js";
 import { applyDesktopCliToEnvironment, parseDesktopCliArgs } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
@@ -89,6 +90,8 @@ const WORKBENCH_CLOSE_TRANSACTION_CAPABILITY = "workbench_close.transaction.v1";
 const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
 const WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS = 30_000;
 const ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
+const ELECTRON_PROCESS_STARTED_AT_MS = performance.now();
+const ELECTRON_STARTUP_TRACE_ID = String(process.env.VIBELUTION_STARTUP_TRACE_ID || "").trim().slice(0, 96);
 
 let windowProvider: ElectronWindowProvider | null = null;
 let launcherBootstrap: LauncherBootstrapResult | null = null;
@@ -110,6 +113,9 @@ const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
 let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench;
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
 let pendingWorkbenchCloseAck: PendingWorkbenchCloseAck | null = null;
+let electronStartupStage = "electron_process_ready";
+let electronStartupSummaryRecorded = false;
+let workbenchOpenRequestedAtMs: number | null = null;
 
 type DesktopActionLoopContext = {
   launcherOrigin: string;
@@ -195,6 +201,44 @@ function desktopEnvironment(): NodeJS.ProcessEnv {
     NODE_ENV: process.env.NODE_ENV || (app.isPackaged ? "production" : "development")
   };
   return applyDesktopLaunchSettingsToEnvironment(applyDesktopCliToEnvironment(baseEnv, desktopCliArgs), desktopLaunchSettings());
+}
+
+function electronStageElapsedMs(startedAtMs: number): number {
+  return Math.round(Math.max(0, performance.now() - startedAtMs) * 10) / 10;
+}
+
+function electronStartupElapsedMs(): number {
+  return electronStageElapsedMs(ELECTRON_PROCESS_STARTED_AT_MS);
+}
+
+function electronStartupFields(
+  fields: Record<string, string | number | boolean> = {}
+): Record<string, string | number | boolean> {
+  return {
+    startupTraceId: ELECTRON_STARTUP_TRACE_ID,
+    processElapsedMs: electronStartupElapsedMs(),
+    ...fields
+  };
+}
+
+function markWorkbenchOpenRequested(): number {
+  workbenchOpenRequestedAtMs = performance.now();
+  return workbenchOpenRequestedAtMs;
+}
+
+async function recordElectronStartupSummaryOnce(
+  bootstrap: LauncherBootstrapResult | null,
+  fields: Record<string, string | number | boolean>
+): Promise<void> {
+  if (electronStartupSummaryRecorded || bootstrap === null) {
+    return;
+  }
+  electronStartupSummaryRecorded = true;
+  await recordElectronSupervisorEvent(bootstrap, {
+    eventCode: "electron.startup.summary",
+    message: "Electron startup reached a terminal state.",
+    fields: electronStartupFields(fields)
+  });
 }
 
 function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapResult | null): ElectronWindowProvider {
@@ -310,11 +354,24 @@ async function bootstrapLauncherIfEnabled(paths: DesktopPaths): Promise<Launcher
   if (!pythonPath) {
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to bootstrap the Launcher Service");
   }
-  return await bootstrapPythonLauncherService({
+  electronStartupStage = "control_plane_attach";
+  const stageStartedAtMs = performance.now();
+  const result = await bootstrapPythonLauncherService({
     workspaceRoot: paths.workspaceRoot,
     pythonPath,
     operatorConfigPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim()
   });
+  await recordElectronSupervisorEvent(result, {
+    eventCode: "electron.startup.control_plane_attached",
+    message: "Electron attached to the Launcher control plane.",
+    fields: electronStartupFields({
+      stage: "control_plane_attach",
+      stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
+      mode: result.mode,
+      launcherBackendPid: result.launcherBackendPid
+    })
+  });
+  return result;
 }
 
 function startDesktopActionLoop(
@@ -380,6 +437,8 @@ async function openWorkbenchAtCurrentLauncherUrl(
 ): Promise<ManagedWindowState> {
   let workbenchUrl = "";
   const previousWorkbenchUrl = currentWorkbenchUrl;
+  electronStartupStage = "workbench_navigation";
+  const stageStartedAtMs = markWorkbenchOpenRequested();
   try {
     // A desktop action belongs to the already registered Electron session. Running
     // bootstrap again here can rotate the local control token that this session
@@ -395,7 +454,11 @@ async function openWorkbenchAtCurrentLauncherUrl(
         workspaceRoot: paths.workspaceRoot,
         workbenchOrigin: safeOrigin(workbenchUrl),
         windowId: state.windowId,
-        rendererProcessId: state.rendererProcessId
+        rendererProcessId: state.rendererProcessId,
+        ...electronStartupFields({
+          stage: "workbench_navigation",
+          stageDurationMs: electronStageElapsedMs(stageStartedAtMs)
+        })
       }
     });
     return state;
@@ -410,7 +473,11 @@ async function openWorkbenchAtCurrentLauncherUrl(
       fields: {
         workspaceRoot: paths.workspaceRoot,
         workbenchOrigin: safeOrigin(workbenchUrl),
-        error: detail.slice(0, 300)
+        error: detail.slice(0, 300),
+        ...electronStartupFields({
+          stage: "workbench_navigation",
+          stageDurationMs: electronStageElapsedMs(stageStartedAtMs)
+        })
       }
     });
     throw error;
@@ -440,6 +507,8 @@ async function persistManagedWindowState(
   await desktopSessionMutations.enqueue("window", async () => {
     const context = await resolveDesktopActionLoopContext(bootstrap);
     if (!desktopSessionRegistered) {
+      electronStartupStage = "desktop_session_registration";
+      const stageStartedAtMs = performance.now();
       const registration = await registerDesktopSession({
         ...context,
         workspaceRoot: paths.workspaceRoot,
@@ -448,6 +517,15 @@ async function persistManagedWindowState(
       desktopSessionRevision = registration.revision;
       desktopSessionRegistered = true;
       startDesktopSessionHeartbeatIfNeeded(bootstrap);
+      await recordElectronSupervisorEvent(bootstrap, {
+        eventCode: "electron.startup.desktop_session_registered",
+        message: "Electron registered its scoped desktop session.",
+        fields: electronStartupFields({
+          stage: "desktop_session_registration",
+          stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
+          desktopSessionId: context.desktopSessionId
+        })
+      });
     }
     const result = await reportDesktopWindowState({
       ...context,
@@ -456,6 +534,27 @@ async function persistManagedWindowState(
       state
     });
     desktopSessionRevision = result.revision;
+    if (state.role === "workbench" && state.open && !electronStartupSummaryRecorded) {
+      electronStartupStage = "workbench_window_ready";
+      const stageStartedAtMs = workbenchOpenRequestedAtMs ?? ELECTRON_PROCESS_STARTED_AT_MS;
+      await recordElectronSupervisorEvent(bootstrap, {
+        eventCode: "electron.startup.workbench_window_ready",
+        message: "Electron reported the Workbench window ready.",
+        fields: electronStartupFields({
+          stage: "workbench_window_ready",
+          stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
+          desktopSessionId: context.desktopSessionId,
+          windowId: state.windowId,
+          rendererProcessId: state.rendererProcessId
+        })
+      });
+      await recordElectronStartupSummaryOnce(bootstrap, {
+        outcome: "succeeded",
+        failureStage: "",
+        desktopSessionRegistered: true,
+        workbenchOpen: true
+      });
+    }
   });
 }
 
@@ -1324,6 +1423,7 @@ function requestOpenWorkbench(): void {
     return;
   }
   pendingOpenWorkbenchRequest = false;
+  markWorkbenchOpenRequested();
   void provider.openOrFocusWorkbench().catch((error: unknown) => {
     console.warn(error instanceof Error ? error.message : String(error));
   });
@@ -1338,6 +1438,8 @@ app.whenReady()
     }
     const deepLinkRegistration = registerPackagedDeepLinks(paths);
     launcherBootstrap = await bootstrapLauncherIfEnabled(paths);
+    electronStartupStage = "launcher_window_ready";
+    const launcherWindowStartedAtMs = performance.now();
     windowProvider = createWindowProvider(paths, launcherBootstrap);
     desktopTray = createDesktopTray(paths, {
       openLauncher: () => {
@@ -1400,7 +1502,11 @@ app.whenReady()
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.launcher.window.opened",
       message: "Launcher window opened by Electron.",
-      fields: { provider: "electron" }
+      fields: electronStartupFields({
+        provider: "electron",
+        stage: "launcher_window_ready",
+        stageDurationMs: electronStageElapsedMs(launcherWindowStartedAtMs)
+      })
     });
     const rawUrl = findVibelutionDeepLinkArg(process.argv.slice(1));
     if (rawUrl) {
@@ -1409,6 +1515,8 @@ app.whenReady()
     await flushPendingPublicDeepLinks();
     if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary) {
       pendingOpenWorkbenchRequest = false;
+      electronStartupStage = "workbench_window_ready";
+      markWorkbenchOpenRequested();
       await windowProvider.openOrFocusWorkbench();
     }
     if (desktopCliArgs.workbenchCloseCanary) {
@@ -1416,8 +1524,23 @@ app.whenReady()
       return;
     }
     startDesktopActionLoop(paths, launcherBootstrap, windowProvider);
+    if (!desktopCliArgs.openWorkbench) {
+      await recordElectronStartupSummaryOnce(launcherBootstrap, {
+        outcome: "succeeded",
+        failureStage: "",
+        desktopSessionRegistered,
+        workbenchOpen: false
+      });
+    }
   })
-  .catch((error: unknown) => {
+  .catch(async (error: unknown) => {
+    await recordElectronStartupSummaryOnce(launcherBootstrap, {
+      outcome: "failed",
+      failureStage: electronStartupStage,
+      errorType: error instanceof Error ? error.name : "Error",
+      desktopSessionRegistered,
+      workbenchOpen: false
+    });
     console.error(error instanceof Error ? error.message : String(error));
     app.quit();
   });

@@ -1338,15 +1338,64 @@ def _terminate_packaged_electron_after_failed_bootstrap(process: subprocess.Pope
             process.kill()
 
 
-def _bootstrap_packaged_electron_workbench(*, env: dict[str, str], action: str) -> dict[str, Any]:
+def _startup_elapsed_ms(started_at: float) -> float:
+    return round(max(0.0, (time.monotonic() - started_at) * 1000.0), 1)
+
+
+def _bootstrap_packaged_electron_workbench(
+    *,
+    env: dict[str, str],
+    action: str,
+    no_browser: bool,
+    startup_telemetry: dict[str, Any],
+) -> dict[str, Any]:
     """Start the package and route the first Workbench open through desktop actions."""
 
     executable = _packaged_electron_desktop_executable()
     if executable is None:
         return {}
-    process = _launch_packaged_electron_desktop(executable=executable, env=env)
+    timings = startup_telemetry.setdefault("timingsMs", {})
+    startup_trace_id = str(startup_telemetry.get("startupTraceId") or "").strip()
+    total_started = time.monotonic()
+    current_stage = "electron_process_spawn"
+    current_timing_key = "electronProcessSpawnMs"
+    stage_started = time.monotonic()
+    process: subprocess.Popen[Any] | None = None
     try:
+        startup_telemetry["failureStage"] = current_stage
+        process = _launch_packaged_electron_desktop(executable=executable, env=env)
+        timings[current_timing_key] = _startup_elapsed_ms(stage_started)
+        _record_launcher_action_event(
+            "launcher.action.startup_stage_completed",
+            action=action,
+            no_browser=no_browser,
+            env=env,
+            duration_ms=timings[current_timing_key],
+            startup_trace_id=startup_trace_id,
+            stage=current_stage,
+        )
+
+        current_stage = "desktop_session_registration"
+        current_timing_key = "desktopSessionRegistrationMs"
+        startup_telemetry["failureStage"] = current_stage
+        stage_started = time.monotonic()
         session = _await_electron_desktop_session(process)
+        timings[current_timing_key] = _startup_elapsed_ms(stage_started)
+        startup_telemetry["desktopSessionRegistered"] = True
+        _record_launcher_action_event(
+            "launcher.action.startup_stage_completed",
+            action=action,
+            no_browser=no_browser,
+            env=env,
+            duration_ms=timings[current_timing_key],
+            startup_trace_id=startup_trace_id,
+            stage=current_stage,
+        )
+
+        current_stage = "desktop_action_submit"
+        current_timing_key = "desktopActionSubmitMs"
+        startup_telemetry["failureStage"] = current_stage
+        stage_started = time.monotonic()
         intent = _submit_electron_window_action(
             action="open_workbench",
             reason=f"{action}:electron_first_start",
@@ -1357,17 +1406,60 @@ def _bootstrap_packaged_electron_workbench(*, env: dict[str, str], action: str) 
                 "Electron first-start Workbench action was not accepted by the Launcher: "
                 f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
             )
+        timings[current_timing_key] = _startup_elapsed_ms(stage_started)
+        _record_launcher_action_event(
+            "launcher.action.startup_stage_completed",
+            action=action,
+            no_browser=no_browser,
+            env=env,
+            duration_ms=timings[current_timing_key],
+            startup_trace_id=startup_trace_id,
+            stage=current_stage,
+        )
+
+        current_stage = "workbench_window_open"
+        current_timing_key = "workbenchWindowOpenMs"
+        startup_telemetry["failureStage"] = current_stage
+        stage_started = time.monotonic()
         opened_session = _await_electron_workbench_open(
             process,
             desktop_session_id=str(session.get("desktopSessionId") or ""),
+        )
+        timings[current_timing_key] = _startup_elapsed_ms(stage_started)
+        timings["electronFirstStartTotalMs"] = _startup_elapsed_ms(total_started)
+        startup_telemetry["workbenchOpen"] = True
+        startup_telemetry["failureStage"] = ""
+        _record_launcher_action_event(
+            "launcher.action.startup_stage_completed",
+            action=action,
+            no_browser=no_browser,
+            env=env,
+            duration_ms=timings[current_timing_key],
+            startup_trace_id=startup_trace_id,
+            stage=current_stage,
         )
         return {
             "electronLaunchPid": int(process.pid),
             "desktopSessionId": str(opened_session.get("desktopSessionId") or session.get("desktopSessionId") or ""),
             "desktopSessionRevision": int(opened_session.get("revision") or 0),
         }
-    except Exception:
-        _terminate_packaged_electron_after_failed_bootstrap(process)
+    except Exception as exc:
+        timings.setdefault(current_timing_key, _startup_elapsed_ms(stage_started))
+        timings["electronFirstStartTotalMs"] = _startup_elapsed_ms(total_started)
+        startup_telemetry["failureStage"] = current_stage
+        _record_launcher_action_event(
+            "launcher.action.startup_stage_failed",
+            action=action,
+            no_browser=no_browser,
+            env=env,
+            duration_ms=timings[current_timing_key],
+            startup_trace_id=startup_trace_id,
+            stage=current_stage,
+            error_type=type(exc).__name__,
+            message=str(exc),
+        )
+        if process is not None:
+            _terminate_packaged_electron_after_failed_bootstrap(process)
         raise
 
 
@@ -1533,6 +1625,20 @@ def run_launcher_action(
     cancel_check: Callable[[], bool] | None = None,
     allow_dirty_launch: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    startup_trace_id = f"launcher-startup-{uuid4().hex}"
+    startup_telemetry: dict[str, Any] = {
+        "startupTraceId": startup_trace_id,
+        "outcome": "failed",
+        "failureStage": "launcher_control_plane_backend_ready",
+        "timingsMs": {},
+        "electronFirstStart": False,
+        "backendReused": False,
+        "desktopSessionRegistered": False,
+        "workbenchOpen": False,
+    }
+    completed: subprocess.CompletedProcess[str] | None = None
+    caught_error: Exception | None = None
+    started_at = time.monotonic()
     electron_session = _latest_active_electron_desktop_session()
     electron_window_action = _electron_window_action_for_launcher_action(action)
     packaged_electron = _packaged_electron_desktop_executable()
@@ -1546,6 +1652,7 @@ def run_launcher_action(
     )
     args = _launcher_command_args(action, no_browser=effective_no_browser)
     env = os.environ.copy()
+    env["VIBELUTION_STARTUP_TRACE_ID"] = startup_trace_id
     env["VIBELUTION_PORT"] = _explicit_workbench_port_env_value() or str(configured_backend_port())
     env[INTERNAL_LAUNCHER_ENV] = INTERNAL_LAUNCHER_VALUE
     if allow_dirty_launch:
@@ -1558,86 +1665,142 @@ def run_launcher_action(
         for pid in (os.getpid(), os.getppid())
         if int(pid or 0) > 0
     )
-    _record_launcher_action_event(
-        "launcher.action.requested",
-        action=action,
-        no_browser=effective_no_browser,
-        env=env,
-    )
-    started_at = time.monotonic()
-    if reuse_electron_backend:
-        completed = subprocess.CompletedProcess(
-            args=args,
-            returncode=0,
-            stdout="backendReady=true; launcherProcessSkipped=true",
-            stderr="",
+    try:
+        _record_launcher_action_event(
+            "launcher.action.requested",
+            action=action,
+            no_browser=effective_no_browser,
+            env=env,
+        )
+        control_plane_started = time.monotonic()
+        if reuse_electron_backend:
+            completed = subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout="backendReady=true; launcherProcessSkipped=true",
+                stderr="",
+            )
+            startup_telemetry["backendReused"] = True
+            _record_launcher_action_event(
+                "launcher.action.electron_backend_reused",
+                action=action,
+                no_browser=effective_no_browser,
+                env=env,
+                stdout=completed.stdout,
+            )
+        else:
+            completed = _run_captured_launcher_process(
+                args,
+                env=env,
+                action=action,
+                no_browser=effective_no_browser,
+                started_at=started_at,
+                cancel_check=cancel_check,
+            )
+        startup_telemetry["timingsMs"]["launcherControlPlaneBackendReadyMs"] = _startup_elapsed_ms(
+            control_plane_started
         )
         _record_launcher_action_event(
-            "launcher.action.electron_backend_reused",
+            "launcher.action.startup_stage_completed",
             action=action,
             no_browser=effective_no_browser,
             env=env,
-            stdout=completed.stdout,
+            duration_ms=startup_telemetry["timingsMs"]["launcherControlPlaneBackendReadyMs"],
+            stage="launcher_control_plane_backend_ready",
         )
-    else:
-        completed = _run_captured_launcher_process(
-            args,
-            env=env,
-            action=action,
-            no_browser=effective_no_browser,
-            started_at=started_at,
-            cancel_check=cancel_check,
-        )
-    if completed.returncode == 0 and electron_window_action:
-        if electron_session:
-            intent = _submit_electron_window_action(
-                action=electron_window_action,
-                reason=f"{action}:electron_window_provider",
-                session=electron_session,
-            )
-            if str(intent.get("status") or "") != "accepted":
-                raise RuntimeError(
-                    "Electron window action was not accepted by the Launcher: "
-                    f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+        if completed.returncode == 0 and electron_window_action:
+            if electron_session:
+                startup_telemetry["failureStage"] = "desktop_action_submit"
+                desktop_action_started = time.monotonic()
+                intent = _submit_electron_window_action(
+                    action=electron_window_action,
+                    reason=f"{action}:electron_window_provider",
+                    session=electron_session,
                 )
-            _record_launcher_action_event(
-                "launcher.action.electron_desktop_action_submitted",
-                action=action,
-                no_browser=effective_no_browser,
-                env=env,
-                stdout=f"desktopAction={electron_window_action}",
-            )
-        elif bootstrap_packaged_electron:
-            bootstrap = _bootstrap_packaged_electron_workbench(env=env, action=action)
-            _record_launcher_action_event(
-                "launcher.action.electron_first_start_succeeded",
-                action=action,
-                no_browser=effective_no_browser,
-                env=env,
-                stdout=(
-                    f"electronLaunchPid={bootstrap['electronLaunchPid']};"
-                    f"desktopSessionId={bootstrap['desktopSessionId']}"
-                ),
-            )
-        elif packaged_electron is None and not no_browser:
-            _record_launcher_action_event(
-                "launcher.action.edge_fallback_package_missing",
-                action=action,
-                no_browser=effective_no_browser,
-                env=env,
-                stdout="Electron package unavailable; legacy Edge app window provider selected.",
-            )
-    _record_launcher_action_event(
-        "launcher.action.completed",
-        action=action,
-        no_browser=effective_no_browser,
-        env=env,
-        return_code=completed.returncode,
-        stdout=completed.stdout,
-        stderr=completed.stderr,
-        duration_ms=(time.monotonic() - started_at) * 1000,
-    )
-    return completed
+                if str(intent.get("status") or "") != "accepted":
+                    raise RuntimeError(
+                        "Electron window action was not accepted by the Launcher: "
+                        f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+                    )
+                startup_telemetry["timingsMs"]["desktopActionSubmitMs"] = _startup_elapsed_ms(
+                    desktop_action_started
+                )
+                startup_telemetry["desktopSessionRegistered"] = True
+                _record_launcher_action_event(
+                    "launcher.action.electron_desktop_action_submitted",
+                    action=action,
+                    no_browser=effective_no_browser,
+                    env=env,
+                    stdout=f"desktopAction={electron_window_action}",
+                )
+            elif bootstrap_packaged_electron:
+                startup_telemetry["electronFirstStart"] = True
+                bootstrap = _bootstrap_packaged_electron_workbench(
+                    env=env,
+                    action=action,
+                    no_browser=effective_no_browser,
+                    startup_telemetry=startup_telemetry,
+                )
+                _record_launcher_action_event(
+                    "launcher.action.electron_first_start_succeeded",
+                    action=action,
+                    no_browser=effective_no_browser,
+                    env=env,
+                    stdout=(
+                        f"electronLaunchPid={bootstrap['electronLaunchPid']};"
+                        f"desktopSessionId={bootstrap['desktopSessionId']}"
+                    ),
+                )
+            elif packaged_electron is None and not no_browser:
+                _record_launcher_action_event(
+                    "launcher.action.edge_fallback_package_missing",
+                    action=action,
+                    no_browser=effective_no_browser,
+                    env=env,
+                    stdout="Electron package unavailable; legacy Edge app window provider selected.",
+                )
+        if int(completed.returncode or 0) == 0:
+            startup_telemetry["outcome"] = "succeeded"
+            startup_telemetry["failureStage"] = ""
+        else:
+            startup_telemetry["failureStage"] = "launcher_control_plane_backend_ready"
+        _record_launcher_action_event(
+            "launcher.action.completed",
+            action=action,
+            no_browser=effective_no_browser,
+            env=env,
+            return_code=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            duration_ms=_startup_elapsed_ms(started_at),
+        )
+        return completed
+    except Exception as exc:
+        caught_error = exc
+        raise
+    finally:
+        startup_telemetry["durationMs"] = _startup_elapsed_ms(started_at)
+        if caught_error is not None:
+            startup_telemetry["outcome"] = "failed"
+            startup_telemetry["errorType"] = type(caught_error).__name__
+        _record_launcher_action_event(
+            "launcher.action.startup_summary",
+            action=action,
+            no_browser=effective_no_browser,
+            env=env,
+            duration_ms=startup_telemetry["durationMs"],
+            error_type=str(startup_telemetry.get("errorType") or ""),
+            startup_trace_id=startup_trace_id,
+            outcome=str(startup_telemetry.get("outcome") or "failed"),
+            failure_stage=str(startup_telemetry.get("failureStage") or ""),
+            timings_ms=startup_telemetry.get("timingsMs"),
+            electron_first_start=bool(startup_telemetry.get("electronFirstStart")),
+            backend_reused=bool(startup_telemetry.get("backendReused")),
+            desktop_session_registered=bool(startup_telemetry.get("desktopSessionRegistered")),
+            workbench_open=bool(startup_telemetry.get("workbenchOpen")),
+        )
+        if completed is not None:
+            completed.startup_telemetry = dict(startup_telemetry)
 
 
 def _record_launcher_action_event(
@@ -1652,6 +1815,15 @@ def _record_launcher_action_event(
     duration_ms: float | None = None,
     error_type: str = "",
     message: str = "",
+    startup_trace_id: str = "",
+    stage: str = "",
+    outcome: str = "",
+    failure_stage: str = "",
+    timings_ms: dict[str, Any] | None = None,
+    electron_first_start: bool | None = None,
+    backend_reused: bool | None = None,
+    desktop_session_registered: bool | None = None,
+    workbench_open: bool | None = None,
 ) -> None:
     internal_action = str(action or "").startswith("internal-")
     payload: dict[str, Any] = {
@@ -1668,6 +1840,29 @@ def _record_launcher_action_event(
         "launcherLaunchApi": _launcher_action_launch_api(),
         "hiddenStartupInfo": os.name == "nt" and hasattr(subprocess, "STARTUPINFO"),
     }
+    resolved_startup_trace_id = str(startup_trace_id or env.get("VIBELUTION_STARTUP_TRACE_ID") or "").strip()
+    if resolved_startup_trace_id:
+        payload["startupTraceId"] = truncate_event_text(resolved_startup_trace_id, limit=96)
+    if stage:
+        payload["stage"] = truncate_event_text(stage, limit=80)
+    if outcome:
+        payload["outcome"] = truncate_event_text(outcome, limit=32)
+    if failure_stage or event_type == "launcher.action.startup_summary":
+        payload["failureStage"] = truncate_event_text(failure_stage, limit=80)
+    if isinstance(timings_ms, dict):
+        payload["timingsMs"] = {
+            truncate_event_text(str(key), limit=80): round(max(0.0, float(value)), 1)
+            for key, value in list(timings_ms.items())[:16]
+            if isinstance(value, (int, float))
+        }
+    for key, value in (
+        ("electronFirstStart", electron_first_start),
+        ("backendReused", backend_reused),
+        ("desktopSessionRegistered", desktop_session_registered),
+        ("workbenchOpen", workbench_open),
+    ):
+        if value is not None:
+            payload[key] = bool(value)
     if return_code is not None:
         payload["returnCode"] = int(return_code)
         payload["ok"] = int(return_code) == 0
