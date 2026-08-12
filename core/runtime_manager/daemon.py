@@ -2861,6 +2861,12 @@ class RuntimeManagerDaemon:
                 _append_event("command.completed", event_payload)
             return result
         except Exception as exc:
+            # Open failures must be finalized before any full runtime
+            # observation.  The readiness path already owns its bounded probe;
+            # a second process/residual scan here can block result persistence
+            # and leave the Launcher stuck in ``opening``.  The daemon loop
+            # reconciles observations again after the failed result is durable.
+            reconcile_failure = command_type != "open_workbench"
             result = self._finish_command(
                 command_id,
                 ok=False,
@@ -2868,6 +2874,7 @@ class RuntimeManagerDaemon:
                 error_scope=command_type or "command",
                 failure_message=str(exc),
                 error_type=type(exc).__name__,
+                reconcile=reconcile_failure,
             )
             result = with_timing(result)
             _append_event(
