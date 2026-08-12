@@ -44,6 +44,7 @@ class GraphDispatchWorker:
         now_provider: Callable[[], int] | None = None,
         readiness_service: Any | None = None,
         readiness_context: Callable[[], Any] | None = None,
+        commit_hook: Callable[[], None] | None = None,
     ) -> None:
         self._store = store
         self._coordinator = coordinator
@@ -52,6 +53,17 @@ class GraphDispatchWorker:
         self._now = now_provider or (lambda: int(time.time() * 1000))
         self._readiness = readiness_service
         self._readiness_context = readiness_context
+        self._commit_hook = commit_hook
+
+    def _submit(self, mutate, *, force_flush: bool = True):
+        hook = self._commit_hook
+
+        def wrapped(uow):
+            if hook is not None:
+                uow.after_commit(hook)
+            return mutate(uow)
+
+        return self._store.submit(wrapped, force_flush=force_flush)
 
     def run_once(self, limit: int = 8) -> int:
         leased = outbox_api.lease_ready_actions(
@@ -138,13 +150,13 @@ class GraphDispatchWorker:
             return False
         if dispatch.receipt is None or dispatch.receipt.outcome != "succeeded":
             return False
-        attempt = self._store.submit(
+        attempt = self._submit(
             lambda uow: uow.repository.get_attempt(dispatch.node_run_id),
             force_flush=True,
         ).result(timeout=10)
         if attempt is None or attempt.status != NodeAttemptStatus.SUCCEEDED.value:
             return False
-        handoff = self._store.submit(
+        handoff = self._submit(
             lambda uow: uow.repository.get_handoff_by_from_node(
                 dispatch.run_id, dispatch.node_run_id
             ),
@@ -160,7 +172,7 @@ class GraphDispatchWorker:
             def ack_only(uow):
                 uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
 
-            self._store.submit(ack_only, force_flush=True).result(timeout=30)
+            self._submit(ack_only, force_flush=True).result(timeout=30)
             return True
         successor_id = successors[0]
         latest = self._store.latest_attempt(dispatch.run_id, successor_id)
@@ -171,7 +183,7 @@ class GraphDispatchWorker:
             def ack_only(uow):
                 uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
 
-            self._store.submit(ack_only, force_flush=True).result(timeout=30)
+            self._submit(ack_only, force_flush=True).result(timeout=30)
             return True
 
         snapshot = self._coordinator.snapshot(dispatch.run_id)
@@ -266,7 +278,7 @@ class GraphDispatchWorker:
                     ),
                 )
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        self._submit(mutate, force_flush=True).result(timeout=30)
 
     def _commit_successor_dispatch(
         self,
@@ -378,7 +390,7 @@ class GraphDispatchWorker:
                 pass
             _ = result
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        self._submit(mutate, force_flush=True).result(timeout=30)
 
     def _precheck_readiness(self, dispatch: GraphDispatch, pending: Any):
         """Evaluate readiness for an auto-advanced successor OUTSIDE the writer
@@ -425,7 +437,7 @@ class GraphDispatchWorker:
             # （retry 会以新 attempt 重新发起，旧的 adapter 任务必须取消）。
             uow.repository.cancel_outbox_by_node_run(dispatch.node_run_id, now_ms)
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        self._submit(mutate, force_flush=True).result(timeout=30)
 
     def _start_or_recover(self, dispatch: GraphDispatch) -> GraphDispatchResult:
         snapshot = self._coordinator.snapshot(dispatch.run_id)
@@ -630,7 +642,7 @@ class GraphDispatchWorker:
                     finished_at_ms=now_ms,
                 )
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        self._submit(mutate, force_flush=True).result(timeout=30)
 
     def _mark_blocked(self, action: Any, dispatch: GraphDispatch, detail: str) -> None:
         now_ms = self._now()
@@ -647,7 +659,7 @@ class GraphDispatchWorker:
                 problem_json=json.dumps(problem),
             )
 
-        self._store.submit(mutate, force_flush=True).result(timeout=30)
+        self._submit(mutate, force_flush=True).result(timeout=30)
 
     def _requeue_or_fail(self, action: Any, detail: str) -> None:
         now_ms = self._now()

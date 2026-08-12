@@ -29,6 +29,10 @@ class EventPage:
     run_version: int
     latest_event_sequence: int
     events: tuple[WorkflowEventEnvelope, ...]
+    after_sequence: int = 0
+    last_returned_sequence: int = 0
+    has_more: bool = False
+    next_after_sequence: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -36,6 +40,10 @@ class EventPage:
             "teamId": self.team_id,
             "runVersion": self.run_version,
             "latestEventSequence": self.latest_event_sequence,
+            "afterSequence": self.after_sequence,
+            "lastReturnedSequence": self.last_returned_sequence,
+            "hasMore": self.has_more,
+            "nextAfterSequence": self.next_after_sequence,
             "events": [envelope_api_dict(event) for event in self.events],
         }
 
@@ -98,12 +106,18 @@ class WorkflowEventReplayService:
                 continue
             seen.add(event.sequence)
             ordered.append(event)
+        last_returned = ordered[-1].sequence if ordered else after_sequence
+        has_more = last_returned < int(latest)
         return EventPage(
             run_id=run_id,
             team_id=scoped,
             run_version=run.run_version,
             latest_event_sequence=latest,
             events=tuple(ordered),
+            after_sequence=after_sequence,
+            last_returned_sequence=last_returned,
+            has_more=has_more,
+            next_after_sequence=last_returned if has_more else None,
         )
 
 

@@ -92,3 +92,15 @@ def get_event_stream_service() -> WorkflowEventStreamService:
         if _STREAM is None:
             raise FormalReadRuntimeUnavailable()
         return _STREAM
+
+
+def wake_stream_readers() -> None:
+    """Wake Formal Read SSE waiters after a Ledger commit that may publish events.
+
+    Safe no-op when formal read runtime is not configured.
+    """
+    with _LOCK:
+        stream = _STREAM
+    if stream is None:
+        return
+    stream.notifier.notify()

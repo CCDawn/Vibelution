@@ -33,14 +33,27 @@ class InvalidLastEventIdError(WorkflowQueryError):
 class LocalStreamNotifier:
     def __init__(self) -> None:
         self._cond = threading.Condition()
+        self._generation = 0
 
     def notify(self) -> None:
         with self._cond:
+            self._generation += 1
             self._cond.notify_all()
 
     def wait(self, timeout: float) -> bool:
+        """Wait until notify() advances generation, or timeout.
+
+        Generation counters avoid lost wakeups when notify races ahead of wait.
+        """
+        deadline = time.monotonic() + max(0.0, float(timeout))
         with self._cond:
-            return self._cond.wait(timeout=timeout)
+            start = self._generation
+            while self._generation == start:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._cond.wait(timeout=remaining)
+            return True
 
 
 def parse_stream_cursor(
@@ -117,6 +130,29 @@ class WorkflowEventStreamService:
     @property
     def notifier(self) -> StreamNotifier:
         return self._notifier
+
+    def validate_stream_request(
+        self,
+        *,
+        team_id: str,
+        run_id: str,
+        after_sequence: int | None = None,
+        last_event_id: str | None = None,
+    ) -> int:
+        """Parse cursor and confirm run scope without materializing replay frames."""
+        cursor = parse_stream_cursor(
+            last_event_id,
+            route_run_id=run_id,
+            after_sequence=after_sequence,
+        )
+        # limit=1 is enough to enforce team/run existence and cursor validity.
+        self._replay.list_events(
+            team_id=team_id,
+            run_id=run_id,
+            after_sequence=cursor,
+            limit=1,
+        )
+        return cursor
 
     def replay_frames(
         self,

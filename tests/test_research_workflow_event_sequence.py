@@ -66,6 +66,35 @@ def test_events_are_monotonic_scoped_and_after_sequence(tmp_path: Path) -> None:
         )
         assert [item.sequence for item in after.events] == [3, 4]
         assert after.latest_event_sequence == 4
+        assert after.after_sequence == 2
+        assert after.last_returned_sequence == 4
+        assert after.has_more is False
+        assert after.next_after_sequence is None
+    finally:
+        harness.close()
+
+
+def test_event_page_pagination_fields(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_events(harness)
+        replay = WorkflowEventReplayService(store=harness.store)
+        page = replay.list_events(
+            team_id="research-team",
+            run_id="run-evt",
+            after_sequence=0,
+            limit=2,
+        )
+        assert [item.sequence for item in page.events] == [1, 2]
+        assert page.after_sequence == 0
+        assert page.last_returned_sequence == 2
+        assert page.latest_event_sequence == 4
+        assert page.has_more is True
+        assert page.next_after_sequence == 2
+        payload = page.to_dict()
+        assert payload["hasMore"] is True
+        assert payload["nextAfterSequence"] == 2
+        assert payload["lastReturnedSequence"] == 2
     finally:
         harness.close()
 

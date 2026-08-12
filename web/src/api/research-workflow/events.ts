@@ -13,6 +13,10 @@ export type EventPage = {
   teamId: string;
   runVersion: number;
   latestEventSequence: number;
+  afterSequence: number;
+  lastReturnedSequence: number;
+  hasMore: boolean;
+  nextAfterSequence: number | null;
   events: WorkflowEventEnvelope[];
 };
 
