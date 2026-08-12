@@ -178,6 +178,9 @@ describe("AppShell navigation telemetry", () => {
     // Capture-phase recovery must not race primary nav / control clicks.
     expect(appShellSource).toContain('[data-shell-group="navigation"]');
     expect(appShellSource).toContain("scheduleRecovery(\"document_click\")");
+    expect(appShellSource).toContain("shellNavAnchorFromEventTarget");
+    expect(appShellSource).toContain("resolveUnmodifiedShellNavHref");
+    expect(appShellSource).toContain("event.defaultPrevented");
   });
 
   it("keeps group chat out of the top navigation because it lives in the chat page", () => {
