@@ -173,9 +173,10 @@ def test_list_branch_instances_covers_worktrees_and_local_refs(tmp_path):
     assert payload["currentShortName"] == "主"
     assert payload["currentWorkbenchTitle"] == "主 台"
     assert by_id["worktree:feat-task"]["legacy"] is False
-    assert by_id["worktree:feat-task"]["alive"] is True
+    assert by_id["worktree:feat-task"]["alive"] is False
+    assert by_id["worktree:feat-task"]["observedState"] == "idle"
     assert by_id["worktree:feat-task"]["port"] == 8011
-    assert by_id["worktree:feat-task"]["pids"]["backend"] == 4242
+    assert by_id["worktree:feat-task"]["pids"]["backend"] == 0
     assert by_id["worktree:feat-task"]["promotable"] is True
     assert by_id["branch:codex/not-open"]["checkedOut"] is False
     assert by_id["retired:shell-only"]["promotable"] is False
@@ -213,19 +214,39 @@ def test_migrate_moves_legacy_worktree_and_retires_shell_dirs(tmp_path):
     assert (tmp_path / "Vibelution-worktrees" / "MOVED.txt").is_file()
 
 
-def test_migrate_skips_alive_legacy_worktree(tmp_path):
+def test_migrate_skips_alive_legacy_worktree(tmp_path, monkeypatch):
     project = _init_repo(tmp_path / "OtherApp")
     legacy = tmp_path / "Vibelution-worktrees" / "live-task"
     _git(project, "worktree", "add", "-b", "codex/live-task", str(legacy))
     state = legacy / ".runtime" / "launcher"
     state.mkdir(parents=True)
     (state / "state.json").write_text('{"observedState":"open","backendPid":99}', encoding="utf-8")
+    monkeypatch.setattr(workspace, "_pid_is_alive", lambda pid: int(pid) == 99)
 
     report = migrate_legacy_branch_workspaces(project, skip_alive=True)
 
     assert legacy.is_dir()
     assert not (project / ".worktrees" / "live-task").exists()
     assert any(item["reason"] == "instance_alive" for item in report["skipped"])
+
+
+def test_stale_runtime_json_is_not_alive(tmp_path):
+    project = _init_repo(tmp_path / "OtherApp")
+    in_pool = project / ".worktrees" / "stale-task"
+    in_pool.parent.mkdir(parents=True)
+    _git(project, "worktree", "add", "-b", "codex/stale-task", str(in_pool))
+    (in_pool / ".runtime" / "launcher").mkdir(parents=True)
+    (in_pool / ".runtime" / "launcher" / "state.json").write_text(
+        '{"observedState":"open","backendPid":99,"backendPort":8011}',
+        encoding="utf-8",
+    )
+
+    payload = list_branch_instances(project)
+    item = next(entry for entry in payload["items"] if entry["id"] == "worktree:stale-task")
+
+    assert item["alive"] is False
+    assert item["observedState"] == "idle"
+    assert item["pids"]["backend"] == 0
 
 
 def test_resolver_source_does_not_hardcode_user_or_desktop_paths():

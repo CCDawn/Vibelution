@@ -1818,7 +1818,11 @@ export function LauncherRoute() {
         : selectedAlive
           ? copy.startDisabledRunning
           : copy.startDisabled;
-  const projectSummary = lifecycleDisplay.label;
+  const projectSummary = selectedIsCurrent
+    ? lifecycleDisplay.label
+    : selectedAlive
+      ? copy.lifecycleRunning
+      : copy.lifecycleClosed;
   const launcherSummary = !status
     ? copy.launcherOffline
     : copy.launcherMaintaining;
@@ -2311,14 +2315,16 @@ export function LauncherRoute() {
       ariaLabel={copy.title}
       eyebrow={copy.eyebrow}
       title={copy.title}
-      meta={lifecycleDetailShort || copy.subtitle}
+      meta={selectedIsCurrent
+        ? (lifecycleDetailShort || copy.subtitle)
+        : (selectedAlive ? copy.lifecycleRunningDetail : copy.lifecycleClosedDetail)}
       actions={(
         <div className={styles.statusBar}>
           <VTooltip content={statusBarBlockerReason} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">
             <div className={styles.statusBarReason} data-tone={userGuideTone} tabIndex={0}>
               <span>{copy.lifecycleStatus}</span>
               <strong>{projectSummary}</strong>
-              {activeWorkCount > 0 || restartQueueActive || launcherControlLimited || launcherStatusDisconnected ? <small>{statusBarReasonText}</small> : null}
+              {selectedIsCurrent && (activeWorkCount > 0 || restartQueueActive || launcherControlLimited || launcherStatusDisconnected) ? <small>{statusBarReasonText}</small> : null}
             </div>
           </VTooltip>
           <div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>
