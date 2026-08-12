@@ -23,7 +23,9 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("closeWorkbench: (payload) => requestTransactionalWorkbenchClose(paths, bootstrap, payload)");
     expect(source).toContain("function closeTransactionIdFromDesktopAction(");
     expect(source).toContain("await provider.approveWorkbenchCloseOnce()");
-    expect(source).toContain("buttons: [\"重试\", \"取消\"]");
+    expect(source).toContain("isWorkbenchCloseControlFetchFailure(error)");
+    expect(source).toContain("electron.workbench_close.fail_open_destroy");
+    expect(source).toContain("buttons: [\"重试\", \"仍关闭窗口\"]");
     const providerStart = source.indexOf("function createWindowProvider(");
     const providerEnd = source.indexOf("\nfunction createConversationBadgeIcon", providerStart);
     const providerSource = source.slice(providerStart, providerEnd);

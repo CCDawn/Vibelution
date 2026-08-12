@@ -18,6 +18,7 @@ import {
   DesktopSessionMutationQueue,
   type DesktopCloseReason
 } from "./lifecycle/desktopLifecycleCoordinator.js";
+import { isWorkbenchCloseControlFetchFailure } from "./lifecycle/workbenchCloseFailOpen.js";
 import {
   createConversationNotificationService,
   type ConversationNotificationService,
@@ -1011,8 +1012,18 @@ async function handleTransactionalWorkbenchCloseFailure(
     console.warn(message);
     return;
   }
+  if (isWorkbenchCloseControlFetchFailure(error)) {
+    await recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.workbench_close.fail_open_destroy",
+      message: "Workbench close control fetch failed; Electron is destroying the window.",
+      fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
+    });
+    await provider.approveWorkbenchCloseOnce();
+    return;
+  }
   const retry = await confirmWorkbenchCloseRetry(provider, message);
   if (!retry) {
+    await provider.approveWorkbenchCloseOnce();
     return;
   }
   setTimeout(() => {
@@ -1071,10 +1082,10 @@ async function confirmWorkbenchCloseRetry(provider: ElectronWindowProvider, deta
   const options = {
     type: "error" as const,
     title: "工作台未关闭",
-    message: "后端关闭未完成，窗口将保持打开。",
+    message: "后端关闭未完成。可以选择重试，或直接关闭窗口。",
     detail: detail.slice(0, 500),
-    buttons: ["重试", "取消"],
-    defaultId: 0,
+    buttons: ["重试", "仍关闭窗口"],
+    defaultId: 1,
     cancelId: 1,
     noLink: true
   };
