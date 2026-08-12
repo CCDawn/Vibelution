@@ -31,6 +31,26 @@ describe("NodeHandoffSection", () => {
     expect(markup).toContain("handoff-1");
   });
 
+  it("renders ledger summary handoffs that omit outputArtifactRefs", () => {
+    const handoff = {
+      handoffId: "handoff-summary",
+      toNodeId: "source_extraction",
+      status: "accepted",
+    } as unknown as NodeHandoffRecord;
+
+    const markup = renderToStaticMarkup(
+      <NodeHandoffSection
+        handoffs={[handoff]}
+        pending={false}
+        blockedReason=""
+      />,
+    );
+
+    expect(markup).toContain("source_extraction");
+    expect(markup).toContain("accepted");
+    expect(markup).toContain("0 项产物");
+  });
+
   it("renders budget exhaustion as an operator action instead of an internal code", () => {
     const markup = renderToStaticMarkup(
       <NodeHandoffSection handoffs={[]} pending={false} blockedReason="budget_exceeded" />,
