@@ -8,7 +8,6 @@ from typing import Any
 
 from core.web.services.log_diagnostics import analyze_log_content
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MAX_TREE_DEPTH = 6
 MAX_TEXT_CHARS = 200_000
@@ -18,7 +17,7 @@ LOG_ROOTS = (
     {"id": "runtime_scenes", "path": "logs/runtime_scenes"},
     {"id": "runtime_logs", "path": "logs"},
     {"id": "workspace_logs", "path": "workspace/logs"},
-    {"id": "conversation_logs", "path": "log_info"},
+    {"id": "conversation_logs", "path": "logs/conversations"},
 )
 
 LANGUAGE_BY_SUFFIX = {
@@ -335,7 +334,9 @@ def _should_skip_child(root_id: str, child: Path, root_path: Path) -> bool:
         relative = child.relative_to(root_path).as_posix()
     except ValueError:
         return False
-    return relative == "runtime_scenes" or relative.startswith("runtime_scenes/")
+    return relative == "runtime_scenes" or relative.startswith("runtime_scenes/") or (
+        relative == "conversations" or relative.startswith("conversations/")
+    )
 
 
 def _assert_allowed_runtime_log_path(root_id: str, relative_path: str) -> None:
@@ -346,3 +347,5 @@ def _assert_allowed_runtime_log_path(root_id: str, relative_path: str) -> None:
         normalized = normalized[2:].lstrip("/")
     if normalized == "runtime_scenes" or normalized.startswith("runtime_scenes/"):
         raise ValueError("Runtime scene bundles must be managed from the runtime scenes surface")
+    if normalized == "conversations" or normalized.startswith("conversations/"):
+        raise ValueError("Conversation logs must be managed from the conversation logs surface")
