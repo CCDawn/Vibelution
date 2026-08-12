@@ -14,4 +14,13 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain("parsePublicVibelutionDeepLink(rawUrl)");
     expect(source).not.toContain("parseVibelutionDeepLink(rawUrl)");
   });
+
+  it("routes only an explicit second-instance CLI intent to the Workbench", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+
+    expect(source).toContain("let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench");
+    expect(source).toContain("parseDesktopCliArgs(argv).openWorkbench");
+    expect(source).toContain("await windowProvider.openOrFocusWorkbench()");
+    expect(source).toContain("void windowProvider?.openLauncher()");
+  });
 });

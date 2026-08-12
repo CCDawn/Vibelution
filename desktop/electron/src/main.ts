@@ -99,6 +99,7 @@ const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
 const desktopSessionMutations = new DesktopSessionMutationQueue();
 let conversationNotificationService: ConversationNotificationService | null = null;
 const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
+let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench;
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
 let pendingWorkbenchCloseAck: PendingWorkbenchCloseAck | null = null;
 
@@ -1176,6 +1177,18 @@ ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: 
   return await service.notify(payload);
 });
 
+function requestOpenWorkbench(): void {
+  const provider = windowProvider;
+  if (provider === null) {
+    pendingOpenWorkbenchRequest = true;
+    return;
+  }
+  pendingOpenWorkbenchRequest = false;
+  void provider.openOrFocusWorkbench().catch((error: unknown) => {
+    console.warn(error instanceof Error ? error.message : String(error));
+  });
+}
+
 app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
@@ -1227,6 +1240,10 @@ app.whenReady()
       await handlePublicDeepLinkUrl(rawUrl, "startup");
     }
     await flushPendingPublicDeepLinks();
+    if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary) {
+      pendingOpenWorkbenchRequest = false;
+      await windowProvider.openOrFocusWorkbench();
+    }
     if (desktopCliArgs.workbenchCloseCanary) {
       await windowProvider.openOrFocusWorkbench();
       return;
@@ -1242,6 +1259,10 @@ app.on("second-instance", (_event, argv) => {
   const rawUrl = findVibelutionDeepLinkArg(argv);
   if (rawUrl) {
     void handlePublicDeepLinkUrl(rawUrl, "second_instance");
+    return;
+  }
+  if (parseDesktopCliArgs(argv).openWorkbench) {
+    requestOpenWorkbench();
     return;
   }
   void windowProvider?.openLauncher();
