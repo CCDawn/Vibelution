@@ -89,7 +89,37 @@ class GraphDispatchWorker:
         except Exception as exc:
             self._requeue_or_fail(action, str(exc))
             return
-        self._commit_dispatch(action, dispatch, result)
+        readiness_hint = None
+        if result.pending_action is not None:
+            latest = self._store.latest_attempt(dispatch.run_id, result.pending_action.node_id)
+            is_new_node = latest is None or latest.attempt != result.pending_action.attempt
+            if is_new_node:
+                readiness_hint = self._precheck_readiness(dispatch, result.pending_action)
+        self._commit_dispatch(action, dispatch, result, readiness_hint)
+
+    def _precheck_readiness(self, dispatch: GraphDispatch, pending: Any):
+        """Evaluate readiness for an auto-advanced successor OUTSIDE the writer
+        transaction (domain context reads the ledger through the writer queue,
+        so it must not run inside a writer-thread mutate). Returns
+        (ready, blockers) or None when readiness is not wired."""
+        if self._readiness is None or self._readiness_context is None:
+            return None
+        team_id = dispatch.team_id
+        if not team_id:
+            run = self._store.get_run(dispatch.run_id)
+            team_id = run.team_id if run else dispatch.run_id
+        try:
+            readiness = self._readiness.evaluate(
+                team_id=team_id,
+                run_id=dispatch.run_id,
+                node_id=pending.node_id,
+                context=self._readiness_context(),
+                use_cache=False,
+            )
+        except Exception as exc:
+            return (False, [{"code": "readiness_unavailable", "detail": str(exc)}])
+        blockers = [b.to_dict() for b in readiness.blockers]
+        return (bool(readiness.ready), blockers)
 
     def _mark_attempt_outcome(self, action: Any, dispatch: GraphDispatch) -> None:
         now_ms = self._now()
@@ -170,7 +200,11 @@ class GraphDispatchWorker:
             raise
 
     def _commit_dispatch(
-        self, action: Any, dispatch: GraphDispatch, result: GraphDispatchResult
+        self,
+        action: Any,
+        dispatch: GraphDispatch,
+        result: GraphDispatchResult,
+        readiness_hint: tuple[bool, list[Any]] | None = None,
     ) -> None:
         now_ms = self._now()
 
@@ -228,9 +262,12 @@ class GraphDispatchWorker:
                 else:
                     # 自动推进的新节点：进入 adapter 前重新执行 NodeReadiness
                     # （spec 9.1/7.3）；不 ready 则不建 adapter outbox，attempt 标 blocked。
-                    ready, blockers = self._recheck_readiness(
-                        uow, dispatch, pending
-                    )
+                    # readiness_hint 在 writer 事务外预评估（readiness 读 ledger 走
+                    # writer 队列，不能在 writer 线程 mutate 内再 submit）。
+                    if readiness_hint is None:
+                        ready, blockers = True, []
+                    else:
+                        ready, blockers = readiness_hint
                     if not ready:
                         uow.repository.insert_attempt(
                             _attempt_for_pending(
@@ -311,29 +348,6 @@ class GraphDispatchWorker:
                 )
 
         self._store.submit(mutate, force_flush=True).result(timeout=30)
-
-    def _recheck_readiness(self, uow, dispatch: GraphDispatch, pending: Any) -> tuple[bool, list[Any]]:
-        """NodeReadiness recheck before an auto-advanced successor enters the
-        adapter (spec 9.1). Returns (ready, blockers). No readiness wiring
-        available means the recheck passes (composition root provides it)."""
-        if self._readiness is None or self._readiness_context is None:
-            return True, []
-        team_id = dispatch.team_id
-        if not team_id:
-            run = uow.repository.get_run(dispatch.run_id)
-            team_id = run.team_id if run else dispatch.run_id
-        try:
-            readiness = self._readiness.evaluate(
-                team_id=team_id,
-                run_id=dispatch.run_id,
-                node_id=pending.node_id,
-                context=self._readiness_context(),
-                use_cache=False,
-            )
-        except Exception as exc:
-            return False, [{"code": "readiness_unavailable", "detail": str(exc)}]
-        blockers = [b.to_dict() for b in readiness.blockers]
-        return bool(readiness.ready), blockers
 
     def _mark_blocked(self, action: Any, dispatch: GraphDispatch, detail: str) -> None:
         now_ms = self._now()
