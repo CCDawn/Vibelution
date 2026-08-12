@@ -9,7 +9,9 @@ import pytest
 from core.infrastructure import branch_workspace as workspace
 from core.infrastructure.branch_workspace import (
     BranchWorkspaceError,
+    allocate_worktree_path,
     list_branch_instances,
+    migrate_legacy_branch_workspaces,
     resolve_branch_workspace,
 )
 
@@ -171,6 +173,52 @@ def test_list_branch_instances_covers_worktrees_and_local_refs(tmp_path):
     assert by_id["branch:codex/not-open"]["checkedOut"] is False
     assert by_id["retired:shell-only"]["promotable"] is False
     assert len(payload["items"]) == len({item["id"] for item in payload["items"]})
+
+
+def test_allocate_worktree_path_uses_in_repo_pool(tmp_path):
+    project = _init_repo(tmp_path / "OtherApp")
+
+    allocated = allocate_worktree_path(project, "feat-task")
+
+    assert allocated == (project / ".worktrees" / "feat-task").resolve()
+    assert allocated.parent.is_dir()
+
+
+def test_migrate_moves_legacy_worktree_and_retires_shell_dirs(tmp_path):
+    project = _init_repo(tmp_path / "OtherApp")
+    legacy = tmp_path / "Vibelution-worktrees" / "feat-task"
+    leftover = tmp_path / "Vibelution-worktrees" / "dead-shell"
+    leftover.mkdir(parents=True)
+    _git(project, "worktree", "add", "-b", "codex/feat-task", str(legacy))
+
+    report = migrate_legacy_branch_workspaces(project, skip_alive=True)
+
+    moved = project / ".worktrees" / "feat-task"
+    retired = project / ".worktrees" / "_retired" / "dead-shell"
+    assert moved.is_dir()
+    assert retired.is_dir()
+    assert not legacy.exists()
+    assert not leftover.exists()
+    assert any(item["to"] == str(moved.resolve()) for item in report["moved"])
+    assert any(item["to"] == str(retired.resolve()) for item in report["retired"])
+    listed = _git(project, "worktree", "list", "--porcelain").replace("\\", "/")
+    assert moved.resolve().as_posix() in listed
+    assert (tmp_path / "Vibelution-worktrees" / "MOVED.txt").is_file()
+
+
+def test_migrate_skips_alive_legacy_worktree(tmp_path):
+    project = _init_repo(tmp_path / "OtherApp")
+    legacy = tmp_path / "Vibelution-worktrees" / "live-task"
+    _git(project, "worktree", "add", "-b", "codex/live-task", str(legacy))
+    state = legacy / ".runtime" / "launcher"
+    state.mkdir(parents=True)
+    (state / "state.json").write_text('{"observedState":"open","backendPid":99}', encoding="utf-8")
+
+    report = migrate_legacy_branch_workspaces(project, skip_alive=True)
+
+    assert legacy.is_dir()
+    assert not (project / ".worktrees" / "live-task").exists()
+    assert any(item["reason"] == "instance_alive" for item in report["skipped"])
 
 
 def test_resolver_source_does_not_hardcode_user_or_desktop_paths():

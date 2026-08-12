@@ -45,12 +45,21 @@ def create_candidate_workspace(
             f"Candidate branch already exists: {candidate_branch}"
         )
 
-    candidates_root = Path(
-        worktree_root or root.parent / f"{root.name}-worktrees"
-    ).resolve()
-    if candidates_root == root or _is_relative_to(candidates_root, root):
+    from core.infrastructure.branch_workspace import (
+        allowed_worktree_roots,
+        branch_pool_write_root,
+    )
+
+    candidates_root = Path(worktree_root or branch_pool_write_root(root)).resolve()
+    managed_roots = allowed_worktree_roots(root)
+    if candidates_root == root:
+        raise CandidateWorkspaceError("Candidate worktree root cannot be the integration root.")
+    if _is_relative_to(candidates_root, root) and not any(
+        _is_relative_to(candidates_root, managed) or candidates_root == managed.resolve()
+        for managed in managed_roots
+    ):
         raise CandidateWorkspaceError(
-            "Candidate worktree root must stay outside the project root."
+            "Candidate worktree root must stay in the in-repo branch pool or a dedicated external root."
         )
     candidate_path = (candidates_root / f"self-evolution-{normalized_run_id}").resolve()
     if candidate_path.exists():
@@ -258,9 +267,13 @@ def _require_owned_workspace(
     if not raw_path:
         raise CandidateWorkspaceError("Candidate worktreePath is missing.")
     candidate_path = Path(raw_path).resolve()
-    if candidate_path == root or _is_relative_to(candidate_path, root):
+    from core.infrastructure.branch_workspace import allowed_worktree_roots
+
+    managed_roots = allowed_worktree_roots(root)
+    in_managed_pool = any(_is_relative_to(candidate_path, managed) for managed in managed_roots)
+    if candidate_path == root or (_is_relative_to(candidate_path, root) and not in_managed_pool):
         raise CandidateWorkspaceError(
-            "Candidate worktree must stay outside the project root."
+            "Candidate worktree must stay in the in-repo branch pool or a dedicated external root."
         )
     registered = _registered_worktrees(root)
     registered_branch = registered.get(candidate_path)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -80,6 +81,140 @@ def resolve_branch_workspace(checkout: Path | str) -> BranchWorkspaceLayout:
 
 def branch_pool_path(checkout: Path | str) -> Path:
     return resolve_branch_workspace(checkout).branch_pool
+
+
+def branch_pool_write_root(checkout: Path | str) -> Path:
+    """Return the in-repo pool even when the checkout is not a Git worktree."""
+
+    start = Path(checkout).resolve()
+    if _nearest_git_dir(start) is None:
+        pool = start / BRANCH_POOL_NAME
+    else:
+        try:
+            pool = resolve_branch_workspace(start).branch_pool
+        except BranchWorkspaceError:
+            pool = start / BRANCH_POOL_NAME
+    pool.mkdir(parents=True, exist_ok=True)
+    return pool
+
+
+def allowed_worktree_roots(checkout: Path | str) -> list[Path]:
+    """Writable/legacy roots that may host task worktrees."""
+
+    start = Path(checkout).resolve()
+    if _nearest_git_dir(start) is None:
+        roots = [
+            start / BRANCH_POOL_NAME,
+            start.parent / LEGACY_FIXED_SIBLING_NAME,
+            start.parent / f"{start.name}-worktrees",
+        ]
+    else:
+        try:
+            layout = resolve_branch_workspace(start)
+            roots = [layout.branch_pool, *layout.legacy_siblings]
+        except BranchWorkspaceError:
+            roots = [
+                start / BRANCH_POOL_NAME,
+                start.parent / LEGACY_FIXED_SIBLING_NAME,
+                start.parent / f"{start.name}-worktrees",
+            ]
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for item in roots:
+        key = _norm(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def allocate_worktree_path(checkout: Path | str, slug: str) -> Path:
+    pool = branch_pool_write_root(checkout)
+    return (pool / _safe_slug(slug)).resolve()
+
+
+def migrate_legacy_branch_workspaces(
+    checkout: Path | str,
+    *,
+    skip_alive: bool = True,
+) -> dict[str, Any]:
+    """Move legacy sibling worktrees into ``.worktrees``; leftover shells go to ``_retired``."""
+
+    layout = resolve_branch_workspace(checkout)
+    layout.branch_pool.mkdir(parents=True, exist_ok=True)
+    layout.retired_pool.mkdir(parents=True, exist_ok=True)
+    moved: list[dict[str, str]] = []
+    retired: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
+    registered_paths = {
+        _norm(Path(str(entry.get("worktree") or "")))
+        for entry in _registered_worktrees(layout.integration_root)
+        if str(entry.get("worktree") or "").strip()
+    }
+
+    for entry in _registered_worktrees(layout.integration_root):
+        source = Path(str(entry.get("worktree") or "")).resolve()
+        if not str(source) or _same_path(source, layout.integration_root):
+            continue
+        if _is_relative_to(source, layout.branch_pool):
+            continue
+        if not any(_is_relative_to(source, sibling) for sibling in layout.legacy_siblings):
+            skipped.append({"path": str(source), "reason": "not_legacy_sibling"})
+            continue
+        if skip_alive and bool(_runtime_observation(source).get("alive")):
+            skipped.append({"path": str(source), "reason": "instance_alive"})
+            continue
+        slug = source.name
+        destination = (layout.branch_pool / slug).resolve()
+        if destination.exists():
+            skipped.append({"path": str(source), "reason": "destination_exists", "destination": str(destination)})
+            continue
+        try:
+            _run_git(
+                layout.integration_root,
+                "worktree",
+                "move",
+                str(source),
+                str(destination),
+            )
+        except BranchWorkspaceError as exc:
+            errors.append({"path": str(source), "reason": str(exc)})
+            continue
+        moved.append({"from": str(source), "to": str(destination), "slug": slug})
+
+    for sibling in layout.legacy_siblings:
+        if not sibling.is_dir():
+            continue
+        for child in sorted(sibling.iterdir(), key=lambda item: item.name.lower()):
+            if not child.is_dir() or child.name == RETIRED_DIR_NAME:
+                continue
+            if _norm(child) in registered_paths:
+                continue
+            if (child / ".git").exists():
+                continue
+            destination = (layout.retired_pool / child.name).resolve()
+            if destination.exists():
+                skipped.append({"path": str(child), "reason": "retired_destination_exists"})
+                continue
+            try:
+                shutil.move(str(child), str(destination))
+            except OSError as exc:
+                errors.append({"path": str(child), "reason": str(exc)})
+                continue
+            retired.append({"from": str(child), "to": str(destination)})
+        _write_legacy_pointer(sibling, layout.branch_pool)
+
+    return {
+        "schemaVersion": 1,
+        "integrationRoot": str(layout.integration_root),
+        "branchPool": str(layout.branch_pool),
+        "moved": moved,
+        "retired": retired,
+        "skipped": skipped,
+        "errors": errors,
+    }
 
 
 def list_branch_instances(checkout: Path | str) -> dict[str, Any]:
@@ -275,8 +410,61 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     return True
 
 
+def _nearest_git_dir(start: Path) -> Path | None:
+    current = Path(start).resolve()
+    for _ in range(12):
+        if (current / ".git").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+    return None
+
+
 def _norm(path: Path) -> str:
     return os.path.normcase(str(path.resolve()))
+
+
+def _safe_slug(value: str) -> str:
+    raw = str(value or "").strip().replace("\\", "/")
+    path = Path(raw)
+    if (
+        not raw
+        or path.is_absolute()
+        or any(part in {"", ".", "..", RETIRED_DIR_NAME} for part in Path(raw).parts)
+    ):
+        raise BranchWorkspaceError(f"非法 worktree slug：{value or '<empty>'}")
+    return Path(*Path(raw).parts).as_posix()
+
+
+def _run_git(checkout: Path, *args: str) -> str:
+    result = git_process.run_git(
+        list(args),
+        cwd=str(checkout),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = str(result.stderr or result.stdout or "").strip()
+        raise BranchWorkspaceError(
+            f"无法从 {checkout} 执行 Git {' '.join(args)}：{detail or 'git command failed'}"
+        )
+    return str(result.stdout or "").strip()
+
+
+def _write_legacy_pointer(sibling: Path, branch_pool: Path) -> None:
+    remaining = [item for item in sibling.iterdir() if item.name not in {"MOVED.txt", "README.txt"}]
+    if remaining:
+        return
+    notice = (
+        "This legacy sibling worktree folder is no longer the write target.\n"
+        f"New checkouts belong in: {branch_pool}\n"
+    )
+    (sibling / "MOVED.txt").write_text(notice, encoding="utf-8")
 
 
 def _registered_worktrees(integration_root: Path) -> list[dict[str, str]]:

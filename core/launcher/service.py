@@ -179,6 +179,14 @@ def list_launcher_branch_instances() -> dict[str, Any]:
     return list_branch_instances(PROJECT_ROOT)
 
 
+def migrate_launcher_branch_workspaces() -> dict[str, Any]:
+    """Move legacy sibling worktrees into the in-repo branch pool."""
+
+    from core.infrastructure.branch_workspace import migrate_legacy_branch_workspaces
+
+    return migrate_legacy_branch_workspaces(PROJECT_ROOT)
+
+
 def get_launcher_status() -> dict[str, Any]:
     """Return standalone Launcher status without importing the Web service layer."""
 
