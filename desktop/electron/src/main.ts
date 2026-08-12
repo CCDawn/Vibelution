@@ -28,6 +28,7 @@ import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desk
 import {
   acknowledgeWorkbenchCloseWindowClosed,
   fetchWorkbenchCloseTransaction,
+  isRecoverableWorkbenchCloseTransactionControlRejection,
   retryRejectedWorkbenchCloseSubmitOnce,
   submitWorkbenchCloseTransaction,
   type WorkbenchCloseTransaction
@@ -332,7 +333,7 @@ function startDesktopActionLoop(
         operations: {
           openOrFocusWorkbench: () => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider),
           focusWorkbench: () => provider.focusWorkbench(),
-          closeWorkbench: () => requestTransactionalWorkbenchClose(paths, bootstrap)
+          closeWorkbench: (payload) => requestTransactionalWorkbenchClose(paths, bootstrap, payload)
         }
       });
       if (result.claimed) {
@@ -611,7 +612,8 @@ function desktopSessionCapabilities(bootstrap: LauncherBootstrapResult): string[
 
 async function requestTransactionalWorkbenchClose(
   paths: DesktopPaths,
-  bootstrap: LauncherBootstrapResult | null
+  bootstrap: LauncherBootstrapResult | null,
+  desktopActionPayload: Record<string, unknown> = {}
 ): Promise<void> {
   const provider = windowProvider;
   if (provider === null || bootstrap === null) {
@@ -625,28 +627,37 @@ async function requestTransactionalWorkbenchClose(
       throw new Error("Electron Workbench close transaction requires an active desktop session.");
     }
     let context = await resolveDesktopActionLoopContext(bootstrap);
-    const normalIdempotencyKey = `electron-workbench-close:${context.desktopSessionId}:${randomUUID()}`;
-    let transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
-      idempotencyKey: normalIdempotencyKey,
-      mode: "normal",
-      reason: "workbench_window_close"
-    });
-    if (transaction.phase === "confirmation_required") {
-      const confirmed = await confirmWorkbenchForceClose(provider);
-      if (!confirmed) {
-        await recordElectronSupervisorEvent(bootstrap, {
-          eventCode: "electron.workbench_close.cancelled_active_work",
-          message: "Workbench close was cancelled while active work was present.",
-          fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
-        });
-        return;
-      }
-      transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
-        idempotencyKey: `${normalIdempotencyKey}:force`,
-        mode: "force",
-        reason: "workbench_window_close",
-        confirmationCloseId: transaction.closeId
+    const existingCloseId = closeTransactionIdFromDesktopAction(desktopActionPayload, context.desktopSessionId);
+    let transaction: WorkbenchCloseTransaction;
+    if (existingCloseId) {
+      transaction = await fetchWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
+        ...context,
+        closeId: existingCloseId
       });
+    } else {
+      const normalIdempotencyKey = `electron-workbench-close:${context.desktopSessionId}:${randomUUID()}`;
+      transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
+        idempotencyKey: normalIdempotencyKey,
+        mode: "normal",
+        reason: "workbench_window_close"
+      });
+      if (transaction.phase === "confirmation_required") {
+        const confirmed = await confirmWorkbenchForceClose(provider);
+        if (!confirmed) {
+          await recordElectronSupervisorEvent(bootstrap, {
+            eventCode: "electron.workbench_close.cancelled_active_work",
+            message: "Workbench close was cancelled while active work was present.",
+            fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
+          });
+          return;
+        }
+        transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
+          idempotencyKey: `${normalIdempotencyKey}:force`,
+          mode: "force",
+          reason: "workbench_window_close",
+          confirmationCloseId: transaction.closeId
+        });
+      }
     }
     // A recovered submit replaces the cached control context. Refresh this
     // local handle before polling and acknowledging the same close transaction.
@@ -672,6 +683,18 @@ async function requestTransactionalWorkbenchClose(
   });
 }
 
+function closeTransactionIdFromDesktopAction(
+  payload: Record<string, unknown>,
+  desktopSessionId: string
+): string {
+  const targetSessionId = String(payload.desktopSessionId || "").trim();
+  const closeId = String(payload.closeId || "").trim();
+  if (!closeId || targetSessionId !== desktopSessionId) {
+    return "";
+  }
+  return closeId;
+}
+
 async function submitWorkbenchCloseTransactionWithControlRecovery(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
@@ -691,6 +714,23 @@ async function submitWorkbenchCloseTransactionWithControlRecovery(
       }),
     async () => await recoverWorkbenchCloseControlContext(paths, bootstrap, provider)
   );
+}
+
+async function fetchWorkbenchCloseTransactionWithControlRecovery(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider,
+  input: DesktopActionLoopContext & { closeId: string }
+): Promise<WorkbenchCloseTransaction> {
+  try {
+    return await fetchWorkbenchCloseTransaction(input);
+  } catch (error: unknown) {
+    if (!isRecoverableWorkbenchCloseTransactionControlRejection(error, "fetch")) {
+      throw error;
+    }
+    await recoverWorkbenchCloseControlContext(paths, bootstrap, provider);
+    return await fetchWorkbenchCloseTransaction({ ...(await resolveDesktopActionLoopContext(bootstrap)), closeId: input.closeId });
+  }
 }
 
 async function recoverWorkbenchCloseControlContext(

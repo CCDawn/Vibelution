@@ -125,6 +125,103 @@ describe("runDesktopActionOnce", () => {
     });
   });
 
+  it("forwards a targeted close-transaction payload to the Electron window owner", async () => {
+    let receivedPayload: Record<string, unknown> | null = null;
+    const fetchImpl = async (url: string | URL | Request) => {
+      if (String(url).endsWith("/claim")) {
+        return jsonResponse({
+          actionId: "action-close-1",
+          intentId: "intent-close-1",
+          action: "close_workbench",
+          status: "claimed",
+          payload: {
+            closeId: "workbench-close-1",
+            desktopSessionId: "desktop-session-1",
+            expectedDesktopSessionRevision: 9,
+            mode: "force"
+          },
+          claimedBy: "desktop-session-1",
+          leaseExpiresAt: "2026-06-26T10:00:00Z",
+          claimAttempt: 1
+        });
+      }
+      return jsonResponse({ status: "acked" }, 202);
+    };
+
+    await runDesktopActionOnce({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "token",
+      desktopSessionId: "desktop-session-1",
+      leaseSeconds: 30,
+      fetchImpl,
+      operations: {
+        openOrFocusWorkbench: async () => ({ open: true }),
+        focusWorkbench: async () => ({ focused: true }),
+        closeWorkbench: async (payload) => {
+          receivedPayload = payload;
+          return { open: false };
+        }
+      }
+    });
+
+    expect(receivedPayload).toEqual({
+      closeId: "workbench-close-1",
+      desktopSessionId: "desktop-session-1",
+      expectedDesktopSessionRevision: 9,
+      mode: "force"
+    });
+  });
+
+  it("fails a mismatched targeted action without opening, focusing, or closing any window", async () => {
+    const operations: string[] = [];
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      if (String(url).endsWith("/claim")) {
+        return jsonResponse({
+          actionId: "action-wrong-target",
+          intentId: "intent-wrong-target",
+          action: "close_workbench",
+          status: "claimed",
+          payload: { desktopSessionId: "other-electron", closeId: "workbench-close-other" },
+          claimedBy: "desktop-session-1",
+          leaseExpiresAt: "2026-06-26T10:00:00Z",
+          claimAttempt: 1
+        });
+      }
+      return jsonResponse({ status: "failed" }, 202);
+    };
+
+    const result = await runDesktopActionOnce({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "token",
+      desktopSessionId: "desktop-session-1",
+      leaseSeconds: 30,
+      fetchImpl,
+      operations: {
+        openOrFocusWorkbench: async () => operations.push("open"),
+        focusWorkbench: async () => operations.push("focus"),
+        closeWorkbench: async () => operations.push("close")
+      }
+    });
+
+    expect(result).toEqual({
+      claimed: true,
+      actionId: "action-wrong-target",
+      action: "close_workbench",
+      status: "failed"
+    });
+    expect(operations).toEqual([]);
+    expect(JSON.parse(String(requests[1].init.body))).toEqual({
+      desktopSessionId: "desktop-session-1",
+      result: {
+        reason: "desktop_action_target_mismatch",
+        targetDesktopSessionId: "other-electron",
+        desktopSessionId: "desktop-session-1"
+      }
+    });
+  });
+
   it("fails runtime-effect actions without executing a window operation", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
