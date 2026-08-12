@@ -475,7 +475,6 @@ def test_launcher_action_passes_runtime_manager_process_protection(monkeypatch, 
     assert env["VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"] == "1"
     assert [event_type for event_type, _payload in events] == [
         "launcher.action.requested",
-        "launcher.action.startup_stage_completed",
         "launcher.action.completed",
         "launcher.action.startup_summary",
     ]
@@ -5626,7 +5625,7 @@ def test_packaged_electron_launch_requests_workbench_from_primary_instance(monke
     assert kwargs["stderr"] is subprocess.DEVNULL
 
 
-def test_packaged_electron_bootstrap_records_bounded_stage_timings(monkeypatch, tmp_path):
+def test_packaged_electron_bootstrap_collects_stage_timings_without_persisting_each_stage(monkeypatch, tmp_path):
     events: list[tuple[str, dict]] = []
 
     class FakeProcess:
@@ -5689,17 +5688,10 @@ def test_packaged_electron_bootstrap_records_bounded_stage_timings(monkeypatch, 
         "workbenchWindowOpenMs",
         "electronFirstStartTotalMs",
     }.issubset(telemetry["timingsMs"])
-    stage_events = [payload for event_type, payload in events if event_type == "launcher.action.startup_stage_completed"]
-    assert [payload["stage"] for payload in stage_events] == [
-        "electron_process_spawn",
-        "desktop_session_registration",
-        "desktop_action_submit",
-        "workbench_window_open",
-    ]
-    assert all(payload["startup_trace_id"] == "startup-test-1" for payload in stage_events)
+    assert events == []
 
 
-def test_packaged_electron_bootstrap_records_failure_stage_before_cleanup(monkeypatch, tmp_path):
+def test_packaged_electron_bootstrap_collects_failure_stage_without_persisting_before_cleanup(monkeypatch, tmp_path):
     events: list[tuple[str, dict]] = []
     terminated: list[int] = []
 
@@ -5751,9 +5743,7 @@ def test_packaged_electron_bootstrap_records_failure_stage_before_cleanup(monkey
 
     assert telemetry["failureStage"] == "desktop_session_registration"
     assert terminated == [43211]
-    failed = _event_payload(events, "launcher.action.startup_stage_failed")
-    assert failed["stage"] == "desktop_session_registration"
-    assert failed["startup_trace_id"] == "startup-test-failure"
+    assert events == []
 
 
 def test_electron_session_bootstrap_waits_for_primary_instance_handoff(monkeypatch):
@@ -5842,6 +5832,9 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch,
     assert summary["outcome"] == "succeeded"
     assert summary["failureStage"] == ""
     assert summary["timingsMs"]["launcherControlPlaneBackendReadyMs"] >= 0
+    assert [event_type for event_type, _payload in events].count("launcher.action.startup_summary") == 1
+    assert "command" not in summary
+    assert "prompt" not in summary
     assert result.startup_telemetry["startupTraceId"] == summary["startupTraceId"]
 
 
@@ -5926,7 +5919,6 @@ def test_run_launcher_action_routes_active_electron_session_to_desktop_action(mo
     ]
     assert [event_type for event_type, _payload in events] == [
         "launcher.action.requested",
-        "launcher.action.startup_stage_completed",
         "launcher.action.electron_desktop_action_submitted",
         "launcher.action.completed",
         "launcher.action.startup_summary",
