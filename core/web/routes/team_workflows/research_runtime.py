@@ -187,7 +187,11 @@ def _map_query_error(exc: Exception) -> HTTPException:
             detail={"code": "invalid_event_cursor", "message": str(exc)},
         )
     if isinstance(exc, WorkflowQueryError):
-        status = 404 if exc.code in {"team_scope_mismatch", "run_not_found"} else 422
+        status = (
+            404
+            if exc.code in {"team_scope_mismatch", "run_not_found", "unknown_node"}
+            else 422
+        )
         return HTTPException(
             status_code=status,
             detail={"code": exc.code, "message": str(exc)},
@@ -349,7 +353,7 @@ def research_workflow_node_detail(
             team_id=_canonical_team_id(team_id),
             run_id=run_id,
             node_id=node_id,
-        )
+        ).to_dict()
     except Exception as exc:
         raise _map_query_error(exc) from exc
 

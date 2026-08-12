@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.research.workflow.contracts import ResearchWorkflowSnapshot
+from core.research.workflow.contracts.workflow_snapshot import (
+    HumanTaskSummary,
+    ResearchWorkflowNodeDetail,
+)
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger.errors import (
@@ -46,6 +50,13 @@ class RunNotFoundError(WorkflowQueryError):
 
     def __init__(self, run_id: str) -> None:
         super().__init__(f"run not found: {run_id}", code="run_not_found")
+
+
+class NodeNotFoundError(WorkflowQueryError):
+    code = "unknown_node"
+
+    def __init__(self, node_id: str) -> None:
+        super().__init__(f"unknown nodeId: {node_id}", code="unknown_node")
 
 
 class WorkflowLedgerUnavailable(WorkflowQueryError):
@@ -123,24 +134,38 @@ class WorkflowQueryService:
 
     def get_node_detail(
         self, *, team_id: str, run_id: str, node_id: str
-    ) -> dict[str, Any]:
+    ) -> ResearchWorkflowNodeDetail:
         snap = self.get_snapshot(team_id=team_id, run_id=run_id)
-        attempts = list(snap.node_attempts.get(node_id, ()))
-        offers = [
-            offer.to_dict()
-            for offer in snap.command_offers
-            if offer.node_id == node_id
-        ]
-        return {
-            "runId": run_id,
-            "teamId": team_id,
-            "nodeId": node_id,
-            "runVersion": snap.run["runVersion"],
-            "attempts": attempts,
-            "commandOffers": offers,
-            "latestEventSequence": snap.latest_event_sequence,
-            "generatedAt": snap.generated_at,
-        }
+        node = next(
+            (item for item in self._definition.nodes if item.nodeId == node_id),
+            None,
+        )
+        if node is None:
+            raise NodeNotFoundError(node_id)
+        attempts = snap.node_attempts.get(node_id, ())
+        latest = attempts[-1] if attempts else None
+        offers = tuple(
+            offer for offer in snap.command_offers if offer.node_id == node_id
+        )
+        return ResearchWorkflowNodeDetail(
+            run_id=run_id,
+            team_id=team_id,
+            node_id=node_id,
+            run_version=snap.run.run_version,
+            actor_kind=node.actorKind.value,
+            primary_role_key=node.primaryRoleKey,
+            label=node.label,
+            runtime_current=node_id in snap.active_node_ids,
+            status=latest.status if latest is not None else snap.run.status,
+            binding_snapshot_id=(
+                latest.binding_snapshot_id if latest is not None else None
+            ),
+            latest_attempt=latest,
+            attempts=attempts,
+            command_offers=offers,
+            latest_event_sequence=snap.latest_event_sequence,
+            generated_at=snap.generated_at,
+        )
 
     def _read_bundle(self, run_id: str):
         def load(repo: WorkflowLedgerRepository):
@@ -191,7 +216,7 @@ def _default_iso_clock() -> str:
     )
 
 
-def _human_task_summary(row: tuple, attempt_by_id: dict[str, Any]) -> dict[str, Any]:
+def _human_task_summary(row: tuple, attempt_by_id: dict[str, Any]) -> HumanTaskSummary:
     (
         task_id,
         run_id,
@@ -205,17 +230,17 @@ def _human_task_summary(row: tuple, attempt_by_id: dict[str, Any]) -> dict[str, 
         resolved_at_ms,
     ) = row
     attempt = attempt_by_id.get(node_run_id)
-    return {
-        "taskId": task_id,
-        "runId": run_id,
-        "nodeRunId": node_run_id,
-        "nodeId": attempt.node_id if attempt is not None else None,
-        "handoffId": handoff_id,
-        "taskKind": task_kind,
-        "status": status,
-        "createdAtMs": created_at_ms,
-        "resolvedAtMs": resolved_at_ms,
-    }
+    return HumanTaskSummary(
+        task_id=task_id,
+        run_id=run_id,
+        node_run_id=node_run_id,
+        node_id=attempt.node_id if attempt is not None else None,
+        handoff_id=handoff_id,
+        task_kind=task_kind,
+        status=status,
+        created_at_ms=created_at_ms,
+        resolved_at_ms=resolved_at_ms,
+    )
 
 
 def _handoff_summary(row: tuple) -> dict[str, Any]:
