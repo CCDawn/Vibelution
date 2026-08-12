@@ -42,6 +42,7 @@ from core.runtime_manager.workbench_controller import _is_process_alive, observe
 from core.runtime_manager.window_provider_state import window_provider_projection
 from . import desktop_session_store, lifecycle_action_dispatcher, lifecycle_intent_store
 from . import developer_mode as launcher_developer_mode
+from .branch_instance_lifecycle import BranchInstanceLifecycleError
 from . import maintenance_reset as launcher_maintenance_reset
 
 
@@ -137,6 +138,7 @@ DeveloperCleanupPlanError = launcher_developer_mode.DeveloperCleanupPlanError
 LauncherMaintenancePlanError = launcher_maintenance_reset.LauncherMaintenancePlanError
 
 
+
 class LauncherCommandResponse(TypedDict, total=False):
     accepted: bool
     mode: str
@@ -147,6 +149,10 @@ class LauncherCommandResponse(TypedDict, total=False):
     activeWorkRuns: list[dict[str, str]]
     closeId: str
     windowOwner: str
+    instanceId: str
+    port: int
+    controlPort: int
+    url: str
 
 
 class LauncherRequestAudit(TypedDict, total=False):
@@ -174,9 +180,48 @@ class LauncherSupervisorCommandResponse(TypedDict, total=False):
 def list_launcher_branch_instances() -> dict[str, Any]:
     """Return Git-governed branch instances for the Launcher first screen."""
 
-    from core.infrastructure.branch_workspace import list_branch_instances
+    from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
 
-    return list_branch_instances(PROJECT_ROOT)
+    return list_overlayed_branch_instances()
+
+
+def request_branch_instance_operation(
+    instance_id: str,
+    operation: LauncherOperation,
+    request_audit: LauncherRequestAudit | None = None,
+) -> LauncherCommandResponse:
+    """Start/stop/restart the selected branch instance.
+
+    The current checkout keeps the existing Runtime Manager lifecycle. Other
+    checked-out worktrees use isolated backend/control ports.
+    """
+
+    from core.launcher.branch_instance_lifecycle import (
+        assert_instance_operable,
+        resolve_branch_instance,
+        run_isolated_operation,
+    )
+
+    item = resolve_branch_instance(instance_id)
+    assert_instance_operable(item, operation)
+    if item.get("current"):
+        response = _current_branch_instance_operation(operation, request_audit)
+        response["instanceId"] = str(item.get("id") or instance_id)
+        return response
+    return run_isolated_operation(item, operation)
+
+
+def _current_branch_instance_operation(
+    operation: LauncherOperation,
+    request_audit: LauncherRequestAudit | None,
+) -> LauncherCommandResponse:
+    if operation == "start":
+        return request_launcher_start()
+    if operation == "stop":
+        return request_launcher_stop(request_audit)
+    if operation == "force-stop":
+        return request_launcher_force_stop(request_audit)
+    return request_launcher_restart()
 
 
 def migrate_launcher_branch_workspaces() -> dict[str, Any]:

@@ -1185,6 +1185,10 @@ export type LauncherStatus = {
 export type LauncherControlResponse = RuntimeControlResponse & {
   launcherMode: string;
   operation: LauncherOperation;
+  instanceId?: string;
+  port?: number;
+  controlPort?: number;
+  url?: string;
 };
 
 export type WorkbenchWindowModeUpdateResponse = {
