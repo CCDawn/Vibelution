@@ -3,7 +3,7 @@ import type { IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../src/ipc.js";
 import { assertLocalHttpUrl } from "../src/security/urlPolicy.js";
 import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
-import { resolveLauncherUrl } from "../src/windows/windowUrlResolver.js";
+import { resolveLauncherUrl, resolveWorkbenchUrl } from "../src/windows/windowUrlResolver.js";
 import {
   ElectronWindowProvider,
   type ElectronWindowLike,
@@ -607,6 +607,20 @@ describe("resolveLauncherUrl", () => {
   it("accepts an explicit development override", () => {
     expect(resolveLauncherUrl({ VIBELUTION_LAUNCHER_URL: "http://127.0.0.1:9000/launcher" } as NodeJS.ProcessEnv)).toBe(
       "http://127.0.0.1:9000/launcher"
+    );
+  });
+});
+
+describe("resolveWorkbenchUrl", () => {
+  it("prefers a live status URL over the development default", () => {
+    expect(
+      resolveWorkbenchUrl({ NODE_ENV: "development" } as NodeJS.ProcessEnv, "http://127.0.0.1:8002/")
+    ).toBe("http://127.0.0.1:8002/");
+  });
+
+  it("does not silently hard-code a production port", () => {
+    expect(() => resolveWorkbenchUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
+      "Workbench URL is not resolved"
     );
   });
 });
