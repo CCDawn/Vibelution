@@ -16,6 +16,33 @@ type ChatAgentArchiveQueueItem<TContext> = {
   context: TContext;
 };
 
+export type OptimisticallyArchivedAgentContext<TAgent> = {
+  agent: TAgent | null;
+  index: number;
+};
+
+export function restoreOptimisticallyArchivedAgent<TAgent extends { agentId: string }>(
+  current: readonly TAgent[] | undefined,
+  context: OptimisticallyArchivedAgentContext<TAgent>,
+): TAgent[] | undefined {
+  if (!current || !context.agent) {
+    return current ? [...current] : undefined;
+  }
+  if (current.some((agent) => agent.agentId === context.agent?.agentId)) {
+    return [...current];
+  }
+  const next = [...current];
+  next.splice(Math.max(0, Math.min(context.index, next.length)), 0, context.agent);
+  return next;
+}
+
+export function remainingAgentsAfterConfirmedArchive<TAgent extends { agentId: string }>(
+  agentsAtIntent: readonly TAgent[],
+  archivedAgentId: string,
+): TAgent[] {
+  return agentsAtIntent.filter((agent) => agent.agentId !== archivedAgentId);
+}
+
 export type ChatAgentArchiveQueue<TContext> = {
   enqueue: (agentId: string) => boolean;
   pendingAgentIds: () => ReadonlySet<string>;
