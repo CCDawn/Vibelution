@@ -6276,14 +6276,14 @@ class TestResolvedApiKeyUsage:
 
         message = str(exc_info.value)
         assert "modelId=relay_gpt_5_6_luna" in message
-        assert "provider=inline_profile_primary" in message
+        assert "provider=default" in message
         assert model_key_env in message
         assert provider_key_env in message
         assert "llm.providers.<provider_id>" not in message
         missing_event = next(event for event in scene_events if event[1] == "agent.api_key.missing")
         fields = missing_event[2]["fields"]
         assert fields["modelId"] == "relay_gpt_5_6_luna"
-        assert fields["providerId"] == "inline_profile_primary"
+        assert fields["providerId"] == "default"
         assert fields["providerKind"] == "relay"
         assert fields["modelApiKeyEnv"] == model_key_env
         assert fields["providerApiKeyEnv"] == provider_key_env

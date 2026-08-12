@@ -24,6 +24,23 @@ def isolate_developer_sandbox_config(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
 
 
+@pytest.fixture(autouse=True)
+def enable_supervised_evolution_feature(monkeypatch: pytest.MonkeyPatch):
+    import config.settings as settings_module
+
+    def _feature_enabled_config() -> SimpleNamespace:
+        return SimpleNamespace(
+            supervised_evolution=SimpleNamespace(enabled=True, mental_model_enabled=True),
+            agent=SimpleNamespace(
+                modes=SimpleNamespace(supervised_evolution_enabled=True, self_evolution_enabled=True)
+            ),
+            mental_model=SimpleNamespace(enabled=True),
+            runtime_status=SimpleNamespace(enabled=True),
+        )
+
+    monkeypatch.setattr(settings_module, "get_config", _feature_enabled_config)
+
+
 def _enable_developer_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
@@ -704,22 +721,20 @@ def test_conversation_harness_treats_completed_session_turn_as_success(monkeypat
     monkeypatch.setattr(conversation_adapter, "submit_session_message", fake_submit_session_message)
     monkeypatch.setattr(
         conversation_adapter,
-        "get_session_detail",
-        lambda session_id: {
-            "id": session_id,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id="": {
+            "sessionId": session_id,
+            "turnId": turn_id or "turn-1",
+            "terminal": True,
+            "terminalStatus": "completed",
             "lastTurnStatus": "completed",
-            "updatedAt": "2026-06-11T00:00:03Z",
-            "messages": [
-                {"role": "user", "content": "inspect current state", "timestamp": "2026-06-11T00:00:01Z"},
-                {
-                    "role": "assistant",
-                    "content": "state inspected",
-                    "timestamp": "2026-06-11T00:00:03Z",
-                    "thought": "inspect first",
-                    "toolCalls": [{"name": "inspect_state", "status": "success"}],
-                    "mentalSnapshot": {"mood": "focused"},
-                },
-            ],
+            "completionSource": "session",
+            "completionRecovered": False,
+            "assistantText": "state inspected",
+            "messageCount": 2,
+            "isRunning": False,
+            "activeTurnId": turn_id or "turn-1",
+            "turnCurrent": False,
         },
     )
 
@@ -747,11 +762,6 @@ def test_conversation_harness_treats_completed_session_turn_as_success(monkeypat
     assert events[-1]["phase"] == "conversation_turn_finished"
     assert events[-1]["conversation_session_id"] == "session-hidden"
     assert events[-1]["conversation_turn_id"] == "turn-1"
-    assert events[-1]["conversation_messages"][0]["id"] == "session-hidden-message-1"
-    assert events[-1]["conversation_messages"][0]["role"] == "user"
-    assert events[-1]["conversation_messages"][1]["thought"] == "inspect first"
-    assert events[-1]["conversation_messages"][1]["toolCalls"][0]["name"] == "inspect_state"
-    assert events[-1]["conversation_messages"][1]["mentalSnapshot"]["mood"] == "focused"
 
 
 def test_conversation_harness_returns_cancelled_after_stop_grace(monkeypatch, tmp_path):

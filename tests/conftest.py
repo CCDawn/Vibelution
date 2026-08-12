@@ -11,6 +11,7 @@ pytest 配置和共享 fixtures
 import pytest
 import os
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -18,6 +19,18 @@ from pathlib import Path
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+# Windows: pytest tmp basename 使用完整测试函数名（最长 ~60 字符），叠加
+# developer-mode 沙盒/team 知识库等深层目录会超过 260 字符路径上限并抛
+# WinError 206。将临时根移到短路径（优先 C:\vtmp，失败时回退系统 temp），
+# 必须在 pytest 初始化 basetemp 之前生效（conftest import 时机足够早）。
+if os.name == "nt":
+    _short_temp_root = r"C:\vtmp"
+    try:
+        Path(_short_temp_root).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        _short_temp_root = os.path.join(tempfile.gettempdir(), "vtmp")
+    os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", _short_temp_root)
 
 # Team-workflow behavioral cases live in five domain packs for xdist loadfile.
 # The historical aggregate re-exports the same cases and must not be collected
