@@ -114,8 +114,11 @@ class AgentActionAdapter:
 class HumanActionAdapter:
     action_kind = "human_task"
 
-    def __init__(self, ports: DomainPorts) -> None:
+    def __init__(self, ports: DomainPorts, *, node_id: str | None = None) -> None:
         self._ports = ports
+        if node_id:
+            # 精确 kind 契约：`human_task:{node_id}`，registry 精确匹配。
+            self.action_kind = f"human_task:{node_id}"
 
     def preflight(self, action: PendingAction) -> AdapterPreflight:
         return AdapterPreflight(ready=True)
@@ -142,8 +145,11 @@ class HumanActionAdapter:
 class SystemActionAdapter:
     action_kind = "system_action"
 
-    def __init__(self, ports: DomainPorts) -> None:
+    def __init__(self, ports: DomainPorts, *, node_id: str | None = None) -> None:
         self._ports = ports
+        if node_id:
+            # 精确 kind 契约：`system_action:{node_id}`，registry 精确匹配。
+            self.action_kind = f"system_action:{node_id}"
 
     def preflight(self, action: PendingAction) -> AdapterPreflight:
         verdict = self._ports.read_back_input(action)
@@ -225,12 +231,20 @@ def _stage_for(node_id: str) -> str:
     return _STAGE_BY_NODE.get(node_id, "execution_iteration")
 
 
-def register_default_adapters(registry: Any, ports: DomainPorts) -> None:
+def register_default_adapters(registry: Any, ports: DomainPorts) -> Any:
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+    )
+    from core.research.workflow.models import ActorKind
+
     from ..action_registry import ActionRegistry
 
     if not isinstance(registry, ActionRegistry):
         registry = ActionRegistry()
     registry.register(AgentActionAdapter(ports))
-    registry.register(HumanActionAdapter(ports))
-    registry.register(SystemActionAdapter(ports))
+    for node in build_challenge_cup_workflow_definition().nodes:
+        if node.actorKind == ActorKind.HUMAN:
+            registry.register(HumanActionAdapter(ports, node_id=node.nodeId))
+        elif node.actorKind == ActorKind.SYSTEM:
+            registry.register(SystemActionAdapter(ports, node_id=node.nodeId))
     return registry
