@@ -4,6 +4,7 @@ import {
   shouldCanonicalizeUrlSessionSelection,
   shouldDeferUrlSessionSync,
   shouldKeepExplicitSessionRouteOnNotFound,
+  resolveArchivedSessionRouteTransition,
 } from "./chatSessionRouteSync";
 
 describe("shouldCanonicalizeUrlSessionSelection", () => {
@@ -108,5 +109,33 @@ describe("shouldKeepExplicitSessionRouteOnNotFound", () => {
         activeSessionId: "session-workflow",
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveArchivedSessionRouteTransition", () => {
+  it("retires an archived active or URL-selected session and replaces it with the fallback", () => {
+    expect(resolveArchivedSessionRouteTransition({
+      archivedSessionIds: ["session-archived"],
+      activeSessionId: "session-archived",
+      requestedSessionId: "session-archived",
+      fallbackSessionId: "session-live",
+    })).toEqual({
+      shouldRetireSelection: true,
+      nextActiveSessionId: "session-live",
+      nextRequestedSessionId: "session-live",
+    });
+  });
+
+  it("removes the stale URL target when there is no surviving fallback session", () => {
+    expect(resolveArchivedSessionRouteTransition({
+      archivedSessionIds: ["session-archived"],
+      activeSessionId: "session-live",
+      requestedSessionId: "session-archived",
+      fallbackSessionId: "",
+    })).toEqual({
+      shouldRetireSelection: true,
+      nextActiveSessionId: "session-live",
+      nextRequestedSessionId: "",
+    });
   });
 });

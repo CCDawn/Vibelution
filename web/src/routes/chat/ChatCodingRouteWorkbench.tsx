@@ -216,7 +216,10 @@ import {
 import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useChatSessionSelection } from "./useChatSessionSelection";
-import { shouldKeepExplicitSessionRouteOnNotFound } from "./chatSessionRouteSync";
+import {
+  resolveArchivedSessionRouteTransition,
+  shouldKeepExplicitSessionRouteOnNotFound,
+} from "./chatSessionRouteSync";
 import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
@@ -392,6 +395,7 @@ export function ChatCodingRoute() {
   const latestDirectSessionSelectionRef = useRef("");
   const latestDirectSessionSelectionAtRef = useRef(0);
   const directSessionSelectionGenerationRef = useRef(0);
+  const retiredDirectSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
   const reselectDirectSessionRef = useRef<(sessionId: string) => void>(() => undefined);
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
@@ -993,6 +997,7 @@ export function ChatCodingRoute() {
     latestDirectSessionSelectionRef,
     latestDirectSessionSelectionAtRef,
     directSessionSelectionGenerationRef,
+    retiredDirectSessionIdsRef,
     reselectDirectSessionRef,
     activeSessionId,
     setActiveSession,
@@ -1354,42 +1359,104 @@ export function ChatCodingRoute() {
         method: "DELETE",
       }),
     onMutate: async (payload) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.agents() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions() }),
+      ]);
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       const previousSelectedAgentId = selectedAgentId;
       const previousActiveSessionId = activeSessionId;
+      const previousSessions = sessionsQuery.data;
+      const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const remainingAgents = (previousAgents ?? []).filter((agent) => agent.agentId !== payload.agentId);
       const remainingAgentIds = new Set(remainingAgents.map((agent) => agent.agentId));
+      const archivedSessionIds = (sessionsQuery.data ?? [])
+        .filter((session) => String(session.agentId || "").trim() === payload.agentId)
+        .map((session) => session.id);
+      const archivedSessionIdSet = new Set(archivedSessionIds);
       const currentActiveSession = (sessionsQuery.data ?? []).find((session) => session.id === activeSessionId);
       const fallbackSession = (
         currentActiveSession
         && remainingAgentIds.has(String(currentActiveSession.agentId || "").trim())
+        && isVisibleDirectSession(currentActiveSession)
       )
         ? currentActiveSession
         : (sessionsQuery.data ?? []).find(
-          (session) => remainingAgentIds.has(String(session.agentId || "").trim()),
+          (session) => (
+            !archivedSessionIdSet.has(session.id)
+            && remainingAgentIds.has(String(session.agentId || "").trim())
+            && isVisibleDirectSession(session)
+          ),
         );
-      const activeSessionAgentId = String(
-        sessionDetailQuery.data?.agentId
-        || currentActiveSession?.agentId
-        || "",
-      ).trim();
       const fallbackAgentId = String(
         fallbackSession?.agentId
         || remainingAgents.find((agent) => String(agent.status || "").trim() !== "archived")?.agentId
         || "",
       ).trim();
+      const archiveRouteTransition = resolveArchivedSessionRouteTransition({
+        archivedSessionIds,
+        activeSessionId,
+        requestedSessionId,
+        fallbackSessionId: fallbackSession?.id,
+      });
+      const latestIntentArchived = archivedSessionIdSet.has(latestDirectSessionSelectionRef.current);
+      if (archiveRouteTransition.shouldRetireSelection || latestIntentArchived) {
+        const retiredSessionIds = new Set(retiredDirectSessionIdsRef.current);
+        archivedSessionIds.forEach((sessionId) => retiredSessionIds.add(sessionId));
+        while (retiredSessionIds.size > 64) {
+          const oldestSessionId = retiredSessionIds.values().next().value;
+          if (!oldestSessionId) {
+            break;
+          }
+          retiredSessionIds.delete(oldestSessionId);
+        }
+        retiredDirectSessionIdsRef.current = retiredSessionIds;
+        directSessionSelectionGenerationRef.current += 1;
+        latestDirectSessionSelectionRef.current = fallbackSession?.id || "";
+        latestDirectSessionSelectionAtRef.current = Date.now();
+      }
 
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents);
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        sessions?.filter((session) => !archivedSessionIdSet.has(session.id)),
+      );
+      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
+        archivedSessionIds.reduce(
+          (current, sessionId) => removeDeletedSessionFromConversations(current, sessionId),
+          conversations,
+        ),
+      );
+      archivedSessionIds.forEach((sessionId) => {
+        clearSessionTransientUiState(sessionId);
+        forgetSessionDetailPaint(sessionId);
+        removeSessionWorkspace(sessionId, fallbackSession?.id || null);
+      });
       setAgentContextMenu(null);
       setSelectedAgentId((current) => current === payload.agentId ? fallbackAgentId : current);
-      if (activeSessionAgentId === payload.agentId) {
-        setActiveSession(fallbackSession?.id || "");
+      if (archiveRouteTransition.nextActiveSessionId !== activeSessionId) {
+        setActiveSession(archiveRouteTransition.nextActiveSessionId);
       }
+      if (archiveRouteTransition.nextRequestedSessionId !== requestedSessionId) {
+        const nextSearchParams = new URLSearchParams(location.search);
+        if (archiveRouteTransition.nextRequestedSessionId) {
+          nextSearchParams.set("session", archiveRouteTransition.nextRequestedSessionId);
+        } else {
+          nextSearchParams.delete("session");
+        }
+        const nextSearch = nextSearchParams.toString();
+        navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
+      }
+      setSessionComposerErrors((current) => {
+        const next: Record<string, string> = { ...current, __sessions__: "" };
+        archivedSessionIds.forEach((sessionId) => delete next[sessionId]);
+        return next;
+      });
       return {
         previousActiveSessionId,
         previousAgents,
         previousSelectedAgentId,
+        previousSessions,
+        previousConversations,
       };
     },
     onSuccess: (agent) => {
@@ -1405,6 +1472,12 @@ export function ChatCodingRoute() {
     onError: (error, _variables, context) => {
       if (context?.previousAgents) {
         queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
+      }
+      if (context?.previousSessions) {
+        updateSessionSummaryCaches(queryClient, () => context.previousSessions);
+      }
+      if (context?.previousConversations) {
+        queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
       }
       setSelectedAgentId(context?.previousSelectedAgentId ?? "");
       if (context?.previousActiveSessionId) {
