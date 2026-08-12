@@ -337,7 +337,7 @@ function startDesktopActionLoop(
         ...context,
         leaseSeconds: DESKTOP_ACTION_LEASE_SECONDS,
         operations: {
-          openOrFocusWorkbench: () => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider),
+          openOrFocusWorkbench: (payload) => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, payload),
           focusWorkbench: () => provider.focusWorkbench(),
           closeWorkbench: (payload) => requestTransactionalWorkbenchClose(paths, bootstrap, payload)
         }
@@ -375,7 +375,8 @@ function startDesktopActionLoop(
 async function openWorkbenchAtCurrentLauncherUrl(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
-  provider: ElectronWindowProvider
+  provider: ElectronWindowProvider,
+  payload: Record<string, unknown> = {}
 ): Promise<ManagedWindowState> {
   let workbenchUrl = "";
   const previousWorkbenchUrl = currentWorkbenchUrl;
@@ -383,7 +384,8 @@ async function openWorkbenchAtCurrentLauncherUrl(
     // A desktop action belongs to the already registered Electron session. Running
     // bootstrap again here can rotate the local control token that this session
     // uses to acknowledge actions, report window state, and close atomically.
-    workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), bootstrap.workbenchUrl);
+    const payloadUrl = typeof payload.workbenchUrl === "string" ? payload.workbenchUrl.trim() : "";
+    workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), payloadUrl || bootstrap.workbenchUrl);
     currentWorkbenchUrl = workbenchUrl;
     const state = await provider.openOrFocusWorkbench(workbenchUrl);
     await recordElectronSupervisorEvent(bootstrap, {
