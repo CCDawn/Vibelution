@@ -1202,7 +1202,7 @@ def _launch_packaged_electron_desktop(*, executable: Path, env: dict[str, str]) 
     desktop_env["VIBELUTION_WORKSPACE_ROOT"] = str(PROJECT_ROOT)
     desktop_env["VIBELUTION_PYTHON_PATH"] = _electron_bootstrap_python_executable()
     return subprocess.Popen(
-        [str(executable), "--workspace", str(PROJECT_ROOT)],
+        [str(executable), "--workspace", str(PROJECT_ROOT), "--open-workbench"],
         cwd=str(PROJECT_ROOT),
         env=desktop_env,
         stdin=subprocess.DEVNULL,

@@ -5590,6 +5590,40 @@ def no_active_electron_desktop_session(monkeypatch):
     monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
 
 
+def test_packaged_electron_launch_requests_workbench_from_primary_instance(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        pass
+
+    def fake_popen(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    executable = tmp_path / "Vibelution.exe"
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(workbench_controller, "_electron_bootstrap_python_executable", lambda: "python.exe")
+
+    process = workbench_controller._launch_packaged_electron_desktop(executable=executable, env={"BASE": "1"})
+
+    assert isinstance(process, FakeProcess)
+    assert captured["args"] == [
+        str(executable),
+        "--workspace",
+        str(workbench_controller.PROJECT_ROOT),
+        "--open-workbench",
+    ]
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["env"]["VIBELUTION_WORKSPACE_ROOT"] == str(workbench_controller.PROJECT_ROOT)
+    assert kwargs["env"]["VIBELUTION_PYTHON_PATH"] == "python.exe"
+    assert kwargs["shell"] is False
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["stdout"] is subprocess.DEVNULL
+    assert kwargs["stderr"] is subprocess.DEVNULL
+
+
 def test_electron_session_bootstrap_waits_for_primary_instance_handoff(monkeypatch):
     sessions = iter([None, {"desktopSessionId": "electron-primary"}])
 
