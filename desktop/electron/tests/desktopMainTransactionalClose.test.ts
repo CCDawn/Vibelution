@@ -20,7 +20,8 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("shouldInterceptWorkbenchClose: () => true");
     expect(source).toContain("onWorkbenchCloseRequest: () =>");
     expect(source).toContain("requestTransactionalWorkbenchClose(paths, bootstrap)");
-    expect(source).toContain("closeWorkbench: () => requestTransactionalWorkbenchClose(paths, bootstrap)");
+    expect(source).toContain("closeWorkbench: (payload) => requestTransactionalWorkbenchClose(paths, bootstrap, payload)");
+    expect(source).toContain("function closeTransactionIdFromDesktopAction(");
     expect(source).toContain("await provider.approveWorkbenchCloseOnce()");
     expect(source).toContain("buttons: [\"重试\", \"取消\"]");
   });
