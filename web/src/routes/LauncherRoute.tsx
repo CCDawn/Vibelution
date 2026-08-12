@@ -5,7 +5,9 @@ import { ExternalLink, LoaderCircle, Play, RefreshCw } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  getLauncherBranchInstances,
   getLauncherStatus,
+  type LauncherBranchInstance,
   getLauncherDeveloperNoiseOverview,
   getLauncherMaintenanceSummary,
   applyLauncherDeveloperCleanup,
@@ -53,6 +55,7 @@ import { useShellI18n } from "../i18n/useShellI18n";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
 /** T4: secondary launcher panels load as route packs — keep lifecycle shell first. */
+import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
 import { LauncherProcessMonitorPanel, type LauncherProcessRow } from "./LauncherProcessMonitorPanel";
 
 const LauncherStartupSettingsPanel = lazy(() =>
@@ -334,6 +337,18 @@ type LauncherCopy = {
   lifecycleEvidenceIncomplete: string;
   processMonitor: string;
   processMonitorHint: string;
+  branchInstances: string;
+  branchInstancesHint: string;
+  branchColumn: string;
+  instanceState: string;
+  instanceKind: string;
+  instancePath: string;
+  currentInstance: string;
+  legacyCheckout: string;
+  retiredCheckout: string;
+  notCheckedOut: string;
+  selectedInstance: string;
+  instanceNoObservation: string;
   ownership: string;
   residualCount: string;
   residualProcess: string;
@@ -415,6 +430,59 @@ function displayPid(value: unknown) {
 function displayPort(value: unknown) {
   const port = Number(value || 0);
   return Number.isFinite(port) && port > 0 ? String(port) : "-";
+}
+
+function observationProcessRows(
+  instance: LauncherBranchInstance | undefined,
+  copy: LauncherCopy,
+  uiLang: "zh" | "en",
+): LauncherProcessRow[] {
+  if (!instance) {
+    return [];
+  }
+  if (!instance.checkedOut) {
+    return [
+      {
+        id: `${instance.id}-missing`,
+        label: instance.branch || instance.id,
+        status: copy.notCheckedOut,
+        pid: "-",
+        port: "-",
+        ownership: copy.notCheckedOut,
+        detail: copy.instanceNoObservation,
+        technical: instance.id,
+        ok: false,
+        tone: "neutral",
+      },
+    ];
+  }
+  const pids = instance.pids;
+  return [
+    {
+      id: `${instance.id}-backend`,
+      label: uiLang === "zh" ? "后端" : "Backend",
+      status: instance.alive ? humanState("running", uiLang) : humanState("stopped", uiLang),
+      pid: displayPid(pids.backend),
+      port: displayPort(instance.port),
+      ownership: copy.ownedProcess,
+      detail: instance.observedState || copy.instanceNoObservation,
+      technical: `${instance.path} · port ${displayPort(instance.port)}`,
+      ok: instance.alive,
+      tone: instance.alive ? "success" : "neutral",
+    },
+    {
+      id: `${instance.id}-window`,
+      label: uiLang === "zh" ? "窗口" : "Window",
+      status: displayPid(pids.window) === "-" ? humanState("stopped", uiLang) : humanState("running", uiLang),
+      pid: displayPid(pids.window),
+      port: "-",
+      ownership: copy.ownedProcess,
+      detail: instance.displayPath || instance.path,
+      technical: `pid ${displayPid(pids.window)}`,
+      ok: pids.window > 0,
+      tone: pids.window > 0 ? "success" : "neutral",
+    },
+  ];
 }
 
 function residualKindLabel(kind: string, lang: "zh" | "en") {
@@ -985,6 +1053,18 @@ export function LauncherRoute() {
         matrix: "进程监控",
         processMonitor: "进程监控",
         processMonitorHint: "托管进程与残留子进程",
+        branchInstances: "分支实例",
+        branchInstancesHint: "本地分支与 worktree；点选一行查看该实例进程",
+        branchColumn: "分支",
+        instanceState: "状态",
+        instanceKind: "类型",
+        instancePath: "路径",
+        currentInstance: "当前 main",
+        legacyCheckout: "旧目录",
+        retiredCheckout: "退役",
+        notCheckedOut: "未打开",
+        selectedInstance: "选中实例",
+        instanceNoObservation: "该实例没有运行时观察，进程表只描述当前 Launcher 项目。",
         ownership: "归属",
         residualCount: "残留进程",
         residualProcess: "残留",
@@ -1232,6 +1312,18 @@ export function LauncherRoute() {
         matrix: "Process monitor",
         processMonitor: "Process monitor",
         processMonitorHint: "Owned and leftover child processes",
+        branchInstances: "Branch instances",
+        branchInstancesHint: "Local branches and worktrees; select a row to inspect that instance",
+        branchColumn: "Branch",
+        instanceState: "State",
+        instanceKind: "Kind",
+        instancePath: "Path",
+        currentInstance: "Current main",
+        legacyCheckout: "Legacy path",
+        retiredCheckout: "Retired",
+        notCheckedOut: "Not checked out",
+        selectedInstance: "Selected instance",
+        instanceNoObservation: "This instance has no runtime observation. The process table still describes the current Launcher project.",
         ownership: "Owner",
         residualCount: "Leftover processes",
         residualProcess: "Leftover",
@@ -1429,6 +1521,12 @@ export function LauncherRoute() {
     },
     refetchIntervalInBackground: true,
   });
+  const branchInstancesQuery = useQuery({
+    queryKey: queryKeys.launcherBranchInstances(),
+    queryFn: getLauncherBranchInstances,
+    refetchInterval: pageVisible ? 20_000 : false,
+  });
+  const [selectedInstanceId, setSelectedInstanceId] = useState("");
   const developerNoiseQuery = useQuery({
     queryKey: queryKeys.launcherDeveloperNoiseOverview(),
     queryFn: getLauncherDeveloperNoiseOverview,
@@ -1978,6 +2076,20 @@ export function LauncherRoute() {
   }, [bundle, componentRows, copy, evidence?.state.updatedAt, lang, launcherStatusDisconnected, locale, residualItems, startupSettings, status, uiLang]);
 
   const keyStatusRows = statusRows;
+  const branchItems = branchInstancesQuery.data?.items ?? [];
+  const currentInstanceId = branchInstancesQuery.data?.currentId || "main";
+  const selectedBranchId = branchItems.some((item) => item.id === selectedInstanceId)
+    ? selectedInstanceId
+    : currentInstanceId;
+  const selectedBranch = branchItems.find((item) => item.id === selectedBranchId);
+  const inspectSelectedInstance = Boolean(selectedBranch && !selectedBranch.current);
+  const selectedProcessRows = inspectSelectedInstance
+    ? observationProcessRows(selectedBranch, copy, uiLang)
+    : keyStatusRows;
+  const selectedProcessHint = inspectSelectedInstance
+    ? `${copy.selectedInstance}: ${selectedBranch?.branch || selectedBranchId}`
+    : copy.processMonitorHint;
+  const selectedResidualCount = inspectSelectedInstance ? 0 : residualCount;
   const diagnosticStatusRows = statusRows.filter((row) => row.id === "runtime_manager");
   const activeCommand = evidence?.state.activeCommand;
   const recovery = evidence?.recovery;
@@ -2227,10 +2339,19 @@ export function LauncherRoute() {
         </div>
       )}
     >
-      <LauncherProcessMonitorPanel
+      <LauncherBranchInstancesPanel
         copy={copy}
-        rows={keyStatusRows}
-        residualCount={residualCount}
+        items={branchItems}
+        selectedId={selectedBranchId}
+        onSelect={setSelectedInstanceId}
+      />
+      <LauncherProcessMonitorPanel
+        copy={{
+          ...copy,
+          processMonitorHint: selectedProcessHint,
+        }}
+        rows={selectedProcessRows}
+        residualCount={selectedResidualCount}
       />
       <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
         <LauncherStartupSettingsPanel

@@ -9,6 +9,7 @@ import pytest
 from core.infrastructure import branch_workspace as workspace
 from core.infrastructure.branch_workspace import (
     BranchWorkspaceError,
+    list_branch_instances,
     resolve_branch_workspace,
 )
 
@@ -133,6 +134,43 @@ def test_missing_or_non_git_checkout_raises(tmp_path):
         resolve_branch_workspace(missing)
     with pytest.raises(BranchWorkspaceError, match="无法从"):
         resolve_branch_workspace(plain)
+
+
+def test_list_branch_instances_covers_worktrees_and_local_refs(tmp_path):
+    project = _init_repo(tmp_path / "OtherApp")
+    in_pool = project / ".worktrees" / "feat-task"
+    leftover = project / ".worktrees" / "shell-only"
+    in_pool.parent.mkdir(parents=True)
+    leftover.mkdir()
+    _git(project, "worktree", "add", "-b", "codex/feat-task", str(in_pool))
+    _git(project, "branch", "codex/not-open")
+    (in_pool / ".runtime" / "launcher").mkdir(parents=True)
+    (in_pool / ".runtime" / "launcher" / "state.json").write_text(
+        '{"observedState":"open","workbench":{"backendPort":8011,"backendPid":4242}}',
+        encoding="utf-8",
+    )
+
+    payload = list_branch_instances(project)
+    by_id = {item["id"]: item for item in payload["items"]}
+
+    assert payload["branchPool"] == str((project / ".worktrees").resolve())
+    assert payload["currentId"] == "main"
+    assert {item["id"] for item in payload["items"]} >= {
+        "main",
+        "worktree:feat-task",
+        "branch:codex/not-open",
+        "retired:shell-only",
+    }
+    assert by_id["main"]["kind"] == "main"
+    assert by_id["main"]["current"] is True
+    assert by_id["worktree:feat-task"]["legacy"] is False
+    assert by_id["worktree:feat-task"]["alive"] is True
+    assert by_id["worktree:feat-task"]["port"] == 8011
+    assert by_id["worktree:feat-task"]["pids"]["backend"] == 4242
+    assert by_id["worktree:feat-task"]["promotable"] is True
+    assert by_id["branch:codex/not-open"]["checkedOut"] is False
+    assert by_id["retired:shell-only"]["promotable"] is False
+    assert len(payload["items"]) == len({item["id"] for item in payload["items"]})
 
 
 def test_resolver_source_does_not_hardcode_user_or_desktop_paths():

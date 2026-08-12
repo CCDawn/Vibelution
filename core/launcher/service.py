@@ -171,6 +171,14 @@ class LauncherSupervisorCommandResponse(TypedDict, total=False):
     blockers: list[str]
 
 
+def list_launcher_branch_instances() -> dict[str, Any]:
+    """Return Git-governed branch instances for the Launcher first screen."""
+
+    from core.infrastructure.branch_workspace import list_branch_instances
+
+    return list_branch_instances(PROJECT_ROOT)
+
+
 def get_launcher_status() -> dict[str, Any]:
     """Return standalone Launcher status without importing the Web service layer."""
 

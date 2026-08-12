@@ -4,6 +4,7 @@ import { resetControlTokenForTests } from "./client";
 import {
   cancelRuntimeLifecycleCommand,
   forceStopLauncherBundle,
+  getLauncherBranchInstances,
   getLauncherStatus,
   getRuntimeSummary,
   launcherEndpoint,
@@ -65,6 +66,25 @@ describe("launcher api helpers", () => {
     expect(payload.launcher.mode).toBe("standalone_control_plane");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/launcher/status");
+  });
+
+  it("fetches launcher branch instances as a read-only request", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/launcher",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ schemaVersion: 1, items: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await getLauncherBranchInstances();
+
+    expect(payload.schemaVersion).toBe(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/launcher/branch-instances");
   });
 
   it("fetches the workbench runtime summary directly instead of through launcher control", async () => {

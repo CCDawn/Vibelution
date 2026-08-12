@@ -243,7 +243,7 @@ Git 步骤（只在集成根上操作）：
 | 阶段 | 内容 | 可单独验收 |
 | --- | --- | --- |
 | A | 解析函数 + 单测 | 路径不依赖用户名。已落地：`core/infrastructure/branch_workspace.py` |
-| B | 清单 API + Launcher 首屏列表 | 条数对得上 worktree list + 本地 ref |
+| B | 清单 API + Launcher 首屏列表 | 条数对得上 worktree list + 本地 ref。已落地：`GET /api/launcher/branch-instances` |
 | C | `git worktree move` 迁移 + gitignore | 活 worktree 都在仓内池 |
 | D | 兼容扫描旧兄弟目录 | 新 worktree add 不再写外面 |
 | E | 整树晋升服务（替换本流程的拷文件合入） | merge 后 main 树等于候选 HEAD；可 revert |

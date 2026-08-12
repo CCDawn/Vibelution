@@ -57,6 +57,36 @@ export type LauncherStatus = Omit<BaseLauncherStatus, "settings"> & {
   };
 };
 
+export type LauncherBranchInstance = {
+  id: string;
+  kind: "main" | "worktree" | "local_branch" | "retired" | string;
+  branch: string;
+  path: string;
+  displayPath: string;
+  head: string;
+  current: boolean;
+  legacy: boolean;
+  dirty: boolean;
+  checkedOut: boolean;
+  alive: boolean;
+  observedState: string;
+  port: number;
+  pids: {
+    backend: number;
+    window: number;
+    manager: number;
+  };
+  promotable: boolean;
+};
+
+export type LauncherBranchInstances = {
+  schemaVersion: number;
+  integrationRoot: string;
+  branchPool: string;
+  currentId: string;
+  items: LauncherBranchInstance[];
+};
+
 export type LauncherStartupSettingsUpdateResponse = {
   ok: boolean;
   setting: LauncherStartupSettings;
@@ -154,6 +184,10 @@ export function launcherRestartEndpoint() {
 
 export function getLauncherStatus() {
   return fetchLauncherJson<LauncherStatus>("status");
+}
+
+export function getLauncherBranchInstances() {
+  return fetchLauncherJson<LauncherBranchInstances>("branch-instances");
 }
 
 export function startLauncherBundle() {

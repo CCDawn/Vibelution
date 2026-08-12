@@ -78,6 +78,11 @@ def launcher_status() -> dict:
     return launcher_service.get_launcher_status()
 
 
+@router.get("/launcher/branch-instances")
+def launcher_branch_instances() -> dict:
+    return launcher_service.list_launcher_branch_instances()
+
+
 @router.get("/launcher/settings/workbench-window")
 def launcher_workbench_window_setting() -> dict:
     return launcher_service.get_workbench_window_mode_setting()
