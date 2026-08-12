@@ -1347,6 +1347,7 @@ def _submit_electron_window_action(*, action: str, reason: str, session: dict[st
             "sourceTaskId": str(session.get("desktopSessionId") or ""),
         },
         active_work_runs=[],
+        desktop_action_payload={"desktopSessionId": str(session.get("desktopSessionId") or "")},
     )
 
 
@@ -1410,7 +1411,7 @@ def run_launcher_action(
     electron_window_action = _electron_window_action_for_launcher_action(action)
     packaged_electron = _packaged_electron_desktop_executable()
     bootstrap_packaged_electron = bool(
-        not electron_session and electron_window_action == "open_workbench" and packaged_electron is not None
+        not no_browser and not electron_session and electron_window_action == "open_workbench" and packaged_electron is not None
     )
     effective_no_browser = bool(no_browser or electron_session or bootstrap_packaged_electron)
     reuse_electron_backend = _can_reuse_backend_for_electron_window_open(
