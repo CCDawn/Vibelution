@@ -1339,7 +1339,6 @@
 
 @media (max-width: 1279px) {
   :where(.vui-app-appshell).brandSubtle,
-  :where(.vui-app-appshell).topClock time,
   :where(.vui-app-appshell).utilityTriggerLabel,
   :where(.vui-app-appshell).statusBadgeLabel,
   :where(.vui-app-appshell).statusSummaryToneChip {
@@ -1354,7 +1353,6 @@
 
 @media (max-width: 1180px) {
   :where(.vui-app-appshell).brandSubtle,
-  :where(.vui-app-appshell).topClock time,
   :where(.vui-app-appshell).utilityTriggerLabel,
   :where(.vui-app-appshell).statusBadgeLabel,
   :where(.vui-app-appshell).statusSummaryToneChip {

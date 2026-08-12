@@ -1030,7 +1030,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.leftRail).toContain("border-l");
     expect(routeStyles.leftRail).toMatch(/bg-vui-surface-rail|bg-\[var\(--vui-surface-rail\)\]/);
     expect(routeStyles.leftRail).toContain("shadow-none");
-    expect(routeStyles.leftBlock).toContain("border-b");
+    // Sections separate by whitespace rhythm; hairline rules are removed.
+    expect(routeStyles.leftBlock).not.toContain("border-b");
+    expect(routeStyles.leftBlock).toContain("border-0");
     expect(routeStyles.leftBlock).toContain("bg-transparent");
     expect(routeStyles.leftBlock).toContain("shadow-none");
     expect(routeStyles.leftBlock).not.toContain("rounded-[var(--radius-panel)]");
@@ -1071,6 +1073,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.inlineMetaPill).toContain("min-h-7");
     expect(routeStyles.petShowcaseAction).toContain("min-h-8");
     expect(routeStyles.petShowcaseAction).toContain("text-xs");
+  });
+
+  it("accents the running rail block and collapses empty rail panels", () => {
+    // Busy session/group blocks get the inset accent bar; idle blocks stay neutral.
+    expect(chatStatusRailSource).toContain("isBusyPhase(sessionStateValue)");
+    expect(chatStatusRailSource).toContain("styles.railBlockActive");
+    expect(chatStatusRailSource).toContain("groupRoundRunning ? ` ${styles.railBlockActive}`");
+    expect(routeStyles.railBlockActive).toContain("inset_2px_0_0_var(--accent-cool)");
+    expect(routeStyles.currentSessionBlock).not.toContain("accent-cool");
+    // Empty states fold to one line instead of rendering hollow detail chrome.
+    expect(chatStatusRailSource).toContain("{pet ? (");
+    expect(tokenCoreStatusPanelSource).toContain("hasMetricData");
+    expect(tokenCoreStatusPanelSource).toContain("--token-status-bar-fill");
+    expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusEmpty");
+    expect(routeStyles.tokenStatusEmpty).toContain("text-[var(--fg-tertiary)]");
   });
 
   it("compresses repeated status prose while keeping critical guidance visible", () => {
@@ -1124,7 +1141,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusRingCore).toContain("text-ellipsis");
     expect(routeStyles.tokenStatusRingCore).toContain("whitespace-nowrap");
     expect(routeStyles.tokenStatusRingCore).toContain("tabular-nums");
-    expect(routeStyles.tokenStatusBar).toContain("h-1.5");
+    expect(routeStyles.tokenStatusBar).toContain("block h-1 overflow-hidden");
+    expect(routeStyles.tokenStatusBar).toContain("[&>span]:bg-[var(--token-status-bar-fill,var(--accent-cool))]");
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(routeStyles.tokenStatusMetricButton).toContain("!grid");
     expect(routeStyles.tokenStatusMetricButton).toContain("grid-rows-[28px_minmax(0,1fr)]");

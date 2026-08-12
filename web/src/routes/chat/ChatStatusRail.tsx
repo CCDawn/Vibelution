@@ -33,6 +33,7 @@ import {
 } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "../agentDisplay";
+import { isBusyPhase } from "./chatCodingRouteViewModel";
 import type { FeaturePresetKey } from "./chatFeaturePresets";
 import {
   CHAT_COMPACT_DETAILS_HEIGHT_PANE,
@@ -273,6 +274,8 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     onPetInteraction,
   } = props;
 
+  const sessionBusy = isBusyPhase(sessionStateValue);
+
   return (
       <aside
         id="chat-status-pane"
@@ -284,7 +287,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
         aria-label={statusRailOverlayOpen ? (lang === "zh" ? "状态栏" : "Status panel") : undefined}
       >
         {standardGroupRoomActive ? (
-          <section className={`${routeStyles.leftBlock} ${styles.groupProfileBlock}`}>
+          <section className={`${routeStyles.leftBlock} ${styles.groupProfileBlock}${groupRoundRunning ? ` ${styles.railBlockActive}` : ""}`}>
             <div className={routeStyles.sectionHeader}>
               <div className={routeStyles.sectionIdentity}>
                 <div className={routeStyles.sectionEyebrowRow}>
@@ -504,7 +507,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
           </section>
         ) : (
           <>
-        <section className={`${routeStyles.leftBlock} ${styles.currentSessionBlock}`}>
+        <section className={`${routeStyles.leftBlock} ${styles.currentSessionBlock}${sessionBusy ? ` ${styles.railBlockActive}` : ""}`}>
           <div className={routeStyles.sectionHeader}>
             <div className={routeStyles.sectionIdentity}>
               <p className={routeStyles.blockEyebrow}>{t("currentSession")}</p>
@@ -768,6 +771,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
               <p title={petCompactLine}>{petCompactLine || (lang === "zh" ? "暂无陪伴状态" : "No companion state yet")}</p>
             </div>
           </div>
+          {pet ? (
           <details className={styles.compactDetails}>
             <summary>
               <ChevronRight size={14} aria-hidden="true" />
@@ -837,6 +841,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
               {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
             </PersistedHeightListShell>
           </details>
+          ) : null}
         </section>
           </>
         )}

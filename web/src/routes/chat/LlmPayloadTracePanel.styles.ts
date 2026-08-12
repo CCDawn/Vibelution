@@ -3,8 +3,9 @@ import {
 } from "../../design/vuiSurfaceRecipes";
 
 const styles = {
+  // Mirrors ChatCodingRoute.styles leftBlock: whitespace separation, no hairline.
   leftBlock:
-    "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 border-b border-[var(--vui-border-subtle)] bg-transparent p-2 shadow-none last:border-b-0",
+    "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 bg-transparent p-2 shadow-none",
   llmPayloadTraceGrid:
     "vui-routes-chatcodingroute llmPayloadTraceGrid grid min-w-0 grid-cols-2 gap-2",
   llmPayloadTraceHelp:

@@ -98,7 +98,6 @@ import { VStatusChip, type VStatusTone } from "../components/vui";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
-import { AppShellTopClock } from "./AppShellTopClock";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryShare";
 import packageJson from "../../package.json";
 
@@ -2304,7 +2303,6 @@ export function AppShell() {
             </span>
             <span className={styles.brandSubtle}>{t("brandSubtle")}</span>
           </div>
-          <AppShellTopClock lang={lang} systemTimeLabel={t("systemTime")} />
           {activeWorkIndicator ? (
             <VPopover
               align="start"

@@ -58,7 +58,11 @@ const styles: Record<string, string> = {
   companionTopLine:
     "vui-routes-chatcodingroute companionTopLine !grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-0.5 [font-size:var(--vui-font-xs)] leading-tight [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:font-[760] [&_strong]:text-[var(--fg-primary)] [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--fg-tertiary)]",
   currentSessionBlock:
-    "vui-routes-chatcodingroute currentSessionBlock min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_26%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_5%,transparent)] text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute currentSessionBlock min-w-0 text-[var(--fg-primary)]",
+  // Busy/running emphasis: inset accent bar + tint. Inset shadow keeps layout stable
+  // (no 2px content shift a real border would cause) and needs `!` to beat leftBlock shadow-none.
+  railBlockActive:
+    "vui-routes-chatcodingroute railBlockActive bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)] !shadow-[inset_2px_0_0_var(--accent-cool)]",
   currentSessionLine: `vui-routes-chatcodingroute currentSessionLine min-w-0 ${vuiOpaqueRowClass} px-1.5 py-1 [font-size:var(--vui-font-xs)] font-medium leading-[1.4] text-[var(--fg-secondary)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden [overflow-wrap:anywhere]`,
   currentSessionMetaList:
     "vui-routes-chatcodingroute currentSessionMetaList min-w-0 flex flex-wrap items-center gap-1 border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)] text-[var(--accent-cool)]",

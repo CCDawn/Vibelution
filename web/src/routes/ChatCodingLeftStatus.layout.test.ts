@@ -23,7 +23,9 @@ describe("ChatCodingRoute left status panel layout contract", () => {
     expect(styles.leftRail).toContain("border-l");
     expect(styles.leftRail).toMatch(/bg-vui-surface-rail|bg-\[var\(--vui-surface-rail\)\]/);
     expect(styles.leftRail).toContain("shadow-none");
-    expect(styles.leftBlock).toContain("border-b");
+    // Whitespace rhythm replaces hairline separators between rail sections.
+    expect(styles.leftBlock).not.toContain("border-b");
+    expect(styles.leftBlock).toContain("border-0");
     expect(styles.leftBlock).toContain("bg-transparent");
     expect(styles.leftBlock).toContain("shadow-none");
     expect(styles.leftBlock).not.toContain("rounded-[var(--radius-panel)]");
