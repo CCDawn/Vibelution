@@ -108,6 +108,32 @@ def test_lazy_activation_writes_without_explicit_start_session(tmp_path):
     assert record["session_id"] == "lazy_session"
 
 
+def test_debug_level_records_are_not_persisted(tmp_path):
+    logger = _fresh_logger(tmp_path)
+
+    logger.log_debug("RAW", "content length probe", "DEBUG")
+    logger.log_debug("INFO", "service info stays", "INFO")
+
+    lines = (tmp_path / "conversation_test_session.jsonl").read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines]
+    debug_records = [r for r in records if r["type"] == "debug"]
+    assert [r["tag"] for r in debug_records] == ["INFO"]
+    assert debug_records[0]["level"] == "INFO"
+
+
+def test_timestamps_are_utc_iso(tmp_path):
+    logger = _fresh_logger(tmp_path)
+
+    logger.log_debug("INFO", "utc probe")
+
+    record = json.loads(
+        (tmp_path / "conversation_test_session.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )
+    timestamp = record["timestamp"]
+    assert timestamp.endswith("+00:00")
+    assert "T" in timestamp
+
+
 def test_tool_result_keeps_main_log_compact_and_spills_raw_payload(tmp_path):
     logger = _fresh_logger(tmp_path)
     logger._turn_count = 1

@@ -54,7 +54,7 @@ ROOT_GUIDES = {
     },
     "conversation_logs": {
         "userGuide": "适合回看 agent 会话、工具调用、子 agent 输出和轮次结论。",
-        "agentGuide": "排查 agent 漂移、重复工具、停止/继续、委派和验证行为时优先读取 conversation_*.jsonl 与 debug_*.log。",
+        "agentGuide": "排查 agent 漂移、重复工具、停止/继续、委派和验证行为时优先读取 conversation_*.jsonl。",
     },
 }
 
