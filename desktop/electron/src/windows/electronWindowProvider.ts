@@ -47,7 +47,6 @@ export type ElectronWindowProviderOptions = {
   createWorkbenchWindow?: ElectronWindowFactory;
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
   shouldInterceptLauncherClose?: () => boolean;
-  onLauncherCloseRequest?: () => void;
   shouldInterceptWorkbenchClose?: () => boolean;
   onWorkbenchCloseRequest?: () => void | Promise<void>;
   onWorkbenchClosed?: () => void | Promise<void>;
@@ -62,7 +61,6 @@ export class ElectronWindowProvider {
   private readonly createWorkbenchWindow: ElectronWindowFactory;
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
   private readonly shouldInterceptLauncherClose: () => boolean;
-  private readonly onLauncherCloseRequest: () => void;
   private readonly shouldInterceptWorkbenchClose: () => boolean;
   private readonly onWorkbenchCloseRequest: () => void | Promise<void>;
   private readonly onWorkbenchClosed: () => void | Promise<void>;
@@ -85,7 +83,6 @@ export class ElectronWindowProvider {
     this.createWorkbenchWindow = options.createWorkbenchWindow ?? missingWindowFactory("workbench");
     this.reportState = options.reportState ?? (() => undefined);
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
-    this.onLauncherCloseRequest = options.onLauncherCloseRequest ?? (() => undefined);
     this.shouldInterceptWorkbenchClose = options.shouldInterceptWorkbenchClose ?? (() => false);
     this.onWorkbenchCloseRequest = options.onWorkbenchCloseRequest ?? (() => undefined);
     this.onWorkbenchClosed = options.onWorkbenchClosed ?? (() => undefined);
@@ -206,7 +203,8 @@ export class ElectronWindowProvider {
           return;
         }
         preventWindowClose(event);
-        this.onLauncherCloseRequest();
+        window.hide();
+        void this.reportState(this.stateFor("launcher"));
       });
     }
     if (role === "workbench") {

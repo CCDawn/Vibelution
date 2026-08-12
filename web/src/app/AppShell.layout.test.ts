@@ -603,7 +603,7 @@ describe("AppShell layout contract", () => {
     expect(beforeUnloadBody).not.toContain("beginShutdown");
   });
 
-  it("turns the top refresh icon into a frontend refresh and routes lifecycle actions through Launcher", () => {
+  it("keeps frontend refresh in the shell while Launcher exclusively owns lifecycle controls", () => {
     expect(shellSource).toContain("VIconButton");
     expect(shellSource).toContain("label={refreshFrontendLabel}");
     expect(shellSource).not.toContain("<button\n            type=\"button\"\n            className={styles.actionIconButton}");
@@ -616,17 +616,14 @@ describe("AppShell layout contract", () => {
     // Stable beforeunload: shared hook + ref decision, not re-armed on every polled state tick.
     expect(shellSource).toContain("projectCloseGuardRef");
     expect(shellSource).toContain("useStableBeforeUnload");
-    expect(shellSource).toContain("lifecycleMenuCluster");
-    expect(shellSource).toContain("lifecycleMenuPanel");
-    expect(shellSource).toContain("lifecycleMenuOpen");
-    expect(shellSource).toContain("VWorkbenchPowerMenu");
-    expect(shellSource).toContain('variant="icon"');
-    expect(shellSource).toContain("contentClassName={styles.lifecycleMenuPanel}");
-    // Lifecycle control goes through the shared action path (not raw launcher helpers).
-    expect(shellSource).toContain('useWorkbenchLifecycleActions("app_shell")');
-    expect(shellSource).toContain('requestLifecycle("stop")');
-    expect(shellSource).toContain('requestLifecycle("force-stop")');
-    expect(shellSource).toContain('requestLifecycle("restart")');
+    expect(shellSource).not.toContain("lifecycleMenuOpen");
+    expect(shellSource).not.toContain("VWorkbenchPowerMenu");
+    expect(shellSource).not.toContain("restartWorkbenchLabel");
+    expect(shellSource).not.toContain("forceCloseWorkbenchLabel");
+    expect(shellSource).not.toContain("closeWorkbenchLabel");
+    // Native Workbench X is the sole close entry; browser fallback close stays guarded.
+    expect(shellSource).toContain("shouldArmBrowserProjectCloseGuard");
+    expect(shellSource).toContain("electronDesktopShell: desktopShell");
     expect(shellSource).not.toContain("stopLauncherBundle");
     expect(shellSource).not.toContain("forceStopLauncherBundle");
     expect(shellSource).not.toContain("restartLauncherBundle");
@@ -636,10 +633,6 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("isActiveWorkRestartBlocked");
     expect(shellSource).not.toContain('"/api/runtime/restart"');
     expect(shellSource).not.toContain('"/api/runtime/shutdown"');
-    expect(shellSource).toContain("restartWorkbenchLabel");
-    expect(shellSource).toContain("forceCloseWorkbenchLabel");
-    expect(shellSource).toContain("beginRestart");
-    expect(shellSource).toContain("beginForceShutdown");
     expect(shellSource).toContain("restartActiveWorkBlockedMessage");
     expect(shellSource).toContain("shutdownActiveWorkBlockedMessage");
     expect(shellSource).not.toContain("confirmedActiveWork");
@@ -647,21 +640,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("shutdown_blocked_active_work");
     expect(shellSource).toContain("browser.user_action.force_shutdown_requested");
     expect(shellSource).toContain("browser.user_action.force_shutdown_unconfirmed");
-    expect(shellSource).toContain("requestWorkbenchExitGuard");
-    expect(shellSource).toContain('requestWorkbenchExitGuard("restart"');
-    expect(shellSource).toContain('requestWorkbenchExitGuard("shutdown"');
-    // Outside-click/Escape are owned by Radix DropdownMenu (no hand-rolled listeners).
     expect(shellSource).not.toContain("lifecycleMenuRef");
-    expect(styles.lifecycleMenuCluster).toBeTypeOf("string");
-    expect(styles.lifecycleMenuPanel).toBeTypeOf("string");
-    expect(styles.lifecycleMenuItem).toBeTypeOf("string");
-    expect(styles.lifecycleMenuDangerItem).toBeTypeOf("string");
-    // Portal menu must not rely on .lifecycleMenuClusterOpen for hit-testing
-    // (panel is portaled to document.body, outside the cluster).
-    const panelRule = shellStyles.match(/\.lifecycleMenuPanel\s*\{[\s\S]*?\n\}/);
-    expect(panelRule?.[0] ?? "").toContain("pointer-events: auto");
-    expect(panelRule?.[0] ?? "").not.toContain("pointer-events: none");
-    expect(shellStyles).not.toContain(".lifecycleMenuClusterOpen .lifecycleMenuPanel");
   });
 
   it("lets lifecycle wait overlays be cancelled without stopping active work", () => {

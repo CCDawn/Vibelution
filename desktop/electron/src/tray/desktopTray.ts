@@ -3,7 +3,6 @@ import { resolveWorkspaceIconPath, type DesktopPaths } from "../paths.js";
 
 export type DesktopTrayActions = {
   openLauncher: () => void;
-  quit: () => void;
 };
 
 export function createDesktopTray(paths: DesktopPaths, actions: DesktopTrayActions): Tray {
@@ -12,9 +11,7 @@ export function createDesktopTray(paths: DesktopPaths, actions: DesktopTrayActio
   tray.on("click", actions.openLauncher);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "打开 Vibelution Launcher", click: actions.openLauncher },
-      { type: "separator" },
-      { label: "退出 Vibelution", click: actions.quit }
+      { label: "打开 Vibelution Launcher", click: actions.openLauncher }
     ])
   );
   return tray;

@@ -65,7 +65,7 @@ describe("Electron desktop tray", () => {
   });
 
   it("creates a persistent Vibelution tray icon with a tooltip", () => {
-    const tray = createDesktopTray(desktopPaths, { openLauncher: vi.fn(), quit: vi.fn() });
+    const tray = createDesktopTray(desktopPaths, { openLauncher: vi.fn() });
 
     expect(trayInstances).toHaveLength(1);
     expect(tray).toBe(trayInstances[0]);
@@ -73,22 +73,15 @@ describe("Electron desktop tray", () => {
     expect(trayInstances[0].tooltip).toBe("Vibelution");
   });
 
-  it("opens Launcher from tray click or menu and exits through the supplied lifecycle action", () => {
+  it("only opens Launcher from tray click or menu", () => {
     const openLauncher = vi.fn();
-    const quit = vi.fn();
-    const tray = createDesktopTray(desktopPaths, { openLauncher, quit }) as unknown as FakeTray;
+    const tray = createDesktopTray(desktopPaths, { openLauncher }) as unknown as FakeTray;
 
     tray.emit("click");
     const template = menuTemplates[0];
     (template[0].click as () => void)();
-    (template[2].click as () => void)();
 
     expect(openLauncher).toHaveBeenCalledTimes(2);
-    expect(quit).toHaveBeenCalledTimes(1);
-    expect(template.map((item) => item.label ?? item.type)).toEqual([
-      "打开 Vibelution Launcher",
-      "separator",
-      "退出 Vibelution"
-    ]);
+    expect(template.map((item) => item.label ?? item.type)).toEqual(["打开 Vibelution Launcher"]);
   });
 });

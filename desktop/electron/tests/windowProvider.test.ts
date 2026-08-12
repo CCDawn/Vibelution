@@ -68,6 +68,7 @@ class FakeWindow implements ElectronWindowLike {
 
   hide(): void {
     this.hideCount += 1;
+    this.focused = false;
   }
 
   loadURL(url: string): Promise<void> {
@@ -398,25 +399,48 @@ describe("Electron window provider state", () => {
     });
   });
 
-  it("routes launcher window close through the desktop shell exit guard before the renderer unloads", async () => {
-    const closeRequests: string[] = [];
+  it("hides Launcher on X so the tray control center remains alive", async () => {
     const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const reports: Array<{ role: string; open: boolean; focused: boolean }> = [];
     const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
       createLauncherWindow: () => launcherWindow,
       createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242),
       shouldInterceptLauncherClose: () => true,
-      onLauncherCloseRequest: () => {
-        closeRequests.push("launcher");
-      }
+      reportState: (state) => {
+        reports.push({ role: state.role, open: state.open, focused: state.focused });
+      },
     });
     await provider.openLauncher();
+    reports.length = 0;
 
     const closeEvent = { preventDefault: vi.fn() };
     launcherWindow.emit("close", closeEvent);
 
     expect(closeEvent.preventDefault).toHaveBeenCalledTimes(1);
-    expect(closeRequests).toEqual(["launcher"]);
+    expect(launcherWindow.hideCount).toBe(1);
     expect(launcherWindow.isDestroyed()).toBe(false);
+    expect(reports).toEqual([{ role: "launcher", open: true, focused: false }]);
+  });
+
+  it("closes only Workbench while Launcher remains available", async () => {
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: () => workbenchWindow,
+      shouldInterceptLauncherClose: () => true,
+      shouldInterceptWorkbenchClose: () => true,
+    });
+    await provider.openLauncher();
+    await provider.openOrFocusWorkbench();
+
+    workbenchWindow.emit("close", { preventDefault: vi.fn() });
+    await provider.approveWorkbenchCloseOnce();
+
+    expect(workbenchWindow.closeCount).toBe(1);
+    expect(launcherWindow.isDestroyed()).toBe(false);
+    const launcherState = await provider.openLauncher();
+    expect(launcherState).toMatchObject({ role: "launcher", open: true, focused: true });
   });
 
   it("reports workbench focus without exposing the raw BrowserWindow", async () => {
