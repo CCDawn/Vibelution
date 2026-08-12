@@ -22,15 +22,6 @@ vi.mock("electron", () => ({
 const { createLauncherWindow } = await import("../src/windows/launcherWindow.js");
 const { createWorkbenchWindow } = await import("../src/windows/workbenchWindow.js");
 
-const lightShellTitleBar = {
-  titleBarStyle: "hidden",
-  titleBarOverlay: {
-    color: "#f7fafc",
-    symbolColor: "#475467",
-    height: 34
-  }
-};
-
 const desktopPaths: DesktopPaths = {
   schemaVersion: 1,
   desktopBundleRoot: "C:/Program Files/Vibelution/resources/app.asar/dist",
@@ -60,7 +51,7 @@ describe("Electron desktop window icons", () => {
     expect(loadedUrls).toEqual(["http://127.0.0.1:8765/launcher"]);
   });
 
-  it("uses the shared Vibelution icon for the Workbench window", () => {
+  it("uses native Windows chrome for the Workbench window", () => {
     createWorkbenchWindow("http://127.0.0.1:8000", desktopPaths);
 
     expect(browserWindowOptions[0]).toMatchObject({
@@ -68,8 +59,10 @@ describe("Electron desktop window icons", () => {
       icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
       backgroundColor: "#f7fafc",
       show: false,
-      ...lightShellTitleBar
+      titleBarStyle: "default",
+      autoHideMenuBar: true
     });
+    expect(browserWindowOptions[0]).not.toHaveProperty("titleBarOverlay");
     expect(loadedUrls).toEqual([]);
   });
 
