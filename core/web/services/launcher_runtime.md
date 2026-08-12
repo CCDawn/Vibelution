@@ -21,16 +21,23 @@ Runtime scene pack：[`runtime_scene/README.md`](runtime_scene/README.md)。
 | Workbench runtime summary 投影 | `runtime_service.py` | 当成第二写入者改 store |
 | Scene 证据包读写 / 诊断 | `runtime_scene/*` · facade `runtime_scene_service.py` | 手写无界 log dump 进 Prompt |
 | 托盘 / 脚本入口 | `scripts/vibelution_launcher.py` · `scripts/vibelution_desktop_entry.py` | 后台路径弹 `cmd`/`powershell`/WT |
+| 产品托盘 owner | Electron `desktopTray.ts` + `desktopShellOwner.ts` | 与 WinForms 同时显示 NotifyIcon |
 
 ---
 
 ## 生命周期（谁拥有什么）
 
 ```text
-VibelutionLauncher.exe --project <root> start|stop|restart
+Electron (product tray owner)
+  → claim .runtime/launcher/desktop_shell_owner.json
+  → Python launcher service (vibelution_desktop_entry.py bootstrap)
+  → Runtime Manager → FastAPI + Workbench
+
+VibelutionLauncher.exe --project <root> launcher
+  → if Electron owner pid is alive: no NotifyIcon (thin shim / open console)
+  → else native WinForms tray
   → core/launcher (control plane)
-  → Runtime Manager (core/runtime_manager)
-  → FastAPI + agent turn + Workbench
+```
 
 Web: core/web/routes/launcher.py · runtime.py · logs.py
   → launcher_service / runtime_service / runtime_scene_service（薄委托）
@@ -75,6 +82,18 @@ Web: core/web/routes/launcher.py · runtime.py · logs.py
 .\.venv\Scripts\python.exe -m pytest tests\test_runtime_manager.py -q
 .\.venv\Scripts\python.exe -m pytest tests\test_launcher_scripts.py -q
 ```
+
+## 窄冒烟包（tray / quit / workbenchUrl 交接，合入前子集）
+
+```powershell
+# Python: live URL / ports.json handoff
+.\.venv\Scripts\python.exe -m pytest tests\test_vibelution_desktop_entry.py tests\test_runtime_manager_electron_window_handoff.py -q
+
+# Electron: tray menu, quit/lifecycle, workbench URL
+node desktop\electron\node_modules\vitest\vitest.mjs run tests/windowProvider.test.ts tests/desktopTray.test.ts tests/desktopLifecycleCoordinator.test.ts tests/desktopMainTransactionalClose.test.ts tests/desktopMainTrayIntegration.test.ts tests/desktopActionClient.test.ts tests/desktopSmokeShutdown.test.ts
+```
+
+选择器：`desktop-electron-smoke`（`tests/test_matrix.yaml`）。这不是双壳重写；改完源码后若用户跑的是 `dist\desktop\win-unpacked\Vibelution.exe`，需要重新 package 才看得到 tray/quit/handoff。
 
 影响面选择器：`tests\select_tests.py --changed-file <path> --commands-only`。
 

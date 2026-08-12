@@ -27,7 +27,7 @@ internal static class VibelutionLauncher
             bool created;
             using (var mutex = new Mutex(true, "Global\\Vibelution.Launcher.Tray", out created))
             {
-                if (!created)
+                if (!created || ElectronOwnsDesktopTray(projectDir))
                 {
                     RunPythonBridge(projectDir, "launcher", false, false);
                     return 0;
@@ -58,6 +58,7 @@ internal static class VibelutionLauncher
         private readonly string launcherUrl;
         private readonly NotifyIcon notifyIcon;
         private readonly SynchronizationContext uiContext;
+        private readonly FileSystemWatcher ownerWatcher;
 
         public TrayApplicationContext(string projectDir)
         {
@@ -70,6 +71,7 @@ internal static class VibelutionLauncher
             this.notifyIcon.ContextMenuStrip = BuildMenu();
             this.notifyIcon.Visible = true;
             this.notifyIcon.DoubleClick += delegate { QueueOpenConsole(); };
+            this.ownerWatcher = WatchElectronTrayOwner();
             ThreadPool.QueueUserWorkItem(delegate { BootstrapLauncherBackend(); });
         }
 
@@ -413,10 +415,87 @@ internal static class VibelutionLauncher
         {
             if (disposing)
             {
+                if (ownerWatcher != null)
+                {
+                    ownerWatcher.EnableRaisingEvents = false;
+                    ownerWatcher.Dispose();
+                }
                 notifyIcon.Visible = false;
                 notifyIcon.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        private FileSystemWatcher WatchElectronTrayOwner()
+        {
+            string ownerDir = Path.Combine(projectDir, ".runtime", "launcher");
+            Directory.CreateDirectory(ownerDir);
+            var watcher = new FileSystemWatcher(ownerDir, "desktop_shell_owner.json");
+            watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime;
+            FileSystemEventHandler onOwnerChanged = delegate { YieldTrayIfElectronOwns(); };
+            watcher.Created += onOwnerChanged;
+            watcher.Changed += onOwnerChanged;
+            watcher.EnableRaisingEvents = true;
+            return watcher;
+        }
+
+        private void YieldTrayIfElectronOwns()
+        {
+            if (!ElectronOwnsDesktopTray(projectDir))
+            {
+                return;
+            }
+            uiContext.Post(
+                delegate
+                {
+                    try
+                    {
+                        notifyIcon.Visible = false;
+                    }
+                    catch
+                    {
+                    }
+                    ExitThread();
+                },
+                null
+            );
+        }
+    }
+
+    private static bool ElectronOwnsDesktopTray(string projectDir)
+    {
+        try
+        {
+            string path = Path.Combine(projectDir, ".runtime", "launcher", "desktop_shell_owner.json");
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+            string text = File.ReadAllText(path);
+            if (text.IndexOf("\"electron\"", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+            Match pidMatch = Regex.Match(text, "\"pid\"\\s*:\\s*(\\d+)");
+            int pid;
+            if (!pidMatch.Success || !int.TryParse(pidMatch.Groups[1].Value, out pid) || pid <= 0)
+            {
+                return false;
+            }
+            Process process = Process.GetProcessById(pid);
+            return process != null && !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 

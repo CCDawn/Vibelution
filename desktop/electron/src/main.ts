@@ -80,6 +80,10 @@ import {
 import { prepareDesktopSmokeShutdown } from "./smoke/desktopSmokeShutdown.js";
 import { createDesktopTray, DESKTOP_TRAY_MENU_LABELS } from "./tray/desktopTray.js";
 import {
+  claimElectronDesktopShellOwner,
+  releaseElectronDesktopShellOwner
+} from "./tray/desktopShellOwner.js";
+import {
   closeDesktopSession,
   heartbeatDesktopSession,
   registerDesktopSession,
@@ -1300,6 +1304,7 @@ async function requestDesktopShellExit(
           // Fail-open: stop must not block the forced Electron quit.
         }
         stopDesktopActionLoop();
+        releaseElectronDesktopShellOwner(paths.workspaceRoot);
         desktopTray?.destroy();
         desktopTray = null;
         app.quit();
@@ -1486,6 +1491,7 @@ app.whenReady()
         void runTrayStopAll();
       }
     });
+    claimElectronDesktopShellOwner(paths.workspaceRoot);
     await windowProvider.openLauncher();
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.tray.created",
@@ -1580,6 +1586,7 @@ app.on("open-url", (event, rawUrl) => {
 
 app.on("before-quit", (event) => {
   if (shutdownApproved) {
+    releaseElectronDesktopShellOwner(createDesktopPathsForApp().workspaceRoot);
     desktopTray?.destroy();
     desktopTray = null;
     stopDesktopActionLoop();

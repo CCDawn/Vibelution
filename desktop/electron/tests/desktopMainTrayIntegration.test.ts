@@ -34,6 +34,8 @@ describe("Electron main tray integration", () => {
     const beforeQuitSource = mainSource.slice(beforeQuitStart, windowAllClosedStart);
 
     expect(beforeQuitSource).toContain("if (shutdownApproved)");
+    expect(mainSource).toContain("claimElectronDesktopShellOwner(paths.workspaceRoot)");
+    expect(beforeQuitSource).toContain("releaseElectronDesktopShellOwner");
     expect(beforeQuitSource).toContain("desktopTray?.destroy()");
     expect(beforeQuitSource).toContain("desktopTray = null");
   });
