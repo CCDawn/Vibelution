@@ -59,6 +59,8 @@
 | runtime 调试证据 | `logs/runtime_scenes/**`、`log_info/**`、work-run records | 诊断包；不能替代 journal。 |
 | UI cache | React Query cache 与 `activeTurnLayersBySession` | 临时显示状态；必须通过 backend detail/journal 校准。 |
 
+历史提案 `docs/archive/plans/2026-08/2026-08-11-agent-session-sqlite-migration.md` 曾计划把 Turn/Item 迁入 SQLite `ConversationStore`。该目标未落地，也不再执行；以本表为准。
+
 经验规则：
 
 - `turn_journal.jsonl` 是 durable turn record。
