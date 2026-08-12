@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
-import { cancelRuntimeLifecycleCommand, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
+import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
+import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
@@ -749,6 +750,12 @@ export function AppShell() {
     queryKey: queryKeys.configPublic(),
     queryFn: ({ signal }) => fetchJson<ConfigSummary>("/api/config/public", { signal }),
   });
+  const branchInstancesQuery = useQuery({
+    queryKey: queryKeys.launcherBranchInstances(),
+    queryFn: getLocalBranchInstances,
+    staleTime: 15_000,
+  });
+  const workbenchWindowTitle = currentInstanceWindowTitle("workbench", branchInstancesQuery.data);
   const themeBackgroundImageUrl = configThemeBackgroundImageUrl(configQuery.data);
   const themeBackgroundReadability = configThemeBackgroundReadability(
     configQuery.data,
@@ -1687,8 +1694,8 @@ export function AppShell() {
 
   useEffect(() => {
     applyWorkbenchDocumentLanguage(document, lang);
-    document.title = t("appTitle");
-  }, [lang, t]);
+    document.title = workbenchWindowTitle;
+  }, [lang, workbenchWindowTitle]);
 
   useEffect(() => {
     setFetchJsonFailureReporter((failure) => {

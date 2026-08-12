@@ -71,6 +71,9 @@ export type LauncherBranchInstance = {
   alive: boolean;
   observedState: string;
   port: number;
+  shortName?: string;
+  workbenchTitle?: string;
+  launcherTitle?: string;
   pids: {
     backend: number;
     window: number;
@@ -84,6 +87,9 @@ export type LauncherBranchInstances = {
   integrationRoot: string;
   branchPool: string;
   currentId: string;
+  currentShortName?: string;
+  currentWorkbenchTitle?: string;
+  currentLauncherTitle?: string;
   items: LauncherBranchInstance[];
 };
 
@@ -188,6 +194,10 @@ export function getLauncherStatus() {
 
 export function getLauncherBranchInstances() {
   return fetchLauncherJson<LauncherBranchInstances>("branch-instances");
+}
+
+export function getLocalBranchInstances() {
+  return fetchJson<LauncherBranchInstances>("/api/launcher/branch-instances");
 }
 
 export function startLauncherBundle() {

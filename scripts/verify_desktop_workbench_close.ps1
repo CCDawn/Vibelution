@@ -17,6 +17,7 @@ $desktopExe = Resolve-DesktopPublicEntryPath -Catalog $entryCatalog -ProjectDir 
 $canaryUserDataRoot = Join-Path $projectDir ".runtime/electron-workbench-close-canary-user-data"
 $canarySummaryPath = Join-Path $projectDir ".runtime/launcher/electron-workbench-close-canary-summary.json"
 $workbenchWindowTitle = "Vibelution Workbench"
+$workbenchWindowTitleSuffix = " 台"
 $WM_CLOSE = [uint32]0x0010
 
 function Invoke-CheckedNative {
@@ -316,11 +317,12 @@ function Get-WorkbenchNativeWindows {
         }
         $titleBuilder = [System.Text.StringBuilder]::new($textLength + 1)
         $null = [Vibelution.DesktopCanary.NativeWindowApi]::GetWindowText($Handle, $titleBuilder, $titleBuilder.Capacity)
-        if ($titleBuilder.ToString() -eq $workbenchWindowTitle) {
+        $windowTitle = $titleBuilder.ToString()
+        if ($windowTitle -eq $workbenchWindowTitle -or $windowTitle -eq "Vibelution 工作台" -or $windowTitle.EndsWith($workbenchWindowTitleSuffix)) {
             $matches.Add([pscustomobject]@{
                 Handle = $Handle
                 ProcessId = [int]$processId
-                Title = $titleBuilder.ToString()
+                Title = $windowTitle
                 IsForeground = ($Handle -eq $foregroundWindowHandle)
             })
         }
