@@ -331,6 +331,31 @@ def _publish_llm_status_event(status: str, **fields: Any) -> None:
         return
 
 
+def _trace_metadata_with_context(
+    event_metadata: Dict[str, Any],
+    explicit_metadata: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Trace identity precedence: explicit metadata > status context > synthetic scope.
+
+    ``event_metadata`` already folds invocation-scope ids; when the scope is
+    synthetic (no explicit session identity), active ``llm_status_context``
+    breadcrumbs must win so the trace shows the real conversation identity.
+    """
+
+    context = dict(_LLM_STATUS_CONTEXT.get({}) or {})
+    merged = {**context, **event_metadata}
+    explicit = dict(explicit_metadata or {})
+    for camel, snake in (("sessionId", "session_id"), ("turnId", "turn_id")):
+        explicit_value = str(explicit.get(camel) or explicit.get(snake) or "").strip()
+        if explicit_value:
+            merged[camel] = explicit_value
+            continue
+        context_value = str(context.get(camel) or context.get(snake) or "").strip()
+        if context_value:
+            merged[camel] = context_value
+    return merged
+
+
 def _retry_policy_max_attempts(profile: Any, *, role: str = "") -> int:
     if str(role or "").strip().lower() == "compression":
         return 1
@@ -2300,7 +2325,7 @@ class LLMClient:
             **protocol_summary,
             **capability_source_summary,
         }
-        trace_metadata = {**dict(_LLM_STATUS_CONTEXT.get({}) or {}), **event_metadata}
+        trace_metadata = _trace_metadata_with_context(event_metadata, metadata)
         llm_payload_trace = build_llm_payload_trace(
             phase="invoke",
             stream=False,
@@ -2887,7 +2912,7 @@ class LLMClient:
             **protocol_summary,
             **capability_source_summary,
         }
-        trace_metadata = {**dict(_LLM_STATUS_CONTEXT.get({}) or {}), **event_metadata}
+        trace_metadata = _trace_metadata_with_context(event_metadata, metadata)
         llm_payload_trace = build_llm_payload_trace(
             phase="stream",
             stream=True,

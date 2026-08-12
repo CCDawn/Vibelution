@@ -15,7 +15,7 @@ def make_config(**kwargs):
     return isolated_settings_config(**kwargs)
 
 
-def test_projector_demotes_legacy_tool_calls_with_results_to_semantic_history():
+def test_projector_keeps_legacy_tool_calls_with_results_as_structured_chain():
     full_result = "line\n" * 300
 
     projected = normalize_messages_for_provider(
@@ -38,11 +38,14 @@ def test_projector_demotes_legacy_tool_calls_with_results_to_semantic_history():
         ]
     )
 
-    assert [message["role"] for message in projected] == ["user", "assistant"]
-    assert not any(message.get("role") == "tool" for message in projected)
-    assert "历史工具结果: cli_tool" in projected[1]["content"]
-    assert full_result.strip() in projected[1]["content"]
-    assert "short preview must not win" not in projected[1]["content"]
+    # c32c8e711 契约：历史工具链保持 assistant.tool_calls + tool 结构化配对，
+    # 不再降级为 "历史工具结果" 散文；完整 result 优先于 resultPreview。
+    assert [message["role"] for message in projected] == ["user", "assistant", "tool"]
+    assert projected[1]["tool_calls"][0]["id"] == "call_1"
+    assert projected[1]["tool_calls"][0]["function"]["name"] == "cli_tool"
+    assert projected[2]["tool_call_id"] == "call_1"
+    assert full_result.strip() in projected[2]["content"]
+    assert "short preview must not win" not in projected[2]["content"]
 
 
 def test_llm_client_payload_rejects_ui_tool_calls_before_provider_projection():

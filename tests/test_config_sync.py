@@ -22,6 +22,11 @@ frontend_port = 5173
 window_mode = "fullscreen"
 window_size = "auto"
 
+[llm]
+# 样例刻意保持 v1 结构（model_library + profiles）；schema 默认已升为 v2，
+# 必须显式声明 schema_version = 1，与 tests/fixtures/config/llm_schema_v1_inline.toml 一致。
+schema_version = 1
+
 [llm.discovery]
 timeout = 12
 
@@ -167,6 +172,9 @@ def test_config_loader_canonicalizes_inline_profile_model_env(tmp_path, monkeypa
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         """
+[llm]
+schema_version = 1
+
 [llm.profiles.primary]
 model = "unit-runtime-model"
 api_key_env = "LEGACY_PROFILE_ENV"

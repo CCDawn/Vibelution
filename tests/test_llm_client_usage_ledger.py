@@ -126,7 +126,7 @@ def test_llm_client_usage_ledger_write_failure_does_not_fail_response(monkeypatc
 
     def backend(_payload):
         return {
-            "choices": [{"message": {"role": "assistant", "content": "ok", "tool_calls": []}}],
+            "choices": [{"message": {"role": "assistant", "content": "ok", "tool_calls": []}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
         }
 
@@ -188,7 +188,7 @@ def _usage_config():
 
 def _usage_response():
     return {
-        "choices": [{"message": {"role": "assistant", "content": "hello", "tool_calls": []}}],
+        "choices": [{"message": {"role": "assistant", "content": "hello", "tool_calls": []}, "finish_reason": "stop"}],
         "usage": {
             "prompt_tokens": 90,
             "completion_tokens": 15,
