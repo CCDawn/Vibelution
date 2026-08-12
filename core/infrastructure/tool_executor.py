@@ -184,21 +184,8 @@ def _record_current_agent_tool_observation(
     *,
     duration_ms: float | None = None,
 ) -> None:
-    try:
-        from core.logging.tool_tracker import get_tool_tracker
-
-        _SUCCESS_STATUSES = {"succeeded", "completed", "observed", "degraded"}
-        is_success = status in _SUCCESS_STATUSES
-        get_tool_tracker().record_call(
-            tool_name,
-            max(0.0, float(duration_ms or 0.0)),
-            success=is_success,
-            error=None if is_success else summary,
-            args=dict(tool_args or {}),
-            result_preview=(summary or "")[:160],
-        )
-    except Exception as exc:
-        _debug_logger.warning(f"[工具观测] 记录工具统计失败: {type(exc).__name__}: {exc}")
+    # 注：ToolTracker analytics（tool_stats.json）无读取者，已停用记录；
+    # 工具调用详情由 conversation log_tool_call 与 agent_directory observation 覆盖。
     try:
         from core.web.services.agent_directory_service import write_current_tool_observation
 

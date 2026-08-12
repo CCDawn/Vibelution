@@ -96,7 +96,7 @@ from core.evaluation.chat_next_state_signals import (
     summarize_chat_next_state_signals,
 )
 from core.evaluation.chat_segmenter import ChatTurnRecord, has_conclusion_signal, has_next_action_signal
-from core.logging.logger import debug as _debug_logger
+from core.logging import debug as _debug_logger
 from core.logging.unified_logger import logger as unified_logger
 from core.mental_model_flags import mental_model_enabled_override
 from core.orchestration.output_boundary import (

@@ -24,7 +24,7 @@ from core.infrastructure.tool_result import (
     render_tool_result_for_model,
     RuntimeToolMetadata,
 )
-from core.logging.logger import debug as _debug_logger
+from core.logging import debug as _debug_logger
 from core.logging.unified_logger import logger
 from core.ui.cli_ui import get_ui
 from tools.rebirth_tools import handle_restart_request
