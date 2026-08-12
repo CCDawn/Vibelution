@@ -10,6 +10,10 @@
 | --- | --- |
 | [plans/2026-05/](plans/2026-05/) | 2026-05 早期实现计划 |
 | [plans/2026-06-07/](plans/2026-06-07/) | 原 `docs/plans/`（2026-06～07 计划与 service 优化阶段报告） |
+| [plans/2026-08/](plans/2026-08/) | 2026-08 会话 SQLite 迁移提案（已 superseded，见该文 §0） |
+| [plans/2026-08-07/](plans/2026-08-07/) | Challenge Cup 工作流历史计划 |
+| [plans/2026-08-09/](plans/2026-08-09/) | MCP 受管 Agent 网关历史计划 |
+| [plans/2026-08-10/](plans/2026-08-10/) | Electron workbench 事务关闭历史计划 |
 | [ops/2026-05/](ops/2026-05/) | 原 ops 根下治理/审计快照 |
 | [ops/efficiency-baselines/](ops/efficiency-baselines/) | 效率基线快照 |
 | [frontend/](frontend/) | 一次性前端预算/计划笔记 |

@@ -1,12 +1,29 @@
 # Agent 配置与会话统一 SQLite 迁移方案（复用优先）
 
-> Status: **Proposed / CALIBRATED / ARCH_REVIEW_HARDENED**
+> Status: **ARCHIVED / SUPERSEDED BY IMPLEMENTATION**
 > Created: 2026-08-11
+> Closed: 2026-08-13
 > Baseline: `main@852d74af4ac81ac82289f090296ecb1852bdbe50`
 > Scope: Agent 配置权威、会话父子关系、Turn/Item 持久化、前端状态边界、旧测试会话清理与可恢复切换
 > User decisions: 旧 Agent 会话均为测试数据，不迁移；每个会话必须绑定一个 Agent 父节点；Agent 配置进入 SQLite；数据访问采用 DAO + Repository + Unit of Work；前端继续使用 React Query + Zustand；优先复用现有能力。
 > Architecture hardening: 2026-08-11，补充 canonical 数据位置、单 writer actor、锁顺序、revision CAS、WAL checkpoint、CPU/IO 资源池、背压、32 会话压力门禁与 SQLite WAL-reset 运行库安全门。
 > Authority: 本文是 dated implementation plan，不覆盖 `AGENTS.md`、`docs/standards/`、ADR、模块 README 或用户后续明确决定。
+
+## 0. 现行落地（2026-08-13）
+
+本文后半仍是 2026-08-11 的「把 Turn/TurnItem 也做成 SQLite `ConversationStore` 唯一权威」提案，**不得再按该目标实现**。
+
+现行边界：
+
+| 事实 | 现行权威 | 不是权威 |
+| --- | --- | --- |
+| Turn、消息、思考、工具、终态 | `turn_journal.jsonl`，经 `core/chat/conversation_ledger.py` / `core/chat/turn_journal.py` | SQLite `turns/turn_items`、Zustand、SSE |
+| Session / Agent 控制面元数据 | `core/chat/conversation_store`（不存 transcript）+ session catalog 投影 | 扫描 journal 当目录 |
+| Agent 配置 | workspace Agent 配置 + revision 身份；控制面可导入 store | 浏览器本地副本 |
+| 传输 / 实时草稿 | SSE `assistant_delta`、live output | 不得回写 journal |
+
+地图与 ownership：[`docs/agents/conversation-flow-map.md`](../../../agents/conversation-flow-map.md) · [`docs/guides/ownership.md`](../../../guides/ownership.md)。
+本地分支 `codex/agent-session-sqlite-codex-authority-plan` 只修订过本文归档稿，实现已在 `main`，不要再合那条分支。
 
 ## 1. 结论先行
 
