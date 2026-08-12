@@ -7,6 +7,7 @@ import json
 from core.logging import debug as _debug_logger
 import locale
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -49,6 +50,8 @@ LAUNCHER_ACTION_CANCELLED_RETURN_CODE = 130
 _PACKAGED_ELECTRON_ENTRY = Path("dist") / "desktop" / "win-unpacked" / "Vibelution.exe"
 _ELECTRON_SESSION_BOOTSTRAP_TIMEOUT_SECONDS = 20.0
 _ELECTRON_WORKBENCH_OPEN_TIMEOUT_SECONDS = 30.0
+_ELECTRON_DESKTOP_ACTION_ACK_TIMEOUT_SECONDS = 8.0
+_ELECTRON_SESSION_PROCESS_RE = re.compile(r"-(\d+)-[a-z0-9]+$", re.IGNORECASE)
 
 
 def _is_process_alive_windows(pid: int) -> bool:
@@ -813,7 +816,7 @@ def _with_active_electron_window_projection(observation: dict[str, Any]) -> dict
         projection = latest_active_window_provider_projection(workspace_root=str(PROJECT_ROOT))
     except (OSError, TypeError, ValueError):
         projection = {}
-    if isinstance(projection, dict) and projection:
+    if isinstance(projection, dict) and projection and _electron_session_process_is_live(projection):
         payload.update(projection)
     return with_window_provider_projection(payload)
 
@@ -1230,7 +1233,36 @@ def _latest_active_electron_desktop_session() -> dict[str, Any]:
         )
     except (OSError, TypeError, ValueError):
         return {}
-    return session if isinstance(session, dict) else {}
+    if not isinstance(session, dict) or not _electron_session_process_is_live(session):
+        return {}
+    return session
+
+
+def _electron_session_process_is_live(session: dict[str, Any]) -> bool:
+    """Reject canonical Electron leases whose owning process has already exited.
+
+    Older/non-canonical session identifiers remain lease-compatible; only the
+    canonical id embeds an authoritative process id.
+    """
+
+    session_id = str(session.get("desktopSessionId") or "").strip()
+    match = _ELECTRON_SESSION_PROCESS_RE.search(session_id)
+    if match is None:
+        return True
+    return _is_process_alive(int(match.group(1)))
+
+
+def _instance_short_name_for_checkout(checkout: Path | str) -> str:
+    try:
+        from core.infrastructure.branch_workspace import list_branch_instances
+        from core.infrastructure.instance_display_name import MAIN_SHORT_NAME, current_instance_display
+
+        payload = list_branch_instances(checkout)
+        return current_instance_display(payload.get("items") or []).get("shortName") or MAIN_SHORT_NAME
+    except Exception:
+        from core.infrastructure.instance_display_name import MAIN_SHORT_NAME
+
+        return MAIN_SHORT_NAME
 
 
 def _packaged_electron_desktop_executable() -> Path | None:
@@ -1257,6 +1289,7 @@ def _launch_packaged_electron_desktop(*, executable: Path, env: dict[str, str]) 
     desktop_env = dict(env)
     desktop_env["VIBELUTION_WORKSPACE_ROOT"] = str(PROJECT_ROOT)
     desktop_env["VIBELUTION_PYTHON_PATH"] = _electron_bootstrap_python_executable()
+    desktop_env["VIBELUTION_INSTANCE_SHORT_NAME"] = _instance_short_name_for_checkout(PROJECT_ROOT)
     return subprocess.Popen(
         [str(executable), "--workspace", str(PROJECT_ROOT), "--open-workbench"],
         cwd=str(PROJECT_ROOT),
@@ -1521,6 +1554,44 @@ def _submit_electron_window_action(*, action: str, reason: str, session: dict[st
     )
 
 
+def _await_electron_window_action_confirmed(
+    *,
+    intent: dict[str, Any],
+    session: dict[str, Any],
+    action: str,
+    timeout_seconds: float = _ELECTRON_DESKTOP_ACTION_ACK_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Wait for both the action ack and a newer live desktop-session snapshot."""
+
+    from core.launcher.desktop_session_store import get_desktop_session
+    from core.launcher.lifecycle_intent_store import get_lifecycle_intent
+
+    intent_id = str(intent.get("intentId") or "").strip()
+    desktop_session_id = str(session.get("desktopSessionId") or "").strip()
+    baseline_revision = int(session.get("revision") or 0)
+    if not intent_id or not desktop_session_id:
+        raise RuntimeError(f"Electron window action {action} is missing confirmation identity.")
+    deadline = time.monotonic() + max(0.05, float(timeout_seconds))
+    while time.monotonic() < deadline:
+        current_intent = get_lifecycle_intent(intent_id)
+        status = str(current_intent.get("status") or "").strip().lower()
+        if status in {"failed", "rejected", "cancelled", "expired"}:
+            detail = str(current_intent.get("failureMessage") or current_intent.get("rejectionReason") or status)
+            raise RuntimeError(f"Electron window action {action} failed: {detail}")
+        if status == "succeeded":
+            current_session = get_desktop_session(desktop_session_id)
+            windows = current_session.get("windows") if isinstance(current_session.get("windows"), dict) else {}
+            workbench = windows.get("workbench") if isinstance(windows.get("workbench"), dict) else {}
+            if (
+                int(current_session.get("revision") or 0) > baseline_revision
+                and bool(workbench.get("open"))
+                and _electron_session_process_is_live(current_session)
+            ):
+                return current_session
+        time.sleep(0.05)
+    raise RuntimeError(f"Electron window action {action} was not acknowledged before the bounded timeout.")
+
+
 def _run_captured_launcher_process(
     args: list[str],
     *,
@@ -1666,10 +1737,21 @@ def run_launcher_action(
                         "Electron window action was not accepted by the Launcher: "
                         f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
                     )
+                startup_telemetry["failureStage"] = "desktop_action_confirmation"
+                confirmed_session = _await_electron_window_action_confirmed(
+                    intent=intent,
+                    session=electron_session,
+                    action=electron_window_action,
+                )
                 startup_telemetry["timingsMs"]["desktopActionSubmitMs"] = _startup_elapsed_ms(
                     desktop_action_started
                 )
                 startup_telemetry["desktopSessionRegistered"] = True
+                startup_telemetry["workbenchOpen"] = bool(
+                    isinstance(confirmed_session.get("windows"), dict)
+                    and isinstance(confirmed_session["windows"].get("workbench"), dict)
+                    and confirmed_session["windows"]["workbench"].get("open")
+                )
                 _record_launcher_action_event(
                     "launcher.action.electron_desktop_action_submitted",
                     action=action,

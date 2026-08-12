@@ -1,11 +1,38 @@
-import type { CommandOffer, CommandReceipt } from "../types/research-workflow/commands";
+import type { CommandOffer, CommandReceipt, WorkflowCommandKind } from "../types/research-workflow/commands";
+import { fetchJson, JSON_HEADERS, requireTeamId, requireText } from "./client";
 
-function requireTeamId(teamId: string): string {
-  const normalized = String(teamId || "").trim();
-  if (!normalized) {
-    throw new Error("teamId is required");
+export async function submitResearchWorkflowCommand(options: {
+  teamId: string;
+  runId: string;
+  command: WorkflowCommandKind | string;
+  expectedRunVersion: number;
+  idempotencyKey: string;
+  nodeId?: string | null;
+  payload?: Record<string, unknown>;
+  signal?: AbortSignal;
+}): Promise<CommandReceipt> {
+  const teamId = requireTeamId(options.teamId);
+  const runId = requireText(options.runId, "runId");
+  const nodeId = options.nodeId ? String(options.nodeId).trim() : "";
+  const body: Record<string, unknown> = {
+    teamId,
+    command: options.command,
+    expectedRunVersion: options.expectedRunVersion,
+    idempotencyKey: requireText(options.idempotencyKey, "idempotencyKey"),
+    payload: options.payload ?? {},
+  };
+  if (nodeId) {
+    body.nodeId = nodeId;
   }
-  return normalized;
+  return fetchJson(
+    `/api/research/workflow-runs/${encodeURIComponent(runId)}/commands`,
+    {
+      method: "POST",
+      signal: options.signal,
+      headers: JSON_HEADERS,
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export async function submitResearchWorkflowCommandOffer(options: {
@@ -14,40 +41,18 @@ export async function submitResearchWorkflowCommandOffer(options: {
   offer: CommandOffer;
   signal?: AbortSignal;
 }): Promise<CommandReceipt> {
-  const teamId = requireTeamId(options.teamId);
-  const runId = String(options.runId || "").trim();
   const offer = options.offer;
-
   if (!offer.available) {
     throw new Error(offer.reasonCode || "command_unavailable");
   }
-
-  const body = {
-    teamId,
+  return submitResearchWorkflowCommand({
+    teamId: options.teamId,
+    runId: options.runId,
     command: offer.command,
     expectedRunVersion: offer.expectedRunVersion,
     idempotencyKey: offer.idempotencyKey,
+    nodeId: offer.nodeId,
     payload: offer.payload ?? {},
-  };
-
-  const nodeId = offer.nodeId ? String(offer.nodeId).trim() : "";
-  const url = nodeId
-    ? `/api/research/workflow-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/commands`
-    : `/api/research/workflow-runs/${encodeURIComponent(runId)}/commands`;
-
-  const response = await fetch(url, {
-    method: "POST",
     signal: options.signal,
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
   });
-
-  if (!response.ok) {
-    throw new Error(`command_http_${response.status}`);
-  }
-
-  return (await response.json()) as CommandReceipt;
 }

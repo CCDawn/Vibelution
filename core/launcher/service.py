@@ -171,6 +171,22 @@ class LauncherSupervisorCommandResponse(TypedDict, total=False):
     blockers: list[str]
 
 
+def list_launcher_branch_instances() -> dict[str, Any]:
+    """Return Git-governed branch instances for the Launcher first screen."""
+
+    from core.infrastructure.branch_workspace import list_branch_instances
+
+    return list_branch_instances(PROJECT_ROOT)
+
+
+def migrate_launcher_branch_workspaces() -> dict[str, Any]:
+    """Move legacy sibling worktrees into the in-repo branch pool."""
+
+    from core.infrastructure.branch_workspace import migrate_legacy_branch_workspaces
+
+    return migrate_legacy_branch_workspaces(PROJECT_ROOT)
+
+
 def get_launcher_status() -> dict[str, Any]:
     """Return standalone Launcher status without importing the Web service layer."""
 
@@ -213,6 +229,7 @@ def get_launcher_status() -> dict[str, Any]:
                 "nextPhase": "standalone_launcher_frontend",
                 "url": str(launcher_state.get("launcherControlUrl") or "").strip(),
                 "port": int(launcher_state.get("launcherControlPort") or 0),
+                "pid": os.getpid(),
             },
             "message": "Launcher 已作为独立控制面运行；项目工作台前后端现在是被管理对象。",
         },
@@ -367,7 +384,10 @@ def get_launcher_startup_settings() -> dict[str, Any]:
             "windowSize": configured_window_size,
             "effectiveWindowSize": window_size_env_override or configured_window_size,
             "windowSizeEnvOverride": window_size_env_override,
-            "windowSizeOptions": _workbench_window_size_options(),
+            "windowSizeOptions": _workbench_window_size_options(
+                configured_window_size,
+                window_size_env_override or configured_window_size,
+            ),
             "windowPosition": configured_window_position,
             "effectiveWindowPosition": window_position_env_override or configured_window_position,
             "windowPositionEnvOverride": window_position_env_override,
@@ -657,13 +677,27 @@ def _workbench_window_position_in_range(x: int, y: int) -> bool:
     return -8000 <= x <= 8000 and -8000 <= y <= 8000
 
 
-def _workbench_window_size_options() -> list[dict[str, Any]]:
+def _workbench_window_size_options(*extra_sizes: object) -> list[dict[str, Any]]:
+    sizes: list[str] = list(_WORKBENCH_WINDOW_SIZE_PRESETS)
+    seen = set(sizes)
+    for extra in extra_sizes:
+        normalized = str(extra or "").strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        if normalized != "auto" and not _WORKBENCH_WINDOW_SIZE_RE.match(normalized):
+            continue
+        if normalized != "auto":
+            match = _WORKBENCH_WINDOW_SIZE_RE.match(normalized)
+            if match is None or not _workbench_window_size_in_range(int(match.group(1)), int(match.group(2))):
+                continue
+        sizes.append(normalized)
+        seen.add(normalized)
     return [
         {
             "size": size,
             "label": {"zh": _workbench_window_size_label(size, "zh"), "en": _workbench_window_size_label(size, "en")},
         }
-        for size in _WORKBENCH_WINDOW_SIZE_PRESETS
+        for size in sizes
     ]
 
 
@@ -2225,6 +2259,14 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     )
     browser_managed = bool(observed_or_state("browserManaged", True))
     window_managed = bool(observed_or_state("windowManaged", False))
+    window_provider = str(observed_or_state("windowProvider", "") or "").strip()
+    external_window_owner = str(observed_or_state("externalWindowOwner", "") or "").strip()
+    desktop_session_id = str(observed_or_state("desktopSessionId", "") or "").strip()
+    electron_window_expected = bool(
+        window_provider == "electron"
+        or external_window_owner == "electron"
+        or desktop_session_id
+    )
     project_backend_present = bool(
         backend_observed
         or backend_alive
@@ -2246,6 +2288,8 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
                 desired_state = "open"
         elif desired_state == "open" and phase not in {"opening", "failed"}:
             desired_state = "closed"
+    if electron_window_expected and project_backend_present and not project_window_alive and not window_managed:
+        observed_state = "partial"
     manager_running = bool(runtime_state.get("daemonRunning"))
     runtime_command = runtime_state.get("command") if isinstance(runtime_state.get("command"), dict) else {}
     active_command_id = str(runtime_command.get("activeCommandId") or "").strip()
@@ -2265,7 +2309,7 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     lifecycle_consistency = str(
         observed_or_state("lifecycleConsistency", "consistent") or "consistent"
     ).strip() or "consistent"
-    if observation_confirms_open_workbench:
+    if observation_confirms_open_workbench and not electron_window_expected:
         lifecycle_consistency = "consistent"
     if desktop_window and bool(desktop_window.get("windowManaged")) and lifecycle_consistency == "browser_missing":
         # An active Electron workbench window is the managed frontend.  The
@@ -2274,6 +2318,7 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         lifecycle_consistency = "consistent"
     browser_missing = bool(
         lifecycle_consistency == "browser_missing"
+        or (electron_window_expected and project_backend_present and not project_window_alive and not window_managed)
         or (
             observed_state == "partial"
             and browser_managed
@@ -2281,6 +2326,8 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
             and project_backend_present
         )
     )
+    if electron_window_expected and project_backend_present and not project_window_alive and not window_managed:
+        lifecycle_consistency = "browser_missing"
     stale_open_state_reconciled = False
     if (
         has_observation
@@ -2357,11 +2404,10 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         "statusLine": status_line,
         "failureMessage": failure_message,
         "staleRuntimeStateReconciled": stale_open_state_reconciled,
-        "desktopSessionId": str(observed_or_state("desktopSessionId", "") or "").strip(),
+        "desktopSessionId": desktop_session_id,
         "desktopSessionRevision": int(observed_or_state("desktopSessionRevision", 0) or 0),
         "desktopSessionLeaseExpiresAt": str(observed_or_state("desktopSessionLeaseExpiresAt", "") or "").strip(),
     }
-    window_provider = str(observed_or_state("windowProvider", "") or "").strip()
     if window_provider:
         payload["windowProvider"] = window_provider
     if (has_observation and "windowManaged" in observed) or "windowManaged" in state_workbench:
@@ -2377,11 +2423,21 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
 
 
 def _desktop_session_workbench_projection() -> dict[str, Any]:
-    return desktop_session_store.latest_active_workbench_projection()
+    projection = desktop_session_store.latest_active_workbench_projection()
+    return projection if _desktop_session_projection_owner_is_live(projection) else {}
 
 
 def _desktop_session_window_provider_projection() -> dict[str, Any]:
-    return desktop_session_store.latest_active_window_provider_projection(workspace_root=str(PROJECT_ROOT))
+    projection = desktop_session_store.latest_active_window_provider_projection(workspace_root=str(PROJECT_ROOT))
+    return projection if _desktop_session_projection_owner_is_live(projection) else {}
+
+
+def _desktop_session_projection_owner_is_live(projection: dict[str, Any]) -> bool:
+    if not isinstance(projection, dict) or not projection:
+        return False
+    session_id = str(projection.get("desktopSessionId") or "").strip()
+    match = re.search(r"-(\d+)-[a-z0-9]+$", session_id, re.IGNORECASE)
+    return match is None or _is_process_alive(int(match.group(1)))
 
 
 def _runtime_manager_payload(runtime_state: dict[str, Any]) -> dict[str, Any]:
@@ -2390,6 +2446,54 @@ def _runtime_manager_payload(runtime_state: dict[str, Any]) -> dict[str, Any]:
         "runtimeState": str(runtime_state.get("runtimeState") or "idle"),
         "managerPid": int(runtime_state.get("managerPid") or 0),
         "stateVersion": int(runtime_state.get("stateVersion") or 0),
+    }
+
+
+def _positive_pid(value: object) -> int:
+    try:
+        pid = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return pid if pid > 0 else 0
+
+
+def _residual_excluded_pids(*, runtime_manager: dict[str, Any], workbench: dict[str, Any]) -> set[int]:
+    excluded = {os.getpid()}
+    trusted_port_owner = workbench.get("backendPortOwnerPid") if workbench.get("backendPortOwnerTrusted") else 0
+    for value in (
+        runtime_manager.get("managerPid"),
+        workbench.get("backendPid"),
+        workbench.get("backendLaunchPid"),
+        workbench.get("browserWindowPid"),
+        workbench.get("browserLaunchPid"),
+        trusted_port_owner,
+    ):
+        pid = _positive_pid(value)
+        if pid:
+            excluded.add(pid)
+    return excluded
+
+
+def _residual_processes_payload(*, runtime_manager: dict[str, Any], workbench: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from core.runtime_manager.process_inventory import residual_process_payload
+
+        payload = residual_process_payload(
+            project_root=PROJECT_ROOT,
+            exclude_pids=_residual_excluded_pids(runtime_manager=runtime_manager, workbench=workbench),
+        )
+    except Exception:
+        return {"count": 0, "items": []}
+    if not isinstance(payload, dict):
+        return {"count": 0, "items": []}
+    items = [item for item in payload.get("items", []) if isinstance(item, dict)]
+    try:
+        reported = int(payload.get("count") or 0)
+    except (TypeError, ValueError):
+        reported = 0
+    return {
+        "count": max(reported, len(items)),
+        "items": items[:16],
     }
 
 
@@ -2494,7 +2598,10 @@ def _lifecycle_proof(
             "kinds": sorted({item["kind"] for item in active_work_runs if item.get("kind")}),
             "items": active_work_runs[:8],
         },
-        "residualProcesses": {"count": 0, "items": []},
+        "residualProcesses": _residual_processes_payload(
+            runtime_manager=runtime_manager,
+            workbench=workbench,
+        ),
     }
 
 

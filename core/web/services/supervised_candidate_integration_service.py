@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -27,13 +24,10 @@ def integrate_candidate(
     run_id: str,
     manifest_root: Path,
 ) -> dict[str, Any]:
-    """Apply the frozen candidate as one exact, auditable local Git commit."""
+    """Promote the candidate Git tree onto local main (ff-only, else merge)."""
 
     root = Path(project_root).resolve()
     candidate = Path(candidate_root).resolve()
-    normalized_paths = _normalized_changed_paths(changed_files)
-    if not normalized_paths:
-        raise CandidateIntegrationError("候选差异为空，禁止创建合入提交。")
     if not candidate.is_dir():
         raise CandidateIntegrationError("候选工作树不可用，禁止创建合入提交。")
 
@@ -45,86 +39,98 @@ def integrate_candidate(
         raise CandidateIntegrationError(
             f"主工作区必须完全干净后才能自动合入；当前存在 {len(dirty)} 项改动。"
         )
-    current_head = _git_text(root, "rev-parse", "HEAD")
-    frozen_head = str(expected_head or "").strip()
-    if not frozen_head or current_head != frozen_head:
-        raise CandidateIntegrationError(
-            f"主工作区 HEAD 已偏离冻结检查点；expected={frozen_head or 'missing'}，"
-            f"actual={current_head or 'missing'}。"
-        )
+    _freeze_candidate_head(candidate, changed_files=changed_files, run_id=run_id)
+
     variant_id = str(expected_variant_id or "").strip()
     if not variant_id:
         raise CandidateIntegrationError("候选版本未绑定，禁止创建合入提交。")
 
-    manifest = _build_manifest(
-        root=root,
-        candidate=candidate,
-        paths=normalized_paths,
-        changed_files=changed_files,
-        run_id=run_id,
-        base_commit=current_head,
-        variant_id=variant_id,
+    current_head = _git_text(root, "rev-parse", "HEAD")
+    candidate_head = _fetch_candidate_head(root, candidate)
+    if not candidate_head:
+        raise CandidateIntegrationError("无法解析候选 HEAD，禁止晋升。")
+    if candidate_head == current_head:
+        raise CandidateIntegrationError("候选与 main 指向同一提交，禁止空晋升。")
+
+    current_tree = _git_text(root, "rev-parse", f"{current_head}^{{tree}}")
+    candidate_tree = _git_text(root, "rev-parse", f"{candidate_head}^{{tree}}")
+    if current_tree == candidate_tree:
+        raise CandidateIntegrationError("候选与 main 工作树相同，禁止空晋升。")
+
+    frozen_head = str(expected_head or "").strip()
+    run_label = str(run_id or "").strip()
+    message = "\n\n".join(
+        [
+            f"evolve(supervised): promote {run_label}".strip(),
+            "\n".join(
+                [
+                    f"Supervised-Run: {run_label}",
+                    f"Candidate-Variant: {variant_id}",
+                    f"Base-Commit: {current_head}",
+                    f"Candidate-Commit: {candidate_head}",
+                    f"Frozen-Main: {frozen_head}",
+                ]
+            ),
+        ]
     )
-    manifest_path = _write_manifest(Path(manifest_root), manifest)
-    applied = False
-    try:
-        _apply_candidate(root=root, candidate=candidate, entries=manifest["entries"])
-        applied = True
-        _verify_candidate_content(root=root, candidate=candidate, entries=manifest["entries"])
-        _run_git_checked(root, "add", "--all", "--", *normalized_paths)
-        staged = _nul_paths(_git_bytes(root, "diff", "--cached", "--name-only", "-z"))
-        if staged != sorted(normalized_paths):
-            raise CandidateIntegrationError(
-                "暂存区与冻结候选文件集合不一致，已中止自动合入。"
-            )
-        commit_result = git_process.run_git(
-            [
-                "commit",
-                "-m",
-                f"evolve(supervised): apply {str(run_id or '').strip()}",
-                "-m",
-                (
-                    f"Supervised-Run: {str(run_id or '').strip()}\n"
-                    f"Candidate-Variant: {variant_id}\n"
-                    f"Base-Commit: {current_head}"
-                ),
-            ],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
+
+    if _is_ancestor(root, current_head, candidate_head):
+        _run_git_checked(root, "merge", "--ff-only", candidate_head)
+        mechanism = "git_merge_ff"
+    else:
+        merge_sha = _git_text(
+            root,
+            "commit-tree",
+            candidate_tree,
+            "-p",
+            current_head,
+            "-p",
+            candidate_head,
+            "-m",
+            message,
         )
-        if commit_result.returncode != 0:
-            detail = str(commit_result.stderr or commit_result.stdout or "").strip()
-            raise CandidateIntegrationError(f"Git 提交失败：{detail or 'unknown error'}")
-        commit_sha = _git_text(root, "rev-parse", "HEAD")
-        if not commit_sha or commit_sha == current_head:
-            raise CandidateIntegrationError("Git 提交未推进 HEAD，已中止自动合入。")
-        remaining = _status_entries(root)
-        if remaining:
-            raise CandidateIntegrationError(
-                f"候选提交后主工作区仍有 {len(remaining)} 项改动，不能声明合入完成。"
-            )
-    except Exception as exc:
-        if applied:
-            recovery_error = _restore_before_commit(root=root, manifest=manifest)
-            if recovery_error:
-                raise CandidateIntegrationError(
-                    f"{exc}；自动恢复失败：{recovery_error}"
-                ) from exc
-        if isinstance(exc, CandidateIntegrationError):
-            raise
-        raise CandidateIntegrationError(str(exc)) from exc
+        _run_git_checked(root, "merge", "--ff-only", merge_sha)
+        mechanism = "git_merge_no_ff"
+
+    commit_sha = _git_text(root, "rev-parse", "HEAD")
+    if not commit_sha or commit_sha == current_head:
+        raise CandidateIntegrationError("Git 晋升未推进 HEAD，已中止自动合入。")
+    result_tree = _git_text(root, "rev-parse", f"{commit_sha}^{{tree}}")
+    if result_tree != candidate_tree:
+        raise CandidateIntegrationError("晋升后 main 工作树与候选不一致，已中止。")
+    if _status_entries(root):
+        raise CandidateIntegrationError(
+            f"候选提交后主工作区仍有 {len(_status_entries(root))} 项改动，不能声明合入完成。"
+        )
+
+    changed_paths = _nul_paths(
+        _git_bytes(root, "diff", "--name-only", "-z", current_head, commit_sha)
+    )
+    if not changed_paths and changed_files:
+        changed_paths = _normalized_changed_paths(changed_files)
+
+    manifest = {
+        "schemaVersion": 3,
+        "mechanism": mechanism,
+        "runId": run_label,
+        "createdAt": _now_iso(),
+        "baseCommit": current_head,
+        "candidateCommit": candidate_head,
+        "frozenMain": frozen_head,
+        "candidateVariantId": variant_id,
+        "commitSha": commit_sha,
+        "changedFiles": changed_paths,
+    }
+    manifest_path = _write_manifest(Path(manifest_root), manifest)
 
     return {
         "status": "committed",
-        "mechanism": "controlled_candidate_commit",
+        "mechanism": mechanism,
         "baseCommit": current_head,
         "commitSha": commit_sha,
+        "candidateCommit": candidate_head,
         "candidateVariantId": variant_id,
-        "changedFiles": normalized_paths,
+        "changedFiles": changed_paths,
         "rollbackManifestPath": str(manifest_path),
         "committedAt": _now_iso(),
     }
@@ -149,8 +155,13 @@ def revert_candidate_commit(
         raise CandidateIntegrationError(
             "自动回退仅允许在候选合入提交仍为当前 HEAD 时执行，避免覆盖后续提交。"
         )
+    parents = _git_text(root, "rev-list", "--parents", "-n", "1", commit_sha).split()
+    revert_args = ["revert", "--no-edit"]
+    if len(parents) >= 3:
+        revert_args.extend(["-m", "1"])
+    revert_args.append(commit_sha)
     result = git_process.run_git(
-        ["revert", "--no-edit", commit_sha],
+        revert_args,
         cwd=root,
         capture_output=True,
         text=True,
@@ -173,6 +184,84 @@ def revert_candidate_commit(
     }
 
 
+def _freeze_candidate_head(
+    candidate: Path,
+    *,
+    changed_files: list[dict[str, Any]],
+    run_id: str,
+) -> None:
+    """Commit pending judged changes so promote only reads a Git tree."""
+
+    tracked_dirty = _nul_paths(
+        _git_bytes(candidate, "status", "--porcelain=v1", "-z", "--untracked-files=no")
+    )
+    judged_paths = set(_normalized_changed_paths(changed_files))
+    untracked = _nul_paths(
+        _git_bytes(candidate, "ls-files", "--others", "--exclude-standard", "-z")
+    )
+    judged_untracked = [path for path in untracked if path in judged_paths]
+    if not tracked_dirty and not judged_untracked:
+        return
+    if tracked_dirty:
+        _run_git_checked(candidate, "add", "-u", "--")
+    if judged_untracked:
+        _run_git_checked(candidate, "add", "--", *judged_untracked)
+    if not _nul_paths(_git_bytes(candidate, "diff", "--cached", "--name-only", "-z")):
+        raise CandidateIntegrationError("候选工作区有未提交改动，不在 Git 管辖内，禁止晋升。")
+    label = str(run_id or "").strip() or "candidate"
+    _run_git_checked(
+        candidate,
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        f"evolve(supervised): freeze {label}",
+    )
+    leftover_tracked = _nul_paths(
+        _git_bytes(candidate, "status", "--porcelain=v1", "-z", "--untracked-files=no")
+    )
+    leftover_judged = [
+        path
+        for path in _nul_paths(
+            _git_bytes(candidate, "ls-files", "--others", "--exclude-standard", "-z")
+        )
+        if path in judged_paths
+    ]
+    if leftover_tracked or leftover_judged:
+        raise CandidateIntegrationError("候选冻结提交后仍有未纳入 Git 的改动，禁止晋升。")
+
+
+def _fetch_candidate_head(root: Path, candidate: Path) -> str:
+    fetch = git_process.run_git(
+        [
+            "fetch",
+            "--no-tags",
+            str(candidate),
+            "+HEAD:refs/vibelution/supervised-promote",
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if fetch.returncode != 0:
+        detail = str(fetch.stderr or fetch.stdout or "").strip()
+        raise CandidateIntegrationError(f"无法把候选提交取入 main 仓库：{detail or 'fetch failed'}")
+    return _git_text(root, "rev-parse", "refs/vibelution/supervised-promote")
+
+
+def _is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    result = git_process.run_git(
+        ["merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def _normalized_changed_paths(changed_files: list[dict[str, Any]]) -> list[str]:
     paths: set[str] = set()
     for item in changed_files:
@@ -189,55 +278,6 @@ def _normalized_changed_paths(changed_files: list[dict[str, Any]]) -> list[str]:
     return sorted(paths)
 
 
-def _build_manifest(
-    *,
-    root: Path,
-    candidate: Path,
-    paths: list[str],
-    changed_files: list[dict[str, Any]],
-    run_id: str,
-    base_commit: str,
-    variant_id: str,
-) -> dict[str, Any]:
-    change_types = {
-        str(item.get("path") or "").strip().replace("\\", "/"): str(
-            item.get("changeType") or ""
-        ).strip()
-        for item in changed_files
-    }
-    entries: list[dict[str, Any]] = []
-    for relative in paths:
-        target = _safe_path(root, relative)
-        source = _safe_path(candidate, relative)
-        if target.exists() and not target.is_file():
-            raise CandidateIntegrationError(f"目标不是普通文件：{relative}")
-        if source.exists() and not source.is_file():
-            raise CandidateIntegrationError(f"候选不是普通文件：{relative}")
-        before = target.read_bytes() if target.exists() else b""
-        after = source.read_bytes() if source.exists() else b""
-        declared_type = change_types.get(relative, "")
-        if declared_type != "deleted" and not source.exists():
-            raise CandidateIntegrationError(f"候选文件缺失：{relative}")
-        entries.append(
-            {
-                "path": relative,
-                "changeType": "deleted" if not source.exists() else declared_type,
-                "existed": target.exists(),
-                "contentBase64": base64.b64encode(before).decode("ascii"),
-                "beforeSha256": _sha256(before) if target.exists() else "",
-                "afterSha256": _sha256(after) if source.exists() else "",
-            }
-        )
-    return {
-        "schemaVersion": 2,
-        "runId": str(run_id or "").strip(),
-        "createdAt": _now_iso(),
-        "baseCommit": base_commit,
-        "candidateVariantId": variant_id,
-        "entries": entries,
-    }
-
-
 def _write_manifest(manifest_root: Path, manifest: dict[str, Any]) -> Path:
     root = Path(manifest_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -248,69 +288,6 @@ def _write_manifest(manifest_root: Path, manifest: dict[str, Any]) -> Path:
         encoding="utf-8",
     )
     return path
-
-
-def _apply_candidate(*, root: Path, candidate: Path, entries: list[dict[str, Any]]) -> None:
-    for entry in entries:
-        relative = str(entry["path"])
-        target = _safe_path(root, relative)
-        source = _safe_path(candidate, relative)
-        if str(entry.get("changeType") or "") == "deleted" or not source.exists():
-            if target.exists():
-                target.unlink()
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-
-
-def _verify_candidate_content(
-    *,
-    root: Path,
-    candidate: Path,
-    entries: list[dict[str, Any]],
-) -> None:
-    for entry in entries:
-        relative = str(entry["path"])
-        target = _safe_path(root, relative)
-        source = _safe_path(candidate, relative)
-        if str(entry.get("changeType") or "") == "deleted" or not source.exists():
-            if target.exists():
-                raise CandidateIntegrationError(f"删除候选仍存在于目标：{relative}")
-            continue
-        if not target.is_file() or _sha256(target.read_bytes()) != str(entry.get("afterSha256") or ""):
-            raise CandidateIntegrationError(f"候选文件内容校验失败：{relative}")
-
-
-def _restore_before_commit(*, root: Path, manifest: dict[str, Any]) -> str:
-    paths = [str(entry["path"]) for entry in list(manifest.get("entries") or [])]
-    if paths:
-        git_process.run_git(
-            ["restore", "--staged", "--", *paths],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    for entry in list(manifest.get("entries") or []):
-        target = _safe_path(root, str(entry["path"]))
-        if bool(entry.get("existed")):
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(base64.b64decode(str(entry.get("contentBase64") or "")))
-        elif target.exists():
-            target.unlink()
-    remaining = _status_entries(root)
-    return "" if not remaining else f"恢复后仍有 {len(remaining)} 项改动"
-
-
-def _safe_path(root: Path, relative: str) -> Path:
-    target = (root / Path(*PurePosixPath(relative).parts)).resolve()
-    try:
-        target.relative_to(root.resolve())
-    except ValueError as exc:
-        raise CandidateIntegrationError(f"候选路径越界：{relative}") from exc
-    return target
 
 
 def _status_entries(root: Path) -> list[str]:
@@ -357,10 +334,6 @@ def _nul_paths(value: bytes) -> list[str]:
         for item in value.split(b"\0")
         if item
     )
-
-
-def _sha256(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
 
 
 def _now_iso() -> str:

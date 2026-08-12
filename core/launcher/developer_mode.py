@@ -33,6 +33,7 @@ QUICK_CLEAN_EXCLUDED_DIRS = {
     ".venv",
     "node_modules",
     ".runtime",
+    ".worktrees",
     ".docs",
     "workspace",
     "logs",
@@ -171,7 +172,7 @@ def get_noise_overview(*, config_path: Path | None = None, project_root: Path | 
             "skippedCount": len(worktree_skipped),
             "action": "worktree_cleanup",
             "protected": False,
-            "reason": "只列出位于 Vibelution-worktrees 下、clean 且 branch tip 已并入 main 的 worktree。",
+            "reason": "只列出位于仓内 .worktrees 或旧兄弟目录下、clean 且 branch tip 已并入 main 的 worktree。",
         },
     ]
     return {
@@ -376,7 +377,15 @@ def _project_root(project_root: Path | None) -> Path:
 
 
 def _worktrees_root(root: Path) -> Path:
-    return root.parent / "Vibelution-worktrees"
+    from core.infrastructure.branch_workspace import branch_pool_write_root
+
+    return branch_pool_write_root(root)
+
+
+def _managed_worktree_roots(root: Path) -> list[Path]:
+    from core.infrastructure.branch_workspace import allowed_worktree_roots
+
+    return allowed_worktree_roots(root)
 
 
 def _overview_item(
@@ -463,11 +472,12 @@ def _is_safe_quick_clean_target(path: Path, root: Path) -> bool:
 
 def _worktree_cleanup_candidates(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     worktrees_root = _worktrees_root(root).resolve()
+    managed_roots = [item.resolve() for item in _managed_worktree_roots(root)]
     targets: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for item in _git_worktrees(root):
         path = Path(item.get("path") or "").resolve()
-        if path == root or not _is_relative_to(path, worktrees_root):
+        if path == root or not any(_is_relative_to(path, managed) for managed in managed_roots):
             continue
         branch = str(item.get("branch") or "")
         head = str(item.get("head") or "")
@@ -650,8 +660,10 @@ def _validate_targets_still_safe(plan: dict[str, Any], root: Path) -> None:
             raise DeveloperCleanupPlanError("target_outside_project", "清理目标不属于当前项目工作区。", detail={"path": str(path)})
         if action == "quick_clean" and not _is_safe_quick_clean_target(path, root):
             raise DeveloperCleanupPlanError("target_not_whitelisted", "清理目标不在 quick clean 白名单内。", detail={"path": str(path)})
-        if action == "worktree_cleanup" and not _is_relative_to(path, _worktrees_root(root).resolve()):
-            raise DeveloperCleanupPlanError("target_outside_worktrees", "worktree 清理目标不在外部 worktree 目录内。", detail={"path": str(path)})
+        if action == "worktree_cleanup" and not any(
+            _is_relative_to(path, managed.resolve()) for managed in _managed_worktree_roots(root)
+        ):
+            raise DeveloperCleanupPlanError("target_outside_worktrees", "worktree 清理目标不在仓内分支池或旧兄弟目录内。", detail={"path": str(path)})
         if action == "worktree_cleanup":
             reason = _worktree_skip_reason(
                 path,

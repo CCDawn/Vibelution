@@ -53,7 +53,14 @@
 | [assets/](assets/) | 静态资源 | README 截图等 |
 | [archive/](archive/) | **归档** | 一切历史计划/规格/审计；见 [archive/README.md](archive/README.md) |
 
-**不存在** 现行 `docs/plans/` 或 `docs/superpowers/` 顶层目录（均已归档）。
+**不存在** 现行 `docs/plans/` 或 `docs/superpowers/` 顶层目录作为规范权威（计划正文曾归档）。
+
+在研草案（**不是**规范，升格前不覆盖 `AGENTS.md` / `standards/`）：
+
+| 草案 | 说明 |
+| --- | --- |
+| [plans/2026-08-13-portable-branch-workspace.md](plans/2026-08-13-portable-branch-workspace.md) | 仓内 `.worktrees` + Launcher 全部分支清单 |
+| [plans/2026-08-11-multi-instance-branch-isolation.md](plans/2026-08-11-multi-instance-branch-isolation.md) | 多实例端口隔离与注册表 |
 
 ### 本轮迁入 archive
 

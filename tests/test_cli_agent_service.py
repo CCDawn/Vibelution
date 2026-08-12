@@ -286,7 +286,7 @@ def test_mimo_worktree_mode_requires_sibling_worktree(monkeypatch, tmp_path):
 
 def test_mimo_worktree_mode_builds_dir_and_agent_args(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
-    worktree = project_root.parent / "Vibelution-worktrees" / "cli-agent-demo"
+    worktree = project_root / ".worktrees" / "cli-agent-demo"
     worktree.mkdir(parents=True)
     spawned = []
     writes = []

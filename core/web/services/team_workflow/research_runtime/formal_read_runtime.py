@@ -74,7 +74,11 @@ def reset_formal_read_runtime_for_tests(
 
 
 def get_query_service() -> WorkflowQueryService:
+    from .formal_write_runtime import WorkflowMigrationRequired, is_migration_required
+
     with _LOCK:
+        if is_migration_required():
+            raise WorkflowMigrationRequired()
         if _QUERY is None:
             raise FormalReadRuntimeUnavailable()
         return _QUERY

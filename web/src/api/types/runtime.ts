@@ -1168,6 +1168,7 @@ export type LauncherStatus = {
       nextPhase: string;
       url?: string;
       port?: number;
+      pid?: number;
     };
     message: string;
   };

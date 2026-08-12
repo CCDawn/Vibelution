@@ -97,4 +97,28 @@ describe("research workflow legacy cleanup", () => {
     expect(commands).not.toContain("executeNodeCommand");
     expect(commandSection).not.toContain("EvidenceRemediationDialog");
   });
+
+  it("does not ship production node-command, session-binding, or human-task write clients", () => {
+    const apiClient = readFileSync(resolve(webSrc, "api/researchWorkflow.ts"), "utf8");
+    const commandClient = readFileSync(resolve(webSrc, "api/research-workflow/commands.ts"), "utf8");
+    const evidenceGraph = readFileSync(
+      resolve(routesRoot, "teams/research-workflow/EvidenceGraphView.tsx"),
+      "utf8",
+    );
+    expect(apiClient).not.toContain("fetchJson");
+    expect(apiClient).not.toContain("nodes/");
+    expect(apiClient).not.toContain("session-binding");
+    expect(apiClient).not.toContain("human-tasks");
+    expect(commandClient).toContain("/commands");
+    expect(commandClient).not.toContain("/nodes/");
+    expect(commandClient).toContain("nodeId");
+    expect(evidenceGraph).not.toContain("executeNodeCommand");
+    expect(evidenceGraph).toContain("fetchResearchWorkflowResearchLedger");
+    expect(existsSync(resolve(routesRoot, "teams/research-workflow/nodeCommandAdapter.ts"))).toBe(
+      false,
+    );
+    expect(existsSync(resolve(routesRoot, "teams/research-workflow/useResearchWorkflowStream.ts"))).toBe(
+      false,
+    );
+  });
 });

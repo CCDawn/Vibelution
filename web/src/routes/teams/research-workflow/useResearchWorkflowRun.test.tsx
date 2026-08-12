@@ -16,7 +16,6 @@ const api = vi.hoisted(() => ({
   replayResearchWorkflowEvents: vi.fn(),
   fetchResearchWorkflowDefinition: vi.fn(),
   createResearchWorkflowRun: vi.fn(),
-  resolveResearchWorkflowHumanTask: vi.fn(),
   researchWorkflowStreamUrl: vi.fn(
     (options: { runId: string; teamId: string; afterSequence?: number }) => {
       const qs = new URLSearchParams({ teamId: options.teamId });
@@ -40,7 +39,6 @@ vi.mock("../../../api/research-workflow/events", () => ({
 vi.mock("../../../api/researchWorkflow", () => ({
   fetchResearchWorkflowDefinition: api.fetchResearchWorkflowDefinition,
   createResearchWorkflowRun: api.createResearchWorkflowRun,
-  resolveResearchWorkflowHumanTask: api.resolveResearchWorkflowHumanTask,
 }));
 
 import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
