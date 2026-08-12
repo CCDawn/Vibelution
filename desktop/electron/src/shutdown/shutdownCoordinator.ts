@@ -14,8 +14,22 @@ const ACTIVE_WORK_BLOCK_MESSAGE = "有进行中的任务，无法重启 Vibeluti
 export async function decideShutdown(input: {
   ownershipMode: BootstrapOwnershipMode;
   activeWorkStatus: () => Promise<ActiveWorkStatus>;
+  /** When true, active-work status failures/timeouts allow quit instead of blocking forever. */
+  failOpenOnActiveWorkError?: boolean;
 }): Promise<ShutdownDecision> {
-  const activeWork = await input.activeWorkStatus();
+  let activeWork: ActiveWorkStatus;
+  try {
+    activeWork = await input.activeWorkStatus();
+  } catch (error: unknown) {
+    if (input.failOpenOnActiveWorkError) {
+      return {
+        allowed: true,
+        reason: "no_active_work",
+        stopPythonLauncher: input.ownershipMode === "started"
+      };
+    }
+    throw error;
+  }
   if (activeWork.active) {
     return {
       allowed: false,

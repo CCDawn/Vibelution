@@ -26,6 +26,12 @@ import {
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
 import {
+  fetchLauncherStatusSummary,
+  formatLauncherStatusSummary,
+  postLauncherControl,
+  type LauncherControlPostPath
+} from "./protocol/launcherControlClient.js";
+import {
   acknowledgeWorkbenchCloseWindowClosed,
   fetchWorkbenchCloseTransaction,
   isRecoverableWorkbenchCloseTransactionControlRejection,
@@ -48,7 +54,7 @@ import {
 } from "./process/launcherServiceClient.js";
 import type { LauncherBootstrapResult } from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
-import { executeApprovedDesktopShellShutdown } from "./shutdown/desktopShellExit.js";
+import { executeApprovedDesktopShellShutdown, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
 import { decideShutdown, fetchLauncherActiveWorkStatus, type ShutdownDecision } from "./shutdown/shutdownCoordinator.js";
 import {
   desktopSmokeSummary,
@@ -61,7 +67,7 @@ import {
   desktopWorkbenchCloseCanarySummaryPath
 } from "./smoke/workbenchCloseCanary.js";
 import { prepareDesktopSmokeShutdown } from "./smoke/desktopSmokeShutdown.js";
-import { createDesktopTray } from "./tray/desktopTray.js";
+import { createDesktopTray, DESKTOP_TRAY_MENU_LABELS } from "./tray/desktopTray.js";
 import {
   closeDesktopSession,
   heartbeatDesktopSession,
@@ -81,6 +87,8 @@ const DESKTOP_SESSION_HEARTBEAT_MS = 15000;
 const DESKTOP_SESSIONS_HEARTBEAT_CAPABILITY = "desktop_sessions.heartbeat";
 const WORKBENCH_CLOSE_TRANSACTION_CAPABILITY = "workbench_close.transaction.v1";
 const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
+const WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS = 30_000;
+const ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
 
 let windowProvider: ElectronWindowProvider | null = null;
 let launcherBootstrap: LauncherBootstrapResult | null = null;
@@ -856,7 +864,13 @@ async function awaitWorkbenchCloseAuthorization(
   initialTransaction: WorkbenchCloseTransaction
 ): Promise<WorkbenchCloseTransaction> {
   let transaction = initialTransaction;
+  const startedAt = Date.now();
   while (transaction.phase === "backend_closing") {
+    if (Date.now() - startedAt >= WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS) {
+      throw new Error(
+        `Workbench backend close authorization timed out after ${WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS}ms`
+      );
+    }
     const deadlineEpochMs = Date.parse(String(transaction.deadlineAt || ""));
     if (Number.isFinite(deadlineEpochMs) && Date.now() >= deadlineEpochMs) {
       throw new Error("Workbench backend close transaction reached its Launcher deadline before window authorization.");
@@ -1095,17 +1109,32 @@ async function requestDesktopShellExit(
   closeReason: DesktopCloseReason = "desktop_shell_quit"
 ): Promise<ShutdownDecision> {
   return desktopLifecycleCoordinator.request(closeReason, async () => {
-    const decision = await decideShutdown({
-      ownershipMode: launcherBootstrap?.mode ?? "attached",
-      activeWorkStatus: async () => {
-        if (launcherBootstrap === null) {
-          return { active: false, message: "" };
+    const runExit = async (): Promise<ShutdownDecision> => {
+      const ownershipMode = launcherBootstrap?.mode ?? "attached";
+      const decision = await decideShutdown({
+        ownershipMode,
+        failOpenOnActiveWorkError: true,
+        activeWorkStatus: async () => {
+          if (launcherBootstrap === null) {
+            return { active: false, message: "" };
+          }
+          const context = await withDesktopShellExitTimeout(
+            resolveDesktopActionLoopContext(launcherBootstrap),
+            ACTIVE_WORK_STATUS_TIMEOUT_MS,
+            "resolve desktop action context for quit"
+          );
+          return await withDesktopShellExitTimeout(
+            fetchLauncherActiveWorkStatus(context),
+            ACTIVE_WORK_STATUS_TIMEOUT_MS,
+            "fetch launcher active work status"
+          );
         }
-        const context = await resolveDesktopActionLoopContext(launcherBootstrap);
-        return fetchLauncherActiveWorkStatus(context);
+      });
+      if (!decision.allowed) {
+        notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“停止全部”。", "warning");
+        return decision;
       }
-    });
-    if (decision.allowed) {
+      pendingWorkbenchCloseAck = null;
       await executeApprovedDesktopShellShutdown({
         decision,
         closeDesktopSession: closeDesktopSessionIfRegistered,
@@ -1114,7 +1143,7 @@ async function requestDesktopShellExit(
             ...event,
             fields: {
               closeReason,
-              ownershipMode: launcherBootstrap?.mode ?? "attached",
+              ownershipMode,
               ...(event.fields ?? {})
             }
           });
@@ -1126,11 +1155,120 @@ async function requestDesktopShellExit(
         stopDesktopActionLoop,
         quitApp: () => {
           app.quit();
-        }
+        },
+        stepTimeoutMs: DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS
       });
+      return decision;
+    };
+
+    try {
+      return await withDesktopShellExitTimeout(runExit(), DESKTOP_SHELL_EXIT_BUDGET_MS, "desktop shell exit");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(message);
+      await recordElectronSupervisorEvent(launcherBootstrap, {
+        eventCode: "electron.launcher_service.exited",
+        message: "Desktop shell exit budget exceeded; forcing Electron quit.",
+        fields: { closeReason, error: message.slice(0, 500), failOpen: true }
+      }).catch(() => undefined);
+      shutdownApproved = true;
+      pendingWorkbenchCloseAck = null;
+      // Best-effort stop owned Python before force quit so orphans are less likely.
+      try {
+        await withDesktopShellExitTimeout(
+          stopOwnedPythonLauncherService(),
+          Math.min(3_000, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS),
+          "stop python launcher on exit budget fail-open"
+        );
+      } catch {
+        // Fail-open: stop must not block the forced Electron quit.
+      }
+      stopDesktopActionLoop();
+      desktopTray?.destroy();
+      desktopTray = null;
+      app.quit();
+      return {
+        allowed: true,
+        reason: "no_active_work",
+        stopPythonLauncher: (launcherBootstrap?.mode ?? "attached") === "started"
+      };
     }
-    return decision;
   });
+}
+
+function notifyDesktopTray(title: string, body: string, type: "info" | "warning" = "info"): void {
+  if (Notification.isSupported()) {
+    new Notification({ title, body, silent: type === "info" }).show();
+    return;
+  }
+  void dialog
+    .showMessageBox({
+      type,
+      title,
+      message: body,
+      buttons: ["确定"],
+      defaultId: 0,
+      noLink: true
+    })
+    .catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    });
+}
+
+async function resolveTrayLauncherControlContext(): Promise<DesktopActionLoopContext> {
+  if (launcherBootstrap === null) {
+    throw new Error("Launcher backend is not available.");
+  }
+  return resolveDesktopActionLoopContext(launcherBootstrap);
+}
+
+async function runTrayLauncherPost(path: LauncherControlPostPath, label: string, trigger?: string): Promise<void> {
+  try {
+    const context = await resolveTrayLauncherControlContext();
+    await postLauncherControl({
+      launcherOrigin: context.launcherOrigin,
+      controlToken: context.controlToken,
+      path,
+      trigger
+    });
+    notifyDesktopTray("Vibelution", `${label}请求已发送。`);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `${label}失败：${detail.slice(0, 300)}`, "warning");
+  }
+}
+
+async function runTrayLauncherStatus(): Promise<void> {
+  try {
+    const context = await resolveTrayLauncherControlContext();
+    const summary = await fetchLauncherStatusSummary(context);
+    notifyDesktopTray("Vibelution", formatLauncherStatusSummary(summary));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `获取状态失败：${detail.slice(0, 300)}`, "warning");
+  }
+}
+
+async function runTrayStopAll(): Promise<void> {
+  try {
+    const context = await resolveTrayLauncherControlContext();
+    await postLauncherControl({
+      launcherOrigin: context.launcherOrigin,
+      controlToken: context.controlToken,
+      path: "/api/launcher/force-stop",
+      trigger: "electron_tray_stop_all"
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止全部失败：${detail.slice(0, 300)}`, "warning");
+    return;
+  }
+  try {
+    await requestDesktopShellExit();
+  } catch (error: unknown) {
+    console.warn(error instanceof Error ? error.message : String(error));
+  }
 }
 
 ipcMain.handle(IPC_CHANNELS.getVersion, (event) => {
@@ -1204,6 +1342,33 @@ app.whenReady()
         void windowProvider?.openLauncher().catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
         });
+      },
+      startProject: () => {
+        void runTrayLauncherPost("/api/launcher/start", DESKTOP_TRAY_MENU_LABELS.startProject);
+      },
+      stopProject: () => {
+        void runTrayLauncherPost(
+          "/api/launcher/stop",
+          DESKTOP_TRAY_MENU_LABELS.stopProject,
+          "electron_tray_stop_project"
+        );
+      },
+      restartProject: () => {
+        void runTrayLauncherPost("/api/launcher/restart", DESKTOP_TRAY_MENU_LABELS.restartProject);
+      },
+      rebuildAndStart: () => {
+        void runTrayLauncherPost("/api/launcher/rebuild-and-start", DESKTOP_TRAY_MENU_LABELS.rebuildAndStart);
+      },
+      showStatus: () => {
+        void runTrayLauncherStatus();
+      },
+      quit: () => {
+        void requestDesktopShellExit().catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+      },
+      stopAll: () => {
+        void runTrayStopAll();
       }
     });
     await windowProvider.openLauncher();

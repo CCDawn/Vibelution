@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   DesktopLifecycleCoordinator,
   DesktopSessionMutationQueue,
+  desktopCloseReasonSupersedes,
   type DesktopCloseReason
 } from "../src/lifecycle/desktopLifecycleCoordinator.js";
 
 describe("DesktopLifecycleCoordinator", () => {
-  it("shares one pending close operation across close, quit, and restart requests", async () => {
+  it("shares one pending close operation across duplicate workbench close requests", async () => {
     let resolveClose: ((value: DesktopCloseReason) => void) | null = null;
     let calls = 0;
     const coordinator = new DesktopLifecycleCoordinator();
@@ -18,17 +19,62 @@ describe("DesktopLifecycleCoordinator", () => {
     };
 
     const first = coordinator.request("workbench_window_close", runClose);
-    const second = coordinator.request("desktop_shell_quit", runClose);
-    const third = coordinator.request("desktop_shell_restart", runClose);
+    const second = coordinator.request("workbench_window_close", runClose);
 
     expect(second).toBe(first);
-    expect(third).toBe(first);
     expect(calls).toBe(1);
 
     resolveClose?.("workbench_window_close");
 
     await expect(first).resolves.toBe("workbench_window_close");
     expect(coordinator.pendingReason()).toBeNull();
+  });
+
+  it("lets shell quit supersede an in-flight workbench close instead of hanging on it", async () => {
+    let resolveClose: ((value: string) => void) | null = null;
+    const coordinator = new DesktopLifecycleCoordinator();
+
+    const closePromise = coordinator.request("workbench_window_close", async () => {
+      await new Promise<string>((resolve) => {
+        resolveClose = resolve;
+      });
+      return "close-finished";
+    });
+
+    expect(coordinator.pendingReason()).toBe("workbench_window_close");
+    expect(desktopCloseReasonSupersedes("workbench_window_close", "desktop_shell_quit")).toBe(true);
+
+    const quitPromise = coordinator.request("desktop_shell_quit", async () => "quit-finished");
+    expect(quitPromise).not.toBe(closePromise);
+    expect(coordinator.pendingReason()).toBe("desktop_shell_quit");
+
+    await expect(quitPromise).resolves.toBe("quit-finished");
+    expect(coordinator.pendingReason()).toBeNull();
+
+    resolveClose?.("done");
+    await expect(closePromise).resolves.toBe("close-finished");
+  });
+
+  it("still coalesces duplicate shell quit requests", async () => {
+    let resolveQuit: ((value: string) => void) | null = null;
+    let calls = 0;
+    const coordinator = new DesktopLifecycleCoordinator();
+
+    const first = coordinator.request("desktop_shell_quit", async () => {
+      calls += 1;
+      return await new Promise<string>((resolve) => {
+        resolveQuit = resolve;
+      });
+    });
+    const second = coordinator.request("desktop_shell_quit", async () => {
+      calls += 1;
+      return "second";
+    });
+
+    expect(second).toBe(first);
+    expect(calls).toBe(1);
+    resolveQuit?.("first");
+    await expect(first).resolves.toBe("first");
   });
 
   it("records OS-session recovery without reusing a normal close reason", () => {
