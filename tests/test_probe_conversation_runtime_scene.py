@@ -7,7 +7,7 @@ from uuid import uuid4
 from core.chat.turn_journal import turn_journal_path
 
 
-SCRIPT_PATH = Path(__file__).with_name("probe_conversation_runtime_scene.py")
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "probe_conversation_runtime_scene.py"
 
 
 def cleanup_session_artifacts(project_root: Path, session_id: str) -> None:
