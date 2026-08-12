@@ -79,7 +79,10 @@ export const launcherRouteStyles = {
   notice:
     `mx-2 mt-1.5 grid gap-0.5 ${panelSurface} px-2 py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] data-[tone=success]:text-[var(--state-success)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] data-[tone=warning]:text-[var(--state-warning)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] data-[tone=error]:text-[var(--state-error)] [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
   workspace:
-    `grid min-h-0 grid-cols-[minmax(0,1fr)_auto_var(--launcher-rail-width,clamp(300px,26vw,420px))] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)] ${vuiWorkspaceFillClass}`,
+    `grid min-h-0 grid-cols-[minmax(0,1fr)] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 ${vuiWorkspaceFillClass}`,
+  advancedFold:
+    `col-auto block min-h-0 overflow-hidden ${panelSurface} p-0 [&_summary]:flex [&_summary]:min-w-0 [&_summary]:cursor-pointer [&_summary]:items-baseline [&_summary]:justify-between [&_summary]:gap-2.5 [&_summary]:px-2.5 [&_summary]:py-2 [&_summary]:text-[var(--fg-secondary)] [&_summary_span]:[font-size:var(--vui-font-xs)] [&_summary_span]:uppercase [&_summary_span]:tracking-[0.08em] [&_summary_span]:text-[var(--fg-tertiary)] [&_summary_strong]:text-[var(--fg-primary)]`,
+  advancedFoldBody: "grid min-w-0 gap-1.5 px-0 pb-2",
   // Wave 4B: shared PaneResizeHandle visual.
   railResizeHandle:
     "max-[1200px]:hidden",

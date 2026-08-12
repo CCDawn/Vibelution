@@ -213,6 +213,7 @@ def get_launcher_status() -> dict[str, Any]:
                 "nextPhase": "standalone_launcher_frontend",
                 "url": str(launcher_state.get("launcherControlUrl") or "").strip(),
                 "port": int(launcher_state.get("launcherControlPort") or 0),
+                "pid": os.getpid(),
             },
             "message": "Launcher 已作为独立控制面运行；项目工作台前后端现在是被管理对象。",
         },
@@ -367,7 +368,10 @@ def get_launcher_startup_settings() -> dict[str, Any]:
             "windowSize": configured_window_size,
             "effectiveWindowSize": window_size_env_override or configured_window_size,
             "windowSizeEnvOverride": window_size_env_override,
-            "windowSizeOptions": _workbench_window_size_options(),
+            "windowSizeOptions": _workbench_window_size_options(
+                configured_window_size,
+                window_size_env_override or configured_window_size,
+            ),
             "windowPosition": configured_window_position,
             "effectiveWindowPosition": window_position_env_override or configured_window_position,
             "windowPositionEnvOverride": window_position_env_override,
@@ -657,13 +661,27 @@ def _workbench_window_position_in_range(x: int, y: int) -> bool:
     return -8000 <= x <= 8000 and -8000 <= y <= 8000
 
 
-def _workbench_window_size_options() -> list[dict[str, Any]]:
+def _workbench_window_size_options(*extra_sizes: object) -> list[dict[str, Any]]:
+    sizes: list[str] = list(_WORKBENCH_WINDOW_SIZE_PRESETS)
+    seen = set(sizes)
+    for extra in extra_sizes:
+        normalized = str(extra or "").strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        if normalized != "auto" and not _WORKBENCH_WINDOW_SIZE_RE.match(normalized):
+            continue
+        if normalized != "auto":
+            match = _WORKBENCH_WINDOW_SIZE_RE.match(normalized)
+            if match is None or not _workbench_window_size_in_range(int(match.group(1)), int(match.group(2))):
+                continue
+        sizes.append(normalized)
+        seen.add(normalized)
     return [
         {
             "size": size,
             "label": {"zh": _workbench_window_size_label(size, "zh"), "en": _workbench_window_size_label(size, "en")},
         }
-        for size in _WORKBENCH_WINDOW_SIZE_PRESETS
+        for size in sizes
     ]
 
 
@@ -2415,6 +2433,54 @@ def _runtime_manager_payload(runtime_state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _positive_pid(value: object) -> int:
+    try:
+        pid = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return pid if pid > 0 else 0
+
+
+def _residual_excluded_pids(*, runtime_manager: dict[str, Any], workbench: dict[str, Any]) -> set[int]:
+    excluded = {os.getpid()}
+    trusted_port_owner = workbench.get("backendPortOwnerPid") if workbench.get("backendPortOwnerTrusted") else 0
+    for value in (
+        runtime_manager.get("managerPid"),
+        workbench.get("backendPid"),
+        workbench.get("backendLaunchPid"),
+        workbench.get("browserWindowPid"),
+        workbench.get("browserLaunchPid"),
+        trusted_port_owner,
+    ):
+        pid = _positive_pid(value)
+        if pid:
+            excluded.add(pid)
+    return excluded
+
+
+def _residual_processes_payload(*, runtime_manager: dict[str, Any], workbench: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from core.runtime_manager.process_inventory import residual_process_payload
+
+        payload = residual_process_payload(
+            project_root=PROJECT_ROOT,
+            exclude_pids=_residual_excluded_pids(runtime_manager=runtime_manager, workbench=workbench),
+        )
+    except Exception:
+        return {"count": 0, "items": []}
+    if not isinstance(payload, dict):
+        return {"count": 0, "items": []}
+    items = [item for item in payload.get("items", []) if isinstance(item, dict)]
+    try:
+        reported = int(payload.get("count") or 0)
+    except (TypeError, ValueError):
+        reported = 0
+    return {
+        "count": max(reported, len(items)),
+        "items": items[:16],
+    }
+
+
 def _lifecycle_proof(
     *,
     runtime_manager: dict[str, Any],
@@ -2516,7 +2582,10 @@ def _lifecycle_proof(
             "kinds": sorted({item["kind"] for item in active_work_runs if item.get("kind")}),
             "items": active_work_runs[:8],
         },
-        "residualProcesses": {"count": 0, "items": []},
+        "residualProcesses": _residual_processes_payload(
+            runtime_manager=runtime_manager,
+            workbench=workbench,
+        ),
     }
 
 
