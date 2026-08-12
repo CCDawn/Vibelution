@@ -27,7 +27,7 @@ import logging
 import os
 import re
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -39,7 +39,6 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 LOG_ROOT = os.path.join(_PROJECT_ROOT, "logs")
 CONVERSATION_LOG_DIR = os.path.join(LOG_ROOT, "conversations")
-DEBUG_LOG_DIR = os.path.join(LOG_ROOT, "debug")
 
 _logger = logging.getLogger("core.logging.logger")
 
@@ -142,46 +141,17 @@ class DebugLogger:
         return _get_ui()
 
     def _log_internal_warning(self, context: str, error: Exception) -> None:
-        if not self._file_handle:
-            return
-        try:
-            ts = datetime.now().isoformat(timespec="milliseconds")
-            self._file_handle.write(f"[{ts}] [WARN] {context}: {error}\n")
-            self._file_handle.flush()
-        except Exception:
-            pass
+        _logger.warning("DebugLogger %s: %s", context, error)
 
     def start_session(self, session_id: str):
-        """开始会话 — 打开 debug 日志文件"""
-        try:
-            log_dir = DEBUG_LOG_DIR
-            os.makedirs(log_dir, exist_ok=True)
-            log_path = os.path.join(log_dir, f'debug_{session_id}.log')
-            self._file_handle = open(log_path, 'a', encoding='utf-8', buffering=1)
-            self._write_file("SYS", f"=== Debug session started: {session_id} ===")
-        except Exception as exc:
-            self._log_internal_warning("Failed to start debug session", exc)
-            self._file_handle = None
+        """开始会话 — debug 文件通道已停用（落盘统一走 conversation jsonl）"""
 
     def end_session(self):
-        """结束会话 — 关闭 debug 日志文件"""
-        if self._file_handle:
-            try:
-                self._write_file("SYS", "=== Debug session ended ===")
-                self._file_handle.close()
-            except Exception as exc:
-                self._log_internal_warning("Failed to close debug session", exc)
-            self._file_handle = None
+        """结束会话 — debug 文件通道已停用（落盘统一走 conversation jsonl）"""
+        self._file_handle = None
 
     def _write_file(self, tag: str, msg: str):
-        """写入 debug 日志文件"""
-        if self._file_handle:
-            try:
-                ts = datetime.now().isoformat(timespec="milliseconds")
-                self._file_handle.write(f"[{ts}] [{tag}] {msg}\n")
-                self._file_handle.flush()
-            except Exception as exc:
-                self._log_internal_warning("Failed to write debug file", exc)
+        """写入 debug 日志文件 — 已停用；会话落盘统一走 conversation jsonl"""
 
     def debug(self, msg: str, tag: str = "DEBUG"):
         """调试信息"""
@@ -604,8 +574,8 @@ class ConversationLogger:
         }
 
     def _timestamp(self) -> str:
-        """获取 ISO 格式的时间戳"""
-        return datetime.now().isoformat(timespec="milliseconds")
+        """获取 ISO 格式的时间戳（UTC，与 runtime scene 事件一致）"""
+        return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
     def _activate_default(self) -> None:
         """未显式 start_session 时，懒激活进程级默认会话，避免日志被静默丢弃。"""
@@ -866,7 +836,9 @@ class ConversationLogger:
         self._write(record)
 
     def log_debug(self, tag: str, message: str, level: str = "INFO"):
-        """记录 debug/warning/info/system 级别事件"""
+        """记录 debug/warning/info/system 级别事件（DEBUG 级仅 UI 展示，不落盘）"""
+        if level == "DEBUG":
+            return
         record = {
             "type": "debug",
             "turn": self._turn_count,

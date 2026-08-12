@@ -9,7 +9,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable
@@ -1947,7 +1947,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def _now_timestamp() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 __all__ = [
