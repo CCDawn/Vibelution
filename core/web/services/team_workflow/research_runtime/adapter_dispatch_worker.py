@@ -74,24 +74,76 @@ class AdapterDispatchWorker:
             self._fail_unregistered(outbox, action)
             return
 
-        verdict = self._ports.read_back_input(action)
+        try:
+            verdict = self._ports.read_back_input(action)
+        except Exception as exc:
+            self._fail_attempt(
+                outbox,
+                action,
+                {"code": "input_readback_exception", "detail": str(exc)},
+            )
+            return
         if not verdict.ok:
             self._block_attempt(outbox, action, "input_readback_mismatch", verdict.detail)
             return
 
-        preflight = adapter.preflight(action)
+        try:
+            preflight = adapter.preflight(action)
+        except Exception as exc:
+            self._fail_attempt(
+                outbox,
+                action,
+                {"code": "adapter_preflight_exception", "detail": str(exc)},
+            )
+            return
         if not preflight.ready:
-            self._block_attempt(outbox, action, "adapter_preflight_failed", json.dumps(preflight.blockers, ensure_ascii=False))
+            self._block_attempt(
+                outbox,
+                action,
+                "adapter_preflight_failed",
+                json.dumps(preflight.blockers, ensure_ascii=False),
+            )
             return
 
-        result = adapter.execute(action)
+        try:
+            result = adapter.execute(action)
+        except Exception as exc:
+            self._fail_attempt(
+                outbox,
+                action,
+                {
+                    "code": "adapter_execution_exception",
+                    "detail": str(exc),
+                    "actionId": action.action_id,
+                },
+            )
+            return
         if result.outcome != "succeeded":
-            self._fail_attempt(outbox, action, result.problem or {"code": "adapter_execution_failed"})
+            self._fail_attempt(
+                outbox,
+                action,
+                result.problem or {"code": "adapter_execution_failed"},
+            )
             return
 
-        verified = adapter.verify(action, result)
+        try:
+            verified = adapter.verify(action, result)
+        except Exception as exc:
+            self._fail_attempt(
+                outbox,
+                action,
+                {"code": "adapter_verify_exception", "detail": str(exc)},
+            )
+            return
         if verified.outcome != "succeeded":
-            self._block_attempt(outbox, action, verified.problem.get("code", "verification_failed") if verified.problem else "verification_failed", json.dumps(verified.problem, ensure_ascii=False))
+            self._block_attempt(
+                outbox,
+                action,
+                verified.problem.get("code", "verification_failed")
+                if verified.problem
+                else "verification_failed",
+                json.dumps(verified.problem, ensure_ascii=False),
+            )
             return
 
         try:
@@ -101,8 +153,10 @@ class AdapterDispatchWorker:
                 self._commit_verified(outbox, action, verified, usage=result.usage)
             if verified.budget_receipt:
                 # ledger 提交后结算领域预算权威；settle 失败不回滚已提交 receipt，
-                # 由领域侧保留 reservation 供对账。
-                self._settle_domain_budget(verified.budget_receipt, result.usage)
+                # 进入 reconciliation_required 供对账（禁止静默吞掉）。
+                self._settle_domain_budget(
+                    outbox, action, verified.budget_receipt, result.usage
+                )
         except Exception as exc:
             # commit 前 crash：outbox 保留 pending（可重领取），领域侧幂等。
             self._requeue_or_fail(outbox, str(exc))
@@ -357,14 +411,26 @@ class AdapterDispatchWorker:
 
     # ------------------------------------------------------------ failures
 
-    def _settle_domain_budget(self, reservation: dict[str, Any], usage: dict[str, Any]) -> None:
+    def _settle_domain_budget(
+        self,
+        outbox: Any,
+        action: PendingAction,
+        reservation: dict[str, Any],
+        usage: dict[str, Any],
+    ) -> None:
         """After the ledger receipt commits, settle the domain budget authority.
-        A settle failure never rolls back the committed receipt; the domain
-        authority keeps the reservation for later reconciliation."""
+        A settle failure never rolls back the committed receipt; record a
+        diagnostic problem for later reconciliation (T5.1-5 deepens this)."""
         try:
             self._ports.settle_budget(reservation=reservation, usage=usage)
-        except Exception:
-            return
+        except Exception as exc:
+            self.last_problem = {
+                "code": "budget_settle_failed",
+                "detail": str(exc),
+                "reservationId": str(reservation.get("reservationId") or ""),
+                "actionId": action.action_id,
+                "nodeRunId": action.node_run_id,
+            }
 
     def _block_attempt(self, outbox: Any, action: PendingAction, code: str, detail: str) -> None:
         now_ms = self._now()

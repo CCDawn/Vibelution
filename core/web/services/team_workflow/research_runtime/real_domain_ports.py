@@ -126,13 +126,23 @@ class RealDomainPorts:
     # ------------------------------------------------------------ agent
 
     def create_agent_task(self, *, action: PendingAction) -> AgentTaskHandle:
+        from .task_adapter_registry import resolve_agent_task_adapter
+
+        adapter_spec = resolve_agent_task_adapter(action.node_id)
+        if adapter_spec is None:
+            raise RuntimeError(f"agent node {action.node_id} has no task adapter")
         binding = self.resolve_binding(action)
         if not binding.agent_id:
             raise RuntimeError("agent node is unbound")
         if self._agent_task_factory is not None:
             return self._agent_task_factory(action=action, binding=binding)
         # 默认 factory：真实 research-project / source-collection task。
-        handle = _create_real_agent_task(action, binding, self._run_input_snapshot(action.run_id))
+        handle = _create_real_agent_task(
+            action,
+            binding,
+            self._run_input_snapshot(action.run_id),
+            adapter_spec=adapter_spec,
+        )
         _require_canonical_session(
             session_id=handle.session_id,
             agent_id=binding.agent_id,
@@ -187,38 +197,112 @@ def _create_real_agent_task(
     action: PendingAction,
     binding: BindingResolution,
     input_snapshot: dict[str, Any],
+    *,
+    adapter_spec: Any | None = None,
 ) -> AgentTaskHandle:
-    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+    from .task_adapter_registry import AgentTaskAdapterSpec, resolve_agent_task_adapter
 
-    node_spec = next(
-        (n for n in build_challenge_cup_workflow_definition().nodes if n.nodeId == action.node_id),
-        None,
-    )
-    if node_spec is None:
-        raise RuntimeError(f"unknown node {action.node_id}")
+    spec = adapter_spec or resolve_agent_task_adapter(action.node_id)
+    if not isinstance(spec, AgentTaskAdapterSpec):
+        raise RuntimeError(f"agent node {action.node_id} has no task adapter")
     team_id = str(input_snapshot.get("teamId") or "").strip()
     project_id = str(input_snapshot.get("projectId") or "").strip()
     if not team_id:
         raise RuntimeError("input snapshot has no teamId")
     idempotency_key = f"agent-task:{action.node_run_id}"
-    task_kind = _task_kind_for(action.node_id)
-    if task_kind is None:
-        raise RuntimeError(f"agent node {action.node_id} has no task adapter")
+    if spec.family == "source_collection":
+        started = _start_source_collection_agent_task(
+            team_id=team_id,
+            project_id=project_id,
+            input_snapshot=input_snapshot,
+            action=action,
+            binding=binding,
+            stage_id=spec.task_key,
+            role_key=spec.role_key or binding.role_key,
+            idempotency_key=idempotency_key,
+        )
+    else:
+        from core.web.services.team_workflow.research_project_agent_tasks import (
+            start_research_project_agent_task,
+        )
 
-    from core.web.services.team_workflow.research_project_agent_tasks import (
-        start_research_project_agent_task,
+        if not project_id:
+            raise RuntimeError("input snapshot has no projectId")
+        started = start_research_project_agent_task(
+            team_id,
+            project_id,
+            {
+                "taskKind": spec.task_key,
+                "agentId": binding.agent_id,
+                "idempotencyKey": idempotency_key,
+                "targetRef": f"node-run:{action.node_id}",
+            },
+        )
+    return _agent_handle_from_started(started)
+
+
+def _task_kind_for(node_id: str) -> str | None:
+    """Compatibility helper: returns stageId/taskKind key for Agent nodes."""
+    from .task_adapter_registry import resolve_agent_task_adapter
+
+    spec = resolve_agent_task_adapter(node_id)
+    return None if spec is None else spec.task_key
+
+
+def _start_source_collection_agent_task(
+    *,
+    team_id: str,
+    project_id: str,
+    input_snapshot: dict[str, Any],
+    action: PendingAction,
+    binding: BindingResolution,
+    stage_id: str,
+    role_key: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    from core.web.services.team_workflow.source_collection.runs import (
+        start_source_collection_run,
+    )
+    from core.web.services.team_workflow.source_collection.stage_session import (
+        start_source_collection_stage_session_task,
     )
 
-    started = start_research_project_agent_task(
+    source_run_id = str(input_snapshot.get("sourceCollectionRunId") or "").strip()
+    if not source_run_id:
+        objective = input_snapshot.get("researchObjectiveContract") or {}
+        started_run = start_source_collection_run(
+            team_id,
+            {
+                "researchProjectId": project_id,
+                "title": "Challenge Cup workflow source collection",
+                "goal": str(objective.get("question") or ""),
+                "topic": str(objective.get("question") or ""),
+                "inputRefs": list(input_snapshot.get("datasetRefs") or []),
+                "agentRoles": [role_key] if role_key else [],
+                "agentIds": {role_key: binding.agent_id} if role_key else {},
+                "scope": {
+                    "workflowRunId": action.run_id,
+                    "researchProjectId": project_id,
+                },
+            },
+        )
+        source_run_id = str((started_run.get("run") or {}).get("runId") or "").strip()
+    if not source_run_id:
+        raise RuntimeError("source collection adapter did not return a runId")
+    return start_source_collection_stage_session_task(
         team_id,
-        project_id,
+        source_run_id,
         {
-            "taskKind": task_kind,
+            "stageId": stage_id,
             "agentId": binding.agent_id,
+            "agentRole": role_key,
             "idempotencyKey": idempotency_key,
-            "targetRef": f"node-run:{action.node_id}",
+            "returnLabel": "科研工作流",
         },
     )
+
+
+def _agent_handle_from_started(started: dict[str, Any]) -> AgentTaskHandle:
     task = started.get("task") if isinstance(started.get("task"), dict) else {}
     task_turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
     session_id = str(started.get("sessionId") or task.get("sessionId") or "")
@@ -237,18 +321,6 @@ def _create_real_agent_task(
         task_id=task_id,
         turn_id=turn_id,
     )
-
-
-def _task_kind_for(node_id: str) -> str | None:
-    _PROJECT_NODE_TASKS = {
-        "hypothesis_design": "experiment_design",
-        "protocol_design": "experiment_design",
-        "protocol_review": "experiment_evidence_review",
-        "result_evaluation": "experiment_evidence_review",
-        "iteration_decision": "iteration_decision",
-        "version_governance": "version_governance",
-    }
-    return _PROJECT_NODE_TASKS.get(node_id)
 
 
 def _require_canonical_session(*, session_id: str, agent_id: str) -> None:
