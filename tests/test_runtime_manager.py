@@ -475,12 +475,14 @@ def test_launcher_action_passes_runtime_manager_process_protection(monkeypatch, 
     assert env["VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"] == "1"
     assert [event_type for event_type, _payload in events] == [
         "launcher.action.requested",
+        "launcher.action.startup_stage_completed",
         "launcher.action.completed",
+        "launcher.action.startup_summary",
     ]
     assert events[0][1]["internalAction"] is True
     assert events[0][1]["internalLauncherEnvSet"] is True
     assert events[0][1]["protectedProcessIdsSet"] is True
-    assert events[1][1]["returnCode"] == 0
+    assert _event_payload(events, "launcher.action.completed")["returnCode"] == 0
 
 
 def test_launcher_command_uses_python_adapter_on_posix(monkeypatch, tmp_path):
@@ -5624,6 +5626,136 @@ def test_packaged_electron_launch_requests_workbench_from_primary_instance(monke
     assert kwargs["stderr"] is subprocess.DEVNULL
 
 
+def test_packaged_electron_bootstrap_records_bounded_stage_timings(monkeypatch, tmp_path):
+    events: list[tuple[str, dict]] = []
+
+    class FakeProcess:
+        pid = 43210
+
+        @staticmethod
+        def poll():
+            return None
+
+    monkeypatch.setattr(
+        workbench_controller,
+        "_packaged_electron_desktop_executable",
+        lambda: tmp_path / "Vibelution.exe",
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_launch_packaged_electron_desktop",
+        lambda **_kwargs: FakeProcess(),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_await_electron_desktop_session",
+        lambda _process: {"desktopSessionId": "desktop-session-1"},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_submit_electron_window_action",
+        lambda **_kwargs: {"status": "accepted"},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_await_electron_workbench_open",
+        lambda _process, **_kwargs: {"desktopSessionId": "desktop-session-1", "revision": 7},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_record_launcher_action_event",
+        lambda event_type, **payload: events.append((event_type, payload)),
+    )
+    telemetry = {
+        "startupTraceId": "startup-test-1",
+        "timingsMs": {},
+        "failureStage": "",
+    }
+
+    result = workbench_controller._bootstrap_packaged_electron_workbench(
+        env={"VIBELUTION_STARTUP_TRACE_ID": "startup-test-1"},
+        action="internal-start",
+        no_browser=True,
+        startup_telemetry=telemetry,
+    )
+
+    assert result["desktopSessionId"] == "desktop-session-1"
+    assert result["desktopSessionRevision"] == 7
+    assert telemetry["failureStage"] == ""
+    assert {
+        "electronProcessSpawnMs",
+        "desktopSessionRegistrationMs",
+        "desktopActionSubmitMs",
+        "workbenchWindowOpenMs",
+        "electronFirstStartTotalMs",
+    }.issubset(telemetry["timingsMs"])
+    stage_events = [payload for event_type, payload in events if event_type == "launcher.action.startup_stage_completed"]
+    assert [payload["stage"] for payload in stage_events] == [
+        "electron_process_spawn",
+        "desktop_session_registration",
+        "desktop_action_submit",
+        "workbench_window_open",
+    ]
+    assert all(payload["startup_trace_id"] == "startup-test-1" for payload in stage_events)
+
+
+def test_packaged_electron_bootstrap_records_failure_stage_before_cleanup(monkeypatch, tmp_path):
+    events: list[tuple[str, dict]] = []
+    terminated: list[int] = []
+
+    class FakeProcess:
+        pid = 43211
+
+        @staticmethod
+        def poll():
+            return None
+
+    monkeypatch.setattr(
+        workbench_controller,
+        "_packaged_electron_desktop_executable",
+        lambda: tmp_path / "Vibelution.exe",
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_launch_packaged_electron_desktop",
+        lambda **_kwargs: FakeProcess(),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_await_electron_desktop_session",
+        lambda _process: (_ for _ in ()).throw(RuntimeError("desktop session timeout")),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_terminate_packaged_electron_after_failed_bootstrap",
+        lambda process: terminated.append(process.pid),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_record_launcher_action_event",
+        lambda event_type, **payload: events.append((event_type, payload)),
+    )
+    telemetry = {
+        "startupTraceId": "startup-test-failure",
+        "timingsMs": {},
+        "failureStage": "",
+    }
+
+    with pytest.raises(RuntimeError, match="desktop session timeout"):
+        workbench_controller._bootstrap_packaged_electron_workbench(
+            env={"VIBELUTION_STARTUP_TRACE_ID": "startup-test-failure"},
+            action="internal-start",
+            no_browser=True,
+            startup_telemetry=telemetry,
+        )
+
+    assert telemetry["failureStage"] == "desktop_session_registration"
+    assert terminated == [43211]
+    failed = _event_payload(events, "launcher.action.startup_stage_failed")
+    assert failed["stage"] == "desktop_session_registration"
+    assert failed["startup_trace_id"] == "startup-test-failure"
+
+
 def test_electron_session_bootstrap_waits_for_primary_instance_handoff(monkeypatch):
     sessions = iter([None, {"desktopSessionId": "electron-primary"}])
 
@@ -5701,8 +5833,42 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch,
 
     assert result.returncode == 0
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
+    assert captured["kwargs"]["env"]["VIBELUTION_STARTUP_TRACE_ID"].startswith("launcher-startup-")
+    requested = _event_payload(events, "launcher.action.requested")
     completed = _event_payload(events, "launcher.action.completed")
+    summary = _event_payload(events, "launcher.action.startup_summary")
+    assert requested["startupTraceId"] == completed["startupTraceId"] == summary["startupTraceId"]
     assert completed["durationMs"] >= 0
+    assert summary["outcome"] == "succeeded"
+    assert summary["failureStage"] == ""
+    assert summary["timingsMs"]["launcherControlPlaneBackendReadyMs"] >= 0
+    assert result.startup_telemetry["startupTraceId"] == summary["startupTraceId"]
+
+
+def test_run_launcher_action_emits_final_summary_when_control_plane_bootstrap_fails(
+    monkeypatch,
+    no_active_electron_desktop_session,
+):
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        workbench_controller,
+        "_run_captured_launcher_process",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("bootstrap failed")),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
+    )
+
+    with pytest.raises(RuntimeError, match="bootstrap failed"):
+        workbench_controller.run_launcher_action("internal-start")
+
+    summary = _event_payload(events, "launcher.action.startup_summary")
+    assert summary["outcome"] == "failed"
+    assert summary["failureStage"] == "launcher_control_plane_backend_ready"
+    assert summary["errorType"] == "RuntimeError"
+    assert summary["durationMs"] >= 0
 
 
 def test_run_launcher_action_routes_active_electron_session_to_desktop_action(monkeypatch):
@@ -5760,8 +5926,10 @@ def test_run_launcher_action_routes_active_electron_session_to_desktop_action(mo
     ]
     assert [event_type for event_type, _payload in events] == [
         "launcher.action.requested",
+        "launcher.action.startup_stage_completed",
         "launcher.action.electron_desktop_action_submitted",
         "launcher.action.completed",
+        "launcher.action.startup_summary",
     ]
 
 
@@ -6058,7 +6226,17 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
 
     def fake_open_workbench(*, no_browser: bool, cancel_check=None):
         opened["no_browser"] = no_browser
-        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        completed.startup_telemetry = {
+            "startupTraceId": "launcher-startup-test",
+            "outcome": "succeeded",
+            "failureStage": "",
+            "timingsMs": {
+                "launcherControlPlaneBackendReadyMs": 12.5,
+                "desktopSessionRegistrationMs": 4.0,
+            },
+        }
+        return completed
 
     monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
     monkeypatch.setattr(
@@ -6075,6 +6253,15 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
     assert result["ok"] is True
     assert result["message"] == "Workbench opened."
     assert opened == {"no_browser": False}
+    assert result["lifecycleTimingsMs"]["launcherStartup"] == {
+        "startupTraceId": "launcher-startup-test",
+        "outcome": "succeeded",
+        "failureStage": "",
+        "timingsMs": {
+            "launcherControlPlaneBackendReadyMs": 12.5,
+            "desktopSessionRegistrationMs": 4.0,
+        },
+    }
     success_payload = _event_payload(events, "workbench.open.verification_succeeded")
     assert success_payload | {
         "attempts": 1,
@@ -7119,9 +7306,10 @@ def test_run_launcher_action_uses_devnull_stdio(monkeypatch, no_active_electron_
     assert "text" not in captured["kwargs"]
     assert captured["kwargs"]["stdout"] is not None
     assert captured["kwargs"]["stderr"] is not None
-    assert events[-1][0] == "launcher.action.completed"
-    assert events[-1][1]["stdoutTail"] == "launcher stdout\n"
-    assert events[-1][1]["stderrTail"] == "launcher stderr\n"
+    completed = _event_payload(events, "launcher.action.completed")
+    assert completed["stdoutTail"] == "launcher stdout\n"
+    assert completed["stderrTail"] == "launcher stderr\n"
+    assert events[-1][0] == "launcher.action.startup_summary"
 
 
 def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
