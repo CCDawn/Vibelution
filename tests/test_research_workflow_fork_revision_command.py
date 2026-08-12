@@ -130,7 +130,7 @@ def test_high_impact_command_requires_operator_identity(tmp_path: Path) -> None:
             requested_at_ms=request.requested_at_ms,
         )
         with pytest.raises(CommandForbiddenError):
-            harness.service.submit(forged)
+            harness.command_service.submit(forged)
 
         # 空 operator id —— 拒绝。
         empty = CommandRequest(
@@ -146,7 +146,7 @@ def test_high_impact_command_requires_operator_identity(tmp_path: Path) -> None:
             requested_at_ms=request.requested_at_ms,
         )
         with pytest.raises(CommandForbiddenError):
-            harness.service.submit(empty)
+            harness.command_service.submit(empty)
 
         # 合法 operator —— 通过。
         ok = CommandRequest(
@@ -161,7 +161,9 @@ def test_high_impact_command_requires_operator_identity(tmp_path: Path) -> None:
             requested_by=ActorRef("operator", "operator-1"),
             requested_at_ms=request.requested_at_ms,
         )
-        receipt = harness.service.submit(ok)
+        from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope
+        with server_operator_scope("operator-1"):
+            receipt = harness.command_service.submit(ok)
         assert receipt.status == "accepted"
         run = harness.store.get_run("run-test")
         assert run is not None and run.status == "cancelled"

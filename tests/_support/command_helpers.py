@@ -10,6 +10,10 @@ from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowC
 from core.research.workflow.ledger import WorkflowLedgerStore
 
 from core.web.services.team_workflow.research_runtime.command_service import WorkflowCommandService
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    current_server_operator,
+    server_operator_scope,
+)
 from core.web.services.team_workflow.research_runtime.readiness import NodeReadinessService
 from core.web.services.team_workflow.research_runtime.readiness.common import RunSnapshot
 
@@ -20,6 +24,23 @@ from tests._support.workflow_ledger_helpers import (
     build_run_record,
     open_ledger_store,
 )
+
+
+class _OperatorBoundCommandService:
+    """Test helper: bind a server operator when callers forget (production uses routes)."""
+
+    def __init__(self, inner: WorkflowCommandService) -> None:
+        self._inner = inner
+
+    def submit(self, request: CommandRequest):
+        if current_server_operator() is not None:
+            return self._inner.submit(request)
+        operator_id = str(request.requested_by.actor_id or "").strip() or "test-operator"
+        with server_operator_scope(operator_id):
+            return self._inner.submit(request)
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
 
 
 class CommandHarness:
@@ -62,13 +83,14 @@ class CommandHarness:
             run_source=run_source,
             attempt_count_source=attempt_count_source,
         )
-        self.service = WorkflowCommandService(
+        self.command_service = WorkflowCommandService(
             store=self.store,
             readiness_service=self.readiness,
             readiness_context=lambda: self.context,
             clock=lambda: FIXED_NOW_MS + 1000,
             wake_worker=wake,
         )
+        self.service = _OperatorBoundCommandService(self.command_service)
 
     def close(self) -> None:
         self.store.close()
