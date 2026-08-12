@@ -14,7 +14,7 @@ from time import perf_counter
 from typing import Any
 
 from core.infrastructure import developer_sandbox
-from core.logging.logger import debug as _debug_logger
+from core.logging import debug as _debug_logger
 
 from .. import project_agent_bus_service
 

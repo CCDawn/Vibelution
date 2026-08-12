@@ -420,8 +420,8 @@ session: {self._session_id}
                 pass
 
         if deleted_count > 0:
-            from core.logging import debug_logger
-            debug_logger.info(f"[TranscriptLogger] 已清理 {deleted_count} 个旧 transcript 文件")
+            from core.logging import debug as _debug_logger
+            _debug_logger.info(f"[TranscriptLogger] 已清理 {deleted_count} 个旧 transcript 文件")
 
         return deleted_count
 

@@ -246,12 +246,8 @@ class DebugLogger:
             ui.add_log(msg, "SYS")
 
     def tool(self, name: str, status: str, details: str = ""):
-        """工具执行日志"""
+        """工具执行日志（工具调用详情走结构化 log_tool_call，这里只写 debug 文件与 UI）"""
         self._write_file("TOOL", f"{name} {status} {details}")
-        try:
-            conversation_logger.log_debug("TOOL", f"{name} {status} {details}", "TOOL")
-        except Exception as exc:
-            self._log_internal_warning("Failed to forward tool log", exc)
         if ui := self._ui_or_none():
             ui.add_log(f"Tool: {name} {status} {details}", "TOOL")
 
@@ -293,12 +289,8 @@ class DebugLogger:
         ui.add_log(f"Thinking: {content[:60]}...", "THINK")
 
     def tool_start(self, tool_name: str, args: dict):
-        """打印工具开始调用 — 内容区 + 日志区"""
+        """打印工具开始调用 — 内容区 + 日志区（持久记录走结构化 log_tool_call）"""
         self._write_file("TOOL", f"START {tool_name} args={str(args)[:200]}")
-        try:
-            conversation_logger.log_debug("TOOL", f"START {tool_name} args={args}", "TOOL")
-        except Exception as exc:
-            self._log_internal_warning("Failed to forward tool start log", exc)
         ui = _get_ui()
         if ui is None:
             return
@@ -306,13 +298,9 @@ class DebugLogger:
         ui.print_tool_start_log(tool_name, args)
 
     def tool_result(self, tool_name: str, result: str, success: bool = True):
-        """打印工具执行结果 — 内容区 + 日志区"""
+        """打印工具执行结果 — 内容区 + 日志区（持久记录走结构化 log_tool_call）"""
         status = "OK" if success else "FAIL"
         self._write_file("TOOL", f"RESULT {tool_name} {status} len={len(result) if result else 0}")
-        try:
-            conversation_logger.log_debug("TOOL", f"RESULT {tool_name} {status} len={len(result) if result else 0}", "TOOL")
-        except Exception as exc:
-            self._log_internal_warning("Failed to forward tool result log", exc)
         ui = _get_ui()
         if ui is None:
             return

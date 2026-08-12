@@ -453,7 +453,7 @@ class EventBus:
                     thread.start()
             except Exception as e:
                 # 记录错误但不中断其他处理器
-                from core.logging import debug_logger; debug_logger.error(f"[EventBus] Handler error in {event_name}: {e}")
+                from core.logging import debug as _debug_logger; _debug_logger.error(f"[EventBus] Handler error in {event_name}: {e}")
                 traceback.print_exc()
 
         return results

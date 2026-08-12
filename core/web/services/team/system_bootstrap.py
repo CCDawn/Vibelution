@@ -315,7 +315,7 @@ def _record_system_team_bootstrap_event(
     outcome: str,
     fields: dict[str, Any] | None = None,
 ) -> None:
-    from core.logging.logger import debug as _debug_logger
+    from core.logging import debug as _debug_logger
     from core.web.services.runtime_scene_service import record_runtime_scene_event
 
     try:

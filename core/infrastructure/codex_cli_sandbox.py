@@ -20,7 +20,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from core.logging import debug_logger as _debug_logger
+from core.logging import debug as _debug_logger
 from core.infrastructure.codex_sandbox.environment import (
     sandbox_process_environment as _adapter_sandbox_process_environment,
 )

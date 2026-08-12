@@ -133,7 +133,7 @@ def parse_file_ast(file_path: str) -> Optional[ast.Module]:
             source = f.read()
         return ast.parse(source, filename=str(path))
     except (SyntaxError, UnicodeDecodeError) as e:
-        from core.logging import debug_logger; debug_logger.error(f"Failed to parse {file_path}: {e}")
+        from core.logging import debug as _debug_logger; _debug_logger.error(f"Failed to parse {file_path}: {e}")
         return None
 
 
