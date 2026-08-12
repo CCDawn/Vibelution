@@ -113,8 +113,24 @@ def fetch_evidence_graph_stats(
             return None
         root = default_artifact_root() / spec.authority / team_id
         if not root.is_dir():
-            return None
-        graph_files = list(root.rglob("evidence_relation_graph/*.json"))
+            # Content-addressed layout: authority/<hh>/<hash>.json
+            alt_root = default_artifact_root() / spec.authority
+            if not alt_root.is_dir():
+                return None
+            graph_files = []
+            for path in alt_root.rglob("*.json"):
+                try:
+                    envelope = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, TypeError):
+                    continue
+                if (
+                    isinstance(envelope, dict)
+                    and str(envelope.get("kind") or "") == "evidence_relation_graph"
+                    and str(envelope.get("teamId") or "") == team_id
+                ):
+                    graph_files.append(path)
+        else:
+            graph_files = list(root.rglob("evidence_relation_graph/*.json"))
         if not graph_files:
             return None
         return {

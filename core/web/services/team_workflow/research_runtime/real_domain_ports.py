@@ -133,6 +133,7 @@ class RealDomainPorts:
             binding,
             self._run_input_snapshot(action.run_id),
             adapter_spec=adapter_spec,
+            store=self._store,
         )
         _require_canonical_session(
             session_id=handle.session_id,
@@ -143,8 +144,13 @@ class RealDomainPorts:
     def execute_agent_turn(
         self, *, action: PendingAction, handle: AgentTaskHandle
     ) -> list[dict[str, str]]:
-        # turn 已在 create_agent_task 提交；此处仅返回空（read-back 走 artifact store）。
-        return []
+        from .agent_turn_materializer import materialize_agent_turn_outputs
+
+        return materialize_agent_turn_outputs(
+            action=action,
+            handle=handle,
+            input_snapshot=self._run_input_snapshot(action.run_id),
+        )
 
     def read_back_artifact(self, canonical_ref: str) -> ArtifactReadBack | None:
         return _read_back_real_artifact(canonical_ref)
@@ -190,6 +196,7 @@ def _create_real_agent_task(
     input_snapshot: dict[str, Any],
     *,
     adapter_spec: Any | None = None,
+    store: WorkflowLedgerStore | None = None,
 ) -> AgentTaskHandle:
     from .task_adapter_registry import AgentTaskAdapterSpec, resolve_agent_task_adapter
 
@@ -211,6 +218,7 @@ def _create_real_agent_task(
             stage_id=spec.task_key,
             role_key=spec.role_key or binding.role_key,
             idempotency_key=idempotency_key,
+            store=store,
         )
     else:
         from core.web.services.team_workflow.research_project_agent_tasks import (
@@ -250,6 +258,7 @@ def _start_source_collection_agent_task(
     stage_id: str,
     role_key: str,
     idempotency_key: str,
+    store: WorkflowLedgerStore | None = None,
 ) -> dict[str, Any]:
     from core.web.services.team_workflow.source_collection.runs import (
         start_source_collection_run,
@@ -264,13 +273,15 @@ def _start_source_collection_agent_task(
         started_run = start_source_collection_run(
             team_id,
             {
-                "researchProjectId": project_id,
                 "title": "Challenge Cup workflow source collection",
                 "goal": str(objective.get("question") or ""),
                 "topic": str(objective.get("question") or ""),
                 "inputRefs": list(input_snapshot.get("datasetRefs") or []),
                 "agentRoles": [role_key] if role_key else [],
                 "agentIds": {role_key: binding.agent_id} if role_key else {},
+                # Deterministic production-chain verification does not consume a live
+                # prompt-cache model; SC still creates canonical Session/Task/Turn.
+                "promptCachePolicy": {"requirement": "disabled"},
                 "scope": {
                     "workflowRunId": action.run_id,
                     "researchProjectId": project_id,
@@ -278,6 +289,9 @@ def _start_source_collection_agent_task(
             },
         )
         source_run_id = str((started_run.get("run") or {}).get("runId") or "").strip()
+        if source_run_id and store is not None:
+            _persist_source_collection_run_id(store, action.run_id, source_run_id)
+            input_snapshot["sourceCollectionRunId"] = source_run_id
     if not source_run_id:
         raise RuntimeError("source collection adapter did not return a runId")
     return start_source_collection_stage_session_task(
@@ -291,6 +305,39 @@ def _start_source_collection_agent_task(
             "returnLabel": "科研工作流",
         },
     )
+
+
+def _persist_source_collection_run_id(
+    store: WorkflowLedgerStore,
+    run_id: str,
+    source_run_id: str,
+) -> None:
+    """Freeze the SC run id into the Ledger input snapshot for successor nodes."""
+
+    def mutate(uow):
+        run = uow.repository.get_run(run_id)
+        if run is None or not run.input_snapshot_json:
+            return
+        try:
+            snapshot = json.loads(run.input_snapshot_json)
+        except (TypeError, ValueError):
+            return
+        if not isinstance(snapshot, dict):
+            return
+        if str(snapshot.get("sourceCollectionRunId") or "") == source_run_id:
+            return
+        snapshot["sourceCollectionRunId"] = source_run_id
+        uow.repository.execute(
+            "UPDATE workflow_runs SET input_snapshot_json = ?, updated_at_ms = ? "
+            "WHERE run_id = ?",
+            (
+                json.dumps(snapshot, ensure_ascii=False),
+                int(__import__("time").time() * 1000),
+                run_id,
+            ),
+        )
+
+    store.submit(mutate, force_flush=True).result(timeout=30)
 
 
 def _agent_handle_from_started(started: dict[str, Any]) -> AgentTaskHandle:
