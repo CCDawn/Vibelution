@@ -86,17 +86,26 @@ def _clear_provider_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def _minimal_remote_llm_toml(provider_kind: str, base_url: str, model: str, api_key_env: str) -> str:
+def _minimal_remote_llm_toml(provider_kind: str, base_url: str, model: str, api_key_env: str, schema_version: int = 1) -> str:
+    schema_line = f"\nschema_version = {schema_version}" if schema_version else ""
+    if schema_version == 2:
+        credential_lines = f'credential_ref = "env:{api_key_env}"\nauth_kind = "api_key"'
+        profile_lines = f'model_ref = "default/{model}"'
+        model_lines = f'\n[llm.providers.default.models."{model}"]\nupstream_id = "{model}"\nenabled = true'
+    else:
+        credential_lines = f'api_key = ""\napi_key_env = "{api_key_env}"'
+        profile_lines = f'provider_id = "default"\nmodel = "{model}"'
+        model_lines = ""
     return f"""
+[llm]{schema_line}
+
 [llm.providers.default]
 kind = "{provider_kind}"
-api_key = ""
-api_key_env = "{api_key_env}"
+{credential_lines}
 base_url = "{base_url}"
-
+{model_lines}
 [llm.profiles.primary]
-provider_id = "default"
-model = "{model}"
+{profile_lines}
 """.strip()
 
 
@@ -174,6 +183,7 @@ def test_env_overrides_toml_for_non_secret_fields(tmp_path, monkeypatch):
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             model="qwen-plus",
             api_key_env="DASHSCOPE_API_KEY",
+            schema_version=2,
         ),
         encoding="utf-8",
     )
@@ -233,6 +243,9 @@ def test_model_library_api_key_env_takes_priority(tmp_path, monkeypatch):
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         """
+[llm]
+schema_version = 1
+
 [llm.providers.default]
 kind = "minimax"
 api_key = ""
