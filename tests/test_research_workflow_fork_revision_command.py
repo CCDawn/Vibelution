@@ -38,6 +38,7 @@ def test_fork_revision_creates_child_run_with_lineage_and_dispatch(tmp_path: Pat
             payload={
                 "fromNodeId": "hypothesis_design",
                 "reason": "revise protocol after failed evaluation",
+                "checkpointId": "ckpt-parent-1",
             },
         )
         receipt = harness.service.submit(request)
@@ -47,7 +48,8 @@ def test_fork_revision_creates_child_run_with_lineage_and_dispatch(tmp_path: Pat
         child = harness.store.submit(
             lambda uow: uow.repository.execute(
                 "SELECT run_id, parent_run_id, status, active_node_id, "
-                "workflow_version_id FROM workflow_runs "
+                "workflow_version_id, thread_id, forked_from_checkpoint_id "
+                "FROM workflow_runs "
                 "WHERE parent_run_id = 'run-test'"
             ).fetchall(),
             force_flush=True,
@@ -57,6 +59,8 @@ def test_fork_revision_creates_child_run_with_lineage_and_dispatch(tmp_path: Pat
         assert child[0][1] == "run-test"
         assert child[0][2] == "created"
         assert child[0][3] == "hypothesis_design"
+        assert child[0][5] == child_run_id
+        assert child[0][6] == "ckpt-parent-1"
 
         # child 的 graph_dispatch outbox 存在。
         outbox = harness.store.submit(
@@ -220,6 +224,7 @@ def test_human_revise_decision_forks_child_run(tmp_path: Path) -> None:
                 "decision": "revise",
                 "fromNodeId": "hypothesis_design",
                 "reason": "revise design after handoff review",
+                "checkpointId": "ckpt-revise-1",
             },
             requested_by=ActorRef("operator", "operator-1"),
             requested_at_ms=1_750_000_000_000,

@@ -108,12 +108,14 @@ class WorkflowCommandService:
         readiness_context: Callable[[], DomainReadinessContext],
         clock: Callable[[], int] | None = None,
         wake_worker: Callable[[], None] | None = None,
+        coordinator_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._store = store
         self._readiness = readiness_service
         self._readiness_context = readiness_context
         self._clock = clock or (lambda: int(time.time() * 1000))
         self._wake_worker = wake_worker or (lambda: None)
+        self._coordinator_factory = coordinator_factory
         self._handlers: dict[WorkflowCommandKind, Callable] = {
             WorkflowCommandKind.START_NODE: self._handle_start_node,
             WorkflowCommandKind.RETRY_NODE: self._handle_retry_node,
@@ -745,7 +747,9 @@ class WorkflowCommandService:
         from core.research.workflow.ledger import RunRecord
 
         child_run_id = new_id("run")
-        child_thread_id = f"thread-{child_run_id}"
+        child_thread_id = child_run_id  # threadId == runId (ADR / spec 7.3)
+        if not str(checkpoint_id or "").strip():
+            raise WorkflowCommandError("fork_revision 需要 checkpointId")
         input_snapshot = {}
         if parent.input_snapshot_json:
             try:
@@ -753,6 +757,9 @@ class WorkflowCommandService:
             except (TypeError, ValueError):
                 input_snapshot = {}
         input_snapshot = dict(input_snapshot)
+        input_snapshot["parentRunId"] = parent.run_id
+        input_snapshot["forkedFromCheckpointId"] = checkpoint_id
+        input_snapshot["forkCorrelationId"] = command_id
 
         child = RunRecord(
             run_id=child_run_id,
@@ -771,7 +778,7 @@ class WorkflowCommandService:
             binding_snapshot_set_id=parent.binding_snapshot_set_id,
             active_node_id=from_node_id,
             parent_run_id=parent.run_id,
-            forked_from_checkpoint_id=checkpoint_id or None,
+            forked_from_checkpoint_id=checkpoint_id,
             completion_kind="revision_fork",
             terminal_reason=reason,
             blocked_problem_json=None,
@@ -810,6 +817,61 @@ class WorkflowCommandService:
                 now_ms=now_ms,
             )
         )
+
+        # Checkpoint I/O is scheduled post-commit — never inside this transaction.
+        if self._coordinator_factory is not None:
+            from .fork_coordinator import schedule_post_commit_fork
+
+            store = self._store
+            parent_run_id = parent.run_id
+            resume_node = from_node_id
+            ckpt = checkpoint_id
+
+            def on_failure(exc: Exception) -> None:
+                import threading
+
+                def mark(uow2):
+                    uow2.repository.execute(
+                        "UPDATE workflow_runs SET status = 'reconciliation_required', "
+                        "blocked_problem_json = ?, updated_at_ms = ? WHERE run_id = ?",
+                        (
+                            json.dumps(
+                                {
+                                    "code": "checkpoint_fork_failed",
+                                    "detail": str(exc),
+                                    "parentRunId": parent_run_id,
+                                    "checkpointId": ckpt,
+                                },
+                                ensure_ascii=False,
+                            ),
+                            self._clock(),
+                            child_run_id,
+                        ),
+                    )
+
+                def mark_async() -> None:
+                    # after_commit runs on the Ledger writer thread — never
+                    # call store.submit().result() inline (deadlock).
+                    try:
+                        store.submit(mark, force_flush=True).result(timeout=30)
+                    except Exception:
+                        return
+
+                threading.Thread(
+                    target=mark_async,
+                    name=f"fork-reconcile-{child_run_id}",
+                    daemon=True,
+                ).start()
+
+            schedule_post_commit_fork(
+                uow,
+                coordinator_factory=self._coordinator_factory,
+                parent_run_id=parent_run_id,
+                checkpoint_id=ckpt,
+                child_run_id=child_run_id,
+                resume_node_id=resume_node,
+                on_failure=on_failure,
+            )
         return child_run_id
 
 
