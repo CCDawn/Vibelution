@@ -810,6 +810,7 @@ def _save_launcher_state(
             "launcherControlUrl": control_url,
             "launcherControlSourceSignature": current_signature,
             "launcherControlStartedAt": _now_iso(),
+            "runtimeProjectRoot": str(PROJECT_ROOT),
             "launcherBrowserProfileDir": str(LAUNCHER_BROWSER_PROFILE_DIR),
             "launcherBrowserLaunchPid": int(browser_pid),
             "launcherBrowserWindowPid": int(browser_pid),
@@ -916,8 +917,21 @@ def _open_launcher(args: argparse.Namespace) -> None:
 def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
     before = _read_state()
     before_pid = int(before.get("launcherBackendPid") or 0)
-    _open_launcher(args)
-    after = _read_state()
+    attach_healthy_launcher = bool(getattr(args, "attach_healthy_launcher", False))
+    port = _launcher_control_port()
+    if attach_healthy_launcher and _launcher_control_healthy(port):
+        _assert_managed_launcher_attachment(before, args=args, port=port)
+        after = before
+        _append_log(
+            "desktop_entry_python.backend.attached_managed_healthy",
+            port=port,
+            backend_pid=before_pid,
+            reason="electron_bootstrap",
+            source_signature_policy="ignored_for_attach",
+        )
+    else:
+        _open_launcher(args)
+        after = _read_state()
     backend_pid = int(after.get("launcherBackendPid") or 0)
     port = int(after.get("launcherControlPort") or _launcher_control_port())
     mode = _launcher_bootstrap_mode(before_pid=before_pid, backend_pid=backend_pid)
@@ -943,6 +957,27 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
             "workbench_close.transaction.v1",
         ],
     }
+
+
+def _assert_managed_launcher_attachment(
+    state: dict[str, object],
+    *,
+    args: argparse.Namespace,
+    port: int,
+) -> None:
+    backend_pid = int(state.get("launcherBackendPid") or 0)
+    state_port = int(state.get("launcherControlPort") or 0)
+    adapter = str(state.get("launcherAdapter") or "").strip()
+    state_root = str(state.get("runtimeProjectRoot") or "").strip()
+    requested_root = Path(str(args.workspace or PROJECT_ROOT)).resolve()
+    if adapter not in {"python_headless", "python_desktop_entry_native"}:
+        raise RuntimeError("Healthy Launcher control port is not owned by a supported managed adapter.")
+    if state_port != int(port):
+        raise RuntimeError("Healthy Launcher control port does not match the managed Launcher state.")
+    if backend_pid <= 0 or not _pid_alive(backend_pid):
+        raise RuntimeError("Healthy Launcher control port has no live managed backend PID.")
+    if not state_root or Path(state_root).resolve() != requested_root:
+        raise RuntimeError("Healthy Launcher control port does not belong to this workspace.")
 
 
 def _launcher_bootstrap_mode(*, before_pid: int, backend_pid: int) -> str:
@@ -1032,6 +1067,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--python-exe", default="")
     parser.add_argument("--run-id", default="")
     parser.add_argument("--owned-backend-pid", type=int, default=0)
+    parser.add_argument("--attach-healthy-launcher", action="store_true")
     return parser.parse_args(argv)
 
 

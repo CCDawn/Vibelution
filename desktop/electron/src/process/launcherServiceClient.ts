@@ -17,11 +17,11 @@ export type LauncherServiceStartInput = {
   workspaceRoot: string;
   pythonPath: string;
   operatorConfigPath: string;
+  spawnImpl?: LauncherServiceSpawn;
 };
 
 export type LauncherServiceStopInput = LauncherServiceStartInput & {
   launcherBackendPid: number;
-  spawnImpl?: LauncherServiceSpawn;
 };
 
 export type LauncherServiceStopResult = {
@@ -34,7 +34,8 @@ export type LauncherServiceStopResult = {
 };
 
 export async function bootstrapPythonLauncherService(input: LauncherServiceStartInput): Promise<LauncherBootstrapResult> {
-  const child = spawn(
+  const spawnImpl = input.spawnImpl ?? spawn;
+  const child = spawnImpl(
     input.pythonPath,
     [
       resolve(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
@@ -46,7 +47,8 @@ export async function bootstrapPythonLauncherService(input: LauncherServiceStart
       input.workspaceRoot,
       "--config",
       input.operatorConfigPath,
-      "--no-browser"
+      "--no-browser",
+      "--attach-healthy-launcher"
     ],
     {
       cwd: input.workspaceRoot,
