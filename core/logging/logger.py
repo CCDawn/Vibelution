@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import logging
@@ -577,6 +578,25 @@ class ConversationLogger:
         """获取 ISO 格式的时间戳（UTC，与 runtime scene 事件一致）"""
         return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
+    def cleanup_old_conversations(self, keep_recent: int = 5) -> int:
+        """清理旧的 conversation jsonl 文件，只保留最近 N 个会话（与 TranscriptLogger 对称）。"""
+        pattern = os.path.join(self._log_dir, "conversation_*.jsonl")
+        files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+
+        deleted_count = 0
+        for file_path in files[keep_recent:]:
+            try:
+                os.remove(file_path)
+                deleted_count += 1
+            except Exception:
+                pass
+
+        if deleted_count > 0:
+            from core.logging import debug as _debug_logger
+            _debug_logger.info(f"[ConversationLogger] 已清理 {deleted_count} 个旧 conversation 文件")
+
+        return deleted_count
+
     def _activate_default(self) -> None:
         """未显式 start_session 时，懒激活进程级默认会话，避免日志被静默丢弃。"""
         with self._activation_lock:
@@ -585,6 +605,7 @@ class ConversationLogger:
             if not self._session_file_stem:
                 self._session_file_stem = f"conversation_{self._session_id}"
             self._session_active = True
+            self.cleanup_old_conversations()
 
     def _write(self, record: dict):
         """写入单条记录到文件（实时刷出）"""
@@ -619,6 +640,7 @@ class ConversationLogger:
             "session_label": self._build_session_label(),
         }
         self._write(record)
+        self.cleanup_old_conversations()
 
     def log_external_request(self, content: str):
         """记录外部任务输入"""
