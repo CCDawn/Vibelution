@@ -923,12 +923,8 @@ def _open_launcher(args: argparse.Namespace) -> None:
             return
         state = _read_state()
         workspace_root = Path(str(args.workspace or PROJECT_ROOT)).resolve()
-        active_electron_session = (
-            _active_electron_desktop_session_for_workspace(workspace_root)
-            if _launcher_control_healthy(port)
-            else {}
-        )
-        attached_active_electron = bool(active_electron_session)
+        active_electron_session = _active_electron_desktop_session_for_workspace(workspace_root)
+        attached_active_electron = bool(active_electron_session and _launcher_control_healthy(port))
         if attached_active_electron:
             _assert_managed_launcher_attachment(state, args=args, port=port)
             _append_log(
