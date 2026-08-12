@@ -61,7 +61,12 @@ import {
 } from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { executeApprovedDesktopShellShutdown, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
-import { decideShutdown, fetchLauncherActiveWorkStatus, type ShutdownDecision } from "./shutdown/shutdownCoordinator.js";
+import {
+  decideShutdown,
+  executeShutdownAuthorizationBoundary,
+  fetchLauncherActiveWorkStatus,
+  type ShutdownDecision
+} from "./shutdown/shutdownCoordinator.js";
 import {
   desktopSmokeSummary,
   desktopSmokeSummaryPath,
@@ -1222,90 +1227,84 @@ async function requestDesktopShellExit(
   closeReason: DesktopCloseReason = "desktop_shell_quit"
 ): Promise<ShutdownDecision> {
   return desktopLifecycleCoordinator.request(closeReason, async () => {
-    const runExit = async (): Promise<ShutdownDecision> => {
-      const ownershipMode = launcherBootstrap?.mode ?? "attached";
-      const decision = await decideShutdown({
+    const ownershipMode = launcherBootstrap?.mode ?? "attached";
+    return await executeShutdownAuthorizationBoundary({
+      authorize: async () =>
+        await decideShutdown({
         ownershipMode,
-        failOpenOnActiveWorkError: true,
         activeWorkStatus: async () => {
           if (launcherBootstrap === null) {
             return { active: false, message: "" };
           }
-          const context = await withDesktopShellExitTimeout(
-            resolveDesktopActionLoopContext(launcherBootstrap),
-            ACTIVE_WORK_STATUS_TIMEOUT_MS,
-            "resolve desktop action context for quit"
-          );
           return await withDesktopShellExitTimeout(
-            fetchLauncherActiveWorkStatus(context),
+            (async () => {
+              const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+              return await fetchLauncherActiveWorkStatus(context);
+            })(),
             ACTIVE_WORK_STATUS_TIMEOUT_MS,
-            "fetch launcher active work status"
+            "resolve launcher active work status for quit"
           );
         }
-      });
-      if (!decision.allowed) {
+      }),
+      onDenied: (decision) => {
         notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“停止全部”。", "warning");
-        return decision;
-      }
-      pendingWorkbenchCloseAck = null;
-      await executeApprovedDesktopShellShutdown({
-        decision,
-        closeDesktopSession: closeDesktopSessionIfRegistered,
-        recordEvent: async (event) => {
-          await recordElectronSupervisorEvent(launcherBootstrap, {
-            ...event,
-            fields: {
-              closeReason,
-              ownershipMode,
-              ...(event.fields ?? {})
-            }
-          });
-        },
-        stopPythonLauncher: stopOwnedPythonLauncherService,
-        approveShutdown: () => {
-          shutdownApproved = true;
-        },
-        stopDesktopActionLoop,
-        quitApp: () => {
-          app.quit();
-        },
-        stepTimeoutMs: DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS
-      });
-      return decision;
-    };
-
-    try {
-      return await withDesktopShellExitTimeout(runExit(), DESKTOP_SHELL_EXIT_BUDGET_MS, "desktop shell exit");
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(message);
-      await recordElectronSupervisorEvent(launcherBootstrap, {
-        eventCode: "electron.launcher_service.exited",
-        message: "Desktop shell exit budget exceeded; forcing Electron quit.",
-        fields: { closeReason, error: message.slice(0, 500), failOpen: true }
-      }).catch(() => undefined);
-      shutdownApproved = true;
-      pendingWorkbenchCloseAck = null;
-      // Best-effort stop owned Python before force quit so orphans are less likely.
-      try {
+      },
+      runApproved: async (decision) => {
+        pendingWorkbenchCloseAck = null;
         await withDesktopShellExitTimeout(
-          stopOwnedPythonLauncherService(),
-          Math.min(3_000, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS),
-          "stop python launcher on exit budget fail-open"
+          executeApprovedDesktopShellShutdown({
+            decision,
+            closeDesktopSession: closeDesktopSessionIfRegistered,
+            recordEvent: async (event) => {
+              await recordElectronSupervisorEvent(launcherBootstrap, {
+                ...event,
+                fields: {
+                  closeReason,
+                  ownershipMode,
+                  ...(event.fields ?? {})
+                }
+              });
+            },
+            stopPythonLauncher: stopOwnedPythonLauncherService,
+            approveShutdown: () => {
+              shutdownApproved = true;
+            },
+            stopDesktopActionLoop,
+            quitApp: () => {
+              app.quit();
+            },
+            stepTimeoutMs: DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS
+          }),
+          DESKTOP_SHELL_EXIT_BUDGET_MS,
+          "desktop shell exit"
         );
-      } catch {
-        // Fail-open: stop must not block the forced Electron quit.
+      },
+      failOpenAfterApproval: async (_decision, error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(message);
+        await recordElectronSupervisorEvent(launcherBootstrap, {
+          eventCode: "electron.launcher_service.exited",
+          message: "Desktop shell exit budget exceeded; forcing Electron quit.",
+          fields: { closeReason, error: message.slice(0, 500), failOpen: true }
+        }).catch(() => undefined);
+        shutdownApproved = true;
+        pendingWorkbenchCloseAck = null;
+        // Best-effort stop owned Python before force quit so orphans are less likely.
+        try {
+          await withDesktopShellExitTimeout(
+            stopOwnedPythonLauncherService(),
+            Math.min(3_000, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS),
+            "stop python launcher on exit budget fail-open"
+          );
+        } catch {
+          // Fail-open: stop must not block the forced Electron quit.
+        }
+        stopDesktopActionLoop();
+        desktopTray?.destroy();
+        desktopTray = null;
+        app.quit();
       }
-      stopDesktopActionLoop();
-      desktopTray?.destroy();
-      desktopTray = null;
-      app.quit();
-      return {
-        allowed: true,
-        reason: "no_active_work",
-        stopPythonLauncher: (launcherBootstrap?.mode ?? "attached") === "started"
-      };
-    }
+    });
   });
 }
 

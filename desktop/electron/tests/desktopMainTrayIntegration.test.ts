@@ -38,9 +38,9 @@ describe("Electron main tray integration", () => {
     expect(beforeQuitSource).toContain("desktopTray = null");
   });
 
-  it("fail-opens shell exit past hung close transactions and notifies on active-work denial", () => {
+  it("fails closed before authorization but fails open after shutdown was approved", () => {
     expect(mainSource).toContain("DESKTOP_SHELL_EXIT_BUDGET_MS");
-    expect(mainSource).toContain("failOpenOnActiveWorkError: true");
+    expect(mainSource).not.toContain("failOpenOnActiveWorkError: true");
     expect(mainSource).toContain("pendingWorkbenchCloseAck = null");
     expect(mainSource).toContain("forcing Electron quit");
     expect(mainSource).toContain("stopOwnedPythonLauncherService()");

@@ -14,7 +14,7 @@ def _active_electron_session() -> dict[str, str]:
 
 def test_open_workbench_uses_desktop_action_without_restarting_healthy_backend(monkeypatch):
     submitted: list[dict] = []
-    events: list[str] = []
+    events: list[tuple[str, dict]] = []
 
     monkeypatch.setattr(
         workbench_controller,
@@ -43,7 +43,7 @@ def test_open_workbench_uses_desktop_action_without_restarting_healthy_backend(m
     monkeypatch.setattr(
         workbench_controller,
         "_record_launcher_action_event",
-        lambda event_type, **_kwargs: events.append(event_type),
+        lambda event_type, **kwargs: events.append((event_type, kwargs)),
     )
 
     result = workbench_controller.run_launcher_action("internal-start")
@@ -56,12 +56,17 @@ def test_open_workbench_uses_desktop_action_without_restarting_healthy_backend(m
             "session": {"desktopSessionId": "electron-session-1"},
         }
     ]
-    assert events == [
+    assert [event_type for event_type, _payload in events] == [
         "launcher.action.requested",
         "launcher.action.electron_backend_reused",
         "launcher.action.electron_desktop_action_submitted",
         "launcher.action.completed",
+        "launcher.action.startup_summary",
     ]
+    requested_payload = next(payload for event_type, payload in events if event_type == "launcher.action.requested")
+    summary_payload = next(payload for event_type, payload in events if event_type == "launcher.action.startup_summary")
+    assert requested_payload["env"]["VIBELUTION_STARTUP_TRACE_ID"] == summary_payload["startup_trace_id"]
+    assert summary_payload["outcome"] == "succeeded"
 
 
 def test_open_workbench_starts_backend_before_desktop_action_when_not_ready(monkeypatch):
@@ -131,11 +136,16 @@ def test_first_open_uses_packaged_electron_after_headless_backend_start(monkeypa
 
     assert result.returncode == 0
     assert "--no-browser" in launcher_calls[0]["args"][0]
-    assert bootstraps == [{"env": launcher_calls[0]["kwargs"]["env"], "action": "internal-start"}]
+    assert len(bootstraps) == 1
+    assert bootstraps[0]["env"] == launcher_calls[0]["kwargs"]["env"]
+    assert bootstraps[0]["action"] == "internal-start"
+    assert bootstraps[0]["no_browser"] is True
+    assert bootstraps[0]["startup_telemetry"]["startupTraceId"].startswith("launcher-startup-")
     assert events == [
         "launcher.action.requested",
         "launcher.action.electron_first_start_succeeded",
         "launcher.action.completed",
+        "launcher.action.startup_summary",
     ]
 
 
@@ -165,6 +175,7 @@ def test_first_open_uses_edge_only_when_packaged_electron_is_missing(monkeypatch
         "launcher.action.requested",
         "launcher.action.edge_fallback_package_missing",
         "launcher.action.completed",
+        "launcher.action.startup_summary",
     ]
 
 

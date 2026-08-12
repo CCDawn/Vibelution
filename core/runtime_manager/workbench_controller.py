@@ -1355,7 +1355,6 @@ def _bootstrap_packaged_electron_workbench(
     if executable is None:
         return {}
     timings = startup_telemetry.setdefault("timingsMs", {})
-    startup_trace_id = str(startup_telemetry.get("startupTraceId") or "").strip()
     total_started = time.monotonic()
     current_stage = "electron_process_spawn"
     current_timing_key = "electronProcessSpawnMs"
@@ -1365,15 +1364,6 @@ def _bootstrap_packaged_electron_workbench(
         startup_telemetry["failureStage"] = current_stage
         process = _launch_packaged_electron_desktop(executable=executable, env=env)
         timings[current_timing_key] = _startup_elapsed_ms(stage_started)
-        _record_launcher_action_event(
-            "launcher.action.startup_stage_completed",
-            action=action,
-            no_browser=no_browser,
-            env=env,
-            duration_ms=timings[current_timing_key],
-            startup_trace_id=startup_trace_id,
-            stage=current_stage,
-        )
 
         current_stage = "desktop_session_registration"
         current_timing_key = "desktopSessionRegistrationMs"
@@ -1382,15 +1372,6 @@ def _bootstrap_packaged_electron_workbench(
         session = _await_electron_desktop_session(process)
         timings[current_timing_key] = _startup_elapsed_ms(stage_started)
         startup_telemetry["desktopSessionRegistered"] = True
-        _record_launcher_action_event(
-            "launcher.action.startup_stage_completed",
-            action=action,
-            no_browser=no_browser,
-            env=env,
-            duration_ms=timings[current_timing_key],
-            startup_trace_id=startup_trace_id,
-            stage=current_stage,
-        )
 
         current_stage = "desktop_action_submit"
         current_timing_key = "desktopActionSubmitMs"
@@ -1407,15 +1388,6 @@ def _bootstrap_packaged_electron_workbench(
                 f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
             )
         timings[current_timing_key] = _startup_elapsed_ms(stage_started)
-        _record_launcher_action_event(
-            "launcher.action.startup_stage_completed",
-            action=action,
-            no_browser=no_browser,
-            env=env,
-            duration_ms=timings[current_timing_key],
-            startup_trace_id=startup_trace_id,
-            stage=current_stage,
-        )
 
         current_stage = "workbench_window_open"
         current_timing_key = "workbenchWindowOpenMs"
@@ -1429,35 +1401,15 @@ def _bootstrap_packaged_electron_workbench(
         timings["electronFirstStartTotalMs"] = _startup_elapsed_ms(total_started)
         startup_telemetry["workbenchOpen"] = True
         startup_telemetry["failureStage"] = ""
-        _record_launcher_action_event(
-            "launcher.action.startup_stage_completed",
-            action=action,
-            no_browser=no_browser,
-            env=env,
-            duration_ms=timings[current_timing_key],
-            startup_trace_id=startup_trace_id,
-            stage=current_stage,
-        )
         return {
             "electronLaunchPid": int(process.pid),
             "desktopSessionId": str(opened_session.get("desktopSessionId") or session.get("desktopSessionId") or ""),
             "desktopSessionRevision": int(opened_session.get("revision") or 0),
         }
-    except Exception as exc:
+    except Exception:
         timings.setdefault(current_timing_key, _startup_elapsed_ms(stage_started))
         timings["electronFirstStartTotalMs"] = _startup_elapsed_ms(total_started)
         startup_telemetry["failureStage"] = current_stage
-        _record_launcher_action_event(
-            "launcher.action.startup_stage_failed",
-            action=action,
-            no_browser=no_browser,
-            env=env,
-            duration_ms=timings[current_timing_key],
-            startup_trace_id=startup_trace_id,
-            stage=current_stage,
-            error_type=type(exc).__name__,
-            message=str(exc),
-        )
         if process is not None:
             _terminate_packaged_electron_after_failed_bootstrap(process)
         raise
@@ -1700,14 +1652,6 @@ def run_launcher_action(
         startup_telemetry["timingsMs"]["launcherControlPlaneBackendReadyMs"] = _startup_elapsed_ms(
             control_plane_started
         )
-        _record_launcher_action_event(
-            "launcher.action.startup_stage_completed",
-            action=action,
-            no_browser=effective_no_browser,
-            env=env,
-            duration_ms=startup_telemetry["timingsMs"]["launcherControlPlaneBackendReadyMs"],
-            stage="launcher_control_plane_backend_ready",
-        )
         if completed.returncode == 0 and electron_window_action:
             if electron_session:
                 startup_telemetry["failureStage"] = "desktop_action_submit"
@@ -1816,7 +1760,6 @@ def _record_launcher_action_event(
     error_type: str = "",
     message: str = "",
     startup_trace_id: str = "",
-    stage: str = "",
     outcome: str = "",
     failure_stage: str = "",
     timings_ms: dict[str, Any] | None = None,
@@ -1843,8 +1786,6 @@ def _record_launcher_action_event(
     resolved_startup_trace_id = str(startup_trace_id or env.get("VIBELUTION_STARTUP_TRACE_ID") or "").strip()
     if resolved_startup_trace_id:
         payload["startupTraceId"] = truncate_event_text(resolved_startup_trace_id, limit=96)
-    if stage:
-        payload["stage"] = truncate_event_text(stage, limit=80)
     if outcome:
         payload["outcome"] = truncate_event_text(outcome, limit=32)
     if failure_stage or event_type == "launcher.action.startup_summary":
