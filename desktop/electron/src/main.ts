@@ -61,6 +61,7 @@ import {
   desktopWorkbenchCloseCanarySummaryPath
 } from "./smoke/workbenchCloseCanary.js";
 import { prepareDesktopSmokeShutdown } from "./smoke/desktopSmokeShutdown.js";
+import { createDesktopTray } from "./tray/desktopTray.js";
 import {
   closeDesktopSession,
   heartbeatDesktopSession,
@@ -89,6 +90,7 @@ let desktopSessionHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let desktopSessionHeartbeatRunning = false;
 let desktopActionContext: DesktopActionLoopContext | null = null;
 let runtimeSceneBridge: RuntimeSceneBridge | null = null;
+let desktopTray: ReturnType<typeof createDesktopTray> | null = null;
 let currentWorkbenchUrl = "";
 let desktopSessionRegistered = false;
 let desktopSessionRevision = 0;
@@ -1189,7 +1191,24 @@ app.whenReady()
     const deepLinkRegistration = registerPackagedDeepLinks(paths);
     launcherBootstrap = await bootstrapLauncherIfEnabled(paths);
     windowProvider = createWindowProvider(paths, launcherBootstrap);
+    desktopTray = createDesktopTray(paths, {
+      openLauncher: () => {
+        void windowProvider?.openLauncher().catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+      },
+      quit: () => {
+        void requestDesktopShellExit().catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+      }
+    });
     await windowProvider.openLauncher();
+    await recordElectronSupervisorEvent(launcherBootstrap, {
+      eventCode: "electron.tray.created",
+      message: "Electron system tray created.",
+      fields: { provider: "electron" }
+    });
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.launcher.supervisor.started",
       message: "Electron launcher supervisor started.",
@@ -1245,6 +1264,8 @@ app.on("open-url", (event, rawUrl) => {
 
 app.on("before-quit", (event) => {
   if (shutdownApproved) {
+    desktopTray?.destroy();
+    desktopTray = null;
     stopDesktopActionLoop();
     return;
   }
