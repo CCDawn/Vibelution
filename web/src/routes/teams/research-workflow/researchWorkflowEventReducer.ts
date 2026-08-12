@@ -44,6 +44,29 @@ export function switchFormalEventScope(
   };
 }
 
+/**
+ * Hydrate the formal event cursor from Snapshot.latestEventSequence.
+ * Does not fabricate events — only advances lastSequence so SSE afterSequence
+ * starts at latest+1 without a false gap.
+ */
+export function hydrateFormalEventFromSnapshot(
+  state: FormalEventReadModel,
+  options: {
+    teamId: string;
+    runId: string;
+    latestEventSequence: number;
+  },
+): FormalEventReadModel {
+  const latest = Number(options.latestEventSequence);
+  const lastSequence =
+    Number.isFinite(latest) && latest > 0 ? Math.floor(latest) : 0;
+  return {
+    ...emptyFormalEventReadModel(options.teamId, options.runId),
+    generation: state.generation + 1,
+    lastSequence,
+  };
+}
+
 export function applyFormalEvent(
   state: FormalEventReadModel,
   event: WorkflowEventEnvelope,

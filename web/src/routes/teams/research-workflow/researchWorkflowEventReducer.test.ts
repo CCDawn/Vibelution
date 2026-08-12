@@ -9,6 +9,7 @@ import {
   applyInitialRunEvents,
   emptyEventReadModel,
   emptyFormalEventReadModel,
+  hydrateFormalEventFromSnapshot,
   mergeEventsByIdentity,
   switchFormalEventScope,
 } from "./researchWorkflowEventReducer";
@@ -143,6 +144,27 @@ describe("formal event reducer (T6)", () => {
     ]);
     expect(state.lastSequence).toBe(2);
     expect(state.events.map((item) => item.eventId)).toEqual(["e1", "e2"]);
+  });
+
+  it("hydrates cursor from snapshot latestEventSequence without fabricating events", () => {
+    const hydrated = hydrateFormalEventFromSnapshot(
+      emptyFormalEventReadModel("team-a", "run-old"),
+      { teamId: "team-a", runId: "run-a", latestEventSequence: 7 },
+    );
+    expect(hydrated.runId).toBe("run-a");
+    expect(hydrated.lastSequence).toBe(7);
+    expect(hydrated.events).toEqual([]);
+    const next = applyFormalEvent(
+      hydrated,
+      evt({ eventId: "e8", sequence: 8 }),
+    );
+    expect(next.resyncRequired).toBe(false);
+    expect(next.lastSequence).toBe(8);
+    const gap = applyFormalEvent(
+      hydrated,
+      evt({ eventId: "e10", sequence: 10 }),
+    );
+    expect(gap.resyncRequired).toBe(true);
   });
 });
 
