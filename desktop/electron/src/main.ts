@@ -1360,7 +1360,7 @@ async function requestDesktopShellExit(
           // Fail-open: stop must not block the forced Electron quit.
         }
         stopDesktopActionLoop();
-        releaseElectronDesktopShellOwner(paths.workspaceRoot);
+        releaseElectronDesktopShellOwner(createDesktopPathsForApp().workspaceRoot);
         desktopTray?.destroy();
         desktopTray = null;
         app.quit();
