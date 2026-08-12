@@ -219,3 +219,47 @@ def test_launcher_state_records_workspace_identity_for_future_attach(tmp_path, m
     )
 
     assert writes[-1]["runtimeProjectRoot"] == str(desktop_entry.PROJECT_ROOT)
+
+
+def test_workbench_port_prefers_ports_json_over_config(monkeypatch, tmp_path):
+    ports_dir = tmp_path / ".runtime" / "launcher"
+    ports_dir.mkdir(parents=True)
+    (ports_dir / "ports.json").write_text('{"backendPort": 8002}', encoding="utf-8")
+
+    monkeypatch.setattr(desktop_entry, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("VIBELUTION_PORT", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_BACKEND_PORT", raising=False)
+    monkeypatch.setattr(
+        desktop_entry,
+        "_config_section",
+        lambda name: {"backend_port": 8000} if name == "workbench" else {},
+    )
+
+    assert desktop_entry._workbench_port() == 8002
+
+
+def test_bootstrap_workbench_url_falls_back_to_workbench_port(monkeypatch):
+    states = iter(
+        [
+            {"launcherBackendPid": 0},
+            {
+                "launcherBackendPid": 0,
+                "launcherControlPort": 8765,
+                "sessionId": "launcher-session",
+                "url": "",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(desktop_entry, "_read_state", lambda: next(states))
+    monkeypatch.setattr(desktop_entry, "_open_launcher", lambda args: None)
+    monkeypatch.setattr(desktop_entry, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(desktop_entry, "_launcher_control_url", lambda port: "http://127.0.0.1:8765/launcher")
+    monkeypatch.setattr(desktop_entry, "_launcher_control_healthy", lambda port: True)
+    monkeypatch.setattr(desktop_entry, "_workbench_port", lambda: 8002)
+
+    result = desktop_entry._bootstrap_launcher(
+        argparse.Namespace(workspace="", config="", no_browser=True, python_exe="")
+    )
+
+    assert result["workbenchUrl"] == "http://127.0.0.1:8002"
