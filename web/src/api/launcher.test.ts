@@ -5,6 +5,7 @@ import {
   cancelRuntimeLifecycleCommand,
   forceStopLauncherBundle,
   getLauncherBranchInstances,
+  requestBranchInstanceCleanup,
   requestBranchInstanceLifecycle,
   getLauncherStatus,
   getRuntimeSummary,
@@ -116,6 +117,41 @@ describe("launcher api helpers", () => {
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
     expect(requestInit.body).toBe(JSON.stringify({ instanceId: "worktree:task" }));
+  });
+
+  it("confirms selected branch-instance cleanup through the guarded launcher endpoint", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/launcher",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          cleaned: [{ id: "branch:codex/task", actions: ["branch_deleted"] }],
+          failed: [],
+          skipped: [],
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await requestBranchInstanceCleanup(["branch:codex/task"], true);
+
+    expect(payload.ok).toBe(true);
+    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/branch-instances/cleanup");
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(requestInit.method).toBe("POST");
+    expect(requestInit.body).toBe(JSON.stringify({ instanceIds: ["branch:codex/task"], confirm: true }));
   });
 
   it("fetches the workbench runtime summary directly instead of through launcher control", async () => {

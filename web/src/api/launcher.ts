@@ -83,6 +83,32 @@ export type LauncherBranchInstance = {
     manager: number;
   };
   promotable: boolean;
+  mergedToMain?: boolean;
+  cleanupEligible?: boolean;
+  cleanupRisks?: string[];
+};
+
+export type LauncherBranchInstanceCleanupResult = {
+  id: string;
+  branch?: string;
+  shortName?: string;
+  path?: string;
+  actions?: string[];
+};
+
+export type LauncherBranchInstanceCleanupIssue = {
+  id: string;
+  code: string;
+  message: string;
+  branch?: string;
+  shortName?: string;
+};
+
+export type LauncherBranchInstanceCleanupResponse = {
+  ok: boolean;
+  cleaned: LauncherBranchInstanceCleanupResult[];
+  failed: LauncherBranchInstanceCleanupIssue[];
+  skipped: LauncherBranchInstanceCleanupIssue[];
 };
 
 export type LauncherBranchInstances = {
@@ -216,6 +242,14 @@ export function requestBranchInstanceLifecycle(
     method: "POST",
     headers,
     body: JSON.stringify({ instanceId }),
+  });
+}
+
+export function requestBranchInstanceCleanup(instanceIds: string[], confirm: boolean) {
+  return fetchLauncherJson<LauncherBranchInstanceCleanupResponse>("branch-instances/cleanup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instanceIds, confirm }),
   });
 }
 

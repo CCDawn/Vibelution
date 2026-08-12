@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from core.launcher.api_contract import (
+    BranchInstanceCleanupPayload,
     BranchInstanceLifecyclePayload,
     DesktopActionClaimPayload,
     DesktopActionResultPayload,
@@ -127,6 +128,20 @@ def launcher_branch_instance_force_stop(payload: BranchInstanceLifecyclePayload,
 @router.post("/launcher/branch-instances/restart", status_code=202)
 def launcher_branch_instance_restart(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
     return _branch_instance_lifecycle_response(payload, "restart", request)
+
+
+@router.post("/launcher/branch-instances/cleanup")
+def launcher_branch_instances_cleanup(payload: BranchInstanceCleanupPayload) -> dict:
+    try:
+        return launcher_service.cleanup_launcher_branch_instances(
+            payload.instanceIds,
+            confirm=payload.confirm,
+        )
+    except launcher_service.BranchInstanceCleanupError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
 
 
 @router.get("/launcher/settings/workbench-window")

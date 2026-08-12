@@ -8,9 +8,11 @@ depending on ``core.web.services.runtime_service``.
 from __future__ import annotations
 
 from core.launcher.service import (
+    BranchInstanceCleanupError,
     LauncherActiveWorkBlocked,
     LauncherCommandResponse,
     LauncherSupervisorCommandResponse,
+    cleanup_launcher_branch_instances,
     get_launcher_status,
     launcher_active_work_runs,
     list_launcher_branch_instances,
@@ -22,9 +24,11 @@ from core.launcher.service import (
 )
 
 __all__ = [
+    "BranchInstanceCleanupError",
     "LauncherActiveWorkBlocked",
     "LauncherCommandResponse",
     "LauncherSupervisorCommandResponse",
+    "cleanup_launcher_branch_instances",
     "get_launcher_status",
     "launcher_active_work_runs",
     "list_launcher_branch_instances",
