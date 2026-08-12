@@ -85,6 +85,19 @@ _ATTEMPT_CREATING_COMMANDS = frozenset(
     {WorkflowCommandKind.START_NODE, WorkflowCommandKind.RETRY_NODE}
 )
 
+# 高影响命令：必须由服务端可验证的 operator 身份执行（P1-6）。
+_OPERATOR_ONLY_COMMANDS = frozenset(
+    {
+        WorkflowCommandKind.CANCEL_NODE,
+        WorkflowCommandKind.CANCEL_RUN,
+        WorkflowCommandKind.REBIND_NODE,
+        WorkflowCommandKind.EXTEND_BUDGET,
+        WorkflowCommandKind.RESOLVE_HUMAN_TASK,
+        WorkflowCommandKind.FORK_REVISION,
+        WorkflowCommandKind.RECONCILE_RUN,
+    }
+)
+
 
 class WorkflowCommandService:
     def __init__(
@@ -110,6 +123,7 @@ class WorkflowCommandService:
             WorkflowCommandKind.EXTEND_BUDGET: self._handle_extend_budget,
             WorkflowCommandKind.RECONCILE_RUN: self._handle_reconcile_run,
             WorkflowCommandKind.REBIND_NODE: self._handle_rebind_node,
+            WorkflowCommandKind.FORK_REVISION: self._handle_fork_revision,
         }
 
     # ------------------------------------------------------------ public
@@ -138,6 +152,9 @@ class WorkflowCommandService:
                 f"expected {request.expected_run_version}, current {run.run_version}"
             )
 
+        if request.command in _OPERATOR_ONLY_COMMANDS:
+            self._authorize_operator(request)
+
         handler = self._handlers.get(request.command)
         if handler is None:
             raise WorkflowCommandError(
@@ -162,6 +179,20 @@ class WorkflowCommandService:
             force_flush=True,
         )
         return future.result(timeout=30)
+
+    def _authorize_operator(self, request: CommandRequest) -> None:
+        """Server-side operator authorization for high-impact commands.
+
+        The request must carry a verifiable operator identity; the frozen
+        command contract never trusts a raw client string for control actions.
+        """
+        actor = request.requested_by
+        actor_type = str(getattr(actor, "actor_type", "") or "").lower()
+        actor_id = str(getattr(actor, "actor_id", "") or "").strip()
+        if actor_type not in ("operator", "user"):
+            raise CommandForbiddenError("command requires an operator identity")
+        if not actor_id:
+            raise CommandForbiddenError("command requires a non-empty operator id")
 
     def _replay(self, existing: Any, request_hash: str) -> CommandReceipt:
         if existing.request_hash != request_hash:
@@ -432,7 +463,28 @@ class WorkflowCommandService:
         # 人工决策后通过正式 graph resume 推进（T5 契约：Human 节点可恢复）。
         attempt = uow.repository.get_attempt(str(row[2]))
         pending_action_id = attempt.pending_action_id if attempt else None
-        if pending_action_id:
+        if decision == "revise":
+            # revise：不把决策压成 failed receipt，而是 fork 新 Run
+            # （spec 8.4 revision fork；父 Run 保持 lineage）。
+            parent_run = uow.repository.get_run(request.run_id)
+            from_node_id = str(
+                request.payload.get("fromNodeId") or request.node_id or ""
+            )
+            if parent_run is None or not from_node_id:
+                raise WorkflowCommandError(
+                    "revise 决策需要 fromNodeId 且父 run 存在"
+                )
+            self._create_revision_fork(
+                uow,
+                parent=parent_run,
+                from_node_id=from_node_id,
+                reason=str(request.payload.get("reason") or "revise protocol"),
+                checkpoint_id=str(request.payload.get("checkpointId") or ""),
+                requested_by=request.requested_by,
+                command_id=command_id,
+                now_ms=now_ms,
+            )
+        elif pending_action_id:
             from core.research.workflow.contracts import ExecutionReceipt
 
             receipt = ExecutionReceipt(
@@ -567,6 +619,194 @@ class WorkflowCommandService:
             )
         )
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
+
+    def _handle_fork_revision(
+        self, uow, request: CommandRequest, request_hash: str
+    ) -> CommandReceipt:
+        from_node_id = str(request.payload.get("fromNodeId") or "")
+        reason = str(request.payload.get("reason") or "")
+        if not from_node_id:
+            raise WorkflowCommandError("fork_revision 需要 fromNodeId（实验设计节点）")
+        if not reason:
+            raise WorkflowCommandError("fork_revision 需要 reason")
+        # fromNodeId 必须属于实验设计阶段（revision 只从实验设计分支）。
+        from core.research.workflow.definition import (
+            build_challenge_cup_workflow_definition,
+        )
+        from core.research.workflow.models import WorkflowStageId
+
+        definition = build_challenge_cup_workflow_definition()
+        node_spec = next(
+            (n for n in definition.nodes if n.nodeId == from_node_id), None
+        )
+        if node_spec is None:
+            raise WorkflowCommandError(f"unknown fromNodeId: {from_node_id}")
+        if node_spec.stageId not in (
+            WorkflowStageId.EXPERIMENT_DESIGN,
+            WorkflowStageId.KNOWLEDGE_COLLECTION,
+        ):
+            raise WorkflowCommandError("fork_revision 只能从知识/实验设计节点分支")
+
+        parent = uow.repository.get_run(request.run_id)
+        if parent is None:
+            raise RunNotFoundError(request.run_id)
+        if parent.status in ("succeeded", "failed", "cancelled", "archived"):
+            raise WorkflowCommandError("terminal run 不能 fork revision")
+
+        now_ms = self._clock()
+        command_id = new_id("cmd")
+        event_count = 2
+        bumped = _bump(uow, request, event_count=event_count, now_ms=now_ms)
+        accepted_version, sequence = bumped
+
+        # 新 command 属于父 run（谱系：revision fork 的驱动命令挂在父上）。
+        # 必须先插入 command，child attempt/outbox 才能引用它（FK）。
+        uow.repository.insert_command(
+            _command_record(
+                command_id=command_id,
+                request=request,
+                request_hash=request_hash,
+                accepted_run_version=accepted_version,
+                now_ms=now_ms,
+            )
+        )
+
+        child_run_id = self._create_revision_fork(
+            uow,
+            parent=parent,
+            from_node_id=from_node_id,
+            reason=reason,
+            checkpoint_id=str(request.payload.get("checkpointId") or ""),
+            requested_by=request.requested_by,
+            command_id=command_id,
+            now_ms=now_ms,
+        )
+
+        uow.repository.insert_event(
+            _event_record(
+                run_id=request.run_id,
+                sequence=sequence - 1,
+                event_id=new_id("evt"),
+                run_version=accepted_version,
+                event_type="revision_forked",
+                correlation_id=request.idempotency_key,
+                payload={
+                    "commandId": command_id,
+                    "childRunId": child_run_id,
+                    "fromNodeId": from_node_id,
+                    "reason": reason,
+                    "requestedBy": request.requested_by.to_dict(),
+                },
+                now_ms=now_ms,
+            )
+        )
+        uow.repository.insert_event(
+            _event_record(
+                run_id=request.run_id,
+                sequence=sequence,
+                event_id=new_id("evt"),
+                run_version=accepted_version,
+                event_type="command_accepted",
+                correlation_id=request.idempotency_key,
+                payload={
+                    "commandId": command_id,
+                    "nodeId": from_node_id,
+                    "expectedRunVersion": request.expected_run_version,
+                    "acceptedRunVersion": accepted_version,
+                    "forkOf": request.run_id,
+                },
+                now_ms=now_ms,
+            )
+        )
+        uow.after_commit(self._wake_worker)
+        return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
+
+    def _create_revision_fork(
+        self,
+        uow,
+        *,
+        parent: Any,
+        from_node_id: str,
+        reason: str,
+        checkpoint_id: str,
+        requested_by: Any,
+        command_id: str,
+        now_ms: int,
+    ) -> str:
+        """Create the child revision run (parent lineage) in the same transaction.
+
+        Pure child creation: no runVersion bump, no command, no event — the
+        caller owns those. Used by fork_revision and by human revise decisions.
+        """
+        from core.research.workflow.ledger import RunRecord
+
+        child_run_id = new_id("run")
+        child_thread_id = f"thread-{child_run_id}"
+        input_snapshot = {}
+        if parent.input_snapshot_json:
+            try:
+                input_snapshot = json.loads(parent.input_snapshot_json)
+            except (TypeError, ValueError):
+                input_snapshot = {}
+        input_snapshot = dict(input_snapshot)
+
+        child = RunRecord(
+            run_id=child_run_id,
+            team_id=parent.team_id,
+            workflow_id=parent.workflow_id,
+            workflow_version_id=parent.workflow_version_id,
+            thread_id=child_thread_id,
+            project_id=parent.project_id,
+            question_id=parent.question_id,
+            status="created",
+            run_version=1,
+            last_event_sequence=0,
+            input_snapshot_json=json.dumps(input_snapshot, ensure_ascii=False),
+            input_snapshot_hash=parent.input_snapshot_hash,
+            safety_limits_json=parent.safety_limits_json,
+            binding_snapshot_set_id=parent.binding_snapshot_set_id,
+            active_node_id=from_node_id,
+            parent_run_id=parent.run_id,
+            forked_from_checkpoint_id=checkpoint_id or None,
+            completion_kind="revision_fork",
+            terminal_reason=reason,
+            blocked_problem_json=None,
+            created_at_ms=now_ms,
+            updated_at_ms=now_ms,
+            completed_at_ms=None,
+        )
+        uow.repository.insert_run(child)
+
+        node_run_id = f"nr-{child_run_id}-{from_node_id}-a1"
+        child_attempt = _node_attempt_for_dispatch(
+            node_run_id=node_run_id,
+            run_id=child_run_id,
+            node_id=from_node_id,
+            attempt=1,
+            binding_snapshot_id=None,
+        )
+        uow.repository.insert_attempt(
+            _attempt_record(
+                node_run_id=node_run_id,
+                run_id=child_run_id,
+                node_id=from_node_id,
+                attempt=1,
+                status=NodeAttemptStatus.STARTING.value,
+                command_id=command_id,
+                input_snapshot_hash=parent.input_snapshot_hash,
+                started_at_ms=now_ms,
+            )
+        )
+        uow.repository.insert_outbox(
+            _graph_dispatch_record(
+                uow=uow,
+                run=child,
+                attempt=child_attempt,
+                command_id=command_id,
+                now_ms=now_ms,
+            )
+        )
+        return child_run_id
 
 
 def _bump(uow, request: CommandRequest, *, event_count: int, now_ms: int) -> tuple[int, int]:
