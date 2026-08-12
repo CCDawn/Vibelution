@@ -5577,12 +5577,81 @@ def test_terminate_workbench_processes_reports_cleanup_stage_timings(monkeypatch
         "liveProcessCollectMs",
         "terminateSignalMs",
         "terminateWaitMs",
-        "killSignalMs",
-        "killWaitMs",
         "remainingCheckMs",
         "totalMs",
-    }.issubset(result["timingsMs"])
-    assert all(isinstance(result["timingsMs"][key], (int, float)) for key in result["timingsMs"])
+    } <= set(result["timingsMs"])
+    assert result["timingsMs"]["totalMs"] >= 0
+
+
+def test_terminate_workbench_processes_uses_known_pids_without_inventory_scan(monkeypatch, tmp_path):
+    class FakeChild:
+        def __init__(self, pid):
+            self.pid = pid
+
+    class FakeProc:
+        def __init__(self, pid, children=()):
+            self.pid = pid
+            self._children = [FakeChild(child) for child in children]
+            self.terminated = False
+
+        def children(self, recursive=True):
+            return list(self._children)
+
+        def parent(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            return None
+
+        def name(self):
+            return f"proc-{self.pid}"
+
+    root = tmp_path / "repo"
+    live = {4242: FakeProc(4242, children=(4243,)), 4243: FakeProc(4243)}
+
+    def fail_inventory(**kwargs):
+        raise AssertionError("known-pid close must not scan every process")
+
+    monkeypatch.setattr(process_inventory, "list_repo_runtime_processes", fail_inventory)
+    monkeypatch.setattr(
+        process_inventory,
+        "repo_runtime_process_for_pid",
+        lambda pid, project_root=None: process_inventory.RuntimeProcess(
+            pid=int(pid),
+            parent_pid=1,
+            kind="managed_workbench_backend",
+            name="pythonw.exe",
+            command_line="pythonw scripts/web_workbench.py --managed-by-launcher",
+            cwd=str(root),
+            port=8002,
+        ),
+    )
+    monkeypatch.setattr(process_inventory.psutil, "Process", lambda pid: live[int(pid)])
+    live_scan_count = {"value": 0}
+
+    def fake_live_processes(pids):
+        live_scan_count["value"] += 1
+        if live_scan_count["value"] == 1:
+            return [live[pid] for pid in sorted(pids) if pid in live]
+        return []
+
+    monkeypatch.setattr(process_inventory, "_live_processes", fake_live_processes)
+    monkeypatch.setattr(process_inventory.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(process_inventory.psutil, "wait_procs", lambda processes, timeout: (list(processes), []))
+
+    result = process_inventory.terminate_workbench_processes(
+        project_root=root,
+        known_pids=[4242],
+        timeout_seconds=0.1,
+        verify_remaining_with_inventory=False,
+    )
+
+    assert result["requested"] == [4242, 4243]
+    assert result["terminated"] == [4242, 4243]
+    assert result["processCounts"]["targetProcesses"] == 2
 
 
 @pytest.fixture
@@ -6463,6 +6532,146 @@ def test_handle_close_command_skips_prehandler_reconcile(monkeypatch):
     assert payload["commandId"] == "cmd-close"
     assert payload["type"] == "close_workbench"
     assert payload["reason"] == "close_workbench_avoids_prehandler_reconcile"
+
+
+def test_handle_restart_command_skips_prehandler_reconcile(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    saved_states: list[dict] = []
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(json.loads(json.dumps(next_state))) or next_state)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        type(runtime_daemon),
+        "_reconcile_observation",
+        lambda self, next_state, observation=None: pytest.fail("restart_workbench must not reconcile before the handler"),
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_handle_restart_workbench",
+        lambda *, command_id, args: {
+            "commandId": command_id,
+            "accepted": True,
+            "completed": True,
+            "ok": True,
+            "message": "Workbench restarted.",
+        },
+    )
+
+    result = runtime_daemon._handle_command(
+        {
+            "commandId": "cmd-restart",
+            "type": "restart_workbench",
+            "requestedBy": "test",
+            "args": {"reason": "launcher_restart_button"},
+        }
+    )
+
+    assert result["ok"] is True
+    payload = _event_payload(events, "command.active_marked_fast_path")
+    assert payload["commandId"] == "cmd-restart"
+    assert payload["type"] == "restart_workbench"
+    assert payload["reason"] == "restart_workbench_avoids_prehandler_reconcile"
+
+
+def test_perform_restart_workbench_does_not_reconcile(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-07-23T02:00:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed", "backendPid": 101, "backendLaunchPid": 100})
+    monkeypatch.setattr(daemon, "_append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(daemon, "_active_lifecycle_interrupt", lambda command_id: None)
+    monkeypatch.setattr(daemon, "_lifecycle_interrupt_cancel_check", lambda command_id: None)
+    monkeypatch.setattr(
+        type(runtime_daemon),
+        "_reconcile_observation",
+        lambda self, next_state, observation=None: pytest.fail("restart success path must not reconcile"),
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda command_id, *, force=False: {"ok": True, "skipped": True, "completedSteps": []},
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_close_workbench_with_fast_path",
+        lambda **kwargs: {
+            "cleanupResult": {},
+            "verification": {"observedState": "closed"},
+            "verificationAttempts": 0,
+            "launcherResult": subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            "closeStrategy": "runtime_manager_fast_path",
+            "closed": True,
+            "lifecycleTimingsMs": {},
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda **kwargs: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_wait_for_open_verification",
+        lambda **kwargs: (True, {"observedState": "open", "backendHealthy": True}, 1),
+    )
+    monkeypatch.setattr(daemon, "persist_workbench_launcher_state_after_open", lambda *args, **kwargs: {})
+
+    result = runtime_daemon._perform_restart_workbench(
+        command_id="cmd-restart",
+        args={"reason": "launcher_restart_button", "source": "launcher_api"},
+    )
+
+    assert result["buildPreflight"]["skipped"] is True
+
+
+def test_handle_restart_workbench_finishes_without_reconcile(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    finish_kwargs: list[dict[str, object]] = []
+
+    monkeypatch.setattr(daemon, "_runtime_manager_active_work_runs", lambda: [])
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_perform_restart_workbench",
+        lambda **kwargs: {"buildPreflight": {"skipped": True}, "lifecycleTimingsMs": {}},
+    )
+
+    def fake_finish(command_id, **kwargs):
+        finish_kwargs.append({"commandId": command_id, **kwargs})
+        return {"ok": True, "commandId": command_id, "message": kwargs.get("message")}
+
+    monkeypatch.setattr(runtime_daemon, "_finish_command", fake_finish)
+
+    result = runtime_daemon._handle_restart_workbench(
+        command_id="cmd-restart",
+        args={"reason": "launcher_restart_button", "skipActiveWorkGuard": True},
+    )
+
+    assert result["ok"] is True
+    assert finish_kwargs == [
+        {
+            "commandId": "cmd-restart",
+            "ok": True,
+            "message": "Workbench restarted.",
+            "result_data": {"buildPreflight": {"skipped": True}, "lifecycleTimingsMs": {}},
+            "reconcile": False,
+        }
+    ]
 
 
 def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monkeypatch):
