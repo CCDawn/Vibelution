@@ -181,18 +181,22 @@ class WorkflowCommandService:
         return future.result(timeout=30)
 
     def _authorize_operator(self, request: CommandRequest) -> None:
-        """Server-side operator authorization for high-impact commands.
+        """Authorize high-impact commands from server request context only.
 
-        The request must carry a verifiable operator identity; the frozen
-        command contract never trusts a raw client string for control actions.
+        Client body ``requestedBy`` must never self-declare operator authority.
         """
+        from .operator_authorization import current_server_operator
+
+        context = current_server_operator()
+        if context is None or not context.operator_id:
+            raise CommandForbiddenError("command_forbidden")
+        # Body may carry a display actor, but a forged operator id that disagrees
+        # with the server context is rejected.
         actor = request.requested_by
-        actor_type = str(getattr(actor, "actor_type", "") or "").lower()
-        actor_id = str(getattr(actor, "actor_id", "") or "").strip()
-        if actor_type not in ("operator", "user"):
-            raise CommandForbiddenError("command requires an operator identity")
-        if not actor_id:
-            raise CommandForbiddenError("command requires a non-empty operator id")
+        body_type = str(getattr(actor, "actor_type", "") or "").lower()
+        body_id = str(getattr(actor, "actor_id", "") or "").strip()
+        if body_type in {"operator", "user"} and body_id and body_id != context.operator_id:
+            raise CommandForbiddenError("command_forbidden")
 
     def _replay(self, existing: Any, request_hash: str) -> CommandReceipt:
         if existing.request_hash != request_hash:
