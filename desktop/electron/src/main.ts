@@ -200,11 +200,6 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       createWorkbenchWindow,
       reportState: (state) => reportManagedWindowState(paths, bootstrap, state),
       shouldInterceptLauncherClose: () => !shutdownApproved,
-      onLauncherCloseRequest: () => {
-        void requestDesktopShellExit().catch((error: unknown) => {
-          console.warn(error instanceof Error ? error.message : String(error));
-        });
-      },
       shouldInterceptWorkbenchClose: () => true,
       onWorkbenchCloseRequest: () =>
         requestTransactionalWorkbenchClose(paths, bootstrap).catch((error: unknown) =>
@@ -1194,11 +1189,6 @@ app.whenReady()
     desktopTray = createDesktopTray(paths, {
       openLauncher: () => {
         void windowProvider?.openLauncher().catch((error: unknown) => {
-          console.warn(error instanceof Error ? error.message : String(error));
-        });
-      },
-      quit: () => {
-        void requestDesktopShellExit().catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
         });
       }

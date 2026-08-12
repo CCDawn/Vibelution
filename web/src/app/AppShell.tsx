@@ -64,7 +64,6 @@ import {
 import { startWorkbenchUiPreferencesSync } from "./workbenchUiPreferencesSync";
 import { startWorkbenchWindowMemory } from "./workbenchWindowMemory";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
-import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
 import {
   appendReturnNavigationEntry,
   consumeReturnNavigationTarget,
@@ -96,10 +95,6 @@ import { VIconButton } from "../components/vui/primitives/VIconButton";
 import { VPopover } from "../components/vui/primitives/VPopover";
 import { VRouteLinkButton } from "../components/vui/primitives/VRouteLinkButton";
 import { VStatusChip, type VStatusTone } from "../components/vui";
-import {
-  VWorkbenchPowerMenu,
-  type VWorkbenchPowerMenuAction,
-} from "../components/vui/product/workbench-shell";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
@@ -720,7 +715,6 @@ export function AppShell() {
   const [lifecycleCommandId, setLifecycleCommandId] = useState("");
   const [lifecycleCancelPending, setLifecycleCancelPending] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
-  const [lifecycleMenuOpen, setLifecycleMenuOpen] = useState(false);
   const [statusGuideOpen, setStatusGuideOpen] = useState(false);
   const topBarMode = useShellStore((state) => state.topBarMode);
   const setTopBarMode = useShellStore((state) => state.setTopBarMode);
@@ -855,10 +849,6 @@ export function AppShell() {
   const supervisedEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "supervised_evolution");
   const selfEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "self_evolution");
   const refreshFrontendLabel = lang === "en" ? "Refresh frontend" : "刷新前端";
-  const lifecycleMenuLabel = lang === "en" ? "Workbench power actions" : "工作台电源操作";
-  const closeWorkbenchLabel = lang === "en" ? "Stop workbench" : "停止工作台";
-  const forceCloseWorkbenchLabel = lang === "en" ? "Force stop" : "强制停止";
-  const restartWorkbenchLabel = lang === "en" ? "Restart workbench" : "重启工作台";
   const hideTopBarLabel = lang === "en" ? "Hide top bar" : "隐藏顶部栏";
   const showTopBarLabel = lang === "en" ? "Show top bar" : "显示顶部栏";
   const cancelShutdownLabel = lang === "en" ? "Cancel close" : "取消关闭";
@@ -984,11 +974,6 @@ export function AppShell() {
     runtimeSummaryUnavailable: runtimeQuery.isError || runtimeQuery.isRefetchError,
     workbench,
   });
-  const forceCloseVisible =
-    runtimeControllerState === "failed"
-    || shutdownInFlight
-    || String(workbench?.observedState ?? "").toLowerCase() === "open"
-    || String(workbench?.lifecycleConsistency ?? "").toLowerCase() !== "consistent";
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
   // Human-readable only (no raw session ids). Used for shutdown/restart copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
@@ -2669,76 +2654,6 @@ export function AppShell() {
             title={hideTopBarLabel}
             icon={<PanelTopClose size={16} />}
             onPress={() => setTopBarMode("hidden")}
-          />
-          <VWorkbenchPowerMenu
-            open={lifecycleMenuOpen}
-            onOpenChange={setLifecycleMenuOpen}
-            variant="icon"
-            labels={{
-              menu: lifecycleMenuLabel,
-              restart: restartWorkbenchLabel,
-              stop: closeWorkbenchLabel,
-              forceStop: forceCloseWorkbenchLabel,
-            }}
-            disabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
-            restartDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
-            stopDisabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
-            forceStopDisabled={restartRequested}
-            showForceStop={forceCloseVisible}
-            triggerClassName={styles.actionIconButton}
-            contentClassName={styles.lifecycleMenuPanel}
-            itemClassName={styles.lifecycleMenuItem}
-            dangerItemClassName={styles.lifecycleMenuDangerItem}
-            clusterClassName={styles.lifecycleMenuCluster}
-            clusterOpenClassName={styles.lifecycleMenuClusterOpen}
-            onAction={(action: VWorkbenchPowerMenuAction) => {
-              if (action === "stop") {
-                const proceed = () => {
-                  void beginShutdown();
-                };
-                if (requestWorkbenchExitGuard("shutdown", proceed)) {
-                  proceed();
-                }
-                return;
-              }
-              if (action === "force-stop") {
-                void beginForceShutdown();
-                return;
-              }
-              const proceed = () => {
-                if (activeWorkIndicator) {
-                  setShutdownOpen(true);
-                  setShutdownSettled(false);
-                  setShutdownRequested(false);
-                  setRestartRequested(false);
-                  setLifecycleAction("restart");
-                  setLifecycleCommandId("");
-                  setLifecycleCancelPending(false);
-                  setShutdownTitle(restartHeading);
-                  setShutdownDetail(restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle));
-                  emitBrowserTelemetry(
-                    {
-                      phase: "restart",
-                      eventCode: "browser.user_action.restart_blocked_active_work",
-                      message: "Restart was blocked because active work is running.",
-                      level: "warning",
-                      fields: {
-                        action: "restart",
-                        source: "app_shell",
-                        activeWorkCount: activeWorkIndicator.count,
-                        activeWorkKinds: activeWorkIndicator.items.map((item) => item.kind),
-                      },
-                    },
-                    { preferBeacon: true },
-                  );
-                  return;
-                }
-                void beginRestart();
-              };
-              if (requestWorkbenchExitGuard("restart", proceed)) {
-                proceed();
-              }
-            }}
           />
           <VRouteLinkButton
             to="/config"

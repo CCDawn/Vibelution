@@ -24,6 +24,12 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("function closeTransactionIdFromDesktopAction(");
     expect(source).toContain("await provider.approveWorkbenchCloseOnce()");
     expect(source).toContain("buttons: [\"重试\", \"取消\"]");
+    const providerStart = source.indexOf("function createWindowProvider(");
+    const providerEnd = source.indexOf("\nfunction createConversationBadgeIcon", providerStart);
+    const providerSource = source.slice(providerStart, providerEnd);
+    expect(providerSource).toContain("requestTransactionalWorkbenchClose(paths, bootstrap)");
+    expect(providerSource).not.toContain('requestDesktopShellExit("workbench_window_close")');
+    expect(source).toContain("targetSessionId !== desktopSessionId");
   });
 
   it("waits from Launcher transaction metadata and acknowledges only after the window closed callback", () => {
