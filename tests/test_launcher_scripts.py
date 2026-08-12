@@ -716,7 +716,7 @@ def test_python_launcher_start_launches_backend_with_project_venv_python(monkeyp
     monkeypatch.setattr(launcher, "_preserved_launcher_control_state", lambda state: {})
     monkeypatch.setattr(launcher, "_retire_project_workbench_instance", lambda state, port=None: [])
     monkeypatch.setattr(launcher, "_resolve_start_backend_port", lambda port, host: (8000, ""))
-    monkeypatch.setattr(launcher, "_ensure_frontend_build", lambda identity: {})
+    monkeypatch.setattr(launcher, "_ensure_frontend_build", lambda identity, **kwargs: {})
     monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: source_identity)
     monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity, light=False: identity)
     monkeypatch.setattr(
@@ -1043,7 +1043,16 @@ def test_python_launcher_start_retires_previous_handles_before_spawn(monkeypatch
         "allowDirty": False,
         "ignoredUserSceneEntries": [],
     })
-    monkeypatch.setattr(launcher, "_ensure_frontend_build", lambda identity: {"rebuilt": False, "sourceCommit": "a" * 40, "frontendTree": "tree", "builtFromCommit": "a" * 40})
+    monkeypatch.setattr(
+        launcher,
+        "_ensure_frontend_build",
+        lambda identity, **kwargs: {
+            "rebuilt": False,
+            "sourceCommit": "a" * 40,
+            "frontendTree": "tree",
+            "builtFromCommit": "a" * 40,
+        },
+    )
     monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity, light=False: identity)
     monkeypatch.setattr(launcher, "_start_runtime_scene", lambda trigger: {
         "runtimeSceneId": "scene",
@@ -1330,6 +1339,176 @@ def test_python_launcher_reattests_reused_build_for_current_matching_tree(monkey
     assert result["reusedArtifactFromCommit"] == "1" * 40
     assert result["rebuilt"] is False
     assert result["lastValidatedCommit"] == "2" * 40
+
+
+def test_python_launcher_start_reuses_existing_dist_even_when_sources_are_newer(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    web_dir = tmp_path / "web"
+    source = web_dir / "src" / "App.tsx"
+    dist_index = web_dir / "dist" / "index.html"
+    provenance_path = web_dir / "dist" / launcher.FRONTEND_BUILD_PROVENANCE_NAME
+    node_modules = web_dir / "node_modules"
+    source.parent.mkdir(parents=True)
+    dist_index.parent.mkdir(parents=True)
+    node_modules.mkdir(parents=True)
+    source.write_text("export {};", encoding="utf-8")
+    dist_index.write_text("<html>current</html>", encoding="utf-8")
+    provenance_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "sourceCommit": "1" * 40,
+                "frontendTree": "tree-old",
+                "builtFromCommit": "1" * 40,
+            }
+        ),
+        encoding="utf-8",
+    )
+    now = time.time()
+    os.utime(dist_index, (now - 10, now - 10))
+    os.utime(source, (now, now))
+    commands: list[tuple[list[str], str]] = []
+    source_identity = {
+        "projectRoot": str(tmp_path.resolve()),
+        "branch": "main",
+        "commit": "2" * 40,
+        "frontendTree": "tree-new",
+        "trackedClean": True,
+    }
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher, "_frontend_package_manager", lambda: "npm")
+    monkeypatch.setattr(
+        launcher,
+        "_frontend_build_commands",
+        lambda package_manager, directory: [(["npm", "run", "build"], "npm build")],
+    )
+    monkeypatch.setattr(launcher, "_run_checked", lambda args, cwd, label: commands.append((args, label)))
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+
+    result = launcher._ensure_frontend_build(source_identity, require_current=False)
+
+    assert commands == []
+    assert result["rebuilt"] is False
+    assert result["skipped"] is True
+    assert result["skipReason"] == "start_reuses_existing_dist"
+    assert result["frontendTree"] == "tree-old"
+    assert result["builtFromCommit"] == "1" * 40
+    stamped = json.loads(provenance_path.read_text(encoding="utf-8"))
+    assert stamped["frontendTree"] == "tree-old"
+    assert stamped["builtFromCommit"] == "1" * 40
+
+
+def test_python_launcher_start_builds_when_dist_is_missing(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    web_dir = tmp_path / "web"
+    source = web_dir / "src" / "App.tsx"
+    node_modules = web_dir / "node_modules"
+    source.parent.mkdir(parents=True)
+    (web_dir / "dist").mkdir(parents=True)
+    node_modules.mkdir(parents=True)
+    source.write_text("export {};", encoding="utf-8")
+    commands: list[tuple[list[str], str]] = []
+    source_identity = {
+        "projectRoot": str(tmp_path.resolve()),
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "tree-new",
+        "trackedClean": True,
+    }
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher, "_frontend_package_manager", lambda: "npm")
+    monkeypatch.setattr(
+        launcher,
+        "_frontend_build_commands",
+        lambda package_manager, directory: [(["npm", "run", "build"], "npm build")],
+    )
+    monkeypatch.setattr(launcher, "_run_checked", lambda args, cwd, label: commands.append((args, label)))
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity, light=False: identity)
+
+    result = launcher._ensure_frontend_build(source_identity, require_current=False)
+
+    assert commands == [(["npm", "run", "build"], "npm build")]
+    assert result["rebuilt"] is True
+
+
+def test_python_launcher_start_backend_does_not_require_current_frontend(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    project_dir = tmp_path / "project"
+    venv_python = project_dir / ".venv" / "bin" / "python"
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    runtime_dir = tmp_path / ".runtime" / "launcher"
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(launcher, "PORTS_PATH", runtime_dir / "ports.json")
+    monkeypatch.setattr(launcher, "BACKEND_STDOUT_PATH", runtime_dir / "backend.stdout.log")
+    monkeypatch.setattr(launcher, "BACKEND_STDERR_PATH", runtime_dir / "backend.stderr.log")
+    source_identity = {
+        "projectRoot": str(project_dir.resolve()),
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "tree",
+        "trackedClean": True,
+    }
+    ensure_calls: list[dict[str, object]] = []
+
+    def fake_ensure(identity, *, require_current=True):
+        ensure_calls.append({"identity": identity, "require_current": require_current})
+        return {"rebuilt": False, "skipped": True, "skipReason": "start_reuses_existing_dist"}
+
+    monkeypatch.setattr(launcher, "_read_state", lambda: {})
+    monkeypatch.setattr(launcher, "_preserved_launcher_control_state", lambda state: {})
+    monkeypatch.setattr(launcher, "_retire_project_workbench_instance", lambda state, port=None: [])
+    monkeypatch.setattr(launcher, "_resolve_start_backend_port", lambda port, host: (8000, ""))
+    monkeypatch.setattr(launcher, "_ensure_frontend_build", fake_ensure)
+    monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: source_identity)
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity, light=False: identity)
+    monkeypatch.setattr(
+        launcher,
+        "_start_runtime_scene",
+        lambda trigger: {
+            "runtimeSceneId": "scene-1",
+            "runtimeSceneDir": str(tmp_path / "scene-1"),
+            "startedAt": "2026-01-01T00:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(launcher, "_ensure_project_python_runtime", lambda: str(venv_python))
+    monkeypatch.setattr(
+        launcher,
+        "_select_background_python",
+        lambda executable: {
+            "pythonExecutable": str(venv_python),
+            "sourcePythonExecutable": str(venv_python),
+            "noConsolePythonExecutable": str(venv_python),
+            "consoleWindowSuppressed": True,
+            "consoleSuppressionMode": "creation_flags",
+            "consoleFallbackReason": "",
+            "pythonLaunchPolicy": "pythonw",
+            "creationFlagNames": ["CREATE_NO_WINDOW"],
+        },
+    )
+    monkeypatch.setattr(launcher, "_wait_for_started_backend", lambda process, port, host: 4242)
+    monkeypatch.setattr(launcher, "_remember_project_backend_port", lambda port, *, reason="": None)
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+    monkeypatch.setattr(launcher, "_backend_environment", lambda host: {})
+    monkeypatch.setattr(launcher, "_windows_creation_flags", lambda *, detach=False: 0)
+    monkeypatch.setattr(launcher, "_hidden_startup_info", lambda: None)
+    monkeypatch.setattr(launcher, "_write_state", lambda state: None)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "backend.stdout.log").write_bytes(b"")
+    (runtime_dir / "backend.stderr.log").write_bytes(b"")
+
+    class FakeProcess:
+        pid = 12345
+
+        @staticmethod
+        def poll():
+            return None
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda args, **kwargs: FakeProcess())
+
+    launcher._start_backend(8000, "127.0.0.1", no_browser=True)
+
+    assert ensure_calls == [{"identity": source_identity, "require_current": False}]
 
 
 def test_python_launcher_runtime_identity_requires_clean_main(monkeypatch, tmp_path):
