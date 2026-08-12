@@ -30,6 +30,10 @@ from core.runtime_manager.scene_logging import (
     record_runtime_manager_scene_event,
     runtime_manager_event_phase,
 )
+from core.web.services.runtime_scene.record import (
+    _append_scene_log_line,
+    _resolve_current_runtime_scene_dir,
+)
 from core.runtime_manager.state_store import load_pid, load_state
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
@@ -2957,6 +2961,40 @@ def _record_launcher_event(
         )
     except Exception as exc:
         _debug_logger.warning(f"Failed to record launcher scene event: {exc}")
+    _append_launcher_control_log_line(
+        event_code,
+        phase=phase,
+        outcome=outcome,
+        level=level,
+        message=message,
+        event_at=event_at,
+    )
+
+
+def _append_launcher_control_log_line(
+    event_code: str,
+    *,
+    phase: str,
+    outcome: str,
+    level: str,
+    message: str,
+    event_at: str,
+) -> None:
+    """追加一行原始控制日志到当前场景包 raw/launcher-control.log（包结构标准成员）。
+
+    场景不可解析时静默跳过（事件化记录仍已生效），任何失败不干扰主流程。
+    """
+    try:
+        scene_dir = _resolve_current_runtime_scene_dir()
+        if scene_dir is None:
+            return
+        _append_scene_log_line(
+            Path(scene_dir),
+            "raw/launcher-control.log",
+            f"[{event_at}] {event_code} phase={phase} outcome={outcome} level={level} {message}",
+        )
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to append launcher control log line: {exc}")
 
 
 def _truncate(value: str, limit: int) -> str:
