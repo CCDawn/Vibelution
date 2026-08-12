@@ -207,6 +207,8 @@ class WorkflowCommandService:
         bumped = _bump(uow, request, event_count=2, now_ms=now_ms)
         accepted_version, sequence = bumped
 
+        run = uow.repository.get_run(request.run_id)
+        binding_snapshot_id = _binding_snapshot_id(uow, request.run_id, node_id)
         uow.repository.insert_command(
             _command_record(
                 command_id=command_id,
@@ -227,13 +229,21 @@ class WorkflowCommandService:
                 input_snapshot_hash=_input_snapshot_hash(uow, request.run_id),
                 started_at_ms=now_ms,
                 retry_of_node_run_id=latest.node_run_id if latest else None,
+                binding_snapshot_id=binding_snapshot_id,
             )
         )
         uow.repository.insert_outbox(
             _graph_dispatch_record(
-                run_id=request.run_id,
+                uow=uow,
+                run=run,
+                attempt=_node_attempt_for_dispatch(
+                    node_run_id=node_run_id,
+                    run_id=request.run_id,
+                    node_id=node_id,
+                    attempt=attempt,
+                    binding_snapshot_id=binding_snapshot_id,
+                ),
                 command_id=command_id,
-                node_run_id=node_run_id,
                 now_ms=now_ms,
             )
         )
@@ -625,6 +635,7 @@ def _attempt_record(
     input_snapshot_hash: str,
     started_at_ms: int,
     retry_of_node_run_id: str | None = None,
+    binding_snapshot_id: str | None = None,
 ) -> Any:
     from core.research.workflow.ledger import NodeAttemptRecord
 
@@ -636,7 +647,7 @@ def _attempt_record(
         actor_kind="agent",
         status=status,
         command_id=command_id,
-        binding_snapshot_id=None,
+        binding_snapshot_id=binding_snapshot_id,
         input_snapshot_hash=input_snapshot_hash,
         pending_action_id=None,
         execution_anchor_id=None,
@@ -648,28 +659,61 @@ def _attempt_record(
     )
 
 
-def _graph_dispatch_record(*, run_id: str, command_id: str, node_run_id: str, now_ms: int) -> Any:
-    from core.research.workflow.ledger import OutboxRecord
+def _node_attempt_for_dispatch(
+    *,
+    node_run_id: str,
+    run_id: str,
+    node_id: str,
+    attempt: int,
+    binding_snapshot_id: str | None = None,
+) -> Any:
+    from core.research.workflow.ledger import NodeAttemptRecord
 
-    return OutboxRecord(
-        action_id=new_id("act"),
-        run_id=run_id,
-        command_id=command_id,
+    return NodeAttemptRecord(
         node_run_id=node_run_id,
-        action_kind="graph_dispatch",
-        idempotency_key=f"graph:{command_id}",
-        payload_json=json.dumps(
-            {"commandId": command_id, "runId": run_id, "nodeRunId": node_run_id}
-        ),
-        status="pending",
-        attempt_count=0,
-        available_at_ms=now_ms,
-        lease_owner=None,
-        lease_expires_at_ms=None,
-        last_problem_json=None,
-        created_at_ms=now_ms,
-        updated_at_ms=now_ms,
+        run_id=run_id,
+        node_id=node_id,
+        attempt=attempt,
+        actor_kind="agent",
+        status="starting",
+        command_id="",
+        binding_snapshot_id=binding_snapshot_id,
+        input_snapshot_hash="",
+        pending_action_id=None,
+        execution_anchor_id=None,
+        retry_of_node_run_id=None,
+        problem_json=None,
+        started_at_ms=0,
+        updated_at_ms=0,
+        finished_at_ms=None,
     )
+
+
+def _graph_dispatch_record(*, uow, run: Any, attempt: Any, command_id: str, now_ms: int) -> Any:
+    from .graph_dispatch_factory import build_graph_dispatch_record
+
+    return build_graph_dispatch_record(
+        run=run,
+        attempt=attempt,
+        command_id=command_id,
+        dispatch_kind="start",
+        now_ms=now_ms,
+    )
+
+
+def _binding_snapshot_id(uow, run_id: str, node_id: str) -> str | None:
+    from .graph_dispatch_factory import binding_snapshot_id_for_node
+
+    run = uow.repository.get_run(run_id)
+    if run is None or not run.input_snapshot_json:
+        return None
+    import json
+
+    try:
+        input_snapshot = json.loads(run.input_snapshot_json)
+    except (TypeError, ValueError):
+        return None
+    return binding_snapshot_id_for_node(input_snapshot, node_id)
 
 
 def _event_record(
@@ -727,32 +771,17 @@ def _input_snapshot_hash(uow, run_id: str) -> str:
 
 
 def _human_resume_dispatch(uow, request: CommandRequest, node_run_id: str, receipt: Any, command_id: str, now_ms: int):
-    from core.research.workflow.ledger import OutboxRecord
+    from .graph_dispatch_factory import build_graph_dispatch_record
 
-    return OutboxRecord(
-        action_id=new_id("act"),
-        run_id=request.run_id,
+    run = uow.repository.get_run(request.run_id)
+    attempt = uow.repository.get_attempt(node_run_id)
+    if run is None or attempt is None:
+        raise WorkflowCommandError(f"resume dispatch 缺少 run/attempt: {node_run_id}")
+    return build_graph_dispatch_record(
+        run=run,
+        attempt=attempt,
         command_id=command_id,
-        node_run_id=node_run_id,
-        action_kind="graph_dispatch",
-        idempotency_key=f"graph:resume-human:{receipt.action_id}",
-        payload_json=json.dumps(
-            {
-                "actionId": new_id("act"),
-                "runId": request.run_id,
-                "nodeRunId": node_run_id,
-                "nodeId": request.node_id,
-                "attempt": 1,
-                "dispatchKind": "resume_human",
-                "receipt": receipt.to_dict(),
-            }
-        ),
-        status="pending",
-        attempt_count=0,
-        available_at_ms=now_ms,
-        lease_owner=None,
-        lease_expires_at_ms=None,
-        last_problem_json=None,
-        created_at_ms=now_ms,
-        updated_at_ms=now_ms,
+        dispatch_kind="resume_human",
+        now_ms=now_ms,
+        receipt_payload=receipt.to_dict(),
     )

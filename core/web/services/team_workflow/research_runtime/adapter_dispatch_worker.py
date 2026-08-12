@@ -226,11 +226,15 @@ class AdapterDispatchWorker:
                     problem=None,
                     completed_at_ms=now_ms,
                 )
+                attempt = uow.repository.get_attempt(action.node_run_id)
+                if attempt is None:
+                    return
                 uow.repository.insert_outbox(
                     _resume_dispatch_record(
+                        run=run,
+                        attempt=attempt,
                         action=action,
                         receipt=receipt,
-                        run_id=action.run_id,
                         command_id=outbox.command_id,
                         now_ms=now_ms,
                     )
@@ -430,33 +434,14 @@ def _event(*, run_id: str, sequence: int, run_version: int, event_id: str, event
     )
 
 
-def _resume_dispatch_record(*, action: PendingAction, receipt: ExecutionReceipt, run_id: str, command_id: str | None, now_ms: int):
-    from core.research.workflow.ledger import OutboxRecord
+def _resume_dispatch_record(*, run: Any, attempt: Any, action: PendingAction, receipt: ExecutionReceipt, command_id: str | None, now_ms: int):
+    from .graph_dispatch_factory import build_graph_dispatch_record
 
-    return OutboxRecord(
-        action_id=new_id("act"),
-        run_id=run_id,
-        command_id=command_id,
-        node_run_id=action.node_run_id,
-        action_kind="graph_dispatch",
-        idempotency_key=f"graph:resume:{action.action_id}",
-        payload_json=json.dumps(
-            {
-                "actionId": new_id("act"),
-                "runId": run_id,
-                "nodeRunId": action.node_run_id,
-                "nodeId": action.node_id,
-                "attempt": action.attempt,
-                "dispatchKind": "resume_action",
-                "receipt": receipt.to_dict(),
-            }
-        ),
-        status="pending",
-        attempt_count=0,
-        available_at_ms=now_ms,
-        lease_owner=None,
-        lease_expires_at_ms=None,
-        last_problem_json=None,
-        created_at_ms=now_ms,
-        updated_at_ms=now_ms,
+    return build_graph_dispatch_record(
+        run=run,
+        attempt=attempt,
+        command_id=command_id or "cmd-recovery",
+        dispatch_kind="resume_action",
+        now_ms=now_ms,
+        receipt_payload=receipt.to_dict(),
     )

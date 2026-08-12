@@ -104,6 +104,9 @@ class GraphDispatchWorker:
                 now_ms,
                 finished_at_ms=now_ms,
             )
+            # attempt 已终态：其待执行的 adapter_dispatch 不得再运行
+            # （retry 会以新 attempt 重新发起，旧的 adapter 任务必须取消）。
+            uow.repository.cancel_outbox_by_node_run(dispatch.node_run_id, now_ms)
 
         self._store.submit(mutate, force_flush=True).result(timeout=30)
 
