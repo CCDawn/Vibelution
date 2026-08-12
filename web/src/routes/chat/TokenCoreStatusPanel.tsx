@@ -18,6 +18,14 @@ export type TokenCoreStatusMetric = {
   tone: "cache" | "modelInput" | "compression" | "speed";
 };
 
+/** Bar fill follows the metric's own tone color (cache cool / input success / compression warm). */
+const TOKEN_STATUS_BAR_FILL: Record<TokenCoreStatusMetric["tone"], string> = {
+  cache: "var(--accent-cool)",
+  modelInput: "var(--state-success)",
+  compression: "var(--accent-warm)",
+  speed: "var(--accent-cool)",
+};
+
 type TokenCoreStatusPanelProps = {
   cacheDetailAvailable: boolean;
   cacheDetailOpen: boolean;
@@ -77,6 +85,7 @@ export function TokenCoreStatusPanel({
     ?? (lang === "zh"
       ? "缓存与输入来自上一轮落库；压缩看当前会话；速度仅在流式时估算。"
       : "Cache and input come from the last persisted turn; compression is active-session only; speed is estimated while streaming.");
+  const hasMetricData = metrics.some((metric) => (metric.displayValue ?? metric.value) !== "--");
 
   return (
     <section className={`${routeStyles.leftBlock} ${styles.tokenCompressionCard}`} aria-labelledby={titleId}>
@@ -86,9 +95,13 @@ export function TokenCoreStatusPanel({
           {resolvedScopeLabel}
         </span>
       </div>
+      {hasMetricData ? (
       <div className={styles.tokenStatusVisualGrid} role="list" aria-label={lang === "zh" ? "Token 核心状态" : "Token core status"}>
         {metrics.map((metric) => {
-          const metricStyle = { "--token-status-value": metric.percent } as CSSProperties;
+          const metricStyle = {
+            "--token-status-value": metric.percent,
+            "--token-status-bar-fill": TOKEN_STATUS_BAR_FILL[metric.tone],
+          } as CSSProperties;
           const metricClassName = `${styles.tokenStatusMetric} ${styles[`tokenStatusMetric_${metric.tone}`]}`;
           const visibleValue = metric.displayValue ?? metric.value;
           const visibleLabel = tokenMetricShortLabel(metric, lang);
@@ -195,6 +208,11 @@ export function TokenCoreStatusPanel({
           );
         })}
       </div>
+      ) : (
+        <p className={styles.tokenStatusEmpty}>
+          {lang === "zh" ? "暂无 Token 数据，等待首轮运行" : "No token data yet — waiting for the first turn"}
+        </p>
+      )}
     </section>
   );
 }
