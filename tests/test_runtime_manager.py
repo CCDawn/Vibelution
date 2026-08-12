@@ -6113,7 +6113,10 @@ def test_handle_open_workbench_fails_when_launcher_exits_before_workbench_is_rea
     monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(next_state) or next_state)
     monkeypatch.setattr(daemon, "observe_workbench", observations)
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
-    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    def fail_if_failure_finalization_reconciles(**kwargs):
+        raise AssertionError("open failure finalization must not synchronously rescan residual processes")
+
+    monkeypatch.setattr(daemon, "residual_process_payload", fail_if_failure_finalization_reconciles)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
     monkeypatch.setattr(daemon, "_OPEN_VERIFICATION_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(
@@ -6137,7 +6140,9 @@ def test_handle_open_workbench_fails_when_launcher_exits_before_workbench_is_rea
     assert saved_states[-1]["workbench"]["phase"] == "failed"
     assert saved_states[-1]["workbench"]["desiredState"] == "open"
     assert saved_states[-1]["workbench"]["observedState"] == "closed"
+    assert saved_states[-1]["command"]["activeCommandId"] == ""
     assert any(event_type == "workbench.open.verification_failed" for event_type, _payload in events)
+    assert any(event_type == "command.failed" for event_type, _payload in events)
     failed_payload = next(payload for event_type, payload in events if event_type == "workbench.open.verification_failed")
     assert failed_payload["commandId"] == "cmd-open"
     assert failed_payload["attempts"] == 1
