@@ -49,10 +49,16 @@ describe("VPopover contract", () => {
       resolve(vuiRoot, "../conversation/ConversationInferenceControl.tsx"),
       "utf8",
     );
+    const contextRing = readFileSync(
+      resolve(vuiRoot, "../conversation/ComposerContextRing.tsx"),
+      "utf8",
+    );
     expect(permission).toContain("<VPopover");
     expect(permission).not.toContain("createPortal(");
     expect(inference).toContain("<VPopover");
     expect(inference).not.toContain("createPortal(");
+    expect(contextRing).toContain("<VPopover");
+    expect(contextRing).not.toContain("createPortal(");
   });
 
   it("AppShell status guide uses VPopover instead of hover cluster panel", () => {

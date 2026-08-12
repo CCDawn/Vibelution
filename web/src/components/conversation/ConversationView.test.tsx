@@ -569,6 +569,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain('composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar');
     expect(conversationViewSource).toContain("className={styles.attachButton}");
     expect(conversationViewSource).toContain("<ConversationInferenceControl {...llmControl} />");
+    expect(conversationViewSource).toContain("<ComposerContextRing");
+    expect(conversationViewSource).toContain("composerContextRing");
     expect(conversationViewSource).toContain('composerVariant === "codex" ? composerActions : null');
     expect(conversationViewSource).toContain('composerVariant === "compact" ? composerActions : null');
     expect(styles.composerToolbar).toContain("items-center");
