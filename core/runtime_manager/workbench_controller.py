@@ -1252,6 +1252,19 @@ def _electron_session_process_is_live(session: dict[str, Any]) -> bool:
     return _is_process_alive(int(match.group(1)))
 
 
+def _instance_short_name_for_checkout(checkout: Path | str) -> str:
+    try:
+        from core.infrastructure.branch_workspace import list_branch_instances
+        from core.infrastructure.instance_display_name import MAIN_SHORT_NAME, current_instance_display
+
+        payload = list_branch_instances(checkout)
+        return current_instance_display(payload.get("items") or []).get("shortName") or MAIN_SHORT_NAME
+    except Exception:
+        from core.infrastructure.instance_display_name import MAIN_SHORT_NAME
+
+        return MAIN_SHORT_NAME
+
+
 def _packaged_electron_desktop_executable() -> Path | None:
     """Return the supported packaged desktop entry when this host can run it."""
 
@@ -1276,6 +1289,7 @@ def _launch_packaged_electron_desktop(*, executable: Path, env: dict[str, str]) 
     desktop_env = dict(env)
     desktop_env["VIBELUTION_WORKSPACE_ROOT"] = str(PROJECT_ROOT)
     desktop_env["VIBELUTION_PYTHON_PATH"] = _electron_bootstrap_python_executable()
+    desktop_env["VIBELUTION_INSTANCE_SHORT_NAME"] = _instance_short_name_for_checkout(PROJECT_ROOT)
     return subprocess.Popen(
         [str(executable), "--workspace", str(PROJECT_ROOT), "--open-workbench"],
         cwd=str(PROJECT_ROOT),

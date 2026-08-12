@@ -1,13 +1,14 @@
 import { BrowserWindow } from "electron";
 import type { DesktopPaths } from "../paths.js";
 import { resolvePreloadPath, resolveWorkspaceIconPath } from "../paths.js";
+import { instanceWindowTitle } from "./instanceWindowTitle.js";
 
 export function createWorkbenchWindow(_url: string, paths: DesktopPaths): BrowserWindow {
   const window = new BrowserWindow({
     width: 1440,
     height: 960,
     show: false,
-    title: "Vibelution Workbench",
+    title: instanceWindowTitle("workbench"),
     icon: resolveWorkspaceIconPath(paths),
     backgroundColor: "#f7fafc",
     titleBarStyle: "default",

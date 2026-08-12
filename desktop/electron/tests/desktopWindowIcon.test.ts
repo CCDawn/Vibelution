@@ -40,7 +40,7 @@ describe("Electron desktop window icons", () => {
     createLauncherWindow("http://127.0.0.1:8765/launcher", desktopPaths);
 
     expect(browserWindowOptions[0]).toMatchObject({
-      title: "Vibelution Launcher",
+      title: "主 控",
       icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
       backgroundColor: "#f7fafc",
       titleBarStyle: "default",
@@ -55,7 +55,7 @@ describe("Electron desktop window icons", () => {
     createWorkbenchWindow("http://127.0.0.1:8000", desktopPaths);
 
     expect(browserWindowOptions[0]).toMatchObject({
-      title: "Vibelution Workbench",
+      title: "主 台",
       icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
       backgroundColor: "#f7fafc",
       show: false,
