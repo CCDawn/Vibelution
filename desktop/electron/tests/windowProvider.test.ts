@@ -278,6 +278,7 @@ describe("Electron window provider state", () => {
       createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
       createWorkbenchWindow: () => workbenchWindow,
       shouldInterceptWorkbenchClose: () => true,
+      hungCloseDestroyAfterMs: 0,
       onWorkbenchCloseRequest: () => {
         closeRequests.push("workbench");
       }
@@ -295,7 +296,28 @@ describe("Electron window provider state", () => {
     await provider.approveWorkbenchCloseOnce();
 
     expect(workbenchWindow.closeCount).toBe(1);
-    expect(provider.isWorkbenchCloseInFlight()).toBe(true);
+    expect(workbenchWindow.destroyCount).toBe(1);
+    expect(workbenchWindow.isDestroyed()).toBe(true);
+    expect(provider.isWorkbenchCloseInFlight()).toBe(false);
+  });
+
+  it("destroys an authorized Workbench window when close is ignored by a hung renderer", async () => {
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      shouldInterceptWorkbenchClose: () => true,
+      hungCloseDestroyAfterMs: 0
+    });
+    await provider.openOrFocusWorkbench();
+
+    const state = await provider.approveWorkbenchCloseOnce();
+
+    expect(workbenchWindow.closeCount).toBe(1);
+    expect(workbenchWindow.destroyCount).toBe(1);
+    expect(workbenchWindow.isDestroyed()).toBe(true);
+    expect(state.open).toBe(false);
+    expect(provider.snapshot().workbench.open).toBe(false);
   });
 
   it("does not let a programmatic Workbench close bypass the transactional interceptor", async () => {
@@ -448,6 +470,7 @@ describe("Electron window provider state", () => {
       createWorkbenchWindow: () => workbenchWindow,
       shouldInterceptLauncherClose: () => true,
       shouldInterceptWorkbenchClose: () => true,
+      hungCloseDestroyAfterMs: 0
     });
     await provider.openLauncher();
     await provider.openOrFocusWorkbench();
@@ -456,6 +479,7 @@ describe("Electron window provider state", () => {
     await provider.approveWorkbenchCloseOnce();
 
     expect(workbenchWindow.closeCount).toBe(1);
+    expect(workbenchWindow.isDestroyed()).toBe(true);
     expect(launcherWindow.isDestroyed()).toBe(false);
     const launcherState = await provider.openLauncher();
     expect(launcherState).toMatchObject({ role: "launcher", open: true, focused: true });

@@ -52,7 +52,34 @@ export type ElectronWindowProviderOptions = {
   onWorkbenchClosed?: () => void | Promise<void>;
   onWorkbenchFocusAttentionClear?: () => void;
   onOsSessionEnd?: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
+  hungCloseDestroyAfterMs?: number;
 };
+
+export const DEFAULT_HUNG_CLOSE_DESTROY_AFTER_MS = 500;
+
+function waitForWindowClosed(
+  window: ElectronWindowLike,
+  timeoutMs: number
+): Promise<"closed" | "timeout"> {
+  if (window.isDestroyed()) {
+    return Promise.resolve("closed");
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (reason: "closed" | "timeout") => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(reason);
+    };
+    const timer = setTimeout(() => finish("timeout"), Math.max(0, timeoutMs));
+    window.on("closed", () => {
+      clearTimeout(timer);
+      finish("closed");
+    });
+  });
+}
 
 export class ElectronWindowProvider {
   private launcherWindow: ElectronWindowLike | null = null;
@@ -71,6 +98,7 @@ export class ElectronWindowProvider {
   private workbenchNavigation: Promise<ManagedWindowState> | null = null;
   private workbenchCloseAuthorized = false;
   private workbenchCloseInFlight = false;
+  private readonly hungCloseDestroyAfterMs: number;
 
   constructor(
     private readonly paths: DesktopPaths,
@@ -88,6 +116,10 @@ export class ElectronWindowProvider {
     this.onWorkbenchClosed = options.onWorkbenchClosed ?? (() => undefined);
     this.onWorkbenchFocusAttentionClear = options.onWorkbenchFocusAttentionClear ?? (() => undefined);
     this.onOsSessionEnd = options.onOsSessionEnd ?? (() => undefined);
+    this.hungCloseDestroyAfterMs =
+      typeof options.hungCloseDestroyAfterMs === "number" && Number.isFinite(options.hungCloseDestroyAfterMs)
+        ? Math.max(0, options.hungCloseDestroyAfterMs)
+        : DEFAULT_HUNG_CLOSE_DESTROY_AFTER_MS;
   }
 
   async openLauncher(): Promise<ManagedWindowState> {
@@ -174,6 +206,20 @@ export class ElectronWindowProvider {
     }
     this.workbenchCloseAuthorized = true;
     workbenchWindow.close();
+    if (!workbenchWindow.isDestroyed()) {
+      const outcome = await waitForWindowClosed(workbenchWindow, this.hungCloseDestroyAfterMs);
+      if (outcome === "timeout" && !workbenchWindow.isDestroyed()) {
+        try {
+          workbenchWindow.destroy();
+        } catch {
+          // A hung renderer must not keep an authorized Workbench window open.
+        }
+      }
+    }
+    if (!workbenchWindow.isDestroyed()) {
+      this.workbenchCloseAuthorized = false;
+      this.workbenchCloseInFlight = false;
+    }
     return this.stateFor("workbench");
   }
 
