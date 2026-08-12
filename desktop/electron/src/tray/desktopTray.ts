@@ -1,10 +1,18 @@
-import { Menu, Tray, nativeImage } from "electron";
+import { Menu, Tray, nativeImage, type MenuItemConstructorOptions } from "electron";
 import { resolveWorkspaceIconPath, type DesktopPaths } from "../paths.js";
+
+export type TrayBranchInstance = {
+  id: string;
+  label: string;
+  startable: boolean;
+  stoppable: boolean;
+};
 
 export type DesktopTrayActions = {
   openLauncher: () => void;
-  startProject: () => void;
-  stopProject: () => void;
+  listInstances: () => Promise<TrayBranchInstance[]>;
+  startInstance: (instanceId: string, label: string) => void;
+  stopInstance: (instanceId: string, label: string) => void;
   restartProject: () => void;
   rebuildAndStart: () => void;
   showStatus: () => void;
@@ -14,32 +22,83 @@ export type DesktopTrayActions = {
 
 export const DESKTOP_TRAY_MENU_LABELS = {
   openLauncher: "打开 Vibelution Launcher",
-  startProject: "启动项目",
-  stopProject: "停止项目",
-  restartProject: "重启项目",
+  startProject: "启动",
+  stopProject: "停止",
+  restartProject: "重启当前 main",
   rebuildAndStart: "重建并启动（最新）",
   showStatus: "状态",
   quit: "退出 Vibelution",
-  stopAll: "停止全部"
+  stopAll: "停止全部",
+  noStartable: "没有可启动的实例",
+  noRunning: "没有正在运行的实例",
+  listFailed: "无法读取分支列表"
 } as const;
+
+export function buildDesktopTrayTemplate(
+  instances: TrayBranchInstance[],
+  actions: DesktopTrayActions
+): MenuItemConstructorOptions[] {
+  const startable = instances.filter((item) => item.startable);
+  const stoppable = instances.filter((item) => item.stoppable);
+  return [
+    { label: DESKTOP_TRAY_MENU_LABELS.openLauncher, click: actions.openLauncher },
+    { type: "separator" },
+    {
+      label: DESKTOP_TRAY_MENU_LABELS.startProject,
+      submenu: startable.length
+        ? startable.map((item) => ({
+            label: item.label,
+            click: () => actions.startInstance(item.id, item.label)
+          }))
+        : [{ label: DESKTOP_TRAY_MENU_LABELS.noStartable, enabled: false }]
+    },
+    {
+      label: DESKTOP_TRAY_MENU_LABELS.stopProject,
+      submenu: stoppable.length
+        ? stoppable.map((item) => ({
+            label: item.label,
+            click: () => actions.stopInstance(item.id, item.label)
+          }))
+        : [{ label: DESKTOP_TRAY_MENU_LABELS.noRunning, enabled: false }]
+    },
+    { label: DESKTOP_TRAY_MENU_LABELS.restartProject, click: actions.restartProject },
+    { label: DESKTOP_TRAY_MENU_LABELS.rebuildAndStart, click: actions.rebuildAndStart },
+    { label: DESKTOP_TRAY_MENU_LABELS.showStatus, click: actions.showStatus },
+    { type: "separator" },
+    { label: DESKTOP_TRAY_MENU_LABELS.quit, click: actions.quit },
+    { label: DESKTOP_TRAY_MENU_LABELS.stopAll, click: actions.stopAll }
+  ];
+}
 
 export function createDesktopTray(paths: DesktopPaths, actions: DesktopTrayActions): Tray {
   const tray = new Tray(nativeImage.createFromPath(resolveWorkspaceIconPath(paths)));
   tray.setToolTip("Vibelution");
-  tray.on("click", actions.openLauncher);
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: DESKTOP_TRAY_MENU_LABELS.openLauncher, click: actions.openLauncher },
-      { type: "separator" },
-      { label: DESKTOP_TRAY_MENU_LABELS.startProject, click: actions.startProject },
-      { label: DESKTOP_TRAY_MENU_LABELS.stopProject, click: actions.stopProject },
-      { label: DESKTOP_TRAY_MENU_LABELS.restartProject, click: actions.restartProject },
-      { label: DESKTOP_TRAY_MENU_LABELS.rebuildAndStart, click: actions.rebuildAndStart },
-      { label: DESKTOP_TRAY_MENU_LABELS.showStatus, click: actions.showStatus },
-      { type: "separator" },
-      { label: DESKTOP_TRAY_MENU_LABELS.quit, click: actions.quit },
-      { label: DESKTOP_TRAY_MENU_LABELS.stopAll, click: actions.stopAll }
-    ])
-  );
+
+  const applyMenu = (instances: TrayBranchInstance[]): Menu => {
+    const menu = Menu.buildFromTemplate(buildDesktopTrayTemplate(instances, actions));
+    tray.setContextMenu(menu);
+    return menu;
+  };
+
+  const refreshMenu = async (show = false): Promise<void> => {
+    let instances: TrayBranchInstance[] = [];
+    try {
+      instances = await actions.listInstances();
+    } catch {
+      instances = [];
+    }
+    const menu = applyMenu(instances);
+    if (show) {
+      tray.popUpContextMenu(menu);
+    }
+  };
+
+  applyMenu([]);
+  tray.on("click", () => {
+    void refreshMenu(true);
+  });
+  tray.on("right-click", () => {
+    void refreshMenu(true);
+  });
   return tray;
 }

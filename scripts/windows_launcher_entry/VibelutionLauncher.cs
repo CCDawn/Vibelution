@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Text;
 using System.Net;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -29,7 +30,7 @@ internal static class VibelutionLauncher
             {
                 if (!created || ElectronOwnsDesktopTray(projectDir))
                 {
-                    RunPythonBridge(projectDir, "launcher", false, false);
+                    // Already running as a tray app; do not open the full Launcher window.
                     return 0;
                 }
 
@@ -80,15 +81,147 @@ internal static class VibelutionLauncher
             var menu = new ContextMenuStrip();
             menu.Items.Add(MenuItem("打开控制台", delegate { QueueOpenConsole(); }));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(MenuItem("启动项目", delegate { QueuePost("/api/launcher/start", "启动项目"); }));
-            menu.Items.Add(MenuItem("停止项目", delegate { QueuePost("/api/launcher/stop", "停止项目"); }));
-            menu.Items.Add(MenuItem("重启项目", delegate { QueuePost("/api/launcher/restart", "重启项目"); }));
+            menu.Items.Add(BranchActionMenu("启动", "start"));
+            menu.Items.Add(BranchActionMenu("停止", "stop"));
+            menu.Items.Add(MenuItem("重启当前 main", delegate { QueuePost("/api/launcher/restart", "重启当前 main"); }));
             menu.Items.Add(MenuItem("重建并启动（最新）", delegate { QueueRebuildAndStart(); }));
             menu.Items.Add(MenuItem("状态", delegate { QueueStatus(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(MenuItem("退出 Launcher", delegate { QueueExitLauncher(false); }));
             menu.Items.Add(MenuItem("停止全部", delegate { QueueExitLauncher(true); }));
             return menu;
+        }
+
+        private ToolStripMenuItem BranchActionMenu(string label, string operation)
+        {
+            var item = new ToolStripMenuItem(label);
+            item.DropDownOpening += delegate { PopulateBranchActionMenu(item, operation); };
+            item.DropDownItems.Add(DisabledMenuItem(operation == "stop" ? "没有正在运行的实例" : "没有可启动的实例"));
+            return item;
+        }
+
+        private void PopulateBranchActionMenu(ToolStripMenuItem item, string operation)
+        {
+            item.DropDownItems.Clear();
+            try
+            {
+                EnsureLauncherBackend();
+                var instances = ParseBranchInstances(GetLauncher("/api/launcher/branch-instances"));
+                foreach (var inst in instances)
+                {
+                    bool include = operation == "stop" ? inst.Alive : inst.Startable;
+                    if (!include)
+                    {
+                        continue;
+                    }
+                    var child = new ToolStripMenuItem(inst.Label);
+                    string instanceId = inst.Id;
+                    string instanceLabel = inst.Label;
+                    child.Click += delegate { QueueInstanceLifecycle(operation, instanceId, instanceLabel); };
+                    item.DropDownItems.Add(child);
+                }
+                if (item.DropDownItems.Count == 0)
+                {
+                    item.DropDownItems.Add(DisabledMenuItem(operation == "stop" ? "没有正在运行的实例" : "没有可启动的实例"));
+                }
+            }
+            catch
+            {
+                item.DropDownItems.Add(DisabledMenuItem("无法读取分支列表"));
+            }
+        }
+
+        private void QueueInstanceLifecycle(string operation, string instanceId, string label)
+        {
+            string actionLabel = (operation == "stop" ? "停止 " : "启动 ") + label;
+            ThreadPool.QueueUserWorkItem(
+                delegate
+                {
+                    try
+                    {
+                        EnsureLauncherBackend();
+                        PostLauncher(
+                            "/api/launcher/branch-instances/" + operation,
+                            "{"instanceId":" + Quote(instanceId) + "}"
+                        );
+                        ShowInfo(actionLabel + "请求已发送。");
+                    }
+                    catch (WebException ex)
+                    {
+                        ShowWarning(actionLabel + "失败：" + ShortMessage(ReadWebException(ex)));
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowWarning(actionLabel + "失败：" + ShortMessage(ex.Message));
+                    }
+                }
+            );
+        }
+
+        private static ToolStripMenuItem DisabledMenuItem(string text)
+        {
+            var item = new ToolStripMenuItem(text);
+            item.Enabled = false;
+            return item;
+        }
+
+        private sealed class BranchInstanceItem
+        {
+            public string Id;
+            public string Label;
+            public bool Alive;
+            public bool Startable;
+        }
+
+        private static List<BranchInstanceItem> ParseBranchInstances(string json)
+        {
+            var items = new List<BranchInstanceItem>();
+            if (string.IsNullOrEmpty(json))
+            {
+                return items;
+            }
+            foreach (Match match in Regex.Matches(json, "(?:\{|,)\s*"id"\s*:\s*"(?<id>[^"]+)""))
+            {
+                int start = Math.Max(0, match.Index - 8);
+                int length = Math.Min(json.Length - start, 1200);
+                string chunk = json.Substring(start, length);
+                string id = match.Groups["id"].Value;
+                if (string.IsNullOrEmpty(id))
+                {
+                    continue;
+                }
+                string kind = ExtractJsonString(chunk, "kind");
+                bool alive = ExtractJsonBool(chunk, "alive");
+                bool checkedOut = ExtractJsonBool(chunk, "checkedOut");
+                string shortName = ExtractJsonString(chunk, "shortName");
+                string branch = ExtractJsonString(chunk, "branch");
+                items.Add(new BranchInstanceItem
+                {
+                    Id = id,
+                    Label = FirstNonEmpty(shortName, branch, id),
+                    Alive = alive,
+                    Startable = checkedOut && !alive && kind != "retired" && kind != "local_branch"
+                });
+            }
+            return items;
+        }
+
+        private static bool ExtractJsonBool(string json, string key)
+        {
+            var match = Regex.Match(json, """ + Regex.Escape(key) + ""\s*:\s*(true|false)", RegexOptions.IgnoreCase);
+            return match.Success && match.Groups[1].Value.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string FirstNonEmpty(params string[] values)
+        {
+            foreach (string value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
+            return "";
         }
 
         private static ToolStripMenuItem MenuItem(string text, EventHandler handler)
@@ -357,9 +490,27 @@ internal static class VibelutionLauncher
 
         private void PostLauncher(string path)
         {
+            PostLauncher(path, null);
+        }
+
+        private void PostLauncher(string path, string jsonBody)
+        {
             var request = (HttpWebRequest)WebRequest.Create(launcherUrl + path);
             request.Method = "POST";
-            request.ContentLength = 0;
+            if (string.IsNullOrEmpty(jsonBody))
+            {
+                request.ContentLength = 0;
+            }
+            else
+            {
+                byte[] payload = Encoding.UTF8.GetBytes(jsonBody);
+                request.ContentType = "application/json; charset=utf-8";
+                request.ContentLength = payload.Length;
+                using (var stream = request.GetRequestStream())
+                {
+                    stream.Write(payload, 0, payload.Length);
+                }
+            }
             using (var response = (HttpWebResponse)request.GetResponse())
             {
                 if ((int)response.StatusCode >= 400)

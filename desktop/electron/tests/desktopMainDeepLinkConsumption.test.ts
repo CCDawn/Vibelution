@@ -21,6 +21,7 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain("let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench");
     expect(source).toContain("parseDesktopCliArgs(argv).openWorkbench");
     expect(source).toContain("await windowProvider.openOrFocusWorkbench()");
-    expect(source).toContain("void windowProvider?.openLauncher()");
+    expect(source).toContain("windowProvider?.openLauncher()");
+    expect(source).not.toContain("void windowProvider?.openLauncher();");
   });
 });

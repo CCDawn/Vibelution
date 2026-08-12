@@ -11,6 +11,7 @@ const { FakeTray, trayInstances, menuTemplates, iconPaths } = vi.hoisted(() => {
     readonly listeners = new Map<string, () => void>();
     tooltip = "";
     contextMenu: unknown = null;
+    poppedMenus: unknown[] = [];
 
     constructor(readonly icon: unknown) {
       trayInstances.push(this);
@@ -22,6 +23,10 @@ const { FakeTray, trayInstances, menuTemplates, iconPaths } = vi.hoisted(() => {
 
     setContextMenu(value: unknown): void {
       this.contextMenu = value;
+    }
+
+    popUpContextMenu(value?: unknown): void {
+      this.poppedMenus.push(value ?? this.contextMenu);
     }
 
     on(event: string, listener: () => void): void {
@@ -65,14 +70,22 @@ const desktopPaths: DesktopPaths = {
 function createActions() {
   return {
     openLauncher: vi.fn(),
-    startProject: vi.fn(),
-    stopProject: vi.fn(),
+    listInstances: vi.fn().mockResolvedValue([
+      { id: "main", label: "主", startable: false, stoppable: true },
+      { id: "worktree:task", label: "task", startable: true, stoppable: false }
+    ]),
+    startInstance: vi.fn(),
+    stopInstance: vi.fn(),
     restartProject: vi.fn(),
     rebuildAndStart: vi.fn(),
     showStatus: vi.fn(),
     quit: vi.fn(),
     stopAll: vi.fn()
   };
+}
+
+function topLabels(template: Array<Record<string, unknown>>): string[] {
+  return template.map((item) => String(item.label ?? item.type));
 }
 
 describe("Electron desktop tray", () => {
@@ -91,13 +104,11 @@ describe("Electron desktop tray", () => {
     expect(trayInstances[0].tooltip).toBe("Vibelution");
   });
 
-  it("restores the native WinForms tray menu labels and wires each action", () => {
+  it("exposes start/stop as instance submenus and keeps the other tray actions", async () => {
     const actions = createActions();
     const tray = createDesktopTray(desktopPaths, actions) as unknown as InstanceType<typeof FakeTray>;
 
-    tray.emit("click");
-    const template = menuTemplates[0];
-    expect(template.map((item) => item.label ?? item.type)).toEqual([
+    expect(topLabels(menuTemplates[0])).toEqual([
       DESKTOP_TRAY_MENU_LABELS.openLauncher,
       "separator",
       DESKTOP_TRAY_MENU_LABELS.startProject,
@@ -110,18 +121,29 @@ describe("Electron desktop tray", () => {
       DESKTOP_TRAY_MENU_LABELS.stopAll
     ]);
 
-    (template[0].click as () => void)();
-    (template[2].click as () => void)();
-    (template[3].click as () => void)();
-    (template[4].click as () => void)();
-    (template[5].click as () => void)();
-    (template[6].click as () => void)();
-    (template[8].click as () => void)();
-    (template[9].click as () => void)();
+    tray.emit("click");
+    await vi.waitFor(() => {
+      expect(menuTemplates.length).toBeGreaterThan(1);
+    });
 
-    expect(actions.openLauncher).toHaveBeenCalledTimes(2);
-    expect(actions.startProject).toHaveBeenCalledTimes(1);
-    expect(actions.stopProject).toHaveBeenCalledTimes(1);
+    const refreshed = menuTemplates[menuTemplates.length - 1];
+    const startMenu = refreshed[2]?.submenu as Array<Record<string, unknown>>;
+    const stopMenu = refreshed[3]?.submenu as Array<Record<string, unknown>>;
+    expect(startMenu.map((item) => item.label)).toEqual(["task"]);
+    expect(stopMenu.map((item) => item.label)).toEqual(["主"]);
+
+    (startMenu[0].click as () => void)();
+    (stopMenu[0].click as () => void)();
+    (refreshed[0].click as () => void)();
+    (refreshed[4].click as () => void)();
+    (refreshed[5].click as () => void)();
+    (refreshed[6].click as () => void)();
+    (refreshed[8].click as () => void)();
+    (refreshed[9].click as () => void)();
+
+    expect(actions.startInstance).toHaveBeenCalledWith("worktree:task", "task");
+    expect(actions.stopInstance).toHaveBeenCalledWith("main", "主");
+    expect(actions.openLauncher).toHaveBeenCalledTimes(1);
     expect(actions.restartProject).toHaveBeenCalledTimes(1);
     expect(actions.rebuildAndStart).toHaveBeenCalledTimes(1);
     expect(actions.showStatus).toHaveBeenCalledTimes(1);
