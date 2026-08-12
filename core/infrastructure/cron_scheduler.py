@@ -19,7 +19,7 @@ import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from core.logging import debug as debug_logger
+from core.logging import debug as _debug_logger
 
 
 def _match_cron_field(value: int, pattern: str, field_min: int, field_max: int) -> bool:
@@ -126,7 +126,7 @@ class CronScheduler:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"jobs": self._jobs, "updated_at": time.time()}, f, ensure_ascii=False, indent=2)
         except OSError as exc:
-            debug_logger.warning(f"[Cron] 持久化任务失败: {type(exc).__name__}: {exc}")
+            _debug_logger.warning(f"[Cron] 持久化任务失败: {type(exc).__name__}: {exc}")
             pass
 
     def create_job(self, name: str, command: str, schedule: str) -> str:

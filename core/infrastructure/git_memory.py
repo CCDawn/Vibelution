@@ -15,7 +15,7 @@ from core.infrastructure import git_process
 from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.infrastructure.workspace_manager import get_workspace
-from core.logging import debug_logger
+from core.logging import debug as _debug_logger
 
 
 _RISKY_EVOLUTION_PATH_PREFIXES = ("core/", "tools/", "config/", "workspace/prompts/")
@@ -159,7 +159,7 @@ class GitMemoryService:
         try:
             self._bus.subscribe(EventNames.VALIDATION_COMPLETED, self._on_validation_completed)
         except Exception as exc:
-            debug_logger.warning(f"[GitMemory] 订阅验证完成事件失败: {type(exc).__name__}: {exc}")
+            _debug_logger.warning(f"[GitMemory] 订阅验证完成事件失败: {type(exc).__name__}: {exc}")
             pass
 
     def _on_validation_completed(self, event: Any) -> None:
@@ -167,7 +167,7 @@ class GitMemoryService:
         try:
             self._sync_attention_cache()
         except Exception as exc:
-            debug_logger.warning(f"[GitMemory] 同步 attention cache 失败: {type(exc).__name__}: {exc}")
+            _debug_logger.warning(f"[GitMemory] 同步 attention cache 失败: {type(exc).__name__}: {exc}")
             pass
 
     def _ensure_tables(self) -> None:
@@ -283,7 +283,7 @@ class GitMemoryService:
         except subprocess.TimeoutExpired as exc:
             timeout_seconds = getattr(exc, "timeout", 20)
             cmd_preview = " ".join(str(part) for part in list(args or [])[:8])
-            debug_logger.warning(
+            _debug_logger.warning(
                 "[GitMemory] git 命令超时，降级为不可用状态："
                 f"timeout={timeout_seconds}s cmd={cmd_preview!r}"
             )
@@ -295,7 +295,7 @@ class GitMemoryService:
             )
         except OSError as exc:
             cmd_preview = " ".join(str(part) for part in list(args or [])[:8])
-            debug_logger.warning(
+            _debug_logger.warning(
                 "[GitMemory] git 命令失败，降级为不可用状态："
                 f"{type(exc).__name__}: {exc} cmd={cmd_preview!r}"
             )
@@ -630,7 +630,7 @@ class GitMemoryService:
                 keep_latest=self._worktree_snapshot_retention_limit,
             )
             if prune_stats["snapshots_deleted"]:
-                debug_logger.info(
+                _debug_logger.info(
                     "[GitMemory] Pruned worktree snapshot history: "
                     f"{prune_stats['snapshots_deleted']} snapshots, "
                     f"{prune_stats['file_rows_deleted']} file rows, "

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.logging.logger import debug as _debug_logger
+from core.logging import debug as _debug_logger
 
 
 def _service():
