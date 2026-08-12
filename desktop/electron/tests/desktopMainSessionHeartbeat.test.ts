@@ -39,6 +39,8 @@ describe("Electron main desktop session heartbeat", () => {
     expect(heartbeatBlock).toContain("catch (error: unknown)");
     expect(heartbeatBlock).toContain("console.warn");
     expect(heartbeatBlock).not.toContain("app.quit");
+    expect(source).toContain('from "./runtime/brokenPipeGuard.js"');
+    expect(source).toContain("installBrokenPipeGuards()");
   });
 
   it("refreshes a rejected control context and preserves the desktop session identity", () => {

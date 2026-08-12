@@ -90,6 +90,9 @@ import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
 import { resolveLauncherUrl, resolveWorkbenchUrl } from "./windows/windowUrlResolver.js";
+import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
+
+installBrokenPipeGuards();
 
 const DESKTOP_ACTION_POLL_MS = 2000;
 const DESKTOP_ACTION_LEASE_SECONDS = 30;
