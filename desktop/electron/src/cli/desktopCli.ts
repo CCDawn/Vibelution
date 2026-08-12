@@ -2,6 +2,7 @@ export type DesktopCliArgs = {
   workspaceRoot: string;
   configPath: string;
   smoke: boolean;
+  openWorkbench: boolean;
   workbenchCloseCanary: boolean;
 };
 
@@ -10,6 +11,7 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     workspaceRoot: "",
     configPath: "",
     smoke: false,
+    openWorkbench: false,
     workbenchCloseCanary: false
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -26,6 +28,10 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     }
     if (item === "--smoke") {
       result.smoke = true;
+      continue;
+    }
+    if (item === "--open-workbench") {
+      result.openWorkbench = true;
       continue;
     }
     if (item === "--workbench-close-canary") {

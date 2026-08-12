@@ -4,6 +4,10 @@ import { desktopSmokeSummary, desktopSmokeSummaryPath } from "../src/smoke/deskt
 import { desktopWorkbenchCloseCanarySummary, desktopWorkbenchCloseCanarySummaryPath } from "../src/smoke/workbenchCloseCanary.js";
 
 describe("desktop CLI arguments", () => {
+  it("does not infer a Workbench-open request from an ordinary duplicate launch", () => {
+    expect(parseDesktopCliArgs(["--workspace", "C:/workspace"]).openWorkbench).toBe(false);
+  });
+
   it("maps package smoke arguments onto the existing environment contract", () => {
     const args = parseDesktopCliArgs([
       "--workspace",
@@ -11,6 +15,7 @@ describe("desktop CLI arguments", () => {
       "--config",
       "C:/Users/17533/Documents/Vibelution/config/config.toml",
       "--smoke",
+      "--open-workbench",
       "--workbench-close-canary"
     ]);
 
@@ -18,6 +23,7 @@ describe("desktop CLI arguments", () => {
       workspaceRoot: "C:/Users/17533/Desktop/Vibelution",
       configPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
       smoke: true,
+      openWorkbench: true,
       workbenchCloseCanary: true
     });
     expect(applyDesktopCliToEnvironment({ NODE_ENV: "production" } as NodeJS.ProcessEnv, args)).toMatchObject({
