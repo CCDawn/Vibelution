@@ -76,81 +76,103 @@ def test_effective_bindings_include_canonical_agent_display_name(
     assert source_binding["displayName"] == "资料寻找 Agent"
 
 
-def test_run_queries_require_exact_team_scope(tmp_path: Path) -> None:
-    service, client = _runtime(tmp_path)
-    run = _run(service)
-    base = f"/api/research/workflow-runs/{run['runId']}"
+def test_run_queries_require_exact_team_scope(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services.team_workflow.research_runtime.run_creation import create_run
+    from tests._support.workflow_ledger_http import ledger_http_client
 
-    canonical = client.get(f"{base}?teamId={TEAM_ID}")
-    assert canonical.status_code == 200, canonical.text
-    assert canonical.json()["teamId"] == TEAM_ID
-    canvas = client.get(f"{base}/canvas?teamId={TEAM_ID}")
-    assert canvas.status_code == 200, canvas.text
-    assert canvas.json()["run"]["teamId"] == TEAM_ID
-    assert canvas.json()["run"]["runVersion"] == run["runVersion"]
+    with ledger_http_client(tmp_path, monkeypatch) as (client, _runtime):
+        run = create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=run_input_request(team_id=TEAM_ID),
+            binding_layers=SOURCE_BINDING,
+            idempotency_key="create-team-scope-version",
+        )
+        base = f"/api/research/workflow-runs/{run['runId']}"
 
-    for path in (
-        base,
-        f"{base}/canvas",
-        f"{base}/nodes/source_finding",
-        f"{base}/handoffs",
-        f"{base}/research-ledger",
-        f"{base}/budget",
-        f"{base}/hypotheses",
-        f"{base}/experiment-campaigns",
-        f"{base}/evaluation",
-        f"{base}/events",
-        f"{base}/stream",
-    ):
-        missing = client.get(path)
-        assert missing.status_code == 422, (path, missing.text)
+        snapshot = client.get(f"{base}/snapshot?teamId={TEAM_ID}")
+        assert snapshot.status_code == 200, snapshot.text
+        assert snapshot.json()["run"]["teamId"] == TEAM_ID
+        assert snapshot.json()["run"]["runVersion"] == run["runVersion"]
 
-    mismatch = client.get(f"{base}?teamId=another-team")
-    assert mismatch.status_code == 404, mismatch.text
-    assert mismatch.json()["detail"]["code"] == "team_scope_mismatch"
+        for path in (
+            f"{base}/snapshot",
+            f"{base}/nodes/source_finding",
+            f"{base}/handoffs",
+            f"{base}/research-ledger",
+            f"{base}/budget",
+            f"{base}/hypotheses",
+            f"{base}/experiment-campaigns",
+            f"{base}/evaluation",
+            f"{base}/events",
+            f"{base}/stream",
+        ):
+            missing = client.get(path)
+            assert missing.status_code == 422, (path, missing.text)
 
-    for suffix in ("budget", "hypotheses", "experiment-campaigns", "evaluation"):
-        response = client.get(f"{base}/{suffix}?teamId={TEAM_ID}")
-        assert response.status_code == 200, (suffix, response.text)
-        assert response.json()["teamId"] == TEAM_ID
-        assert response.json()["runVersion"] == run["runVersion"]
+        mismatch = client.get(f"{base}/snapshot?teamId=another-team")
+        assert mismatch.status_code == 404, mismatch.text
+        assert mismatch.json()["detail"]["code"] == "team_scope_mismatch"
+
+        for suffix in ("budget", "hypotheses", "experiment-campaigns", "evaluation"):
+            response = client.get(f"{base}/{suffix}?teamId={TEAM_ID}")
+            assert response.status_code == 200, (suffix, response.text)
+            assert response.json()["teamId"] == TEAM_ID
+            assert response.json()["runVersion"] == run["runVersion"]
 
 
 def test_commands_require_team_id_idempotency_and_expected_run_version(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
-    service, client = _runtime(tmp_path)
-    run = _run(service)
-    assert run["runVersion"] == 1
-    endpoint = f"/api/research/workflow-runs/{run['runId']}/commands"
-    valid = {
-        "teamId": TEAM_ID,
-        "command": "cancel",
-        "idempotencyKey": "cancel-v1",
-        "expectedRunVersion": run["runVersion"],
-        "payload": {},
-    }
+    from core.web.services.team_workflow.research_runtime.run_creation import create_run
+    from tests._support.workflow_ledger_http import ledger_http_client
 
-    for missing_key in ("teamId", "idempotencyKey", "expectedRunVersion"):
-        body = {key: value for key, value in valid.items() if key != missing_key}
-        rejected = client.post(endpoint, json=body)
-        assert rejected.status_code == 422, (missing_key, rejected.text)
+    with ledger_http_client(tmp_path, monkeypatch) as (client, _runtime):
+        run = create_run(
+            CHALLENGE_CUP_WORKFLOW_ID,
+            run_input=run_input_request(team_id=TEAM_ID),
+            binding_layers=SOURCE_BINDING,
+            idempotency_key="create-team-scope-commands",
+        )
+        assert run["runVersion"] == 1
+        endpoint = f"/api/research/workflow-runs/{run['runId']}/commands"
+        valid = {
+            "teamId": TEAM_ID,
+            "command": "cancel_run",
+            "idempotencyKey": "cancel-v1",
+            "expectedRunVersion": run["runVersion"],
+            "payload": {},
+        }
 
-    wrong_team = client.post(endpoint, json={**valid, "teamId": "another-team"})
-    assert wrong_team.status_code == 404, wrong_team.text
-    assert wrong_team.json()["detail"]["code"] == "team_scope_mismatch"
+        for missing_key in ("teamId", "idempotencyKey", "expectedRunVersion"):
+            body = {key: value for key, value in valid.items() if key != missing_key}
+            rejected = client.post(endpoint, json=body)
+            assert rejected.status_code == 422, (missing_key, rejected.text)
 
-    stale = client.post(
-        endpoint,
-        json={**valid, "expectedRunVersion": run["runVersion"] + 1},
-    )
-    assert stale.status_code == 409, stale.text
-    assert stale.json()["detail"]["code"] == "run_version_conflict"
+        wrong_team = client.post(
+            endpoint,
+            headers={CONTROL_TOKEN_HEADER: get_control_token()},
+            json={**valid, "teamId": "another-team"},
+        )
+        assert wrong_team.status_code == 404, wrong_team.text
+        assert wrong_team.json()["detail"]["code"] == "team_scope_mismatch"
 
-    accepted = client.post(endpoint, json=valid)
-    assert accepted.status_code == 200, accepted.text
-    assert accepted.json()["status"] == "cancelled"
-    assert accepted.json()["runVersion"] > run["runVersion"]
+        stale = client.post(
+            endpoint,
+            headers={CONTROL_TOKEN_HEADER: get_control_token()},
+            json={**valid, "expectedRunVersion": run["runVersion"] + 1},
+        )
+        assert stale.status_code == 409, stale.text
+        assert stale.json()["detail"]["code"] == "run_version_conflict"
+
+        accepted = client.post(
+            endpoint,
+            headers={CONTROL_TOKEN_HEADER: get_control_token()},
+            json=valid,
+        )
+        assert accepted.status_code == 202, accepted.text
+        assert accepted.json()["status"] == "accepted"
+        assert accepted.json()["acceptedRunVersion"] > run["runVersion"]
 
 
 def test_heartbeat_persists_typed_event_and_advances_run_version(

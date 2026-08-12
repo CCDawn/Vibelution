@@ -1,33 +1,41 @@
-/** Canonical research-workflow HTTP client. Implementations live in ./research-workflow. */
+export { fetchResearchWorkflowDefinition } from "./definitions";
 export {
-  fetchResearchWorkflowDefinition,
   fetchEffectiveAgentBindings,
   putResearchWorkflowAgentBindings,
+} from "./bindings";
+export {
   listResearchWorkflowRuns,
   fetchResearchWorkflowLaunchOptions,
   createResearchWorkflowRun,
   fetchTeamWorkflowResearchProjects,
-  fetchResearchWorkflowSnapshot,
-  fetchResearchWorkflowNodeDetail,
-  submitResearchWorkflowCommand,
-  submitResearchWorkflowCommandOffer,
-  fetchResearchWorkflowEvents,
-  replayResearchWorkflowEvents,
-  researchWorkflowStreamUrl,
-  fetchResearchWorkflowHandoffs,
-  fetchResearchWorkflowResearchLedger,
-  fetchResearchWorkflowBudget,
-  fetchResearchWorkflowHypotheses,
-  fetchResearchWorkflowExperimentCampaigns,
-  fetchResearchWorkflowEvaluation,
-} from "./research-workflow";
-
+} from "./catalog";
 export type {
   WorkflowRunRecord,
   CreateResearchWorkflowRunInput,
   ResearchWorkflowSafetyLimits,
   ResearchWorkflowLaunchOption,
   ResearchWorkflowLaunchOptionsResponse,
-  WorkflowDefinitionResponse,
-  EventPage,
-} from "./research-workflow";
+} from "./catalog";
+export type { WorkflowDefinitionResponse } from "./definitions";
+export {
+  fetchResearchWorkflowSnapshot,
+  fetchResearchWorkflowNodeDetail,
+} from "./runs";
+export {
+  submitResearchWorkflowCommand,
+  submitResearchWorkflowCommandOffer,
+} from "./commands";
+export {
+  fetchResearchWorkflowEvents,
+  replayResearchWorkflowEvents,
+  researchWorkflowStreamUrl,
+} from "./events";
+export type { EventPage } from "./events";
+export {
+  fetchResearchWorkflowHandoffs,
+  fetchResearchWorkflowResearchLedger,
+  fetchResearchWorkflowBudget,
+  fetchResearchWorkflowHypotheses,
+  fetchResearchWorkflowExperimentCampaigns,
+  fetchResearchWorkflowEvaluation,
+} from "./domain-projections";

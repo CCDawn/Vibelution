@@ -73,6 +73,9 @@ class WorkflowLedgerStore:
     def get_run(self, run_id: str) -> RunRecord | None:
         return self.read(lambda repo: repo.get_run(run_id))
 
+    def list_runs_for_team(self, team_id: str, workflow_id: str) -> list[RunRecord]:
+        return self.read(lambda repo: repo.list_runs_for_team(team_id, workflow_id))
+
     def get_command_by_idempotency(self, run_id: str, idempotency_key: str):
         return self.read(
             lambda repo: repo.find_command_by_idempotency(run_id, idempotency_key)
