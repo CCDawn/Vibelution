@@ -631,25 +631,33 @@ def _resolve_run_cwd(raw_cwd: str, *, mode: str) -> dict[str, Any]:
         return {
             "ok": False,
             "code": "CWD_OUTSIDE_ALLOWED_ROOTS",
-            "message": "CLI agent cwd must stay inside the project root or the sibling worktree root.",
+            "message": "CLI agent cwd must stay inside the project root or a managed worktree root.",
             "cwd": str(candidate),
         }
-    if mode == "worktree" and not _is_within_any(candidate, [_worktrees_root(root)]):
+    if mode == "worktree" and not _is_within_any(candidate, _managed_worktree_roots(root)):
         return {
             "ok": False,
             "code": "WORKTREE_REQUIRED",
-            "message": "Writable CLI agent mode requires a dedicated sibling worktree cwd.",
+            "message": "Writable CLI agent mode requires a dedicated worktree cwd.",
             "cwd": str(candidate),
         }
     return {"ok": True, "cwd": str(candidate)}
 
 
 def _allowed_cwd_roots(root: Path) -> list[Path]:
-    return [root, _worktrees_root(root)]
+    return [root, *_managed_worktree_roots(root)]
 
 
 def _worktrees_root(root: Path) -> Path:
-    return (root.parent / f"{root.name}-worktrees").resolve()
+    from core.infrastructure.branch_workspace import branch_pool_write_root
+
+    return branch_pool_write_root(root)
+
+
+def _managed_worktree_roots(root: Path) -> list[Path]:
+    from core.infrastructure.branch_workspace import allowed_worktree_roots
+
+    return allowed_worktree_roots(root)
 
 
 def _is_within_any(path: Path, roots: Sequence[Path]) -> bool:

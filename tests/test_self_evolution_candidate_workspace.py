@@ -58,6 +58,16 @@ def test_candidate_workspace_is_named_branch_from_clean_main(tmp_path):
     assert _git(candidate, "status", "--short") == ""
 
 
+def test_candidate_workspace_defaults_to_in_repo_branch_pool(tmp_path):
+    root = _repo(tmp_path)
+
+    workspace = create_candidate_workspace(root, run_id="self-loop-pool")
+
+    candidate = Path(workspace["worktreePath"])
+    assert candidate == (root / ".worktrees" / "self-evolution-self-loop-pool").resolve()
+    assert candidate.is_dir()
+
+
 def test_candidate_inspection_freezes_added_modified_and_deleted_files(tmp_path):
     root = _repo(tmp_path)
     workspace = create_candidate_workspace(

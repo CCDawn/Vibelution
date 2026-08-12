@@ -220,13 +220,13 @@ def test_candidate_runtime_evidence_uses_candidate_summary_and_optional_extensio
     assert evidence["extensionEvidence"]["variant"] == "swte-variant-one"
 
 
-def test_create_worktree_lets_git_create_path_under_controlled_sibling_root(
+def test_create_worktree_lets_git_create_path_under_in_repo_branch_pool(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
     repo_root = tmp_path / "Vibelution"
     repo_root.mkdir()
-    expected_root = tmp_path / "Vibelution-worktrees"
+    expected_root = repo_root / ".worktrees"
     created_path = expected_root / "vibelution-harness-swte-san-12345678"
     calls: list[tuple[object, ...]] = []
 
