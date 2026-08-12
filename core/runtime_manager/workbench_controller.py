@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from core.logging import debug as _debug_logger
 import locale
@@ -44,6 +45,9 @@ INTERNAL_LAUNCHER_VALUE = "1"
 ALLOW_DIRTY_LAUNCH_ENV = "VIBELUTION_ALLOW_DIRTY_LAUNCH"
 ALLOW_DIRTY_LAUNCH_VALUE = "1"
 LAUNCHER_ACTION_CANCELLED_RETURN_CODE = 130
+_PACKAGED_ELECTRON_ENTRY = Path("dist") / "desktop" / "win-unpacked" / "Vibelution.exe"
+_ELECTRON_SESSION_BOOTSTRAP_TIMEOUT_SECONDS = 20.0
+_ELECTRON_WORKBENCH_OPEN_TIMEOUT_SECONDS = 30.0
 
 
 def _is_process_alive_windows(pid: int) -> bool:
@@ -1173,6 +1177,132 @@ def _latest_active_electron_desktop_session() -> dict[str, Any]:
     return session if isinstance(session, dict) else {}
 
 
+def _packaged_electron_desktop_executable() -> Path | None:
+    """Return the supported packaged desktop entry when this host can run it."""
+
+    if os.name != "nt":
+        return None
+    candidate = PROJECT_ROOT / _PACKAGED_ELECTRON_ENTRY
+    return candidate if candidate.is_file() else None
+
+
+def _electron_bootstrap_python_executable() -> str:
+    """Prefer the project interpreter so Electron can bootstrap Launcher consistently."""
+
+    candidate = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    if candidate.is_file():
+        return str(candidate)
+    return _python_launcher_executable()
+
+
+def _launch_packaged_electron_desktop(*, executable: Path, env: dict[str, str]) -> subprocess.Popen[Any]:
+    """Launch the visible Electron package directly, never through a console shell."""
+
+    desktop_env = dict(env)
+    desktop_env["VIBELUTION_WORKSPACE_ROOT"] = str(PROJECT_ROOT)
+    desktop_env["VIBELUTION_PYTHON_PATH"] = _electron_bootstrap_python_executable()
+    return subprocess.Popen(
+        [str(executable), "--workspace", str(PROJECT_ROOT)],
+        cwd=str(PROJECT_ROOT),
+        env=desktop_env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        shell=False,
+    )
+
+
+def _await_electron_desktop_session(
+    process: subprocess.Popen[Any],
+    *,
+    timeout_seconds: float = _ELECTRON_SESSION_BOOTSTRAP_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Wait for the newly started package to register its scoped desktop session."""
+
+    deadline = time.monotonic() + max(0.1, float(timeout_seconds))
+    while time.monotonic() < deadline:
+        session = _latest_active_electron_desktop_session()
+        if session:
+            return session
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"Packaged Electron exited before registering a desktop session (exit code {process.returncode})."
+            )
+        time.sleep(0.2)
+    raise RuntimeError("Packaged Electron did not register a desktop session before the startup deadline.")
+
+
+def _await_electron_workbench_open(
+    process: subprocess.Popen[Any],
+    *,
+    desktop_session_id: str,
+    timeout_seconds: float = _ELECTRON_WORKBENCH_OPEN_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Wait for the targeted desktop action to produce a real Electron Workbench window."""
+
+    from core.launcher.desktop_session_store import get_desktop_session
+
+    deadline = time.monotonic() + max(0.1, float(timeout_seconds))
+    while time.monotonic() < deadline:
+        session = get_desktop_session(desktop_session_id)
+        windows = session.get("windows") if isinstance(session.get("windows"), dict) else {}
+        workbench = windows.get("workbench") if isinstance(windows.get("workbench"), dict) else {}
+        if bool(workbench.get("open", False)):
+            return session
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"Packaged Electron exited before opening the Workbench window (exit code {process.returncode})."
+            )
+        time.sleep(0.2)
+    raise RuntimeError("Packaged Electron did not open the Workbench window before the startup deadline.")
+
+
+def _terminate_packaged_electron_after_failed_bootstrap(process: subprocess.Popen[Any]) -> None:
+    """Best-effort cleanup for the exact Electron process started by this action."""
+
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=4.0)
+    except (OSError, subprocess.TimeoutExpired):
+        with contextlib.suppress(OSError):
+            process.kill()
+
+
+def _bootstrap_packaged_electron_workbench(*, env: dict[str, str], action: str) -> dict[str, Any]:
+    """Start the package and route the first Workbench open through desktop actions."""
+
+    executable = _packaged_electron_desktop_executable()
+    if executable is None:
+        return {}
+    process = _launch_packaged_electron_desktop(executable=executable, env=env)
+    try:
+        session = _await_electron_desktop_session(process)
+        intent = _submit_electron_window_action(
+            action="open_workbench",
+            reason=f"{action}:electron_first_start",
+            session=session,
+        )
+        if str(intent.get("status") or "") != "accepted":
+            raise RuntimeError(
+                "Electron first-start Workbench action was not accepted by the Launcher: "
+                f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+            )
+        opened_session = _await_electron_workbench_open(
+            process,
+            desktop_session_id=str(session.get("desktopSessionId") or ""),
+        )
+        return {
+            "electronLaunchPid": int(process.pid),
+            "desktopSessionId": str(opened_session.get("desktopSessionId") or session.get("desktopSessionId") or ""),
+            "desktopSessionRevision": int(opened_session.get("revision") or 0),
+        }
+    except Exception:
+        _terminate_packaged_electron_after_failed_bootstrap(process)
+        raise
+
+
 def _electron_window_action_for_launcher_action(action: str) -> str:
     normalized = str(action or "").strip().lower()
     if normalized in {"internal-start", "internal-restart", "start", "restart"}:
@@ -1278,7 +1408,11 @@ def run_launcher_action(
 ) -> subprocess.CompletedProcess[str]:
     electron_session = _latest_active_electron_desktop_session()
     electron_window_action = _electron_window_action_for_launcher_action(action)
-    effective_no_browser = bool(no_browser or electron_session)
+    packaged_electron = _packaged_electron_desktop_executable()
+    bootstrap_packaged_electron = bool(
+        not electron_session and electron_window_action == "open_workbench" and packaged_electron is not None
+    )
+    effective_no_browser = bool(no_browser or electron_session or bootstrap_packaged_electron)
     reuse_electron_backend = _can_reuse_backend_for_electron_window_open(
         action=action,
         session=electron_session,
@@ -1327,24 +1461,45 @@ def run_launcher_action(
             started_at=started_at,
             cancel_check=cancel_check,
         )
-    if completed.returncode == 0 and electron_session and electron_window_action:
-        intent = _submit_electron_window_action(
-            action=electron_window_action,
-            reason=f"{action}:electron_window_provider",
-            session=electron_session,
-        )
-        if str(intent.get("status") or "") != "accepted":
-            raise RuntimeError(
-                "Electron window action was not accepted by the Launcher: "
-                f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+    if completed.returncode == 0 and electron_window_action:
+        if electron_session:
+            intent = _submit_electron_window_action(
+                action=electron_window_action,
+                reason=f"{action}:electron_window_provider",
+                session=electron_session,
             )
-        _record_launcher_action_event(
-            "launcher.action.electron_desktop_action_submitted",
-            action=action,
-            no_browser=effective_no_browser,
-            env=env,
-            stdout=f"desktopAction={electron_window_action}",
-        )
+            if str(intent.get("status") or "") != "accepted":
+                raise RuntimeError(
+                    "Electron window action was not accepted by the Launcher: "
+                    f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+                )
+            _record_launcher_action_event(
+                "launcher.action.electron_desktop_action_submitted",
+                action=action,
+                no_browser=effective_no_browser,
+                env=env,
+                stdout=f"desktopAction={electron_window_action}",
+            )
+        elif bootstrap_packaged_electron:
+            bootstrap = _bootstrap_packaged_electron_workbench(env=env, action=action)
+            _record_launcher_action_event(
+                "launcher.action.electron_first_start_succeeded",
+                action=action,
+                no_browser=effective_no_browser,
+                env=env,
+                stdout=(
+                    f"electronLaunchPid={bootstrap['electronLaunchPid']};"
+                    f"desktopSessionId={bootstrap['desktopSessionId']}"
+                ),
+            )
+        elif packaged_electron is None and not no_browser:
+            _record_launcher_action_event(
+                "launcher.action.edge_fallback_package_missing",
+                action=action,
+                no_browser=effective_no_browser,
+                env=env,
+                stdout="Electron package unavailable; legacy Edge app window provider selected.",
+            )
     _record_launcher_action_event(
         "launcher.action.completed",
         action=action,
