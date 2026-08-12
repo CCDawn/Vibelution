@@ -274,6 +274,7 @@ def preview_v1_to_v2(
     llm = source.get("llm") if isinstance(source, dict) else None
     if not isinstance(llm, dict) or int(llm.get("schema_version") or 1) != 1:
         raise ValueError("migration preview requires llm schema v1")
+    llm["schema_version"] = 1
     library = llm.get("model_library")
     if not isinstance(library, dict) or not library:
         raise ValueError("migration preview requires llm.model_library")

@@ -104,6 +104,7 @@ def test_v2_effective_config_resolves_provider_credential_without_inline_copies(
 def test_v1_normalization_remains_read_only_and_compatible() -> None:
     legacy = {
         "llm": {
+            "schema_version": 1,
             "model_library": {
                 "relay_model": {
                     "provider": {
@@ -302,6 +303,7 @@ api_key = "nested-load-secret-must-not-appear"
 def test_v1_public_config_hash_still_accepts_legacy_model_library() -> None:
     legacy = {
         "llm": {
+            "schema_version": 1,
             "model_library": {
                 "relay_model": {
                     "provider": {"kind": "relay", "base_url": "https://relay.example/v1"},
@@ -581,6 +583,9 @@ def test_v1_config_loader_keeps_profile_scalar_kwargs_behavior(tmp_path) -> None
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
+[llm]
+schema_version = 1
+
 [llm.providers.default]
 kind = "relay"
 base_url = "https://relay.example/v1"
@@ -602,6 +607,9 @@ def test_v1_config_loader_still_materializes_legacy_provider_api_key(tmp_path, m
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
+[llm]
+schema_version = 1
+
 [llm.providers.default]
 kind = "relay"
 api_key_env = "LEGACY_RELAY_KEY"

@@ -361,6 +361,9 @@ def test_config_loader_accepts_model_ref_toml(tmp_path):
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         """
+[llm]
+schema_version = 1
+
 [llm.model_library.openai_gpt_5_5]
 model = "gpt-5.5"
 label = "OpenAI GPT-5.5"
