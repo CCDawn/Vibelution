@@ -229,22 +229,38 @@ class AdapterDispatchWorker:
                 )
 
             if budget_receipt_id and verified.budget_receipt:
-                uow.repository.insert_budget_receipt(
-                    receipt_id=budget_receipt_id,
-                    run_id=action.run_id,
-                    node_run_id=action.node_run_id,
-                    reservation_id=str(verified.budget_receipt.get("reservationId") or f"res-{action.action_id}"),
-                    stage_id=str(verified.budget_receipt.get("stageId") or ""),
-                    policy_hash=action.budget_policy_hash,
-                    reserved_json=json.dumps(verified.budget_receipt.get("reserved") or {}),
-                    created_at_ms=now_ms,
+                reservation_id = str(
+                    verified.budget_receipt.get("reservationId")
+                    or f"res-{action.action_id}"
                 )
-                uow.repository.update_budget_receipt(
-                    budget_receipt_id,
-                    status="settled",
-                    now_ms=now_ms,
-                    settled_json=json.dumps({"usage": usage}),
-                )
+                existing = uow.repository.execute(
+                    "SELECT receipt_id, status FROM budget_receipts "
+                    "WHERE reservation_id = ?",
+                    (reservation_id,),
+                ).fetchone()
+                if existing is None:
+                    uow.repository.insert_budget_receipt(
+                        receipt_id=budget_receipt_id,
+                        run_id=action.run_id,
+                        node_run_id=action.node_run_id,
+                        reservation_id=reservation_id,
+                        stage_id=str(verified.budget_receipt.get("stageId") or ""),
+                        policy_hash=action.budget_policy_hash,
+                        reserved_json=json.dumps(
+                            verified.budget_receipt.get("reserved") or {}
+                        ),
+                        created_at_ms=now_ms,
+                    )
+                    receipt_to_settle = budget_receipt_id
+                else:
+                    receipt_to_settle = str(existing[0])
+                if str(existing[1] if existing else "") != "settled":
+                    uow.repository.update_budget_receipt(
+                        receipt_to_settle,
+                        status="settled",
+                        now_ms=now_ms,
+                        settled_json=json.dumps({"usage": usage}),
+                    )
 
             uow.repository.update_attempt_status(
                 action.node_run_id,
