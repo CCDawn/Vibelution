@@ -8,8 +8,10 @@ const launcherRouteSource = readFileSync(new URL("../routes/LauncherRoute.tsx", 
 
 describe("LauncherShell taskbar identity contract", () => {
   it("sets the document title to Launcher instead of Workbench", () => {
-    expect(launcherShellSource).toContain('document.title = "Vibelution Launcher"');
+    expect(launcherShellSource).toContain("document.title = launcherWindowTitle");
+    expect(launcherShellSource).toContain("currentInstanceWindowTitle(\"launcher\"");
     expect(launcherShellSource).not.toContain('document.title = t("appTitle")');
+    expect(launcherShellSource).not.toContain('document.title = "Vibelution Launcher"');
   });
 
   it("keeps shell language local so Launcher does not request workbench config", () => {

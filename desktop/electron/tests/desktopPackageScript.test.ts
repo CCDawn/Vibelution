@@ -165,6 +165,8 @@ describe("desktop package script", () => {
     expect(script).toContain("$canarySummaryPath = Join-Path $projectDir \".runtime/launcher/electron-workbench-close-canary-summary.json\"");
     expect(script).toContain("--workbench-close-canary");
     expect(script).toContain('$workbenchWindowTitle = "Vibelution Workbench"');
+    expect(script).toContain('$workbenchWindowTitleSuffix = " 台"');
+    expect(script).toContain("EndsWith($workbenchWindowTitleSuffix)");
     expect(script).toContain("PostMessage");
     expect(script).toContain("WM_CLOSE");
     expect(script).toContain("function Assert-NoActiveWorkbenchWork");

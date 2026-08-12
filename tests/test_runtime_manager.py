@@ -5688,6 +5688,7 @@ def test_packaged_electron_launch_requests_workbench_from_primary_instance(monke
     assert isinstance(kwargs, dict)
     assert kwargs["env"]["VIBELUTION_WORKSPACE_ROOT"] == str(workbench_controller.PROJECT_ROOT)
     assert kwargs["env"]["VIBELUTION_PYTHON_PATH"] == "python.exe"
+    assert kwargs["env"]["VIBELUTION_INSTANCE_SHORT_NAME"]
     assert kwargs["shell"] is False
     assert kwargs["stdin"] is subprocess.DEVNULL
     assert kwargs["stdout"] is subprocess.DEVNULL

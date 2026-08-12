@@ -74,7 +74,7 @@ export function LauncherBranchInstancesPanel({
           return (
             <VTooltip
               key={item.id}
-              content={`${item.branch || item.id} · ${item.path || item.displayPath || item.id}`}
+              content={`${item.shortName || item.branch || item.id} · ${item.branch || item.id} · ${item.path || item.displayPath || item.id}`}
               width="wide"
             >
               <div
@@ -92,7 +92,7 @@ export function LauncherBranchInstancesPanel({
                   }
                 }}
               >
-                <span role="cell"><strong>{item.branch || item.id}</strong></span>
+                <span role="cell"><strong>{item.shortName || item.branch || item.id}</strong></span>
                 <span role="cell">{stateLabel(item)}</span>
                 <span role="cell">{kindLabel(item, copy)}</span>
                 <span role="cell">{item.head || "-"}</span>
