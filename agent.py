@@ -3277,6 +3277,7 @@ class SelfEvolvingAgent:
                 )
                 # 进展标记
                 round_state.note_progress()
+                self._last_turn_failed = False
 
                 # Token 使用统计
                 token_usage = self._get_response_surface_controller().record_token_usage(
