@@ -123,8 +123,8 @@ def test_snapshot_rebuilds_deterministically_from_ledger(tmp_path: Path) -> None
         assert snap_a.to_dict() == snap_b.to_dict()
         assert snap_a.latest_event_sequence == latest_seq == 3
         assert snap_a.generated_at == FIXED_GENERATED_AT
-        assert snap_a.run["runId"] == "run-snap"
-        assert snap_a.run["teamId"] == "research-team"
+        assert snap_a.run.run_id == "run-snap"
+        assert snap_a.run.team_id == "research-team"
         assert "source_finding" in snap_a.node_attempts
         assert snap_a.active_node_ids == ("source_extraction",)
         payload = snap_a.to_dict()
@@ -166,7 +166,7 @@ def test_snapshot_query_is_zero_write(tmp_path: Path) -> None:
         after = harness.store.latest_event_sequence("run-snap")
         assert writes["count"] == 0
         assert before == after == snap.latest_event_sequence
-        assert snap.run["runId"] == "run-snap"
+        assert snap.run.run_id == "run-snap"
         harness.store.submit = original_submit  # type: ignore[method-assign]
     finally:
         harness.close()
@@ -210,7 +210,7 @@ def test_command_offer_in_snapshot_accepted_by_command_service(tmp_path: Path) -
         assert available, "expected at least one available start_node offer"
         offer = available[0]
         assert isinstance(offer, CommandOffer)
-        assert offer.expected_run_version == snap.run["runVersion"]
+        assert offer.expected_run_version == snap.run.run_version
         receipt = harness.service.submit(
             harness.request(
                 run_id="run-offer",

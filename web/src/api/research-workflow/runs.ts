@@ -1,4 +1,7 @@
-import type { ResearchWorkflowSnapshot } from "../types/research-workflow/core";
+import type {
+  ResearchWorkflowNodeDetail,
+  ResearchWorkflowSnapshot,
+} from "../types/research-workflow/core";
 
 function requireTeamId(teamId: string): string {
   const normalized = String(teamId || "").trim();
@@ -30,7 +33,7 @@ export async function fetchResearchWorkflowNodeDetail(options: {
   nodeId: string;
   teamId: string;
   signal?: AbortSignal;
-}): Promise<Record<string, unknown>> {
+}): Promise<ResearchWorkflowNodeDetail> {
   const teamId = requireTeamId(options.teamId);
   const runId = String(options.runId || "").trim();
   const nodeId = String(options.nodeId || "").trim();
@@ -41,5 +44,5 @@ export async function fetchResearchWorkflowNodeDetail(options: {
   if (!response.ok) {
     throw new Error(`node_detail_http_${response.status}`);
   }
-  return (await response.json()) as Record<string, unknown>;
+  return (await response.json()) as ResearchWorkflowNodeDetail;
 }

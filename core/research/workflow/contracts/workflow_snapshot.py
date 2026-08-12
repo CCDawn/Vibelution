@@ -13,33 +13,251 @@ from .workflow_command import CommandOffer
 
 
 @dataclass(frozen=True, slots=True)
-class ResearchWorkflowSnapshot:
-    run: Mapping[str, Any]
-    definition: Mapping[str, Any]
-    node_attempts: Mapping[str, tuple[Mapping[str, Any], ...]]
-    active_node_ids: tuple[str, ...]
-    pending_human_tasks: tuple[Mapping[str, Any], ...]
+class WorkflowRunSummary:
+    run_id: str
+    team_id: str
+    workflow_id: str
+    workflow_version_id: str
+    thread_id: str
+    project_id: str
+    question_id: str
+    status: str
+    run_version: int
+    input_snapshot_hash: str
+    binding_snapshot_set_id: str
+    active_node_id: str | None
+    parent_run_id: str | None
+    forked_from_checkpoint_id: str | None
+    completion_kind: str | None
+    terminal_reason: str | None
+    created_at_ms: int
+    updated_at_ms: int
+    completed_at_ms: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "runId": self.run_id,
+            "teamId": self.team_id,
+            "workflowId": self.workflow_id,
+            "workflowVersionId": self.workflow_version_id,
+            "threadId": self.thread_id,
+            "projectId": self.project_id,
+            "questionId": self.question_id,
+            "status": self.status,
+            "runVersion": self.run_version,
+            "inputSnapshotHash": self.input_snapshot_hash,
+            "bindingSnapshotSetId": self.binding_snapshot_set_id,
+            "activeNodeId": self.active_node_id,
+            "parentRunId": self.parent_run_id,
+            "forkedFromCheckpointId": self.forked_from_checkpoint_id,
+            "completionKind": self.completion_kind,
+            "terminalReason": self.terminal_reason,
+            "createdAtMs": self.created_at_ms,
+            "updatedAtMs": self.updated_at_ms,
+            "completedAtMs": self.completed_at_ms,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class NodeAttemptSummary:
+    node_run_id: str
+    node_id: str
+    attempt: int
+    actor_kind: str
+    status: str
+    command_id: str
+    binding_snapshot_id: str | None
+    input_snapshot_hash: str
+    execution_anchor_id: str | None
+    started_at_ms: int
+    updated_at_ms: int
+    finished_at_ms: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "nodeRunId": self.node_run_id,
+            "nodeId": self.node_id,
+            "attempt": self.attempt,
+            "actorKind": self.actor_kind,
+            "status": self.status,
+            "commandId": self.command_id,
+            "bindingSnapshotId": self.binding_snapshot_id,
+            "inputSnapshotHash": self.input_snapshot_hash,
+            "executionAnchorId": self.execution_anchor_id,
+            "startedAtMs": self.started_at_ms,
+            "updatedAtMs": self.updated_at_ms,
+            "finishedAtMs": self.finished_at_ms,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HumanTaskSummary:
+    task_id: str
+    run_id: str
+    node_run_id: str
+    task_kind: str
+    status: str
+    created_at_ms: int
+    node_id: str | None = None
+    handoff_id: str | None = None
+    resolved_at_ms: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "taskId": self.task_id,
+            "runId": self.run_id,
+            "nodeRunId": self.node_run_id,
+            "nodeId": self.node_id,
+            "handoffId": self.handoff_id,
+            "taskKind": self.task_kind,
+            "status": self.status,
+            "createdAtMs": self.created_at_ms,
+            "resolvedAtMs": self.resolved_at_ms,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HandoffRefSummary:
+    status: str
+    handoff_id: str | None = None
+    to_node_id: str | None = None
+    input_snapshot_hash: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "handoffId": self.handoff_id,
+            "toNodeId": self.to_node_id,
+            "status": self.status,
+            "inputSnapshotHash": self.input_snapshot_hash,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HandoffSummary:
+    counts_by_status: Mapping[str, int]
+    refs: tuple[HandoffRefSummary, ...]
+    count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "countsByStatus": dict(self.counts_by_status),
+            "refs": [item.to_dict() for item in self.refs],
+            "count": self.count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AgentBindingSummary:
+    binding_snapshot_set_id: str
+    binding_snapshot_ids: tuple[str, ...]
+    count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "bindingSnapshotSetId": self.binding_snapshot_set_id,
+            "bindingSnapshotIds": list(self.binding_snapshot_ids),
+            "count": self.count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetReceiptRef:
+    receipt_id: str | None = None
+    node_run_id: str | None = None
+    status: str | None = None
+    policy_hash: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "receiptId": self.receipt_id,
+            "nodeRunId": self.node_run_id,
+            "status": self.status,
+            "policyHash": self.policy_hash,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetSummary:
+    safety_limits: Any
+    receipt_refs: tuple[BudgetReceiptRef, ...]
+    receipt_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "safetyLimits": self.safety_limits,
+            "receiptRefs": [item.to_dict() for item in self.receipt_refs],
+            "receiptCount": self.receipt_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchWorkflowNodeDetail:
+    run_id: str
+    team_id: str
+    node_id: str
+    run_version: int
+    actor_kind: str
+    primary_role_key: str
+    label: str
+    runtime_current: bool
+    status: str | None
+    attempts: tuple[NodeAttemptSummary, ...]
     command_offers: tuple[CommandOffer, ...]
-    handoff_summary: Mapping[str, Any]
-    agent_binding_summary: Mapping[str, Any]
-    budget_summary: Mapping[str, Any]
+    latest_event_sequence: int
+    generated_at: str
+    binding_snapshot_id: str | None = None
+    latest_attempt: NodeAttemptSummary | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "runId": self.run_id,
+            "teamId": self.team_id,
+            "nodeId": self.node_id,
+            "runVersion": self.run_version,
+            "actorKind": self.actor_kind,
+            "primaryRoleKey": self.primary_role_key,
+            "label": self.label,
+            "runtimeCurrent": self.runtime_current,
+            "status": self.status,
+            "bindingSnapshotId": self.binding_snapshot_id,
+            "latestAttempt": (
+                self.latest_attempt.to_dict() if self.latest_attempt is not None else None
+            ),
+            "attempts": [item.to_dict() for item in self.attempts],
+            "commandOffers": [offer.to_dict() for offer in self.command_offers],
+            "latestEventSequence": self.latest_event_sequence,
+            "generatedAt": self.generated_at,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchWorkflowSnapshot:
+    run: WorkflowRunSummary
+    definition: Mapping[str, Any]
+    node_attempts: Mapping[str, tuple[NodeAttemptSummary, ...]]
+    active_node_ids: tuple[str, ...]
+    pending_human_tasks: tuple[HumanTaskSummary, ...]
+    command_offers: tuple[CommandOffer, ...]
+    handoff_summary: HandoffSummary
+    agent_binding_summary: AgentBindingSummary
+    budget_summary: BudgetSummary
     latest_event_sequence: int
     generated_at: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "run": dict(self.run),
+            "run": self.run.to_dict(),
             "definition": dict(self.definition),
             "nodeAttempts": {
-                node_id: [dict(item) for item in attempts]
+                node_id: [item.to_dict() for item in attempts]
                 for node_id, attempts in self.node_attempts.items()
             },
             "activeNodeIds": list(self.active_node_ids),
-            "pendingHumanTasks": [dict(item) for item in self.pending_human_tasks],
+            "pendingHumanTasks": [item.to_dict() for item in self.pending_human_tasks],
             "commandOffers": [offer.to_dict() for offer in self.command_offers],
-            "handoffSummary": dict(self.handoff_summary),
-            "agentBindingSummary": dict(self.agent_binding_summary),
-            "budgetSummary": dict(self.budget_summary),
+            "handoffSummary": self.handoff_summary.to_dict(),
+            "agentBindingSummary": self.agent_binding_summary.to_dict(),
+            "budgetSummary": self.budget_summary.to_dict(),
             "latestEventSequence": int(self.latest_event_sequence),
             "generatedAt": self.generated_at,
         }

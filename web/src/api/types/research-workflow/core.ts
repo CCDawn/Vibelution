@@ -79,6 +79,24 @@ export type BudgetSummary = {
   receiptCount: number;
 };
 
+export type ResearchWorkflowNodeDetail = {
+  runId: string;
+  teamId: string;
+  nodeId: ChallengeCupNodeId;
+  runVersion: number;
+  actorKind: string;
+  primaryRoleKey: string;
+  label: string;
+  runtimeCurrent: boolean;
+  status: string | null;
+  bindingSnapshotId?: string | null;
+  latestAttempt?: NodeAttemptSummary | null;
+  attempts: NodeAttemptSummary[];
+  commandOffers: import("./commands").CommandOffer[];
+  latestEventSequence: number;
+  generatedAt: string;
+};
+
 export type ResearchWorkflowSnapshot = {
   run: WorkflowRunSummary;
   definition: Record<string, unknown>;
