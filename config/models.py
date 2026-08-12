@@ -562,7 +562,7 @@ class LLMConfig(BaseModel):
     """新的 LLM 根配置：providers / profiles / discovery。"""
     model_config = ConfigDict(extra="ignore")
 
-    schema_version: int = Field(default=1, ge=1, le=2)
+    schema_version: int = Field(default=2, ge=1, le=2)
     providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
     profiles: Dict[str, LLMProfile] = Field(default_factory=dict)
     model_library: Dict[str, Dict[str, Any]] = Field(default_factory=dict)

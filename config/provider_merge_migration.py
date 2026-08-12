@@ -258,7 +258,7 @@ def preview_provider_merge(
         raise ProviderMergeConflictError("duplicate Provider ids are required")
     source = load_public_config(Path(config_path).resolve())
     llm = source.get("llm") if isinstance(source.get("llm"), dict) else {}
-    if int(llm.get("schema_version") or 1) != 2:
+    if int(llm.get("schema_version") or 2) != 2:
         raise ProviderMergeConflictError("Provider merge requires llm schema v2")
     providers = llm.get("providers") if isinstance(llm.get("providers"), dict) else {}
     canonical = providers.get(canonical_id)

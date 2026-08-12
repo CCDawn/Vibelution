@@ -452,7 +452,7 @@ def _canonicalize_model_library_api_key_envs(public_config: Dict[str, Any]) -> D
 def _canonicalize_runtime_public_config(public_config: Dict[str, Any]) -> Dict[str, Any]:
     candidate = copy.deepcopy(public_config)
     llm = candidate.get("llm", {})
-    schema_version = int(llm.get("schema_version") or 1) if isinstance(llm, dict) else 1
+    schema_version = int(llm.get("schema_version") or 2) if isinstance(llm, dict) else 1
     if schema_version == 2:
         from .llm_projection import project_v2_llm_for_runtime
 
@@ -625,7 +625,7 @@ def _runtime_provider_id(owner_kind: str, owner_id: str) -> str:
 
 
 def _materialize_inline_llm_providers(llm_section: Dict[str, Any]) -> None:
-    if int(llm_section.get("schema_version") or 1) != 1:
+    if int(llm_section.get("schema_version") or 2) != 1:
         return
     legacy_providers = llm_section.get("providers")
     runtime_providers: Dict[str, Any] = {}
@@ -708,7 +708,7 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
                 + ". Use [llm.profiles.<id>] / [llm.model_library.<id>] / [llm.discovery]."
             )
         _materialize_role_bound_profiles(llm_section)
-        schema_version = int(llm_section.get("schema_version") or 1)
+        schema_version = int(llm_section.get("schema_version") or 2)
         _materialize_model_ref_profiles(llm_section, preserve_model_ref=schema_version == 2)
         if schema_version == 1:
             _materialize_inline_llm_providers(llm_section)
@@ -1465,7 +1465,7 @@ class ConfigLoader:
 
         merged = deep_merge(current, data)
         data_llm = data.get("llm")
-        if isinstance(data_llm, dict) and int(data_llm.get("schema_version") or 1) == 2:
+        if isinstance(data_llm, dict) and int(data_llm.get("schema_version") or 2) == 2:
             merged_llm = merged.get("llm")
             if isinstance(merged_llm, dict):
                 for collection in ("providers", "profiles", "model_library", "model_aliases"):

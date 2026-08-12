@@ -1005,7 +1005,7 @@ def _ensure_profile_model_library_entries(public_config: dict) -> dict:
 def _canonicalize_public_config(public_config: dict) -> dict:
     candidate = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
     llm = candidate.get("llm", {})
-    schema_version = int(llm.get("schema_version") or 1) if isinstance(llm, dict) else 1
+    schema_version = int(llm.get("schema_version") or 2) if isinstance(llm, dict) else 1
     if schema_version == 2:
         build_effective_config_for_validation = normalize_public_config_dict(candidate)
         AppConfig.model_validate(build_effective_config_for_validation)
@@ -1456,7 +1456,7 @@ def list_llm_provider_preset_options() -> list[dict[str, object]]:
 def list_llm_provider_options(public_config: dict) -> list[dict[str, object]]:
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
     providers = llm.get("providers", {}) if isinstance(llm, dict) else {}
-    if int(llm.get("schema_version") or 1) != 2 or not isinstance(providers, dict):
+    if int(llm.get("schema_version") or 2) != 2 or not isinstance(providers, dict):
         return []
     options: list[dict[str, object]] = []
     for provider_id, provider in sorted(providers.items()):
@@ -1546,7 +1546,7 @@ def apply_llm_model_preset(
 
 def _require_v1_model_library_write(public_config: dict) -> None:
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
-    if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
+    if isinstance(llm, dict) and int(llm.get("schema_version") or 2) == 2:
         raise ValueError(SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR)
 
 
@@ -1557,7 +1557,7 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
     options: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
 
-    if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
+    if isinstance(llm, dict) and int(llm.get("schema_version") or 2) == 2:
         providers = llm.get("providers", {})
         if isinstance(providers, dict):
             for provider_id, raw_provider in providers.items():

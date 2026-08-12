@@ -72,7 +72,7 @@ def discover_provider_models(
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
     providers = llm.get("providers", {}) if isinstance(llm, dict) else {}
     provider = providers.get(canonical_provider_id) if isinstance(providers, dict) else None
-    if int(llm.get("schema_version") or 1) != 2 or not isinstance(provider, dict):
+    if int(llm.get("schema_version") or 2) != 2 or not isinstance(provider, dict):
         raise ValueError(f"unknown schema v2 provider: {canonical_provider_id}")
     validate_llm_provider_target(provider, context="llm.provider.discovery", resolve_dns=True)
     resolution = resolve_credential_ref(str(provider.get("credential_ref") or "none"))
