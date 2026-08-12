@@ -56,21 +56,36 @@ class WorkflowEventReplayService:
         if after_sequence < 0:
             raise ValueError("afterSequence must be >= 0")
         try:
-            run = self._store.get_run(run_id)
-            if run is None:
-                raise RunNotFoundError(run_id)
-            if run.team_id != scoped:
-                raise TeamScopeMismatchError()
-            records = self._store.list_events(
-                run_id, after_sequence=after_sequence, limit=limit
-            )
-            latest = self._store.latest_event_sequence(run_id)
+
+            def load(repo):
+                run = repo.get_run(run_id)
+                if run is None:
+                    return None
+                if run.team_id != scoped:
+                    raise TeamScopeMismatchError()
+                records = repo.list_events(
+                    run_id, after_sequence=after_sequence, limit=limit
+                )
+                latest = repo.latest_event_sequence(run_id)
+                return run, records, latest
+
+            bundle = self._store.read(load)
         except (WorkflowLedgerUnavailableError, WorkflowLedgerClosedError) as exc:
             raise WorkflowLedgerUnavailable(str(exc)) from exc
+        except TeamScopeMismatchError:
+            raise
+
+        if bundle is None:
+            raise RunNotFoundError(run_id)
+        run, records, latest = bundle
 
         events = tuple(
-            _envelope_from_record(record, team_id=scoped, workflow_id=run.workflow_id,
-                                  workflow_version_id=run.workflow_version_id)
+            _envelope_from_record(
+                record,
+                team_id=scoped,
+                workflow_id=run.workflow_id,
+                workflow_version_id=run.workflow_version_id,
+            )
             for record in records
         )
         # Defensive: never emit duplicates or out-of-order sequences.
