@@ -207,6 +207,16 @@ class ResearchWorkflowNodeDetail:
     generated_at: str
     binding_snapshot_id: str | None = None
     latest_attempt: NodeAttemptSummary | None = None
+    agent_id: str | None = None
+    display_name: str = ""
+    resolved_from: str = "unbound"
+    session_id: str | None = None
+    task_id: str | None = None
+    turn_id: str | None = None
+    session_attempt: int | None = None
+    chat_deep_link: str | None = None
+    session_anchor_degraded: bool = False
+    blocked_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -227,6 +237,17 @@ class ResearchWorkflowNodeDetail:
             "commandOffers": [offer.to_dict() for offer in self.command_offers],
             "latestEventSequence": self.latest_event_sequence,
             "generatedAt": self.generated_at,
+            "agentId": self.agent_id,
+            "displayName": self.display_name,
+            "resolvedFrom": self.resolved_from,
+            "sessionId": self.session_id,
+            "taskId": self.task_id,
+            "turnId": self.turn_id,
+            "sessionAttempt": self.session_attempt,
+            "chatDeepLink": self.chat_deep_link,
+            "sessionAnchorDegraded": self.session_anchor_degraded,
+            "blockedReason": self.blocked_reason,
+            "nodeAttempt": self.latest_attempt.attempt if self.latest_attempt else 0,
         }
 
 
