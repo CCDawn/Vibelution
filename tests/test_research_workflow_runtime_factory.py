@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from core.research.workflow.contracts import WorkflowCommandKind
 from core.web.services.team_workflow.research_runtime.real_readiness_context import (
     RealDomainReadinessContext,
@@ -147,7 +149,8 @@ def test_real_context_reads_frozen_snapshot_data(tmp_path: Path) -> None:
         assert binding["agentId"] == "agent-real-1"
         assert binding["roleKey"] == "source_finder"
 
-        assert context.agent_resolvable("agent-real-1") is True
+        # Agent Directory is authoritative: unknown ids are not resolvable.
+        assert context.agent_resolvable("agent-real-1") is False
         assert context.adapter_registered("source_finding") is True
         assert context.adapter_registered("controlled_run") is True
         assert context.adapter_registered("knowledge_handoff") is True
@@ -168,11 +171,21 @@ def test_real_context_returns_conservative_missing(tmp_path: Path) -> None:
         runtime.close()
 
 
-def test_composition_root_command_flow_works(tmp_path: Path) -> None:
+def test_composition_root_command_flow_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import readiness_providers
+
+    monkeypatch.setattr(
+        readiness_providers, "is_agent_resolvable", lambda agent_id: bool(agent_id)
+    )
     runtime = build_workflow_runtime(tmp_path / "ledger.sqlite3")
     try:
         _seed_with_snapshot(runtime.store)
         from core.research.workflow.contracts import ActorRef, CommandRequest
+        from core.web.services.team_workflow.research_runtime.operator_authorization import (
+            server_operator_scope,
+        )
 
         request = CommandRequest(
             command_id="cmd-client",
@@ -186,7 +199,8 @@ def test_composition_root_command_flow_works(tmp_path: Path) -> None:
             requested_by=ActorRef("user", "u-1"),
             requested_at_ms=1_750_000_000_000,
         )
-        receipt = runtime.command_service.submit(request)
+        with server_operator_scope("u-1"):
+            receipt = runtime.command_service.submit(request)
         assert receipt.status == "accepted"
         run = runtime.store.get_run("run-test")
         assert run is not None and run.run_version == 2
