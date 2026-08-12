@@ -1,7 +1,5 @@
-import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
+import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
 import { getNodeAdapter } from "./nodeAdapterModel";
-
-type WorkflowEvent = NonNullable<WorkflowRunRecord["events"]>[number];
 
 export type ResearchTimelineItem = {
   key: string;
@@ -17,37 +15,43 @@ export type ResearchTimelineGroup = {
 };
 
 const EVENT_LABELS: Record<string, string> = {
-  "run.queued": "运行已创建",
-  LeaseAcquired: "执行租约已获取",
-  LeaseHeartbeat: "执行心跳",
-  LeaseExpired: "执行租约超时",
-  NodeRunTransitioned: "节点状态已更新",
-  ArtifactProduced: "产物已生成",
-  ArtifactReused: "验证产物已复用",
-  QualityGateEvaluated: "质量门已评估",
-  BudgetReserved: "预算已预留",
-  BudgetSettled: "预算已结算",
-  BudgetExceeded: "预算已耗尽",
-  HumanDecisionRecorded: "人工决策已记录",
-  TaskBundleCancelled: "并行任务组已取消",
-  ActionIssued: "系统动作已发出",
-  ObservationRecorded: "系统观测已记录",
-  CommandReceiptRecorded: "命令回执已记录",
-  RunForked: "修订运行已分叉",
-  "iteration.decision_applied": "迭代决策已执行",
-  "binding.rebind_node": "节点 Agent 已换绑",
-  "session_binding.bound": "精确会话已绑定",
-  "node.command.applied": "节点命令已执行",
+  run_created: "运行已创建",
+  command_accepted: "命令已接受",
+  command_failed: "命令失败",
+  node_starting: "节点启动中",
+  node_running: "节点执行中",
+  node_waiting_human: "等待人工确认",
+  node_succeeded: "节点已完成",
+  node_failed: "节点失败",
+  node_blocked: "节点已阻塞",
+  handoff_ready: "交接已就绪",
+  handoff_accepted: "交接已接受",
+  handoff_rejected: "交接已拒绝",
+  budget_reserved: "预算已预留",
+  budget_settled: "预算已结算",
+  execution_anchor_bound: "执行锚点已绑定",
+  artifact_verified: "产物已核验",
+  run_forked: "运行已分叉",
+  run_blocked: "运行已阻塞",
+  run_succeeded: "运行已完成",
+  reconciliation_required: "需要对账",
 };
 
-function text(event: WorkflowEvent, key: string): string {
-  const value = event[key];
-  return value === null || value === undefined ? "" : String(value);
+function field(event: WorkflowEventEnvelope, key: string): string {
+  const direct = (event as unknown as Record<string, unknown>)[key];
+  if (direct !== null && direct !== undefined && typeof direct !== "object") {
+    return String(direct);
+  }
+  const nested = event.payload?.[key];
+  if (nested !== null && nested !== undefined && typeof nested !== "object") {
+    return String(nested);
+  }
+  return "";
 }
 
-function groupIdentity(event: WorkflowEvent): { key: string; title: string } {
-  const nodeId = text(event, "nodeId");
-  const attempt = text(event, "nodeAttempt") || text(event, "attempt");
+function groupIdentity(event: WorkflowEventEnvelope): { key: string; title: string } {
+  const nodeId = field(event, "nodeId");
+  const attempt = field(event, "attempt") || field(event, "nodeAttempt");
   if (nodeId) {
     const label = getNodeAdapter(nodeId)?.label || nodeId.replace(/_/g, " ");
     return {
@@ -55,26 +59,26 @@ function groupIdentity(event: WorkflowEvent): { key: string; title: string } {
       title: attempt ? `${label} · 第 ${attempt} 次尝试` : label,
     };
   }
-  const handoffId = text(event, "handoffId");
+  const handoffId = field(event, "handoffId");
   if (handoffId) return { key: `handoff:${handoffId}`, title: "节点交接" };
-  const checkpointId = text(event, "checkpointId");
+  const checkpointId = field(event, "checkpointId");
   if (checkpointId) return { key: `checkpoint:${checkpointId}`, title: "检查点与恢复" };
   return { key: "run", title: "运行治理" };
 }
 
 export function buildResearchTimelineGroups(
-  events: WorkflowRunRecord["events"] = [],
+  events: WorkflowEventEnvelope[] = [],
 ): ResearchTimelineGroup[] {
   const groups = new Map<string, ResearchTimelineGroup>();
   for (const event of events ?? []) {
     const identity = groupIdentity(event);
     const group = groups.get(identity.key) ?? { ...identity, items: [] };
-    const eventType = text(event, "type");
+    const eventType = field(event, "type");
     group.items.push({
-      key: text(event, "eventId") || `${text(event, "sequence")}:${eventType}`,
+      key: field(event, "eventId") || `${field(event, "sequence")}:${eventType}`,
       label: EVENT_LABELS[eventType] || "运行状态已更新",
-      status: text(event, "status") || text(event, "decision") || text(event, "outcome"),
-      occurredAt: text(event, "occurredAt") || text(event, "createdAt") || text(event, "capturedAt"),
+      status: field(event, "status") || field(event, "decision") || field(event, "outcome"),
+      occurredAt: field(event, "occurredAt"),
     });
     groups.set(identity.key, group);
   }

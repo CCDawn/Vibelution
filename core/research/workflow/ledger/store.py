@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ from .database import WorkflowLedgerDatabase
 from .errors import WorkflowLedgerClosedError
 from .records import EventRecord, NodeAttemptRecord, OutboxRecord, RunRecord
 from .writer import WorkflowLedgerWriter
+
+_read_tls = threading.local()
 
 
 class WorkflowLedgerStore:
@@ -68,67 +71,73 @@ class WorkflowLedgerStore:
     # ------------------------------------------------------- read-only
 
     def get_run(self, run_id: str) -> RunRecord | None:
-        connection = self._database.acquire_read_connection()
-        try:
-            return self._repository(connection).get_run(run_id)
-        finally:
-            self._database.release_read_connection(connection)
+        return self.read(lambda repo: repo.get_run(run_id))
 
     def get_command_by_idempotency(self, run_id: str, idempotency_key: str):
-        from .repository import WorkflowLedgerRepository
+        return self.read(
+            lambda repo: repo.find_command_by_idempotency(run_id, idempotency_key)
+        )
 
-        connection = self._database.acquire_read_connection()
-        try:
-            return WorkflowLedgerRepository(connection).find_command_by_idempotency(
-                run_id, idempotency_key
-            )
-        finally:
-            self._database.release_read_connection(connection)
-
-    def list_events(self, run_id: str, after_sequence: int = 0, limit: int = 500) -> list[EventRecord]:
-        connection = self._database.acquire_read_connection()
-        try:
-            return self._repository(connection).list_events(run_id, after_sequence, limit)
-        finally:
-            self._database.release_read_connection(connection)
+    def list_events(
+        self, run_id: str, after_sequence: int = 0, limit: int = 500
+    ) -> list[EventRecord]:
+        return self.read(
+            lambda repo: repo.list_events(run_id, after_sequence, limit)
+        )
 
     def latest_event_sequence(self, run_id: str) -> int:
-        connection = self._database.acquire_read_connection()
-        try:
-            return self._repository(connection).latest_event_sequence(run_id)
-        finally:
-            self._database.release_read_connection(connection)
+        return self.read(lambda repo: repo.latest_event_sequence(run_id))
 
     def list_attempts(self, run_id: str) -> list[NodeAttemptRecord]:
-        connection = self._database.acquire_read_connection()
-        try:
-            return self._repository(connection).list_attempts(run_id)
-        finally:
-            self._database.release_read_connection(connection)
+        return self.read(lambda repo: repo.list_attempts(run_id))
 
     def latest_attempt(self, run_id: str, node_id: str) -> NodeAttemptRecord | None:
-        connection = self._database.acquire_read_connection()
-        try:
-            return self._repository(connection).latest_attempt(run_id, node_id)
-        finally:
-            self._database.release_read_connection(connection)
+        return self.read(lambda repo: repo.latest_attempt(run_id, node_id))
 
     def list_attempts_for_all(self, run_ids: list[str]) -> list[NodeAttemptRecord]:
-        records: list[NodeAttemptRecord] = []
-        connection = self._database.acquire_read_connection()
-        try:
-            repository = self._repository(connection)
+        def load(repo):
+            records: list[NodeAttemptRecord] = []
             for run_id in run_ids:
-                records.extend(repository.list_attempts(run_id))
+                records.extend(repo.list_attempts(run_id))
             return records
-        finally:
-            self._database.release_read_connection(connection)
 
-    def list_pending_outbox(self, run_id: str | None = None, limit: int = 200) -> list[OutboxRecord]:
+        return self.read(load)
+
+    def list_pending_outbox(
+        self, run_id: str | None = None, limit: int = 200
+    ) -> list[OutboxRecord]:
+        return self.read(lambda repo: repo.list_pending_outbox(run_id, limit))
+
+    def read(self, fn: Callable[[Any], Any]) -> Any:
+        """Run callback inside one explicit read transaction (SQLite snapshot).
+
+        Nested ``read()`` calls on the same thread reuse the open snapshot instead
+        of starting a second transaction on the pooled connection.
+        """
+        depth = int(getattr(_read_tls, "depth", 0) or 0)
+        if depth > 0:
+            connection = _read_tls.connection
+            return fn(self._repository(connection))
+
         connection = self._database.acquire_read_connection()
+        _read_tls.connection = connection
+        _read_tls.depth = 1
         try:
-            return self._repository(connection).list_pending_outbox(run_id, limit)
+            connection.execute("BEGIN")
+            try:
+                result = fn(self._repository(connection))
+            except Exception:
+                try:
+                    connection.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise
+            else:
+                connection.execute("COMMIT")
+                return result
         finally:
+            _read_tls.depth = 0
+            _read_tls.connection = None
             self._database.release_read_connection(connection)
 
     @staticmethod

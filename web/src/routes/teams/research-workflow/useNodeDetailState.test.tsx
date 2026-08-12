@@ -13,7 +13,7 @@ const api = vi.hoisted(() => ({
   fetchResearchWorkflowNodeDetail: vi.fn(),
 }));
 
-vi.mock("../../../api/researchWorkflow", () => api);
+vi.mock("../../../api/research-workflow/runs", () => api);
 
 import { useNodeDetailState, type NodeDetailState } from "./useNodeDetailState";
 
@@ -85,18 +85,18 @@ describe("useNodeDetailState", () => {
       runId: "run-1",
       nodeId: "source_finding",
       label: "资料寻找",
-      commands: [],
+      commandOffers: [],
     });
     await renderWith("run-1", "source_finding");
     expect(latest.kind).toBe("ready");
     if (latest.kind === "ready") {
       expect(latest.detail.nodeId).toBe("source_finding");
     }
-    expect(api.fetchResearchWorkflowNodeDetail).toHaveBeenCalledWith(
-      "run-1",
-      "source_finding",
-      { teamId: "team-1" },
-    );
+    expect(api.fetchResearchWorkflowNodeDetail).toHaveBeenCalledWith({
+      runId: "run-1",
+      nodeId: "source_finding",
+      teamId: "team-1",
+    });
   });
 
   it("refetches the selected node when the authoritative run version changes", async () => {
@@ -104,7 +104,7 @@ describe("useNodeDetailState", () => {
       runId: "run-1",
       nodeId: "source_finding",
       label: "资料寻找",
-      commands: [],
+      commandOffers: [],
     });
     await act(async () => {
       root.render(
@@ -159,7 +159,7 @@ describe("useNodeDetailState", () => {
       runId: "run-1",
       nodeId: "source_finding",
       label: "资料寻找",
-      commands: [],
+      commandOffers: [],
     });
     await act(async () => {
       latestRetry();
@@ -175,7 +175,7 @@ describe("useNodeDetailState", () => {
       runId: "run-1",
       nodeId: "source_finding",
       label: "资料寻找",
-      commands: [],
+      commandOffers: [],
     });
     await renderWith("run-1", "source_finding");
     expect(latest.kind).toBe("ready");
@@ -190,7 +190,7 @@ describe("useNodeDetailState", () => {
         runId: "run-1",
         nodeId: "protocol_design",
         label: "协议设计",
-        commands: [],
+        commandOffers: [],
       });
     });
     await act(async () => {

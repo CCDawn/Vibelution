@@ -8,6 +8,7 @@ import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
 import { useNodeDetailState } from "./useNodeDetailState";
 import { useResearchWorkflowCatalog } from "./useResearchWorkflowCatalog";
+import { useResearchWorkflowCommand } from "./useResearchWorkflowCommand";
 import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
 import { useResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
@@ -36,14 +37,20 @@ export function ResearchProcessWorkspace({
   );
   const detail = nodeDetail.state.kind === "ready" ? nodeDetail.state.detail : null;
   const insights = useResearchWorkflowInsights(teamId, location.runId);
+  const formalCommand = useResearchWorkflowCommand(
+    teamId,
+    location.runId,
+    location.selectedNodeId,
+  );
   const commands = useResearchWorkflowCommands({
     teamId,
     runId: location.runId,
     selectedNodeId: location.selectedNodeId,
     run: runState.run,
     nodeDetail: detail,
+    commandOffers: runState.commandOffers,
+    submitFormalOffer: formalCommand.submit,
     createRun: runState.createRun,
-    resolveHuman: runState.resolveHuman,
     refresh: runState.refresh,
     replaceParams: location.replaceParams,
   });
@@ -69,8 +76,9 @@ export function ResearchProcessWorkspace({
   const nextAction = runState.projection?.definition.nodes.find(
     (node) => node.nodeId === runtimeNodeId,
   )?.label ?? (location.runId ? "等待运行更新" : "创建运行");
-  const displayError = commands.error || runState.error || catalog.error;
-  const commandBusy = runState.busy || commands.busy;
+  const displayError =
+    commands.error || formalCommand.commandError || runState.error || catalog.error;
+  const commandBusy = runState.busy || commands.busy || formalCommand.busy;
 
   return (
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
@@ -132,7 +140,7 @@ export function ResearchProcessWorkspace({
               retryNodeDetail: nodeDetail.retry,
               submitRun: commands.submitRun,
               pendingTaskId: commands.pendingTaskId,
-              runCommand: commands.runInspectorCommand,
+              submitOffer: commands.submitOffer,
             }}
           />
         )}
