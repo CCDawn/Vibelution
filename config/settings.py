@@ -454,6 +454,10 @@ def _canonicalize_runtime_public_config(public_config: Dict[str, Any]) -> Dict[s
     llm = candidate.get("llm", {})
     schema_version = int(llm.get("schema_version") or 2) if isinstance(llm, dict) else 1
     if schema_version == 2:
+        if "model_library" not in llm and (
+            not isinstance(llm.get("providers"), dict) or not isinstance(llm.get("profiles"), dict)
+        ):
+            return candidate
         from .llm_projection import project_v2_llm_for_runtime
 
         return project_v2_llm_for_runtime(candidate)
@@ -1209,7 +1213,8 @@ class ConfigLoader:
         for env_var, path in env_mappings.items():
             value = os.environ.get(env_var)
             if value is not None:
-                path = remap_legacy_provider_path(path)
+                if allow_legacy_llm_provider_materialization:
+                    path = remap_legacy_provider_path(path)
                 if is_blocked_v2_llm_path(path):
                     continue
                 if path in bool_keys:
@@ -1232,7 +1237,9 @@ class ConfigLoader:
         for env_var, raw_value in os.environ.items():
             if not env_var.startswith(llm_prefix):
                 continue
-            path = remap_legacy_provider_path(env_var[len(prefix):].lower().replace("__", "."))
+            path = env_var[len(prefix):].lower().replace("__", ".")
+            if allow_legacy_llm_provider_materialization:
+                path = remap_legacy_provider_path(path)
             if is_blocked_v2_llm_path(path):
                 continue
             value = raw_value
@@ -1449,6 +1456,11 @@ class ConfigLoader:
                         _validate_runtime_overrides(overrides, "overrides")
                         profile_update.update(overrides)
         else:
+            if config.llm.schema_version == 1:
+                incoming_llm = data.get("llm")
+                if isinstance(incoming_llm, dict) and "schema_version" not in incoming_llm:
+                    data = copy.deepcopy(data)
+                    data["llm"] = {**incoming_llm, "schema_version": 1}
             data = normalize_public_config_dict(data)
         # 深度合并字典
         current = config.model_dump()
@@ -1465,7 +1477,7 @@ class ConfigLoader:
 
         merged = deep_merge(current, data)
         data_llm = data.get("llm")
-        if isinstance(data_llm, dict) and int(data_llm.get("schema_version") or 2) == 2:
+        if isinstance(data_llm, dict) and int(data_llm.get("schema_version") or 1) == 2:
             merged_llm = merged.get("llm")
             if isinstance(merged_llm, dict):
                 for collection in ("providers", "profiles", "model_library", "model_aliases"):

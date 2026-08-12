@@ -1811,6 +1811,7 @@ def test_save_public_config_preserves_dotted_model_library_ids(tmp_path):
 def test_load_public_config_recovers_from_legacy_dotted_model_library_shape(tmp_path):
     legacy_text = """
 [llm]
+schema_version = 1
 
 [llm.model_library.custom.gpt-5.3-codex]
 model = "gpt-5.3-codex"

@@ -31,7 +31,7 @@ def legacy_config_with_models(*rows: tuple[str, str, str, str]) -> dict:
         profiles["primary" if index == 0 else f"profile_{index}"] = {"model_ref": model_id}
     first_model_id = rows[0][0] if rows else ""
     return {
-        "llm": {"model_library": model_library, "profiles": profiles},
+        "llm": {"schema_version": 1, "model_library": model_library, "profiles": profiles},
         "tools": {"image2": {"default_model_ref": first_model_id}},
         "git": {"commit_message_model_ref": first_model_id},
     }
