@@ -53,7 +53,8 @@ describe("Electron desktop window icons", () => {
       icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
       backgroundColor: "#f7fafc",
       titleBarStyle: "default",
-      skipTaskbar: false
+      skipTaskbar: false,
+      autoHideMenuBar: true
     });
     expect(browserWindowOptions[0]).not.toHaveProperty("titleBarOverlay");
     expect(loadedUrls).toEqual(["http://127.0.0.1:8765/launcher"]);
