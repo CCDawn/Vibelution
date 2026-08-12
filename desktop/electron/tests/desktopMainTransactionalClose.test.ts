@@ -53,14 +53,32 @@ describe("Electron main transactional Workbench close", () => {
     );
   });
 
-  it("refreshes the Workbench URL from the current Launcher bootstrap before a desktop open action is acknowledged", () => {
+  it("keeps the registered Launcher session intact while opening a desktop action", () => {
     const source = readFileSync(mainSourcePath, "utf8");
+    const actionOpenStart = source.indexOf("async function openWorkbenchAtCurrentLauncherUrl(");
+    const actionOpenEnd = source.indexOf("\nasync function reportManagedWindowState", actionOpenStart);
+    const actionOpenSource = source.slice(actionOpenStart, actionOpenEnd);
 
-    expect(source).toContain("async function openWorkbenchAtCurrentLauncherUrl(");
-    expect(source).toContain("const currentBootstrap = await bootstrapLauncherIfEnabled(paths)");
-    expect(source).toContain("resolveWorkbenchUrl(desktopEnvironment(), currentBootstrap.workbenchUrl)");
-    expect(source).toContain("currentWorkbenchUrl = workbenchUrl;");
+    expect(actionOpenStart).toBeGreaterThanOrEqual(0);
+    expect(actionOpenEnd).toBeGreaterThan(actionOpenStart);
+    expect(actionOpenSource).not.toContain("bootstrapLauncherIfEnabled(paths)");
+    expect(actionOpenSource).toContain("resolveWorkbenchUrl(desktopEnvironment(), bootstrap.workbenchUrl)");
+    expect(actionOpenSource).toContain("currentWorkbenchUrl = workbenchUrl;");
+    expect(actionOpenSource).toContain("await provider.openOrFocusWorkbench(workbenchUrl)");
     expect(source).toContain("const workbenchUrl = currentWorkbenchUrl || resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl)");
     expect(source).toContain("openOrFocusWorkbench: () => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider)");
+  });
+
+  it("repairs one rejected close submit by refreshing the session control context before showing a retry dialog", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+
+    expect(source).toContain("async function recoverWorkbenchCloseControlContext(");
+    expect(source).toContain("await fetchLauncherControlToken({ launcherOrigin })");
+    expect(source).toContain("async function submitWorkbenchCloseTransactionWithControlRecovery(");
+    expect(source).toContain("retryRejectedWorkbenchCloseSubmitOnce(");
+    expect(source).toContain("await recoverWorkbenchCloseControlContext(paths, bootstrap, provider)");
+    expect(source).toContain("context = await resolveDesktopActionLoopContext(bootstrap);");
+    expect(source).toContain("transaction = await awaitWorkbenchCloseAuthorization(context, transaction);");
+    expect(source).toContain("runtimeSceneBridge = null;");
   });
 });

@@ -28,6 +28,7 @@ import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desk
 import {
   acknowledgeWorkbenchCloseWindowClosed,
   fetchWorkbenchCloseTransaction,
+  retryRejectedWorkbenchCloseSubmitOnce,
   submitWorkbenchCloseTransaction,
   type WorkbenchCloseTransaction
 } from "./protocol/workbenchCloseTransactionClient.js";
@@ -372,11 +373,10 @@ async function openWorkbenchAtCurrentLauncherUrl(
   let workbenchUrl = "";
   const previousWorkbenchUrl = currentWorkbenchUrl;
   try {
-    const currentBootstrap = await bootstrapLauncherIfEnabled(paths);
-    if (currentBootstrap === null) {
-      throw new Error("Workbench open requires an active Launcher bootstrap");
-    }
-    workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), currentBootstrap.workbenchUrl);
+    // A desktop action belongs to the already registered Electron session. Running
+    // bootstrap again here can rotate the local control token that this session
+    // uses to acknowledge actions, report window state, and close atomically.
+    workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), bootstrap.workbenchUrl);
     currentWorkbenchUrl = workbenchUrl;
     const state = await provider.openOrFocusWorkbench(workbenchUrl);
     await recordElectronSupervisorEvent(bootstrap, {
@@ -413,36 +413,41 @@ async function reportManagedWindowState(
   bootstrap: LauncherBootstrapResult | null,
   state: ManagedWindowState
 ): Promise<void> {
-  if (bootstrap === null) {
-    return;
-  }
-  if (!desktopSessionMutations.accepts("window")) {
-    return;
-  }
   try {
-    await desktopSessionMutations.enqueue("window", async () => {
-      const context = await resolveDesktopActionLoopContext(bootstrap);
-      if (!desktopSessionRegistered) {
-        const registration = await registerDesktopSession({
-          ...context,
-          workspaceRoot: paths.workspaceRoot,
-          capabilities: desktopSessionCapabilities(bootstrap)
-        });
-        desktopSessionRevision = registration.revision;
-        desktopSessionRegistered = true;
-        startDesktopSessionHeartbeatIfNeeded(bootstrap);
-      }
-      const result = await reportDesktopWindowState({
-        ...context,
-        role: state.role,
-        revision: desktopSessionRevision,
-        state
-      });
-      desktopSessionRevision = result.revision;
-    });
+    await persistManagedWindowState(paths, bootstrap, state);
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
   }
+}
+
+async function persistManagedWindowState(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult | null,
+  state: ManagedWindowState
+): Promise<void> {
+  if (bootstrap === null || !desktopSessionMutations.accepts("window")) {
+    return;
+  }
+  await desktopSessionMutations.enqueue("window", async () => {
+    const context = await resolveDesktopActionLoopContext(bootstrap);
+    if (!desktopSessionRegistered) {
+      const registration = await registerDesktopSession({
+        ...context,
+        workspaceRoot: paths.workspaceRoot,
+        capabilities: desktopSessionCapabilities(bootstrap)
+      });
+      desktopSessionRevision = registration.revision;
+      desktopSessionRegistered = true;
+      startDesktopSessionHeartbeatIfNeeded(bootstrap);
+    }
+    const result = await reportDesktopWindowState({
+      ...context,
+      role: state.role,
+      revision: desktopSessionRevision,
+      state
+    });
+    desktopSessionRevision = result.revision;
+  });
 }
 
 function desktopSessionHeartbeatSupported(
@@ -497,14 +502,19 @@ function stopDesktopSessionHeartbeat(): void {
   desktopSessionHeartbeatRunning = false;
 }
 
-async function resolveDesktopActionLoopContext(bootstrap: LauncherBootstrapResult): Promise<DesktopActionLoopContext> {
-  if (desktopActionContext !== null) {
+async function resolveDesktopActionLoopContext(
+  bootstrap: LauncherBootstrapResult,
+  options: { forceControlTokenRefresh?: boolean } = {}
+): Promise<DesktopActionLoopContext> {
+  if (!options.forceControlTokenRefresh && desktopActionContext !== null) {
     return desktopActionContext;
   }
   const desktopEnv = desktopEnvironment();
   const launcherOrigin = resolveLauncherUrl(desktopEnv, bootstrap.launcherUrl);
   const envToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "").trim();
-  const controlToken = envToken || (await fetchLauncherControlToken({ launcherOrigin }));
+  const controlToken = options.forceControlTokenRefresh
+    ? await fetchLauncherControlToken({ launcherOrigin })
+    : envToken || (await fetchLauncherControlToken({ launcherOrigin }));
   desktopActionContext = {
     launcherOrigin,
     controlToken,
@@ -614,10 +624,9 @@ async function requestTransactionalWorkbenchClose(
     if (!desktopSessionRegistered) {
       throw new Error("Electron Workbench close transaction requires an active desktop session.");
     }
-    const context = await resolveDesktopActionLoopContext(bootstrap);
+    let context = await resolveDesktopActionLoopContext(bootstrap);
     const normalIdempotencyKey = `electron-workbench-close:${context.desktopSessionId}:${randomUUID()}`;
-    let transaction = await submitWorkbenchCloseTransaction({
-      ...context,
+    let transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
       idempotencyKey: normalIdempotencyKey,
       mode: "normal",
       reason: "workbench_window_close"
@@ -632,14 +641,16 @@ async function requestTransactionalWorkbenchClose(
         });
         return;
       }
-      transaction = await submitWorkbenchCloseTransaction({
-        ...context,
+      transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
         idempotencyKey: `${normalIdempotencyKey}:force`,
         mode: "force",
         reason: "workbench_window_close",
         confirmationCloseId: transaction.closeId
       });
     }
+    // A recovered submit replaces the cached control context. Refresh this
+    // local handle before polling and acknowledging the same close transaction.
+    context = await resolveDesktopActionLoopContext(bootstrap);
     transaction = await awaitWorkbenchCloseAuthorization(context, transaction);
     if (transaction.phase !== "window_close_authorized") {
       throw new Error(workbenchCloseTransactionFailureMessage(transaction));
@@ -658,6 +669,52 @@ async function requestTransactionalWorkbenchClose(
       }
     });
     await provider.approveWorkbenchCloseOnce();
+  });
+}
+
+async function submitWorkbenchCloseTransactionWithControlRecovery(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider,
+  input: {
+    idempotencyKey: string;
+    mode: "normal" | "force";
+    reason: string;
+    confirmationCloseId?: string;
+  }
+): Promise<WorkbenchCloseTransaction> {
+  return await retryRejectedWorkbenchCloseSubmitOnce(
+    async () =>
+      await submitWorkbenchCloseTransaction({
+        ...(await resolveDesktopActionLoopContext(bootstrap)),
+        ...input
+      }),
+    async () => await recoverWorkbenchCloseControlContext(paths, bootstrap, provider)
+  );
+}
+
+async function recoverWorkbenchCloseControlContext(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider
+): Promise<void> {
+  const previousContext = desktopActionContext;
+  stopDesktopSessionHeartbeat();
+  desktopActionContext = null;
+  runtimeSceneBridge = null;
+  desktopSessionRegistered = false;
+  const refreshedContext = await resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh: true });
+  if (previousContext !== null && refreshedContext.desktopSessionId !== previousContext.desktopSessionId) {
+    throw new Error("Electron control recovery changed the desktop session identity.");
+  }
+  await persistManagedWindowState(paths, bootstrap, provider.snapshot().workbench);
+  if (!desktopSessionRegistered) {
+    throw new Error("Electron control recovery could not re-register the active desktop session.");
+  }
+  await recordElectronSupervisorEvent(bootstrap, {
+    eventCode: "electron.workbench_close.control_recovered",
+    message: "Electron refreshed its local Launcher control context before retrying the Workbench close.",
+    fields: { desktopSessionId: refreshedContext.desktopSessionId, workspaceRoot: paths.workspaceRoot }
   });
 }
 
