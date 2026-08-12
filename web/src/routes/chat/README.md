@@ -28,6 +28,7 @@ ChatCodingRoute.tsx → re-export ChatCodingRouteWorkbench
 | Session stream connect/grace pure helpers | `chatSessionStreamConnect.ts` | opening EventSource |
 | Direct session detail SSE (sole EventSource) | `useSessionDetailStream.ts` | second session EventSource, group stream |
 | Group room SSE (sole EventSource) | `useGroupRoomStream.ts` | second group EventSource, session stream |
+| Catalog / secondary queries (runtime·pet·index·teams·skills·rooms) | `useChatWorkbenchCatalogQueries.ts` | session detail SSE, composer submit |
 | Session select / URL / bootstrap | `useChatSessionSelection.ts` | EventSource ownership |
 | Session detail window / ledger / conversation merge | `chatSessionDetailHelpers.ts` | stream EventSource |
 | Labels / avatar / group message presentation | `chatRoutePresentation.tsx` | mutations / stream |
@@ -77,6 +78,11 @@ Historical plan (archived): `docs/archive/superpowers/plans/2026-07-19-chat-codi
 
 - **E1–E4i done:** stream selection split, workspace hooks, surface models, center surfaces
 - **D2 (ROI queue):** `conversationFeedbackStatusPresentation.ts` — feedback status placeholder pure boundary for `ConversationView` (projection vs shell)
+
+## Phase F (R01c — in progress)
+
+- **F1 done:** `useChatWorkbenchCatalogQueries.ts` — runtime/pet/config/session-index/conversations/teams/agents/skills/chat-room catalog + expanded agent detail queries
+- **Next:** group draft state / dialog chrome / remaining shell wiring until workbench net −300 LOC vs pre-R01c baseline
 
 ## Bundle note (secondary lazy)
 

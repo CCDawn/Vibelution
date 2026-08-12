@@ -12,7 +12,8 @@ import routerSource from "../app/router.tsx?raw";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import chatApiSource from "../api/chat.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
-import routeSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
+import chatCodingRouteWorkbenchSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
+import chatWorkbenchCatalogQueriesSource from "./chat/useChatWorkbenchCatalogQueries.ts?raw";
 import chatCenterTabStripSource from "./chat/ChatCenterTabStrip.tsx?raw";
 import chatCenterSessionSurfaceSource from "./chat/ChatCenterSessionSurface.tsx?raw";
 import chatConversationIndexPanelContentSource from "./chat/ChatConversationIndexPanelContent.tsx?raw";
@@ -51,6 +52,9 @@ import cacheDetailStyles from "./chat/CacheDetailDialog.styles";
 import conversationIndexRailStyles from "./chat/ChatConversationIndexRail.styles";
 import chatStatusRailStyles from "./chat/ChatStatusRail.styles";
 import tokenCoreStatusPanelStyles from "./chat/TokenCoreStatusPanel.styles";
+
+/** Workbench shell + catalog queries hook (R01c F1). */
+const routeSource = `${chatCodingRouteWorkbenchSource}\n${chatWorkbenchCatalogQueriesSource}`;
 
 /** Wave 8C/8D: layout contracts resolve class strings across route shell + panel/component maps. */
 const routeStyles = {
@@ -1196,6 +1200,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps group settings in the right status rail and member status in the left conversation index", () => {
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatWorkbenchCatalogQueries");
     expect(routeSource).toContain("expandedGroupAgentSessionIds");
     expect(routeSource).toContain("useQueries");
     expect(routeSource).toContain("expandedGroupAgentDetailQueries");
@@ -3102,7 +3107,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queryText: sessionQueryText");
     expect(routeSource).toContain("enabled: sessionIndexQueryEnabled");
     expect(routeSource).toContain("const sessionIndexQueryEnabled =");
-    expect(routeSource).toContain("Boolean(requestedSessionId || requestedRoomId)");
+    expect(routeSource).toContain("Boolean(input.requestedSessionId || input.requestedRoomId)");
     expect(routeSource).toContain("shouldEnableSessionIndexQuery");
     expect(routeSource).toContain("bootstrapIsFetched: activeSessionBootstrapQuery.isFetched");
     expect(routeSource).toContain("bootstrapIsError: activeSessionBootstrapQuery.isError");
