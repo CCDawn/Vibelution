@@ -2224,6 +2224,7 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         or (backend_healthy and backend_port_listening and not backend_port_conflict)
     )
     browser_managed = bool(observed_or_state("browserManaged", True))
+    window_managed = bool(observed_or_state("windowManaged", False))
     project_backend_present = bool(
         backend_observed
         or backend_alive
@@ -2254,6 +2255,11 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         and backend_healthy
         and backend_port_listening
         and not backend_port_conflict
+    )
+    observation_confirms_visible_workbench = bool(
+        observation_confirms_open_workbench
+        and project_window_alive
+        and (browser_managed or window_managed)
     )
     frontend_orphaned = False if observation_confirms_open_workbench else bool(observed_or_state("frontendOrphaned", False))
     lifecycle_consistency = str(
@@ -2297,10 +2303,10 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         phase = "closing"
     failure_message = (
         str(observed.get("failureMessage") or "").strip()
-        if observation_confirms_open_workbench
+        if observation_confirms_visible_workbench
         else str(state_workbench.get("failureMessage") or "").strip()
     )
-    if observation_confirms_open_workbench and phase == "failed":
+    if observation_confirms_visible_workbench and phase == "failed":
         phase = "steady"
     # A non-empty failureMessage must win the status line. Dirty-main / start
     # failures previously left observedState=open + status "running" while the

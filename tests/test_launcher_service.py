@@ -3275,6 +3275,57 @@ def test_launcher_status_marks_missing_managed_window_as_partial(tmp_path, monke
     assert payload["lifecycleProof"]["summary"] == bundle["statusLine"]
 
 
+def test_workbench_payload_keeps_failed_window_start_when_backend_is_healthy(monkeypatch):
+    failure_message = "Packaged Electron exited before registering a desktop session (exit code 0)."
+    runtime_state = {
+        "runtimeState": "running",
+        "daemonRunning": True,
+        "command": {"activeCommandId": "", "activeType": ""},
+        "workbench": {
+            "sessionRole": "workbench",
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "failed",
+            "backendPid": 10952,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPort": 8000,
+            "backendPortListening": True,
+            "backendPortConflict": False,
+            "browserManaged": False,
+            "browserWindowAlive": False,
+            "lifecycleConsistency": "consistent",
+            "failureMessage": failure_message,
+        },
+    }
+    observed = {
+        "sessionRole": "workbench",
+        "observedState": "open",
+        "backendPid": 10952,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 8000,
+        "backendPortListening": True,
+        "backendPortConflict": False,
+        "browserManaged": False,
+        "browserWindowAlive": False,
+        "lifecycleConsistency": "consistent",
+    }
+    monkeypatch.setattr(launcher_service, "_desktop_session_workbench_projection", dict)
+    monkeypatch.setattr(launcher_service, "_desktop_session_window_provider_projection", dict)
+
+    payload = launcher_service._workbench_payload(
+        runtime_state=runtime_state,
+        observed_workbench=observed,
+    )
+
+    assert payload["phase"] == "failed"
+    assert payload["failureMessage"] == failure_message
+    assert payload["statusLine"] == failure_message
+
+
 def test_launcher_supervisor_snapshot_reports_recorded_dead_pid(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     launcher_state_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1224,11 +1224,17 @@ def _await_electron_desktop_session(
         session = _latest_active_electron_desktop_session()
         if session:
             return session
-        if process.poll() is not None:
+        exit_code = process.poll()
+        if exit_code is not None and int(exit_code) != 0:
             raise RuntimeError(
-                f"Packaged Electron exited before registering a desktop session (exit code {process.returncode})."
+                f"Packaged Electron exited before registering a desktop session (exit code {exit_code})."
             )
         time.sleep(0.2)
+    if process.poll() == 0:
+        raise RuntimeError(
+            "Packaged Electron handed off to an existing primary instance, but no desktop session "
+            "was registered before the startup deadline."
+        )
     raise RuntimeError("Packaged Electron did not register a desktop session before the startup deadline.")
 
 
@@ -1249,11 +1255,17 @@ def _await_electron_workbench_open(
         workbench = windows.get("workbench") if isinstance(windows.get("workbench"), dict) else {}
         if bool(workbench.get("open", False)):
             return session
-        if process.poll() is not None:
+        exit_code = process.poll()
+        if exit_code is not None and int(exit_code) != 0:
             raise RuntimeError(
-                f"Packaged Electron exited before opening the Workbench window (exit code {process.returncode})."
+                f"Packaged Electron exited before opening the Workbench window (exit code {exit_code})."
             )
         time.sleep(0.2)
+    if process.poll() == 0:
+        raise RuntimeError(
+            "Packaged Electron handed off to an existing primary instance, but the Workbench window "
+            "did not open before the startup deadline."
+        )
     raise RuntimeError("Packaged Electron did not open the Workbench window before the startup deadline.")
 
 
