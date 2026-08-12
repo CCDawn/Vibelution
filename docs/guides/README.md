@@ -58,6 +58,7 @@
 | 配置 | `docs/ops/config/INDEX.md` |
 | **全部 web services** | `core/web/services/README.md` |
 | **便利度改造排期** | `docs/guides/agent-dev-roi-backlog.md` |
+| **Launcher / Runtime 迷你索引** | `core/web/services/launcher_runtime.md` |
 | **按钮选型** | `docs/guides/button-selection.md` |
 | LLM 协议 | `core/llm/PROTOCOL.md` |
 | 测试 | `tests/README.md` |
