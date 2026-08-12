@@ -91,25 +91,38 @@ class FakeDomainPorts:
             self.calls.append("execute_agent_turn(cached)")
             return existing
         self.calls.append("execute_agent_turn")
-        ref = {
-            "canonicalRef": f"evidence_card_batch:{action.action_id[:8]}",
-            "kind": "evidence_card_batch",
-            "sha256": "a" * 64,
-        }
-        self.turn_results_by_action[action.action_id] = [ref]
+        from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+            required_artifact_kinds,
+        )
+
+        kinds = required_artifact_kinds(action.node_id) or ("evidence_card_batch",)
+        refs: list[dict[str, str]] = []
         actual_hash = "b" * 64 if self.fail_artifact_hash else "a" * 64
-        if "evidence_card_batch:a" not in self.artifact_store:
-            self.artifact_store["evidence_card_batch:a"] = ArtifactReadBack(
-                canonical_ref=f"evidence_card_batch:{action.action_id[:8]}",
+        for kind in kinds:
+            canonical = f"{kind}:{action.action_id[:8]}"
+            refs.append(
+                {
+                    "canonicalRef": canonical,
+                    "kind": kind,
+                    "sha256": "a" * 64,
+                    "version": "1.0",
+                }
+            )
+            self.artifact_store[canonical] = ArtifactReadBack(
+                canonical_ref=canonical,
                 version="1.0",
                 content_hash=actual_hash,
                 domain_revision="rev-1",
             )
-        return self.turn_results_by_action[action.action_id]
+        self.turn_results_by_action[action.action_id] = refs
+        return refs
 
     def read_back_artifact(self, canonical_ref: str) -> ArtifactReadBack | None:
         self.calls.append("read_back_artifact")
-        return self.artifact_store.get(canonical_ref) or self.artifact_store.get("evidence_card_batch:a")
+        if canonical_ref in self.artifact_store:
+            return self.artifact_store[canonical_ref]
+        # Fallback for older tests that keyed a generic slot.
+        return self.artifact_store.get("evidence_card_batch:a")
 
     def create_human_task(self, *, action: PendingAction) -> HumanTaskHandle:
         self.calls.append("create_human_task")

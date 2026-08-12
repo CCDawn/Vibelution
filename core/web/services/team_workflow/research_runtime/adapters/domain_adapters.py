@@ -64,6 +64,21 @@ class AgentActionAdapter:
         )
 
     def verify(self, action: PendingAction, result: AdapterResult) -> VerifiedDomainResult:
+        from ..artifact_readback_registry import required_artifact_kinds
+
+        required = required_artifact_kinds(action.node_id)
+        if required and not result.materialized_refs:
+            return VerifiedDomainResult(
+                action_id=action.action_id,
+                outcome="blocked",
+                artifact_receipts=(),
+                anchor=result.anchor,
+                budget_receipt=None,
+                problem={
+                    "code": "required_artifact_missing",
+                    "detail": f"{action.node_id} requires {list(required)}",
+                },
+            )
         receipts: list[dict[str, Any]] = []
         for ref in result.materialized_refs:
             read_back = self._ports.read_back_artifact(str(ref.get("canonicalRef") or ""))
@@ -79,6 +94,20 @@ class AgentActionAdapter:
                         "detail": f"canonical ref 不可读: {ref.get('canonicalRef')}",
                     },
                 )
+            if not str(read_back.content_hash or "").strip() or not str(
+                read_back.domain_revision or ""
+            ).strip():
+                return VerifiedDomainResult(
+                    action_id=action.action_id,
+                    outcome="blocked",
+                    artifact_receipts=(),
+                    anchor=result.anchor,
+                    budget_receipt=None,
+                    problem={
+                        "code": "artifact_incomplete_readback",
+                        "detail": f"empty hash/revision: {read_back.canonical_ref}",
+                    },
+                )
             if read_back.content_hash != str(ref.get("sha256") or ""):
                 return VerifiedDomainResult(
                     action_id=action.action_id,
@@ -91,6 +120,19 @@ class AgentActionAdapter:
                         "detail": f"hash 不符: {read_back.canonical_ref}",
                     },
                 )
+            expected_version = str(ref.get("version") or "").strip()
+            if expected_version and expected_version != str(read_back.version or "").strip():
+                return VerifiedDomainResult(
+                    action_id=action.action_id,
+                    outcome="blocked",
+                    artifact_receipts=(),
+                    anchor=result.anchor,
+                    budget_receipt=None,
+                    problem={
+                        "code": "artifact_version_mismatch",
+                        "detail": f"version 不符: {read_back.canonical_ref}",
+                    },
+                )
             receipts.append(
                 {
                     "artifactType": str(ref.get("kind") or read_back.canonical_ref),
@@ -99,6 +141,23 @@ class AgentActionAdapter:
                     "sha256": read_back.content_hash,
                     "domainRevision": read_back.domain_revision,
                 }
+            )
+        present_kinds = {
+            str(item.get("artifactType") or "").split(":", 1)[0]
+            for item in receipts
+        }
+        missing = [kind for kind in required if kind not in present_kinds]
+        if missing:
+            return VerifiedDomainResult(
+                action_id=action.action_id,
+                outcome="blocked",
+                artifact_receipts=(),
+                anchor=result.anchor,
+                budget_receipt=None,
+                problem={
+                    "code": "required_artifact_missing",
+                    "detail": f"missing kinds: {missing}",
+                },
             )
         reserved = result.reserved or {}
         reservation_id = str(
@@ -182,6 +241,34 @@ class SystemActionAdapter:
         )
 
     def verify(self, action: PendingAction, result: AdapterResult) -> VerifiedDomainResult:
+        from ..artifact_readback_registry import required_artifact_kinds
+
+        runner_id = str((result.usage or {}).get("compute") or "").strip()
+        if not runner_id:
+            return VerifiedDomainResult(
+                action_id=action.action_id,
+                outcome="blocked",
+                artifact_receipts=(),
+                anchor=result.anchor,
+                budget_receipt=None,
+                problem={
+                    "code": "system_runner_missing",
+                    "detail": f"{action.node_id} requires a non-empty runnerId",
+                },
+            )
+        required = required_artifact_kinds(action.node_id)
+        if required and not result.materialized_refs:
+            return VerifiedDomainResult(
+                action_id=action.action_id,
+                outcome="blocked",
+                artifact_receipts=(),
+                anchor=result.anchor,
+                budget_receipt=None,
+                problem={
+                    "code": "required_artifact_missing",
+                    "detail": f"{action.node_id} requires {list(required)}",
+                },
+            )
         receipts: list[dict[str, Any]] = []
         for ref in result.materialized_refs:
             read_back = self._ports.read_back_artifact(str(ref.get("canonicalRef") or ""))
@@ -193,6 +280,20 @@ class SystemActionAdapter:
                     anchor=result.anchor,
                     budget_receipt=None,
                     problem={"code": "artifact_unreadable", "detail": str(ref.get("canonicalRef"))},
+                )
+            if not str(read_back.content_hash or "").strip() or not str(
+                read_back.domain_revision or ""
+            ).strip():
+                return VerifiedDomainResult(
+                    action_id=action.action_id,
+                    outcome="blocked",
+                    artifact_receipts=(),
+                    anchor=result.anchor,
+                    budget_receipt=None,
+                    problem={
+                        "code": "artifact_incomplete_readback",
+                        "detail": f"empty hash/revision: {read_back.canonical_ref}",
+                    },
                 )
             receipts.append(
                 {
