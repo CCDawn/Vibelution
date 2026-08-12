@@ -5897,7 +5897,12 @@ def test_run_launcher_action_routes_active_electron_session_to_desktop_action(mo
         workbench_controller,
         "_submit_electron_window_action",
         lambda **kwargs: submitted.append(kwargs)
-        or {"status": "accepted", "action": kwargs["action"]},
+        or {"status": "accepted", "action": kwargs["action"], "intentId": "intent-open-runtime"},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_await_electron_window_action_confirmed",
+        lambda **_kwargs: {"desktopSessionId": "electron-session-1", "revision": 2},
     )
     monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
     monkeypatch.setattr(
@@ -7262,6 +7267,50 @@ def test_handle_open_workbench_logs_focus_failure_for_existing_browser_session(m
         "returnCode": 1,
         "detail": "No managed browser window was available to focus.\nLauncher exit code: 1",
     }
+
+
+def test_handle_open_workbench_falls_back_when_verified_focus_raises(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+    }
+    observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
+        "browserManaged": False,
+        "browserWindowAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPortListening": True,
+        "backendPortConflict": False,
+        "desktopSessionId": "electron-session-1",
+    }
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: observation)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "focus_workbench", lambda: (_ for _ in ()).throw(RuntimeError("focus ack timeout")))
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda **_kwargs: subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="fallback failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="fallback failed"):
+        runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert [event_type for event_type, _payload in events if event_type.startswith("workbench.open.")][:3] == [
+        "workbench.open.already_satisfied",
+        "workbench.open.focus_failed_fallback_open",
+        "workbench.open.fast_path_started",
+    ]
+    assert events[1][1]["detail"] == "focus ack timeout"
 
 
 def test_run_launcher_action_uses_devnull_stdio(monkeypatch, no_active_electron_desktop_session):

@@ -115,6 +115,7 @@ let desktopTray: ReturnType<typeof createDesktopTray> | null = null;
 let currentWorkbenchUrl = "";
 let desktopSessionRegistered = false;
 let desktopSessionRevision = 0;
+let desktopControlRecoveryPromise: Promise<void> | null = null;
 let shutdownApproved = false;
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
 const desktopSessionMutations = new DesktopSessionMutationQueue();
@@ -432,7 +433,11 @@ function startDesktopActionLoop(
         }
       }
     } catch (error: unknown) {
-      console.warn(error instanceof Error ? error.message : String(error));
+      if (isRecoverableDesktopControlError(error)) {
+        await recoverDesktopControlContext(paths, bootstrap, provider, "desktop_action");
+      } else {
+        console.warn(error instanceof Error ? error.message : String(error));
+      }
     } finally {
       desktopActionPollRunning = false;
     }
@@ -529,7 +534,7 @@ async function persistManagedWindowState(
       });
       desktopSessionRevision = registration.revision;
       desktopSessionRegistered = true;
-      startDesktopSessionHeartbeatIfNeeded(bootstrap);
+      startDesktopSessionHeartbeatIfNeeded(paths, bootstrap);
       const registrationEvent = {
         eventCode: "electron.startup.desktop_session_registered",
         message: "Electron registered its scoped desktop session.",
@@ -581,7 +586,7 @@ function desktopSessionHeartbeatSupported(
   return bootstrap !== null && bootstrap.capabilities.includes(DESKTOP_SESSIONS_HEARTBEAT_CAPABILITY);
 }
 
-function startDesktopSessionHeartbeatIfNeeded(bootstrap: LauncherBootstrapResult | null): void {
+function startDesktopSessionHeartbeatIfNeeded(paths: DesktopPaths, bootstrap: LauncherBootstrapResult | null): void {
   if (bootstrap === null || desktopSessionHeartbeatTimer !== null || !desktopSessionRegistered) {
     return;
   }
@@ -611,7 +616,11 @@ function startDesktopSessionHeartbeatIfNeeded(bootstrap: LauncherBootstrapResult
         desktopSessionRevision = result.revision;
       });
     } catch (error: unknown) {
-      console.warn(error instanceof Error ? error.message : String(error));
+      if (isRecoverableDesktopControlError(error) && windowProvider !== null) {
+        await recoverDesktopControlContext(paths, currentBootstrap, windowProvider, "desktop_session_heartbeat");
+      } else {
+        console.warn(error instanceof Error ? error.message : String(error));
+      }
     } finally {
       desktopSessionHeartbeatRunning = false;
     }
@@ -857,29 +866,62 @@ async function fetchWorkbenchCloseTransactionWithControlRecovery(
   }
 }
 
+function isRecoverableDesktopControlError(error: unknown): boolean {
+  const detail = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    /(?:^|\D)(?:401|403)(?:\D|$)/.test(detail) ||
+    detail.includes("unauthorized") ||
+    detail.includes("forbidden") ||
+    detail.includes("control context")
+  );
+}
+
+async function recoverDesktopControlContext(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider,
+  reason: string
+): Promise<void> {
+  if (desktopControlRecoveryPromise !== null) {
+    return await desktopControlRecoveryPromise;
+  }
+  desktopControlRecoveryPromise = (async () => {
+    const previousContext = desktopActionContext;
+    stopDesktopSessionHeartbeat();
+    desktopActionContext = null;
+    runtimeSceneBridge = null;
+    desktopSessionRegistered = false;
+    const refreshedContext = await resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh: true });
+    if (previousContext !== null && refreshedContext.desktopSessionId !== previousContext.desktopSessionId) {
+      throw new Error("Electron control recovery changed the desktop session identity.");
+    }
+    await persistManagedWindowState(paths, bootstrap, provider.snapshot().workbench);
+    if (!desktopSessionRegistered) {
+      throw new Error("Electron control recovery could not re-register the active desktop session.");
+    }
+    scheduleTelemetryWithoutWaiting(() => recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.desktop_control.recovered",
+      message: "Electron refreshed its Launcher control context and resumed the existing desktop session.",
+      fields: {
+        desktopSessionId: refreshedContext.desktopSessionId,
+        workspaceRoot: paths.workspaceRoot,
+        reason: reason.slice(0, 80)
+      }
+    }));
+  })();
+  try {
+    await desktopControlRecoveryPromise;
+  } finally {
+    desktopControlRecoveryPromise = null;
+  }
+}
+
 async function recoverWorkbenchCloseControlContext(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
   provider: ElectronWindowProvider
 ): Promise<void> {
-  const previousContext = desktopActionContext;
-  stopDesktopSessionHeartbeat();
-  desktopActionContext = null;
-  runtimeSceneBridge = null;
-  desktopSessionRegistered = false;
-  const refreshedContext = await resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh: true });
-  if (previousContext !== null && refreshedContext.desktopSessionId !== previousContext.desktopSessionId) {
-    throw new Error("Electron control recovery changed the desktop session identity.");
-  }
-  await persistManagedWindowState(paths, bootstrap, provider.snapshot().workbench);
-  if (!desktopSessionRegistered) {
-    throw new Error("Electron control recovery could not re-register the active desktop session.");
-  }
-  await recordElectronSupervisorEvent(bootstrap, {
-    eventCode: "electron.workbench_close.control_recovered",
-    message: "Electron refreshed its local Launcher control context before retrying the Workbench close.",
-    fields: { desktopSessionId: refreshedContext.desktopSessionId, workspaceRoot: paths.workspaceRoot }
-  });
+  await recoverDesktopControlContext(paths, bootstrap, provider, "workbench_close");
 }
 
 async function acknowledgeTransactionalWorkbenchClose(

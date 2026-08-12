@@ -3326,6 +3326,60 @@ def test_workbench_payload_keeps_failed_window_start_when_backend_is_healthy(mon
     assert payload["statusLine"] == failure_message
 
 
+def test_workbench_payload_marks_missing_expected_electron_window_as_partial(monkeypatch):
+    runtime_state = {
+        "runtimeState": "running",
+        "daemonRunning": True,
+        "command": {"activeCommandId": "", "activeType": ""},
+        "workbench": {
+            "sessionRole": "workbench",
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+            "externalWindowOwner": "electron",
+            "windowProvider": "electron",
+            "backendPid": 40368,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPort": 8002,
+            "backendPortListening": True,
+            "backendPortConflict": False,
+            "browserManaged": False,
+            "windowManaged": False,
+            "browserWindowAlive": False,
+            "lifecycleConsistency": "consistent",
+        },
+    }
+    observed = {
+        "sessionRole": "workbench",
+        "observedState": "open",
+        "windowProvider": "electron",
+        "backendPid": 40368,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 8002,
+        "backendPortListening": True,
+        "backendPortConflict": False,
+        "browserManaged": False,
+        "windowManaged": False,
+        "browserWindowAlive": False,
+        "lifecycleConsistency": "consistent",
+    }
+    monkeypatch.setattr(launcher_service, "_desktop_session_workbench_projection", dict)
+    monkeypatch.setattr(launcher_service, "_desktop_session_window_provider_projection", dict)
+
+    payload = launcher_service._workbench_payload(runtime_state=runtime_state, observed_workbench=observed)
+
+    assert payload["observedState"] == "partial"
+    assert payload["phase"] == "steady"
+    assert payload["windowProvider"] == "electron"
+    assert payload["windowManaged"] is False
+    assert payload["lifecycleConsistency"] == "browser_missing"
+    assert payload["statusLine"] == "工作台窗口已关闭，后端仍在运行。"
+
+
 def test_launcher_supervisor_snapshot_reports_recorded_dead_pid(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     launcher_state_path.parent.mkdir(parents=True, exist_ok=True)

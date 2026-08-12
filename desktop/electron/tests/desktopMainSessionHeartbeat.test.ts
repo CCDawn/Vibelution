@@ -18,7 +18,7 @@ describe("Electron main desktop session heartbeat", () => {
   it("starts the heartbeat only after registration when the launcher declares the capability", () => {
     const source = readFileSync(mainSourcePath, "utf8");
     const registrationIndex = source.indexOf("desktopSessionRegistered = true;");
-    const startCallIndex = source.indexOf("startDesktopSessionHeartbeatIfNeeded(bootstrap)");
+    const startCallIndex = source.indexOf("startDesktopSessionHeartbeatIfNeeded(paths, bootstrap)");
 
     expect(source).toContain('DESKTOP_SESSIONS_HEARTBEAT_CAPABILITY = "desktop_sessions.heartbeat"');
     expect(registrationIndex).toBeGreaterThan(-1);
@@ -39,6 +39,30 @@ describe("Electron main desktop session heartbeat", () => {
     expect(heartbeatBlock).toContain("catch (error: unknown)");
     expect(heartbeatBlock).toContain("console.warn");
     expect(heartbeatBlock).not.toContain("app.quit");
+  });
+
+  it("refreshes a rejected control context and preserves the desktop session identity", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const recoveryStart = source.indexOf("async function recoverDesktopControlContext(");
+    const recoveryEnd = source.indexOf("async function recoverWorkbenchCloseControlContext(", recoveryStart);
+    const recoveryBlock = source.slice(recoveryStart, recoveryEnd);
+    const heartbeatStart = source.indexOf("const heartbeatOnce = async () => {");
+    const heartbeatEnd = source.indexOf("function stopDesktopSessionHeartbeat()", heartbeatStart);
+    const heartbeatBlock = source.slice(heartbeatStart, heartbeatEnd);
+    const actionStart = source.indexOf("function startDesktopActionLoop(");
+    const actionEnd = source.indexOf("async function openWorkbenchAtCurrentLauncherUrl(", actionStart);
+    const actionBlock = source.slice(actionStart, actionEnd);
+
+    expect(recoveryStart).toBeGreaterThan(-1);
+    expect(recoveryEnd).toBeGreaterThan(recoveryStart);
+    expect(recoveryBlock).toContain("forceControlTokenRefresh: true");
+    expect(recoveryBlock).toContain("refreshedContext.desktopSessionId !== previousContext.desktopSessionId");
+    expect(recoveryBlock).toContain("await persistManagedWindowState(paths, bootstrap, provider.snapshot().workbench)");
+    expect(recoveryBlock).not.toContain("app.quit");
+    expect(heartbeatBlock).toContain("isRecoverableDesktopControlError(error)");
+    expect(heartbeatBlock).toContain("await recoverDesktopControlContext(");
+    expect(actionBlock).toContain("isRecoverableDesktopControlError(error)");
+    expect(actionBlock).toContain("await recoverDesktopControlContext(");
   });
 
   it("clears the heartbeat timer on lifecycle stop and session close", () => {
