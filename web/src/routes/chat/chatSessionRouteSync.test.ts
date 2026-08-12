@@ -4,6 +4,7 @@ import {
   shouldCanonicalizeUrlSessionSelection,
   shouldDeferUrlSessionSync,
   shouldKeepExplicitSessionRouteOnNotFound,
+  resolveAuthoritativeArchivedSessionIds,
   resolveArchivedSessionRouteTransition,
 } from "./chatSessionRouteSync";
 
@@ -137,5 +138,25 @@ describe("resolveArchivedSessionRouteTransition", () => {
       nextActiveSessionId: "session-live",
       nextRequestedSessionId: "",
     });
+  });
+});
+
+describe("resolveAuthoritativeArchivedSessionIds", () => {
+  it("uses the archive transaction's complete session list instead of a partial loaded index", () => {
+    expect(resolveAuthoritativeArchivedSessionIds({
+      optimisticSessionIds: ["session-visible"],
+      archiveSummary: {
+        sessions: {
+          sessionIds: ["session-visible", "session-not-loaded", "session-visible"],
+        },
+      },
+    })).toEqual(["session-visible", "session-not-loaded"]);
+  });
+
+  it("keeps the optimistic list only for legacy archive responses without a session summary", () => {
+    expect(resolveAuthoritativeArchivedSessionIds({
+      optimisticSessionIds: ["session-visible", "session-visible"],
+      archiveSummary: {},
+    })).toEqual(["session-visible"]);
   });
 });

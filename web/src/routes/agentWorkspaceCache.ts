@@ -30,6 +30,11 @@ export type AgentArchiveResponse = AgentConfigWorkspaceAgent & {
     modeBindingsRepaired?: number;
     removedFromRoomIds?: string[];
     removedFromTeamIds?: string[];
+    sessions?: {
+      sessionIds?: string[];
+      archivedCount?: number;
+      [key: string]: unknown;
+    };
     dataRetention?: string;
     source?: string;
   };
