@@ -52,6 +52,8 @@ def _append_initial_session_journal_markers(
     normalized_submission_id = str(client_submission_id or "").strip()
 
     def matching_events(event_type: str) -> list[Any]:
+        if not normalized_submission_id:
+            return []
         return [
             event
             for event in s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id)
