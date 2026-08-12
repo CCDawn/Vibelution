@@ -2878,16 +2878,20 @@ class RuntimeManagerDaemon:
                     "reason": "open_workbench_avoids_prelaunch_reconcile",
                 },
             )
-        elif command_type in {"close_workbench", "force_close_workbench"}:
-            # Fast close observes itself. A pre-handler reconcile rescans
-            # net_connections and has added multiple seconds after the click.
+        elif command_type in {"close_workbench", "force_close_workbench", "restart_workbench"}:
+            # Restart/close observe themselves. A pre-handler reconcile walks
+            # every process and added multiple seconds after the click.
             state = save_state(state)
             _append_event(
                 "command.active_marked_fast_path",
                 {
                     "commandId": command_id,
                     "type": command_type,
-                    "reason": "close_workbench_avoids_prehandler_reconcile",
+                    "reason": (
+                        "restart_workbench_avoids_prehandler_reconcile"
+                        if command_type == "restart_workbench"
+                        else "close_workbench_avoids_prehandler_reconcile"
+                    ),
                 },
             )
         else:
@@ -4768,10 +4772,19 @@ class RuntimeManagerDaemon:
                     pid = 0
                 if pid > 0:
                     excluded_pids.add(pid)
+        known_pids: set[int] = set()
+        for key in ("backendPid", "backendLaunchPid"):
+            try:
+                pid = int(observed.get(key) or 0)
+            except (TypeError, ValueError):
+                pid = 0
+            if pid > 0 and pid not in excluded_pids:
+                known_pids.add(pid)
         cleanup_result = terminate_workbench_processes(
             project_root=PROJECT_ROOT,
             browser_profile_dir="" if external_window_owner else str(observed.get("browserProfileDir") or ""),
             exclude_pids=excluded_pids,
+            known_pids=known_pids,
             timeout_seconds=_FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS,
             verify_remaining_with_inventory=False,
         )
@@ -4799,7 +4812,7 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
-        state = save_state(self._reconcile_observation(state))
+        save_state(state)
         workbench = state.setdefault("workbench", {})
         effective_no_browser = requested_no_browser
         build_preflight: dict[str, Any] = {}
@@ -4900,7 +4913,7 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
-        save_state(self._reconcile_observation(state))
+        save_state(state)
         cancel_check = _lifecycle_interrupt_cancel_check(command_id)
         open_launcher_started = time.monotonic()
         if bool(args.get("forceFrontendRebuild")):
@@ -5013,6 +5026,7 @@ class RuntimeManagerDaemon:
             ok=True,
             message="Workbench restarted.",
             result_data=result_data,
+            reconcile=False,
         )
 
     def _wake_hot_restart_session(
