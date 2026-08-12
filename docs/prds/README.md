@@ -9,5 +9,6 @@
 | [2026-08-07-research-workflow-canvas-elk-layout-handoff.md](2026-08-07-research-workflow-canvas-elk-layout-handoff.md) | 科研工作流画布 ELK 自动布局开发交接；复合分区、固定端口、正交边路由、几何与实机验收契约 |
 | [2026-08-07-research-workflow-canvas-elk-layout-design.md](2026-08-07-research-workflow-canvas-elk-layout-design.md) | ELK 自动布局实现技术方案；ExtendedEdge 端口、真实决策拓扑、Worker 生命周期、multi-section 路径与 bundle 门 |
 | [2026-08-09-challenge-cup-research-workflow-v2-repair-plan.md](2026-08-09-challenge-cup-research-workflow-v2-repair-plan.md) | 挑战杯科研工作流 v2.1 完整修复、科研效能优化与验收合同；LangGraph 单运行时、teamId 单一事实源、真实 Agent/会话、科研质量与预算门禁、Handoff/fork、旧页面硬切换及 Launcher 实机门禁 |
+| [2026-08-12-challenge-cup-research-workflow-runtime-architecture.md](2026-08-12-challenge-cup-research-workflow-runtime-architecture.md) | 挑战杯科研工作流正式运行架构与硬切换实施方案；Workflow Ledger 单写入、NodeReadiness、事务命令/outbox、LangGraph interrupt/resume、领域事实源、纯点击验收与收尾清理 |
 
 实现与安全边界以 ADR + owning README / 代码为准。过时 PRD 应标注 superseded 或迁入 archive。
