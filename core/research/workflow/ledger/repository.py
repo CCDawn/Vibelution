@@ -176,6 +176,7 @@ class WorkflowLedgerRepository:
         terminal_reason: str | None = None,
         blocked_problem_json: str | None = None,
     ) -> bool:
+        self._require_run_transition(run_id, status)
         cursor = self.execute(
             """
             UPDATE workflow_runs
@@ -449,6 +450,7 @@ class WorkflowLedgerRepository:
         problem_json: str | None = None,
         finished_at_ms: int | None = None,
     ) -> bool:
+        self._require_attempt_transition(node_run_id, status)
         cursor = self.execute(
             """
             UPDATE node_attempts
@@ -1109,6 +1111,7 @@ class WorkflowLedgerRepository:
         rejection_problem_json: str | None = None,
         accepted_at_ms: int | None = None,
     ) -> bool:
+        self._require_handoff_transition(handoff_id, status)
         cursor = self.execute(
             """
             UPDATE handoffs
@@ -1140,3 +1143,73 @@ class WorkflowLedgerRepository:
             (handoff_id,),
         ).fetchall()
         return [str(row[0]) for row in rows]
+
+    # ------------------------------------------------- transition guards
+
+    def _require_run_transition(self, run_id: str, target_status: str) -> None:
+        """Enforce the frozen run transition graph (P1-5b); SQL never accepts
+        an arbitrary status on its own."""
+        from core.research.workflow.transitions import (
+            RunStatus,
+            require_run_transition,
+        )
+
+        row = self.execute(
+            "SELECT status FROM workflow_runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return
+        current = str(row[0])
+        try:
+            require_run_transition(RunStatus(current), RunStatus(target_status))
+        except ValueError as exc:
+            raise ValueError(
+                f"illegal run transition {current} -> {target_status} for {run_id}"
+            ) from exc
+
+    def _require_attempt_transition(self, node_run_id: str, target_status: str) -> None:
+        """Enforce the frozen node-attempt transition graph (P1-5b)."""
+        from core.research.workflow.transitions import (
+            NodeAttemptStatus,
+            require_node_attempt_transition,
+        )
+
+        row = self.execute(
+            "SELECT status FROM node_attempts WHERE node_run_id = ?",
+            (node_run_id,),
+        ).fetchone()
+        if row is None:
+            return
+        current = str(row[0])
+        try:
+            require_node_attempt_transition(
+                NodeAttemptStatus(current), NodeAttemptStatus(target_status)
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"illegal node attempt transition {current} -> {target_status} "
+                f"for {node_run_id}"
+            ) from exc
+
+    def _require_handoff_transition(self, handoff_id: str, target_status: str) -> None:
+        """Enforce the frozen handoff transition graph (P1-5b)."""
+        from core.research.workflow.transitions import (
+            HandoffStatus,
+            require_handoff_transition,
+        )
+
+        row = self.execute(
+            "SELECT status FROM handoffs WHERE handoff_id = ?",
+            (handoff_id,),
+        ).fetchone()
+        if row is None:
+            return
+        current = str(row[0])
+        try:
+            require_handoff_transition(HandoffStatus(current), HandoffStatus(target_status))
+        except ValueError as exc:
+            raise ValueError(
+                f"illegal handoff transition {current} -> {target_status} "
+                f"for {handoff_id}"
+            ) from exc
