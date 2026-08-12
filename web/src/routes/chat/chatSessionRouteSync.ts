@@ -92,3 +92,25 @@ export function resolveArchivedSessionRouteTransition(options: {
     nextRequestedSessionId: requestedSessionArchived ? fallbackSessionId : requestedSessionId,
   };
 }
+
+/**
+ * The archive endpoint seals the full Agent session set in one transaction.
+ * Its returned session list is therefore more authoritative than the currently
+ * loaded Chat index, which may be paged or temporarily stale during archive.
+ */
+export function resolveAuthoritativeArchivedSessionIds(options: {
+  optimisticSessionIds?: readonly string[] | null;
+  archiveSummary?: {
+    sessions?: {
+      sessionIds?: unknown;
+    } | null;
+  } | null;
+}): string[] {
+  const serverSessionIds = options.archiveSummary?.sessions?.sessionIds;
+  const source = Array.isArray(serverSessionIds)
+    ? serverSessionIds
+    : (options.optimisticSessionIds ?? []);
+  return [...new Set(
+    source.map((sessionId) => String(sessionId || "").trim()).filter(Boolean),
+  )];
+}

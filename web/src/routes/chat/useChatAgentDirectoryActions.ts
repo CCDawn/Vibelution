@@ -190,8 +190,8 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
     const agentName = String(agent.displayName || agent.agentCode || agentId).trim();
     const confirmed = confirmArchive(
       lang === "zh"
-        ? `确认安全归档 ${agentName}？这会将 Agent 移出可用列表及相关绑定，但保留会话、记忆、日志和工作区。`
-        : `Archive ${agentName}? This removes the Agent from active lists and bindings while keeping sessions, memory, logs, and workspace data.`,
+        ? `确认归档 ${agentName}？它及其会话会立即从普通聊天区和标签中移除；保留的数据只在 Agent 管理中查看或彻底删除。`
+        : `Archive ${agentName}? It and its sessions leave normal Chat and tabs immediately. Retained data is available only in Agent Management for inspection or permanent deletion.`,
     );
     if (!confirmed) {
       return;
