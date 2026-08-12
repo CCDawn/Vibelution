@@ -51,7 +51,6 @@ export function ResearchProcessWorkspace({
     commandOffers: runState.commandOffers,
     submitFormalOffer: formalCommand.submit,
     createRun: runState.createRun,
-    resolveHuman: runState.resolveHuman,
     refresh: runState.refresh,
     replaceParams: location.replaceParams,
   });
@@ -141,7 +140,7 @@ export function ResearchProcessWorkspace({
               retryNodeDetail: nodeDetail.retry,
               submitRun: commands.submitRun,
               pendingTaskId: commands.pendingTaskId,
-              runCommand: commands.runInspectorCommand,
+              submitOffer: commands.submitOffer,
             }}
           />
         )}

@@ -1,10 +1,10 @@
 import { VButton, VSelect } from "../../../components/vui";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import { researchRunStatusLabel, type ResearchRunOption } from "./researchRunPresentation";
-import type { ResearchWorkflowStreamState } from "./useResearchWorkflowStream";
+import type { ResearchWorkflowEventStreamState } from "./useResearchWorkflowEventStream";
 import styles from "./ResearchWorkflowToolbar.styles";
 
-const STREAM_LABEL: Record<ResearchWorkflowStreamState, string> = {
+const STREAM_LABEL: Record<ResearchWorkflowEventStreamState, string> = {
   idle: "未连接",
   connecting: "连接中",
   connected: "实时",
@@ -17,7 +17,7 @@ export function ResearchWorkflowToolbar(props: {
   runId: string;
   runStatus: string;
   nextAction: string;
-  streamState: ResearchWorkflowStreamState;
+  streamState: ResearchWorkflowEventStreamState;
   runOptions: ResearchRunOption[];
   panel: ResearchProcessPanel;
   hasRuntimeNode: boolean;

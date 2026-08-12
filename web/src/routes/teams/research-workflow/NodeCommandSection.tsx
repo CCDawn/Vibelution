@@ -1,56 +1,45 @@
-import { useState } from "react";
-
-import type { NodeCommandCapability } from "../../../api/types/researchWorkflow";
+import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import { VButton } from "../../../components/vui";
-import { commandLabel, disableReasonFor } from "./nodeCommandAdapter";
-import { EvidenceRemediationDialog } from "./EvidenceRemediationDialog";
 import styles from "./NodeCommandSection.styles";
 
+function offerReason(offer: CommandOffer): string {
+  if (offer.available) return "";
+  return offer.reasonCode || offer.blockerIds[0] || "command_unavailable";
+}
+
 export function NodeCommandSection(props: {
-  capabilities: NodeCommandCapability[];
+  offers: CommandOffer[];
   busy: boolean;
-  onCommand: (command: string, payload?: Record<string, unknown>) => Promise<void>;
+  onOffer: (offer: CommandOffer) => Promise<void>;
 }) {
-  const [remediationOpen, setRemediationOpen] = useState(false);
-  const commands = props.capabilities.filter((item) => item.command !== "open_session");
-  if (!commands.length) return null;
-  const remediationCapability = commands.find(
-    (item) => item.command === "fork_evidence_remediation",
-  ) ?? null;
+  if (!props.offers.length) return null;
   return (
     <section data-vui="node-commands">
       <h4 className={styles.title}>操作</h4>
       <div className={styles.actions}>
-        {commands.map((capability) => {
-          const reason = disableReasonFor(capability);
+        {props.offers.map((offer) => {
+          const reason = offerReason(offer);
           return (
             <VButton
-              key={capability.command}
+              key={`${offer.command}:${offer.idempotencyKey}`}
               type="button"
-              variant={capability.command.startsWith("accept") ? "primary" : "ghost"}
+              variant={
+                offer.payload?.decision === "accept" || offer.command === "start_node"
+                  ? "primary"
+                  : "ghost"
+              }
               isDisabled={props.busy || Boolean(reason)}
               disabledReason={reason || undefined}
-              aria-label={reason ? `${commandLabel(capability.command)}：${reason}` : undefined}
+              aria-label={reason ? `${offer.label}：${reason}` : undefined}
               onClick={() => {
-                if (capability.command === "fork_evidence_remediation") {
-                  setRemediationOpen(true);
-                  return;
-                }
-                void props.onCommand(capability.command).catch(() => undefined);
+                void props.onOffer(offer).catch(() => undefined);
               }}
             >
-              {commandLabel(capability.command)}
+              {offer.label}
             </VButton>
           );
         })}
       </div>
-      <EvidenceRemediationDialog
-        open={remediationOpen}
-        capability={remediationCapability}
-        busy={props.busy}
-        onOpenChange={setRemediationOpen}
-        onSubmit={(payload) => props.onCommand("fork_evidence_remediation", payload)}
-      />
     </section>
   );
 }
