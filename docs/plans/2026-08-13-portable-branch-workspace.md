@@ -166,14 +166,16 @@ Git 步骤（只在集成根上操作）：
 
 ```text
 1. 记录 old_main = git rev-parse main
-2. 记录 candidate = git -C <worktree> rev-parse HEAD
-3. 优先：git merge --ff-only <candidate>
-   不能快进：git merge --no-ff <candidate>
-   冲突：中止，不在 main 上留下冲突文件；回子树修完再晋升
-4. 禁止：git reset --hard <candidate> 作为日常路径
-5. 禁止：checkout 任务分支到集成根
-6. 新 HEAD 记入 run / Launcher 证据；再排队 runtime 激活
-7. 候选 worktree：默认保留对照；或 git worktree remove
+2. 候选未提交的已跟踪/已评改动先在子树 commit（不写 main）
+3. fetch 候选 HEAD 进集成根 refs/vibelution/supervised-promote
+4. 优先：git merge --ff-only <candidate>
+   不能快进：commit-tree(候选树, -p old_main -p candidate) 再 ff 该 merge
+   结果树必须等于候选 HEAD 树；main 上独有提交不保留
+   失败：中止，不在 main 上留下冲突文件；回子树修完再晋升
+5. 禁止：git reset --hard <candidate> 作为日常路径
+6. 禁止：checkout 任务分支到集成根
+7. 新 HEAD 记入 run / Launcher 证据；再排队 runtime 激活
+8. 候选 worktree：默认保留对照；或 git worktree remove
 ```
 
 回滚：对晋升产生的 merge/ff 提交做 `git revert`，不要 `reset --hard` 公共 main。
@@ -231,7 +233,7 @@ Git 步骤（只在集成根上操作）：
 7. 旧兄弟目录兼容多久。
 8. 非 `codex/` 分支是否同等展示。
 9. 无 Git 的最终用户是否只显示一行 main（建议：是）。
-10. 不能快进时：默认 `--no-ff` merge，还是先 rebase 再 ff。
+10. 不能快进时：**已定 merge 优先** — 先 `merge --ff-only`，否则以候选树做 merge commit（不 rebase）。
 11. 无 Git 残留是否出现在主列表（建议：只在高级/退役）。
 
 ---

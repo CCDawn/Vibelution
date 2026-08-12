@@ -625,6 +625,8 @@ def _make_candidate_repo(tmp_path: Path, project_root: Path, *, changed_path: st
     target = candidate / changed_path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(target.read_text(encoding="utf-8") + "\n# candidate edit\n", encoding="utf-8")
+    _run_git(candidate, "add", changed_path)
+    _run_git(candidate, "commit", "-m", "candidate tree")
     return candidate
 
 
@@ -634,10 +636,11 @@ def _bound_candidate_worktree(
     baseline_untracked: list[str] | None = None,
 ) -> dict:
     baseline_noise = list(baseline_untracked or [])
-    checkpoint_commit = _run_git(candidate, "rev-parse", "HEAD")
+    checkpoint_commit = _candidate_checkpoint_commit(candidate)
     changed_files = service._candidate_changed_files(
         candidate,
         baseline_untracked=baseline_noise,
+        checkpoint_commit=checkpoint_commit,
     )
     return {
         "path": str(candidate),
@@ -651,6 +654,33 @@ def _bound_candidate_worktree(
             baseline_untracked=baseline_noise,
         ),
     }
+
+
+def _candidate_checkpoint_commit(candidate: Path) -> str:
+    head = _run_git(candidate, "rev-parse", "HEAD")
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain=v1"],
+        cwd=str(candidate),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if dirty.returncode == 0 and str(dirty.stdout or "").strip():
+        return head
+    parent = subprocess.run(
+        ["git", "rev-parse", "HEAD^"],
+        cwd=str(candidate),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if parent.returncode == 0 and str(parent.stdout or "").strip():
+        return str(parent.stdout).strip()
+    return head
 
 
 def test_active_baseline_keeps_future_approval_pending():
@@ -1316,6 +1346,41 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
     assert snapshot["mentalModelMode"] == "enabled"
 
 
+def test_candidate_variant_stays_stable_after_committing_same_patch(tmp_path):
+    candidate = tmp_path / "candidate"
+    _init_repo(candidate)
+    tracked = candidate / "tracked.txt"
+    tracked.write_text("base\n", encoding="utf-8")
+    _run_git(candidate, "add", "tracked.txt")
+    _run_git(candidate, "commit", "-m", "base")
+    checkpoint = _run_git(candidate, "rev-parse", "HEAD")
+    tracked.write_text("candidate improvement\n", encoding="utf-8")
+    dirty_files = service._candidate_changed_files(
+        candidate,
+        checkpoint_commit=checkpoint,
+    )
+    dirty_variant = service._build_candidate_variant(
+        candidate,
+        checkpoint_commit=checkpoint,
+        changed_files=dirty_files,
+    )
+    _run_git(candidate, "add", "tracked.txt")
+    _run_git(candidate, "commit", "-m", "candidate tree")
+    committed_files = service._candidate_changed_files(
+        candidate,
+        checkpoint_commit=checkpoint,
+    )
+    committed_variant = service._build_candidate_variant(
+        candidate,
+        checkpoint_commit=checkpoint,
+        changed_files=committed_files,
+    )
+
+    assert [item["path"] for item in committed_files] == ["tracked.txt"]
+    assert dirty_variant["variantId"] == committed_variant["variantId"]
+    assert dirty_variant["patchSha256"] == committed_variant["patchSha256"]
+
+
 def test_candidate_variant_changes_when_untracked_content_changes(tmp_path):
     candidate = tmp_path / "candidate"
     _init_repo(candidate)
@@ -1715,7 +1780,7 @@ def test_merge_analysis_blocks_when_main_workspace_touched_same_file(tmp_path):
         "runKind": service.RUN_KIND,
         "status": "done",
         "projectRoot": str(project_root),
-        "candidateWorktree": {"path": str(candidate), "preserved": True},
+        "candidateWorktree": _bound_candidate_worktree(candidate),
     }
     service._persist_snapshot(snapshot, active_run_id="")
 
@@ -1789,7 +1854,7 @@ def test_merge_analysis_blocks_any_untracked_main_workspace_noise(tmp_path):
     ]
 
 
-def test_merge_analysis_blocks_when_main_head_advanced_after_candidate_freeze(tmp_path):
+def test_merge_analysis_allows_git_merge_when_main_head_advanced_after_freeze(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
     (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
@@ -1815,11 +1880,12 @@ def test_merge_analysis_blocks_when_main_head_advanced_after_candidate_freeze(tm
         "analyze_merge",
     )
 
-    assert updated["mergeAnalysis"]["status"] == "blocked"
-    assert "main_head_drift" in updated["mergeAnalysis"]["blockers"]
+    assert "main_head_drift" not in updated["mergeAnalysis"]["blockers"]
+    assert updated["mergeAnalysis"]["mainHeadDrifted"] is True
     assert updated["mergeAnalysis"]["mainHead"] != updated["mergeAnalysis"][
         "expectedMainHead"
     ]
+    assert any(item["path"] == "agent.py" for item in updated["mergeAnalysis"]["changedFiles"])
 
 
 def test_force_merge_never_overwrites_main_workspace_overlap(tmp_path):
@@ -1893,7 +1959,7 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
 
     assert merged["merge"]["status"] == "committed"
     assert merged["merge"]["triggeredBy"]["role"] == "approval_executor"
-    assert merged["merge"]["triggeredBy"]["mechanism"] == "controlled_candidate_commit"
+    assert merged["merge"]["triggeredBy"]["mechanism"] in {"git_merge_ff", "git_merge_no_ff"}
     assert merged["merge"]["triggeredBy"]["conversationSessionId"] == ""
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
     manifest_path = Path(merged["rollback"]["manifestPath"])
@@ -1905,6 +1971,53 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
     assert rolled_back["rollback"]["revertCommit"]
     assert rolled_back["outcome"] == "rollback_activation_pending"
     assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('base')\n"
+
+
+def test_force_merge_promotes_candidate_tree_when_main_has_moved(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    candidate = _make_candidate_repo(tmp_path, project_root)
+    (project_root / "unrelated.py").write_text("UNRELATED = True\n", encoding="utf-8")
+    _run_git(project_root, "add", "unrelated.py")
+    _run_git(project_root, "commit", "-m", "advance main")
+    snapshot = {
+        "runId": "swte-merge-moved-main",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": _bound_candidate_worktree(candidate),
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "evaluationState": "VALID",
+            "decision": "REJECT",
+        },
+        "approvalDecision": {
+            "status": "decided",
+            "decision": "APPROVE",
+            "evaluationState": "VALID",
+            "mode": "human",
+        },
+        "judgeConversationSessionId": "session-judge",
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    merged = service.execute_supervised_worktree_action(
+        "swte-merge-moved-main",
+        "merge",
+        force=True,
+    )
+
+    assert merged["merge"]["status"] == "committed"
+    assert merged["merge"]["triggeredBy"]["mechanism"] == "git_merge_no_ff"
+    assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
+    assert not (project_root / "unrelated.py").exists()
+    parents = _run_git(project_root, "rev-list", "--parents", "-n", "1", "HEAD").split()
+    assert len(parents) >= 3
 
 
 def test_approved_candidate_creates_commit_and_queues_runtime_activation(
@@ -1966,7 +2079,7 @@ def test_approved_candidate_creates_commit_and_queues_runtime_activation(
     assert merged["merge"]["status"] == "committed"
     assert merged["merge"]["baseCommit"] == base_commit
     assert merged["merge"]["commitSha"] == commit_sha
-    assert merged["merge"]["triggeredBy"]["mechanism"] == "controlled_candidate_commit"
+    assert merged["merge"]["triggeredBy"]["mechanism"] in {"git_merge_ff", "git_merge_no_ff"}
     assert merged["runtimeActivation"] == {
         "status": "activating",
         "attempt": 1,
