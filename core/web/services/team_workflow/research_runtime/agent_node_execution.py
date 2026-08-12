@@ -13,6 +13,7 @@ from .node_execution import start_node_execution
 from .node_execution_support import NodeExecutionError, latest_node_run
 from .session_binding_bridge import SessionBindingBridge, SessionBindingError
 from .store import WorkflowRunStore
+from .task_adapter_registry import PROJECT_NODE_TASKS, SOURCE_NODE_TASKS
 from .task_bundle_lifecycle import (
     TaskBundleError,
     bind_agent_task_bundle,
@@ -20,22 +21,6 @@ from .task_bundle_lifecycle import (
     ensure_task_bundle_capacity,
     task_bundle_id,
 )
-
-SOURCE_NODE_TASKS: dict[str, tuple[str, str]] = {
-    "source_finding": ("finding", "source_finder"),
-    "source_extraction": ("extraction", "source_extractor"),
-    "evidence_relations": ("relations", "source_relation_mapper"),
-    "knowledge_ingestion": ("ingestion", "source_ingestor"),
-}
-
-PROJECT_NODE_TASKS: dict[str, str] = {
-    "hypothesis_design": "experiment_design",
-    "protocol_design": "experiment_design",
-    "protocol_review": "experiment_evidence_review",
-    "result_evaluation": "experiment_evidence_review",
-    "iteration_decision": "iteration_decision",
-    "version_governance": "version_governance",
-}
 
 
 class AgentNodeExecutionError(ValueError):
