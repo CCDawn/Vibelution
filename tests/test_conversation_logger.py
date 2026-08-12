@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from core.logging.logger import ConversationLogger
@@ -280,3 +281,74 @@ def test_transcript_writer_marks_failed_items_done(tmp_path):
     logger._flush_pending_writes()
 
     assert logger._write_queue.unfinished_tasks == 0
+
+
+def _make_old_conversation_files(tmp_path: Path, count: int, base_mtime: float) -> list[Path]:
+    paths = []
+    for i in range(count):
+        path = tmp_path / f"conversation_stale_{i}.jsonl"
+        path.write_text("{\"type\": \"stale\"}\n", encoding="utf-8")
+        os.utime(path, (base_mtime + i, base_mtime + i))
+        paths.append(path)
+    return paths
+
+
+def test_cleanup_old_conversations_keeps_recent_five(tmp_path):
+    logger = _fresh_logger(tmp_path)
+    stale = _make_old_conversation_files(tmp_path, 7, base_mtime=1_000_000_000)
+    active = tmp_path / "conversation_test_session.jsonl"
+    os.utime(active, (1_900_000_000, 1_900_000_000))
+
+    deleted = logger.cleanup_old_conversations()
+
+    assert deleted == 3
+    remaining = sorted(tmp_path.glob("conversation_*.jsonl"))
+    assert len(remaining) == 5
+    assert active in remaining
+    assert all(p not in remaining for p in stale[:3])
+    assert stale[3:] == [p for p in remaining if p != active]
+
+
+def test_cleanup_triggers_on_lazy_activation(tmp_path):
+    ConversationLogger._instance = None
+    logger = ConversationLogger()
+    logger._log_dir = str(tmp_path)
+    logger._current_session_file = None
+    logger._session_id = "lazy_cleanup"
+    logger._turn_count = 0
+    logger._session_active = False
+    logger._ensure_log_dir()
+    stale = _make_old_conversation_files(tmp_path, 7, base_mtime=1_000_000_000)
+    (tmp_path / "conversation_fresh.jsonl").write_text("{\"type\": \"x\"}\n", encoding="utf-8")
+    os.utime(tmp_path / "conversation_fresh.jsonl", (2_000_000_000, 2_000_000_000))
+
+    logger.log_debug("INFO", "lazy activation with cleanup")
+
+    remaining = sorted(tmp_path.glob("conversation_*.jsonl"))
+    assert len(remaining) == 6
+    assert (tmp_path / "conversation_fresh.jsonl") in remaining
+    assert (tmp_path / "conversation_lazy_cleanup.jsonl") in remaining
+    assert stale[0] not in remaining
+    assert stale[1] not in remaining
+    assert stale[2] not in remaining
+
+
+def test_cleanup_triggers_on_explicit_start_session(tmp_path):
+    ConversationLogger._instance = None
+    logger = ConversationLogger()
+    logger._log_dir = str(tmp_path)
+    logger._current_session_file = None
+    logger._session_id = "explicit_cleanup"
+    logger._turn_count = 0
+    logger._session_active = False
+    logger._ensure_log_dir()
+    _make_old_conversation_files(tmp_path, 7, base_mtime=1_000_000_000)
+
+    logger.start_session()
+
+    remaining = sorted(tmp_path.glob("conversation_*.jsonl"))
+    assert len(remaining) == 5
+    assert (tmp_path / "conversation_explicit_cleanup.jsonl") in remaining
+    assert (tmp_path / "conversation_stale_0.jsonl") not in remaining
+    assert (tmp_path / "conversation_stale_1.jsonl") not in remaining
+    assert (tmp_path / "conversation_stale_2.jsonl") not in remaining
