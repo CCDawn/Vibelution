@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -83,14 +84,33 @@ def launcher_mount_roots() -> set[Path]:
     return mounted
 
 
+def _allowed_temporary_roots() -> list[Path]:
+    """Disposable temp roots: system temp plus the pytest-designated temp root.
+
+    Windows pytest runs redirect basetemp via ``PYTEST_DEBUG_TEMPROOT`` (see
+    tests/conftest.py) to stay under the 260-char path limit; that root is the
+    same disposable storage class as the system temp directory.
+    """
+
+    roots = [Path(tempfile.gettempdir()).resolve(strict=False)]
+    pytest_root = str(os.environ.get("PYTEST_DEBUG_TEMPROOT") or "").strip()
+    if pytest_root:
+        candidate = Path(pytest_root).resolve(strict=False)
+        if candidate not in roots:
+            roots.append(candidate)
+    return roots
+
+
 def validate_data_root_location(data_root: Path) -> Path:
     if data_root.is_symlink():
         raise BenchmarkIsolationError("data root must not be a symlink")
     resolved = data_root.resolve(strict=True)
     if not resolved.is_dir():
         raise BenchmarkIsolationError("data root must be an existing directory")
-    system_temp = Path(tempfile.gettempdir()).resolve(strict=True)
-    if resolved == system_temp or not is_within(resolved, system_temp):
+    temporary_roots = _allowed_temporary_roots()
+    if any(resolved == root for root in temporary_roots) or not any(
+        is_within(resolved, root) for root in temporary_roots
+    ):
         raise BenchmarkIsolationError(
             "data root must be an explicit child of the system temporary directory"
         )

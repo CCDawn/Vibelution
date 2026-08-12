@@ -9,6 +9,14 @@ from core.llm.types import LLMError
 from tests.helpers.isolated_config import isolated_settings_config
 
 
+@pytest.fixture(autouse=True)
+def _scrub_provider_api_key_env(monkeypatch):
+    # relay/openai_compatible 的 canonical env 是 OPENAI_API_KEY；本机真实环境变量
+    # 会按设计优先于 config api_key，必须隔离以保证 payload 断言确定。
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", raising=False)
+
+
 def _config(*, transport: str = "responses"):
     return isolated_settings_config(
         **{
@@ -36,13 +44,15 @@ def _metadata():
     }
 
 
-def test_unsupported_native_adapter_fails_before_provider_io():
+def test_unavailable_wire_adapter_fails_before_provider_io():
+    # 0d6767317 起 anthropic_messages/gemini_generate_content 已注册 compat 适配器；
+    # 本测试锁定剩余契约：未注册的 adapter_id 仍在 provider IO 前被拒绝。
     calls = []
     client = LLMClient(config=_config(), backend=lambda payload: calls.append(payload))
     client.protocol_route = replace(
         client.protocol_route,
         wire_protocol=WireProtocol.ANTHROPIC_MESSAGES,
-        adapter_id=WireProtocol.ANTHROPIC_MESSAGES.value,
+        adapter_id="anthropic_messages_rest_native",
         wire_source="test_native_route",
     )
 

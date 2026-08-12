@@ -8,6 +8,7 @@ from config import ProviderConfig
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.route_bootstrap import ensure_web_routes_registered
 from core.orchestration import context_engine
 from core.web.routes import agents as agents_route
 from core.web.services import (
@@ -30,7 +31,13 @@ from tests.helpers.system_agent_state import (
 )
 
 
-client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+_app = create_app()
+# 路由模块必须在外层 monkeypatch 之前完成导入：routes/config.py 等按名字
+# from-import service 函数，若首次请求发生在 monkeypatch 生效的测试内，
+# 惰性导入会把 _fake_config_workspace 永久绑进路由模块命名空间，泄漏到
+# 后续测试文件（如 test_web_config_routes 的 /api/config/workspace 断言）。
+ensure_web_routes_registered(_app)
+client = TestClient(_app, headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
 def _raw_mode_binding(mode: str):
