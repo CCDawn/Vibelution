@@ -99,10 +99,10 @@ class WorkflowQueryService:
             readiness_service=self._readiness,
             context=self._readiness_context(),
             team_id=scoped_team,
-            run_id=run.run_id,
-            run_version=run.run_version,
+            run=run,
             definition=self._definition,
             pending_human_tasks=human_tasks,
+            attempts=attempts,
             evaluated_at_ms=(
                 self._evaluated_at_ms() if self._evaluated_at_ms is not None else None
             ),
