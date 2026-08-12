@@ -603,7 +603,7 @@ model = "gpt-5.6-luna"
     assert effective.llm.get_profile("primary").temperature == 0.2
 
 
-def test_v1_config_loader_still_materializes_legacy_provider_api_key(tmp_path, monkeypatch) -> None:
+def test_v1_config_loader_no_longer_materializes_legacy_provider_api_key(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
@@ -626,7 +626,8 @@ model = "gpt-5.6-luna"
     effective = ConfigLoader(str(config_path)).load()
 
     assert effective.llm.schema_version == 1
-    assert effective.llm.get_provider(role="primary").api_key == "legacy-materialized-secret"
+    assert effective.llm.get_provider(role="primary").api_key == ""
+    assert effective.llm.get_provider(role="primary").api_key_env == "LEGACY_RELAY_KEY"
 
 
 @pytest.mark.parametrize("scope", ["defaults", "overrides"])
