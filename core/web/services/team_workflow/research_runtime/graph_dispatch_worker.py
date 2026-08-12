@@ -42,12 +42,16 @@ class GraphDispatchWorker:
         owner_id: str = "graph-worker",
         lease_ms: int = 30_000,
         now_provider: Callable[[], int] | None = None,
+        readiness_service: Any | None = None,
+        readiness_context: Callable[[], Any] | None = None,
     ) -> None:
         self._store = store
         self._coordinator = coordinator
         self._owner = owner_id
         self._lease_ms = lease_ms
         self._now = now_provider or (lambda: int(time.time() * 1000))
+        self._readiness = readiness_service
+        self._readiness_context = readiness_context
 
     def run_once(self, limit: int = 8) -> int:
         leased = outbox_api.lease_ready_actions(
@@ -202,33 +206,93 @@ class GraphDispatchWorker:
                 pending = result.pending_action
                 latest = uow.repository.latest_attempt(dispatch.run_id, pending.node_id)
                 if latest is not None and latest.attempt == pending.attempt:
+                    # 同一节点中断点恢复（命令层已通过 readiness）：直接 dispatching。
                     uow.repository.update_attempt_status(
                         latest.node_run_id,
                         NodeAttemptStatus.DISPATCHING.value,
                         now_ms,
                         pending_action_id=pending.action_id,
                     )
+                    try:
+                        uow.repository.insert_outbox(
+                            _adapter_dispatch_record(
+                                pending=pending,
+                                run_id=dispatch.run_id,
+                                command_id=action.command_id,
+                                now_ms=now_ms,
+                            )
+                        )
+                    except Exception:
+                        # adapter_dispatch 已存在（崩溃恢复的幂等重放）——合法。
+                        pass
                 else:
-                    # 自动推进的新节点：在同一事务创建 attempt（引用原 command 谱系）。
-                    uow.repository.insert_attempt(
-                        _attempt_for_pending(
-                            pending,
-                            command_id=action.command_id or "cmd-recovery",
-                            now_ms=now_ms,
-                        )
+                    # 自动推进的新节点：进入 adapter 前重新执行 NodeReadiness
+                    # （spec 9.1/7.3）；不 ready 则不建 adapter outbox，attempt 标 blocked。
+                    ready, blockers = self._recheck_readiness(
+                        uow, dispatch, pending
                     )
-                try:
-                    uow.repository.insert_outbox(
-                        _adapter_dispatch_record(
-                            pending=pending,
-                            run_id=dispatch.run_id,
-                            command_id=action.command_id,
-                            now_ms=now_ms,
+                    if not ready:
+                        uow.repository.insert_attempt(
+                            _attempt_for_pending(
+                                pending,
+                                command_id=action.command_id or "cmd-recovery",
+                                now_ms=now_ms,
+                                status="blocked",
+                                problem_json=json.dumps(
+                                    {
+                                        "code": "auto_advance_not_ready",
+                                        "detail": "; ".join(
+                                            str(b.get("code") or b) for b in blockers
+                                        ),
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            )
                         )
-                    )
-                except Exception:
-                    # adapter_dispatch 已存在（崩溃恢复的幂等重放）——合法。
-                    pass
+                        blocked_sequence = uow.repository.advance_last_sequence(
+                            dispatch.run_id, 1, now_ms
+                        )
+                        if blocked_sequence is not None:
+                            blocked_run = uow.repository.get_run(dispatch.run_id)
+                            blocked_run_version = blocked_run.run_version if blocked_run else 1
+                            uow.repository.insert_event(
+                                _event_record_for(
+                                    run_id=dispatch.run_id,
+                                    sequence=blocked_sequence,
+                                    run_version=blocked_run_version,
+                                    event_id=new_id("evt"),
+                                    event_type="node_blocked",
+                                    correlation_id=pending.action_id,
+                                    payload={
+                                        "nodeRunId": pending.node_run_id,
+                                        "nodeId": pending.node_id,
+                                        "autoAdvanceBlocked": True,
+                                        "blockers": [
+                                            str(b.get("code") or b) for b in blockers
+                                        ],
+                                    },
+                                    now_ms=now_ms,
+                                )
+                            )
+                    else:
+                        uow.repository.insert_attempt(
+                            _attempt_for_pending(
+                                pending,
+                                command_id=action.command_id or "cmd-recovery",
+                                now_ms=now_ms,
+                            )
+                        )
+                        try:
+                            uow.repository.insert_outbox(
+                                _adapter_dispatch_record(
+                                    pending=pending,
+                                    run_id=dispatch.run_id,
+                                    command_id=action.command_id,
+                                    now_ms=now_ms,
+                                )
+                            )
+                        except Exception:
+                            pass
             if result.completed:
                 outcome = "succeeded"
                 if dispatch.receipt is not None:
@@ -247,6 +311,29 @@ class GraphDispatchWorker:
                 )
 
         self._store.submit(mutate, force_flush=True).result(timeout=30)
+
+    def _recheck_readiness(self, uow, dispatch: GraphDispatch, pending: Any) -> tuple[bool, list[Any]]:
+        """NodeReadiness recheck before an auto-advanced successor enters the
+        adapter (spec 9.1). Returns (ready, blockers). No readiness wiring
+        available means the recheck passes (composition root provides it)."""
+        if self._readiness is None or self._readiness_context is None:
+            return True, []
+        team_id = dispatch.team_id
+        if not team_id:
+            run = uow.repository.get_run(dispatch.run_id)
+            team_id = run.team_id if run else dispatch.run_id
+        try:
+            readiness = self._readiness.evaluate(
+                team_id=team_id,
+                run_id=dispatch.run_id,
+                node_id=pending.node_id,
+                context=self._readiness_context(),
+                use_cache=False,
+            )
+        except Exception as exc:
+            return False, [{"code": "readiness_unavailable", "detail": str(exc)}]
+        blockers = [b.to_dict() for b in readiness.blockers]
+        return bool(readiness.ready), blockers
 
     def _mark_blocked(self, action: Any, dispatch: GraphDispatch, detail: str) -> None:
         now_ms = self._now()
@@ -277,7 +364,14 @@ class GraphDispatchWorker:
         )
 
 
-def _attempt_for_pending(pending: Any, *, command_id: str, now_ms: int):
+def _attempt_for_pending(
+    pending: Any,
+    *,
+    command_id: str,
+    now_ms: int,
+    status: str = "dispatching",
+    problem_json: str | None = None,
+):
     from core.research.workflow.ledger import NodeAttemptRecord
 
     return NodeAttemptRecord(
@@ -286,17 +380,44 @@ def _attempt_for_pending(pending: Any, *, command_id: str, now_ms: int):
         node_id=pending.node_id,
         attempt=pending.attempt,
         actor_kind=pending.actor_kind.value,
-        status="dispatching",
+        status=status,
         command_id=command_id,
         binding_snapshot_id=pending.binding_snapshot_id,
         input_snapshot_hash=pending.input_snapshot_hash,
         pending_action_id=pending.action_id,
         execution_anchor_id=None,
         retry_of_node_run_id=None,
-        problem_json=None,
+        problem_json=problem_json,
         started_at_ms=now_ms,
         updated_at_ms=now_ms,
-        finished_at_ms=None,
+        finished_at_ms=now_ms if status != "dispatching" else None,
+    )
+
+
+def _event_record_for(
+    *,
+    run_id: str,
+    sequence: int,
+    run_version: int,
+    event_id: str,
+    event_type: str,
+    correlation_id: str,
+    payload: dict,
+    now_ms: int,
+):
+    from core.research.workflow.ledger import EventRecord
+
+    return EventRecord(
+        run_id=run_id,
+        sequence=sequence,
+        event_id=event_id,
+        run_version=run_version,
+        event_type=event_type,
+        actor_json=json.dumps({"actorType": "system", "actorId": "graph-worker"}),
+        correlation_id=correlation_id,
+        causation_id=None,
+        payload_json=json.dumps(payload, ensure_ascii=False),
+        occurred_at_ms=now_ms,
     )
 
 
