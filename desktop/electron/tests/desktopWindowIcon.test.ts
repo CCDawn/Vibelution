@@ -45,15 +45,17 @@ describe("Electron desktop window icons", () => {
     loadedUrls.length = 0;
   });
 
-  it("uses the shared Vibelution icon for the Launcher window", () => {
+  it("uses native Windows chrome and keeps the Launcher in the taskbar", () => {
     createLauncherWindow("http://127.0.0.1:8765/launcher", desktopPaths);
 
     expect(browserWindowOptions[0]).toMatchObject({
       title: "Vibelution Launcher",
       icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
       backgroundColor: "#f7fafc",
-      ...lightShellTitleBar
+      titleBarStyle: "default",
+      skipTaskbar: false
     });
+    expect(browserWindowOptions[0]).not.toHaveProperty("titleBarOverlay");
     expect(loadedUrls).toEqual(["http://127.0.0.1:8765/launcher"]);
   });
 
