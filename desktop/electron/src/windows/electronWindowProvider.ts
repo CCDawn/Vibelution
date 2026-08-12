@@ -244,6 +244,19 @@ export class ElectronWindowProvider {
     window.on("blur", () => void this.reportState(this.stateFor(role)));
     window.on("unresponsive", () => void this.reportState(this.stateFor(role)));
     window.webContents.on("render-process-gone", () => void this.reportState(this.stateFor(role)));
+    if (role === "workbench") {
+      window.webContents.on("will-navigate", (event, url) => {
+        if (
+          shouldCancelWorkbenchInPageNavigation({
+            readyUrl: this.workbenchReadyUrl,
+            currentUrl: window.webContents.getURL(),
+            nextUrl: String(url ?? ""),
+          })
+        ) {
+          preventWindowClose(event);
+        }
+      });
+    }
     window.on("query-session-end", () => this.onOsSessionEnd("query-session-end", role));
     window.on("session-end", () => this.onOsSessionEnd("session-end", role));
   }
@@ -347,6 +360,28 @@ function missingWindowFactory(role: ElectronWindowRole): ElectronWindowFactory {
   return () => {
     throw new Error(`missing ${role} window factory`);
   };
+}
+
+export function shouldCancelWorkbenchInPageNavigation(options: {
+  readyUrl: string | null;
+  currentUrl: string;
+  nextUrl: string;
+}): boolean {
+  if (!options.readyUrl) {
+    return false;
+  }
+  try {
+    const current = new URL(options.currentUrl);
+    const next = new URL(options.nextUrl);
+    if (current.origin !== next.origin) {
+      return false;
+    }
+    const currentKey = `${current.pathname}${current.search}${current.hash}`;
+    const nextKey = `${next.pathname}${next.search}${next.hash}`;
+    return currentKey !== nextKey;
+  } catch {
+    return false;
+  }
 }
 
 function isManagedWorkbenchUrl(requestUrl: string, workbenchOrigin: string): boolean {
