@@ -39,10 +39,10 @@ export function shouldRenderStartupOverlay(
   if (!progress.active) {
     return false;
   }
-  // A partial/browser-missing projection is advisory once this shell is
-  // already mounted. Blocking the visible page on that signal can deadlock the
-  // user behind an overlay when Windows merely minimized the managed window.
-  return progress.tone !== "caution";
+  // Once this shell is mounted, every terminal or advisory state must leave
+  // recovery controls reachable. The header keeps the failure visible while
+  // the overlay is reserved for the only genuinely blocking state: startup.
+  return progress.tone === "running";
 }
 
 type RuntimeSnapshot = Pick<RuntimeSummary, "runtimeManager" | "workbench">;

@@ -104,6 +104,7 @@ def test_v2_effective_config_resolves_provider_credential_without_inline_copies(
 def test_v1_normalization_remains_read_only_and_compatible() -> None:
     legacy = {
         "llm": {
+            "schema_version": 1,
             "model_library": {
                 "relay_model": {
                     "provider": {
@@ -302,6 +303,7 @@ api_key = "nested-load-secret-must-not-appear"
 def test_v1_public_config_hash_still_accepts_legacy_model_library() -> None:
     legacy = {
         "llm": {
+            "schema_version": 1,
             "model_library": {
                 "relay_model": {
                     "provider": {"kind": "relay", "base_url": "https://relay.example/v1"},
@@ -581,6 +583,9 @@ def test_v1_config_loader_keeps_profile_scalar_kwargs_behavior(tmp_path) -> None
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
+[llm]
+schema_version = 1
+
 [llm.providers.default]
 kind = "relay"
 base_url = "https://relay.example/v1"
@@ -598,10 +603,13 @@ model = "gpt-5.6-luna"
     assert effective.llm.get_profile("primary").temperature == 0.2
 
 
-def test_v1_config_loader_still_materializes_legacy_provider_api_key(tmp_path, monkeypatch) -> None:
+def test_v1_config_loader_no_longer_materializes_legacy_provider_api_key(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
+[llm]
+schema_version = 1
+
 [llm.providers.default]
 kind = "relay"
 api_key_env = "LEGACY_RELAY_KEY"
@@ -618,7 +626,8 @@ model = "gpt-5.6-luna"
     effective = ConfigLoader(str(config_path)).load()
 
     assert effective.llm.schema_version == 1
-    assert effective.llm.get_provider(role="primary").api_key == "legacy-materialized-secret"
+    assert effective.llm.get_provider(role="primary").api_key == ""
+    assert effective.llm.get_provider(role="primary").api_key_env == "LEGACY_RELAY_KEY"
 
 
 @pytest.mark.parametrize("scope", ["defaults", "overrides"])

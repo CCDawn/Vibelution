@@ -13,6 +13,7 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from core.logging import debug as _debug_logger
@@ -2156,6 +2157,28 @@ def _update_ignored_browser_telemetry_manifest(
     s._save_scene_manifest(scene_dir, manifest)
 
 
+def _refresh_active_scene_package_if_due(scene_dir: Path) -> bool:
+    """节流刷新活跃场景的 summary/package_index（默认 30s 一次），保证诊断入口新鲜。
+
+    与 full_projection_refresh（特定事件立即刷新）互补：常规事件也按节流补齐
+    summary.json / package_index.json / manifest 的 package 字段。
+    """
+    s = _service()
+    now = monotonic()
+    last = float(getattr(s, "_last_scene_package_refresh_at", 0.0))
+    if now - last < s.SCENE_PACKAGE_REFRESH_INTERVAL_SECONDS:
+        return False
+    try:
+        with s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
+            manifest = s._load_scene_manifest(scene_dir)
+            s._update_runtime_scene_package_manifest(scene_dir, manifest)
+        s._last_scene_package_refresh_at = now
+        return True
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to refresh scene package manifest: {exc}")
+        return False
+
+
 def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, Any]) -> None:
     s = _service()
     package = manifest.get("package")
@@ -2754,6 +2777,9 @@ def _record_runtime_scene_event_impl(
     if lifecycle:
         event_payload["lifecycle"] = True
     s._append_scene_event(scene_dir, component_name, event_payload)
+
+    # 节流刷新活跃场景的 summary/package_index，保证诊断入口始终新鲜（常规事件也补齐）
+    s._refresh_active_scene_package_if_due(scene_dir)
 
     projection_refresh = "deferred"
     requires_projection_lock = s._runtime_scene_event_requires_immediate_projection(

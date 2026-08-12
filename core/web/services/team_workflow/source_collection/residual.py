@@ -1795,7 +1795,7 @@ def _source_collection_model_library() -> dict[str, Any]:
     except Exception:
         public_config = {}
     llm = public_config.get("llm") if isinstance(public_config, dict) else {}
-    if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
+    if isinstance(llm, dict) and int(llm.get("schema_version") or 2) == 2:
         try:
             from config.llm_projection import project_v2_llm_for_runtime
 

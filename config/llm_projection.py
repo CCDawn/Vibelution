@@ -154,7 +154,7 @@ def _default_v2_reasoning_effort_defaults(
 def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
     projected = copy.deepcopy(public_config)
     llm = projected.setdefault("llm", {})
-    if int(llm.get("schema_version") or 1) != 2:
+    if int(llm.get("schema_version") or 2) != 2:
         return projected
     if "model_library" in llm:
         raise ValueError("llm.model_library is not allowed in schema v2 input")

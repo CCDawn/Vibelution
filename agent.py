@@ -482,6 +482,40 @@ def _can_reuse_system_prompt(
     )
 
 
+_STALL_SIGNAL_THRESHOLDS = {
+    "no_new_evidence_steps": 3,
+    "consecutive_tool_only_steps": 3,
+    "consecutive_bookkeeping_tool_only_steps": 3,
+    "delegation_failures": 3,
+}
+
+
+def _stall_signal_threshold_events(telemetry, reported) -> list:
+    """返回本次跨越阈值（且未报告过）的卡住信号名列表。
+
+    - reported: {key: True} 已报告集合；值归零后（重置）清除已报告标记，
+      下次再跨越阈值会再次报告。
+    """
+    events = []
+    telemetry = dict(telemetry or {})
+    reported = dict(reported or {})
+    for key, threshold in _STALL_SIGNAL_THRESHOLDS.items():
+        value = int(telemetry.get(key) or 0)
+        if value >= threshold and not bool(reported.get(key)):
+            events.append(key)
+    return events
+
+
+def _reset_stall_signal_reported(telemetry, reported) -> dict:
+    """清除已归零信号的已报告标记（与 _stall_signal_threshold_events 配合）。"""
+    telemetry = dict(telemetry or {})
+    reported = dict(reported or {})
+    for key in list(reported):
+        if int(telemetry.get(key) or 0) == 0:
+            reported.pop(key, None)
+    return reported
+
+
 def _can_reuse_initial_prompt(
     *,
     pending: bool = True,
@@ -3277,6 +3311,7 @@ class SelfEvolvingAgent:
                 )
                 # 进展标记
                 round_state.note_progress()
+                self._last_turn_failed = False
 
                 # Token 使用统计
                 token_usage = self._get_response_surface_controller().record_token_usage(
@@ -3336,6 +3371,7 @@ class SelfEvolvingAgent:
                     self._last_visible_response_text,
                     tool_names=response_tool_names,
                 )
+                self._report_round_state_stall_signals(round_state)
                 turn_tool_names.extend(response_tool_names)
                 if iteration_decision.should_execute_tools:
                     ui.update_status(
@@ -3724,6 +3760,26 @@ class SelfEvolvingAgent:
             },
         )
 
+    def _report_round_state_stall_signals(self, round_state) -> None:
+        """RoundState 卡住信号跨阈值时记录一次性诊断日志（STATE tag）。
+
+        信号归零（进展恢复）后清除已报告标记，再次跨越阈值可重复报告。
+        任何失败静默降级，绝不干扰主循环。
+        """
+        try:
+            telemetry = round_state.runtime_telemetry()
+            reported = dict(getattr(self, "_last_reported_stall_signals", {}) or {})
+            events = _stall_signal_threshold_events(telemetry, reported)
+            if events:
+                details = ", ".join(
+                    f"{key}={int(telemetry.get(key) or 0)}" for key in sorted(events)
+                )
+                _debug_logger.warning(f"[循环卡住信号] {details}", tag="STATE")
+                reported.update({key: True for key in events})
+            self._last_reported_stall_signals = _reset_stall_signal_reported(telemetry, reported)
+        except Exception:
+            pass
+
     def _record_turn_failure_diagnostic(
         self,
         *,
@@ -3831,7 +3887,39 @@ class SelfEvolvingAgent:
             level="error",
             fields=scene_fields,
         )
+        self._announce_scene_diagnostic_package()
         return failure
+
+    def _resolve_current_scene_dir_for_diagnostic(self):
+        """解析当前运行时场景目录（CLI/无 UI 模式下排查入口提示用）。"""
+        try:
+            from core.web.services.runtime_scene.record import _resolve_current_runtime_scene_dir
+
+            return _resolve_current_runtime_scene_dir()
+        except Exception:
+            return None
+
+    def _announce_scene_diagnostic_package(self) -> None:
+        """失败时提示场景诊断包入口（UI 模式已有场景页导航；CLI 模式给出文件路径）。"""
+        try:
+            scene_dir = self._resolve_current_scene_dir_for_diagnostic()
+            if scene_dir is None:
+                return
+            ui = get_ui()
+            if ui is None or not hasattr(ui, "add_log"):
+                return
+            try:
+                from core.runtime_manager.constants import PROJECT_ROOT
+
+                display_path = os.path.relpath(str(scene_dir), str(PROJECT_ROOT)).replace("\\", "/")
+            except Exception:
+                display_path = str(scene_dir)
+            ui.add_log(
+                f"诊断包: {display_path}/（先读 package_index.json，再按推荐顺序展开）",
+                "ERROR",
+            )
+        except Exception:
+            pass
 
     def _invoke_llm(self, messages: list, *, replay_state: Any = None) -> Optional[Any]:
         """调用 LLM（带错误分类、自动重试）"""

@@ -31,7 +31,7 @@ from typing import Optional, Dict, Any, List
 from core.infrastructure.event_bus import get_event_bus, EventNames, Event
 from core.infrastructure.feature_gate import resolve_feature_decision
 from core.infrastructure.state import get_state_manager
-from core.logging.logger import debug as _debug_logger
+from core.logging import debug as _debug_logger
 
 
 _ACTIVE_MENTAL_WORKSPACE_ROOT: ContextVar[str] = ContextVar("vibelution_active_mental_workspace_root", default="")

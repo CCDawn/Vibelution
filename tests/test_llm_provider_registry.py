@@ -328,6 +328,7 @@ def test_provider_options_expose_credential_state_without_reference_or_secret() 
             "artifact_path": "models/relay",
             "base_url": "https://relay.example/v1",
             "credential_state": "not_required",
+            "context_window": None,
             "default_protocol": "responses",
             "pinned_count": 0,
         }

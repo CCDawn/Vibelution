@@ -10,6 +10,7 @@ import {
   hasInvalidChildSessionLink,
   isDiscussionTeam,
   isRepresentedInAgentSessionTabs,
+  isVisibleDirectSession,
   isVisibleConversation,
   isVisibleConversationAgent,
   normalizeConversationIndexTeams,
@@ -436,6 +437,17 @@ describe("conversationIndexModel", () => {
     expect(isVisibleConversation(conversation({
       conversationIndexKind: "user_chat",
       conversationIndexVisibility: "user_visible",
+    }))).toBe(true);
+  });
+
+  it("hides archived direct sessions from the normal chat index", () => {
+    expect(isVisibleDirectSession(session({
+      hiddenFromIndex: true,
+      archiveState: { status: "archived" },
+    }))).toBe(false);
+    expect(isVisibleDirectSession(session({
+      hiddenFromIndex: false,
+      archiveState: {},
     }))).toBe(true);
   });
 

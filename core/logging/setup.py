@@ -25,7 +25,7 @@ from core.logging.logger import debug
 
 
 def print_evolution_time():
-    """打印当前系统时间"""
+    """打印当前系统时间（agent 轮次进化时间戳）"""
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     debug.system(f"系统时间: {current_time}", tag="EVOLVE")
 

@@ -53,7 +53,7 @@ def _contains_credential_field(value: Any) -> bool:
 
 def _providers(public_config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
-    if int(llm.get("schema_version") or 1) != 2:
+    if int(llm.get("schema_version") or 2) != 2:
         raise ValueError("Provider registry mutations require llm.schema_version = 2")
     providers = llm.get("providers")
     if not isinstance(providers, dict):

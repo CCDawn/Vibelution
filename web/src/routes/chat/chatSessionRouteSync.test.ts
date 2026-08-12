@@ -4,6 +4,8 @@ import {
   shouldCanonicalizeUrlSessionSelection,
   shouldDeferUrlSessionSync,
   shouldKeepExplicitSessionRouteOnNotFound,
+  resolveAuthoritativeArchivedSessionIds,
+  resolveArchivedSessionRouteTransition,
 } from "./chatSessionRouteSync";
 
 describe("shouldCanonicalizeUrlSessionSelection", () => {
@@ -108,5 +110,53 @@ describe("shouldKeepExplicitSessionRouteOnNotFound", () => {
         activeSessionId: "session-workflow",
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveArchivedSessionRouteTransition", () => {
+  it("retires an archived active or URL-selected session and replaces it with the fallback", () => {
+    expect(resolveArchivedSessionRouteTransition({
+      archivedSessionIds: ["session-archived"],
+      activeSessionId: "session-archived",
+      requestedSessionId: "session-archived",
+      fallbackSessionId: "session-live",
+    })).toEqual({
+      shouldRetireSelection: true,
+      nextActiveSessionId: "session-live",
+      nextRequestedSessionId: "session-live",
+    });
+  });
+
+  it("removes the stale URL target when there is no surviving fallback session", () => {
+    expect(resolveArchivedSessionRouteTransition({
+      archivedSessionIds: ["session-archived"],
+      activeSessionId: "session-live",
+      requestedSessionId: "session-archived",
+      fallbackSessionId: "",
+    })).toEqual({
+      shouldRetireSelection: true,
+      nextActiveSessionId: "session-live",
+      nextRequestedSessionId: "",
+    });
+  });
+});
+
+describe("resolveAuthoritativeArchivedSessionIds", () => {
+  it("uses the archive transaction's complete session list instead of a partial loaded index", () => {
+    expect(resolveAuthoritativeArchivedSessionIds({
+      optimisticSessionIds: ["session-visible"],
+      archiveSummary: {
+        sessions: {
+          sessionIds: ["session-visible", "session-not-loaded", "session-visible"],
+        },
+      },
+    })).toEqual(["session-visible", "session-not-loaded"]);
+  });
+
+  it("keeps the optimistic list only for legacy archive responses without a session summary", () => {
+    expect(resolveAuthoritativeArchivedSessionIds({
+      optimisticSessionIds: ["session-visible", "session-visible"],
+      archiveSummary: {},
+    })).toEqual(["session-visible"]);
   });
 });

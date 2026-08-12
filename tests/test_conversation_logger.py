@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from core.logging.logger import ConversationLogger
@@ -106,6 +107,54 @@ def test_lazy_activation_writes_without_explicit_start_session(tmp_path):
     assert record["tag"] == "INFO"
     assert record["message"] == "lazy activation smoke"
     assert record["session_id"] == "lazy_session"
+
+
+def test_debug_level_records_are_not_persisted(tmp_path):
+    logger = _fresh_logger(tmp_path)
+
+    logger.log_debug("RAW", "content length probe", "DEBUG")
+    logger.log_debug("INFO", "service info stays", "INFO")
+
+    lines = (tmp_path / "conversation_test_session.jsonl").read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines]
+    debug_records = [r for r in records if r["type"] == "debug"]
+    assert [r["tag"] for r in debug_records] == ["INFO"]
+    assert debug_records[0]["level"] == "INFO"
+
+
+def test_debug_level_records_persist_when_verbose_env_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_LOG_LEVEL", "DEBUG")
+    ConversationLogger._instance = None
+    logger = ConversationLogger()
+    logger._log_dir = str(tmp_path)
+    logger._current_session_file = None
+    logger._session_id = "debug_env"
+    logger._turn_count = 0
+    logger._session_active = False
+    logger._ensure_log_dir()
+    logger.start_session()
+
+    logger.log_debug("RAW", "content length probe", "DEBUG")
+    logger.log_debug("INFO", "service info stays", "INFO")
+
+    lines = (tmp_path / "conversation_debug_env.jsonl").read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines]
+    debug_records = [r for r in records if r["type"] == "debug"]
+    assert [r["tag"] for r in debug_records] == ["RAW", "INFO"]
+    assert debug_records[0]["level"] == "DEBUG"
+
+
+def test_timestamps_are_utc_iso(tmp_path):
+    logger = _fresh_logger(tmp_path)
+
+    logger.log_debug("INFO", "utc probe")
+
+    record = json.loads(
+        (tmp_path / "conversation_test_session.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )
+    timestamp = record["timestamp"]
+    assert timestamp.endswith("+00:00")
+    assert "T" in timestamp
 
 
 def test_tool_result_keeps_main_log_compact_and_spills_raw_payload(tmp_path):
@@ -254,3 +303,74 @@ def test_transcript_writer_marks_failed_items_done(tmp_path):
     logger._flush_pending_writes()
 
     assert logger._write_queue.unfinished_tasks == 0
+
+
+def _make_old_conversation_files(tmp_path: Path, count: int, base_mtime: float) -> list[Path]:
+    paths = []
+    for i in range(count):
+        path = tmp_path / f"conversation_stale_{i}.jsonl"
+        path.write_text("{\"type\": \"stale\"}\n", encoding="utf-8")
+        os.utime(path, (base_mtime + i, base_mtime + i))
+        paths.append(path)
+    return paths
+
+
+def test_cleanup_old_conversations_keeps_recent_five(tmp_path):
+    logger = _fresh_logger(tmp_path)
+    stale = _make_old_conversation_files(tmp_path, 7, base_mtime=1_000_000_000)
+    active = tmp_path / "conversation_test_session.jsonl"
+    os.utime(active, (1_900_000_000, 1_900_000_000))
+
+    deleted = logger.cleanup_old_conversations()
+
+    assert deleted == 3
+    remaining = sorted(tmp_path.glob("conversation_*.jsonl"))
+    assert len(remaining) == 5
+    assert active in remaining
+    assert all(p not in remaining for p in stale[:3])
+    assert stale[3:] == [p for p in remaining if p != active]
+
+
+def test_cleanup_triggers_on_lazy_activation(tmp_path):
+    ConversationLogger._instance = None
+    logger = ConversationLogger()
+    logger._log_dir = str(tmp_path)
+    logger._current_session_file = None
+    logger._session_id = "lazy_cleanup"
+    logger._turn_count = 0
+    logger._session_active = False
+    logger._ensure_log_dir()
+    stale = _make_old_conversation_files(tmp_path, 7, base_mtime=1_000_000_000)
+    (tmp_path / "conversation_fresh.jsonl").write_text("{\"type\": \"x\"}\n", encoding="utf-8")
+    os.utime(tmp_path / "conversation_fresh.jsonl", (2_000_000_000, 2_000_000_000))
+
+    logger.log_debug("INFO", "lazy activation with cleanup")
+
+    remaining = sorted(tmp_path.glob("conversation_*.jsonl"))
+    assert len(remaining) == 6
+    assert (tmp_path / "conversation_fresh.jsonl") in remaining
+    assert (tmp_path / "conversation_lazy_cleanup.jsonl") in remaining
+    assert stale[0] not in remaining
+    assert stale[1] not in remaining
+    assert stale[2] not in remaining
+
+
+def test_cleanup_triggers_on_explicit_start_session(tmp_path):
+    ConversationLogger._instance = None
+    logger = ConversationLogger()
+    logger._log_dir = str(tmp_path)
+    logger._current_session_file = None
+    logger._session_id = "explicit_cleanup"
+    logger._turn_count = 0
+    logger._session_active = False
+    logger._ensure_log_dir()
+    _make_old_conversation_files(tmp_path, 7, base_mtime=1_000_000_000)
+
+    logger.start_session()
+
+    remaining = sorted(tmp_path.glob("conversation_*.jsonl"))
+    assert len(remaining) == 5
+    assert (tmp_path / "conversation_explicit_cleanup.jsonl") in remaining
+    assert (tmp_path / "conversation_stale_0.jsonl") not in remaining
+    assert (tmp_path / "conversation_stale_1.jsonl") not in remaining
+    assert (tmp_path / "conversation_stale_2.jsonl") not in remaining

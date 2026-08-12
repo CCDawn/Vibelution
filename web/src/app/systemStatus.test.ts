@@ -72,6 +72,8 @@ describe("systemStatus", () => {
     expect(shouldRenderStartupOverlay(partial, true)).toBe(false);
     expect(shouldRenderStartupOverlay({ ...partial, tone: "running" }, false)).toBe(true);
     expect(shouldRenderStartupOverlay({ ...partial, tone: "running" }, true)).toBe(true);
+    expect(shouldRenderStartupOverlay({ ...partial, tone: "failed" }, false)).toBe(false);
+    expect(shouldRenderStartupOverlay({ ...partial, tone: "failed" }, true)).toBe(false);
     expect(shouldRenderStartupOverlay({ ...partial, active: false }, false)).toBe(false);
   });
 

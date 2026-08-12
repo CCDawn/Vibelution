@@ -740,7 +740,7 @@ def _model_option_test_target(
     if not model_id:
         raise ValueError("modelId is required")
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
-    if int(llm.get("schema_version") or 1) == 2 and "/" in model_id:
+    if int(llm.get("schema_version") or 2) == 2 and "/" in model_id:
         return _v2_model_ref_test_target(public_config, model_id, draft_meta)
     provider_input = option.get("provider") if isinstance(option.get("provider"), dict) else {}
     details = option.get("details") if isinstance(option.get("details"), dict) else {}
@@ -944,7 +944,7 @@ def _persist_saved_model_verification(
     """
     del draft_meta  # retained for call-site compatibility; no longer gates persistence
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
-    if int(llm.get("schema_version") or 1) != 2:
+    if int(llm.get("schema_version") or 2) != 2:
         return False
     try:
         provider_id, _model_key = split_model_ref(model_ref)
@@ -982,7 +982,7 @@ def _persist_saved_model_reasoning_contract(
     error_type: str = "",
 ) -> bool:
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
-    if int(llm.get("schema_version") or 1) != 2:
+    if int(llm.get("schema_version") or 2) != 2:
         return False
     if _llm_test_config_scope(public_config, draft_meta) != "saved":
         return False
@@ -1016,7 +1016,7 @@ def _apply_image_input_capability_details_to_runtime_view(
 ) -> None:
     model_id = str(model_id or "").strip()
     llm = public_config.setdefault("llm", {})
-    if int(llm.get("schema_version") or 1) == 2:
+    if int(llm.get("schema_version") or 2) == 2:
         return
     model_library = llm.setdefault("model_library", {})
     if not isinstance(model_library, dict) or not isinstance(model_library.get(model_id), dict):
@@ -1885,7 +1885,7 @@ def _provider_workspace_fields(public_config: dict[str, Any]) -> dict[str, Any]:
     except ValueError:
         catalog = {"schemaVersion": 2, "providers": {}}
     return {
-        "schemaVersion": int(llm.get("schema_version") or 1)
+        "schemaVersion": int(llm.get("schema_version") or 2)
         if isinstance(llm, dict)
         else 1,
         "providerOptions": list_llm_provider_options(public_config),
@@ -2506,7 +2506,7 @@ def run_draft_llm_test(
     normalized_profile_id = str(profile_id or "").strip()
     if normalized_model_id:
         llm = submitted.get("llm", {}) if isinstance(submitted, dict) else {}
-        if int(llm.get("schema_version") or 1) == 2 and "/" in normalized_model_id:
+        if int(llm.get("schema_version") or 2) == 2 and "/" in normalized_model_id:
             target = _v2_model_ref_test_target(submitted, normalized_model_id, draft_meta)
         else:
             options = list_llm_model_options(submitted)
@@ -2837,7 +2837,7 @@ def _assert_model_delete_workspace_references_allowed(public_config: dict[str, A
 def _reject_schema_v2_legacy_model_route(public_config: dict[str, Any] | None) -> None:
     submitted = public_config if isinstance(public_config, dict) else {}
     llm = submitted.get("llm", {}) if isinstance(submitted, dict) else {}
-    if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
+    if isinstance(llm, dict) and int(llm.get("schema_version") or 2) == 2:
         raise ValueError(SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR)
 
 
@@ -3153,7 +3153,7 @@ def discover_config_models(
 ) -> dict[str, Any]:
     submitted = public_config if isinstance(public_config, dict) else {}
     llm = submitted.get("llm", {}) if isinstance(submitted, dict) else {}
-    if isinstance(llm, dict) and int(llm.get("schema_version") or 1) == 2:
+    if isinstance(llm, dict) and int(llm.get("schema_version") or 2) == 2:
         canonical_provider_id = str(provider_id or "").strip()
         if not canonical_provider_id:
             raise ValueError(
@@ -3408,7 +3408,7 @@ def materialize_observed_binding_pins(
 ) -> dict[str, Any]:
     materialized = copy.deepcopy(public_config)
     llm = materialized.get("llm", {}) if isinstance(materialized, dict) else {}
-    if not isinstance(llm, dict) or int(llm.get("schema_version") or 1) != 2:
+    if not isinstance(llm, dict) or int(llm.get("schema_version") or 2) != 2:
         return materialized
     providers = llm.get("providers", {})
     if not isinstance(providers, dict):

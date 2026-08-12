@@ -43,7 +43,7 @@ from core.pet_system import get_pet_system as get_pet
 from core.infrastructure.tool_intents import (
     humanize_reading_task,
 )
-from core.logging.logger import debug as _debug_logger
+from core.logging import debug as _debug_logger
 from core.ui.ascii_art import get_avatar_manager
 from core.ui.token_display import format_token_count
 from core.ui.theme import get_style, get_theme

@@ -32,6 +32,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { listPendingSessionToolApprovals } from "../../api/chat";
 import { fetchJson } from "../../api/client";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
+import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import {
   listProjectAgentBusTimeline,
@@ -216,7 +217,11 @@ import {
 import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useChatSessionSelection } from "./useChatSessionSelection";
-import { shouldKeepExplicitSessionRouteOnNotFound } from "./chatSessionRouteSync";
+import {
+  resolveAuthoritativeArchivedSessionIds,
+  shouldKeepExplicitSessionRouteOnNotFound,
+} from "./chatSessionRouteSync";
+import { useChatArchivedAgentRetirement } from "./useChatArchivedAgentRetirement";
 import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
@@ -392,6 +397,7 @@ export function ChatCodingRoute() {
   const latestDirectSessionSelectionRef = useRef("");
   const latestDirectSessionSelectionAtRef = useRef(0);
   const directSessionSelectionGenerationRef = useRef(0);
+  const retiredDirectSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
   const reselectDirectSessionRef = useRef<(sessionId: string) => void>(() => undefined);
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
@@ -993,6 +999,7 @@ export function ChatCodingRoute() {
     latestDirectSessionSelectionRef,
     latestDirectSessionSelectionAtRef,
     directSessionSelectionGenerationRef,
+    retiredDirectSessionIdsRef,
     reselectDirectSessionRef,
     activeSessionId,
     setActiveSession,
@@ -1348,54 +1355,78 @@ export function ChatCodingRoute() {
     },
   });
 
+  const retireArchivedAgentSessions = useChatArchivedAgentRetirement({
+    activeSessionId,
+    clearSessionTransientUiState,
+    directSessionSelectionGenerationRef,
+    forgetSessionDetailPaint,
+    latestDirectSessionSelectionAtRef,
+    latestDirectSessionSelectionRef,
+    pathname: location.pathname,
+    navigate,
+    queryClient,
+    removeSessionWorkspace,
+    requestedSessionId,
+    retiredDirectSessionIdsRef,
+    setActiveSession,
+    setSelectedAgentId,
+    setSessionComposerErrors,
+    search: location.search,
+  });
+
   const archiveAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+      fetchJson<AgentArchiveResponse>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
         method: "DELETE",
       }),
     onMutate: async (payload) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.agents() }),
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions() }),
+      ]);
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       const previousSelectedAgentId = selectedAgentId;
       const previousActiveSessionId = activeSessionId;
+      const previousSessions = sessionsQuery.data;
+      const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const remainingAgents = (previousAgents ?? []).filter((agent) => agent.agentId !== payload.agentId);
-      const remainingAgentIds = new Set(remainingAgents.map((agent) => agent.agentId));
-      const currentActiveSession = (sessionsQuery.data ?? []).find((session) => session.id === activeSessionId);
-      const fallbackSession = (
-        currentActiveSession
-        && remainingAgentIds.has(String(currentActiveSession.agentId || "").trim())
-      )
-        ? currentActiveSession
-        : (sessionsQuery.data ?? []).find(
-          (session) => remainingAgentIds.has(String(session.agentId || "").trim()),
-        );
-      const activeSessionAgentId = String(
-        sessionDetailQuery.data?.agentId
-        || currentActiveSession?.agentId
-        || "",
-      ).trim();
-      const fallbackAgentId = String(
-        fallbackSession?.agentId
-        || remainingAgents.find((agent) => String(agent.status || "").trim() !== "archived")?.agentId
-        || "",
-      ).trim();
+      const archivedSessionIds = (sessionsQuery.data ?? [])
+        .filter((session) => String(session.agentId || "").trim() === payload.agentId)
+        .map((session) => session.id);
 
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents);
+      retireArchivedAgentSessions({
+        agentId: payload.agentId,
+        archivedSessionIds,
+        sessions: sessionsQuery.data ?? [],
+        remainingAgents,
+      });
       setAgentContextMenu(null);
-      setSelectedAgentId((current) => current === payload.agentId ? fallbackAgentId : current);
-      if (activeSessionAgentId === payload.agentId) {
-        setActiveSession(fallbackSession?.id || "");
-      }
       return {
         previousActiveSessionId,
         previousAgents,
         previousSelectedAgentId,
+        previousSessions,
+        previousConversations,
+        optimisticArchivedSessionIds: archivedSessionIds,
       };
     },
-    onSuccess: (agent) => {
+    onSuccess: (agent, _variables, context) => {
+      const archivedSessionIds = resolveAuthoritativeArchivedSessionIds({
+        optimisticSessionIds: context?.optimisticArchivedSessionIds,
+        archiveSummary: agent.archiveSummary,
+      });
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
         current?.filter((item) => item.agentId !== agent.agentId),
       );
+      const remainingAgents = (queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [])
+        .filter((item) => item.agentId !== agent.agentId);
+      retireArchivedAgentSessions({
+        agentId: agent.agentId,
+        archivedSessionIds,
+        sessions: queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? context?.previousSessions ?? [],
+        remainingAgents,
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: "",
@@ -1405,6 +1436,12 @@ export function ChatCodingRoute() {
     onError: (error, _variables, context) => {
       if (context?.previousAgents) {
         queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
+      }
+      if (context?.previousSessions) {
+        updateSessionSummaryCaches(queryClient, () => context.previousSessions);
+      }
+      if (context?.previousConversations) {
+        queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
       }
       setSelectedAgentId(context?.previousSelectedAgentId ?? "");
       if (context?.previousActiveSessionId) {

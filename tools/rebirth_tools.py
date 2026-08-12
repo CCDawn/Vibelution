@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Optional
-from core.logging import debug_logger
+from core.logging import debug as _debug_logger
 
 
 # ============================================================================
@@ -128,7 +128,7 @@ def _runtime_manager_controls_current_project() -> bool:
         snapshot_root = str((snapshot or {}).get("projectRoot") or "").strip()
         return bool(snapshot_root) and Path(snapshot_root).resolve() == PROJECT_ROOT.resolve()
     except Exception as exc:
-        debug_logger.warning(f"Runtime manager 检测失败，降级为 legacy restarter: {exc}")
+        _debug_logger.warning(f"Runtime manager 检测失败，降级为 legacy restarter: {exc}")
         return False
 
 
@@ -189,10 +189,10 @@ def _request_runtime_manager_restart(
             )
         raise
     except Exception as exc:
-        debug_logger.error(f"Runtime manager 重启意图提交失败，降级为 legacy restarter: {exc}")
+        _debug_logger.error(f"Runtime manager 重启意图提交失败，降级为 legacy restarter: {exc}")
         return None
     if not bool(result.get("ok")):
-        debug_logger.error(f"Runtime manager 拒绝重启意图，降级为 legacy restarter: {result}")
+        _debug_logger.error(f"Runtime manager 拒绝重启意图，降级为 legacy restarter: {result}")
         return None
     intent = result.get("restartIntent") if isinstance(result.get("restartIntent"), dict) else {}
     intent_id = str(intent.get("intentId") or "").strip()
@@ -269,11 +269,11 @@ def spawn_detached_process_windows(command: list, env: Optional[dict] = None) ->
                 start_new_session=False
             )
 
-        debug_logger.info(f"Windows: 已启动脱离进程, PID: {process.pid}")
+        _debug_logger.info(f"Windows: 已启动脱离进程, PID: {process.pid}")
         return process.pid
         
     except Exception as e:
-        debug_logger.error(f"Windows: 启动脱离进程失败 - {e}")
+        _debug_logger.error(f"Windows: 启动脱离进程失败 - {e}")
         return None
 
 
@@ -326,16 +326,16 @@ def spawn_detached_process_unix(command: list, env: Optional[dict] = None) -> Op
                     os._exit(0)
                     
             except OSError as e:
-                debug_logger.error(f"Unix fork error: {e}")
+                _debug_logger.error(f"Unix fork error: {e}")
                 os._exit(1)
         else:
             # 父进程：等待子进程退出
             os.waitpid(pid, 0)
-            debug_logger.info(f"Unix: 已启动脱离进程, 中间 PID: {pid}")
+            _debug_logger.info(f"Unix: 已启动脱离进程, 中间 PID: {pid}")
             return pid
             
     except Exception as e:
-        debug_logger.error(f"Unix: 启动脱离进程失败 - {e}")
+        _debug_logger.error(f"Unix: 启动脱离进程失败 - {e}")
         return None
 
 
@@ -452,9 +452,9 @@ def trigger_self_restart_tool(
         - 重启是异步的，新 Agent 可能在几秒后启动
         - 可以通过 --verbose 参数查看详细日志
     """
-    debug_logger.info("=" * 60)
-    debug_logger.info("触发自我重启")
-    debug_logger.info("=" * 60)
+    _debug_logger.info("=" * 60)
+    _debug_logger.info("触发自我重启")
+    _debug_logger.info("=" * 60)
 
     # 0. 【强制记忆快照】在重启前自动保存状态
     # 这是最后一道防线，确保即使 Agent 没有主动保存记忆，系统也会自动保存
@@ -475,17 +475,17 @@ def trigger_self_restart_tool(
             core_wisdom=model_wisdom,
             next_goal=current_goal,
         )
-        debug_logger.info(f"[强制快照] {snapshot_result}")
+        _debug_logger.info(f"[强制快照] {snapshot_result}")
     except Exception as e:
-        debug_logger.error(f"[ERROR] 强制记忆快照失败: {e}")
+        _debug_logger.error(f"[ERROR] 强制记忆快照失败: {e}")
 
     # 1. 获取必要信息
     current_pid = get_current_pid()
     script_path = get_script_path()
     
-    debug_logger.info(f"当前 PID: {current_pid}")
-    debug_logger.info(f"脚本路径: {script_path}")
-    debug_logger.info(f"重启原因: {reason}")
+    _debug_logger.info(f"当前 PID: {current_pid}")
+    _debug_logger.info(f"脚本路径: {script_path}")
+    _debug_logger.info(f"重启原因: {reason}")
 
     normalized_session_id = str(sessionId or session_id or "").strip()
     normalized_run_id = str(runId or run_id or "").strip()
@@ -497,20 +497,20 @@ def trigger_self_restart_tool(
         resume_message=normalized_resume_message,
     )
     if manager_result:
-        debug_logger.info("重启已交由 Runtime Manager 协调")
+        _debug_logger.info("重启已交由 Runtime Manager 协调")
         return manager_result
     
     # 2. 验证 restarter 可用性
     is_available, error_msg = validate_restarter_available()
     if not is_available:
-        debug_logger.error(f"Restarter 不可用: {error_msg}")
+        _debug_logger.error(f"Restarter 不可用: {error_msg}")
         return f"错误: {error_msg}"
     
-    debug_logger.info(f"Restarter 模块: {RESTARTER_MODULE}")
+    _debug_logger.info(f"Restarter 模块: {RESTARTER_MODULE}")
 
     # 3. 分类重启原因
     reason_category = classify_restart_reason(reason)
-    debug_logger.info(f"原因分类: {reason_category}")
+    _debug_logger.info(f"原因分类: {reason_category}")
 
     # 4. 构建环境变量
     env = os.environ.copy()
@@ -530,7 +530,7 @@ def trigger_self_restart_tool(
     # 添加详细日志参数（可选）
     # command.append('--verbose')
 
-    debug_logger.info(f"执行命令: {' '.join(command)}")
+    _debug_logger.info(f"执行命令: {' '.join(command)}")
 
     # 6. 启动脱离进程
     new_pid = spawn_detached_process(command, env)
@@ -563,15 +563,15 @@ def trigger_self_restart_tool(
         
         result = "\n".join(result_lines)
         
-        debug_logger.info("=" * 60)
-        debug_logger.info("重启触发成功")
-        debug_logger.info("当前 Agent 进程即将退出")
-        debug_logger.info("=" * 60)
+        _debug_logger.info("=" * 60)
+        _debug_logger.info("重启触发成功")
+        _debug_logger.info("当前 Agent 进程即将退出")
+        _debug_logger.info("=" * 60)
         
         return result
     else:
         error_msg = "错误: 启动重启进程失败"
-        debug_logger.error(error_msg)
+        _debug_logger.error(error_msg)
         return error_msg
 
 
@@ -628,7 +628,7 @@ def _record_restart_scene_event(
             fields=fields or {},
         )
     except Exception as exc:
-        debug_logger.warning(f"Failed to record restart scene event ({event_code}): {exc}")
+        _debug_logger.warning(f"Failed to record restart scene event ({event_code}): {exc}")
 
 
 def _open_restart_transaction(reason: str = "") -> Optional[str]:
@@ -702,22 +702,22 @@ def handle_restart_request(
         from tools.memory_tools import check_restart_block
         is_blocked, block_msg = check_restart_block()
         if is_blocked:
-            debug_logger.warning("任务清单未完成，禁止重启", tag="TASK_BLOCK")
+            _debug_logger.warning("任务清单未完成，禁止重启", tag="TASK_BLOCK")
             _close_restart_transaction(txn_id, "cancelled", f"restart blocked: {block_msg}")
             return (block_msg, None)
     except Exception as e:
-        debug_logger.error(f"任务清单检查失败: {e}", tag="TASK_BLOCK")
+        _debug_logger.error(f"任务清单检查失败: {e}", tag="TASK_BLOCK")
 
     # 环境烟雾门控（所有重启请求都必须通过）
     try:
         from core.infrastructure.test_gate import check_environment_ready
         passed, msg = check_environment_ready()
         if not passed:
-            debug_logger.error("环境 smoke 门控失败，禁止重启", tag="ENV_GATE")
+            _debug_logger.error("环境 smoke 门控失败，禁止重启", tag="ENV_GATE")
             _close_restart_transaction(txn_id, "failed", f"environment gate failed: {msg}")
             return (f"[ENVIRONMENT GATE FAILED] {msg}", None)
     except Exception as e:
-        debug_logger.error(f"环境 smoke 门控执行失败: {e}", tag="ENV_GATE")
+        _debug_logger.error(f"环境 smoke 门控执行失败: {e}", tag="ENV_GATE")
         _close_restart_transaction(txn_id, "failed", f"environment gate error: {e}")
         return (f"[ENVIRONMENT GATE ERROR] {e}", None)
 
@@ -727,11 +727,11 @@ def handle_restart_request(
             from core.infrastructure.test_gate import check_evolution_ready
             passed, msg = check_evolution_ready()
             if not passed:
-                debug_logger.error("测试门控失败，禁止重启", tag="GATE")
+                _debug_logger.error("测试门控失败，禁止重启", tag="GATE")
                 _close_restart_transaction(txn_id, "failed", f"test gate failed: {msg}")
                 return (f"[TEST GATE FAILED] {msg}", None)
         except Exception as e:
-            debug_logger.error(f"测试门控执行失败: {e}", tag="GATE")
+            _debug_logger.error(f"测试门控执行失败: {e}", tag="GATE")
             _close_restart_transaction(txn_id, "failed", f"test gate error: {e}")
             return (f"[TEST GATE ERROR] {e}", None)
 
@@ -776,7 +776,7 @@ def enter_hibernation_tool(duration: int = 300) -> str:
         return "错误: 休眠时长不能超过 7200 秒（2 小时）"
 
     wake_time = datetime.now() + timedelta(seconds=duration)
-    debug_logger.info(f"[休眠] 进入休眠状态，时长: {duration} 秒，预计苏醒: {wake_time.strftime('%H:%M:%S')}")
+    _debug_logger.info(f"[休眠] 进入休眠状态，时长: {duration} 秒，预计苏醒: {wake_time.strftime('%H:%M:%S')}")
 
     time.sleep(duration)
 

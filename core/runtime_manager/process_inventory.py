@@ -98,29 +98,52 @@ def list_repo_runtime_processes(
         pid = int(info.get("pid") or 0)
         if pid <= 0 or pid in excluded:
             continue
-        command_line = _command_line_text(info.get("cmdline"))
-        cwd = str(info.get("cwd") or "")
-        kind = _classify_repo_runtime_process(command_line=command_line, cwd=cwd, project_root=root)
-        if not kind:
-            continue
-        port = _extract_port_from_command_line(command_line)
-        if port == 0 and kind in {"managed_workbench_backend", "unmanaged_workbench"}:
-            port = configured_backend_port()
-        if port == 0 and kind == "unmanaged_frontend_dev_server":
-            port = 5173
-        processes.append(
-            RuntimeProcess(
-                pid=pid,
-                parent_pid=int(info.get("ppid") or 0),
-                kind=kind,
-                name=str(info.get("name") or ""),
-                command_line=command_line,
-                cwd=cwd,
-                port=port,
-            )
-        )
+        runtime_process = _repo_runtime_process_from_info(info, project_root=root)
+        if runtime_process is not None:
+            processes.append(runtime_process)
 
     return sorted(processes, key=lambda item: (item.kind, item.pid))
+
+
+def repo_runtime_process_for_pid(
+    pid: int,
+    *,
+    project_root: Path | str = PROJECT_ROOT,
+) -> RuntimeProcess | None:
+    """Classify one known process without enumerating every system process."""
+
+    if psutil is None or int(pid or 0) <= 0:
+        return None
+    try:
+        info = dict(psutil.Process(int(pid)).as_dict(["pid", "ppid", "name", "cmdline", "cwd"]))
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+    return _repo_runtime_process_from_info(info, project_root=_resolve_project_root(project_root))
+
+
+def _repo_runtime_process_from_info(info: dict[str, Any], *, project_root: Path) -> RuntimeProcess | None:
+    pid = int(info.get("pid") or 0)
+    if pid <= 0:
+        return None
+    command_line = _command_line_text(info.get("cmdline"))
+    cwd = str(info.get("cwd") or "")
+    kind = _classify_repo_runtime_process(command_line=command_line, cwd=cwd, project_root=project_root)
+    if not kind:
+        return None
+    port = _extract_port_from_command_line(command_line)
+    if port == 0 and kind in {"managed_workbench_backend", "unmanaged_workbench"}:
+        port = configured_backend_port()
+    if port == 0 and kind == "unmanaged_frontend_dev_server":
+        port = 5173
+    return RuntimeProcess(
+        pid=pid,
+        parent_pid=int(info.get("ppid") or 0),
+        kind=kind,
+        name=str(info.get("name") or ""),
+        command_line=command_line,
+        cwd=cwd,
+        port=port,
+    )
 
 
 def managed_browser_process_payload(

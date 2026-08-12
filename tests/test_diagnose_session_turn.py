@@ -16,7 +16,7 @@ from core.chat.turn_journal import (
 )
 
 
-SCRIPT_PATH = Path(__file__).with_name("diagnose_session_turn.py")
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "diagnose_session_turn.py"
 
 
 def cleanup_session_artifacts(project_root: Path, session_id: str) -> None:

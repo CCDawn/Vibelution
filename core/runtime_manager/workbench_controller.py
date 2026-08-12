@@ -30,7 +30,7 @@ from .constants import (
     PROJECT_ROOT,
     PYTHON_LAUNCHER_SCRIPT_PATH,
 )
-from .process_inventory import list_repo_runtime_processes, managed_browser_process_payload
+from .process_inventory import managed_browser_process_payload, repo_runtime_process_for_pid
 from .scene_logging import (
     append_runtime_manager_file_event,
     record_runtime_manager_scene_event,
@@ -698,9 +698,9 @@ def _repo_workbench_backend_kind(pid: int) -> str:
     if pid <= 0:
         return ""
     try:
-        for item in list_repo_runtime_processes(project_root=PROJECT_ROOT):
-            if item.pid == int(pid) and item.kind in {"managed_workbench_backend", "unmanaged_workbench"}:
-                return item.kind
+        item = repo_runtime_process_for_pid(pid, project_root=PROJECT_ROOT)
+        if item is not None and item.kind in {"managed_workbench_backend", "unmanaged_workbench"}:
+            return item.kind
     except Exception:
         return ""
     return ""
