@@ -851,6 +851,7 @@ def _execute_flow(
         snapshot["candidateWorktree"]["changedFiles"] = _candidate_changed_files(
             candidate_path,
             baseline_untracked=candidate_worktree.get("untrackedFiles"),
+            checkpoint_commit=str(candidate_worktree.get("checkpointCommit") or ""),
         )
         mutation_contract_violations = _candidate_mutation_contract_violations(
             snapshot["candidateWorktree"]["changedFiles"],
@@ -3189,21 +3190,26 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
             "highRiskFiles": [],
             "blockers": ["missing_candidate_worktree"],
         }
-    changed_files = _candidate_changed_files(candidate_path, baseline_untracked=worktree.get("untrackedFiles"))
+    frozen_variant = worktree.get("variant") if isinstance(worktree.get("variant"), dict) else {}
+    checkpoint_commit = str(
+        frozen_variant.get("checkpointCommit") or worktree.get("checkpointCommit") or ""
+    ).strip()
+    changed_files = _candidate_changed_files(
+        candidate_path,
+        baseline_untracked=worktree.get("untrackedFiles"),
+        checkpoint_commit=checkpoint_commit,
+    )
     dirty_main = {item["path"] for item in _git_status_files(project_root)}
     overlap = [item for item in changed_files if item["path"] in dirty_main]
     high_risk = [item for item in changed_files if bool(item.get("highRisk"))]
     blockers: list[str] = []
-    frozen_variant = worktree.get("variant") if isinstance(worktree.get("variant"), dict) else {}
     current_branch = _git_scalar(project_root, "branch", "--show-current")
     current_head = _git_scalar(project_root, "rev-parse", "HEAD")
-    checkpoint_commit = str(frozen_variant.get("checkpointCommit") or "").strip()
+    main_head_drifted = bool(checkpoint_commit) and current_head != checkpoint_commit
     if current_branch != "main":
         blockers.append("main_branch_required")
     if dirty_main:
         blockers.append("main_workspace_dirty")
-    if not checkpoint_commit or current_head != checkpoint_commit:
-        blockers.append("main_head_drift")
     variant_status = "verified"
     current_variant: dict[str, Any] = {}
     if not _candidate_variant_is_bound(frozen_variant):
@@ -3254,6 +3260,7 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
         "mainDirtyFiles": sorted(dirty_main),
         "mainBranch": current_branch,
         "mainHead": current_head,
+        "mainHeadDrifted": main_head_drifted,
         "expectedMainHead": checkpoint_commit,
         "reviewGate": snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {},
         "analyzedAt": _now_iso(),
@@ -3555,7 +3562,7 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
                 else ""
             ),
             "decision": str(judgment.get("decision") or judgment.get("recommendation") or ""),
-            "mechanism": "controlled_candidate_commit",
+            "mechanism": str(integration.get("mechanism") or "git_merge_ff"),
         },
         "baseCommit": str(integration.get("baseCommit") or ""),
         "commitSha": str(integration.get("commitSha") or ""),
@@ -4106,16 +4113,27 @@ def _candidate_changed_files(
     candidate_path: Path,
     *,
     baseline_untracked: Any = None,
+    checkpoint_commit: str = "",
 ) -> list[dict[str, Any]]:
-    files = _git_status_files(candidate_path)
     baseline_noise = _baseline_untracked_paths(baseline_untracked)
+    resolved_checkpoint = _resolved_git_commit(candidate_path, checkpoint_commit)
+    by_path: dict[str, dict[str, str]] = {}
+    if resolved_checkpoint:
+        for item in _git_diff_name_status_files(candidate_path, resolved_checkpoint):
+            by_path[item["path"]] = item
+        for item in _git_status_files(candidate_path):
+            if "?" in str(item.get("status") or ""):
+                by_path.setdefault(item["path"], item)
+    else:
+        for item in _git_status_files(candidate_path):
+            by_path[item["path"]] = item
     return [
         {
             **item,
             "changeType": _change_type(item.get("status", "")),
             "highRisk": _is_high_risk_path(item["path"]),
         }
-        for item in files
+        for item in by_path.values()
         if not _is_baseline_untracked_noise(item, baseline_noise)
     ]
 
@@ -4131,9 +4149,10 @@ def _build_candidate_variant(
     if not normalized_checkpoint:
         raise SupervisedWorktreeRunValidationError("候选工作树缺少 checkpointCommit，无法绑定评测版本。")
 
+    diff_rev = _resolved_git_commit(candidate_path, normalized_checkpoint) or "HEAD"
     try:
         diff_proc = git_process.run_git(
-            ["diff", "--binary", "HEAD", "--"],
+            ["diff", "--binary", diff_rev, "--"],
             cwd=str(candidate_path),
             capture_output=True,
             check=False,
@@ -4289,6 +4308,7 @@ def _build_trusted_rerun_workspace_audit(
         observed_changed_files = _candidate_changed_files(
             candidate_path,
             baseline_untracked=baseline_untracked,
+            checkpoint_commit=str(frozen_variant.get("checkpointCommit") or ""),
         )
         observed_variant = _build_candidate_variant(
             candidate_path,
@@ -4373,6 +4393,47 @@ def _is_baseline_untracked_noise(item: dict[str, str], baseline_untracked: set[s
     if path.endswith("/"):
         return any(existing.startswith(path) for existing in baseline_untracked)
     return False
+
+
+def _resolved_git_commit(repo_root: Path, value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return _git_scalar(repo_root, "rev-parse", "--verify", f"{raw}^{{commit}}")
+
+
+def _git_diff_name_status_files(repo_root: Path, checkpoint_commit: str) -> list[dict[str, str]]:
+    try:
+        proc = git_process.run_git(
+            ["diff", "--name-status", "-z", "--no-renames", checkpoint_commit, "--"],
+            cwd=str(repo_root),
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return []
+    if proc.returncode != 0:
+        return []
+    records = _decode_git_nul_records(proc.stdout)
+    items: list[dict[str, str]] = []
+    index = 0
+    while index < len(records):
+        raw_status = records[index]
+        index += 1
+        path = ""
+        if "\t" in raw_status:
+            status, path = raw_status.split("\t", 1)
+        elif index < len(records):
+            status = raw_status
+            path = records[index]
+            index += 1
+        else:
+            continue
+        normalized = path.replace("\\", "/")
+        if not normalized:
+            continue
+        items.append({"path": normalized, "status": (status or "M").strip() or "M"})
+    return items
 
 
 def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
