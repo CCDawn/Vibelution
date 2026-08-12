@@ -26,7 +26,7 @@ export type UseChatAgentDirectoryActionsOptions = {
   navigate: NavigateFunction;
   createSessionPending: boolean;
   renameAgentPending: boolean;
-  archiveAgentPending: boolean;
+  isAgentArchivePending: (agentId: string) => boolean;
   createSession: (variables: { agentId: string }) => void;
   renameAgent: (variables: { agentId: string; displayName: string }) => void;
   archiveAgent: (variables: { agentId: string }) => void;
@@ -51,7 +51,7 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
     navigate,
     createSessionPending,
     renameAgentPending,
-    archiveAgentPending,
+    isAgentArchivePending,
     createSession,
     renameAgent,
     archiveAgent,
@@ -184,7 +184,7 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
 
   const handleArchiveAgent = useCallback((agent: AgentInstance) => {
     const agentId = String(agent.agentId || "").trim();
-    if (!agentId || archiveAgentPending) {
+    if (!agentId || isAgentArchivePending(agentId)) {
       return;
     }
     const agentName = String(agent.displayName || agent.agentCode || agentId).trim();
@@ -201,7 +201,7 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
       __sessions__: "",
     }));
     archiveAgent({ agentId });
-  }, [archiveAgent, archiveAgentPending, confirmArchive, lang, setSessionComposerErrors]);
+  }, [archiveAgent, confirmArchive, isAgentArchivePending, lang, setSessionComposerErrors]);
 
   return {
     handleCreateAgent,
