@@ -131,6 +131,14 @@ class WorkflowLedgerStore:
         finally:
             self._database.release_read_connection(connection)
 
+    def read(self, fn: Callable[[Any], Any]) -> Any:
+        """Run a read-only callback on one pooled connection (consistent view)."""
+        connection = self._database.acquire_read_connection()
+        try:
+            return fn(self._repository(connection))
+        finally:
+            self._database.release_read_connection(connection)
+
     @staticmethod
     def _repository(connection: Any):
         from .repository import WorkflowLedgerRepository

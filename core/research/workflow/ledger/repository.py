@@ -1087,6 +1087,33 @@ class WorkflowLedgerRepository:
             (run_id, to_node_id),
         ).fetchall()
 
+    def list_handoffs_for_run(self, run_id: str) -> list[tuple]:
+        return self.execute(
+            """
+            SELECT handoff_id, run_id, edge_id, from_node_run_id, to_node_id,
+                   to_node_run_id, gate_kind, input_snapshot_hash, status,
+                   accepted_by_json, rejection_problem_json, supersedes_handoff_id,
+                   offered_at_ms, accepted_at_ms
+            FROM handoffs
+            WHERE run_id = ?
+            ORDER BY offered_at_ms ASC, handoff_id ASC
+            """,
+            (run_id,),
+        ).fetchall()
+
+    def list_budget_receipts_for_run(self, run_id: str) -> list[tuple]:
+        return self.execute(
+            """
+            SELECT receipt_id, run_id, node_run_id, reservation_id, stage_id,
+                   policy_hash, reserved_json, settled_json, status,
+                   created_at_ms, updated_at_ms
+            FROM budget_receipts
+            WHERE run_id = ?
+            ORDER BY created_at_ms ASC, receipt_id ASC
+            """,
+            (run_id,),
+        ).fetchall()
+
     def get_handoff_by_from_node(self, run_id: str, from_node_run_id: str) -> tuple | None:
         return self.execute(
             """
