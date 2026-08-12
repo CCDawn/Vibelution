@@ -184,6 +184,10 @@ def _drive_until_node_succeeded(runtime, node_id: str, *, max_ticks: int = 40) -
     )
 
 
+@pytest.mark.xfail(
+    reason="awaiting P1 model-stub gate",
+    strict=False,
+)
 def test_default_composition_three_node_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

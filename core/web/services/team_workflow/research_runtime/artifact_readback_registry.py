@@ -1,13 +1,12 @@
 """Canonical Artifact kind → Domain Store read-back registry (T5.1-2).
 
-Materialized artifacts live under each authority's content-addressed root.
 Ledger receipts only store refs; this module is the sole read-back path for
-production RealDomainPorts.
+production RealDomainPorts. Authority is the real Source Collection candidate
+store, ClaimEvidenceStore, and SC graph records — never data/domain_artifacts.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -80,13 +79,10 @@ def required_artifact_kinds(node_id: str) -> tuple[str, ...]:
 
 
 def default_artifact_root() -> Path:
+    """Deprecated parallel store root — production must not write here."""
     from core.infrastructure.path_containment import PROJECT_ROOT
 
     return Path(PROJECT_ROOT) / "data" / "domain_artifacts"
-
-
-def _authority_root(root: Path, authority: Authority) -> Path:
-    return root / authority
 
 
 def build_canonical_ref(
@@ -96,9 +92,7 @@ def build_canonical_ref(
     authority_run_id: str,
     content_hash: str,
 ) -> str:
-    return (
-        f"{kind}://{team_id}/{authority_run_id}/{content_hash}"
-    )
+    return f"{kind}://{team_id}/{authority_run_id}/{content_hash}"
 
 
 def parse_canonical_ref(canonical_ref: str) -> dict[str, str] | None:
@@ -128,21 +122,6 @@ def parse_canonical_ref(canonical_ref: str) -> dict[str, str] | None:
     }
 
 
-def _payload_path(
-    root: Path,
-    *,
-    authority: Authority,
-    team_id: str,
-    authority_run_id: str,
-    kind: str,
-    content_hash: str,
-) -> Path:
-    # Keep paths short for Windows MAX_PATH; identity remains in the envelope
-    # and canonical ref (kind://team/run/hash).
-    _ = (team_id, authority_run_id, kind)
-    return _authority_root(root, authority) / content_hash[:2] / f"{content_hash}.json"
-
-
 def materialize_domain_artifact(
     *,
     kind: str,
@@ -152,58 +131,331 @@ def materialize_domain_artifact(
     root: Path | None = None,
     schema_version: str = "1.0.0",
 ) -> dict[str, str]:
-    """Write payload into the kind's domain authority and return a verified ref."""
-    spec = resolve_artifact_authority(kind)
-    if spec is None:
-        raise RuntimeError(f"unknown artifact kind: {kind}")
-    if not team_id or not authority_run_id:
-        raise RuntimeError("team_id and authority_run_id are required to materialize")
-    content_hash = canonical_sha256(payload)
-    base = root or default_artifact_root()
-    path = _payload_path(
-        base,
-        authority=spec.authority,
-        team_id=team_id,
-        authority_run_id=authority_run_id,
-        kind=kind,
-        content_hash=content_hash,
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    domain_revision = canonical_sha256(
-        {
-            "kind": kind,
-            "teamId": team_id,
-            "authorityRunId": authority_run_id,
-            "contentHash": content_hash,
-            "schemaVersion": schema_version,
-        }
-    )[:32]
-    envelope = {
-        "kind": kind,
-        "teamId": team_id,
-        "authorityRunId": authority_run_id,
-        "schemaVersion": schema_version,
-        "contentHash": content_hash,
-        "domainRevision": domain_revision,
-        "authority": spec.authority,
-        "payload": payload,
-    }
-    path.write_text(
-        json.dumps(envelope, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    canonical_ref = build_canonical_ref(
-        kind=kind,
-        team_id=team_id,
-        authority_run_id=authority_run_id,
-        content_hash=content_hash,
-    )
+    """Forbidden: parallel domain_artifacts store must not be written in production."""
+    _ = (kind, payload, team_id, authority_run_id, root, schema_version)
+    raise RuntimeError("parallel domain_artifacts store is forbidden")
+
+
+def _scope_ids(item: dict[str, Any]) -> dict[str, str]:
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    summary = item.get("summary") if isinstance(item.get("summary"), dict) else {}
+    graph = meta.get("graph") if isinstance(meta.get("graph"), dict) else {}
+    graph_summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
     return {
-        "canonicalRef": canonical_ref,
-        "kind": kind,
-        "sha256": content_hash,
-        "version": schema_version,
-        "domainRevision": domain_revision,
+        "teamId": str(item.get("teamId") or "").strip(),
+        "sourceCollectionRunId": str(
+            item.get("sourceCollectionRunId")
+            or meta.get("sourceCollectionRunId")
+            or summary.get("sourceCollectionRunId")
+            or graph_summary.get("sourceCollectionRunId")
+            or ""
+        ).strip(),
+        "workflowRunId": str(
+            item.get("workflowRunId")
+            or meta.get("workflowRunId")
+            or summary.get("workflowRunId")
+            or ""
+        ).strip(),
+        "researchProjectId": str(
+            item.get("researchProjectId") or meta.get("researchProjectId") or ""
+        ).strip(),
+    }
+
+
+def _matches_collect_scope(
+    item: dict[str, Any],
+    *,
+    team_id: str,
+    source_collection_run_id: str,
+    workflow_run_id: str,
+) -> bool:
+    ids = _scope_ids(item)
+    if ids["teamId"] and ids["teamId"] != team_id:
+        return False
+    sc = ids["sourceCollectionRunId"]
+    wf = ids["workflowRunId"]
+    # Unscoped historical records must never be counted for a run.
+    if not sc and not wf:
+        return False
+    if source_collection_run_id and sc and sc != source_collection_run_id:
+        return False
+    if workflow_run_id and wf and wf != workflow_run_id:
+        return False
+    matched = False
+    if source_collection_run_id and sc == source_collection_run_id:
+        matched = True
+    if workflow_run_id and wf == workflow_run_id:
+        matched = True
+    return matched
+
+
+def _matches_authority_scope(
+    item: dict[str, Any],
+    *,
+    team_id: str,
+    authority_run_id: str,
+) -> bool:
+    ids = _scope_ids(item)
+    if ids["teamId"] and ids["teamId"] != team_id:
+        return False
+    sc = ids["sourceCollectionRunId"]
+    wf = ids["workflowRunId"]
+    if not sc and not wf:
+        return False
+    return authority_run_id in {sc, wf}
+
+
+def _records_pass_strict_scope(
+    records: list[dict[str, Any]],
+    *,
+    team_id: str,
+    authority_run_id: str,
+) -> bool:
+    for item in records:
+        ids = _scope_ids(item)
+        if ids["teamId"] and ids["teamId"] != team_id:
+            return False
+        sc = ids["sourceCollectionRunId"]
+        wf = ids["workflowRunId"]
+        if sc and sc != authority_run_id and wf != authority_run_id:
+            return False
+        if wf and wf != authority_run_id and sc != authority_run_id:
+            return False
+        if not sc and not wf:
+            return False
+        if authority_run_id not in {sc, wf}:
+            return False
+    return True
+
+
+def _load_scoped_candidates(
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+) -> list[dict[str, Any]] | None:
+    from core.web.services.team_workflow.source_collection.candidates import (
+        list_candidate_store,
+    )
+
+    try:
+        payload = list_candidate_store(team_id, limit=500)
+    except Exception:
+        return None
+    candidates = [
+        item
+        for item in list(payload.get("candidates") or [])
+        if isinstance(item, dict)
+        and str(item.get("candidateType") or "") != "candidate_graph"
+        and _matches_collect_scope(
+            item,
+            team_id=team_id,
+            source_collection_run_id=authority_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+    ]
+    if not _records_pass_strict_scope(
+        candidates, team_id=team_id, authority_run_id=authority_run_id
+    ):
+        return None
+    return sorted(
+        candidates,
+        key=lambda item: str(item.get("candidateId") or item.get("sourceUrl") or ""),
+    )
+
+
+def _load_scoped_evidence(
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+) -> list[dict[str, Any]] | None:
+    from core.infrastructure.path_containment import PROJECT_ROOT
+    from core.research.evidence import ClaimEvidenceStore
+
+    try:
+        records = ClaimEvidenceStore(PROJECT_ROOT).list(team_id)
+    except Exception:
+        return None
+    scoped = [
+        item
+        for item in records
+        if isinstance(item, dict)
+        and _matches_collect_scope(
+            item,
+            team_id=team_id,
+            source_collection_run_id=authority_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+    ]
+    if not _records_pass_strict_scope(
+        scoped, team_id=team_id, authority_run_id=authority_run_id
+    ):
+        return None
+    return sorted(
+        scoped,
+        key=lambda item: str(item.get("claimEvidenceId") or item.get("claimId") or ""),
+    )
+
+
+def _load_scoped_relation_graph(
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
+    from core.web.services.team_workflow.source_collection.candidates import (
+        list_candidate_store,
+    )
+
+    empty = {
+        "nodes": [],
+        "edges": [],
+        "summary": {
+            "teamId": team_id,
+            "sourceCollectionRunId": authority_run_id,
+            "workflowRunId": workflow_run_id,
+        },
+        "teamId": team_id,
+        "sourceCollectionRunId": authority_run_id,
+        "workflowRunId": workflow_run_id,
+    }
+    try:
+        payload = list_candidate_store(team_id, candidate_type="candidate_graph", limit=500)
+    except Exception:
+        # Fall back to SC summary metrics when the graph store is unavailable.
+        try:
+            from core.web.services.team_workflow.source_collection.runs import (
+                get_source_collection_summary,
+            )
+
+            summary = get_source_collection_summary(team_id, run_id=authority_run_id)
+            run_summary = summary.get("runSummary") or summary.get("summary") or {}
+            node_count = int(run_summary.get("graphNodeCount") or 0)
+            if node_count <= 0:
+                return empty
+            empty["summary"]["graphNodeCount"] = node_count
+            empty["summary"]["from"] = "source_collection_summary"
+            return empty
+        except Exception:
+            return empty
+
+    graphs = [
+        item
+        for item in list(payload.get("candidates") or [])
+        if isinstance(item, dict)
+        and _matches_collect_scope(
+            item,
+            team_id=team_id,
+            source_collection_run_id=authority_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+    ]
+    if not graphs:
+        return empty
+    if not _records_pass_strict_scope(
+        graphs, team_id=team_id, authority_run_id=authority_run_id
+    ):
+        return empty
+    latest = max(
+        graphs,
+        key=lambda item: (
+            str(item.get("updatedAt") or ""),
+            str(item.get("createdAt") or ""),
+            str(item.get("candidateId") or ""),
+        ),
+    )
+    meta = latest.get("metadata") if isinstance(latest.get("metadata"), dict) else {}
+    graph = meta.get("graph") if isinstance(meta.get("graph"), dict) else {}
+    if not graph:
+        return empty
+    return {
+        "nodes": list(graph.get("nodes") or []),
+        "edges": list(graph.get("edges") or []),
+        "missingLinks": list(graph.get("missingLinks") or []),
+        "summary": dict(graph.get("summary") or {}),
+        "teamId": team_id,
+        "sourceCollectionRunId": authority_run_id,
+        "workflowRunId": workflow_run_id,
+        "candidateGraphId": str(latest.get("candidateId") or ""),
+    }
+
+
+def load_scoped_artifact_payload(
+    kind: str,
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+) -> dict[str, Any] | None:
+    """Load a deterministic scoped payload for hashing / read-back.
+
+    Returns None when the kind is unknown or store records violate team/run scope.
+    Empty-but-scoped payloads are allowed (hash of empty batch).
+    """
+    normalized_kind = str(kind or "").strip()
+    if resolve_artifact_authority(normalized_kind) is None:
+        return None
+    normalized_team = str(team_id or "").strip()
+    normalized_authority = str(authority_run_id or "").strip()
+    normalized_workflow = str(workflow_run_id or "").strip()
+    if not normalized_team or not normalized_authority:
+        return None
+
+    if normalized_kind == "source_candidate_batch":
+        candidates = _load_scoped_candidates(
+            team_id=normalized_team,
+            authority_run_id=normalized_authority,
+            workflow_run_id=normalized_workflow,
+        )
+        if candidates is None:
+            return None
+        # Hash envelope keys stay authority-stable so collect/read hashes match
+        # even when workflow_run_id is only used as a filter.
+        return {
+            "teamId": normalized_team,
+            "sourceCollectionRunId": normalized_authority,
+            "candidates": candidates,
+            "candidateCount": len(candidates),
+        }
+
+    if normalized_kind == "evidence_card_batch":
+        cards = _load_scoped_evidence(
+            team_id=normalized_team,
+            authority_run_id=normalized_authority,
+            workflow_run_id=normalized_workflow,
+        )
+        if cards is None:
+            return None
+        return {
+            "teamId": normalized_team,
+            "sourceCollectionRunId": normalized_authority,
+            "evidenceCards": cards,
+            "cardCount": len(cards),
+        }
+
+    if normalized_kind == "evidence_relation_graph":
+        graph = _load_scoped_relation_graph(
+            team_id=normalized_team,
+            authority_run_id=normalized_authority,
+            workflow_run_id=normalized_workflow,
+        )
+        return {
+            "teamId": normalized_team,
+            "sourceCollectionRunId": normalized_authority,
+            "nodes": list(graph.get("nodes") or []),
+            "edges": list(graph.get("edges") or []),
+            "missingLinks": list(graph.get("missingLinks") or []),
+            "summary": dict(graph.get("summary") or {}),
+            "candidateGraphId": str(graph.get("candidateGraphId") or ""),
+        }
+
+    # Other kinds are not yet wired to a production store authority.
+    return {
+        "teamId": normalized_team,
+        "sourceCollectionRunId": normalized_authority,
+        "kind": normalized_kind,
+        "records": [],
     }
 
 
@@ -213,52 +465,57 @@ def read_domain_artifact(
     root: Path | None = None,
 ) -> ArtifactReadBack | None:
     """Read-back from the unique domain authority for the artifact kind."""
+    _ = root  # parallel file store is forbidden; root is ignored
     parsed = parse_canonical_ref(canonical_ref)
     if parsed is None:
         return None
     if parsed.get("legacy") == "1":
-        # Short refs are not authoritative without a full locator.
         return None
     kind = parsed["kind"]
-    spec = resolve_artifact_authority(kind)
-    if spec is None:
-        return None
+    team_id = parsed["teamId"]
+    authority_run_id = parsed["authorityRunId"]
     content_hash = parsed["contentHash"]
-    path = _payload_path(
-        root or default_artifact_root(),
-        authority=spec.authority,
-        team_id=parsed["teamId"],
-        authority_run_id=parsed["authorityRunId"],
-        kind=kind,
-        content_hash=content_hash,
+    payload = load_scoped_artifact_payload(
+        kind,
+        team_id=team_id,
+        authority_run_id=authority_run_id,
+        workflow_run_id="",
     )
-    if not path.is_file():
+    if payload is None:
         return None
-    try:
-        envelope = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(envelope, dict):
-        return None
-    stored_hash = str(envelope.get("contentHash") or "")
-    payload = envelope.get("payload")
-    if not isinstance(payload, dict):
+    # Extra forge guard: every record in the payload must match ref team/run.
+    records: list[dict[str, Any]] = []
+    if kind == "source_candidate_batch":
+        records = [item for item in list(payload.get("candidates") or []) if isinstance(item, dict)]
+    elif kind == "evidence_card_batch":
+        records = [
+            item for item in list(payload.get("evidenceCards") or []) if isinstance(item, dict)
+        ]
+    if records and not _records_pass_strict_scope(
+        records, team_id=team_id, authority_run_id=authority_run_id
+    ):
         return None
     recomputed = canonical_sha256(payload)
-    if stored_hash != content_hash or recomputed != content_hash:
+    if recomputed != content_hash:
         return None
-    version = str(envelope.get("schemaVersion") or "").strip()
-    domain_revision = str(envelope.get("domainRevision") or "").strip()
-    if not version or not domain_revision or not stored_hash:
-        return None
+    schema_version = "1.0.0"
+    domain_revision = canonical_sha256(
+        {
+            "kind": kind,
+            "teamId": team_id,
+            "authorityRunId": authority_run_id,
+            "contentHash": content_hash,
+            "schemaVersion": schema_version,
+        }
+    )[:32]
     return ArtifactReadBack(
         canonical_ref=build_canonical_ref(
             kind=kind,
-            team_id=parsed["teamId"],
-            authority_run_id=parsed["authorityRunId"],
+            team_id=team_id,
+            authority_run_id=authority_run_id,
             content_hash=content_hash,
         ),
-        version=version,
-        content_hash=stored_hash,
+        version=schema_version,
+        content_hash=content_hash,
         domain_revision=domain_revision,
     )

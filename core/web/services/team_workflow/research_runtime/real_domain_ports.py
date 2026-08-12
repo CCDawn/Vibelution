@@ -144,9 +144,9 @@ class RealDomainPorts:
     def execute_agent_turn(
         self, *, action: PendingAction, handle: AgentTaskHandle
     ) -> list[dict[str, str]]:
-        from .agent_turn_materializer import materialize_agent_turn_outputs
+        from .agent_turn_completion import complete_agent_turn_outputs
 
-        return materialize_agent_turn_outputs(
+        return complete_agent_turn_outputs(
             action=action,
             handle=handle,
             input_snapshot=self._run_input_snapshot(action.run_id),

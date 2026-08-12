@@ -108,6 +108,22 @@ class AdapterDispatchWorker:
         try:
             result = adapter.execute(action)
         except Exception as exc:
+            from .agent_turn_completion import TurnNotReadyError
+
+            if isinstance(exc, TurnNotReadyError):
+                # Turn still running — requeue without failing the attempt.
+                self._requeue_or_fail(outbox, f"turn_not_ready:{exc}")
+                return
+            # Release unused reservation if execute reserved then crashed.
+            try:
+                from .budget_authority_adapter import release_budget_reservation
+
+                release_budget_reservation(
+                    self._store,
+                    {"reservationId": f"reservation-{action.node_run_id}"},
+                )
+            except Exception:
+                pass
             self._fail_attempt(
                 outbox,
                 action,
