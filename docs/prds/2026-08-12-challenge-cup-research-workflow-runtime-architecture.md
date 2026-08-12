@@ -8,6 +8,8 @@
 
 **决策依据：** [ADR 0006](../adr/0006-challenge-cup-workflow-runtime-and-single-canvas.md)、[ADR 0007](../adr/0007-research-workflow-handoff-and-agent-session-binding.md)
 
+**详细实施合同：** [挑战杯科研工作流运行时详细技术方案](2026-08-12-challenge-cup-research-workflow-runtime-implementation-spec.md)
+
 **替代关系：** 本文细化现行 ADR 的实现架构和迁移路径，不创建第二套产品流程；与旧计划冲突时，以 ADR 和本文的单一事实源、失败显式化、无兼容执行层为准。
 
 ## 1. 执行摘要
