@@ -1,10 +1,8 @@
-"""Production DomainReadinessContext implementation (P1-3).
+"""Production DomainReadinessContext implementation (P1-3 / T5.1-3).
 
 Reads the frozen run input snapshot from the Workflow Ledger and queries the
-real domain authorities for the checkpoints each evaluator needs. Methods that
-require a domain service not yet wired return a conservative "missing" so a
-node is never wrongly declared ready; budget limits and binding resolution
-come from the Ledger (the single frozen authority).
+real domain authorities via readiness_providers. service_overrides remain
+unit-test only and must not be required for production composition.
 """
 
 from __future__ import annotations
@@ -13,16 +11,13 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from core.research.workflow.contracts import (
-    ActorReadiness,
-    BudgetReadiness,
-)
 from core.research.workflow.definition import (
     build_challenge_cup_workflow_definition,
 )
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.models import ActorKind
 
+from . import readiness_providers
 from .readiness.common import (
     BudgetLimitsSnapshot,
     HandoffSnapshot,
@@ -67,13 +62,20 @@ class RealDomainReadinessContext:
     # ---------------------------------------------------- protocol methods
 
     def domain_revision_vector(self, team_id: str, run_id: str) -> Mapping[str, str]:
-        return {}
+        override = self._query("domain_revision_vector", team_id, run_id)
+        if override is not None:
+            return dict(override)
+        return readiness_providers.build_domain_revision_vector(
+            team_id,
+            run_id,
+            input_snapshot=self._input_snapshot(run_id),
+            ledger_store=self._store,
+        )
 
     def question_snapshot(self, team_id: str, question_id: str) -> Mapping[str, Any] | None:
         snapshot = self._query("question_snapshot", team_id, question_id)
         if snapshot is not None:
             return snapshot
-        # 冻结题目从 run input 的 researchObjectiveContract 读取。
         for run_id in _run_ids_for(self._store, team_id):
             run_snapshot = self._input_snapshot(run_id)
             objective = run_snapshot.get("researchObjectiveContract") or {}
@@ -88,54 +90,102 @@ class RealDomainReadinessContext:
         return None
 
     def candidate_stats(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("candidate_stats", team_id, run_id)
+        override = self._query("candidate_stats", team_id, run_id)
+        if override is not None:
+            return override
+        return readiness_providers.fetch_candidate_stats(
+            team_id,
+            run_id,
+            input_snapshot=self._input_snapshot(run_id),
+        )
 
     def evidence_cards_stats(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("evidence_cards_stats", team_id, run_id)
+        override = self._query("evidence_cards_stats", team_id, run_id)
+        if override is not None:
+            return override
+        return readiness_providers.fetch_evidence_cards_stats(
+            team_id,
+            run_id,
+            input_snapshot=self._input_snapshot(run_id),
+        )
 
     def evidence_graph_stats(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("evidence_graph_stats", team_id, run_id)
+        override = self._query("evidence_graph_stats", team_id, run_id)
+        if override is not None:
+            return override
+        return readiness_providers.fetch_evidence_graph_stats(
+            team_id,
+            run_id,
+            input_snapshot=self._input_snapshot(run_id),
+        )
 
     def knowledge_package_draft(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("knowledge_package_draft", team_id, run_id)
+        return self._query("knowledge_package_draft", team_id, run_id) or _artifact_envelope(
+            "knowledge_package_draft", team_id, run_id
+        )
 
     def knowledge_package(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("knowledge_package", team_id, run_id)
+        return self._query("knowledge_package", team_id, run_id) or _artifact_envelope(
+            "knowledge_package", team_id, run_id
+        )
 
     def hypothesis_set(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("hypothesis_set", team_id, run_id)
+        return self._query("hypothesis_set", team_id, run_id) or _artifact_envelope(
+            "hypothesis_set", team_id, run_id
+        )
 
     def protocol_draft(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("protocol_draft", team_id, run_id)
+        return self._query("protocol_draft", team_id, run_id) or _artifact_envelope(
+            "protocol_draft", team_id, run_id
+        )
 
     def protocol_review(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("protocol_review", team_id, run_id)
+        return self._query("protocol_review", team_id, run_id) or _artifact_envelope(
+            "protocol_review_report", team_id, run_id
+        )
 
     def frozen_protocol(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("frozen_protocol", team_id, run_id)
+        return self._query("frozen_protocol", team_id, run_id) or _artifact_envelope(
+            "frozen_protocol", team_id, run_id
+        )
 
     def smoke_evidence(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("smoke_evidence", team_id, run_id)
+        return self._query("smoke_evidence", team_id, run_id) or _artifact_envelope(
+            "smoke_evidence", team_id, run_id
+        )
 
     def controlled_run(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("controlled_run", team_id, run_id)
+        return self._query("controlled_run", team_id, run_id) or _artifact_envelope(
+            "run_artifacts", team_id, run_id
+        )
 
     def evaluation_report(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("evaluation_report", team_id, run_id)
+        return self._query("evaluation_report", team_id, run_id) or _artifact_envelope(
+            "evaluation_report", team_id, run_id
+        )
 
     def iteration_decision(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("iteration_decision", team_id, run_id)
+        return self._query("iteration_decision", team_id, run_id) or _artifact_envelope(
+            "iteration_decision", team_id, run_id
+        )
 
     def version_governance(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("version_governance", team_id, run_id)
+        return self._query("version_governance", team_id, run_id) or _artifact_envelope(
+            "version_governance_record", team_id, run_id
+        )
 
     def promotion_proposal(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("promotion_proposal", team_id, run_id)
+        return self._query("promotion_proposal", team_id, run_id) or _artifact_envelope(
+            "promotion_proposal", team_id, run_id
+        )
 
     def result_package(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("result_package", team_id, run_id)
+        return self._query("result_package", team_id, run_id) or _artifact_envelope(
+            "research_result_package", team_id, run_id
+        )
 
     def budget_limits(self, team_id: str, run_id: str) -> BudgetLimitsSnapshot:
+        _ = team_id
         snapshot = self._input_snapshot(run_id)
         budget_policy = snapshot.get("budgetPolicy") or {}
         stage_budgets = budget_policy.get("stageBudgets") or {}
@@ -145,12 +195,17 @@ class RealDomainReadinessContext:
         tool_calls = _first_positive_limit(stage_budgets, "toolCalls") or int(
             budget_policy.get("toolCalls") or 300
         )
+        consumed = _budget_consumed_from_ledger(self._store, run_id)
         return BudgetLimitsSnapshot(
             policy_hash=_policy_hash(budget_policy),
             stage_tokens_limit=tokens,
+            stage_tokens_consumed=int(consumed.get("tokens") or 0),
             max_tool_calls=tool_calls,
+            tool_calls_consumed=int(consumed.get("toolCalls") or 0),
             max_seconds=int(budget_policy.get("wallClockSeconds") or 21_600),
+            seconds_consumed=int(consumed.get("seconds") or 0),
             auto_retries=int(budget_policy.get("autoRetries") or 2),
+            retries_consumed=int(consumed.get("retries") or 0),
         )
 
     def binding_snapshot(self, run_id: str, node_id: str) -> Mapping[str, Any] | None:
@@ -166,7 +221,7 @@ class RealDomainReadinessContext:
         override = self._query("agent_resolvable", agent_id)
         if override is not None:
             return bool(override)
-        return bool(agent_id)
+        return readiness_providers.is_agent_resolvable(agent_id)
 
     def recovery_blocker_codes(self, run_id: str) -> Sequence[str]:
         rows = self._store.submit(
@@ -211,6 +266,78 @@ class RealDomainReadinessContext:
         ]
 
 
+def _artifact_envelope(
+    kind: str, team_id: str, run_id: str
+) -> Mapping[str, Any] | None:
+    try:
+        from .artifact_readback_registry import (
+            default_artifact_root,
+            resolve_artifact_authority,
+        )
+
+        spec = resolve_artifact_authority(kind)
+        if spec is None:
+            return None
+        root = default_artifact_root() / spec.authority / team_id
+        if not root.is_dir():
+            return None
+        matches = sorted(root.rglob(f"{kind}/*.json"))
+        if not matches:
+            return None
+        envelope = json.loads(matches[-1].read_text(encoding="utf-8"))
+        if not isinstance(envelope, dict):
+            return None
+        payload = envelope.get("payload")
+        if isinstance(payload, dict):
+            return {
+                **payload,
+                "contentHash": envelope.get("contentHash"),
+                "domainRevision": envelope.get("domainRevision"),
+                "schemaVersion": envelope.get("schemaVersion"),
+                "runId": run_id,
+            }
+        return envelope
+    except Exception:
+        return None
+
+
+def _budget_consumed_from_ledger(store: WorkflowLedgerStore, run_id: str) -> dict[str, int]:
+    try:
+        rows = store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT reserved_json, status FROM budget_receipts WHERE run_id = ?",
+                (run_id,),
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+    except Exception:
+        return {}
+    tokens = 0
+    tool_calls = 0
+    seconds = 0
+    retries = 0
+    for reserved_json, status in rows:
+        if str(status or "") not in {"reserved", "settled", "consumed"}:
+            continue
+        try:
+            reserved = json.loads(reserved_json or "{}")
+        except (TypeError, ValueError):
+            reserved = {}
+        if not isinstance(reserved, dict):
+            reserved = {}
+        inner = reserved.get("reserved") if isinstance(reserved.get("reserved"), dict) else reserved
+        tokens += int(inner.get("estimatedTokens") or inner.get("tokens") or 0)
+        tool_calls += int(inner.get("toolCalls") or 0)
+        seconds += int(inner.get("seconds") or inner.get("wallClockSeconds") or 0)
+        retries += int(inner.get("retries") or 0)
+    return {
+        "tokens": tokens,
+        "toolCalls": tool_calls,
+        "seconds": seconds,
+        "retries": retries,
+    }
+
+
 def _run_ids_for(store: WorkflowLedgerStore, team_id: str) -> list[str]:
     rows = store.submit(
         lambda uow: uow.repository.execute(
@@ -225,7 +352,7 @@ def _run_ids_for(store: WorkflowLedgerStore, team_id: str) -> list[str]:
 def _first_positive_limit(stage_budgets: Mapping[str, Any], key: str) -> int | None:
     if not isinstance(stage_budgets, Mapping):
         return None
-    for stage, limits in stage_budgets.items():
+    for _stage, limits in stage_budgets.items():
         if isinstance(limits, Mapping) and int(limits.get(key) or 0) > 0:
             return int(limits[key])
     return None
