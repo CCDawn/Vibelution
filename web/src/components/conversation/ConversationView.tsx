@@ -189,6 +189,7 @@ import {
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { LazyConversationMarkdownRenderer } from "./LazyConversationMarkdownRenderer";
 import { ConversationInferenceControl } from "./ConversationInferenceControl";
+import { ComposerContextRing } from "./ComposerContextRing";
 import {
   addComparableConversationImageUrl,
   comparableConversationImageUrl,
@@ -400,6 +401,8 @@ export function ConversationView({
   permissionControl,
   toolApproval = null,
   llmControl,
+  composerContextRing = null,
+  onOpenComposerContextDetail,
   turnError,
   submitLabel,
   submitPendingLabel,
@@ -4395,6 +4398,14 @@ export function ConversationView({
             </div>
             <div className={styles.composerToolbarEnd}>
               {llmControl ? <ConversationInferenceControl {...llmControl} /> : null}
+              {composerContextRing ? (
+                <ComposerContextRing
+                  model={composerContextRing}
+                  lang={lang}
+                  sessionId={sessionId}
+                  onOpenDetail={onOpenComposerContextDetail}
+                />
+              ) : null}
               {composerVariant === "codex" ? composerActions : null}
             </div>
           </div>
