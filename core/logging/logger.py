@@ -21,13 +21,14 @@
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import logging
 import os
 import re
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -39,7 +40,6 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 LOG_ROOT = os.path.join(_PROJECT_ROOT, "logs")
 CONVERSATION_LOG_DIR = os.path.join(LOG_ROOT, "conversations")
-DEBUG_LOG_DIR = os.path.join(LOG_ROOT, "debug")
 
 _logger = logging.getLogger("core.logging.logger")
 
@@ -142,46 +142,17 @@ class DebugLogger:
         return _get_ui()
 
     def _log_internal_warning(self, context: str, error: Exception) -> None:
-        if not self._file_handle:
-            return
-        try:
-            ts = datetime.now().isoformat(timespec="milliseconds")
-            self._file_handle.write(f"[{ts}] [WARN] {context}: {error}\n")
-            self._file_handle.flush()
-        except Exception:
-            pass
+        _logger.warning("DebugLogger %s: %s", context, error)
 
     def start_session(self, session_id: str):
-        """开始会话 — 打开 debug 日志文件"""
-        try:
-            log_dir = DEBUG_LOG_DIR
-            os.makedirs(log_dir, exist_ok=True)
-            log_path = os.path.join(log_dir, f'debug_{session_id}.log')
-            self._file_handle = open(log_path, 'a', encoding='utf-8', buffering=1)
-            self._write_file("SYS", f"=== Debug session started: {session_id} ===")
-        except Exception as exc:
-            self._log_internal_warning("Failed to start debug session", exc)
-            self._file_handle = None
+        """开始会话 — debug 文件通道已停用（落盘统一走 conversation jsonl）"""
 
     def end_session(self):
-        """结束会话 — 关闭 debug 日志文件"""
-        if self._file_handle:
-            try:
-                self._write_file("SYS", "=== Debug session ended ===")
-                self._file_handle.close()
-            except Exception as exc:
-                self._log_internal_warning("Failed to close debug session", exc)
-            self._file_handle = None
+        """结束会话 — debug 文件通道已停用（落盘统一走 conversation jsonl）"""
+        self._file_handle = None
 
     def _write_file(self, tag: str, msg: str):
-        """写入 debug 日志文件"""
-        if self._file_handle:
-            try:
-                ts = datetime.now().isoformat(timespec="milliseconds")
-                self._file_handle.write(f"[{ts}] [{tag}] {msg}\n")
-                self._file_handle.flush()
-            except Exception as exc:
-                self._log_internal_warning("Failed to write debug file", exc)
+        """写入 debug 日志文件 — 已停用；会话落盘统一走 conversation jsonl"""
 
     def debug(self, msg: str, tag: str = "DEBUG"):
         """调试信息"""
@@ -246,12 +217,8 @@ class DebugLogger:
             ui.add_log(msg, "SYS")
 
     def tool(self, name: str, status: str, details: str = ""):
-        """工具执行日志"""
+        """工具执行日志（工具调用详情走结构化 log_tool_call，这里只写 debug 文件与 UI）"""
         self._write_file("TOOL", f"{name} {status} {details}")
-        try:
-            conversation_logger.log_debug("TOOL", f"{name} {status} {details}", "TOOL")
-        except Exception as exc:
-            self._log_internal_warning("Failed to forward tool log", exc)
         if ui := self._ui_or_none():
             ui.add_log(f"Tool: {name} {status} {details}", "TOOL")
 
@@ -293,12 +260,8 @@ class DebugLogger:
         ui.add_log(f"Thinking: {content[:60]}...", "THINK")
 
     def tool_start(self, tool_name: str, args: dict):
-        """打印工具开始调用 — 内容区 + 日志区"""
+        """打印工具开始调用 — 内容区 + 日志区（持久记录走结构化 log_tool_call）"""
         self._write_file("TOOL", f"START {tool_name} args={str(args)[:200]}")
-        try:
-            conversation_logger.log_debug("TOOL", f"START {tool_name} args={args}", "TOOL")
-        except Exception as exc:
-            self._log_internal_warning("Failed to forward tool start log", exc)
         ui = _get_ui()
         if ui is None:
             return
@@ -306,13 +269,9 @@ class DebugLogger:
         ui.print_tool_start_log(tool_name, args)
 
     def tool_result(self, tool_name: str, result: str, success: bool = True):
-        """打印工具执行结果 — 内容区 + 日志区"""
+        """打印工具执行结果 — 内容区 + 日志区（持久记录走结构化 log_tool_call）"""
         status = "OK" if success else "FAIL"
         self._write_file("TOOL", f"RESULT {tool_name} {status} len={len(result) if result else 0}")
-        try:
-            conversation_logger.log_debug("TOOL", f"RESULT {tool_name} {status} len={len(result) if result else 0}", "TOOL")
-        except Exception as exc:
-            self._log_internal_warning("Failed to forward tool result log", exc)
         ui = _get_ui()
         if ui is None:
             return
@@ -467,6 +426,10 @@ class ConversationLogger:
         except (TypeError, ValueError):
             self._delegation_depth = 0
 
+        self._debug_recording_enabled = (
+            str(os.environ.get("VIBELUTION_LOG_LEVEL", "") or "").strip().upper() == "DEBUG"
+        )
+
     def _ensure_log_dir(self):
         """确保日志目录存在"""
         os.makedirs(self._log_dir, exist_ok=True)
@@ -616,8 +579,27 @@ class ConversationLogger:
         }
 
     def _timestamp(self) -> str:
-        """获取 ISO 格式的时间戳"""
-        return datetime.now().isoformat(timespec="milliseconds")
+        """获取 ISO 格式的时间戳（UTC，与 runtime scene 事件一致）"""
+        return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+    def cleanup_old_conversations(self, keep_recent: int = 5) -> int:
+        """清理旧的 conversation jsonl 文件，只保留最近 N 个会话（与 TranscriptLogger 对称）。"""
+        pattern = os.path.join(self._log_dir, "conversation_*.jsonl")
+        files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+
+        deleted_count = 0
+        for file_path in files[keep_recent:]:
+            try:
+                os.remove(file_path)
+                deleted_count += 1
+            except Exception:
+                pass
+
+        if deleted_count > 0:
+            from core.logging import debug as _debug_logger
+            _debug_logger.info(f"[ConversationLogger] 已清理 {deleted_count} 个旧 conversation 文件")
+
+        return deleted_count
 
     def _activate_default(self) -> None:
         """未显式 start_session 时，懒激活进程级默认会话，避免日志被静默丢弃。"""
@@ -627,6 +609,7 @@ class ConversationLogger:
             if not self._session_file_stem:
                 self._session_file_stem = f"conversation_{self._session_id}"
             self._session_active = True
+            self.cleanup_old_conversations()
 
     def _write(self, record: dict):
         """写入单条记录到文件（实时刷出）"""
@@ -661,6 +644,7 @@ class ConversationLogger:
             "session_label": self._build_session_label(),
         }
         self._write(record)
+        self.cleanup_old_conversations()
 
     def log_external_request(self, content: str):
         """记录外部任务输入"""
@@ -878,7 +862,9 @@ class ConversationLogger:
         self._write(record)
 
     def log_debug(self, tag: str, message: str, level: str = "INFO"):
-        """记录 debug/warning/info/system 级别事件"""
+        """记录 debug/warning/info/system 级别事件（DEBUG 级仅 UI 展示，不落盘；设置 VIBELUTION_LOG_LEVEL=DEBUG 可开启落盘）"""
+        if level == "DEBUG" and not getattr(self, "_debug_recording_enabled", False):
+            return
         record = {
             "type": "debug",
             "turn": self._turn_count,

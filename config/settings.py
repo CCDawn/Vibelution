@@ -41,8 +41,7 @@ NetworkConfig,
     HealthConfig,
     SkinConfig,
     SoundConfig,
-    PromptConfig,
-get_provider_api_key_env,)
+    PromptConfig,)
 from .llm_security import is_llm_local_network_base_url
 from .paths import ensure_global_config_initialized, resolve_config_path
 from .providers import (
@@ -452,8 +451,12 @@ def _canonicalize_model_library_api_key_envs(public_config: Dict[str, Any]) -> D
 def _canonicalize_runtime_public_config(public_config: Dict[str, Any]) -> Dict[str, Any]:
     candidate = copy.deepcopy(public_config)
     llm = candidate.get("llm", {})
-    schema_version = int(llm.get("schema_version") or 1) if isinstance(llm, dict) else 1
+    schema_version = int(llm.get("schema_version") or 2) if isinstance(llm, dict) else 1
     if schema_version == 2:
+        if "model_library" not in llm and (
+            not isinstance(llm.get("providers"), dict) or not isinstance(llm.get("profiles"), dict)
+        ):
+            return candidate
         from .llm_projection import project_v2_llm_for_runtime
 
         return project_v2_llm_for_runtime(candidate)
@@ -625,7 +628,7 @@ def _runtime_provider_id(owner_kind: str, owner_id: str) -> str:
 
 
 def _materialize_inline_llm_providers(llm_section: Dict[str, Any]) -> None:
-    if int(llm_section.get("schema_version") or 1) != 1:
+    if int(llm_section.get("schema_version") or 2) != 1:
         return
     legacy_providers = llm_section.get("providers")
     runtime_providers: Dict[str, Any] = {}
@@ -708,7 +711,7 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
                 + ". Use [llm.profiles.<id>] / [llm.model_library.<id>] / [llm.discovery]."
             )
         _materialize_role_bound_profiles(llm_section)
-        schema_version = int(llm_section.get("schema_version") or 1)
+        schema_version = int(llm_section.get("schema_version") or 2)
         _materialize_model_ref_profiles(llm_section, preserve_model_ref=schema_version == 2)
         if schema_version == 1:
             _materialize_inline_llm_providers(llm_section)
@@ -910,8 +913,6 @@ class ConfigLoader:
     def _load_from_env(
         self,
         prefix: str = "AGENT_",
-        base_provider: str = "",
-        allow_legacy_llm_provider_materialization: bool = True,
     ) -> Dict[str, Any]:
         """
         从环境变量加载配置
@@ -1192,14 +1193,8 @@ class ConfigLoader:
                 current = current.setdefault(part, {})
             current[parts[-1]] = value
 
-        def remap_legacy_provider_path(path: str) -> str:
-            legacy_prefix = "llm.providers.default."
-            if path.startswith(legacy_prefix):
-                return "llm.profiles.primary.provider." + path[len(legacy_prefix):]
-            return path
-
         def is_blocked_v2_llm_path(path: str) -> bool:
-            if allow_legacy_llm_provider_materialization or not path.startswith("llm."):
+            if not path.startswith("llm."):
                 return False
             leaf = path.rsplit(".", 1)[-1]
             is_credential = leaf in {"api_key", "api_key_env", "credential_ref"}
@@ -1209,7 +1204,6 @@ class ConfigLoader:
         for env_var, path in env_mappings.items():
             value = os.environ.get(env_var)
             if value is not None:
-                path = remap_legacy_provider_path(path)
                 if is_blocked_v2_llm_path(path):
                     continue
                 if path in bool_keys:
@@ -1232,7 +1226,7 @@ class ConfigLoader:
         for env_var, raw_value in os.environ.items():
             if not env_var.startswith(llm_prefix):
                 continue
-            path = remap_legacy_provider_path(env_var[len(prefix):].lower().replace("__", "."))
+            path = env_var[len(prefix):].lower().replace("__", ".")
             if is_blocked_v2_llm_path(path):
                 continue
             value = raw_value
@@ -1253,15 +1247,6 @@ class ConfigLoader:
                     pass
             assign_path(config, path, value)
             touched = True
-
-        if allow_legacy_llm_provider_materialization:
-            effective_provider = base_provider
-            provider_env_var = get_provider_api_key_env(effective_provider)
-            if provider_env_var:
-                provider_api_key = os.environ.get(provider_env_var)
-                if provider_api_key:
-                    assign_path(config, "llm.profiles.primary.provider.api_key", provider_api_key)
-                    touched = True
 
         if not touched:
             return {}
@@ -1290,10 +1275,7 @@ class ConfigLoader:
             config = self._apply_dict(config, toml_config, allow_schema_transition=True)
 
         # 3. 从环境变量加载（较高优先级，会覆盖 TOML）
-        env_config = self._load_from_env(
-            base_provider=config.llm.get_provider(role="primary").kind,
-            allow_legacy_llm_provider_materialization=config.llm.schema_version == 1,
-        )
+        env_config = self._load_from_env()
         if env_config:
             config = self._apply_dict(config, env_config)
 
@@ -1318,12 +1300,6 @@ class ConfigLoader:
                 config = apply_runtime_profile(config)
                 if runtime_overrides:
                     config = self._apply_dict(config, {"runtime": runtime_overrides})
-
-        if config.llm.schema_version == 1:
-            for provider in config.llm.providers.values():
-                resolved_api_key = provider.resolve_api_key()
-                if resolved_api_key:
-                    provider.api_key = resolved_api_key
         return config
 
     def _flatten_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -1449,6 +1425,11 @@ class ConfigLoader:
                         _validate_runtime_overrides(overrides, "overrides")
                         profile_update.update(overrides)
         else:
+            if config.llm.schema_version == 1:
+                incoming_llm = data.get("llm")
+                if isinstance(incoming_llm, dict) and "schema_version" not in incoming_llm:
+                    data = copy.deepcopy(data)
+                    data["llm"] = {**incoming_llm, "schema_version": 1}
             data = normalize_public_config_dict(data)
         # 深度合并字典
         current = config.model_dump()

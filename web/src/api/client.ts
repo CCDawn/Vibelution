@@ -29,6 +29,13 @@ export function setFetchJsonFailureReporter(reporter: ((report: FetchJsonFailure
   fetchJsonFailureReporter = reporter;
 }
 
+export function isFetchAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error
+    && (error.name === "AbortError" || /abort|aborted/i.test(error.message))
+  );
+}
+
 export async function getControlToken(origin = ""): Promise<{ header: string; token: string }> {
   const controlOrigin = normalizeControlOrigin(origin);
   const cacheKey = controlTokenCacheKey(controlOrigin);
@@ -165,13 +172,15 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
       credentials: init?.credentials ?? (controlOrigin ? "include" : "same-origin"),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    reportFetchJsonFailure(input, {
-      method,
-      status: null,
-      message: message || "Network request failed",
-      failureKind: "network",
-    });
+    if (!isFetchAbortError(error)) {
+      const message = error instanceof Error ? error.message : String(error);
+      reportFetchJsonFailure(input, {
+        method,
+        status: null,
+        message: message || "Network request failed",
+        failureKind: "network",
+      });
+    }
     throw error;
   }
 

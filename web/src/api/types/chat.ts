@@ -32,6 +32,17 @@ export type SessionSummary = {
   lastActive: string;
   updatedAt: string;
   currentPhase: string;
+  /** Session is retained in storage but intentionally absent from normal chat navigation. */
+  hiddenFromIndex?: boolean;
+  /** Archive metadata is authoritative when a session must not be reopened. */
+  archiveState?: {
+    status?: string;
+    source?: string;
+    agentId?: string;
+    archivedAt?: string;
+    [key: string]: unknown;
+  };
+  readOnly?: boolean;
   lastTurnStatus?: string;
   /** Canonical turn terminal reason: success | failed_runtime | needs_continue | ... */
   terminalReason?: string;

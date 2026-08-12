@@ -55,7 +55,7 @@ from .process_identity import (
     runtime_manager_command_line_for_pid as _runtime_manager_command_line_for_pid,
 )
 from .restart_coordinator import claim_next_restart_intent, complete_restart_intent
-from .scene_logging import append_runtime_manager_file_event, record_runtime_manager_scene_event, runtime_manager_event_phase
+from .scene_logging import append_runtime_manager_file_event, enforce_runtime_scene_retention_on_startup, record_runtime_manager_scene_event, runtime_manager_event_phase
 from .state_store import clear_pid, default_state, load_pid, load_state, now_iso, save_pid, save_state
 from . import work_run_store
 from .process_inventory import (
@@ -2703,6 +2703,17 @@ class RuntimeManagerDaemon:
                 "startupReconcileDeferred": True,
             },
         )
+        retention_result = enforce_runtime_scene_retention_on_startup()
+        if int(retention_result.get("deletedCount") or 0) > 0:
+            record_runtime_manager_scene_event(
+                "runtime_manager.startup.retention_pruned",
+                {
+                    "deletedCount": retention_result.get("deletedCount"),
+                    "keptCount": retention_result.get("keptCount"),
+                    "retentionLimit": retention_result.get("retentionLimit"),
+                },
+                phase="startup",
+            )
         startup_reconciled = False
 
         try:

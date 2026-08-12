@@ -495,6 +495,12 @@ export function isVisibleDirectSession(session: SessionSummary | undefined | nul
   if (!session) {
     return false;
   }
+  if (
+    session.hiddenFromIndex
+    || String(session.archiveState?.status || "").trim().toLowerCase() === "archived"
+  ) {
+    return false;
+  }
   if (session.agentMissing) {
     return false;
   }

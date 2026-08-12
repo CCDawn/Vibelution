@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   acknowledgeWorkbenchCloseWindowClosed,
   fetchWorkbenchCloseTransaction,
-  submitWorkbenchCloseTransaction
+  retryRejectedWorkbenchCloseSubmitOnce,
+  submitWorkbenchCloseTransaction,
+  WorkbenchCloseTransactionRequestError
 } from "../src/protocol/workbenchCloseTransactionClient.js";
 
 describe("workbench close transaction client", () => {
@@ -71,5 +73,75 @@ describe("workbench close transaction client", () => {
       desktopSessionId: "desktop-session-1",
       desktopSessionRevision: 9
     });
+  });
+
+  it("identifies an unauthorized submit so Electron can recover control before any close is accepted", async () => {
+    const input = {
+      launcherOrigin: "http://127.0.0.1:8765/launcher",
+      controlToken: "stale-token",
+      desktopSessionId: "desktop-session-1",
+      idempotencyKey: "desktop-session-1:close-1",
+      mode: "normal" as const,
+      reason: "workbench_window_close",
+      fetchImpl: async () => new Response("", { status: 403 })
+    };
+
+    await expect(submitWorkbenchCloseTransaction(input)).rejects.toMatchObject<Partial<WorkbenchCloseTransactionRequestError>>({
+      name: "WorkbenchCloseTransactionRequestError",
+      operation: "submit",
+      status: 403
+    });
+  });
+
+  it("refreshes control once and retries only an unaccepted unauthorized submit", async () => {
+    let submits = 0;
+    let recoveries = 0;
+
+    await expect(
+      retryRejectedWorkbenchCloseSubmitOnce(
+        async () => {
+          submits += 1;
+          if (submits === 1) {
+            throw new WorkbenchCloseTransactionRequestError("submit", 403);
+          }
+          return "accepted";
+        },
+        async () => {
+          recoveries += 1;
+        }
+      )
+    ).resolves.toBe("accepted");
+
+    expect({ submits, recoveries }).toEqual({ submits: 2, recoveries: 1 });
+  });
+
+  it("never retries a poll failure or a second rejected submit", async () => {
+    let recoveries = 0;
+
+    await expect(
+      retryRejectedWorkbenchCloseSubmitOnce(
+        async () => {
+          throw new WorkbenchCloseTransactionRequestError("fetch", 403);
+        },
+        async () => {
+          recoveries += 1;
+        }
+      )
+    ).rejects.toMatchObject({ operation: "fetch", status: 403 });
+    expect(recoveries).toBe(0);
+
+    let submits = 0;
+    await expect(
+      retryRejectedWorkbenchCloseSubmitOnce(
+        async () => {
+          submits += 1;
+          throw new WorkbenchCloseTransactionRequestError("submit", 401);
+        },
+        async () => {
+          recoveries += 1;
+        }
+      )
+    ).rejects.toMatchObject({ operation: "submit", status: 401 });
+    expect({ submits, recoveries }).toEqual({ submits: 2, recoveries: 1 });
   });
 });

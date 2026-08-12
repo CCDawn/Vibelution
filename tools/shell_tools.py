@@ -55,7 +55,7 @@ import platform
 
 from core.infrastructure.event_bus import get_event_bus, EventNames
 from core.infrastructure.security import get_security_validator
-from core.logging import debug_logger as logger
+from core.logging import debug as _debug_logger
 # ============================================================================
 # 文件 Glob 搜索
 # ============================================================================
@@ -94,7 +94,7 @@ def glob_files(pattern: str = "**/*.py", search_dir: str = ".") -> list:
             recursive=True
         )
     except Exception as e:
-        logger.warning(f"glob_files: 模式 '{pattern}' 搜索失败 - {e}")
+        _debug_logger.warning(f"glob_files: 模式 '{pattern}' 搜索失败 - {e}")
         return []
 
     # 转换路径
@@ -193,7 +193,7 @@ def _terminate_shell_process(process: subprocess.Popen) -> None:
 
             terminate_process_descendants(pid, timeout_seconds=1.0)
         except Exception as exc:
-            logger.warning(f"terminate_shell_process: 终止子进程树失败 - {type(exc).__name__}: {exc}")
+            _debug_logger.warning(f"terminate_shell_process: 终止子进程树失败 - {type(exc).__name__}: {exc}")
     if process.poll() is None:
         try:
             process.terminate()
@@ -1078,7 +1078,7 @@ def _is_command_dangerous(command: str) -> tuple[bool, str]:
         if not is_safe:
             return True, f"[Whitelist Block] {error_msg}"
     except Exception as e:
-        from core.logging import debug_logger; debug_logger.warning(f"Security module load failed: {e}")
+        from core.logging import debug as _debug_logger; _debug_logger.warning(f"Security module load failed: {e}")
     return False, ""
 
 

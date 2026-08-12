@@ -17,6 +17,51 @@ export type WorkbenchCloseTransaction = {
   message?: string;
 };
 
+export type WorkbenchCloseTransactionRequestOperation = "submit" | "fetch" | "window closed acknowledgement";
+
+/**
+ * Keeps control-plane rejection details available to the Electron lifecycle
+ * owner without parsing a user-facing error message.
+ */
+export class WorkbenchCloseTransactionRequestError extends Error {
+  constructor(
+    readonly operation: WorkbenchCloseTransactionRequestOperation,
+    readonly status: number
+  ) {
+    super(`workbench close transaction ${operation} failed: ${status}`);
+    this.name = "WorkbenchCloseTransactionRequestError";
+  }
+}
+
+/**
+ * A rejected submit cannot have created a close transaction, so it is safe to
+ * refresh the local control context and submit the same idempotent request one
+ * more time. Poll and acknowledgement failures deliberately do not use this
+ * helper: their transaction may already be in flight or complete.
+ */
+export async function retryRejectedWorkbenchCloseSubmitOnce<T>(
+  submit: () => Promise<T>,
+  recoverControlContext: () => Promise<void>
+): Promise<T> {
+  try {
+    return await submit();
+  } catch (error: unknown) {
+    if (!isRecoverableWorkbenchCloseSubmitRejection(error)) {
+      throw error;
+    }
+    await recoverControlContext();
+    return await submit();
+  }
+}
+
+function isRecoverableWorkbenchCloseSubmitRejection(
+  error: unknown
+): error is WorkbenchCloseTransactionRequestError {
+  return error instanceof WorkbenchCloseTransactionRequestError
+    && error.operation === "submit"
+    && (error.status === 401 || error.status === 403);
+}
+
 type WorkbenchCloseTransactionRequest = {
   launcherOrigin: string;
   controlToken: string;
@@ -98,9 +143,12 @@ function transactionHeaders(controlToken: string): Record<string, string> {
   };
 }
 
-async function readTransaction(response: Response, operation: string): Promise<WorkbenchCloseTransaction> {
+async function readTransaction(
+  response: Response,
+  operation: WorkbenchCloseTransactionRequestOperation
+): Promise<WorkbenchCloseTransaction> {
   if (!response.ok) {
-    throw new Error(`workbench close transaction ${operation} failed: ${response.status}`);
+    throw new WorkbenchCloseTransactionRequestError(operation, response.status);
   }
   return (await response.json()) as WorkbenchCloseTransaction;
 }

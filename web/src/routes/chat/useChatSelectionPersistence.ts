@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import type { SessionSummary } from "../../api/types";
+import { isVisibleDirectSession } from "../conversationIndexModel";
 import {
   chatSelectionStorageKey,
   normalizeChatSelection,
@@ -41,7 +42,8 @@ type UseChatSelectionPersistenceOptions = {
 function availabilityFromSessions(sessions: SessionSummary[]): DirectSelectionAvailability {
   const sessionsById = new Map<string, string>();
   const agentIds = new Set<string>();
-  for (const session of sessions) {
+  const visibleSessions = sessions.filter(isVisibleDirectSession);
+  for (const session of visibleSessions) {
     const sessionId = String(session.id || "").trim();
     const agentId = String(session.agentId || "").trim();
     if (!sessionId) {
@@ -55,8 +57,8 @@ function availabilityFromSessions(sessions: SessionSummary[]): DirectSelectionAv
   return {
     agentIds,
     sessionsById,
-    firstAgentId: sessions.find((session) => String(session.agentId || "").trim())?.agentId,
-    firstSessionId: sessions[0]?.id,
+    firstAgentId: visibleSessions.find((session) => String(session.agentId || "").trim())?.agentId,
+    firstSessionId: visibleSessions[0]?.id,
   };
 }
 
@@ -76,7 +78,12 @@ export function resolveStoredDirectChatSelection(
   sessions: SessionSummary[],
 ): ChatSelectionProjection | null {
   const requestedSessionId = String(stored?.sessionId || "").trim();
-  if (!requestedSessionId || !sessions.some((session) => String(session.id || "").trim() === requestedSessionId)) {
+  if (
+    !requestedSessionId
+    || !sessions.some(
+      (session) => String(session.id || "").trim() === requestedSessionId && isVisibleDirectSession(session),
+    )
+  ) {
     return null;
   }
   const resolved = resolveChatSelection({
@@ -160,7 +167,9 @@ export function useChatSelectionPersistence({
     if (!sessionId) {
       return;
     }
-    const knownSession = sessions?.some((session) => String(session.id || "").trim() === sessionId);
+    const knownSession = sessions?.some(
+      (session) => String(session.id || "").trim() === sessionId && isVisibleDirectSession(session),
+    );
     if (sessions && !knownSession) {
       return;
     }

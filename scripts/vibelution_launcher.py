@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import ctypes
 import ctypes.wintypes
+import errno
 import hashlib
 import json
 import os
@@ -126,14 +127,44 @@ def _start_runtime_scene(trigger: str) -> dict[str, str]:
     return reference
 
 
-def _pid_alive(pid: int) -> bool:
+def _pid_probe(pid: int) -> str:
+    """Return "alive", "dead" or "unknown" for a pid.
+
+    psutil.pid_exists checks the Windows exit status (STILL_ACTIVE), so it
+    correctly reports "dead" for processes that are exiting but still hold
+    a queryable handle. os.kill(pid, 0) is the fallback when psutil is
+    unavailable: ProcessLookupError (POSIX) / WinError 87 (Windows) mean
+    dead, access denial (WinError 5) means the process exists but cannot
+    be inspected -> unknown.
+    """
     if pid <= 0:
-        return False
+        return "dead"
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        pass
+    else:
+        try:
+            if psutil.pid_exists(pid):
+                return "alive"
+            return "dead"
+        except psutil.Error:
+            return "unknown"
     try:
         os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
+        return "alive"
+    except ProcessLookupError:
+        return "dead"
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 87:
+            return "dead"
+        if getattr(exc, "errno", None) == errno.ESRCH:
+            return "dead"
+    return "unknown"
+
+
+def _pid_alive(pid: int) -> bool:
+    return _pid_probe(pid) == "alive"
 
 
 def _health_url(port: int, host: str = DEFAULT_HOST) -> str:
@@ -2038,30 +2069,151 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
 
 
 def _terminate_pid(pid: int) -> str:
-    """Terminate a pid with SIGTERM then SIGKILL escalation.
+    """Terminate a pid with SIGTERM/SIGKILL escalation and native fallbacks.
 
     Returns an empty string when the pid is confirmed dead (or was already
     gone); otherwise returns a short reason so callers can surface why a
     retire/cleanup could not complete instead of failing silently.
     """
-    if pid <= 0 or not _pid_alive(pid):
+    if pid <= 0:
         return ""
+    probe = _pid_probe(pid)
+    if probe == "dead":
+        return ""
+    if probe == "unknown":
+        # The process exists but cannot be inspected (access denied). Do not
+        # skip termination: native fallbacks may still be permitted even when
+        # OpenProcess inspection was rejected.
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError as exc:
+            return _terminate_pid_with_fallbacks(pid, probe, primary_error=exc, still_alive=False)
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
+            if _pid_probe(pid) == "dead":
+                return ""
+            time.sleep(0.2)
+        if not hasattr(signal, "SIGKILL"):
+            return _terminate_pid_with_fallbacks(pid, probe, primary_error=None, still_alive=True)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError as exc:
+            return _terminate_pid_with_fallbacks(pid, probe, primary_error=exc, still_alive=False)
+        if _pid_probe(pid) == "dead":
+            return ""
+        return _terminate_pid_with_fallbacks(pid, probe, primary_error=None, still_alive=True)
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError as exc:
-        return f"os.kill({pid}, SIGTERM) failed: {exc}"
+        return _terminate_pid_with_fallbacks(pid, probe, primary_error=exc, still_alive=False)
     deadline = time.monotonic() + 8.0
     while time.monotonic() < deadline:
         if not _pid_alive(pid):
             return ""
         time.sleep(0.2)
+    if not hasattr(signal, "SIGKILL"):
+        # Windows has no SIGKILL; escalate through native fallbacks instead.
+        return _terminate_pid_with_fallbacks(pid, probe, primary_error=None, still_alive=True)
     try:
         os.kill(pid, signal.SIGKILL)
     except OSError as exc:
-        return f"os.kill({pid}, SIGKILL) failed: {exc}"
+        return _terminate_pid_with_fallbacks(pid, probe, primary_error=exc, still_alive=False)
     if not _pid_alive(pid):
         return ""
-    return f"pid {pid} still alive after SIGTERM and SIGKILL"
+    return _terminate_pid_with_fallbacks(pid, probe, primary_error=None, still_alive=True)
+
+
+def _terminate_pid_with_fallbacks(
+    pid: int,
+    probe: str,
+    *,
+    primary_error: OSError | None,
+    still_alive: bool,
+) -> str:
+    """Fallback termination: psutil process tree, then winapi TerminateProcess."""
+    reasons: list[str] = []
+    if primary_error is not None:
+        reasons.append(f"os.kill failed: {primary_error}")
+    if probe != "alive":
+        reasons.append(f"pid probe: {probe}")
+    if still_alive:
+        reasons.append("still alive after SIGTERM and SIGKILL")
+    tree_killed = _terminate_pid_tree_with_psutil(pid) if os.name == "nt" else False
+    if tree_killed and _pid_probe(pid) == "dead":
+        return ""
+    winapi_killed = False
+    if tree_killed:
+        deadline = time.monotonic() + 6.0
+        while time.monotonic() < deadline:
+            if _pid_probe(pid) == "dead":
+                return ""
+            time.sleep(0.2)
+    if _pid_probe(pid) == "dead":
+        return ""
+    if os.name == "nt":
+        winapi_killed = _terminate_pid_with_winapi(pid)
+        if winapi_killed:
+            deadline = time.monotonic() + 6.0
+            while time.monotonic() < deadline:
+                if _pid_probe(pid) == "dead":
+                    return ""
+                time.sleep(0.2)
+    if _pid_probe(pid) == "dead":
+        return ""
+    detail = "; ".join(reasons)
+    return (
+        f"pid {pid} survived os.kill, psutil tree ({tree_killed}) "
+        f"and winapi TerminateProcess ({winapi_killed})"
+        + (f" ({detail})" if detail else "")
+    )
+
+
+def _terminate_pid_tree_with_psutil(pid: int) -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return False
+    try:
+        root = psutil.Process(int(pid))
+        processes = list(root.children(recursive=True))
+        processes.reverse()
+        processes.append(root)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+    except (OSError, psutil.Error):
+        return False
+    attempted = False
+    for process in processes:
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+            process.terminate()
+            attempted = True
+    try:
+        _gone, alive = psutil.wait_procs(processes, timeout=1.5)
+    except (OSError, psutil.Error):
+        alive = []
+    for process in alive:
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+            process.kill()
+            attempted = True
+    if alive:
+        with contextlib.suppress(psutil.Error, OSError):
+            psutil.wait_procs(alive, timeout=1.0)
+    return attempted
+
+
+def _terminate_pid_with_winapi(pid: int) -> bool:
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x0001, False, int(pid))
+    if not handle:
+        return False
+    try:
+        return bool(kernel32.TerminateProcess(handle, 1))
+    except OSError:
+        return False
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _stop_backend() -> dict:

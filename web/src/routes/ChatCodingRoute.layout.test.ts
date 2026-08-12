@@ -94,6 +94,7 @@ import chatSessionStreamConnectSource from "./chat/chatSessionStreamConnect.ts?r
 import sessionDetailStreamSource from "./chat/useSessionDetailStream.ts?raw";
 import groupRoomStreamSource from "./chat/useGroupRoomStream.ts?raw";
 import chatSessionSelectionSource from "./chat/useChatSessionSelection.ts?raw";
+import chatArchivedAgentRetirementSource from "./chat/useChatArchivedAgentRetirement.ts?raw";
 import chatSessionDetailHelpersSource from "./chat/chatSessionDetailHelpers.ts?raw";
 import chatRoutePresentationSource from "./chat/chatRoutePresentation.tsx?raw";
 import chatWorkspaceLifecycleSource from "./chat/useChatWorkspaceLifecycle.ts?raw";
@@ -2594,7 +2595,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("await queryClient.cancelQueries({ queryKey: queryKeys.agents() })");
     expect(routeSource).toContain("queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents)");
-    expect(routeSource).toContain("setActiveSession(fallbackSession?.id || \"\")");
+    expect(routeSource).toContain("useChatArchivedAgentRetirement");
+    expect(routeSource).toContain("resolveAuthoritativeArchivedSessionIds");
+    expect(routeSource).toContain("archiveSummary: agent.archiveSummary");
+    expect(chatArchivedAgentRetirementSource).toContain("Removes an archived Agent's sessions from the normal Chat selection surface");
+    expect(routeSource).toContain("retiredDirectSessionIdsRef");
+    expect(routeSource).toContain("updateSessionSummaryCaches(queryClient");
+    expect(routeSource).toContain("navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : \"\"}`, { replace: true })");
     expect(routeSource).toContain("previousActiveSessionId");
     expect(routeSource).toContain("previousSelectedAgentId");
     expect(routeSource).toContain("chatWorkspaceCache.afterAgentArchived()");

@@ -390,3 +390,15 @@ def _parse_event_datetime(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def enforce_runtime_scene_retention_on_startup() -> dict[str, Any]:
+    """Runtime Manager 启动时主动收紧 runtime scene 保留（查询侧惰性清理的对称补充）。
+
+    返回 enforce 结果字典；任何环境性失败降级为空 dict（启动路径不得中断）。
+    """
+    try:
+        from core.web.services.runtime_scene import query as _runtime_scene_query
+        return dict(_runtime_scene_query._enforce_runtime_scene_retention() or {})
+    except Exception:
+        return {}
