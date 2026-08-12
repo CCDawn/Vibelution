@@ -207,7 +207,11 @@ import {
   resolveAuthoritativeArchivedSessionIds,
   shouldKeepExplicitSessionRouteOnNotFound,
 } from "./chatSessionRouteSync";
-import { useChatAgentArchiveQueue } from "./useChatAgentArchiveQueue";
+import {
+  remainingAgentsAfterConfirmedArchive,
+  restoreOptimisticallyArchivedAgent,
+  useChatAgentArchiveQueue,
+} from "./useChatAgentArchiveQueue";
 import { useChatArchivedAgentRetirement } from "./useChatArchivedAgentRetirement";
 import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
@@ -1278,20 +1282,19 @@ export function ChatCodingRoute() {
         ?? sessionsQuery.data
         ?? []
       );
+      const archivedAgentIndex = currentAgents.findIndex((agent) => agent.agentId === agentId);
+      const archivedAgent = archivedAgentIndex >= 0 ? currentAgents[archivedAgentIndex] : null;
       const remainingAgents = currentAgents.filter((agent) => agent.agentId !== agentId);
       const archivedSessionIds = currentSessions
         .filter((session) => String(session.agentId || "").trim() === agentId)
         .map((session) => session.id);
 
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents);
-      retireArchivedAgentSessions({
-        agentId,
-        archivedSessionIds,
-        sessions: currentSessions,
-        remainingAgents,
-      });
       setAgentContextMenu(null);
       return {
+        agent: archivedAgent,
+        agentIndex: archivedAgentIndex,
+        agents: currentAgents,
         sessions: currentSessions,
         optimisticArchivedSessionIds: archivedSessionIds,
       };
@@ -1304,8 +1307,10 @@ export function ChatCodingRoute() {
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
         current?.filter((item) => item.agentId !== agent.agentId),
       );
-      const remainingAgents = (queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [])
-        .filter((item) => item.agentId !== agent.agentId);
+      // Another Agent may already be optimistically hidden while its FIFO
+      // request is still pending. Keep it eligible as the semantic fallback
+      // until its own archive succeeds.
+      const remainingAgents = remainingAgentsAfterConfirmedArchive(context.agents, agent.agentId);
       retireArchivedAgentSessions({
         agentId: agent.agentId,
         archivedSessionIds,
@@ -1317,7 +1322,13 @@ export function ChatCodingRoute() {
         __sessions__: "",
       }));
     },
-    onArchiveFailure: (_agentId, error) => {
+    onArchiveFailure: (_agentId, error, context) => {
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
+        restoreOptimisticallyArchivedAgent(current, {
+          agent: context.agent,
+          index: context.agentIndex,
+        }),
+      );
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: describeError(error, t("loadFailed")),

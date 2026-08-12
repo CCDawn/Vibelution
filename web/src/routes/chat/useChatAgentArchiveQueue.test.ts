@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createChatAgentArchiveQueue } from "./useChatAgentArchiveQueue";
+import {
+  createChatAgentArchiveQueue,
+  remainingAgentsAfterConfirmedArchive,
+  restoreOptimisticallyArchivedAgent,
+} from "./useChatAgentArchiveQueue";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -13,6 +17,29 @@ function deferred<T>() {
 }
 
 describe("createChatAgentArchiveQueue", () => {
+  it("restores only the failed Agent without resurrecting another queued archive", () => {
+    const agentA = { agentId: "agent-a", displayName: "Agent A" };
+    const agentB = { agentId: "agent-b", displayName: "Agent B" };
+    const agentC = { agentId: "agent-c", displayName: "Agent C" };
+
+    expect(restoreOptimisticallyArchivedAgent(
+      [agentC],
+      { agent: agentA, index: 0 },
+    )).toEqual([agentA, agentC]);
+    expect(restoreOptimisticallyArchivedAgent(
+      [agentA, agentC],
+      { agent: agentA, index: 0 },
+    )).toEqual([agentA, agentC]);
+    expect(restoreOptimisticallyArchivedAgent(
+      [agentA, agentC],
+      { agent: agentB, index: 1 },
+    )).toEqual([agentA, agentB, agentC]);
+    expect(remainingAgentsAfterConfirmedArchive(
+      [agentA, agentB, agentC],
+      "agent-a",
+    )).toEqual([agentB, agentC]);
+  });
+
   it("retires every click immediately while executing archive requests in FIFO order", async () => {
     const first = deferred<string>();
     const second = deferred<string>();

@@ -37,6 +37,44 @@ def _create_agent_with_child_session(tmp_path, monkeypatch):
     return direct, child_result["childSession"]
 
 
+def test_archive_preflight_releases_directory_lock_before_api_projection(tmp_path, monkeypatch):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    projection_started = threading.Event()
+    release_projection = threading.Event()
+    state_read_completed = threading.Event()
+    original_agent_to_api = agent_directory_service._agent_to_api
+    result: dict[str, object] = {}
+
+    def blocking_agent_to_api(agent, *args, **kwargs):
+        projection_started.set()
+        assert release_projection.wait(timeout=2)
+        return original_agent_to_api(agent, *args, **kwargs)
+
+    def run_preflight():
+        result["agent"] = agent_directory_service.ensure_agent_archive_allowed(direct["agentId"])
+
+    def read_directory_state():
+        agent_directory_service.load_state()
+        state_read_completed.set()
+
+    monkeypatch.setattr(agent_directory_service, "_agent_to_api", blocking_agent_to_api)
+    preflight_thread = threading.Thread(target=run_preflight, daemon=True)
+    reader_thread = threading.Thread(target=read_directory_state, daemon=True)
+    preflight_thread.start()
+    assert projection_started.wait(timeout=1)
+    try:
+        reader_thread.start()
+        assert state_read_completed.wait(timeout=0.5), (
+            "Agent API projection must not hold the global directory lock."
+        )
+    finally:
+        release_projection.set()
+        preflight_thread.join(timeout=2)
+        reader_thread.join(timeout=2)
+
+    assert result["agent"]["agentId"] == direct["agentId"]
+
+
 def test_agent_archive_seals_direct_and_child_sessions(tmp_path, monkeypatch):
     direct, child = _create_agent_with_child_session(tmp_path, monkeypatch)
 

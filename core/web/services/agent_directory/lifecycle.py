@@ -233,7 +233,11 @@ def ensure_agent_archive_allowed(agent_id: str) -> dict[str, Any]:
             raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
         if s._agent_archive_protected(agent):
             raise s.AgentDirectoryError("Protected core Agent cannot be archived.")
-        return s._agent_to_api(agent)
+        agent_snapshot = dict(agent)
+    # API projection reads Prompt/tool/avatar and activity sources. Keeping
+    # those reads under the registry lock makes every Agent/session list wait
+    # behind one slow archive preflight.
+    return s._agent_to_api(agent_snapshot)
 
 
 def ensure_agent_purge_allowed(agent_id: str) -> dict[str, Any]:
@@ -252,7 +256,8 @@ def ensure_agent_purge_allowed(agent_id: str) -> dict[str, Any]:
             raise s.AgentDirectoryError("Only archived Agents can be permanently deleted.")
         if s._agent_archive_protected(agent):
             raise s.AgentDirectoryError("Protected core Agent cannot be purged.")
-        return s._agent_to_api(agent)
+        agent_snapshot = dict(agent)
+    return s._agent_to_api(agent_snapshot)
 
 
 def ensure_agent_purge_workspace_deletable(agent: dict[str, Any]) -> dict[str, Any]:
