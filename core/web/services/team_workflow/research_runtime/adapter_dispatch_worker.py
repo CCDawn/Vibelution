@@ -43,6 +43,7 @@ class AdapterDispatchWorker:
         now_provider: Callable[[], int] | None = None,
         successor_fn: Callable[[str], tuple[str, ...]] | None = None,
         commit_hook: Callable[[], None] | None = None,
+        after_commit_hook: Callable[[], None] | None = None,
     ) -> None:
         self._store = store
         self._registry = registry
@@ -52,6 +53,7 @@ class AdapterDispatchWorker:
         self._now = now_provider or (lambda: int(time.time() * 1000))
         self._successor_fn = successor_fn or (lambda node_id: ())
         self._commit_hook = commit_hook
+        self._after_commit_hook = after_commit_hook
         self.last_problem: dict[str, Any] | None = None
 
     def run_once(self, limit: int = 4) -> int:
@@ -198,6 +200,8 @@ class AdapterDispatchWorker:
         def mutate(uow):
             if self._commit_hook is not None:
                 self._commit_hook()
+            if self._after_commit_hook is not None:
+                uow.after_commit(self._after_commit_hook)
             acked = uow.repository.ack_outbox(outbox.action_id, self._owner, now_ms)
             if not acked:
                 return
@@ -381,6 +385,8 @@ class AdapterDispatchWorker:
         handoff_id = new_id("ho")
 
         def mutate(uow):
+            if self._after_commit_hook is not None:
+                uow.after_commit(self._after_commit_hook)
             acked = uow.repository.ack_outbox(outbox.action_id, self._owner, now_ms)
             if not acked:
                 return

@@ -359,12 +359,14 @@ def research_workflow_events(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
     after_sequence: int = Query(0, alias="afterSequence"),
+    limit: int = Query(500, ge=1, le=2000),
 ) -> dict:
     try:
         page = get_event_replay_service().list_events(
             team_id=_canonical_team_id(team_id),
             run_id=run_id,
             after_sequence=after_sequence,
+            limit=limit,
         )
         return page.to_dict()
     except FormalReadRuntimeUnavailable:
@@ -389,14 +391,12 @@ def research_workflow_event_stream(
     scoped = _canonical_team_id(team_id)
     try:
         stream = get_event_stream_service()
-        # Validate cursor before opening the stream body.
-        list(
-            stream.replay_frames(
-                team_id=scoped,
-                run_id=run_id,
-                after_sequence=after_sequence,
-                last_event_id=last_event_id,
-            )
+        # Validate cursor/scope without materializing the full replay.
+        stream.validate_stream_request(
+            team_id=scoped,
+            run_id=run_id,
+            after_sequence=after_sequence,
+            last_event_id=last_event_id,
         )
     except FormalReadRuntimeUnavailable as exc:
         raise HTTPException(
