@@ -151,6 +151,8 @@
 
 ## Runtime / runtime scene
 
+**与 Launcher 共用迷你索引：** [`launcher_runtime.md`](launcher_runtime.md) · scene pack：[`runtime_scene/README.md`](runtime_scene/README.md)
+
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `runtime_manager_control_service.py` | Lightweight runtime-manager control checks for web services. | — | — | `test_runtime_manager_control_service.py` |
@@ -158,6 +160,8 @@
 | `runtime_service.py` | Runtime summary helpers for the web shell. | — | `runtime.py` | `test_launcher_service.py`, `test_model_config_migration.py`, `test_runtime_service.py` |
 
 ## Launcher / Reset
+
+**30 秒路由（生命周期 / 无控制台 / 主测）：** [`launcher_runtime.md`](launcher_runtime.md)
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |

@@ -41,8 +41,13 @@
 npm test -- --run PATTERN
 npx tsc -b --pretty false
 
-# 会话诊断
+# —— 诊断三件套（卡住 / 无响应 / 环境先扫这里）——
+# 1) 最新 runtime scene（按时间戳目录；先看 summary / package_index / raw log）
+Get-ChildItem .\logs\runtime_scenes -Directory | Sort-Object Name -Descending | Select-Object -First 5 Name
+# 2) 单轮会话诊断
 .\.venv\Scripts\python.exe scripts\diagnose_session_turn.py --project-root . --session-id ID --turn-id TID
+# 3) 本机环境医生（venv / hooks / 关键模块）
+powershell -NoProfile -File .\scripts\doctor.ps1
 
 # Launcher
 # %LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<ROOT>" start|stop|restart
@@ -50,6 +55,8 @@ npx tsc -b --pretty false
 
 Config 真源：`%USERPROFILE%\Documents\Vibelution\config\config.toml`
 Override：`VIBELUTION_CONFIG_PATH` / `VIBELUTION_CONFIG_HOME`
+
+Launcher / runtime 落点速查：[`core/web/services/launcher_runtime.md`](../../core/web/services/launcher_runtime.md)
 
 ---
 

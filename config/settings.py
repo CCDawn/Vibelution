@@ -1268,6 +1268,11 @@ class ConfigLoader:
         """
         # 1. 创建默认配置
         config = AppConfig()
+        kwargs_schema_version = kwargs.get("llm.schema_version", kwargs.get("llm__schema_version"))
+        if kwargs_schema_version is None and isinstance(kwargs.get("llm"), dict):
+            kwargs_schema_version = (kwargs.get("llm") or {}).get("schema_version")
+        if kwargs_schema_version is not None:
+            config.llm.schema_version = int(kwargs_schema_version)
 
         # 2. 从 TOML 加载
         toml_config = self._load_from_toml()
