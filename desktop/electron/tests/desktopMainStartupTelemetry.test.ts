@@ -1,10 +1,32 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { completeBootstrapWithoutWaitingForTelemetry } from "../src/process/launcherBootstrap.js";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
 describe("Electron main startup telemetry", () => {
+  it("resolves bootstrap without waiting for telemetry I/O", async () => {
+    let releaseTelemetry: (() => void) | null = null;
+    const telemetryPending = new Promise<void>((resolve) => {
+      releaseTelemetry = resolve;
+    });
+    const recordTelemetry = vi.fn(() => telemetryPending);
+    const result = { mode: "attached" as const };
+
+    const bootstrapPromise = Promise.resolve(result).then((resolved) => {
+      const completed = completeBootstrapWithoutWaitingForTelemetry(resolved, recordTelemetry);
+      expect(recordTelemetry).not.toHaveBeenCalled();
+      return completed;
+    });
+
+    await expect(bootstrapPromise).resolves.toBe(result);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(recordTelemetry).toHaveBeenCalledTimes(1);
+    releaseTelemetry?.();
+    await telemetryPending;
+  });
+
   it("correlates bounded startup stages with the Python startup trace", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
@@ -16,6 +38,11 @@ describe("Electron main startup telemetry", () => {
     expect(source).toContain('eventCode: "electron.startup.summary"');
     expect(source).toContain('processElapsedMs: electronStartupElapsedMs()');
     expect(source).toContain('stageDurationMs: electronStageElapsedMs(');
+    expect(source).toContain("return completeBootstrapWithoutWaitingForTelemetry(");
+    expect(source).toContain("scheduleTelemetryWithoutWaiting(async () => {");
+    expect(source).not.toMatch(
+      /await recordElectronStartupSummaryOnce\(launcherBootstrap,\s*\{\s*outcome: "succeeded"/u
+    );
   });
 
   it("emits one terminal summary for success or bounded failure without logging command lines", () => {

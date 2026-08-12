@@ -17,6 +17,28 @@ export type LauncherBootstrapResult = {
   capabilities: string[];
 };
 
+/**
+ * Start best-effort startup telemetry without making it part of the bootstrap
+ * result contract. Telemetry failures must never reject or delay startup.
+ */
+export function scheduleTelemetryWithoutWaiting(recordTelemetry: () => Promise<void>): void {
+  setImmediate(() => {
+    try {
+      void recordTelemetry().catch(() => undefined);
+    } catch {
+      // A synchronous telemetry failure is still observational only.
+    }
+  });
+}
+
+export function completeBootstrapWithoutWaitingForTelemetry<T>(
+  result: T,
+  recordTelemetry: () => Promise<void>
+): T {
+  scheduleTelemetryWithoutWaiting(recordTelemetry);
+  return result;
+}
+
 const REQUIRED_LAUNCHER_CAPABILITIES = [
   "desktop_actions.claim",
   "workbench_close.transaction.v1"
