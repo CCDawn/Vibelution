@@ -2,21 +2,51 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import time
+from typing import Any
 
 from fastapi import Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowCommandKind
+from core.research.workflow.ledger.errors import (
+    CommandNotAllowedError,
+    IdempotencyConflictError,
+    RunVersionConflictError,
+)
+from core.web.services.team_workflow.research_runtime.command_service import (
+    CommandForbiddenError,
+    NodeNotReadyError,
+    RunNotFoundError as CommandRunNotFoundError,
+    TeamScopeMismatchError as CommandTeamScopeMismatchError,
+    WorkflowCommandError,
+)
 from core.web.services.team_workflow.research_runtime.formal_read_runtime import (
     FormalReadRuntimeUnavailable,
     get_event_replay_service,
     get_event_stream_service,
     get_query_service,
 )
+from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
+    FormalWriteRuntimeUnavailable,
+    WorkflowMigrationRequired,
+    get_command_service,
+)
+from core.web.services.team_workflow.research_runtime.ids import new_id
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
     current_server_operator,
     server_operator_scope_from_http,
+)
+from core.web.services.team_workflow.research_runtime.ledger_domain_projections import (
+    HandoffQueryError,
+    project_budget_from_snapshot,
+    project_campaigns_from_snapshot,
+    project_evaluation_from_snapshot,
+    project_handoff_detail,
+    project_handoffs,
+    project_hypotheses_from_snapshot,
+    project_research_ledger_from_snapshot,
 )
 from core.web.services.team_workflow.research_runtime.query_service import (
     RunNotFoundError as QueryRunNotFoundError,
@@ -27,6 +57,7 @@ from core.web.services.team_workflow.research_runtime.query_service import (
 from core.web.services.team_workflow.research_runtime.event_stream_service import (
     InvalidLastEventIdError,
 )
+from core.web.services.team_workflow.research_runtime.run_creation import create_question_run
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
     get_research_workflow_runtime_service,
@@ -69,41 +100,16 @@ class VersionedCommandPayload(TeamScopedPayload):
     expectedRunVersion: int = Field(..., ge=1)
 
 
-class HumanTaskResolvePayload(VersionedCommandPayload):
-    decision: Literal["accept", "reject", "revise"]
-
-
-class TaskBundleCancelPayload(VersionedCommandPayload):
-    reason: str = Field(..., min_length=1)
-
-
 class CommandPayload(VersionedCommandPayload):
     command: str = Field(..., min_length=1)
+    nodeId: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
-
-
-class SessionBindingPayload(VersionedCommandPayload):
-    sessionId: str = ""
-    taskId: str = ""
-    turnId: str = ""
-    agentId: str = ""
-    roleKey: str = ""
-    nodeRunId: str = ""
-    nodeAttempt: int = 1
-    sessionAttempt: int = 1
-    checkpointId: str = ""
-    supersedesBindingId: str = ""
 
 
 class AgentBindingConfigPayload(TeamScopedPayload):
     workflowDefaults: dict[str, str] = Field(default_factory=dict)
     stageOverrides: dict[str, dict[str, str]] = Field(default_factory=dict)
     nodeOverrides: dict[str, str] = Field(default_factory=dict)
-
-
-class NodeCommandPayload(VersionedCommandPayload):
-    command: str = Field(..., min_length=1)
-    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 def _svc():
@@ -166,15 +172,15 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
 
 
 def _map_query_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, FormalReadRuntimeUnavailable):
+    if isinstance(exc, (FormalReadRuntimeUnavailable, FormalWriteRuntimeUnavailable, WorkflowLedgerUnavailable)):
         return HTTPException(
             status_code=503,
             detail={"code": "workflow_ledger_unavailable", "message": str(exc)},
         )
-    if isinstance(exc, WorkflowLedgerUnavailable):
+    if isinstance(exc, WorkflowMigrationRequired):
         return HTTPException(
             status_code=503,
-            detail={"code": "workflow_ledger_unavailable", "message": str(exc)},
+            detail={"code": "workflow_migration_required", "message": str(exc)},
         )
     if isinstance(exc, (QueryTeamScopeMismatchError, QueryRunNotFoundError)):
         return HTTPException(
@@ -202,38 +208,6 @@ def _map_query_error(exc: Exception) -> HTTPException:
     )
 
 
-
-def _authorize_run(
-    run_id: str,
-    team_id: str,
-    *,
-    expected_run_version: int | None = None,
-) -> dict[str, Any]:
-    try:
-        return _svc().authorize_run_access(
-            run_id,
-            team_id=_canonical_team_id(team_id),
-            expected_run_version=expected_run_version,
-        )
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
-
-
-def _node_command_body(payload: NodeCommandPayload) -> dict[str, Any]:
-    body = dict(payload.payload)
-    nested_key = str(body.get("idempotencyKey") or "").strip()
-    if nested_key and nested_key != payload.idempotencyKey:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "idempotency_conflict",
-                "message": "payload idempotencyKey conflicts with command idempotencyKey",
-            },
-        )
-    body["idempotencyKey"] = payload.idempotencyKey
-    return body
-
-
 @router.get("/research/workflows/{workflow_id}/definition")
 def research_workflow_definition(workflow_id: str) -> dict:
     try:
@@ -245,11 +219,15 @@ def research_workflow_definition(workflow_id: str) -> dict:
 @router.get("/research/workflows/{workflow_id}/runs")
 def research_workflow_runs(
     workflow_id: str,
-    # teamId is the only public team scope. Legacy team_id is intentionally
-    # rejected by FastAPI's required-field validation instead of ignored.
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
-    return _svc().list_runs(workflow_id, team_id=_canonical_team_id(team_id))
+    try:
+        return get_query_service().list_runs(
+            team_id=_canonical_team_id(team_id),
+            workflow_id=workflow_id,
+        )
+    except Exception as exc:
+        raise _map_query_error(exc) from exc
 
 
 @router.get("/research/workflows/{workflow_id}/launch-options")
@@ -296,33 +274,15 @@ def research_workflow_put_binding_config(
 @router.post("/research/workflows/{workflow_id}/runs", status_code=201)
 def research_workflow_create_run(workflow_id: str, payload: CreateRunPayload) -> dict:
     try:
-        return _svc().create_question_run(
+        return create_question_run(
             workflow_id,
             team_id=payload.teamId,
             question_id=payload.questionId,
             safety_limits=payload.safetyLimits.model_dump(),
             idempotency_key=payload.idempotencyKey,
         )
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
-
-
-@router.get("/research/workflow-runs/{run_id}")
-def research_workflow_run(
-    run_id: str,
-    team_id: str = Query(..., alias="teamId", min_length=1),
-) -> dict:
-    return _authorize_run(run_id, team_id)
-
-
-@router.get("/research/workflow-runs/{run_id}/canvas")
-def research_workflow_run_canvas(
-    run_id: str,
-    team_id: str = Query(..., alias="teamId", min_length=1),
-) -> dict:
-    _authorize_run(run_id, team_id)
-    try:
-        return _svc().get_canvas_projection(run_id)
+    except (FormalWriteRuntimeUnavailable, WorkflowMigrationRequired) as exc:
+        raise _map_query_error(exc) from exc
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 
@@ -425,16 +385,22 @@ def research_workflow_event_stream(
     )
 
 
+def _snapshot_or_raise(run_id: str, team_id: str):
+    try:
+        return get_query_service().get_snapshot(
+            team_id=_canonical_team_id(team_id),
+            run_id=run_id,
+        )
+    except Exception as exc:
+        raise _map_query_error(exc) from exc
+
+
 @router.get("/research/workflow-runs/{run_id}/handoffs")
 def research_workflow_handoffs(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
-    _authorize_run(run_id, team_id)
-    try:
-        return _svc().list_handoffs(run_id)
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
+    return project_handoffs(_snapshot_or_raise(run_id, team_id))
 
 
 @router.get("/research/workflow-runs/{run_id}/research-ledger")
@@ -442,9 +408,8 @@ def research_workflow_research_ledger(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
-    _authorize_run(run_id, team_id)
     try:
-        return _svc().get_research_ledger(run_id)
+        return project_research_ledger_from_snapshot(_snapshot_or_raise(run_id, team_id))
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 
@@ -454,8 +419,7 @@ def research_workflow_budget(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
-    _authorize_run(run_id, team_id)
-    return _svc().get_budget(run_id)
+    return project_budget_from_snapshot(_snapshot_or_raise(run_id, team_id))
 
 
 @router.get("/research/workflow-runs/{run_id}/hypotheses")
@@ -463,8 +427,7 @@ def research_workflow_hypotheses(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
-    _authorize_run(run_id, team_id)
-    return _svc().get_hypotheses(run_id)
+    return project_hypotheses_from_snapshot(_snapshot_or_raise(run_id, team_id))
 
 
 @router.get("/research/workflow-runs/{run_id}/experiment-campaigns")
@@ -472,8 +435,7 @@ def research_workflow_experiment_campaigns(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
-    _authorize_run(run_id, team_id)
-    return _svc().get_experiment_campaigns(run_id)
+    return project_campaigns_from_snapshot(_snapshot_or_raise(run_id, team_id))
 
 
 @router.get("/research/workflow-runs/{run_id}/evaluation")
@@ -481,8 +443,7 @@ def research_workflow_evaluation(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
-    _authorize_run(run_id, team_id)
-    return _svc().get_evaluation(run_id)
+    return project_evaluation_from_snapshot(_snapshot_or_raise(run_id, team_id))
 
 
 @router.get("/research/workflow-runs/{run_id}/handoffs/{handoff_id}")
@@ -491,181 +452,92 @@ def research_workflow_handoff_detail(
     handoff_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
 ) -> dict:
-    _authorize_run(run_id, team_id)
     try:
-        return _svc().get_handoff_detail(run_id, handoff_id)
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
-
-
-@router.post("/research/workflow-runs/{run_id}/task-bundles/{bundle_id}/cancel")
-def research_workflow_cancel_task_bundle(
-    run_id: str,
-    bundle_id: str,
-    payload: TaskBundleCancelPayload,
-    request: Request,
-) -> dict:
-    _authorize_run(
-        run_id,
-        payload.teamId,
-        expected_run_version=payload.expectedRunVersion,
-    )
-    try:
-        with server_operator_scope_from_http(request):
-            return _svc().cancel_task_bundle(
-                run_id,
-                bundle_id,
-                reason=payload.reason,
-                idempotency_key=payload.idempotencyKey,
-            )
-    except PermissionError as exc:
+        return project_handoff_detail(_snapshot_or_raise(run_id, team_id), handoff_id)
+    except HandoffQueryError as exc:
         raise HTTPException(
-            status_code=403,
-            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+            status_code=404,
+            detail={"code": exc.code, "message": str(exc)},
         ) from exc
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
 
 
-@router.post("/research/workflow-runs/{run_id}/task-bundles/reconcile")
-def research_workflow_reconcile_task_bundles(
-    run_id: str,
-    payload: VersionedCommandPayload,
-    request: Request,
-) -> dict:
-    _authorize_run(
-        run_id,
-        payload.teamId,
-        expected_run_version=payload.expectedRunVersion,
-    )
-    try:
-        with server_operator_scope_from_http(request):
-            return _svc().reconcile_task_bundles(run_id)
-    except PermissionError as exc:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
-        ) from exc
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
-
-
-@router.post("/research/workflow-runs/{run_id}/commands")
+@router.post("/research/workflow-runs/{run_id}/commands", status_code=202)
 def research_workflow_command(
     run_id: str,
     payload: CommandPayload,
     request: Request,
 ) -> dict:
-    _authorize_run(
-        run_id,
-        payload.teamId,
-        expected_run_version=payload.expectedRunVersion,
-    )
     try:
-        with server_operator_scope_from_http(request):
-            return _svc().apply_command(
-                run_id,
-                payload.command,
-                idempotency_key=payload.idempotencyKey,
-                payload=payload.payload,
-            )
-    except PermissionError as exc:
+        kind = WorkflowCommandKind(payload.command)
+    except ValueError as exc:
         raise HTTPException(
-            status_code=403,
-            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+            status_code=422,
+            detail={"code": "unknown_command", "message": str(exc)},
         ) from exc
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
-
-
-@router.post("/research/workflow-runs/{run_id}/human-tasks/{task_id}/resolve")
-def research_workflow_human_resolve(
-    run_id: str,
-    task_id: str,
-    payload: HumanTaskResolvePayload,
-    request: Request,
-) -> dict:
-    _authorize_run(
-        run_id,
-        payload.teamId,
-        expected_run_version=payload.expectedRunVersion,
-    )
+    operator = None
     try:
         with server_operator_scope_from_http(request):
             operator = current_server_operator()
-            resolved_by = (
-                str(operator.operator_id).strip() if operator is not None else ""
-            ) or "operator"
-            return _svc().resolve_human_task(
-                run_id,
-                task_id,
-                decision=payload.decision,
-                resolved_by=resolved_by,
-                idempotency_key=payload.idempotencyKey,
+            actor_id = str(operator.operator_id).strip() if operator is not None else ""
+            receipt = get_command_service().submit(
+                CommandRequest(
+                    command_id=new_id("cmd"),
+                    run_id=run_id,
+                    team_id=payload.teamId,
+                    command=kind,
+                    node_id=(payload.nodeId or None),
+                    expected_run_version=payload.expectedRunVersion,
+                    idempotency_key=payload.idempotencyKey,
+                    payload=dict(payload.payload or {}),
+                    requested_by=ActorRef("user", actor_id or "operator"),
+                    requested_at_ms=int(time.time() * 1000),
+                )
             )
+            return receipt.to_dict()
     except PermissionError as exc:
         raise HTTPException(
             status_code=403,
             detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
         ) from exc
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
-
-
-@router.post("/research/workflow-runs/{run_id}/nodes/{node_id}/commands")
-def research_workflow_node_command(
-    run_id: str,
-    node_id: str,
-    payload: NodeCommandPayload,
-    request: Request,
-) -> dict:
-    _authorize_run(
-        run_id,
-        payload.teamId,
-        expected_run_version=payload.expectedRunVersion,
-    )
-    try:
-        with server_operator_scope_from_http(request):
-            return _svc().apply_node_command(
-                run_id,
-                node_id,
-                payload.command,
-                payload=_node_command_body(payload),
-            )
-    except PermissionError as exc:
+    except CommandForbiddenError as exc:
         raise HTTPException(
             status_code=403,
-            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+            detail={"code": "command_forbidden", "message": str(exc)},
         ) from exc
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
-
-
-@router.put("/research/workflow-runs/{run_id}/nodes/{node_id}/session-binding")
-def research_workflow_session_binding(
-    run_id: str,
-    node_id: str,
-    payload: SessionBindingPayload,
-    request: Request,
-) -> dict:
-    _authorize_run(
-        run_id,
-        payload.teamId,
-        expected_run_version=payload.expectedRunVersion,
-    )
-    try:
-        with server_operator_scope_from_http(request):
-            return _svc().put_session_binding(
-                run_id,
-                node_id,
-                payload.model_dump(
-                    exclude={"teamId", "expectedRunVersion"},
-                ),
-            )
-    except PermissionError as exc:
+    except (FormalWriteRuntimeUnavailable, WorkflowMigrationRequired) as exc:
+        raise _map_query_error(exc) from exc
+    except CommandRunNotFoundError as exc:
         raise HTTPException(
-            status_code=403,
-            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
+            status_code=404,
+            detail={"code": "run_not_found", "message": str(exc)},
         ) from exc
-    except ResearchWorkflowError as exc:
-        raise _map_error(exc) from exc
+    except CommandTeamScopeMismatchError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "team_scope_mismatch", "message": str(exc)},
+        ) from exc
+    except RunVersionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "run_version_conflict", "message": str(exc)},
+        ) from exc
+    except IdempotencyConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "idempotency_conflict", "message": str(exc)},
+        ) from exc
+    except CommandNotAllowedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "command_not_allowed", "message": str(exc)},
+        ) from exc
+    except NodeNotReadyError as exc:
+        raise HTTPException(
+            status_code=412,
+            detail={"code": "node_not_ready", "message": str(exc)},
+        ) from exc
+    except WorkflowCommandError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "unknown_command", "message": str(exc)},
+        ) from exc

@@ -423,6 +423,12 @@ export type ResearchLedgerProjection = ResearchWorkflowScopedProjection & {
   handoffs: Array<Record<string, unknown>>;
   artifactManifests: Array<Record<string, unknown>>;
   resultPackage: Record<string, unknown> | null;
+  graph?: {
+    nodes: Array<Record<string, unknown>>;
+    edges: Array<Record<string, unknown>>;
+    runId?: string;
+    source?: string;
+  };
   summary: {
     claimEvidenceCount: number;
     knowledgeBaseCount: number;

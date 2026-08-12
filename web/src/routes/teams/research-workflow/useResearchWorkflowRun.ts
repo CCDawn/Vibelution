@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createResearchWorkflowRun,
   fetchResearchWorkflowDefinition,
-  resolveResearchWorkflowHumanTask,
   type CreateResearchWorkflowRunInput,
   type WorkflowRunRecord,
 } from "../../../api/researchWorkflow";
+import { submitResearchWorkflowCommand } from "../../../api/research-workflow/commands";
+import type { CommandReceipt } from "../../../api/types/research-workflow/commands";
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import {
@@ -31,7 +32,7 @@ export type UseResearchWorkflowRunResult = {
   resolveHuman: (
     taskId: string,
     decision: "accept" | "reject" | "revise",
-  ) => Promise<WorkflowRunRecord>;
+  ) => Promise<CommandReceipt>;
 };
 
 export function useResearchWorkflowRun(
@@ -149,14 +150,16 @@ export function useResearchWorkflowRun(
       if (!current) throw new Error("当前没有可操作的工作流运行");
       setBusy(true);
       try {
-        const updated = await resolveResearchWorkflowHumanTask(current.runId, taskId, {
+        const receipt = await submitResearchWorkflowCommand({
           teamId: current.teamId,
+          runId: current.runId,
+          command: "resolve_human_task",
           expectedRunVersion: current.runVersion,
           idempotencyKey: `human:${current.runId}:${taskId}:${decision}:v${current.runVersion}`,
-          decision,
+          payload: { taskId, decision },
         });
         await snapshotState.refresh();
-        return updated;
+        return receipt;
       } finally {
         if (mountedRef.current) setBusy(false);
       }
