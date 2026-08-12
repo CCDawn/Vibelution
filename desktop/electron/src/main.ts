@@ -53,7 +53,11 @@ import {
   stopPythonLauncherService,
   type LauncherServiceStopResult
 } from "./process/launcherServiceClient.js";
-import type { LauncherBootstrapResult } from "./process/launcherBootstrap.js";
+import {
+  completeBootstrapWithoutWaitingForTelemetry,
+  scheduleTelemetryWithoutWaiting,
+  type LauncherBootstrapResult
+} from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { executeApprovedDesktopShellShutdown, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
 import { decideShutdown, fetchLauncherActiveWorkStatus, type ShutdownDecision } from "./shutdown/shutdownCoordinator.js";
@@ -361,7 +365,7 @@ async function bootstrapLauncherIfEnabled(paths: DesktopPaths): Promise<Launcher
     pythonPath,
     operatorConfigPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim()
   });
-  await recordElectronSupervisorEvent(result, {
+  const event = {
     eventCode: "electron.startup.control_plane_attached",
     message: "Electron attached to the Launcher control plane.",
     fields: electronStartupFields({
@@ -370,8 +374,11 @@ async function bootstrapLauncherIfEnabled(paths: DesktopPaths): Promise<Launcher
       mode: result.mode,
       launcherBackendPid: result.launcherBackendPid
     })
-  });
-  return result;
+  };
+  return completeBootstrapWithoutWaitingForTelemetry(
+    result,
+    () => recordElectronSupervisorEvent(result, event)
+  );
 }
 
 function startDesktopActionLoop(
@@ -517,7 +524,7 @@ async function persistManagedWindowState(
       desktopSessionRevision = registration.revision;
       desktopSessionRegistered = true;
       startDesktopSessionHeartbeatIfNeeded(bootstrap);
-      await recordElectronSupervisorEvent(bootstrap, {
+      const registrationEvent = {
         eventCode: "electron.startup.desktop_session_registered",
         message: "Electron registered its scoped desktop session.",
         fields: electronStartupFields({
@@ -525,7 +532,8 @@ async function persistManagedWindowState(
           stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
           desktopSessionId: context.desktopSessionId
         })
-      });
+      };
+      scheduleTelemetryWithoutWaiting(() => recordElectronSupervisorEvent(bootstrap, registrationEvent));
     }
     const result = await reportDesktopWindowState({
       ...context,
@@ -537,7 +545,7 @@ async function persistManagedWindowState(
     if (state.role === "workbench" && state.open && !electronStartupSummaryRecorded) {
       electronStartupStage = "workbench_window_ready";
       const stageStartedAtMs = workbenchOpenRequestedAtMs ?? ELECTRON_PROCESS_STARTED_AT_MS;
-      await recordElectronSupervisorEvent(bootstrap, {
+      const readyEvent = {
         eventCode: "electron.startup.workbench_window_ready",
         message: "Electron reported the Workbench window ready.",
         fields: electronStartupFields({
@@ -547,12 +555,15 @@ async function persistManagedWindowState(
           windowId: state.windowId,
           rendererProcessId: state.rendererProcessId
         })
-      });
-      await recordElectronStartupSummaryOnce(bootstrap, {
-        outcome: "succeeded",
-        failureStage: "",
-        desktopSessionRegistered: true,
-        workbenchOpen: true
+      };
+      scheduleTelemetryWithoutWaiting(async () => {
+        await recordElectronSupervisorEvent(bootstrap, readyEvent);
+        await recordElectronStartupSummaryOnce(bootstrap, {
+          outcome: "succeeded",
+          failureStage: "",
+          desktopSessionRegistered: true,
+          workbenchOpen: true
+        });
       });
     }
   });
@@ -1525,12 +1536,14 @@ app.whenReady()
     }
     startDesktopActionLoop(paths, launcherBootstrap, windowProvider);
     if (!desktopCliArgs.openWorkbench) {
-      await recordElectronStartupSummaryOnce(launcherBootstrap, {
-        outcome: "succeeded",
-        failureStage: "",
-        desktopSessionRegistered,
-        workbenchOpen: false
-      });
+      scheduleTelemetryWithoutWaiting(() =>
+        recordElectronStartupSummaryOnce(launcherBootstrap, {
+          outcome: "succeeded",
+          failureStage: "",
+          desktopSessionRegistered,
+          workbenchOpen: false
+        })
+      );
     }
   })
   .catch(async (error: unknown) => {
