@@ -38,7 +38,13 @@ def test_open_workbench_uses_desktop_action_without_restarting_healthy_backend(m
     monkeypatch.setattr(
         workbench_controller,
         "_submit_electron_window_action",
-        lambda **kwargs: submitted.append(kwargs) or {"status": "accepted"},
+        lambda **kwargs: submitted.append(kwargs) or {"status": "accepted", "intentId": "intent-open-1"},
+    )
+    confirmed: list[dict] = []
+    monkeypatch.setattr(
+        workbench_controller,
+        "_await_electron_window_action_confirmed",
+        lambda **kwargs: confirmed.append(kwargs) or {"desktopSessionId": "electron-session-1", "revision": 2},
     )
     monkeypatch.setattr(
         workbench_controller,
@@ -56,6 +62,13 @@ def test_open_workbench_uses_desktop_action_without_restarting_healthy_backend(m
             "session": {"desktopSessionId": "electron-session-1"},
         }
     ]
+    assert confirmed == [
+        {
+            "intent": {"status": "accepted", "intentId": "intent-open-1"},
+            "session": {"desktopSessionId": "electron-session-1"},
+            "action": "open_workbench",
+        }
+    ]
     assert [event_type for event_type, _payload in events] == [
         "launcher.action.requested",
         "launcher.action.electron_backend_reused",
@@ -67,6 +80,53 @@ def test_open_workbench_uses_desktop_action_without_restarting_healthy_backend(m
     summary_payload = next(payload for event_type, payload in events if event_type == "launcher.action.startup_summary")
     assert requested_payload["env"]["VIBELUTION_STARTUP_TRACE_ID"] == summary_payload["startup_trace_id"]
     assert summary_payload["outcome"] == "succeeded"
+
+
+def test_latest_active_electron_session_rejects_live_lease_when_electron_pid_is_dead(monkeypatch):
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "latest_active_desktop_session",
+        lambda **_kwargs: {
+            "desktopSessionId": "electron-launcher-session-8952-msqairvx",
+            "revision": 33,
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda _pid: False)
+
+    assert workbench_controller._latest_active_electron_desktop_session() == {}
+
+
+def test_desktop_action_acceptance_without_ack_fails_bounded(monkeypatch):
+    from core.launcher import desktop_session_store, lifecycle_intent_store
+
+    clock = iter([0.0, 0.0, 0.2])
+    monkeypatch.setattr(workbench_controller.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(workbench_controller.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "get_lifecycle_intent",
+        lambda _intent_id: {"intentId": "intent-focus-1", "status": "accepted"},
+    )
+    monkeypatch.setattr(
+        desktop_session_store,
+        "get_desktop_session",
+        lambda _session_id: {
+            "desktopSessionId": "electron-launcher-session-8952-msqairvx",
+            "revision": 33,
+            "windows": {"workbench": {"open": True}},
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda _pid: True)
+
+    with pytest.raises(RuntimeError, match="was not acknowledged"):
+        workbench_controller._await_electron_window_action_confirmed(
+            intent={"intentId": "intent-focus-1", "status": "accepted"},
+            session={"desktopSessionId": "electron-launcher-session-8952-msqairvx", "revision": 33},
+            action="focus_workbench",
+            timeout_seconds=0.1,
+        )
 
 
 def test_open_workbench_starts_backend_before_desktop_action_when_not_ready(monkeypatch):
@@ -96,7 +156,12 @@ def test_open_workbench_starts_backend_before_desktop_action_when_not_ready(monk
     monkeypatch.setattr(
         workbench_controller,
         "_submit_electron_window_action",
-        lambda **kwargs: submitted.append(kwargs) or {"status": "accepted"},
+        lambda **kwargs: submitted.append(kwargs) or {"status": "accepted", "intentId": "intent-open-2"},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_await_electron_window_action_confirmed",
+        lambda **_kwargs: {"desktopSessionId": "electron-session-1", "revision": 2},
     )
     monkeypatch.setattr(workbench_controller, "_record_launcher_action_event", lambda *_args, **_kwargs: None)
 

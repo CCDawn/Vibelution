@@ -10,6 +10,7 @@ import ctypes.wintypes
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -774,6 +775,35 @@ def _replace_stale_launcher_control(state: dict[str, object], port: int, current
     return True
 
 
+def _active_electron_desktop_session_for_workspace(workspace_root: Path) -> dict[str, object]:
+    """Return the live Electron lease that makes control-plane rekey unsafe."""
+
+    project_path = str(PROJECT_ROOT)
+    added_project_path = project_path not in sys.path
+    if added_project_path:
+        sys.path.insert(0, project_path)
+    try:
+        from core.launcher.desktop_session_store import latest_active_desktop_session
+
+        session = latest_active_desktop_session(
+            provider="electron",
+            workspace_root=str(workspace_root.resolve()),
+        )
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+        return {}
+    finally:
+        if added_project_path:
+            with contextlib.suppress(ValueError):
+                sys.path.remove(project_path)
+    if not isinstance(session, dict):
+        return {}
+    session_id = str(session.get("desktopSessionId") or "").strip()
+    match = re.search(r"-(\d+)-[a-z0-9]+$", session_id, re.IGNORECASE)
+    if match is not None and not _pid_alive(int(match.group(1))):
+        return {}
+    return session
+
+
 def _discard_orphaned_launcher_control_window(state: dict[str, object], port: int) -> bool:
     if _launcher_control_healthy(port):
         return False
@@ -892,14 +922,35 @@ def _open_launcher(args: argparse.Namespace) -> None:
             _append_log("desktop_entry_python.open.skipped_lock_busy", level="warning", port=port)
             return
         state = _read_state()
-        _replace_stale_launcher_control(state, port, current_signature)
+        workspace_root = Path(str(args.workspace or PROJECT_ROOT)).resolve()
+        active_electron_session = (
+            _active_electron_desktop_session_for_workspace(workspace_root)
+            if _launcher_control_healthy(port)
+            else {}
+        )
+        attached_active_electron = bool(active_electron_session)
+        if attached_active_electron:
+            _assert_managed_launcher_attachment(state, args=args, port=port)
+            _append_log(
+                "desktop_entry_python.backend.attached_active_electron",
+                port=port,
+                backend_pid=int(state.get("launcherBackendPid") or 0),
+                desktop_session_id=str(active_electron_session.get("desktopSessionId") or ""),
+                source_signature_policy="preserved_until_controlled_restart",
+            )
+        else:
+            _replace_stale_launcher_control(state, port, current_signature)
         state = _read_state()
         backend_pid = int(state.get("launcherBackendPid") or 0)
         browser_pid = int(state.get("launcherBrowserWindowPid") or state.get("launcherBrowserLaunchPid") or 0)
         healthy = _launcher_control_healthy(port)
+        attached_active_electron = bool(attached_active_electron and healthy)
         if not healthy and _discard_orphaned_launcher_control_window(state, port):
             browser_pid = 0
-        current = healthy and _launcher_backend_source_current(state, backend_pid, current_signature)
+        current = healthy and (
+            attached_active_electron
+            or _launcher_backend_source_current(state, backend_pid, current_signature)
+        )
         if healthy:
             if current and backend_pid > 0:
                 _append_log("desktop_entry_python.backend.reused", port=port, backend_pid=backend_pid)
@@ -930,7 +981,11 @@ def _open_launcher(args: argparse.Namespace) -> None:
             port=port,
             backend_pid=backend_pid,
             browser_pid=browser_pid,
-            current_signature=current_signature,
+            current_signature=(
+                str(state.get("launcherControlSourceSignature") or current_signature)
+                if attached_active_electron
+                else current_signature
+            ),
             python_exe=str(args.python_exe or sys.executable),
         )
 

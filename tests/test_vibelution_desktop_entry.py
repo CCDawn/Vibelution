@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import os
 import sys
@@ -200,6 +201,75 @@ def test_ordinary_bootstrap_keeps_existing_launcher_refresh_path(monkeypatch):
     assert calls == [args]
     assert result["mode"] == "started"
     assert result["launcherBackendPid"] == 5678
+
+
+def test_ordinary_bootstrap_attaches_to_healthy_control_while_same_workspace_electron_is_active(monkeypatch):
+    state = {
+        "launcherAdapter": "python_headless",
+        "launcherBackendPid": 4321,
+        "launcherBackendLaunchPid": 4321,
+        "launcherControlPort": 8765,
+        "launcherControlSourceSignature": "older-source",
+        "runtimeProjectRoot": str(desktop_entry.PROJECT_ROOT),
+    }
+    saved: list[dict[str, object]] = []
+    events: list[tuple[str, dict[str, object]]] = []
+
+    monkeypatch.setattr(desktop_entry, "_single_launcher_open_lock", lambda: contextlib.nullcontext(True))
+    monkeypatch.setattr(desktop_entry, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(desktop_entry, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(desktop_entry, "_launcher_control_healthy", lambda _port: True)
+    monkeypatch.setattr(desktop_entry, "_pid_alive", lambda pid: pid == 4321)
+    monkeypatch.setattr(desktop_entry, "_source_signature", lambda: "newer-source")
+    monkeypatch.setattr(
+        desktop_entry,
+        "_active_electron_desktop_session_for_workspace",
+        lambda _workspace: {"desktopSessionId": "electron-launcher-session-8952-msqairvx"},
+    )
+    monkeypatch.setattr(
+        desktop_entry,
+        "_replace_stale_launcher_control",
+        lambda *_args, **_kwargs: pytest.fail("active Electron must keep the healthy control plane attached"),
+    )
+    monkeypatch.setattr(
+        desktop_entry,
+        "_save_launcher_state",
+        lambda previous, **kwargs: saved.append({**previous, **kwargs}),
+    )
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda event, **fields: events.append((event, fields)))
+
+    desktop_entry._open_launcher(
+        argparse.Namespace(
+            workspace=str(desktop_entry.PROJECT_ROOT),
+            config="",
+            no_browser=True,
+            python_exe="C:/Python/python.exe",
+        )
+    )
+
+    assert saved[-1]["current_signature"] == "older-source"
+    assert ("desktop_entry_python.backend.attached_active_electron", {
+        "port": 8765,
+        "backend_pid": 4321,
+        "desktop_session_id": "electron-launcher-session-8952-msqairvx",
+        "source_signature_policy": "preserved_until_controlled_restart",
+    }) in events
+
+
+def test_active_electron_session_helper_rejects_canonical_dead_process(monkeypatch):
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "latest_active_desktop_session",
+        lambda **_kwargs: {
+            "desktopSessionId": "electron-launcher-session-8952-msqairvx",
+            "revision": 33,
+        },
+    )
+    monkeypatch.setattr(desktop_entry, "_pid_alive", lambda _pid: False)
+
+    assert desktop_entry._active_electron_desktop_session_for_workspace(desktop_entry.PROJECT_ROOT) == {}
 
 
 def test_launcher_state_records_workspace_identity_for_future_attach(tmp_path, monkeypatch):

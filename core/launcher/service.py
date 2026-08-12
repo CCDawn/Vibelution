@@ -2225,6 +2225,14 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     )
     browser_managed = bool(observed_or_state("browserManaged", True))
     window_managed = bool(observed_or_state("windowManaged", False))
+    window_provider = str(observed_or_state("windowProvider", "") or "").strip()
+    external_window_owner = str(observed_or_state("externalWindowOwner", "") or "").strip()
+    desktop_session_id = str(observed_or_state("desktopSessionId", "") or "").strip()
+    electron_window_expected = bool(
+        window_provider == "electron"
+        or external_window_owner == "electron"
+        or desktop_session_id
+    )
     project_backend_present = bool(
         backend_observed
         or backend_alive
@@ -2246,6 +2254,8 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
                 desired_state = "open"
         elif desired_state == "open" and phase not in {"opening", "failed"}:
             desired_state = "closed"
+    if electron_window_expected and project_backend_present and not project_window_alive and not window_managed:
+        observed_state = "partial"
     manager_running = bool(runtime_state.get("daemonRunning"))
     runtime_command = runtime_state.get("command") if isinstance(runtime_state.get("command"), dict) else {}
     active_command_id = str(runtime_command.get("activeCommandId") or "").strip()
@@ -2265,7 +2275,7 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     lifecycle_consistency = str(
         observed_or_state("lifecycleConsistency", "consistent") or "consistent"
     ).strip() or "consistent"
-    if observation_confirms_open_workbench:
+    if observation_confirms_open_workbench and not electron_window_expected:
         lifecycle_consistency = "consistent"
     if desktop_window and bool(desktop_window.get("windowManaged")) and lifecycle_consistency == "browser_missing":
         # An active Electron workbench window is the managed frontend.  The
@@ -2274,6 +2284,7 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         lifecycle_consistency = "consistent"
     browser_missing = bool(
         lifecycle_consistency == "browser_missing"
+        or (electron_window_expected and project_backend_present and not project_window_alive and not window_managed)
         or (
             observed_state == "partial"
             and browser_managed
@@ -2281,6 +2292,8 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
             and project_backend_present
         )
     )
+    if electron_window_expected and project_backend_present and not project_window_alive and not window_managed:
+        lifecycle_consistency = "browser_missing"
     stale_open_state_reconciled = False
     if (
         has_observation
@@ -2357,11 +2370,10 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         "statusLine": status_line,
         "failureMessage": failure_message,
         "staleRuntimeStateReconciled": stale_open_state_reconciled,
-        "desktopSessionId": str(observed_or_state("desktopSessionId", "") or "").strip(),
+        "desktopSessionId": desktop_session_id,
         "desktopSessionRevision": int(observed_or_state("desktopSessionRevision", 0) or 0),
         "desktopSessionLeaseExpiresAt": str(observed_or_state("desktopSessionLeaseExpiresAt", "") or "").strip(),
     }
-    window_provider = str(observed_or_state("windowProvider", "") or "").strip()
     if window_provider:
         payload["windowProvider"] = window_provider
     if (has_observation and "windowManaged" in observed) or "windowManaged" in state_workbench:
@@ -2377,11 +2389,21 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
 
 
 def _desktop_session_workbench_projection() -> dict[str, Any]:
-    return desktop_session_store.latest_active_workbench_projection()
+    projection = desktop_session_store.latest_active_workbench_projection()
+    return projection if _desktop_session_projection_owner_is_live(projection) else {}
 
 
 def _desktop_session_window_provider_projection() -> dict[str, Any]:
-    return desktop_session_store.latest_active_window_provider_projection(workspace_root=str(PROJECT_ROOT))
+    projection = desktop_session_store.latest_active_window_provider_projection(workspace_root=str(PROJECT_ROOT))
+    return projection if _desktop_session_projection_owner_is_live(projection) else {}
+
+
+def _desktop_session_projection_owner_is_live(projection: dict[str, Any]) -> bool:
+    if not isinstance(projection, dict) or not projection:
+        return False
+    session_id = str(projection.get("desktopSessionId") or "").strip()
+    match = re.search(r"-(\d+)-[a-z0-9]+$", session_id, re.IGNORECASE)
+    return match is None or _is_process_alive(int(match.group(1)))
 
 
 def _runtime_manager_payload(runtime_state: dict[str, Any]) -> dict[str, Any]:

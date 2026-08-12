@@ -3539,29 +3539,41 @@ class RuntimeManagerDaemon:
             )
             focus_ok = True
             if not no_browser:
-                result = focus_workbench()
-                if result.returncode != 0:
+                try:
+                    result = focus_workbench()
+                except Exception as exc:  # noqa: BLE001 - bounded fallback converts a failed focus into full open
                     focus_ok = False
-                    # Do not fail the whole open lifecycle: state/pid can lag while the
-                    # observation still looks open. Fall through to a full open/repair.
                     _append_event(
                         "workbench.open.focus_failed_fallback_open",
                         {
                             "commandId": command_id,
-                            "returnCode": int(result.returncode),
-                            "detail": _launcher_error_detail(result, "Focusing the workbench failed."),
+                            "returnCode": -1,
+                            "detail": str(exc).strip()[-400:] or type(exc).__name__,
                         },
                     )
                 else:
-                    _append_event(
-                        "workbench.open.focus_requested",
-                        {
-                            "commandId": command_id,
-                            "returnCode": int(result.returncode),
-                            "stdout": str(getattr(result, "stdout", "") or "").strip()[-400:],
-                            "stderr": str(getattr(result, "stderr", "") or "").strip()[-400:],
-                        },
-                    )
+                    if result.returncode != 0:
+                        focus_ok = False
+                        # Do not fail the whole open lifecycle: state/pid can lag while the
+                        # observation still looks open. Fall through to a full open/repair.
+                        _append_event(
+                            "workbench.open.focus_failed_fallback_open",
+                            {
+                                "commandId": command_id,
+                                "returnCode": int(result.returncode),
+                                "detail": _launcher_error_detail(result, "Focusing the workbench failed."),
+                            },
+                        )
+                    else:
+                        _append_event(
+                            "workbench.open.focus_requested",
+                            {
+                                "commandId": command_id,
+                                "returnCode": int(result.returncode),
+                                "stdout": str(getattr(result, "stdout", "") or "").strip()[-400:],
+                                "stderr": str(getattr(result, "stderr", "") or "").strip()[-400:],
+                            },
+                        )
             else:
                 _append_event(
                     "workbench.open.focus_skipped",
