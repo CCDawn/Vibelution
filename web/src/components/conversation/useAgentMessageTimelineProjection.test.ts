@@ -84,4 +84,23 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.agentMessages).toHaveLength(1);
     expect(projection.agentMessages[0]?.parts).toEqual([]);
   });
+
+  it("keeps optimistic pending assistants with empty turnItems in the timeline", () => {
+    const projection = projectAgentMessageTimelineMessages({
+      activeTurnMessage: {
+        id: "active-optimistic",
+        role: "assistant",
+        turnId: "optimistic",
+        status: "pending",
+        turnItems: [],
+        timestamp: "2026-08-10T12:00:00Z",
+        metadata: { processStage: "user_submit" },
+      },
+      timelineMessages: [],
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0]?.status).toBe("pending");
+    expect(projection.messages[0]?.turnItems).toEqual([]);
+  });
 });

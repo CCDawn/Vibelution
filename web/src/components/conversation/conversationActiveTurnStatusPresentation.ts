@@ -13,6 +13,10 @@ export const ACTIVE_TURN_STAGE_BAR_PHASES: readonly ActiveTurnStageBarPhase[] = 
 
 export type ActiveTurnStatusMessageLike = {
   turnItems?: readonly SessionTurnItem[] | null;
+  status?: string | null;
+  metadata?: {
+    processStage?: unknown;
+  } | null;
 };
 
 function compactText(value: unknown) {
@@ -37,6 +41,15 @@ export function resolveActiveTurnProgressStage(message: ActiveTurnStatusMessageL
     if (item?.type === "tool_call" && item.status === "running") {
       return "tool_running";
     }
+  }
+  const fromMetadata = normalizeStage(message.metadata?.processStage);
+  if (fromMetadata) {
+    return fromMetadata;
+  }
+  // Optimistic pending shells often have empty turnItems + processStage on metadata;
+  // fall back to user_submit while pending, otherwise running.
+  if (String(message.status ?? "").trim().toLowerCase() === "pending") {
+    return "user_submit";
   }
   return "running";
 }

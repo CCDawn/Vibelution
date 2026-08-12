@@ -43,6 +43,41 @@ describe("projection dual-paint contracts", () => {  it("does not stack compact 
     })).toBe(true);
   });
 
+  it("optimistic pending + empty turnItems: compact placeholder on, suppress off", () => {
+    const optimistic = message({
+      status: "pending",
+      turnItems: [],
+      metadata: { processStage: "user_submit" },
+    });
+    const plan = resolveAssistantDisplayPlan({ message: optimistic });
+    expect(plan.suppressProjectedResponse).toBe(false);
+    expect(plan.suppressProjectedTurnStatus).toBe(false);
+    expect(plan.hasTurnItemPackage).toBe(false);
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: false,
+      inFlight: true,
+      showResponseBlock: false,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: false,
+      turnErrorMessage: false,
+      hasCodexSurface: Boolean(plan.shouldRenderCodexSurface),
+    })).toBe(true);
+  });
+
+  it("inFlight + hasActiveProcess does not force compact (no force-OR)", () => {
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: false,
+      inFlight: true,
+      showResponseBlock: false,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: true,
+      turnErrorMessage: false,
+      hasCodexSurface: false,
+    })).toBe(false);
+  });
+
   it("dedupes completed + running restream of the same thought text", () => {
     const deduped = dedupeThoughtLikeTranscriptCells([
       {

@@ -1,4 +1,3 @@
-import { activeTurnOptimisticStageSummary } from "../components/conversation/conversationActiveTurnStatusPresentation";
 import type { ConversationMessage, SessionDetail, SessionStreamEvent, SessionTurnItem } from "../api/types";
 import {
   activeTurnProtocolTextLength,
@@ -48,34 +47,6 @@ function activeTurnRenderKey(sessionId: string) {
   return `${sessionId}-active`;
 }
 
-function statusItem(input: {
-  sessionId: string;
-  turnId: string;
-  updatedAt: string;
-  stage: string;
-  status: ActiveTurnLayerState["status"];
-  summary: string;
-}): SessionTurnItem {
-  const itemId = `${input.sessionId}:${input.turnId}:status:${input.stage || "running"}`;
-  return {
-    id: `${itemId}:0`,
-    itemId,
-    version: 3,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    type: "status",
-    code: input.stage || "running",
-    text: input.summary,
-    summary: input.summary,
-    status: input.status,
-    revision: 0,
-    sequence: 0,
-    createdAt: input.updatedAt,
-    updatedAt: input.updatedAt,
-    terminal: input.status === "completed" || input.status === "failed",
-  };
-}
-
 export function createOptimisticActiveTurnLayer(
   input: OptimisticActiveTurnLayerInput,
 ): ActiveTurnLayerState | undefined {
@@ -83,8 +54,8 @@ export function createOptimisticActiveTurnLayer(
   if (!sessionId) return undefined;
   const turnId = compactText(input.turnId) || "optimistic";
   const updatedAt = compactText(input.updatedAt) || new Date().toISOString();
-  const processStage = "user_submit";
-  const summary = compactText(input.summary) || activeTurnOptimisticStageSummary(processStage, "zh");
+  // Optimistic layer keeps processStage + pending status; do not seed status-only
+  // turnItems as a fake package (turnItems remain the answer SSOT).
   return {
     id: activeTurnMessageId(sessionId, turnId),
     renderKey: activeTurnRenderKey(sessionId),
@@ -93,8 +64,8 @@ export function createOptimisticActiveTurnLayer(
     turnId,
     updatedAt,
     status: "pending",
-    processStage,
-    turnItems: [statusItem({ sessionId, turnId, updatedAt, stage: processStage, status: "pending", summary })],
+    processStage: "user_submit",
+    turnItems: [],
     ledgerSeq: 0,
   };
 }
@@ -144,17 +115,8 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const stage = compactText(payload.stage) || base?.processStage || "running";
   const status: ActiveTurnLayerState["status"] = payload.done ? "completed" : "running";
   const turnItems = consolidateSessionTurnItemsV2(base?.turnItems, payload.turnItems);
-  const withStatus = turnItems.length > 0
-    ? turnItems
-    : [statusItem({
-        sessionId,
-        turnId,
-        updatedAt,
-        stage,
-        status,
-        summary: activeTurnOptimisticStageSummary(stage, "zh"),
-      })];
-  if (payload.done && !hasVisibleActiveTurnProtocolContent({ turnItems: withStatus })) return undefined;
+  // Empty after merge: keep processStage on the layer; do not inject a status-only TurnItem.
+  if (payload.done && !hasVisibleActiveTurnProtocolContent({ turnItems })) return undefined;
   return {
     id: activeTurnMessageId(sessionId, turnId),
     renderKey: previous?.renderKey || activeTurnRenderKey(sessionId),
@@ -164,7 +126,7 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
     updatedAt,
     status,
     processStage: stage,
-    turnItems: withStatus,
+    turnItems,
     ledgerSeq: Math.max(base?.ledgerSeq ?? 0, incomingLedgerSeq),
   };
 }

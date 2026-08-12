@@ -54,6 +54,24 @@ describe("conversationOperationPresentation", () => {
     })).toBe(true);
     expect(shouldRenderCompactActiveTurnPlaceholder({
       role: "assistant",
+      streaming: false,
+      inFlight: true,
+      showResponseBlock: false,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: false,
+      turnErrorMessage: false,
+    })).toBe(true);
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: false,
+      inFlight: false,
+      showResponseBlock: false,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: false,
+      turnErrorMessage: false,
+    })).toBe(false);
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
       streaming: true,
       showResponseBlock: true,
       hasFeedbackTimeline: true,
@@ -86,6 +104,32 @@ describe("conversationOperationPresentation", () => {
       hasFeedbackTimeline: false,
       hasActiveProcess: false,
       turnErrorMessage: false,
+    })).toBe(false);
+  });
+
+  it("shows compact placeholder for optimistic pending + empty turnItems (inFlight)", () => {
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: false,
+      inFlight: true,
+      showResponseBlock: false,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: false,
+      turnErrorMessage: false,
+      hasCodexSurface: false,
+    })).toBe(true);
+  });
+
+  it("keeps compact false for inFlight + hasActiveProcess (no force-OR stacking)", () => {
+    expect(shouldRenderCompactActiveTurnPlaceholder({
+      role: "assistant",
+      streaming: false,
+      inFlight: true,
+      showResponseBlock: false,
+      hasFeedbackTimeline: false,
+      hasActiveProcess: true,
+      turnErrorMessage: false,
+      hasCodexSurface: false,
     })).toBe(false);
   });
 

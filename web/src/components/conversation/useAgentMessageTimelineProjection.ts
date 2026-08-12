@@ -2,6 +2,7 @@ import type { ConversationMessage, SessionTurnItem } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread/types";
 import {
+  assistantTurnIsInFlight,
   assistantTurnIsStreaming,
   projectConversationMessageFromTurnItemsV2,
 } from "../../routes/chatTurnProtocol";
@@ -25,7 +26,8 @@ function hasVisibleTurnData(message: ConversationMessage) {
   if (message.role === "user") {
     return Boolean(String(message.content ?? "").trim() || message.attachments?.length || message.references?.length);
   }
-  return message.turnItems.length > 0 || assistantTurnIsStreaming(message);
+  // Keep in-flight rows with empty turnItems (optimistic pending|running waiting shell).
+  return message.turnItems.length > 0 || assistantTurnIsInFlight(message);
 }
 
 /**

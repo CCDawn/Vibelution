@@ -76,6 +76,7 @@ import {
 } from "./assistantDisplayPlan";
 import {
   assistantFinalAnswerText,
+  assistantTurnIsInFlight,
   assistantTurnIsStreaming,
 } from "../../routes/chatTurnProtocol";
 import {
@@ -1987,6 +1988,7 @@ export function ConversationView({
     return resolveShouldRenderCompactActiveTurnPlaceholder({
       role: message.role,
       streaming: assistantTurnIsStreaming(message),
+      inFlight: assistantTurnIsInFlight(message),
       showResponseBlock: options.showResponseBlock,
       hasFeedbackTimeline: options.hasFeedbackTimeline,
       hasActiveProcess: options.hasActiveProcess,
@@ -3954,20 +3956,24 @@ export function ConversationView({
                       agentRenderState.processSectionIds,
                     )
                     : null;
-            const turnStatusNode = !displayPlan.suppressProjectedTurnStatus && noFinalAnswerStatusText ? (
-              <div className={styles.turnStatusNote} role="status" aria-live="polite">
-                <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
-                <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
-              </div>
-            ) : null;
-            const compactActiveTurnPlaceholderNode = shouldRenderCompactActiveTurnPlaceholder(message, {
+            const showCompactActiveTurnPlaceholder = shouldRenderCompactActiveTurnPlaceholder(message, {
               showResponseBlock,
               hasFeedbackTimeline,
               hasActiveProcess,
               turnErrorMessage,
               // Avoid "状态" placeholder stacking above an already-visible codex process trail.
               hasCodexSurface: Boolean(displayPlan.shouldRenderCodexSurface),
-            }) ? (
+            });
+            // Prefer compact active-turn note over projected turnStatus for in-flight shells.
+            const turnStatusNode = !showCompactActiveTurnPlaceholder
+              && !displayPlan.suppressProjectedTurnStatus
+              && noFinalAnswerStatusText ? (
+              <div className={styles.turnStatusNote} role="status" aria-live="polite">
+                <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
+                <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
+              </div>
+            ) : null;
+            const compactActiveTurnPlaceholderNode = showCompactActiveTurnPlaceholder ? (
               <ConversationActiveTurnStatusNote
                 message={message}
                 lang={lang}
