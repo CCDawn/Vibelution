@@ -199,7 +199,7 @@ def test_composition_root_command_flow_works(
             requested_by=ActorRef("user", "u-1"),
             requested_at_ms=1_750_000_000_000,
         )
-        with server_operator_scope("u-1"):
+        with server_operator_scope("u-1", roles=("operator",)):
             receipt = runtime.command_service.submit(request)
         assert receipt.status == "accepted"
         run = runtime.store.get_run("run-test")

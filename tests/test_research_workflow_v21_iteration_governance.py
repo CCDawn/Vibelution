@@ -7,15 +7,28 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+from core.web.services.team_workflow.research_runtime import workflow_artifact_store
 from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle import (
     advance_checkpoint,
+)
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    server_operator_scope,
 )
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowRuntimeService,
 )
 from core.web.services.team_workflow.research_runtime.store import WorkflowRunStore
+
+
+@pytest.fixture(autouse=True)
+def _bind_server_operator(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    with server_operator_scope("test-operator", roles=("operator",)):
+        yield
 
 
 def _input() -> dict[str, Any]:

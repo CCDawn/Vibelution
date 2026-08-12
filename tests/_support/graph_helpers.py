@@ -10,6 +10,9 @@ from core.research.workflow.challenge_cup_runtime import (
     GraphDispatch,
 )
 from core.research.workflow.contracts import ExecutionReceipt
+from core.web.services.team_workflow.research_runtime.checkpoint_fork_worker import (
+    CheckpointForkWorker,
+)
 from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
     GraphDispatchWorker,
 )
@@ -46,6 +49,12 @@ class GraphHarness:
             store=self.commands.store,
             coordinator=self.coordinator,
             owner_id="graph-worker-test",
+            now_provider=lambda: FIXED_NOW_MS + 1000,
+        )
+        self.fork_worker = CheckpointForkWorker(
+            store=self.commands.store,
+            coordinator=self.coordinator,
+            owner_id="checkpoint-fork-worker-test",
             now_provider=lambda: FIXED_NOW_MS + 1000,
         )
 

@@ -18,6 +18,7 @@ from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.models import ActorKind
 
 from . import readiness_providers
+from .human_gate_artifacts import canonical_sha256
 from .readiness.common import (
     BudgetLimitsSnapshot,
     HandoffSnapshot,
@@ -59,6 +60,16 @@ class RealDomainReadinessContext:
             return fn(*args) if callable(fn) else fn
         return None
 
+    def _artifact(self, kind: str, team_id: str, run_id: str) -> dict[str, Any] | None:
+        snapshot = self._input_snapshot(run_id)
+        authority_run_id = str(snapshot.get("sourceCollectionRunId") or run_id).strip()
+        return _artifact_payload(
+            kind,
+            team_id,
+            run_id,
+            authority_run_id=authority_run_id,
+        )
+
     # ---------------------------------------------------- protocol methods
 
     def domain_revision_vector(self, team_id: str, run_id: str) -> Mapping[str, str]:
@@ -72,12 +83,21 @@ class RealDomainReadinessContext:
             ledger_store=self._store,
         )
 
-    def question_snapshot(self, team_id: str, question_id: str) -> Mapping[str, Any] | None:
+    def question_snapshot(
+        self,
+        team_id: str,
+        question_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> Mapping[str, Any] | None:
         snapshot = self._query("question_snapshot", team_id, question_id)
         if snapshot is not None:
             return snapshot
-        for run_id in _run_ids_for(self._store, team_id):
-            run_snapshot = self._input_snapshot(run_id)
+        preferred = str(run_id or "").strip()
+        for candidate_run_id in _run_ids_for(
+            self._store, team_id, preferred_run_id=preferred or None
+        ):
+            run_snapshot = self._input_snapshot(candidate_run_id)
             objective = run_snapshot.get("researchObjectiveContract") or {}
             if str(objective.get("question") or "") and str(
                 run_snapshot.get("questionId") or ""
@@ -86,6 +106,7 @@ class RealDomainReadinessContext:
                     "questionId": question_id,
                     "question": str(objective.get("question") or ""),
                     "fromInputSnapshot": True,
+                    "runId": candidate_run_id,
                 }
         return None
 
@@ -120,69 +141,116 @@ class RealDomainReadinessContext:
         )
 
     def knowledge_package_draft(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("knowledge_package_draft", team_id, run_id) or _artifact_envelope(
+        return self._query("knowledge_package_draft", team_id, run_id) or self._artifact(
             "knowledge_package_draft", team_id, run_id
         )
 
     def knowledge_package(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("knowledge_package", team_id, run_id) or _artifact_envelope(
+        return self._query("knowledge_package", team_id, run_id) or self._artifact(
             "knowledge_package", team_id, run_id
         )
 
     def hypothesis_set(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("hypothesis_set", team_id, run_id) or _artifact_envelope(
+        return self._query("hypothesis_set", team_id, run_id) or self._artifact(
             "hypothesis_set", team_id, run_id
         )
 
     def protocol_draft(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("protocol_draft", team_id, run_id) or _artifact_envelope(
+        return self._query("protocol_draft", team_id, run_id) or self._artifact(
             "protocol_draft", team_id, run_id
         )
 
     def protocol_review(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("protocol_review", team_id, run_id) or _artifact_envelope(
+        return self._query("protocol_review", team_id, run_id) or self._artifact(
             "protocol_review_report", team_id, run_id
         )
 
     def frozen_protocol(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("frozen_protocol", team_id, run_id) or _artifact_envelope(
+        return self._query("frozen_protocol", team_id, run_id) or self._artifact(
             "frozen_protocol", team_id, run_id
         )
 
     def smoke_evidence(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("smoke_evidence", team_id, run_id) or _artifact_envelope(
-            "smoke_evidence", team_id, run_id
+        override = self._query("smoke_evidence", team_id, run_id)
+        if override is not None:
+            return override
+        evidence = self._artifact("smoke_evidence", team_id, run_id)
+        if evidence is None:
+            return None
+        release = self._artifact("smoke_release", team_id, run_id)
+        evidence_smoke_id = str(evidence.get("smokeRunId") or "").strip()
+        release_smoke_id = str((release or {}).get("smokeRunId") or "").strip()
+        evidence_plan_id = str(evidence.get("planId") or "").strip()
+        release_plan_id = str((release or {}).get("planId") or "").strip()
+        released = bool(
+            release
+            and str(evidence.get("status") or "").lower() == "passed"
+            and str(release.get("decision") or "").lower() == "accept"
+            and str(release.get("resolvedBy") or "").strip()
+            and evidence_smoke_id
+            and evidence_smoke_id == release_smoke_id
+            and evidence_plan_id
+            and evidence_plan_id == release_plan_id
         )
+        return {**evidence, "released": released, "release": release}
 
     def controlled_run(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("controlled_run", team_id, run_id) or _artifact_envelope(
-            "run_artifacts", team_id, run_id
-        )
+        override = self._query("controlled_run", team_id, run_id)
+        if override is not None:
+            return override
+        artifact = self._artifact("run_artifacts", team_id, run_id)
+        if artifact is None:
+            return None
+        execution = artifact.get("execution") if isinstance(artifact.get("execution"), dict) else {}
+        result = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+        return {
+            **artifact,
+            "terminal": str(execution.get("status") or "").lower()
+            in {"completed", "succeeded", "failed", "cancelled"},
+            "logs": result.get("logs") or execution.get("logs"),
+            "metrics": result.get("metrics") or execution.get("metrics"),
+            "artifact_hash": result.get("artifactHash")
+            or execution.get("artifactHash")
+            or artifact.get("_contentHash"),
+        }
 
     def evaluation_report(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("evaluation_report", team_id, run_id) or _artifact_envelope(
+        return self._query("evaluation_report", team_id, run_id) or self._artifact(
             "evaluation_report", team_id, run_id
         )
 
     def iteration_decision(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("iteration_decision", team_id, run_id) or _artifact_envelope(
+        return self._query("iteration_decision", team_id, run_id) or self._artifact(
             "iteration_decision", team_id, run_id
         )
 
     def version_governance(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("version_governance", team_id, run_id) or _artifact_envelope(
+        return self._query("version_governance", team_id, run_id) or self._artifact(
             "version_governance_record", team_id, run_id
         )
 
     def promotion_proposal(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("promotion_proposal", team_id, run_id) or _artifact_envelope(
+        return self._query("promotion_proposal", team_id, run_id) or self._artifact(
             "promotion_proposal", team_id, run_id
         )
 
     def result_package(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("result_package", team_id, run_id) or _artifact_envelope(
-            "research_result_package", team_id, run_id
-        )
+        override = self._query("result_package", team_id, run_id)
+        if override is not None:
+            return override
+        artifact = self._artifact("research_result_package", team_id, run_id)
+        if artifact is None:
+            return None
+        package = artifact.get("package") if isinstance(artifact.get("package"), dict) else artifact
+        traceability = package.get("traceability") if isinstance(package.get("traceability"), dict) else {}
+        return {
+            **package,
+            "required_artifacts": bool(
+                traceability.get("artifactRefs") or package.get("deliverables")
+            ),
+            "pending_human_tasks": int(package.get("pendingHumanTasks") or 0),
+            "terminal_reason": str(package.get("terminalReason") or "").strip(),
+        }
 
     def budget_limits(self, team_id: str, run_id: str) -> BudgetLimitsSnapshot:
         _ = team_id
@@ -266,39 +334,36 @@ class RealDomainReadinessContext:
         ]
 
 
-def _artifact_envelope(
-    kind: str, team_id: str, run_id: str
-) -> Mapping[str, Any] | None:
-    try:
-        from .artifact_readback_registry import (
-            default_artifact_root,
-            resolve_artifact_authority,
-        )
+def _artifact_payload(
+    kind: str,
+    team_id: str,
+    run_id: str,
+    *,
+    authority_run_id: str,
+) -> dict[str, Any] | None:
+    """Load readiness facts from the formal scoped artifact authority only.
 
-        spec = resolve_artifact_authority(kind)
-        if spec is None:
-            return None
-        root = default_artifact_root() / spec.authority / team_id
-        if not root.is_dir():
-            return None
-        matches = sorted(root.rglob(f"{kind}/*.json"))
-        if not matches:
-            return None
-        envelope = json.loads(matches[-1].read_text(encoding="utf-8"))
-        if not isinstance(envelope, dict):
-            return None
-        payload = envelope.get("payload")
-        if isinstance(payload, dict):
-            return {
-                **payload,
-                "contentHash": envelope.get("contentHash"),
-                "domainRevision": envelope.get("domainRevision"),
-                "schemaVersion": envelope.get("schemaVersion"),
-                "runId": run_id,
-            }
-        return envelope
-    except Exception:
+    Never reads ``data/domain_artifacts`` (parallel store forbidden) and never
+    picks "latest file" across runs.
+    """
+    from .artifact_readback_registry import load_scoped_artifact_payload
+
+    envelope = load_scoped_artifact_payload(
+        kind,
+        team_id=team_id,
+        authority_run_id=authority_run_id,
+        workflow_run_id=run_id,
+    )
+    if envelope is None:
         return None
+    raw_payload = envelope.get("payload")
+    payload = dict(raw_payload) if isinstance(raw_payload, dict) else dict(envelope)
+    return {
+        **payload,
+        "runId": run_id,
+        "teamId": team_id,
+        "_contentHash": canonical_sha256(envelope),
+    }
 
 
 def _budget_consumed_from_ledger(store: WorkflowLedgerStore, run_id: str) -> dict[str, int]:
@@ -338,15 +403,30 @@ def _budget_consumed_from_ledger(store: WorkflowLedgerStore, run_id: str) -> dic
     }
 
 
-def _run_ids_for(store: WorkflowLedgerStore, team_id: str) -> list[str]:
+def _run_ids_for(
+    store: WorkflowLedgerStore,
+    team_id: str,
+    *,
+    preferred_run_id: str | None = None,
+) -> list[str]:
+    """Return team run ids, preferring the caller's current run when provided."""
+    preferred = str(preferred_run_id or "").strip()
     rows = store.submit(
         lambda uow: uow.repository.execute(
-            "SELECT run_id FROM workflow_runs WHERE team_id = ? ORDER BY created_at_ms DESC LIMIT 50",
+            "SELECT run_id FROM workflow_runs WHERE team_id = ? "
+            "ORDER BY created_at_ms DESC LIMIT 50",
             (team_id,),
         ).fetchall(),
         force_flush=True,
     ).result(timeout=10)
-    return [str(row[0]) for row in rows]
+    run_ids = [str(row[0]) for row in rows]
+    if not preferred:
+        return run_ids
+    ordered = [preferred]
+    for rid in run_ids:
+        if rid != preferred:
+            ordered.append(rid)
+    return ordered
 
 
 def _first_positive_limit(stage_budgets: Mapping[str, Any], key: str) -> int | None:

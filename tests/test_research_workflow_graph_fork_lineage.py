@@ -78,25 +78,32 @@ def test_fork_child_runs_independently(tmp_path: Path) -> None:
         harness.close()
 
 
-def test_fork_rejects_existing_child_thread(tmp_path: Path) -> None:
+def test_fork_existing_child_thread_same_resume_is_idempotent(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
         harness.seed(run_id="run-parent")
         harness.enqueue_graph_dispatch("run-parent", "source_finding", 1)
         harness.worker.run_once()
         parent_snapshot = harness.coordinator.snapshot("run-parent")
-        harness.coordinator.fork_from_checkpoint(
+        first = harness.coordinator.fork_from_checkpoint(
             source_thread_id="run-parent",
             source_checkpoint_id=parent_snapshot["checkpointId"],
             child_thread_id="run-child",
             resume_node_id="source_finding",
         )
-        with pytest.raises(RuntimeError):
+        second = harness.coordinator.fork_from_checkpoint(
+            source_thread_id="run-parent",
+            source_checkpoint_id=parent_snapshot["checkpointId"],
+            child_thread_id="run-child",
+            resume_node_id="source_finding",
+        )
+        assert second == first
+        with pytest.raises(RuntimeError, match="different state"):
             harness.coordinator.fork_from_checkpoint(
                 source_thread_id="run-parent",
                 source_checkpoint_id=parent_snapshot["checkpointId"],
                 child_thread_id="run-child",
-                resume_node_id="source_finding",
+                resume_node_id="source_extraction",
             )
     finally:
         harness.close()

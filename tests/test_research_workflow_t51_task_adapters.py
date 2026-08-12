@@ -217,3 +217,314 @@ def test_adapter_worker_contains_phase_exceptions(tmp_path: Path, boom_phase: st
         assert outbox_rows[0] != "leased"
     finally:
         harness.close()
+
+
+def _seed_run_with_snapshot(harness: CommandHarness, *, run_id: str, snapshot: dict) -> None:
+    import json
+
+    from tests._support.workflow_ledger_helpers import build_event_record, build_run_record
+
+    record = build_run_record(run_id=run_id, last_event_sequence=1)
+    snapshot_json = json.dumps(snapshot, ensure_ascii=False)
+
+    def mutate(uow):
+        uow.repository.insert_run(record)
+        uow.repository.execute(
+            "UPDATE workflow_runs SET input_snapshot_json = ? WHERE run_id = ?",
+            (snapshot_json, run_id),
+        )
+        uow.repository.insert_event(
+            build_event_record(
+                sequence=1,
+                run_id=run_id,
+                event_type="run_created",
+                event_id=f"evt-created-{run_id}",
+            )
+        )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
+def _controlled_run_campaign(*, run_id: str) -> dict:
+    return {
+        "campaignId": "campaign-ledger-1",
+        "runId": run_id,
+        "hypothesisCandidateId": "hypothesis-1",
+        "protocolHash": "3" * 64,
+        "environmentSnapshotHash": "6" * 64,
+        "datasetSnapshotRefs": ["fixture://dataset/ledger"],
+        "baselineRefs": ["baseline:control"],
+        "metricContractRef": "metric:score",
+        "stage": "ablation_replication",
+        "seedSet": [11, 29, 47],
+        "replicationCount": 3,
+        "budgetLedgerRef": "budget-ledger-1",
+        "stopCriteria": {"maxNoImprovementRounds": 2},
+        "experimentRunRefs": [],
+        "resultArtifactRefs": [],
+        "decision": "completed",
+    }
+
+
+def test_ledger_ports_controlled_run_execute_system_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ledger RealDomainPorts must call formal full-run (not only UI node_command)."""
+    from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import (
+        SystemActionAdapter,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger-controlled.sqlite3")
+    try:
+        run_id = "run-controlled"
+        calls: list[tuple[str, str]] = []
+
+        def fake_full_run(team_id: str, plan_id: str, _payload: dict) -> dict:
+            calls.append((team_id, plan_id))
+            return {
+                "execution": {
+                    "executionId": "execution-ledger-1",
+                    "status": "completed",
+                    "adapterId": "formal_runner_v1",
+                }
+            }
+
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.experiment_api.full_run.execute_experiment_full_run",
+            fake_full_run,
+        )
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-sys",
+                "sourceCollectionRunId": "sc-ledger-1",
+                "controlledRun": {
+                    "planId": "plan-ledger-v1",
+                    "campaign": _controlled_run_campaign(run_id=run_id),
+                },
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-controlled",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-controlled_run-a1",
+            node_id="controlled_run",
+            attempt=1,
+            actor_kind=ActorKind.SYSTEM,
+            action_kind="system_action:controlled_run",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        refs, meta = ports.execute_system_action(action=action)
+        assert calls == [("team-ledger-sys", "plan-ledger-v1")]
+        assert meta.get("runnerId")
+        assert meta.get("executionId") == "execution-ledger-1"
+        assert refs and refs[0]["kind"] == "run_artifacts"
+
+        from core.web.services.team_workflow.research_runtime.action_registry import (
+            AdapterResult,
+        )
+
+        adapter = SystemActionAdapter(ports, node_id="controlled_run")
+        # Prove verify against Ledger ports (reserve needs attempt FK; skip execute()).
+        result = AdapterResult(
+            action_id=action.action_id,
+            outcome="succeeded",
+            materialized_refs=tuple(refs),
+            anchor={
+                "systemActionId": str(meta.get("systemActionId") or action.action_id),
+                "actionId": action.action_id,
+            },
+            usage={"compute": str(meta.get("runnerId") or "")},
+            reserved={"reservationId": "res-test", "stageId": "execution_iteration"},
+        )
+        verified = adapter.verify(action, result)
+        assert verified.outcome == "succeeded"
+        assert verified.artifact_receipts
+    finally:
+        harness.close()
+
+
+def test_ledger_ports_result_package_execute_system_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger-package.sqlite3")
+    try:
+        run_id = "run-package"
+        calls: list[str] = []
+
+        def fake_build_package(record: dict, *, research_ledger: dict) -> dict:
+            calls.append(str(record.get("runId") or ""))
+            assert research_ledger.get("officialVersion")
+            return {
+                "packageId": "pkg-ledger-1",
+                "factChainHash": "f" * 64,
+                "officialVersion": {"versionId": "v-1"},
+            }
+
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_runtime.result_package.build_result_package",
+            fake_build_package,
+        )
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-pkg",
+                "resultPackage": {
+                    "workflowRecord": {"runId": run_id, "status": "succeeded"},
+                    "researchLedger": {"officialVersion": {"versionId": "v-1"}},
+                },
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-package",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-result_package-a1",
+            node_id="result_package",
+            attempt=1,
+            actor_kind=ActorKind.SYSTEM,
+            action_kind="system_action:result_package",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        refs, meta = ports.execute_system_action(action=action)
+        assert calls == [run_id]
+        assert meta["runnerId"] == "package_builder"
+        assert meta["packageId"] == "pkg-ledger-1"
+        assert refs and refs[0]["kind"] == "research_result_package"
+
+        from core.web.services.team_workflow.research_runtime.action_registry import (
+            AdapterResult,
+        )
+        from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import (
+            SystemActionAdapter,
+        )
+
+        adapter = SystemActionAdapter(ports, node_id="result_package")
+        result = AdapterResult(
+            action_id=action.action_id,
+            outcome="succeeded",
+            materialized_refs=tuple(refs),
+            anchor={
+                "systemActionId": str(meta.get("systemActionId") or action.action_id),
+                "actionId": action.action_id,
+            },
+            usage={"compute": str(meta.get("runnerId") or "")},
+            reserved={"reservationId": "res-test", "stageId": "execution_iteration"},
+        )
+        verified = adapter.verify(action, result)
+        assert verified.outcome == "succeeded"
+    finally:
+        harness.close()
+
+
+def test_ledger_ports_unknown_system_node_still_refuses(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger-unknown-sys.sqlite3")
+    try:
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-unknown-sys",
+            run_id="run-test",
+            node_run_id="nr-run-test-unknown_sys-a1",
+            node_id="not_a_system_node",
+            attempt=1,
+            actor_kind=ActorKind.SYSTEM,
+            action_kind="system_action:not_a_system_node",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        with pytest.raises(RuntimeError, match="no system executor wired"):
+            ports.execute_system_action(action=action)
+    finally:
+        harness.close()
+
+
+def test_ledger_ports_run_smoke_persists_smoke_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """System run_smoke writes smoke_evidence; smoke_gate stays a Human adapter."""
+    harness = CommandHarness(tmp_path / "ledger-smoke.sqlite3")
+    try:
+        run_id = "run-smoke"
+        calls: list[tuple[str, str]] = []
+
+        def fake_smoke(team_id: str, plan_id: str, _payload: dict) -> dict:
+            calls.append((team_id, plan_id))
+            return {
+                "status": "passed",
+                "smokeRun": {"smokeRunId": "smoke-ledger-1", "status": "passed"},
+            }
+
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.experiment_api.smoke.run_experiment_smoke_run",
+            fake_smoke,
+        )
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-smoke",
+                "smokeGate": {"planId": "plan-smoke-v1"},
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+
+        # Production registry must not register a System adapter for smoke_gate.
+        from core.web.services.team_workflow.research_runtime.adapters.domain_adapters import (
+            HumanActionAdapter,
+            SystemActionAdapter,
+            register_default_adapters,
+        )
+        from core.web.services.team_workflow.research_runtime.action_registry import (
+            ActionRegistry,
+        )
+
+        registry = register_default_adapters(ActionRegistry(), ports)
+        human = registry.get("human_task:smoke_gate")
+        assert isinstance(human, HumanActionAdapter)
+        assert registry.get("system_action:smoke_gate") is None
+
+        with pytest.raises(RuntimeError, match="Human gate"):
+            ports.execute_system_action(
+                action=PendingAction(
+                    action_id="act-smoke-forbidden",
+                    run_id=run_id,
+                    node_run_id=f"nr-{run_id}-smoke_gate-a1",
+                    node_id="smoke_gate",
+                    attempt=1,
+                    actor_kind=ActorKind.SYSTEM,
+                    action_kind="system_action:smoke_gate",
+                    input_snapshot_hash="a" * 64,
+                    input_artifact_refs=(),
+                    binding_snapshot_id=None,
+                    budget_policy_hash="p-1",
+                )
+            )
+
+        refs, meta = ports.execute_run_smoke(
+            run_id=run_id,
+            plan_id="plan-smoke-v1",
+            action_id="act-smoke",
+        )
+        assert calls == [("team-ledger-smoke", "plan-smoke-v1")]
+        assert meta["runnerId"] == "smoke_runner"
+        assert meta["smokeRunId"] == "smoke-ledger-1"
+        assert meta["command"] == "run_smoke"
+        assert refs and {item["kind"] for item in refs} == {"smoke_evidence"}
+        assert "smoke_release" not in {item["kind"] for item in refs}
+        _ = SystemActionAdapter  # ownership boundary documented above
+    finally:
+        harness.close()

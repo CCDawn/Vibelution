@@ -261,7 +261,11 @@ def test_real_ports_system_action_does_not_return_empty_success(tmp_path: Path) 
             binding_snapshot_id=None,
             budget_policy_hash="p-1",
         )
-        with pytest.raises(RuntimeError, match="system node|no system executor|runner"):
+        # Missing teamId/planId/campaign must fail — never empty success stubs.
+        with pytest.raises(
+            RuntimeError,
+            match="teamId|planId|ExperimentCampaign|no system executor|system node",
+        ):
             ports.execute_system_action(action=action)
     finally:
         harness.close()

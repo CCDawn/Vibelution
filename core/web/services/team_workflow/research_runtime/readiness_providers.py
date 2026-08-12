@@ -68,7 +68,6 @@ def fetch_evidence_cards_stats(
 ) -> Mapping[str, Any] | None:
     """Evidence Store authority: claim evidence cards for relations readiness."""
     snapshot = dict(input_snapshot or {})
-    sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
     try:
         from core.infrastructure.path_containment import PROJECT_ROOT
         from core.research.evidence import ClaimEvidenceStore
@@ -77,32 +76,17 @@ def fetch_evidence_cards_stats(
         records = store.list(team_id)
         if not records:
             return None
-        scoped: list[dict[str, Any]] = []
+        scoped = _scope_evidence_records(records, snapshot, run_id)
+        if not scoped:
+            return None
         missing: list[str] = []
-        for item in records:
-            if not isinstance(item, dict):
-                continue
-            item_run = str(item.get("sourceCollectionRunId") or "").strip()
-            item_workflow = str(item.get("workflowRunId") or "").strip()
-            if sc_run_id and item_run and item_run != sc_run_id:
-                continue
-            if item_workflow and item_workflow != run_id:
-                continue
-            # Require explicit scope for this workflow or SC run.
-            if sc_run_id:
-                if item_run != sc_run_id and item_workflow != run_id:
-                    continue
-            elif item_workflow != run_id:
-                continue
-            scoped.append(item)
+        for item in scoped:
             evidence_id = str(item.get("claimEvidenceId") or item.get("claimId") or "")
             if not str(item.get("quote") or "").strip() or not str(
                 item.get("sourceId") or ""
             ).strip():
                 if evidence_id:
                     missing.append(evidence_id)
-        if not scoped:
-            return None
         return {
             "card_count": len(scoped),
             "missing_minimal_fields": missing,
@@ -193,19 +177,34 @@ def build_domain_revision_vector(
             list_candidate_store,
         )
 
-        payload = list_candidate_store(team_id, limit=20)
-        candidates = list(payload.get("candidates") or [])
+        # Match fetch_candidate_stats: load broadly, then scope to SC/workflow run.
+        payload = list_candidate_store(team_id, limit=500)
+        candidates = [
+            item
+            for item in list(payload.get("candidates") or [])
+            if isinstance(item, dict)
+        ]
+        scoped_candidates = _scope_candidates(candidates, snapshot, run_id)
         vector["source_collection"] = _stable_hash(
             {
                 "teamId": team_id,
                 "sourceCollectionRunId": sc_run_id,
-                "candidateCount": len(candidates),
+                "workflowRunId": run_id,
+                "candidateCount": len(scoped_candidates),
+                "candidateIds": [
+                    str(item.get("candidateId") or item.get("id") or "")
+                    for item in scoped_candidates[:20]
+                ],
                 "workflowId": payload.get("workflowId"),
             }
         )[:32]
     except Exception:
         vector["source_collection"] = _stable_hash(
-            {"teamId": team_id, "sourceCollectionRunId": sc_run_id or "none"}
+            {
+                "teamId": team_id,
+                "sourceCollectionRunId": sc_run_id or "none",
+                "workflowRunId": run_id,
+            }
         )[:32]
 
     try:
@@ -213,20 +212,27 @@ def build_domain_revision_vector(
         from core.research.evidence import ClaimEvidenceStore
 
         evidence = ClaimEvidenceStore(PROJECT_ROOT).list(team_id)
+        scoped_evidence = _scope_evidence_records(evidence, snapshot, run_id)
         vector["evidence"] = _stable_hash(
             {
                 "teamId": team_id,
-                "count": len(evidence),
+                "sourceCollectionRunId": sc_run_id,
+                "workflowRunId": run_id,
+                "count": len(scoped_evidence),
                 "ids": [
-                    str(item.get("claimEvidenceId") or "")
-                    for item in evidence[:20]
+                    str(item.get("claimEvidenceId") or item.get("claimId") or "")
+                    for item in scoped_evidence[:20]
                 ],
             }
         )[:32]
     except Exception:
-        vector["evidence"] = _stable_hash({"teamId": team_id, "evidence": "unavailable"})[
-            :32
-        ]
+        vector["evidence"] = _stable_hash(
+            {
+                "teamId": team_id,
+                "workflowRunId": run_id,
+                "evidence": "unavailable",
+            }
+        )[:32]
 
     if ledger_store is not None:
         try:
@@ -258,7 +264,9 @@ def _scope_candidates(
 ) -> list[dict[str, Any]]:
     sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
     project_id = str(snapshot.get("projectId") or "").strip()
-    if not sc_run_id and not project_id:
+    run_id = str(run_id or "").strip()
+    # Without any expected run/project scope, leave the team store untouched.
+    if not sc_run_id and not project_id and not run_id:
         return candidates
     scoped: list[dict[str, Any]] = []
     for item in candidates:
@@ -272,16 +280,55 @@ def _scope_candidates(
         item_project = str(
             item.get("researchProjectId") or meta.get("researchProjectId") or ""
         ).strip()
+        item_workflow = str(
+            item.get("workflowRunId") or meta.get("workflowRunId") or ""
+        ).strip()
+        # Unscoped historical candidates (no SC / workflow run markers) must never
+        # unlock or inflate stats for a run that expects SC or workflow scope.
+        if (sc_run_id or run_id) and not item_run and not item_workflow:
+            continue
         if sc_run_id and item_run and item_run != sc_run_id:
             continue
         if project_id and item_project and item_project != project_id:
             continue
-        # When SC run is known but candidates lack run tags, still count them for
-        # the team-scoped store (single active collection per team is common).
-        if sc_run_id and item_run and item_run != sc_run_id:
+        if item_workflow and item_workflow != run_id:
+            continue
+        if sc_run_id:
+            if item_run != sc_run_id and item_workflow != run_id:
+                continue
+        elif run_id and item_workflow != run_id:
             continue
         scoped.append(item)
-        _ = run_id
+    return scoped
+
+
+def _scope_evidence_records(
+    records: list[Any],
+    snapshot: Mapping[str, Any],
+    run_id: str,
+) -> list[dict[str, Any]]:
+    """Scope evidence cards by sourceCollectionRunId / workflowRunId like fetch_*."""
+    sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
+    scoped: list[dict[str, Any]] = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        item_run = str(item.get("sourceCollectionRunId") or "").strip()
+        item_workflow = str(item.get("workflowRunId") or "").strip()
+        # Unscoped historical evidence must never unlock a scoped run.
+        if (sc_run_id or run_id) and not item_run and not item_workflow:
+            continue
+        if sc_run_id and item_run and item_run != sc_run_id:
+            continue
+        if item_workflow and item_workflow != run_id:
+            continue
+        # Require explicit scope for this workflow or SC run.
+        if sc_run_id:
+            if item_run != sc_run_id and item_workflow != run_id:
+                continue
+        elif item_workflow != run_id:
+            continue
+        scoped.append(item)
     return scoped
 
 

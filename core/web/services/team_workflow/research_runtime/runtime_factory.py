@@ -21,6 +21,7 @@ from core.research.workflow.ledger import WorkflowLedgerStore
 from .action_registry import ActionRegistry
 from .adapter_dispatch_worker import AdapterDispatchWorker
 from .adapters.domain_adapters import register_default_adapters
+from .checkpoint_fork_worker import CheckpointForkWorker
 from .command_service import WorkflowCommandService
 from .graph_dispatch_worker import GraphDispatchWorker
 from .real_domain_ports import RealDomainPorts
@@ -40,9 +41,11 @@ class WorkflowRuntime:
     command_service: WorkflowCommandService
     graph_worker: GraphDispatchWorker
     adapter_worker: AdapterDispatchWorker
+    fork_worker: CheckpointForkWorker
 
     def run_workers_once(self, limit: int = 4) -> int:
-        handled = self.graph_worker.run_once(limit=limit)
+        handled = self.fork_worker.run_once(limit=limit)
+        handled += self.graph_worker.run_once(limit=limit)
         handled += self.adapter_worker.run_once(limit=limit)
         return handled
 
@@ -141,6 +144,11 @@ def build_workflow_runtime(
         owner_id="adapter-worker",
         successor_fn=lambda node_id: successor_map().get(node_id, ()),
     )
+    fork_worker = CheckpointForkWorker(
+        store=store,
+        coordinator=coordinator,
+        owner_id="checkpoint-fork-worker",
+    )
     return WorkflowRuntime(
         store=store,
         coordinator=coordinator,
@@ -151,4 +159,5 @@ def build_workflow_runtime(
         command_service=command_service,
         graph_worker=graph_worker,
         adapter_worker=adapter_worker,
+        fork_worker=fork_worker,
     )

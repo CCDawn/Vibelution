@@ -70,6 +70,7 @@ class BudgetReceiptStatus(str, Enum):
     SETTLED = "settled"
     RELEASED = "released"
     FAILED = "failed"
+    VOIDED = "voided"
 
 
 _TERMINAL_RUN = {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.ARCHIVED}

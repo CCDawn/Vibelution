@@ -104,6 +104,27 @@ def execute_result_package_action(
             ],
             adapter_name="result_package_system_adapter",
         )
+        from .workflow_artifact_store import put_workflow_artifact
+
+        put_workflow_artifact(
+            str(record["teamId"]),
+            kind="research_result_package",
+            workflow_run_id=str(record["runId"]),
+            source_collection_run_id=str(
+                (record.get("inputSnapshot") or {}).get("sourceCollectionRunId")
+                or record["runId"]
+            ),
+            payload={
+                "teamId": str(record["teamId"]),
+                "workflowRunId": str(record["runId"]),
+                "sourceCollectionRunId": str(
+                    (record.get("inputSnapshot") or {}).get("sourceCollectionRunId")
+                    or record["runId"]
+                ),
+                "package": package,
+            },
+            artifact_identity=str(action.get("actionId") or idempotency_key),
+        )
         completed_run = complete_node_execution(
             store,
             checkpoint_path=checkpoint_path,

@@ -629,6 +629,7 @@ class ResearchWorkflowRuntimeService:
         resolved_by: str = "",
         idempotency_key: str,
     ) -> dict[str, Any]:
+        self._require_privileged_operator(command="resolve_human_task")
         with self._lock:
             try:
                 return resolve_human_task_transition(
@@ -642,6 +643,15 @@ class ResearchWorkflowRuntimeService:
                 )
             except HumanTaskResolutionError as exc:
                 raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+
+    @staticmethod
+    def _require_privileged_operator(*, command: str) -> None:
+        from .operator_authorization import require_privileged_server_operator
+
+        try:
+            require_privileged_server_operator(command=command)
+        except PermissionError as exc:
+            raise ResearchWorkflowError("command_forbidden", code="command_forbidden") from exc
 
     def apply_command(
         self,
@@ -660,12 +670,14 @@ class ResearchWorkflowRuntimeService:
 
         payload = payload or {}
         if command == "cancel":
+            self._require_privileged_operator(command="cancel_run")
             record = self._store.update_run(run_id, {"status": "cancelled", "runtimeCurrentNodeIds": []})
         elif command == "retry_node":
             record = self.get_run(run_id)
             attempts = int(record.get("retryCount") or 0) + 1
             record = self._store.update_run(run_id, {"retryCount": attempts, "status": "queued"})
         elif command == "rebind_node":
+            self._require_privileged_operator(command="rebind_node")
             node_id = str(payload.get("nodeId") or "")
             agent_id = str(payload.get("agentId") or "").strip()
             if not node_id or not agent_id:

@@ -23,7 +23,9 @@ def evaluate_source_finding(
     context: DomainReadinessContext,
 ) -> DomainVerdict:
     blockers: list[Any] = []
-    snapshot = context.question_snapshot(run.team_id, run.question_id)
+    snapshot = context.question_snapshot(
+        run.team_id, run.question_id, run_id=run.run_id
+    )
     if snapshot is None:
         blockers.append(
             blocker(

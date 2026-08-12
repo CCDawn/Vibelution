@@ -156,11 +156,37 @@ def execute_controlled_run_action(
                 str(exc),
                 code="invalid_experiment_campaign",
             ) from exc
+        campaign_dict = campaign.to_dict()
+        from .workflow_artifact_store import put_workflow_artifact
+
+        put_workflow_artifact(
+            str(record["teamId"]),
+            kind="run_artifacts",
+            workflow_run_id=str(record["runId"]),
+            source_collection_run_id=str(
+                (record.get("inputSnapshot") or {}).get("sourceCollectionRunId")
+                or record["runId"]
+            ),
+            payload={
+                "teamId": str(record["teamId"]),
+                "workflowRunId": str(record["runId"]),
+                "sourceCollectionRunId": str(
+                    (record.get("inputSnapshot") or {}).get("sourceCollectionRunId")
+                    or record["runId"]
+                ),
+                "planId": plan_id,
+                "executionId": execution_id,
+                "observationRef": result_ref,
+                "execution": execution,
+                "campaign": campaign_dict,
+            },
+            artifact_identity=str(action.get("actionId") or execution_id),
+        )
         manifest = build_system_artifact(
             record=record,
             node_run=node_run,
             artifact_kind="run_artifacts",
-            payload=campaign.to_dict(),
+            payload=campaign_dict,
             source_artifact_ids=[
                 frozen_manifest["artifactId"],
                 smoke_release["artifactId"],
@@ -177,7 +203,7 @@ def execute_controlled_run_action(
                 "leaseOwner": lease_owner,
                 "artifactManifests": [manifest.to_dict()],
                 "artifactPayloads": {
-                    manifest.artifactId: campaign.to_dict(),
+                    manifest.artifactId: campaign_dict,
                 },
             },
         )

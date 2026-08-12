@@ -62,17 +62,28 @@ def test_fork_revision_creates_child_run_with_lineage_and_dispatch(tmp_path: Pat
         assert child[0][5] == child_run_id
         assert child[0][6] == "ckpt-parent-1"
 
-        # child 的 graph_dispatch outbox 存在。
+        # Durable checkpoint_fork outbox; graph_dispatch only after fork worker succeeds.
         outbox = harness.store.submit(
             lambda uow: uow.repository.execute(
-                "SELECT action_kind, run_id FROM outbox_actions "
-                "WHERE run_id = ? AND action_kind = 'graph_dispatch'",
+                "SELECT action_kind, run_id, status FROM outbox_actions "
+                "WHERE run_id = ?",
                 (child_run_id,),
             ).fetchall(),
             force_flush=True,
         ).result(timeout=10)
         assert len(outbox) == 1
+        assert outbox[0][0] == "checkpoint_fork"
         assert outbox[0][1] == child_run_id
+        assert outbox[0][2] == "pending"
+        graph_dispatch = harness.store.submit(
+            lambda uow: uow.repository.execute(
+                "SELECT action_id FROM outbox_actions "
+                "WHERE run_id = ? AND action_kind = 'graph_dispatch'",
+                (child_run_id,),
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+        assert graph_dispatch == []
 
         # 父 run 事件记录 revision_forked。
         events = harness.store.list_events("run-test")
@@ -166,7 +177,7 @@ def test_high_impact_command_requires_operator_identity(tmp_path: Path) -> None:
             requested_at_ms=request.requested_at_ms,
         )
         from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope
-        with server_operator_scope("operator-1"):
+        with server_operator_scope("operator-1", roles=("operator",)):
             receipt = harness.command_service.submit(ok)
         assert receipt.status == "accepted"
         run = harness.store.get_run("run-test")
