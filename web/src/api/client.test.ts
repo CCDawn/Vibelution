@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchJson, getControlToken, resetControlTokenForTests, setFetchJsonFailureReporter } from "./client";
+import {
+  fetchJson,
+  getControlToken,
+  isFetchAbortError,
+  resetControlTokenForTests,
+  setFetchJsonFailureReporter,
+} from "./client";
 
 describe("fetchJson control token", () => {
   afterEach(() => {
@@ -219,6 +225,26 @@ describe("fetchJson control token", () => {
         failureKind: "network",
       },
     ]);
+  });
+
+  it("does not report aborted requests as API failures", async () => {
+    const reports: unknown[] = [];
+    setFetchJsonFailureReporter((report) => reports.push(report));
+    const abortError = new DOMException("signal is aborted without reason", "AbortError");
+    const fetchMock = vi.fn().mockRejectedValueOnce(abortError);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchJson("/api/sessions/session-live?messageLimit=40", { signal: new AbortController().signal }))
+      .rejects.toThrow(abortError);
+
+    expect(reports).toEqual([]);
+  });
+
+  it("classifies abort errors by name and message", () => {
+    expect(isFetchAbortError(new DOMException("signal is aborted without reason", "AbortError"))).toBe(true);
+    expect(isFetchAbortError(new Error("The operation was aborted."))).toBe(true);
+    expect(isFetchAbortError(new Error("connection lost"))).toBe(false);
+    expect(isFetchAbortError(null)).toBe(false);
   });
 
   it("does not report external API failures", async () => {
