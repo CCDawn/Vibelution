@@ -1783,11 +1783,91 @@ def _select_background_python(executable: str) -> dict[str, object]:
     return result
 
 
-def _ensure_frontend_build(source_identity: dict[str, object] | None = None) -> dict[str, object]:
+def _frontend_dist_is_servable(web_dir: Path) -> bool:
+    """True when a non-empty production index exists. Does not scan source mtimes."""
+
+    dist_index = web_dir / "dist" / "index.html"
+    try:
+        return dist_index.is_file() and dist_index.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _reuse_existing_frontend_build(
+    identity: dict[str, object],
+    *,
+    web_dir: Path,
+    skip_reason: str,
+) -> dict[str, object]:
+    """Serve current dist without rebuilding or rewriting artifact identity."""
+
+    provenance_path = web_dir / "dist" / FRONTEND_BUILD_PROVENANCE_NAME
+    previous_provenance = _read_frontend_build_provenance(provenance_path)
+    provenance: dict[str, object] = {
+        "schemaVersion": 1,
+        "projectRoot": identity.get("projectRoot"),
+        "sourceBranch": identity.get("branch"),
+        "sourceCommit": previous_provenance.get("sourceCommit") or identity.get("commit"),
+        "frontendTree": previous_provenance.get("frontendTree") or "",
+        "builtFromCommit": previous_provenance.get("builtFromCommit") or "",
+        "reusedArtifactFromCommit": previous_provenance.get("builtFromCommit")
+        or previous_provenance.get("sourceCommit")
+        or "",
+        "lastValidatedCommit": previous_provenance.get("lastValidatedCommit") or identity.get("commit"),
+        "lastValidatedFrontendTree": previous_provenance.get("lastValidatedFrontendTree")
+        or previous_provenance.get("frontendTree")
+        or "",
+        "rebuilt": False,
+        "skipped": True,
+        "skipReason": skip_reason,
+        "validatedAt": _now_iso(),
+    }
+    _append_frontend_build_log(
+        {
+            "event": "frontend_build.ensure",
+            "packageManager": _frontend_package_manager(),
+            "needsInstall": False,
+            "needsBuild": False,
+            "skipped": True,
+            "skipReason": skip_reason,
+            "sourceCommit": identity.get("commit"),
+            "frontendTree": identity.get("frontendTree"),
+            "previousFrontendTree": previous_provenance.get("frontendTree"),
+            "sourcesNewer": False,
+            "treeMismatch": False,
+        }
+    )
+    _append_frontend_build_log(
+        {
+            "event": "frontend_build.verified",
+            "sourceCommit": provenance["sourceCommit"],
+            "frontendTree": provenance["frontendTree"],
+            "builtFromCommit": provenance["builtFromCommit"],
+            "rebuilt": False,
+            "skipped": True,
+            "skipReason": skip_reason,
+        }
+    )
+    return provenance
+
+
+def _ensure_frontend_build(
+    source_identity: dict[str, object] | None = None,
+    *,
+    require_current: bool = True,
+) -> dict[str, object]:
     web_dir = PROJECT_ROOT / "web"
     if not web_dir.exists():
         return {}
     identity = source_identity or _runtime_source_identity()
+    # Ordinary start must not block the window on tsc/vite. Restart/force still
+    # require a current artifact; missing dist always falls through to build.
+    if not require_current and _frontend_dist_is_servable(web_dir):
+        return _reuse_existing_frontend_build(
+            identity,
+            web_dir=web_dir,
+            skip_reason="start_reuses_existing_dist",
+        )
     package_manager = _frontend_package_manager()
     node_modules = web_dir / "node_modules"
     needs_install = not node_modules.exists()
@@ -1910,7 +1990,8 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     source_identity = _runtime_source_identity()
     open_timings_ms["sourceIdentityMs"] = round((time.monotonic() - identity_started) * 1000.0, 1)
     frontend_started = time.monotonic()
-    frontend_provenance = _ensure_frontend_build(source_identity)
+    # Start serves existing dist. Restart/tray force rebuild before this path.
+    frontend_provenance = _ensure_frontend_build(source_identity, require_current=False)
     open_timings_ms["frontendEnsureMs"] = round((time.monotonic() - frontend_started) * 1000.0, 1)
     # Mid-flight checks only need commit/tree drift detection (full porcelain already done).
     _assert_runtime_source_identity(source_identity, light=True)

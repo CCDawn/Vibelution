@@ -2813,6 +2813,18 @@ class RuntimeManagerDaemon:
                     "reason": "open_workbench_avoids_prelaunch_reconcile",
                 },
             )
+        elif command_type in {"close_workbench", "force_close_workbench"}:
+            # Fast close observes itself. A pre-handler reconcile rescans
+            # net_connections and has added multiple seconds after the click.
+            state = save_state(state)
+            _append_event(
+                "command.active_marked_fast_path",
+                {
+                    "commandId": command_id,
+                    "type": command_type,
+                    "reason": "close_workbench_avoids_prehandler_reconcile",
+                },
+            )
         else:
             state = self._reconcile_observation(state)
             state = save_state(state)

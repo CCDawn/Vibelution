@@ -6415,6 +6415,56 @@ def test_handle_open_command_skips_prelaunch_reconcile(monkeypatch):
     assert _event_payload(events, "command.active_marked_fast_path")["commandId"] == "cmd-open"
 
 
+def test_handle_close_command_skips_prehandler_reconcile(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    saved_states: list[dict] = []
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(json.loads(json.dumps(next_state))) or next_state)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        type(runtime_daemon),
+        "_reconcile_observation",
+        lambda self, next_state: pytest.fail("close_workbench must not reconcile before the fast-close handler"),
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_handle_close_workbench",
+        lambda *, command_id, args: {
+            "commandId": command_id,
+            "accepted": True,
+            "completed": True,
+            "ok": True,
+            "message": "Workbench closed.",
+        },
+    )
+
+    result = runtime_daemon._handle_command(
+        {
+            "commandId": "cmd-close",
+            "type": "close_workbench",
+            "requestedBy": "test",
+            "args": {"reason": "launcher_stop_button"},
+        }
+    )
+
+    assert result["ok"] is True
+    assert saved_states[0]["command"]["activeCommandId"] == "cmd-close"
+    payload = _event_payload(events, "command.active_marked_fast_path")
+    assert payload["commandId"] == "cmd-close"
+    assert payload["type"] == "close_workbench"
+    assert payload["reason"] == "close_workbench_avoids_prehandler_reconcile"
+
+
 def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
