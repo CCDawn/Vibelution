@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { executeApprovedDesktopShellShutdown } from "../src/shutdown/desktopShellExit.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
+  executeApprovedDesktopShellShutdown,
+  withDesktopShellExitTimeout
+} from "../src/shutdown/desktopShellExit.js";
 
 describe("executeApprovedDesktopShellShutdown", () => {
   it("stops the owned Python Launcher before quitting the desktop shell", async () => {
@@ -98,5 +102,58 @@ describe("executeApprovedDesktopShellShutdown", () => {
       stoppedPidCount: 0,
       stopError: ""
     });
+  });
+
+  it("fail-opens past a hung desktop session close so quit still runs", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const pending = executeApprovedDesktopShellShutdown({
+      decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: false },
+      closeDesktopSession: async () => {
+        await new Promise(() => undefined);
+      },
+      recordEvent: async (event) => {
+        calls.push(`event:${event.eventCode}`);
+      },
+      stopPythonLauncher: async () => {
+        throw new Error("should not stop");
+      },
+      approveShutdown: () => {
+        calls.push("approve-shutdown");
+      },
+      stopDesktopActionLoop: () => {
+        calls.push("stop-action-loop");
+      },
+      quitApp: () => {
+        calls.push("quit-app");
+      },
+      stepTimeoutMs: 25
+    });
+
+    await vi.advanceTimersByTimeAsync(30);
+    const result = await pending;
+    expect(calls).toEqual([
+      "event:electron.launcher_service.exited",
+      "approve-shutdown",
+      "stop-action-loop",
+      "quit-app"
+    ]);
+    expect(result?.stopStatus).toBe("not_requested");
+    vi.useRealTimers();
+  });
+});
+
+describe("withDesktopShellExitTimeout", () => {
+  it("rejects when the operation exceeds the budget", async () => {
+    vi.useFakeTimers();
+    const pending = withDesktopShellExitTimeout(new Promise(() => undefined), 40, "demo");
+    const assertion = expect(pending).rejects.toThrow(`demo timed out after 40ms`);
+    await vi.advanceTimersByTimeAsync(40);
+    await assertion;
+    vi.useRealTimers();
+  });
+
+  it("exposes the default step timeout used by shell exit", () => {
+    expect(DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS).toBeGreaterThan(0);
   });
 });

@@ -40,6 +40,22 @@ describe("decideShutdown", () => {
       stopPythonLauncher: true
     });
   });
+
+  it("fail-opens quit when active-work status cannot be resolved", async () => {
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        failOpenOnActiveWorkError: true,
+        activeWorkStatus: async () => {
+          throw new Error("status unreachable");
+        }
+      })
+    ).resolves.toEqual({
+      allowed: true,
+      reason: "no_active_work",
+      stopPythonLauncher: true
+    });
+  });
 });
 
 describe("fetchLauncherActiveWorkStatus", () => {
