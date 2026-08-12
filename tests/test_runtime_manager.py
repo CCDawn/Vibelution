@@ -7839,6 +7839,110 @@ def test_frontend_build_current_detects_tree_mismatch_even_when_mtime_is_fresh(m
     assert freshness["stampedFrontendTree"] == "tree-old"
 
 
+def test_frontend_build_current_ignores_newer_mtime_when_tree_matches_and_worktree_is_clean(monkeypatch, tmp_path):
+    web_dir = tmp_path / "web"
+    dist_index = web_dir / "dist" / "index.html"
+    source = web_dir / "src" / "App.tsx"
+    provenance_path = web_dir / "dist" / ".vibelution-build.json"
+    source.parent.mkdir(parents=True)
+    dist_index.parent.mkdir(parents=True)
+    source.write_text("export {};", encoding="utf-8")
+    dist_index.write_text("<html></html>", encoding="utf-8")
+    provenance_path.write_text(
+        json.dumps({"frontendTree": "tree-same", "builtFromCommit": "1" * 40}),
+        encoding="utf-8",
+    )
+    now = time.time()
+    os.utime(dist_index, (now - 30, now - 30))
+    os.utime(source, (now, now))
+
+    monkeypatch.setattr(daemon, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(daemon, "_frontend_working_tree_changes", lambda: [])
+    monkeypatch.setattr(
+        daemon,
+        "_capture_git_text",
+        lambda args, label="": "tree-same" if args[-1] == "HEAD:web" else "c" * 40,
+    )
+
+    current, reason, freshness = daemon._frontend_build_current()
+
+    assert current is True
+    assert reason == "frontend build is current"
+    assert freshness["workingTreeChangeCount"] == 0
+    assert freshness["inputMtime"] > freshness["distMtime"]
+
+
+def test_frontend_build_current_rebuilds_when_matching_tree_has_dirty_sources(monkeypatch, tmp_path):
+    web_dir = tmp_path / "web"
+    dist_index = web_dir / "dist" / "index.html"
+    source = web_dir / "src" / "App.tsx"
+    provenance_path = web_dir / "dist" / ".vibelution-build.json"
+    source.parent.mkdir(parents=True)
+    dist_index.parent.mkdir(parents=True)
+    source.write_text("export {};", encoding="utf-8")
+    dist_index.write_text("<html></html>", encoding="utf-8")
+    provenance_path.write_text(
+        json.dumps({"frontendTree": "tree-same", "builtFromCommit": "1" * 40}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(daemon, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(daemon, "_frontend_working_tree_changes", lambda: ["web/src/App.tsx"])
+    monkeypatch.setattr(
+        daemon,
+        "_capture_git_text",
+        lambda args, label="": "tree-same" if args[-1] == "HEAD:web" else "c" * 40,
+    )
+
+    current, reason, freshness = daemon._frontend_build_current()
+
+    assert current is False
+    assert reason == "frontend working tree changed"
+    assert freshness["workingTreeChanges"] == ["web/src/App.tsx"]
+
+
+def test_frontend_build_current_falls_back_to_mtime_when_git_status_unavailable(monkeypatch, tmp_path):
+    web_dir = tmp_path / "web"
+    dist_index = web_dir / "dist" / "index.html"
+    source = web_dir / "src" / "App.tsx"
+    provenance_path = web_dir / "dist" / ".vibelution-build.json"
+    source.parent.mkdir(parents=True)
+    dist_index.parent.mkdir(parents=True)
+    source.write_text("export {};", encoding="utf-8")
+    dist_index.write_text("<html></html>", encoding="utf-8")
+    provenance_path.write_text(
+        json.dumps({"frontendTree": "tree-same", "builtFromCommit": "1" * 40}),
+        encoding="utf-8",
+    )
+    now = time.time()
+    os.utime(dist_index, (now - 30, now - 30))
+    os.utime(source, (now, now))
+
+    monkeypatch.setattr(daemon, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(daemon, "_frontend_working_tree_changes", lambda: None)
+    monkeypatch.setattr(
+        daemon,
+        "_capture_git_text",
+        lambda args, label="": "tree-same" if args[-1] == "HEAD:web" else "c" * 40,
+    )
+
+    current, reason, freshness = daemon._frontend_build_current()
+
+    assert current is False
+    assert reason == "frontend sources changed"
+    assert freshness["workingTreeChanges"] is None
+
+
+def test_frontend_working_tree_changes_ignores_test_only_paths():
+    noise = [
+        Path("web/src/App.test.tsx"),
+        Path("web/src/routes/__tests__/foo.ts"),
+        Path("web/src/__mocks__/bar.ts"),
+    ]
+    assert all(daemon._is_frontend_preflight_noise_path(path) for path in noise)
+    assert daemon._is_frontend_preflight_noise_path(Path("web/src/App.tsx")) is False
+
+
 def test_write_frontend_provenance_skip_does_not_rewrite_artifact_tree(monkeypatch, tmp_path):
     web_dir = tmp_path / "web"
     provenance_path = web_dir / "dist" / ".vibelution-build.json"

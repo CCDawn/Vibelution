@@ -2142,13 +2142,64 @@ def _latest_mtime(paths: list[Path]) -> float:
                 continue
             if path.is_dir():
                 for child in path.rglob("*"):
-                    if child.is_file():
+                    if child.is_file() and not _is_frontend_preflight_noise_path(child):
                         latest = max(latest, child.stat().st_mtime)
-            elif path.is_file():
+            elif path.is_file() and not _is_frontend_preflight_noise_path(path):
                 latest = max(latest, path.stat().st_mtime)
         except OSError:
             continue
     return latest
+
+
+_FRONTEND_PREFLIGHT_RELATIVE_PATHS: tuple[str, ...] = (
+    "web/src",
+    "web/public",
+    "web/index.html",
+    "web/package.json",
+    "web/package-lock.json",
+    "web/tsconfig.json",
+    "web/tsconfig.app.json",
+    "web/tsconfig.node.json",
+    "web/vite.config.ts",
+    "web/vite.config.js",
+)
+
+
+def _is_frontend_preflight_noise_path(path: Path) -> bool:
+    """Test-only files do not change production web/dist."""
+
+    name = path.name.lower()
+    if name.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")):
+        return True
+    parts = {part.lower() for part in path.parts}
+    return "__tests__" in parts or "__mocks__" in parts
+
+
+def _frontend_working_tree_changes() -> list[str] | None:
+    """Dirty frontend input paths, or None when git status cannot be trusted."""
+
+    try:
+        from core.infrastructure.no_console_git import run_git
+
+        result = run_git(
+            ["status", "--porcelain", "--untracked-files=normal", "--", *_FRONTEND_PREFLIGHT_RELATIVE_PATHS],
+            cwd=PROJECT_ROOT,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if int(result.returncode or 0) != 0:
+        return None
+    dirty: list[str] = []
+    for raw in str(result.stdout or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        path = line[3:].replace("\\", "/").strip() if len(line) > 3 else line
+        if _is_frontend_preflight_noise_path(Path(path)):
+            continue
+        dirty.append(path)
+    return dirty
 
 
 def _read_frontend_build_provenance() -> dict[str, Any]:
@@ -2208,18 +2259,32 @@ def _frontend_build_current() -> tuple[bool, str, dict[str, Any]]:
             "frontend tree differs from dist provenance",
             freshness,
         )
-    if input_mtime > dist_mtime:
-        return (
-            False,
-            "frontend sources changed",
-            freshness,
-        )
     # No usable provenance: mtime said fresh, but we cannot prove which tree built
     # dist. Require one rebuild so later skips are trustworthy.
     if current_tree and not stamped_tree:
         return (
             False,
             "frontend dist provenance missing",
+            freshness,
+        )
+    # Tree matches (or git identity is unavailable). Prefer porcelain over mtime:
+    # checkout/IDE/test runners bump web/src mtimes without changing HEAD:web.
+    dirty_paths = _frontend_working_tree_changes()
+    if dirty_paths is not None:
+        freshness["workingTreeChanges"] = dirty_paths[:12]
+        freshness["workingTreeChangeCount"] = len(dirty_paths)
+        if dirty_paths:
+            return (
+                False,
+                "frontend working tree changed",
+                freshness,
+            )
+        return True, "frontend build is current", freshness
+    freshness["workingTreeChanges"] = None
+    if input_mtime > dist_mtime:
+        return (
+            False,
+            "frontend sources changed",
             freshness,
         )
     return True, "frontend build is current", freshness
