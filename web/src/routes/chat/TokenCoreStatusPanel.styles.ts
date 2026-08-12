@@ -15,7 +15,9 @@ const styles: Record<string, string> = {
   tokenStatusScope:
     "vui-routes-chatcodingroute tokenStatusScope min-w-0 shrink-0 [font-size:10px] font-semibold leading-none text-[var(--fg-tertiary)]",
   tokenStatusBar:
-    "vui-routes-chatcodingroute tokenStatusBar relative mt-1.5 block h-1.5 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] [&>span]:block [&>span]:h-full [&>span]:rounded-full [&>span]:bg-[var(--accent-cool)] [&>span]:w-[calc(var(--token-status-value)*1%)]",
+    "vui-routes-chatcodingroute tokenStatusBar relative mt-1.5 block h-1 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] [&>span]:block [&>span]:h-full [&>span]:rounded-full [&>span]:bg-[var(--token-status-bar-fill,var(--accent-cool))] [&>span]:w-[calc(var(--token-status-value)*1%)]",
+  tokenStatusEmpty:
+    "vui-routes-chatcodingroute tokenStatusEmpty m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   tokenStatusCopy:
     "vui-routes-chatcodingroute tokenStatusCopy grid min-w-0 self-center gap-0.5 overflow-visible text-center",
   tokenStatusLabel:

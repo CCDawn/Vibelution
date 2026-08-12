@@ -155,9 +155,30 @@ def _env_port(names: tuple[str, ...]) -> int | None:
     return None
 
 
+def _project_local_backend_port() -> int | None:
+    """Read checkout-local port assignment written by the launcher on multi-project conflict."""
+
+    ports_path = PROJECT_ROOT / ".runtime" / "launcher" / "ports.json"
+    try:
+        raw = json.loads(ports_path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    port = _normalize_port(raw.get("backendPort"), 0)
+    return port or None
+
+
 def _workbench_port() -> int:
-    config_port = _normalize_port(_config_section("workbench").get("backend_port"), DEFAULT_WORKBENCH_PORT)
-    return _env_port(("VIBELUTION_PORT", "AGENT_WORKBENCH_BACKEND_PORT")) or config_port
+    # Match config.workbench.configured_backend_port precedence:
+    # env → .runtime/launcher/ports.json → operator config → DEFAULT.
+    env_port = _env_port(("VIBELUTION_PORT", "AGENT_WORKBENCH_BACKEND_PORT"))
+    if env_port:
+        return env_port
+    project_port = _project_local_backend_port()
+    if project_port is not None:
+        return project_port
+    return _normalize_port(_config_section("workbench").get("backend_port"), DEFAULT_WORKBENCH_PORT)
 
 
 def _launcher_control_port(workbench_port: int | None = None) -> int:
@@ -945,7 +966,7 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
         "mode": mode,
         "launcherBackendPid": backend_pid,
         "launcherUrl": _launcher_control_url(port),
-        "workbenchUrl": str(after.get("url") or ""),
+        "workbenchUrl": str(after.get("url") or "").strip() or f"http://{DEFAULT_HOST}:{_workbench_port()}",
         "ready": ready,
         "protocolVersion": 1,
         "minDesktopProtocolVersion": 1,

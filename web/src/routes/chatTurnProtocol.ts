@@ -124,8 +124,15 @@ export const assistantTurnItemsForMessage = (message: ConversationMessage): Sess
   message.role === "assistant" ? consolidateSessionTurnItemsV2(message.turnItems) : []
 );
 
+/** Token-streaming behaviors: answer text is actively revising. */
 export const assistantTurnIsStreaming = (message: ConversationMessage): boolean => (
   message.role === "assistant" && message.status === "running"
+);
+
+/** Pending or running — waiting shell / Thinking placeholder gate (broader than streaming). */
+export const assistantTurnIsInFlight = (message: ConversationMessage): boolean => (
+  message.role === "assistant"
+  && (message.status === "pending" || message.status === "running")
 );
 
 export const assistantFinalAnswerText = (message: ConversationMessage): string => (

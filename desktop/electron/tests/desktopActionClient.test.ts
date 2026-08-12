@@ -125,6 +125,51 @@ describe("runDesktopActionOnce", () => {
     });
   });
 
+  it("forwards open_workbench payload URL hints to the window operation", async () => {
+    let receivedPayload: Record<string, unknown> | undefined;
+    const fetchImpl = async (url: string | URL | Request) => {
+      if (String(url).endsWith("/claim")) {
+        return jsonResponse({
+          actionId: "action-open-1",
+          intentId: "intent-open-1",
+          action: "open_workbench",
+          status: "claimed",
+          payload: {
+            desktopSessionId: "desktop-session-1",
+            workbenchUrl: "http://127.0.0.1:8002/"
+          },
+          claimedBy: "desktop-session-1",
+          leaseExpiresAt: "2026-06-26T10:00:00Z",
+          claimAttempt: 1
+        });
+      }
+      return jsonResponse({ status: "acked" }, 202);
+    };
+
+    await expect(
+      runDesktopActionOnce({
+        launcherOrigin: "http://127.0.0.1:8765/launcher",
+        controlToken: "token",
+        desktopSessionId: "desktop-session-1",
+        leaseSeconds: 30,
+        fetchImpl,
+        operations: {
+          openOrFocusWorkbench: async (payload) => {
+            receivedPayload = payload;
+            return { open: true };
+          },
+          focusWorkbench: async () => ({ focused: true }),
+          closeWorkbench: async () => ({ open: false })
+        }
+      })
+    ).resolves.toMatchObject({ claimed: true, status: "acked" });
+
+    expect(receivedPayload).toEqual({
+      desktopSessionId: "desktop-session-1",
+      workbenchUrl: "http://127.0.0.1:8002/"
+    });
+  });
+
   it("forwards a targeted close-transaction payload to the Electron window owner", async () => {
     let receivedPayload: Record<string, unknown> | null = null;
     const fetchImpl = async (url: string | URL | Request) => {

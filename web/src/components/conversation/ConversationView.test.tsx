@@ -179,7 +179,25 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(conversationViewSource).toContain("buildCodexTranscriptCells(");
     expect(conversationViewSource).toContain("agentCodexSurfacesByMessageId");
     expect(conversationViewSource).toContain("data-codex-transcript-cell-count");
-  });});
+  });
+});
+
+describe("ConversationView compact active-turn status rails", () => {
+  it("does not force-OR compact placeholder over process/feedback gates", () => {
+    expect(conversationViewSource).not.toContain("Force Thinking/waiting when in-flight with no visible paint");
+    expect(conversationViewSource).not.toMatch(
+      /assistantTurnIsInFlight\(message\)\s*&&\s*!displayPlan\.shouldRenderCodexSurface/,
+    );
+    expect(conversationViewSource).toContain("inFlight: assistantTurnIsInFlight(message)");
+  });
+
+  it("suppresses turnStatusNode when compact active-turn placeholder is shown", () => {
+    expect(conversationViewSource).toContain("showCompactActiveTurnPlaceholder");
+    expect(conversationViewSource).toContain(
+      "!showCompactActiveTurnPlaceholder\n              && !displayPlan.suppressProjectedTurnStatus",
+    );
+  });
+});
 
 describe("ConversationView edit resend affordance", () => {
   it("does not force-collapse thinking sections when streaming settles", () => {
@@ -551,6 +569,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain('composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar');
     expect(conversationViewSource).toContain("className={styles.attachButton}");
     expect(conversationViewSource).toContain("<ConversationInferenceControl {...llmControl} />");
+    expect(conversationViewSource).toContain("<ComposerContextRing");
+    expect(conversationViewSource).toContain("composerContextRing");
     expect(conversationViewSource).toContain('composerVariant === "codex" ? composerActions : null');
     expect(conversationViewSource).toContain('composerVariant === "compact" ? composerActions : null');
     expect(styles.composerToolbar).toContain("items-center");

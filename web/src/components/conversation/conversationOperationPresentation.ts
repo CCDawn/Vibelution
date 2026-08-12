@@ -109,6 +109,8 @@ export function shouldRenderCodexTranscriptSurface(surface?: CodexTranscriptSurf
 export function shouldRenderCompactActiveTurnPlaceholder(input: {
   role: string;
   streaming: boolean;
+  /** Pending|running waiting shell — broader than token streaming. */
+  inFlight?: boolean;
   showResponseBlock: boolean;
   hasFeedbackTimeline: boolean;
   hasActiveProcess: boolean;
@@ -118,7 +120,7 @@ export function shouldRenderCompactActiveTurnPlaceholder(input: {
 }) {
   return Boolean(
     input.role === "assistant"
-    && input.streaming
+    && (input.streaming || input.inFlight)
     && !input.turnErrorMessage
     && !input.showResponseBlock
     && !input.hasFeedbackTimeline

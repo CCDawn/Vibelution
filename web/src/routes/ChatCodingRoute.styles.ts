@@ -89,8 +89,10 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute layoutStatusRailCollapsed w-full grid !grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)]",
   layoutOverlay:
     "vui-routes-chatcodingroute layoutOverlay relative w-full grid min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden",
+  // Rail sections separate by whitespace rhythm (p-2 vertical), not hairline rules;
+  // state emphasis moves to the active block accent (currentSessionBlock_active).
   leftBlock:
-    "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 border-b border-[var(--vui-border-subtle)] bg-transparent p-2 shadow-none last:border-b-0",
+    "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 bg-transparent p-2 shadow-none",
   // Use non-important flex so paneCollapsed `!hidden` always wins when the status rail is closed.
   // Important flex + grid-column:5 previously forced implicit tracks and a blank right strip.,
   leftRail: `vui-routes-chatcodingroute leftRail min-w-0 flex h-full min-h-0 flex-col overflow-auto rounded-none border-0 border-l border-[var(--vui-border-subtle)] ${vuiRailFillClass} p-1 shadow-none [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]`,
@@ -260,9 +262,10 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute sectionIdentity grid min-w-0 gap-0.5",
   sectionTitle:
     "vui-routes-chatcodingroute sectionTitle m-0 min-w-0 truncate [font-size:var(--vui-font-sm)] font-[760] leading-tight text-[var(--fg-primary)]",
-  // Section labels (运行模式 / Token / 陪伴): quieter than surface titles.,
+  // Section labels (运行模式 / Token / 陪伴): smaller than surface titles but primary-ink
+  // so the rail scans as titled groups after hairline separators were removed.
   railSectionHeading:
-    "vui-routes-chatcodingroute railSectionHeading m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] font-[650] leading-tight text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute railSectionHeading m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] font-[650] leading-tight text-[var(--fg-primary)]",
   sessionLoadMoreButton:
     `vui-routes-chatcodingroute sessionLoadMoreButton min-w-0 ${vuiControlQuietClass}`,
   sessionLoadMoreStatus:

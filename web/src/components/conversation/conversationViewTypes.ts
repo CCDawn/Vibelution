@@ -11,6 +11,7 @@ import type {
 } from "../../api/types";
 import type { TurnAvatarResolution } from "./conversationTurnAvatar";
 import type { ConversationStreamingFramePaintMetrics } from "./conversationStreamingMetrics";
+import type { ComposerContextRingModel } from "../../routes/chat/composerContextModel";
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
@@ -111,6 +112,9 @@ export type ConversationViewProps = {
   /** Pending tool approval shown under the matching running tool (Codex-style). */
   toolApproval?: ConversationToolApprovalSurface | null;
   llmControl?: ConversationLlmControl;
+  /** Compact context composition ring (left of send). */
+  composerContextRing?: ComposerContextRingModel | null;
+  onOpenComposerContextDetail?: () => void;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
   submitLabel?: string;

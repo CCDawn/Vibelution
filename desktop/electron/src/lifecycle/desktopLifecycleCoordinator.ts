@@ -8,13 +8,31 @@ export type DesktopCloseReason =
 
 export type DesktopSessionMutationKind = "register" | "heartbeat" | "window" | "close";
 
+const SHELL_EXIT_REASONS: ReadonlySet<DesktopCloseReason> = new Set([
+  "desktop_shell_quit",
+  "desktop_shell_restart",
+  "update_install",
+  "os_session_end"
+]);
+
+/** Shell-level exits must not wait forever on an in-flight workbench close transaction. */
+export function desktopCloseReasonSupersedes(
+  pendingReason: DesktopCloseReason,
+  nextReason: DesktopCloseReason
+): boolean {
+  return pendingReason === "workbench_window_close" && SHELL_EXIT_REASONS.has(nextReason);
+}
+
 export class DesktopLifecycleCoordinator {
   private pending: Promise<unknown> | null = null;
   private reason: DesktopCloseReason | null = null;
 
   request<T>(reason: DesktopCloseReason, operation: (reason: DesktopCloseReason) => Promise<T>): Promise<T> {
     if (this.pending !== null) {
-      return this.pending as Promise<T>;
+      if (this.reason === null || !desktopCloseReasonSupersedes(this.reason, reason)) {
+        return this.pending as Promise<T>;
+      }
+      // Fall through and replace the pending workbench-close promise with a shell exit.
     }
     this.reason = reason;
     const pending = operation(reason);

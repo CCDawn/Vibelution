@@ -34,7 +34,7 @@ export type DesktopActionRunResult =
     };
 
 export type DesktopWindowOperations = {
-  openOrFocusWorkbench(): Promise<unknown>;
+  openOrFocusWorkbench(payload?: Record<string, unknown>): Promise<unknown>;
   focusWorkbench(): Promise<unknown>;
   closeWorkbench(payload: Record<string, unknown>): Promise<unknown>;
 };
@@ -224,7 +224,7 @@ function executeDesktopWindowOperation(
   payload: Record<string, unknown>
 ) {
   if (operation === "open_or_focus_workbench") {
-    return operations.openOrFocusWorkbench();
+    return operations.openOrFocusWorkbench(payload);
   }
   if (operation === "focus_workbench") {
     return operations.focusWorkbench();
