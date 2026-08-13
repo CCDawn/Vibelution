@@ -203,6 +203,11 @@ def _opencode_variant(provider: ProviderConfig) -> str:
     return "zen"
 
 
+def _requires_deepseek_reasoning_roundtrip(provider: ProviderConfig, effective_model: str) -> bool:
+    model = str(effective_model or "").strip().lower()
+    return _opencode_variant(provider) == "go" and model.startswith("deepseek-v4")
+
+
 def _wire_protocol_from_opencode(provider: ProviderConfig, effective_model: str) -> WireProtocol | None:
     variant = _opencode_variant(provider)
     model = str(effective_model or "").strip().lower()
@@ -507,7 +512,13 @@ def resolve_model_protocol(
     explicit_protocol = _read_optional_string(model_entry, "protocol") or _read_optional_string(profile, "protocol")
     source = "fallback"
     protocol: ModelProtocol | None = None
-    if explicit_protocol:
+    if explicit_protocol and _requires_deepseek_reasoning_roundtrip(provider, effective_model):
+        normalized_explicit = explicit_protocol.strip().lower()
+        if normalized_explicit in {"openai_chat_tools", "tool_chat"}:
+            protocol = ModelProtocol.DEEPSEEK_REASONING
+            source = "provider_model_compat"
+            warnings.append("model_protocol.deepseek_reasoning_required")
+    if explicit_protocol and protocol is None:
         try:
             protocol = ModelProtocol(explicit_protocol.strip().lower())
             source = "explicit_model"
