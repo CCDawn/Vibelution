@@ -100,10 +100,19 @@ def _draft_payload(
     authority_run_id: str,
 ) -> dict[str, Any]:
     metadata = candidate["metadata"]
+    output = dict(metadata["output"])
+    validation = dict(metadata["validation"])
     return {
         "teamId": team_id,
         "sourceCollectionRunId": authority_run_id,
         "candidateId": str(candidate.get("candidateId") or ""),
-        "draft": dict(metadata["output"]),
-        "validation": dict(metadata["validation"]),
+        "draft": output,
+        "validation": validation,
+        "reviewable": bool(
+            validation.get("valid") is True
+            and (
+                output.get("requiresReview") is True
+                or output.get("approvalRequired") is True
+            )
+        ),
     }

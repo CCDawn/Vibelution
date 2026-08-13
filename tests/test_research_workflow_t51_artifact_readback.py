@@ -216,7 +216,24 @@ def test_knowledge_draft_readback_uses_scoped_authority_and_preserves_old_refs(
     assert payload is not None
     assert payload["candidateId"] == "draft-1"
     assert payload["draft"]["sourceTrace"]["sourceCollectionRunId"] == "sc-run-1"
+    assert payload["reviewable"] is True
     assert "knowledgeIngestion" not in payload
+
+    from core.web.services.team_workflow.research_runtime.readiness import (
+        NodeReadinessService,
+    )
+    from tests._support.readiness_fakes import FakeDomainContext, make_run
+
+    readiness_context = FakeDomainContext()
+    readiness_context._knowledge_draft = payload
+    readiness = NodeReadinessService(run_source={"wf-run-1": make_run()}.get).evaluate(
+        team_id="research-team",
+        run_id="wf-run-1",
+        node_id="knowledge_handoff",
+        context=readiness_context,
+        use_cache=False,
+    )
+    assert readiness.ready is True
 
     refs = collect_required_artifact_refs(
         "knowledge_ingestion",
@@ -284,6 +301,8 @@ def _knowledge_draft_candidate(
             "output": {
                 "title": f"Knowledge draft {candidate_id}",
                 "claims": [{"claim": f"claim-{candidate_id}"}],
+                "approvalRequired": True,
+                "requiresReview": True,
                 "sourceTrace": {
                     "teamId": team_id,
                     "sourceCollectionRunId": source_collection_run_id,
