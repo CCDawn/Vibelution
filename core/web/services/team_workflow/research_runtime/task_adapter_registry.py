@@ -30,7 +30,7 @@ SOURCE_NODE_TASKS: dict[str, tuple[str, str]] = {
 }
 
 PROJECT_NODE_TASKS: dict[str, str] = {
-    "hypothesis_design": "experiment_design",
+    "hypothesis_design": "hypothesis_design",
     "protocol_design": "experiment_design",
     "protocol_review": "experiment_evidence_review",
     "result_evaluation": "experiment_evidence_review",

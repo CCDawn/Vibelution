@@ -169,6 +169,7 @@ def _start_external_task(
     record: dict[str, Any],
     *,
     node_id: str,
+    node_run_id: str,
     agent_id: str,
     idempotency_key: str,
     payload: dict[str, Any],
@@ -227,7 +228,14 @@ def _start_external_task(
             "taskKind": task_kind,
             "agentId": agent_id,
             "idempotencyKey": idempotency_key,
-            "targetRef": str(payload.get("targetRef") or f"node-run:{node_id}"),
+            "targetRef": str(
+                payload.get("targetRef") or f"node-run:{node_run_id}"
+            ),
+            "workflowRunId": str(record.get("runId") or ""),
+            "workflowNodeId": node_id,
+            "sourceCollectionRunId": str(
+                record.get("sourceCollectionRunId") or ""
+            ),
             "returnTo": return_to,
             "returnLabel": "科研工作流",
         },
@@ -343,6 +351,7 @@ def start_agent_node_execution(
         store,
         record,
         node_id=node_id,
+        node_run_id=str(node_run.get("nodeRunId") or ""),
         agent_id=agent_id,
         idempotency_key=idempotency_key,
         payload=payload,

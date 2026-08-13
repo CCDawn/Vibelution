@@ -193,6 +193,36 @@ def test_task_start_requires_explicit_agent_to_match_team_role_snapshot(
     assert len(calls) == 1
 
 
+def test_hypothesis_task_preserves_formal_workflow_scope(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    calls = _accepted_submitter(monkeypatch)
+
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "hypothesis_design",
+            "agentId": agents["experiment_planner"]["agentId"],
+            "targetRef": "node-run:nr-run-sci-096-hypothesis_design-a5",
+            "workflowRunId": "run-sci-096",
+            "workflowNodeId": "hypothesis_design",
+            "sourceCollectionRunId": "dprun-sci-096",
+            "idempotencyKey": "hypothesis-run-sci-096-a5",
+        },
+    )
+
+    task = started["task"]
+    assert task["taskKind"] == "hypothesis_design"
+    assert task["workflowRunId"] == "run-sci-096"
+    assert task["workflowNodeId"] == "hypothesis_design"
+    assert task["sourceCollectionRunId"] == "dprun-sci-096"
+    assert task["roleLabel"] == "假设设计"
+    assert "record_hypothesis_set" in calls[0]["content"]
+    assert "本节点到 hypothesis_set 写回即结束" in calls[0]["content"]
+
 def test_iteration_task_requires_frozen_design_and_registered_result(
     tmp_path, monkeypatch
 ):

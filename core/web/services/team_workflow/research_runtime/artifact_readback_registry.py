@@ -481,6 +481,7 @@ def load_scoped_artifact_payload(
         "smoke_release",
         "frozen_protocol",
         "evaluation_report",
+        "hypothesis_set",
     }:
         from .workflow_artifact_store import load_workflow_artifact_payload
 
