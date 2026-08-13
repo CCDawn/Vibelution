@@ -289,7 +289,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
         }),
       reportState: (state) => reportManagedWindowState(paths, bootstrap, state),
       shouldInterceptLauncherClose: () => !shutdownApproved,
-      shouldInterceptWorkbenchClose: () => true,
+      shouldInterceptWorkbenchClose: () => !shutdownApproved,
       onWorkbenchCloseRequest: () =>
         requestTransactionalWorkbenchClose(paths, bootstrap).catch((error: unknown) =>
           handleTransactionalWorkbenchCloseFailure(paths, bootstrap, error)
