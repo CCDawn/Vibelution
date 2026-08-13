@@ -49,6 +49,7 @@ describe("AgentContextMenu", () => {
   it("hides archive for protected Agents and exposes pending state for eligible Agents", () => {
     expect(agentCanArchiveFromContextMenu(agent({ protected: true }))).toBe(false);
     expect(agentCanArchiveFromContextMenu(agent({ fixedRole: true }))).toBe(false);
+    expect(agentCanArchiveFromContextMenu(agent({ researchOrgRole: "capability_steward" }))).toBe(false);
     expect(agentCanArchiveFromContextMenu(agent())).toBe(true);
     expect(menuSource).toContain("agentCanArchiveFromContextMenu(state.agent)");
     expect(menuSource).toContain("canArchive");

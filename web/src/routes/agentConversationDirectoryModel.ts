@@ -1,4 +1,5 @@
 import type { AgentInstance, SessionSummary, Team } from "../api/types";
+import { agentArchiveProtected } from "./agentArchiveProtection";
 import {
   buildConversationTeamLookup,
   isConfiguredConversationIndexTeam,
@@ -8,10 +9,11 @@ import {
 /**
  * Left-rail Agent directory partitioning.
  *
- * - conversation: pure chat agents with no team membership
+ * - conversation: pure chat agents with no team membership and no archive protection
  * - team blocks: every non-archived team with members or linked room
  *   (includes research + evolution system teams so their chats leave 未归属)
- * - special: non-conversation agents with no team membership
+ * - special: non-conversation agents with no team membership, including
+ *   unassigned archive-protected research-org / system roles
  */
 
 export type AgentDirectoryBucket = "conversation" | "team" | "special";
@@ -45,8 +47,11 @@ export function isEligibleDirectoryAgent(agent: AgentInstance) {
   );
 }
 
-/** Pure conversation entry: chat mode without a specialized role. */
+/** Pure conversation entry: chat mode without a specialized or protected role. */
 export function isConversationDirectoryAgent(agent: AgentInstance) {
+  if (agentArchiveProtected(agent)) {
+    return false;
+  }
   const primaryMode = String(agent.primaryMode || "").trim();
   const roleKey = String(agent.roleKey || "").trim();
   return primaryMode === "chat" && !roleKey;
