@@ -64,5 +64,40 @@ def test_relation_prompt_candidate_relations_materialize_as_candidate_graph_edge
             "targetCandidateId": "source-theme:theme-baseline",
             "relation": "compares_against",
             "edgeState": "candidate_only",
+            "evidenceRefs": ["record-a#p4"],
+        }
+    ]
+
+
+def test_relation_prompt_candidate_graph_predicate_preserves_evidence_refs() -> None:
+    payload = _source_collection_stage_writeback_agent_graph_payload(
+        {
+            "candidateGraph": {
+                "nodes": [
+                    {"id": "candidate-source-a", "type": "source"},
+                    {"id": "theme-temporal", "type": "theme"},
+                ],
+                "edges": [
+                    {
+                        "from": "candidate-source-a",
+                        "to": "theme-temporal",
+                        "predicate": "supports_temporal_coding",
+                        "evidenceRefs": ["record-a#results"],
+                    }
+                ],
+            }
+        }
+    )
+
+    graph = _merge_source_collection_stage_writeback_agent_graph({}, payload)
+
+    assert graph["summary"]["edgeCount"] == 1
+    assert graph["edges"] == [
+        {
+            "sourceCandidateId": "candidate-source-a",
+            "targetCandidateId": "theme-temporal",
+            "relation": "supports_temporal_coding",
+            "edgeState": "candidate_only",
+            "evidenceRefs": ["record-a#results"],
         }
     ]
