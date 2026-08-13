@@ -126,7 +126,7 @@ describe("AgentSessionTabStrip", () => {
     expect(agentSessionStatusTone("failed_runtime")).toBe("error");
     expect(agentSessionStatusTone("blocked")).toBe("error");
     expect(agentSessionStatusTone("idle")).toBe("none");
-    expect(agentSessionStatusTone("ready")).toBe("completed");
+    expect(agentSessionStatusTone("ready")).toBe("none");
     expect(agentSessionStatusTone("completed")).toBe("completed");
     expect(agentSessionStatusTone("needs_continue")).toBe("completed");
     expect(agentSessionStatusTone("running", { needsApproval: true })).toBe("approval");

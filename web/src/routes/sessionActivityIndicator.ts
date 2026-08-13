@@ -6,6 +6,10 @@
  * Red light      = error
  * Blue light     = completed (unread); clears after read
  * No indicator   = idle / already read
+ *
+ * `ready` is the persisted resting state after a successful turn, not an
+ * unread event. Historical ready sessions stay idle until a previously read
+ * session gets a new activity stamp.
  */
 
 export type SessionActivityTone = "running" | "approval" | "error" | "completed" | "none";
@@ -86,6 +90,20 @@ export function isSessionActivitySeen(sessionId: string, stamp: string) {
     return false;
   }
   return readSeenMap()[id] === activityStamp;
+}
+
+export function hasPriorSessionActivitySeen(sessionId: string) {
+  const id = String(sessionId || "").trim();
+  if (!id) {
+    return false;
+  }
+  return Boolean(String(readSeenMap()[id] || "").trim());
+}
+
+/** Idle resting state after a successful turn, not an unread completion. */
+export function sessionIsIdleRestingStatus(value: string | null | undefined) {
+  const status = String(value ?? "").trim().toLowerCase();
+  return status === "ready" || status === "idle";
 }
 
 export function sessionIsErrorStatus(value: string | null | undefined) {
@@ -210,14 +228,20 @@ export function resolveSessionActivityTone(
   if (options?.isRuntimeRunning && !sessionIsCompletedStatus(status)) {
     return "running";
   }
-  if (sessionIsCompletedStatus(status) || Number(session.agentInboxPendingCount || 0) > 0) {
+  const inboxPending = Number(session.agentInboxPendingCount || 0) > 0;
+  if (sessionIsCompletedStatus(status) || inboxPending) {
     if (options?.isActive) {
       return "none";
     }
+    const sessionId = String(session.id || "");
     const stamp = sessionActivityStamp(session);
-    if (!isSessionActivitySeen(String(session.id || ""), stamp)) {
-      return "completed";
+    if (isSessionActivitySeen(sessionId, stamp)) {
+      return "none";
     }
+    if (!inboxPending && sessionIsIdleRestingStatus(status) && !hasPriorSessionActivitySeen(sessionId)) {
+      return "none";
+    }
+    return "completed";
   }
   return "none";
 }
