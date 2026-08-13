@@ -125,8 +125,8 @@ Vibelution/
 
 | # | 优先级 | 任务描述 | 状态 |
 |---|--------|----------|------|
-| 1 | P0 | 拆分 `core/web/services/session_service.py`（~1.3w 行）按域抽出 | 📋 待办 |
-| 2 | P0 | 拆分 `web/src/routes/ChatCodingRoute.tsx`（~6.4k 行） | 📋 待办 |
+| 1 | P0 | 拆分 `core/web/services/session_service.py`（~1.3w 行）按域抽出 | ✅ 已完成（facade 现 ~1.35k 行，业务在 `session/` pack） |
+| 2 | P0 | 拆分 `web/src/routes/ChatCodingRoute.tsx`（~6.4k 行） | ✅ 已完成（route 现为薄壳，实现拆至 `chat/ChatCodingRouteWorkbench.tsx`） |
 | 3 | P1 | 给 `log_info/` / `.runtime/` / `backups/` 落地本地 retention 策略 | 📋 进行中 |
 | 4 | P1 | 生产环境锁定 Python 3.11–3.12 并文档化 CI 镜像 | 📋 待办 |
 | 5 | P2 | 明确 `挑战杯/` 子项目归属：保留当前根目录入口或迁移前同步 flow 站点与项目记忆 | 📋 待决策 |
@@ -155,7 +155,7 @@ Vibelution/
 - [x] 索引与 README 已与当前目录树对齐（持续随提交更新）
 - [x] 测试套件：`tests/test_*.py` 按功能面持续增长，数量以 `tests/README.md` 中的统计命令为准
 - [ ] agent.py 体量偏大，按任务表继续收敛
-- [ ] 超大单文件（session_service.py / ChatCodingRoute.tsx）尚未拆分
+- [x] 超大单文件（session_service.py / ChatCodingRoute.tsx）已拆分收尾
 
 ---
 
