@@ -14,16 +14,19 @@ function resolveWithFiles(input: {
   userDataRoot?: string;
   resourcesRoot?: string;
   files?: Record<string, string>;
+  existingFiles?: string[];
 }) {
   const userDataRoot = input.userDataRoot ?? "C:/Users/17533/AppData/Roaming/Vibelution";
   const resourcesRoot = input.resourcesRoot ?? "C:/Users/17533/Desktop/Vibelution/dist/desktop/win-unpacked/resources";
   const files = new Map(Object.entries(input.files ?? {}));
+  const existing = new Set((input.existingFiles ?? []).map((path) => path.replace(/\\/g, "/")));
   return resolveDesktopLaunchSettings({
     env: input.env ?? {},
     cliArgs: parseDesktopCliArgs(input.argv ?? []),
     userDataRoot,
     resourcesRoot,
-    readTextFile: (path) => files.get(path) ?? null
+    readTextFile: (path) => files.get(path) ?? null,
+    fileExists: (path) => existing.has(path.replace(/\\/g, "/"))
   });
 }
 
@@ -162,5 +165,17 @@ describe("desktop launch settings", () => {
     expect(settings.configPath).toBe(profile.operatorConfigPath);
     expect(settings.pythonPath).toBe(profile.pythonPath);
     expect(settings.profileError).toBe("");
+  });
+
+  it("falls back to the workspace venv interpreter when no env or profile python is set", () => {
+    const workspaceRoot = "C:/Users/17533/Desktop/Vibelution";
+    const venvPython = join(workspaceRoot, ".venv", "Scripts", "python.exe");
+
+    const settings = resolveWithFiles({
+      argv: ["--workspace", workspaceRoot],
+      existingFiles: [venvPython]
+    });
+
+    expect(settings.pythonPath.replace(/\\/g, "/")).toBe(venvPython.replace(/\\/g, "/"));
   });
 });
