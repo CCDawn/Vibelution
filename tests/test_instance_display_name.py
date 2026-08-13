@@ -36,6 +36,18 @@ def test_retired_uses_retired_prefix():
     assert instance_short_name_base(kind="retired", slug="shell-only", path_name="shell-only") == "retired+shell-only"
 
 
+def test_detached_worktree_falls_back_to_slug():
+    assert (
+        instance_short_name_base(
+            kind="worktree",
+            branch="detached",
+            slug="fix-composer-dialog-chrome",
+            path_name="fix-composer-dialog-chrome",
+        )
+        == "branch+fix-composer-dialog-chrome"
+    )
+
+
 def test_assign_names_disambiguates_collisions_and_marks_current():
     items = [
         {"id": "main", "kind": "main", "branch": "main", "path": "", "current": True},
