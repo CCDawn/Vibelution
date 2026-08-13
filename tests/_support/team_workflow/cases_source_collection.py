@@ -1372,6 +1372,10 @@ def test_source_collection_stage_task_records_high_roi_runtime_events(tmp_path, 
             "idempotencyKey": "stage-click",
         },
     )
+    # Once the canonical task/session/turn exists, an idempotent replay must
+    # reuse that anchor without consulting the mutable Agent directory again.
+    # This is the production outbox retry path after a long-running turn wait.
+    monkeypatch.setattr(agent_directory_service, "get_agent", lambda _agent_id: None)
     reused = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_response["run"]["runId"],
