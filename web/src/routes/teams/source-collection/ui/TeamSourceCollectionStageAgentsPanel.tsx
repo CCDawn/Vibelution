@@ -21,11 +21,13 @@ export type TeamSourceCollectionStageAgentCard = {
 type TeamSourceCollectionStageAgentsPanelProps = {
   lang: TeamSourceCollectionStageAgentsLang;
   agents: TeamSourceCollectionStageAgentCard[];
+  layout?: "inline" | "stacked";
 };
 
 export function TeamSourceCollectionStageAgentsPanel({
   lang,
   agents,
+  layout = "inline",
 }: TeamSourceCollectionStageAgentsPanelProps) {
   if (!agents.length) {
     return null;
@@ -33,7 +35,11 @@ export function TeamSourceCollectionStageAgentsPanel({
   const isZh = lang === "zh";
 
   return (
-    <section className={styles.sourceCollectionStageAgentPanel} aria-label={isZh ? "当前步骤 Agent 配置" : "Current step Agent configuration"}>
+    <section
+      className={styles.sourceCollectionStageAgentPanel}
+      aria-label={isZh ? "当前步骤 Agent 配置" : "Current step Agent configuration"}
+      data-layout={layout}
+    >
       <div className={styles.sourceCollectionStageAgentHeader}>
         <strong>{isZh ? "Agent 配置" : "Agent configuration"}</strong>
       </div>
@@ -43,10 +49,14 @@ export function TeamSourceCollectionStageAgentsPanel({
             key={agent.id}
             className={[
               styles.sourceCollectionStageAgentCard,
+              layout === "stacked" ? styles.sourceCollectionStageAgentCardStacked : "",
               styles[`researchStageAgentCard_${agent.tone}` as keyof typeof styles],
             ].filter(Boolean).join(" ")}
           >
-            <div className={styles.sourceCollectionStageAgentCardBody}>
+            <div className={[
+              styles.sourceCollectionStageAgentCardBody,
+              layout === "stacked" ? styles.sourceCollectionStageAgentCardBodyStacked : "",
+            ].filter(Boolean).join(" ")}>
               <span>
                 <small>{isZh ? "职责" : "Role"}</small>
                 <strong>{agent.roleLabel}</strong>

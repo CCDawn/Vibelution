@@ -436,7 +436,17 @@ import { VSplitWorkspace } from "@/components/vui";
 <VSplitWorkspace
   sidebar={list}
   main={detail}
-  resize={{ layoutId: WORKBENCH_LAYOUT_IDS.memory, enabled: true }}
+  resize={{
+    layoutId: WORKBENCH_LAYOUT_IDS.memory,
+    enabled: true,
+    collapse: {
+      sidebar: {
+        separatorLabel: "调整列表栏宽度",
+        collapseLabel: "收起列表栏",
+        expandLabel: "展开列表栏",
+      },
+    },
+  }}
 />
 ```
 
@@ -444,6 +454,7 @@ import { VSplitWorkspace } from "@/components/vui";
 | --- | --- | --- |
 | sidebar / main / aside | 列 | 空列勿占宽 |
 | resize.layoutId | 宽度记忆 | 仅 registry id |
+| resize.collapse | 可选 sidebar / aside 收起 | 复用 `PaneCollapseHandle`；标签由消费者提供；收起不覆盖已记忆宽度 |
 | columnsClassName | 固定列模板覆盖 | 默认列宽带 16rem 回退，未注入页面变量时仍保持桌面横向分栏 |
 
 ### 实现落点
