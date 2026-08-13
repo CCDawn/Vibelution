@@ -417,12 +417,16 @@ class ChallengeCupGraphCoordinator:
         """Retry from the persisted checkpoint with one fresh interrupt.
 
         A retry must not append another ``interrupt()`` position inside the
-        same LangGraph task.  Doing that works once, then the next restart
-        marker is consumed as the prior attempt's receipt.  Replaying the
-        explicit checkpoint with a state-only Command is LangGraph's
-        time-travel branch: cached task resumes/errors are discarded, the
-        already scheduled node runs once, and its sole interrupt is rebuilt
-        from the new attempt counter.
+        same LangGraph task.  A checkpoint can also retain pending writes from
+        a failed resume while exposing an empty current task queue.  Invoking
+        a state-only ``Command`` on that checkpoint merges those stale writes
+        with the retry update and can either replay the old receipt or raise
+        ``INVALID_CONCURRENT_GRAPH_UPDATE``.
+
+        Create an explicit time-travel checkpoint with ``update_state`` (never
+        ``as_node``), then invoke that new checkpoint with ``None``.  This
+        discards cached task resumes/errors and rebuilds exactly one interrupt
+        from the Ledger attempt authority.
         """
         graph, stack = self._compile()
         try:
@@ -439,16 +443,15 @@ class ChallengeCupGraphCoordinator:
                     "checkpoint cannot be replayed for requested node: "
                     f"expected {dispatch.node_id}, found {sorted(interrupted_nodes)}"
                 )
-            result = graph.invoke(
-                Command(
-                    update={
-                        "active_node_id": dispatch.node_id,
-                        "active_attempt": dispatch.attempt,
-                        "node_attempts": {dispatch.node_id: dispatch.attempt},
-                    },
-                ),
+            replay_config = graph.update_state(
                 state.config,
+                {
+                    "active_node_id": dispatch.node_id,
+                    "active_attempt": dispatch.attempt,
+                    "node_attempts": {dispatch.node_id: dispatch.attempt},
+                },
             )
+            result = graph.invoke(None, replay_config)
             return self._dispatch_result(dispatch, result, graph)
         finally:
             stack.close()
