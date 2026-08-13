@@ -10,10 +10,15 @@ import { VUI_PAGE_BODY_FILL_CLASS } from "./pageRecipeClasses";
 export type VDenseOpsPageProps = Omit<ComponentPropsWithoutRef<"section">, "children"> & {
   ariaLabel?: string;
   eyebrow?: ReactNode;
-  title: ReactNode;
+  title?: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
   headerClassName?: string;
+  /**
+   * Skip the route header entirely. Use when the window chrome already names
+   * the surface (e.g. desktop Launcher) so an in-page title would waste space.
+   */
+  hideHeader?: boolean;
   /**
    * Dense ops toolbar (filters, bulk actions) wrapped in VToolbar.
    * Prefer `toolbarSlot` when the slot is already a strip (e.g. VMetricStrip).
@@ -49,6 +54,7 @@ export function VDenseOpsPage({
   meta,
   actions,
   headerClassName,
+  hideHeader = false,
   toolbar,
   toolbarAriaLabel = "Operations",
   toolbarSlot,
@@ -66,15 +72,18 @@ export function VDenseOpsPage({
       className={className}
       data-vui-recipe="dense-ops-page"
       fill={fill}
+      fillLayout={hideHeader && fill ? "stack" : "header-body"}
       {...props}
     >
-      <VRouteHeader
-        className={headerClassName}
-        eyebrow={eyebrow}
-        title={title}
-        meta={meta}
-        actions={actions}
-      />
+      {hideHeader ? null : (
+        <VRouteHeader
+          className={headerClassName}
+          eyebrow={eyebrow}
+          title={title ?? ""}
+          meta={meta}
+          actions={actions}
+        />
+      )}
       {toolbarSlot ? (
         <div data-vui-recipe="dense-ops-toolbar" className="min-w-0 shrink-0">
           {toolbarSlot}

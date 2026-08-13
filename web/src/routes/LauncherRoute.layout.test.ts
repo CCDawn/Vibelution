@@ -601,6 +601,9 @@ describe("LauncherRoute layout contract", () => {
     expect(branchIndex).toBeGreaterThan(pageStart);
     expect(settingsIndex).toBeGreaterThan(branchIndex);
     expect(routeSource.slice(pageStart, branchIndex)).not.toContain("actions=");
+    expect(routeSource.slice(pageStart, branchIndex)).toContain("hideHeader");
+    expect(routeSource.slice(pageStart, branchIndex)).not.toContain("eyebrow={copy.eyebrow}");
+    expect(routeSource.slice(pageStart, branchIndex)).not.toContain("title={copy.title}");
   });
 
   it("lets Launcher own startup settings without restarting immediately", () => {
