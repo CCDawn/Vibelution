@@ -126,8 +126,14 @@ export function instanceWindowOpen(item: LauncherBranchInstance, live?: Instance
 }
 
 export function canStartInstance(item: LauncherBranchInstance, live?: InstanceLiveOverlay): boolean {
+  if (!item.checkedOut || item.kind === "retired" || item.kind === "local_branch") {
+    return false;
+  }
   const health = instanceHealth(item, live);
-  return item.checkedOut && item.kind !== "retired" && item.kind !== "local_branch" && health !== "running";
+  if (health !== "running") {
+    return true;
+  }
+  return !instanceWindowOpen(item, live);
 }
 
 export function canStopInstance(item: LauncherBranchInstance, live?: InstanceLiveOverlay): boolean {

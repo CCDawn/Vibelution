@@ -257,7 +257,9 @@ def test_python_launcher_workbench_window_applies_vibelution_app_identity():
     assert "LAUNCHER_ICON_PATH" in source
     assert "WM_SETICON" in source
     assert "_apply_window_icon(int(hwnd), LAUNCHER_ICON_PATH)" in source
-    assert "_apply_managed_browser_app_identity(int(process.pid), \"workbench\")" in source
+    assert "_apply_managed_browser_app_identity(" in source
+    assert "start_named_workbench_browser" in source
+    assert "display_name=display_name" in source
     assert "browserAppIdentityApplied" in source
     assert "browserWindowIconApplied" in source
 
@@ -287,7 +289,7 @@ def test_python_launcher_workbench_browser_does_not_inherit_hidden_backend_spawn
     monkeypatch.setattr(
         launcher,
         "_apply_managed_browser_app_identity",
-        lambda pid, role: {"windowPid": pid, "appUserModelId": "Vibelution.Workbench"},
+        lambda pid, role, **kwargs: {"windowPid": pid, "appUserModelId": "Vibelution.Workbench"},
     )
     monkeypatch.setitem(
         sys.modules,

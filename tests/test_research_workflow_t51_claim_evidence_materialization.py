@@ -91,6 +91,64 @@ def test_materializes_only_exactly_anchored_claims_into_canonical_store(
     assert len(ClaimEvidenceStore(tmp_path).list("team-a")) == 1
 
 
+def test_materializes_canonical_key_findings_without_requiring_parallel_claims(
+    tmp_path: Path,
+) -> None:
+    task = {
+        "taskId": "task-extract-key-findings",
+        "teamId": "team-a",
+        "runId": "sc-run-a",
+        "stageId": "extraction",
+        "agentId": "agent-a",
+        "result": {
+            "candidateExtractions": [
+                {
+                    "candidateId": "candidate-key-finding",
+                    "decision": "keep",
+                    "evidenceStatus": "anchored",
+                    "keyFindings": [
+                        {
+                            "finding": "Temporal and rate codes can be multiplexed.",
+                            "quote": "Synchronous and asynchronous spiking can multiplex temporal and rate coding.",
+                            "sourceRef": "https://example.org/paper-key-finding",
+                            "evidenceRef": "Abstract",
+                        }
+                    ],
+                },
+                {
+                    "candidateId": "candidate-unanchored",
+                    "decision": "keep",
+                    "evidenceStatus": "missing_evidence_anchor",
+                    "keyFindings": [
+                        {
+                            "finding": "This summary has no acceptable anchor.",
+                            "sourceRef": "https://example.org/paper-unanchored",
+                        }
+                    ],
+                },
+            ]
+        },
+    }
+
+    created = materialize_claim_evidence_from_task(
+        project_root=tmp_path,
+        team_id="team-a",
+        workflow_run_id="wf-run-a",
+        source_collection_run_id="sc-run-a",
+        task=task,
+        model_ref="provider/model-a",
+    )
+
+    assert len(created) == 1
+    assert created[0]["candidateId"] == "candidate-key-finding"
+    assert created[0]["quote"].startswith("Synchronous and asynchronous")
+    assert created[0]["locator"] == {
+        "kind": "evidence_ref",
+        "anchor": "Abstract",
+        "url": "https://example.org/paper-key-finding",
+    }
+
+
 def test_rejects_cross_run_task_materialization(tmp_path: Path) -> None:
     with pytest.raises(EvidenceMaterializationError, match="source collection run"):
         materialize_claim_evidence_from_task(
