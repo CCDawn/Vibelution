@@ -107,6 +107,7 @@ import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
 installBrokenPipeGuards();
 
 const DESKTOP_ACTION_POLL_MS = 2000;
+const DESKTOP_ACTION_WAIT_MS = 1750;
 const DESKTOP_ACTION_LEASE_SECONDS = 30;
 const RUNTIME_SCENE_MAX_BUFFERED_EVENTS = 50;
 const DESKTOP_SESSION_HEARTBEAT_MS = 15000;
@@ -433,6 +434,7 @@ function startDesktopActionLoop(
       const result = await runDesktopActionOnce({
         ...context,
         leaseSeconds: DESKTOP_ACTION_LEASE_SECONDS,
+        waitMs: DESKTOP_ACTION_WAIT_MS,
         operations: {
           openOrFocusWorkbench: (payload) => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, payload),
           focusWorkbench: () => provider.focusWorkbench(),
