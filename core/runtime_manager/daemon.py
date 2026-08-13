@@ -2644,10 +2644,7 @@ class RuntimeManagerDaemon:
         self._idle_reconcile_error: Exception | None = None
 
     def _idle_reconcile_observation(self) -> dict[str, Any]:
-        observation = observe_workbench(recover_browser_window=False)
-        if str(observation.get("lifecycleConsistency") or "").strip() == "browser_missing":
-            return observe_workbench()
-        return observation
+        return observe_workbench(recover_browser_window=False)
 
     def _start_idle_reconcile_probe(self, observation: dict[str, Any]) -> bool:
         with self._idle_reconcile_lock:
@@ -2664,11 +2661,14 @@ class RuntimeManagerDaemon:
             result: dict[str, Any] | None = None
             error: Exception | None = None
             try:
+                recovered_observation = observation_snapshot
+                if str(observation_snapshot.get("lifecycleConsistency") or "").strip() == "browser_missing":
+                    recovered_observation = observe_workbench()
                 result = {
-                    "observation": observation_snapshot,
+                    "observation": recovered_observation,
                     "residualProcesses": residual_process_payload(
                         project_root=PROJECT_ROOT,
-                        exclude_pids=_snapshot_residual_excluded_pids(observation_snapshot, self._pid),
+                        exclude_pids=_snapshot_residual_excluded_pids(recovered_observation, self._pid),
                     ),
                 }
             except Exception as exc:  # noqa: BLE001 - surfaced on the command loop thread

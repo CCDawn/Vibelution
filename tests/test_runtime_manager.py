@@ -2007,6 +2007,42 @@ def test_idle_reconcile_probe_discards_result_after_lifecycle_command(monkeypatc
     assert runtime_daemon._take_idle_reconcile_probe() is None
 
 
+def test_idle_reconcile_probe_recovers_missing_browser_off_command_loop(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    full_probe_started = threading.Event()
+    release_full_probe = threading.Event()
+    calls: list[bool] = []
+
+    def fake_observe_workbench(*, recover_browser_window=True):
+        calls.append(recover_browser_window)
+        if not recover_browser_window:
+            return {"observedState": "partial", "lifecycleConsistency": "browser_missing"}
+        full_probe_started.set()
+        assert release_full_probe.wait(timeout=2.0)
+        return {"observedState": "open", "lifecycleConsistency": "consistent", "browserWindowAlive": True}
+
+    monkeypatch.setattr(daemon, "observe_workbench", fake_observe_workbench)
+    monkeypatch.setattr(daemon, "_snapshot_residual_excluded_pids", lambda *_args, **_kwargs: set())
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **_kwargs: {"count": 0, "items": []})
+
+    observation = runtime_daemon._idle_reconcile_observation()
+    assert calls == [False]
+    assert runtime_daemon._start_idle_reconcile_probe(observation) is True
+    assert full_probe_started.wait(timeout=1.0)
+    assert runtime_daemon._take_idle_reconcile_probe() is None
+
+    release_full_probe.set()
+    deadline = time.time() + 2.0
+    result = None
+    while result is None and time.time() < deadline:
+        result = runtime_daemon._take_idle_reconcile_probe()
+        time.sleep(0.01)
+
+    assert calls == [False, True]
+    assert result is not None
+    assert result["observation"]["lifecycleConsistency"] == "consistent"
+
+
 def test_run_forever_claims_command_while_idle_process_probe_is_running(monkeypatch, tmp_path):
     class StopLoop(Exception):
         pass
