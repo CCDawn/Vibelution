@@ -39,6 +39,21 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain("focusExistingDesktopShell()");
   });
 
+  it("recovers the desktop session before a second-instance Workbench open", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const helperIndex = source.indexOf("async function requestOpenWorkbenchFromSecondInstance()");
+    const recoveryIndex = source.indexOf(
+      'recoverDesktopControlContext(paths, bootstrap, provider, "second_instance_open_workbench")',
+      helperIndex
+    );
+    const openIndex = source.indexOf("await provider.openOrFocusWorkbench()", helperIndex);
+
+    expect(helperIndex).toBeGreaterThan(0);
+    expect(recoveryIndex).toBeGreaterThan(helperIndex);
+    expect(openIndex).toBeGreaterThan(recoveryIndex);
+    expect(source).toContain("void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {");
+  });
+
   it("opens the Launcher window on a bare first launch and does not quit when python is missing", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
