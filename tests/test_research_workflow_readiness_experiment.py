@@ -32,9 +32,28 @@ def test_hypothesis_design_blocks_without_accepted_handoff() -> None:
     assert any(b.code == "knowledge_handoff_not_accepted" for b in result.blockers)
 
 
-def test_hypothesis_design_ready_with_accepted_handoff_even_without_parallel_package_flag() -> None:
+def test_hypothesis_design_blocks_when_accepted_handoff_has_no_materialized_package() -> None:
     context = FakeDomainContext()
-    context._knowledge_package = {"accepted": False}
+    context._knowledge_package = None
+    context.handoffs["hypothesis_design"] = [
+        HandoffSnapshot(
+            handoff_id="ho-knowledge-hypothesis",
+            from_node_run_id="nr-knowledge-handoff-a1",
+            status="accepted",
+        )
+    ]
+    result = _evaluate(context, "hypothesis_design")
+    assert result.ready is False
+    assert any(b.code == "knowledge_package_not_materialized" for b in result.blockers)
+    assert "knowledge_package" in context.calls
+
+
+def test_hypothesis_design_ready_with_accepted_handoff_and_materialized_package() -> None:
+    context = FakeDomainContext()
+    context._knowledge_package = {
+        "accepted": True,
+        "knowledgeItems": [{"knowledgeItemId": "ki-1", "contentHash": "a" * 64}],
+    }
     context.handoffs["hypothesis_design"] = [
         HandoffSnapshot(
             handoff_id="ho-knowledge-hypothesis",
@@ -44,7 +63,7 @@ def test_hypothesis_design_ready_with_accepted_handoff_even_without_parallel_pac
     ]
     result = _evaluate(context, "hypothesis_design")
     assert result.ready is True
-    assert "knowledge_package" not in context.calls
+    assert "knowledge_package" in context.calls
 
 
 def test_protocol_design_blocks_without_hypotheses() -> None:

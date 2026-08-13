@@ -463,6 +463,16 @@ def load_scoped_artifact_payload(
             content_hash=content_hash,
         )
 
+    if normalized_kind == "knowledge_package":
+        from .knowledge_artifact_authority import load_knowledge_package_payload
+
+        return load_knowledge_package_payload(
+            team_id=normalized_team,
+            authority_run_id=normalized_authority,
+            workflow_run_id=normalized_workflow,
+            content_hash=content_hash,
+        )
+
     # Experiment / result-package / smoke kinds: formal workflow_artifact_store.
     if normalized_kind in {
         "run_artifacts",
