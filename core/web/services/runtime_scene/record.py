@@ -2666,6 +2666,7 @@ def record_runtime_scene_event(
     lifecycle: bool = False,
     occurred_at: str = "",
     allow_recent_completed: bool = False,
+    refresh_package_if_due: bool = True,
 ) -> dict[str, Any]:
     """Append one structured service/runtime event into the active runtime scene package."""
     try:
@@ -2683,6 +2684,7 @@ def record_runtime_scene_event(
             lifecycle=lifecycle,
             occurred_at=occurred_at,
             allow_recent_completed=allow_recent_completed,
+            refresh_package_if_due=refresh_package_if_due,
         )
     except Exception as exc:
         _debug_logger.warning(
@@ -2708,6 +2710,7 @@ def _record_runtime_scene_event_impl(
     lifecycle: bool = False,
     occurred_at: str = "",
     allow_recent_completed: bool = False,
+    refresh_package_if_due: bool = True,
 ) -> dict[str, Any]:
     """Append one structured service/runtime event into the active runtime scene package."""
     s = _service()
@@ -2778,8 +2781,11 @@ def _record_runtime_scene_event_impl(
         event_payload["lifecycle"] = True
     s._append_scene_event(scene_dir, component_name, event_payload)
 
-    # 节流刷新活跃场景的 summary/package_index，保证诊断入口始终新鲜（常规事件也补齐）
-    s._refresh_active_scene_package_if_due(scene_dir)
+    # 节流刷新活跃场景的 summary/package_index，保证诊断入口始终新鲜（常规事件也补齐）。
+    # Launcher / Runtime Manager 生命周期热路径可以只追加持久事件；明确的
+    # warning/error 仍会在下方走即时完整投影。
+    if refresh_package_if_due:
+        s._refresh_active_scene_package_if_due(scene_dir)
 
     projection_refresh = "deferred"
     requires_projection_lock = s._runtime_scene_event_requires_immediate_projection(
