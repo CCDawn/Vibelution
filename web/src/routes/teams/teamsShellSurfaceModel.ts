@@ -20,11 +20,6 @@ export type TeamsShellSurfaceModelInput = {
   researchCanvasVisible: boolean;
   researchCanvasReadOnly: boolean;
   teamDetailErrorMessage: string;
-  visibleTeamSummary: {
-    activeTeamCount: number | string;
-    memberCount: number | string;
-    staleMemberCount: number;
-  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   styles: Record<string, string>;
 };
@@ -46,7 +41,6 @@ export function buildTeamsShellSurfaceModel(input: TeamsShellSurfaceModelInput) 
     researchCanvasVisible,
     researchCanvasReadOnly,
     teamDetailErrorMessage,
-    visibleTeamSummary,
     styles,
   } = input;
 
@@ -63,10 +57,6 @@ export function buildTeamsShellSurfaceModel(input: TeamsShellSurfaceModelInput) 
   const showTeamDetailUnavailableSurface =
     !showTeamInitialLoadingSurface && !showTeamUnavailableSurface && selectedTeamDetailUnavailable && !researchWorkflowTeamSelected;
 
-  const teamInitialLoadingTitle = lang === "zh" ? "正在读取团队" : "Loading teams";
-  const teamInitialLoadingMessage = lang === "zh"
-    ? "正在连接团队索引；画布和检查器会在数据返回后原位补齐。"
-    : "Connecting to the team index. The canvas and inspector will fill in place when data arrives.";
   const teamUnavailableTitle = teamListUnavailable
     ? (lang === "zh" ? "团队数据不可用" : "Team data unavailable")
     : (lang === "zh" ? "团队尚未初始化" : "Teams are not initialized");
@@ -99,27 +89,7 @@ export function buildTeamsShellSurfaceModel(input: TeamsShellSurfaceModelInput) 
     ?? (teamListInitialLoading
       ? (lang === "zh" ? "正在读取团队" : "Loading teams")
       : (lang === "zh" ? "暂无团队" : "No team"));
-  const teamSummaryLoadingText = lang === "zh" ? "读取中" : "loading";
   const teamSummaryUnavailableText = lang === "zh" ? "不可用" : "unavailable";
-  const teamListMetricLoadingLabel = lang === "zh" ? "正在读取团队指标" : "Loading team metrics";
-  const teamSummaryStatusItems = [
-    {
-      label: lang === "zh" ? "团队" : "Teams",
-      value: teamListInitialLoading ? teamSummaryLoadingText : visibleTeamSummary.activeTeamCount,
-      tone: "info" as const,
-    },
-    {
-      label: lang === "zh" ? "成员" : "Members",
-      value: teamListInitialLoading ? teamSummaryLoadingText : visibleTeamSummary.memberCount,
-      tone: "success" as const,
-    },
-    {
-      label: lang === "zh" ? "失效" : "Stale",
-      value: teamListInitialLoading ? teamSummaryLoadingText : visibleTeamSummary.staleMemberCount,
-      tone: visibleTeamSummary.staleMemberCount > 0 ? "warning" as const : "neutral" as const,
-    },
-    { label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
-  ];
 
   // Class tokens retained for layout contract stability (composers own live layout).
   const workspaceClassName = [
@@ -150,8 +120,6 @@ export function buildTeamsShellSurfaceModel(input: TeamsShellSurfaceModelInput) 
     researchTeamDetailDegraded,
     showTeamLoadingSurface,
     showTeamDetailUnavailableSurface,
-    teamInitialLoadingTitle,
-    teamInitialLoadingMessage,
     teamUnavailableTitle,
     teamUnavailableMessage,
     teamUnavailableDetail,
@@ -161,10 +129,7 @@ export function buildTeamsShellSurfaceModel(input: TeamsShellSurfaceModelInput) 
     teamWorkspaceUnavailableMessage,
     teamWorkspaceUnavailableDetail,
     teamContextMeta,
-    teamSummaryLoadingText,
     teamSummaryUnavailableText,
-    teamListMetricLoadingLabel,
-    teamSummaryStatusItems,
     workspaceClassName,
     canvasPanelClassName,
     inspectorClassName,
