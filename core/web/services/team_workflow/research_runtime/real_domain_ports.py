@@ -303,9 +303,17 @@ def _create_real_agent_task(
         from core.web.services.team_workflow.research_project_agent_tasks import (
             start_research_project_agent_task,
         )
+        from . import experiment_stage_bootstrap
 
         if not project_id:
             raise RuntimeError("input snapshot has no projectId")
+        experiment_stage_bootstrap.ensure_experiment_stage_round_for_agent_node(
+            node_id=action.node_id,
+            team_id=team_id,
+            project_id=project_id,
+            input_snapshot=input_snapshot,
+            requested_by_agent=binding.agent_id,
+        )
         started = start_research_project_agent_task(
             team_id,
             project_id,
