@@ -68,6 +68,7 @@ def stage_agent_session_purge(
     timestamp = s._now_timestamp()
     restore_token: dict[str, Any] | None = None
     session_ids: list[str] = []
+    replacement_snapshot: dict[str, Any] | None = None
     with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
         payload = s.load_chat_state(s.PROJECT_ROOT)
         conversations = payload.get("conversations")
@@ -129,6 +130,11 @@ def stage_agent_session_purge(
         payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
         payload["updated_at"] = timestamp
         s.save_chat_state(s.PROJECT_ROOT, payload)
+        replacement_id = str((restore_token or {}).get("createdReplacementSessionId") or "").strip()
+        if replacement_id:
+            entry = s._find_conversation_entry(payload, replacement_id)
+            if isinstance(entry, dict):
+                replacement_snapshot = dict(entry)
 
     staging_roots: list[Path] = []
     workspace_moves: list[dict[str, str]] = []
@@ -219,6 +225,12 @@ def stage_agent_session_purge(
         restore_token["stagingRoot"] = str(staging_roots[0]) if staging_roots else ""
         restore_token["stagingRoots"] = [str(path) for path in staging_roots]
     s._invalidate_session_list_cache()
+    from . import directory_bridge
+
+    for session_id in session_ids:
+        directory_bridge.archive_directory_session_safe(session_id)
+    if replacement_snapshot is not None:
+        directory_bridge.sync_conversation_record(replacement_snapshot)
     result = {
         "status": "staged",
         "agentId": normalized_agent_id,
@@ -2189,6 +2201,7 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
 
     next_active_id = ""
+    replacement_snapshot: dict[str, Any] | None = None
     with s._CHAT_STATE_LOCK:
         payload = timed("load_state", lambda: s.load_chat_state(s.PROJECT_ROOT))
         timed(
@@ -2317,6 +2330,7 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             remaining = [
                 replacement_conversation
             ]
+            replacement_snapshot = dict(replacement_conversation)
 
         now = s._now_timestamp()
         payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
@@ -2362,6 +2376,8 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
     from . import directory_bridge
 
     directory_bridge.archive_directory_session_safe(conversation_id)
+    if replacement_snapshot is not None:
+        directory_bridge.sync_conversation_record(replacement_snapshot)
     s._invalidate_session_list_cache()
     if target_agent and target_agent_direct_session_id == conversation_id:
         s._record_session_delete_event(

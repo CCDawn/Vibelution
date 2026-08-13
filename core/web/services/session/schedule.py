@@ -239,6 +239,9 @@ def _mark_session_turn_queued(context: dict[str, Any], *, queue_position: int) -
             conversation["updated_at"] = now
             payload["updated_at"] = now
             s.save_chat_state(s.PROJECT_ROOT, payload)
+    from . import directory_bridge
+
+    directory_bridge.touch_directory_session_safe(session_id, status="queued", wait=False)
     s._set_session_turn_progress_live_output(session_id, "queued", turn_id=turn_id)
     s._persist_chat_turn_work_run(
         session_id=session_id,
@@ -276,6 +279,9 @@ def _mark_session_turn_dequeued(context: dict[str, Any]) -> None:
             conversation["updated_at"] = now
             payload["updated_at"] = now
             s.save_chat_state(s.PROJECT_ROOT, payload)
+    from . import directory_bridge
+
+    directory_bridge.touch_directory_session_safe(session_id, status="running", wait=False)
     s._persist_chat_turn_work_run(
         session_id=session_id,
         turn_id=turn_id,
