@@ -80,6 +80,7 @@ export function snapshotToCanvasProjection(
       })),
       parentRunId: run.parentRunId,
       completionKind: (run.completionKind ?? "") as CompletionKind,
+      blockedReason: run.blockedReason ?? run.terminalReason ?? null,
     },
   };
 }
@@ -104,6 +105,7 @@ export function snapshotToRunRecord(
     events: events as Array<Record<string, unknown>>,
     completionKind: run.completionKind ?? undefined,
     terminalReason: run.terminalReason ?? undefined,
+    blockedReason: run.blockedReason ?? run.terminalReason ?? undefined,
     bindingSnapshots: (snapshot.agentBindingSummary?.bindings ?? []).map((binding) => ({
       nodeId: binding.nodeId,
       agentId: binding.agentId,

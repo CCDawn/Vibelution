@@ -20,12 +20,16 @@ from core.research.workflow.challenge_cup_runtime import (
     ChallengeCupGraphCoordinator,
     GraphDispatch,
     GraphDispatchResult,
+    action_id_for,
     build_pending_action,
     successor_map,
 )
+from core.research.workflow.contracts import ExecutionReceipt
 from core.research.workflow.ledger import WorkflowLedgerStore, outbox as outbox_api
 from core.research.workflow.transitions import NodeAttemptStatus
 
+from .block_projection import apply_node_run_block, sync_run_blocked
+from .blocked_reason import format_blocked_reason, problem_from_graph_error
 from .ids import new_id
 
 
@@ -175,6 +179,11 @@ class GraphDispatchWorker:
             self._submit(ack_only, force_flush=True).result(timeout=30)
             return True
         successor_id = successors[0]
+        snapshot = self._coordinator.snapshot(dispatch.run_id)
+        if not _graph_at_node(snapshot, successor_id):
+            # Ledger advanced (handoff accepted) but LangGraph is still at the
+            # predecessor interrupt — resume instead of forging a successor.
+            return False
         latest = self._store.latest_attempt(dispatch.run_id, successor_id)
         if latest is not None:
             # Successor already present — ack and stop.
@@ -186,7 +195,6 @@ class GraphDispatchWorker:
             self._submit(ack_only, force_flush=True).result(timeout=30)
             return True
 
-        snapshot = self._coordinator.snapshot(dispatch.run_id)
         values = dict(snapshot.get("values") or {})
         values.setdefault("run_id", dispatch.run_id)
         values.setdefault("input_snapshot_hash", dispatch.input_snapshot_hash)
@@ -344,6 +352,17 @@ class GraphDispatchWorker:
                         ),
                     )
                 )
+                problem = {
+                    "code": "auto_advance_not_ready",
+                    "detail": "; ".join(str(b.get("code") or b) for b in blockers),
+                }
+                sync_run_blocked(
+                    uow,
+                    run_id=dispatch.run_id,
+                    node_id=pending.node_id,
+                    problem=problem,
+                    now_ms=now_ms,
+                )
                 blocked_sequence = uow.repository.advance_last_sequence(
                     dispatch.run_id, 1, now_ms
                 )
@@ -362,6 +381,9 @@ class GraphDispatchWorker:
                                 "nodeRunId": pending.node_run_id,
                                 "nodeId": pending.node_id,
                                 "autoAdvanceBlocked": True,
+                                "code": problem["code"],
+                                "detail": problem["detail"],
+                                "reason": format_blocked_reason(problem),
                                 "blockers": [
                                     str(b.get("code") or b) for b in blockers
                                 ],
@@ -464,8 +486,92 @@ class GraphDispatchWorker:
         if node_id == dispatch.node_id:
             # retry：以新 attempt 重启节点，产生新的 actionId。
             return self._coordinator.restart_attempt(dispatch)
+        advanced = self._advance_lagging_checkpoint(dispatch, interrupt_node_id=node_id)
+        if advanced is not None:
+            return advanced
         raise GraphDecisionError(
             f"thread 中断于 {node_id}，但 dispatch 目标是 {dispatch.node_id}"
+        )
+
+    def _advance_lagging_checkpoint(
+        self, dispatch: GraphDispatch, *, interrupt_node_id: str
+    ) -> GraphDispatchResult | None:
+        """Resume a succeeded predecessor so retry can enter the target node."""
+        from dataclasses import replace
+
+        successors = successor_map().get(interrupt_node_id, ())
+        if dispatch.node_id not in successors:
+            return None
+        predecessor = self._store.latest_attempt(dispatch.run_id, interrupt_node_id)
+        if predecessor is None or predecessor.status != NodeAttemptStatus.SUCCEEDED.value:
+            return None
+        handoff = self._submit(
+            lambda uow: uow.repository.get_handoff_by_from_node(
+                dispatch.run_id, predecessor.node_run_id
+            ),
+            force_flush=True,
+        ).result(timeout=10)
+        if handoff is None or str(handoff[8]) != "accepted":
+            return None
+        snapshot = self._coordinator.snapshot(dispatch.run_id)
+        values = dict(snapshot.get("values") or {})
+        pending = build_pending_action(values, interrupt_node_id)
+        receipts = self._submit(
+            lambda uow: uow.repository.list_receipts_for_node_run(predecessor.node_run_id),
+            force_flush=True,
+        ).result(timeout=10)
+        receipt = ExecutionReceipt(
+            action_id=pending.action_id or action_id_for(
+                dispatch.run_id, interrupt_node_id, predecessor.attempt
+            ),
+            node_run_id=pending.node_run_id or predecessor.node_run_id,
+            outcome="succeeded",
+            artifact_receipt_ids=tuple(str(row[0]) for row in receipts),
+            execution_anchor_id=predecessor.execution_anchor_id,
+            budget_receipt_id=None,
+            problem=None,
+            completed_at_ms=int(
+                predecessor.finished_at_ms or predecessor.updated_at_ms or 0
+            ),
+        )
+        node_attempts = dict(values.get("node_attempts") or {})
+        node_attempts[interrupt_node_id] = predecessor.attempt
+        node_attempts[dispatch.node_id] = dispatch.attempt
+        predecessor_dispatch = replace(
+            dispatch,
+            node_run_id=predecessor.node_run_id,
+            node_id=interrupt_node_id,
+            attempt=predecessor.attempt,
+            dispatch_kind="resume_action",
+            receipt=receipt,
+            binding_snapshot_id=predecessor.binding_snapshot_id,
+            state_update={"node_attempts": node_attempts},
+        )
+        try:
+            # Call the coordinator directly: worker._resume() overwrites
+            # node_attempts with successor latest+1, which skips the retry
+            # attempt already inserted by the command layer.
+            self._coordinator.resume_action(predecessor_dispatch)
+        except Exception:
+            return None
+        snapshot = self._coordinator.snapshot(dispatch.run_id)
+        if not _graph_at_node(snapshot, dispatch.node_id):
+            return None
+        values = dict(snapshot.get("values") or {})
+        pending_target = build_pending_action(values, dispatch.node_id)
+        if pending_target.attempt != dispatch.attempt:
+            # restart_attempt consumes the successor interrupt and can persist
+            # an empty next set. retry_attempt (Command.goto) re-enters the
+            # target node with the ledger attempt.
+            return self._coordinator.retry_attempt(dispatch)
+        return GraphDispatchResult(
+            dispatch_kind="start",
+            pending_action=pending_target,
+            next_node_ids=tuple(
+                str(item) for item in (snapshot.get("nextNodeIds") or [])
+            ),
+            checkpoint_id=str(snapshot.get("checkpointId") or ""),
+            state=values,
         )
 
     def _resume(self, dispatch: GraphDispatch) -> GraphDispatchResult:
@@ -581,6 +687,19 @@ class GraphDispatchWorker:
                                 ),
                             )
                         )
+                        problem = {
+                            "code": "auto_advance_not_ready",
+                            "detail": "; ".join(
+                                str(b.get("code") or b) for b in blockers
+                            ),
+                        }
+                        sync_run_blocked(
+                            uow,
+                            run_id=dispatch.run_id,
+                            node_id=pending.node_id,
+                            problem=problem,
+                            now_ms=now_ms,
+                        )
                         blocked_sequence = uow.repository.advance_last_sequence(
                             dispatch.run_id, 1, now_ms
                         )
@@ -599,6 +718,9 @@ class GraphDispatchWorker:
                                         "nodeRunId": pending.node_run_id,
                                         "nodeId": pending.node_id,
                                         "autoAdvanceBlocked": True,
+                                        "code": problem["code"],
+                                        "detail": problem["detail"],
+                                        "reason": format_blocked_reason(problem),
                                         "blockers": [
                                             str(b.get("code") or b) for b in blockers
                                         ],
@@ -646,17 +768,21 @@ class GraphDispatchWorker:
 
     def _mark_blocked(self, action: Any, dispatch: GraphDispatch, detail: str) -> None:
         now_ms = self._now()
-        problem = {"code": "iteration_decision_invalid", "detail": detail}
+        problem = problem_from_graph_error(detail)
 
         def mutate(uow):
             uow.repository.fail_outbox(
                 action.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
             )
-            uow.repository.update_attempt_status(
-                dispatch.node_run_id,
-                NodeAttemptStatus.BLOCKED.value,
-                now_ms,
-                problem_json=json.dumps(problem),
+            apply_node_run_block(
+                uow,
+                run_id=dispatch.run_id,
+                node_run_id=dispatch.node_run_id,
+                node_id=dispatch.node_id,
+                problem=problem,
+                now_ms=now_ms,
+                actor_id=self._owner,
+                correlation_id=str(action.action_id or dispatch.node_run_id),
             )
 
         self._submit(mutate, force_flush=True).result(timeout=30)
@@ -671,6 +797,12 @@ class GraphDispatchWorker:
             retry_at_ms=now_ms + 5_000,
             problem_json=json.dumps({"code": "transient", "detail": detail}),
         )
+
+
+def _graph_at_node(snapshot: dict[str, Any], node_id: str) -> bool:
+    next_ids = [str(item) for item in (snapshot.get("nextNodeIds") or [])]
+    active = str((snapshot.get("values") or {}).get("active_node_id") or "")
+    return node_id in next_ids or active == node_id
 
 
 def _attempt_for_pending(

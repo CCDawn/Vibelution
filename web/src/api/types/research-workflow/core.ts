@@ -22,6 +22,7 @@ export type WorkflowRunSummary = {
   createdAtMs: number;
   updatedAtMs: number;
   completedAtMs: number | null;
+  blockedReason?: string | null;
 };
 
 export type NodeAttemptSummary = {
@@ -37,6 +38,7 @@ export type NodeAttemptSummary = {
   startedAtMs: number;
   updatedAtMs: number;
   finishedAtMs: number | null;
+  problem?: Record<string, unknown> | null;
 };
 
 export type HumanTaskSummary = {
@@ -55,9 +57,14 @@ export type HandoffSummary = {
   countsByStatus: Record<string, number>;
   refs: Array<{
     handoffId?: string | null;
+    fromNodeId?: string | null;
+    fromNodeRunId?: string | null;
     toNodeId?: string | null;
     status: string;
     inputSnapshotHash?: string | null;
+    outputArtifactRefs?: Array<Record<string, unknown>>;
+    offeredAtMs?: number | null;
+    acceptedAtMs?: number | null;
   }>;
   count: number;
 };

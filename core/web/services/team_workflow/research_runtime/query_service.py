@@ -6,6 +6,7 @@ fails closed; legacy JSON stores are never consulted.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -26,6 +27,7 @@ from core.research.workflow.ledger.repository import WorkflowLedgerRepository
 
 from .command_offer_builder import build_command_offers
 from .projection_builder import ProjectionInputs, build_research_workflow_snapshot
+from .blocked_reason import format_blocked_reason
 from .readiness import NodeReadinessService
 from .readiness.common import DomainReadinessContext
 from .run_catalog import catalog_dict_from_run
@@ -214,11 +216,7 @@ class WorkflowQueryService:
                 turn_id=session["turn_id"],
             ),
             session_anchor_degraded=session["degraded"],
-            blocked_reason=(
-                str(snap.run.terminal_reason or "")
-                if latest is not None and latest.status == "blocked"
-                else ""
-            ),
+            blocked_reason=_node_blocked_reason(latest, snap.run.blocked_reason),
         )
 
     def _read_bundle(self, run_id: str):
@@ -232,8 +230,14 @@ class WorkflowQueryService:
             human_tasks = [
                 _human_task_summary(row, attempt_by_id) for row in human_rows
             ]
+            refs_by_handoff: dict[str, list[dict[str, Any]]] = {}
+            for row in repo.list_handoff_artifact_refs_for_run(run_id):
+                refs_by_handoff.setdefault(str(row[0]), []).append(
+                    _artifact_ref_from_receipt(row)
+                )
             handoffs = [
-                _handoff_summary(row) for row in repo.list_handoffs_for_run(run_id)
+                _handoff_summary(row, attempt_by_id, refs_by_handoff)
+                for row in repo.list_handoffs_for_run(run_id)
             ]
             budget_receipts = [
                 _budget_receipt_summary(row)
@@ -297,20 +301,62 @@ def _human_task_summary(row: tuple, attempt_by_id: dict[str, Any]) -> HumanTaskS
     )
 
 
-def _handoff_summary(row: tuple) -> dict[str, Any]:
+def _handoff_summary(
+    row: tuple,
+    attempt_by_id: dict[str, Any],
+    refs_by_handoff: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    from_node_run_id = str(row[3] or "")
+    attempt = attempt_by_id.get(from_node_run_id)
+    edge_id = str(row[2] or "")
+    from_node_id = ""
+    if attempt is not None:
+        from_node_id = str(attempt.node_id or "")
+    elif "->" in edge_id:
+        from_node_id = edge_id.split("->", 1)[0]
     return {
         "handoffId": row[0],
         "runId": row[1],
-        "edgeId": row[2],
-        "fromNodeRunId": row[3],
+        "edgeId": edge_id,
+        "fromNodeId": from_node_id,
+        "fromNodeRunId": from_node_run_id,
         "toNodeId": row[4],
         "toNodeRunId": row[5],
         "gateKind": row[6],
         "inputSnapshotHash": row[7],
         "status": row[8],
+        "outputArtifactRefs": list(refs_by_handoff.get(str(row[0]), [])),
         "offeredAtMs": row[12],
         "acceptedAtMs": row[13],
     }
+
+
+def _artifact_ref_from_receipt(row: tuple) -> dict[str, Any]:
+    canonical_ref = ""
+    try:
+        payload = json.loads(row[3] or "{}")
+        if isinstance(payload, dict):
+            canonical_ref = str(payload.get("canonicalRef") or "")
+    except (TypeError, ValueError):
+        canonical_ref = ""
+    return {
+        "artifactId": str(row[1] or ""),
+        "kind": str(row[2] or ""),
+        "version": str(row[4] or "1.0.0"),
+        "contentHash": str(row[5] or ""),
+        "uri": canonical_ref,
+    }
+
+
+def _node_blocked_reason(latest: Any, run_blocked_reason: str | None) -> str:
+    if latest is None or str(getattr(latest, "status", "") or "") != "blocked":
+        return ""
+    problem = getattr(latest, "problem", None)
+    if isinstance(problem, dict):
+        formatted = format_blocked_reason(problem)
+        if formatted:
+            return formatted
+    return str(run_blocked_reason or "")
 
 
 def _budget_receipt_summary(row: tuple) -> dict[str, Any]:

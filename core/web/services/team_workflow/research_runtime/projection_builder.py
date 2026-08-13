@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from core.research.workflow.contracts import CommandOffer, ResearchWorkflowSnapshot
@@ -21,6 +21,8 @@ from core.research.workflow.contracts.workflow_snapshot import (
 )
 from core.research.workflow.ledger.records import NodeAttemptRecord, RunRecord
 from core.research.workflow.models import WorkflowDefinition
+
+from .blocked_reason import format_blocked_reason, parse_problem_json
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +73,7 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
 
     safety_limits = _loads(run.safety_limits_json)
     return ResearchWorkflowSnapshot(
-        run=_run_summary(run),
+        run=_run_summary_with_active_block(run, inputs.attempts),
         definition=inputs.definition.to_dict(),
         node_attempts={
             node_id: tuple(items) for node_id, items in node_attempts.items()
@@ -106,6 +108,36 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
     )
 
 
+_TERMINAL_RUN_STATUS = frozenset(
+    {"succeeded", "failed", "cancelled", "archived"}
+)
+
+
+def _run_summary_with_active_block(
+    run: RunRecord, attempts: Sequence[NodeAttemptRecord]
+) -> WorkflowRunSummary:
+    """Surface active-node blocks even when ledger run.status is still running."""
+    summary = _run_summary(run)
+    if run.status in _TERMINAL_RUN_STATUS:
+        return summary
+    active = str(run.active_node_id or "")
+    if not active:
+        return summary
+    latest: NodeAttemptRecord | None = None
+    for attempt in attempts:
+        if attempt.node_id != active:
+            continue
+        if latest is None or int(attempt.attempt) >= int(latest.attempt):
+            latest = attempt
+    if latest is None or latest.status != "blocked":
+        return summary
+    reason = format_blocked_reason(
+        parse_problem_json(latest.problem_json),
+        fallback=summary.blocked_reason,
+    ) or summary.blocked_reason
+    return replace(summary, status="blocked", blocked_reason=reason)
+
+
 def _run_summary(run: RunRecord) -> WorkflowRunSummary:
     return WorkflowRunSummary(
         run_id=run.run_id,
@@ -127,6 +159,11 @@ def _run_summary(run: RunRecord) -> WorkflowRunSummary:
         created_at_ms=run.created_at_ms,
         updated_at_ms=run.updated_at_ms,
         completed_at_ms=run.completed_at_ms,
+        blocked_reason=format_blocked_reason(
+            parse_problem_json(run.blocked_problem_json),
+            fallback=run.terminal_reason,
+        )
+        or None,
     )
 
 
@@ -144,6 +181,7 @@ def _attempt_summary(attempt: NodeAttemptRecord) -> NodeAttemptSummary:
         started_at_ms=attempt.started_at_ms,
         updated_at_ms=attempt.updated_at_ms,
         finished_at_ms=attempt.finished_at_ms,
+        problem=parse_problem_json(attempt.problem_json),
     )
 
 
@@ -177,8 +215,17 @@ def _handoff_summary(handoffs: Sequence[Mapping[str, Any]]) -> HandoffSummary:
             HandoffRefSummary(
                 handoff_id=_as_optional_str(item.get("handoffId")),
                 to_node_id=_as_optional_str(item.get("toNodeId")),
+                from_node_id=_as_optional_str(item.get("fromNodeId")),
+                from_node_run_id=_as_optional_str(item.get("fromNodeRunId")),
                 status=status,
                 input_snapshot_hash=_as_optional_str(item.get("inputSnapshotHash")),
+                output_artifact_refs=tuple(
+                    ref
+                    for ref in (item.get("outputArtifactRefs") or ())
+                    if isinstance(ref, Mapping)
+                ),
+                offered_at_ms=_as_optional_int(item.get("offeredAtMs")),
+                accepted_at_ms=_as_optional_int(item.get("acceptedAtMs")),
             )
         )
     return HandoffSummary(
@@ -193,6 +240,15 @@ def _as_optional_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _as_optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def frozen_agent_bindings(input_snapshot_json: str | None) -> tuple[AgentBindingRef, ...]:
