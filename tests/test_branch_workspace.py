@@ -165,13 +165,13 @@ def test_list_branch_instances_covers_worktrees_and_local_refs(tmp_path):
     }
     assert by_id["main"]["kind"] == "main"
     assert by_id["main"]["current"] is True
-    assert by_id["main"]["shortName"] == "主"
-    assert by_id["main"]["workbenchTitle"] == "主 台"
-    assert by_id["main"]["launcherTitle"] == "主 控"
-    assert by_id["worktree:feat-task"]["shortName"] == "task"
-    assert by_id["worktree:feat-task"]["workbenchTitle"] == "task 台"
-    assert payload["currentShortName"] == "主"
-    assert payload["currentWorkbenchTitle"] == "主 台"
+    assert by_id["main"]["shortName"] == "main"
+    assert by_id["main"]["workbenchTitle"] == "main 台"
+    assert by_id["main"]["launcherTitle"] == "main 控"
+    assert by_id["worktree:feat-task"]["shortName"] == "branch+codex/feat-task"
+    assert by_id["worktree:feat-task"]["workbenchTitle"] == "branch+codex/feat-task 台"
+    assert payload["currentShortName"] == "main"
+    assert payload["currentWorkbenchTitle"] == "main 台"
     assert by_id["worktree:feat-task"]["legacy"] is False
     assert by_id["worktree:feat-task"]["alive"] is False
     assert by_id["worktree:feat-task"]["observedState"] == "idle"

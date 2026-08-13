@@ -12,8 +12,8 @@ export type InstanceWindowTitleSource = {
   }>;
 };
 
-export function instanceWindowTitle(role: InstanceWindowRole, shortName = "主"): string {
-  const name = String(shortName || "主").trim() || "主";
+export function instanceWindowTitle(role: InstanceWindowRole, shortName = "main"): string {
+  const name = String(shortName || "main").trim() || "main";
   return role === "workbench" ? `${name} 台` : `${name} 控`;
 }
 
