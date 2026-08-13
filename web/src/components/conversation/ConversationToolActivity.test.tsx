@@ -298,7 +298,7 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain("详情 tool-4");
   });
 
-  it("keeps tool details expandable without a far-edge disclosure chevron", () => {
+  it("keeps tool details expandable with a small inline disclosure chevron", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([toolCell("tool-1", "定位 ConversationLogger")])}
@@ -309,9 +309,10 @@ describe("ConversationToolActivity", () => {
 
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).toContain("工具原始结果");
-    expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).toContain("itemChevron");
     expect(html).not.toContain("执行完成");
-    expect(html).not.toContain("itemChevron");
+    expect(styles.itemSummary).toContain("cursor-pointer");
     expect(styles.itemSummary).toContain("w-full");
     expect(styles.itemSummary).toContain("max-w-full");
     expect(styles.itemSummary).toContain("items-center");
@@ -334,6 +335,28 @@ describe("ConversationToolActivity", () => {
     expect(styles.batchDetails).not.toContain("ml-");
     expect(styles.itemDetailsBody).toContain("max-h-48");
     expect(styles.itemDetailsBody).not.toContain("ml-");
+  });
+
+  it("makes a failed web-fetch row expandable even when the renderer returns no extra body", () => {
+    const cell = toolCell("web-failed", "HTTP 406: https://elifesciences.org/articles/13810");
+    cell.kind = "error_notice";
+    cell.status = "failed";
+    cell.tone = "error";
+    cell.title = "web_fetch_tool";
+    cell.operationIds = ["op-1"];
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([cell])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+
+    expect(html).toContain('data-codex-tool-detail="true"');
+    expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).toContain("没有额外输出");
+    expect(html).not.toContain("itemStatic");
   });
 
   it("opens the current running tool detail directly by default", () => {

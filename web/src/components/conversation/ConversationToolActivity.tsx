@@ -1,4 +1,4 @@
-import { CircleAlert, LoaderCircle } from "lucide-react";
+import { ChevronRight, CircleAlert, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import "./ConversationToolActivity.css";
@@ -215,7 +215,6 @@ function ToolActivityItem({
   const title = toolActivityAriaTitle(pills);
   const detailsId = `codex-tool-detail-${cell.id}`;
   const details = renderToolDetails(cell, detailsId);
-  const expandable = details !== null && details !== undefined && details !== false;
   const openByDefault = !isSettledFailedCell(cell)
     && (cell.status === "running" || cell.status === "pending");
   const label = language === "zh"
@@ -227,24 +226,7 @@ function ToolActivityItem({
       leadingIcon={<ToolStatusIcon cell={cell} language={language} />}
     />
   );
-
-  if (!expandable) {
-    return (
-      <div
-        className={`${styles.item} ${styles.itemStatic}`}
-        data-codex-tool-activity-item="true"
-        data-codex-transcript-cell-kind={cell.kind}
-        data-codex-transcript-cell-tone={cell.tone}
-        data-codex-transcript-cell-status={cell.status}
-        data-codex-transcript-cell-phase={cell.phase ?? "tool_call"}
-        data-conversation-part-key={cell.id}
-        role={cell.status === "running" || cell.status === "pending" ? "status" : undefined}
-        aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
-      >
-        {content}
-      </div>
-    );
-  }
+  const emptyDetail = language === "zh" ? "没有额外输出" : "No extra output";
 
   return (
     <details
@@ -264,8 +246,16 @@ function ToolActivityItem({
         aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
       >
         {content}
+        <ChevronRight
+          className={styles.itemChevron}
+          size={12}
+          aria-hidden="true"
+          data-codex-tool-detail-toggle="inline-symbol"
+        />
       </summary>
-      <div id={detailsId} className={styles.itemDetailsBody}>{details}</div>
+      <div id={detailsId} className={styles.itemDetailsBody}>
+        {details ?? <p className={styles.itemDetailsEmpty}>{emptyDetail}</p>}
+      </div>
     </details>
   );
 }
@@ -302,6 +292,12 @@ function ToolActivityBatch({
           <span className={styles.itemTitle}>{item.title}</span>
           <span className={styles.batchCount}>· {countLabel}</span>
         </span>
+        <ChevronRight
+          className={styles.itemChevron}
+          size={12}
+          aria-hidden="true"
+          data-codex-tool-detail-toggle="inline-symbol"
+        />
       </summary>
       <div className={styles.batchDetails}>
         <div className={styles.batchDetailsInner}>
