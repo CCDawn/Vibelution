@@ -1550,6 +1550,22 @@ function requestOpenWorkbench(): void {
   });
 }
 
+async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
+  const provider = windowProvider;
+  if (provider === null) {
+    pendingOpenWorkbenchRequest = true;
+    return;
+  }
+  const bootstrap = launcherBootstrap;
+  if (bootstrap !== null) {
+    const paths = createDesktopPathsForApp();
+    await recoverDesktopControlContext(paths, bootstrap, provider, "second_instance_open_workbench");
+  }
+  pendingOpenWorkbenchRequest = false;
+  markWorkbenchOpenRequested();
+  await provider.openOrFocusWorkbench();
+}
+
 async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
   const wanted = projectRoot.trim();
   if (!wanted) {
@@ -1739,7 +1755,9 @@ app.on("second-instance", (_event, argv) => {
     return;
   }
   if (intent.action === "open_workbench") {
-    requestOpenWorkbench();
+    void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    });
     return;
   }
   if (intent.action === "focus_existing_shell") {
