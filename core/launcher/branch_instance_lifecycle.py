@@ -50,8 +50,9 @@ def overlay_instance_ports(
     payload: dict[str, Any],
     *,
     launcher_state: dict[str, Any] | None = None,
+    current_bundle: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Attach reserved/live ports to a branch-instance list without changing identity."""
+    """Attach ports and one explicit runtime contract to each branch instance."""
 
     items = payload.get("items")
     if not isinstance(items, list):
@@ -88,6 +89,7 @@ def overlay_instance_ports(
                 item["url"] = _loopback_url(int(item["port"]))
             item.setdefault("controlPort", current_control)
             item.setdefault("url", "")
+            _attach_instance_runtime(item, entry=entry, current_bundle=current_bundle)
             continue
         reserved_port = _positive_int((entry or {}).get("port"))
         reserved_control = _positive_int((entry or {}).get("controlPort"))
@@ -102,11 +104,201 @@ def overlay_instance_ports(
         else:
             item["url"] = ""
         overlay_instance_window_pid(item, entry)
+        _attach_instance_runtime(item, entry=entry)
     return payload
 
 
-def list_overlayed_branch_instances() -> dict[str, Any]:
-    return overlay_instance_ports(list_branch_instances(PROJECT_ROOT))
+def list_overlayed_branch_instances(*, current_bundle: dict[str, Any] | None = None) -> dict[str, Any]:
+    return overlay_instance_ports(list_branch_instances(PROJECT_ROOT), current_bundle=current_bundle)
+
+
+def _attach_instance_runtime(
+    item: dict[str, Any],
+    *,
+    entry: dict[str, Any] | None,
+    current_bundle: dict[str, Any] | None = None,
+) -> None:
+    runtime = _instance_runtime_projection(item, entry=entry, current_bundle=current_bundle)
+    item["runtime"] = runtime
+    block_reason = _instance_start_block_reason(item, runtime)
+    item["startable"] = not block_reason
+    item["startBlockReason"] = block_reason
+
+
+def _instance_runtime_projection(
+    item: dict[str, Any],
+    *,
+    entry: dict[str, Any] | None,
+    current_bundle: dict[str, Any] | None,
+) -> dict[str, Any]:
+    workbench = _workbench_state_for_item(item)
+    bundle = current_bundle if item.get("current") and isinstance(current_bundle, dict) else {}
+    bundle_backend = bundle.get("backend") if isinstance(bundle.get("backend"), dict) else {}
+    bundle_frontend = bundle.get("frontend") if isinstance(bundle.get("frontend"), dict) else {}
+    bundle_browser = bundle.get("browser") if isinstance(bundle.get("browser"), dict) else {}
+
+    pids = item.get("pids") if isinstance(item.get("pids"), dict) else {}
+    backend_pid = _positive_int(bundle_backend.get("pid")) or _positive_int(pids.get("backend"))
+    backend_alive = bool(bundle_backend.get("alive")) if bundle_backend else bool(item.get("alive"))
+    backend_healthy = bool(bundle_backend.get("healthy")) if bundle_backend else bool(workbench.get("backendHealthy"))
+    backend_listening = (
+        bool(bundle_backend.get("portListening"))
+        if bundle_backend
+        else bool(workbench.get("backendPortListening"))
+    )
+    backend_conflict = (
+        bool(bundle_backend.get("portConflict"))
+        if bundle_backend
+        else bool(workbench.get("backendPortConflict"))
+    )
+    backend_port = _positive_int(bundle_backend.get("port")) or _positive_int(item.get("port"))
+    reserved_port = 0 if bundle else _positive_int((entry or {}).get("port"))
+
+    window_pid = _positive_int(bundle_browser.get("windowPid")) or _positive_int(pids.get("window"))
+    window_open = bool(bundle_browser.get("alive")) if bundle_browser else window_pid > 0
+    observed_window_title = str((entry or {}).get("windowTitle") or "").strip()
+    window_title = observed_window_title or str(item.get("workbenchTitle") or "").strip()
+
+    frontend_mode = str(
+        bundle_frontend.get("mode")
+        or workbench.get("frontendMode")
+        or "bundled_static_dist"
+    ).strip()
+    assets_ready = _bundled_frontend_ready(item)
+    if frontend_mode == "bundled_static_dist":
+        frontend_ready = assets_ready
+    elif bundle_frontend:
+        frontend_ready = bool(bundle_frontend.get("distReady"))
+    else:
+        frontend_ready = bool(workbench.get("frontendReady"))
+
+    observed_state = str(bundle.get("observedState") or item.get("observedState") or "closed").strip().lower()
+    phase = str(bundle.get("phase") or workbench.get("phase") or "steady").strip().lower()
+    desired_state = str(bundle.get("desiredState") or workbench.get("desiredState") or "closed").strip().lower()
+    failure_message = str(bundle.get("failureMessage") or workbench.get("failureMessage") or "").strip()
+    registry_status = "" if bundle else str((entry or {}).get("status") or "").strip().lower()
+
+    lifecycle_state, error_code = _instance_lifecycle_state(
+        observed_state=observed_state,
+        phase=phase,
+        registry_status=registry_status,
+        backend_alive=backend_alive,
+        backend_healthy=backend_healthy,
+        backend_listening=backend_listening,
+        backend_conflict=backend_conflict,
+        frontend_ready=frontend_ready,
+        window_open=window_open,
+        failure_message=failure_message,
+    )
+    if lifecycle_state == "error" and not failure_message:
+        failure_message = {
+            "backend_port_conflict": "后端端口被其他进程占用。",
+            "registry_failed": "该分支上次启动失败。",
+            "lifecycle_failed": "该分支生命周期进入失败状态。",
+        }.get(error_code, "该分支运行状态异常。")
+
+    runtime: dict[str, Any] = {
+        "lifecycleState": lifecycle_state,
+        "desiredState": desired_state or "closed",
+        "observedState": observed_state or "closed",
+        "phase": phase or "steady",
+        "backend": {
+            "alive": backend_alive,
+            "healthy": backend_alive and backend_healthy,
+            "listening": backend_listening,
+            "port": backend_port,
+            "portReserved": bool(backend_port > 0 and reserved_port == backend_port and not backend_listening),
+            "portConflict": backend_conflict,
+            "pid": backend_pid,
+        },
+        "frontend": {
+            "mode": frontend_mode,
+            "ready": frontend_ready,
+        },
+        "window": {
+            "open": window_open,
+            "pid": window_pid,
+            "title": window_title,
+            "titleObserved": bool(observed_window_title),
+        },
+    }
+    if error_code or failure_message:
+        runtime["error"] = {
+            "code": error_code or "runtime_error",
+            "message": failure_message,
+        }
+    return runtime
+
+
+def _instance_lifecycle_state(
+    *,
+    observed_state: str,
+    phase: str,
+    registry_status: str,
+    backend_alive: bool,
+    backend_healthy: bool,
+    backend_listening: bool,
+    backend_conflict: bool,
+    frontend_ready: bool,
+    window_open: bool,
+    failure_message: str,
+) -> tuple[str, str]:
+    if phase in {"opening", "starting"}:
+        return "starting", ""
+    if phase in {"restarting", "restart"}:
+        return "restarting", ""
+    if phase in {"closing", "stopping", "force_stopping"}:
+        return "stopping", ""
+    if backend_conflict:
+        return "error", "backend_port_conflict"
+    if phase == "failed":
+        return "error", "lifecycle_failed"
+    if registry_status == "failed":
+        return "error", "registry_failed"
+    if failure_message:
+        return "error", "runtime_error"
+
+    backend_ready = backend_alive and backend_healthy and backend_listening and not backend_conflict
+    if backend_ready and frontend_ready and window_open:
+        return "running", ""
+    has_runtime_signal = bool(
+        backend_alive
+        or backend_listening
+        or window_open
+        or observed_state in {"open", "partial", "running", "healthy"}
+        or registry_status == "running"
+    )
+    if has_runtime_signal:
+        return "partial", ""
+    return "closed", ""
+
+
+def _instance_start_block_reason(item: dict[str, Any], runtime: dict[str, Any]) -> str:
+    if str(item.get("kind") or "") not in _STARTABLE_KINDS:
+        return "unsupported_kind"
+    if not item.get("checkedOut"):
+        return "not_checked_out"
+    path = str(item.get("path") or "").strip()
+    if not path or not Path(path).is_dir():
+        return "worktree_missing"
+    state = str(runtime.get("lifecycleState") or "closed")
+    if state != "closed":
+        return "runtime_error" if state == "error" else "runtime_active"
+    return ""
+
+
+def _workbench_state_for_item(item: dict[str, Any]) -> dict[str, Any]:
+    path = str(item.get("path") or "").strip()
+    if not path:
+        return {}
+    payload = _read_json_file(Path(path) / ".runtime" / "launcher" / "state.json")
+    workbench = payload.get("workbench") if isinstance(payload.get("workbench"), dict) else {}
+    return dict(workbench)
+
+
+def _bundled_frontend_ready(item: dict[str, Any]) -> bool:
+    path = str(item.get("path") or "").strip()
+    return bool(path and (Path(path) / "web" / "dist" / "index.html").is_file())
 
 
 def resolve_branch_instance(instance_id: str) -> dict[str, Any]:
@@ -373,8 +565,12 @@ def _isolated_response(
 
 
 def _read_current_launcher_state() -> dict[str, Any]:
+    return _read_json_file(LAUNCHER_STATE_PATH)
+
+
+def _read_json_file(path: Path) -> dict[str, Any]:
     try:
-        payload = json.loads(LAUNCHER_STATE_PATH.read_text(encoding="utf-8-sig"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}

@@ -632,7 +632,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("Launcher 端口");
     expect(routeSource).toContain("默认后端");
     expect(routeSource).toContain("开发前端");
-    expect(branchInstancesPanelSource).toContain("实例端口");
+    expect(branchInstancesPanelSource).toContain('backend: "后端"');
+    expect(branchInstancesPanelSource).not.toContain("实例端口");
     expect(startupSettingsPanelSource).toContain("windowSize");
     expect(startupSettingsPanelSource).toContain("windowSizeOptions");
     expect(startupSettingsPanelSource).toContain("interfaceLanguage");

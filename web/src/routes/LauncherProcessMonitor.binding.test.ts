@@ -26,6 +26,24 @@ function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBran
     pids: { backend: 0, window: 0, manager: 0 },
     promotable: true,
     shortName: "task",
+    runtime: {
+      lifecycleState: "closed",
+      desiredState: "closed",
+      observedState: "closed",
+      phase: "steady",
+      backend: {
+        alive: false,
+        healthy: false,
+        listening: false,
+        port: 0,
+        portReserved: false,
+        portConflict: false,
+        pid: 0,
+      },
+      frontend: { mode: "bundled_static_dist", ready: true },
+      window: { open: false, pid: 0, title: "task 台", titleObserved: false },
+    },
+    startable: true,
     ...overrides,
   };
 }

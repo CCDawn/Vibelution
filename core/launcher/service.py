@@ -192,7 +192,9 @@ def list_launcher_branch_instances() -> dict[str, Any]:
     from core.launcher.branch_instance_cleanup import annotate_cleanup_metadata
     from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
 
-    return annotate_cleanup_metadata(list_overlayed_branch_instances())
+    status = get_launcher_status()
+    current_bundle = status.get("projectBundle") if isinstance(status.get("projectBundle"), dict) else {}
+    return annotate_cleanup_metadata(list_overlayed_branch_instances(current_bundle=current_bundle))
 
 
 def cleanup_launcher_branch_instances(
