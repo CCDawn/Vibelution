@@ -955,6 +955,8 @@ def start_research_project_agent_task(
                 created_from_task_id=task_id,
                 formal_retry=formal_retry,
                 previous_task=previous_task,
+                workflow_run_id=workflow_run_id,
+                workflow_node_id=workflow_node_id,
             )
         except s.ResearchProjectAgentSessionError as exc:
             raise ResearchProjectAgentTaskError(

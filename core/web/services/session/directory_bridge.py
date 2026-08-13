@@ -441,7 +441,7 @@ def _experiment_binding_for_directory(value: Any) -> dict[str, Any] | None:
         attempt = max(1, int(value.get("attempt") or 1))
     except (TypeError, ValueError):
         attempt = 1
-    return {
+    binding = {
         "teamId": team_id,
         "researchProjectId": research_project_id,
         "experimentName": str(value.get("experimentName") or "").strip()[:160],
@@ -453,6 +453,14 @@ def _experiment_binding_for_directory(value: Any) -> dict[str, Any] | None:
         "createdFromTaskId": str(value.get("createdFromTaskId") or "").strip()[:160],
         "createdAt": str(value.get("createdAt") or "").strip()[:120],
     }
+    workflow_run_id = str(value.get("workflowRunId") or "").strip()[:160]
+    workflow_node_id = str(value.get("workflowNodeId") or "").strip()[:80]
+    if bool(workflow_run_id) != bool(workflow_node_id):
+        return None
+    if workflow_run_id and workflow_node_id:
+        binding["workflowRunId"] = workflow_run_id
+        binding["workflowNodeId"] = workflow_node_id
+    return binding
 
 
 def _chat_state_directory_overlay() -> tuple[str, dict[str, dict[str, Any]]]:
