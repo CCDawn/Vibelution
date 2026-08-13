@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from core.chat.turn_journal import turn_journal_path
+from core.infrastructure import developer_sandbox
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, session_service
 from core.web.services.session import directory_runtime
@@ -18,7 +19,7 @@ def isolated_directory_runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
     monkeypatch.setenv("VIBELUTION_CONFIG_HOME", str(tmp_path / "operator-config"))
     monkeypatch.setattr(
-        directory_runtime.developer_sandbox,
+        developer_sandbox,
         "is_developer_mode_enabled",
         lambda: False,
     )
