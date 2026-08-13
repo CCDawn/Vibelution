@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 
 from core.chat.turn_journal import turn_journal_path
+from core.infrastructure import developer_sandbox
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, session_service
-from core.web.services.session import directory_bridge, directory_runtime
+from core.web.services.session import directory_runtime
 
 
 @pytest.fixture
@@ -18,7 +19,7 @@ def isolated_directory_runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
     monkeypatch.setenv("VIBELUTION_CONFIG_HOME", str(tmp_path / "operator-config"))
     monkeypatch.setattr(
-        directory_runtime.developer_sandbox,
+        developer_sandbox,
         "is_developer_mode_enabled",
         lambda: False,
     )
@@ -39,8 +40,14 @@ def _write_agents_registry(path: Path) -> None:
                     {
                         "agentId": "agent-alpha",
                         "displayName": "Alpha",
-                        "kind": "assistant",
+                        "kind": "persistent",
+                        "primaryMode": "chat",
+                        "conversationIndexKind": "personal_agent",
                         "directSessionId": "legacy-session",
+                        "metadata": {
+                            "conversationIndexKind": "personal_agent",
+                            "directSessionVisibility": "active_session",
+                        },
                         "llmBindings": {"dialogue": {"modelId": "gpt-5.6-luna"}},
                         "promptTemplateId": "chat",
                         "toolPolicyId": "tool-default",
@@ -109,7 +116,8 @@ def test_directory_runtime_discards_legacy_sessions_without_importing_journals(
     assert store.repository.list_sessions(agent_id="agent-alpha") == []
     assert store.repository.legacy_sessions_discarded_at_ms() is not None
     agent = agent_directory_service.get_agent("agent-alpha", include_archived=True)
-    assert str((agent or {}).get("directSessionId") or "") == ""
+    assert str((agent or {}).get("directSessionId") or "") == "legacy-session"
+    assert "legacy-session" in _session_ids()
 
 
 def test_directory_runtime_second_initialize_keeps_new_sessions(
@@ -429,49 +437,28 @@ def test_experiment_bound_team_session_stays_visible_in_user_directory(
     assert match.get("hiddenFromIndex") is False
 
 
-def test_discard_blocks_materialize_while_bindings_are_cleared(
+def test_discard_blocks_materialize_while_discard_in_progress(
     isolated_directory_runtime: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ):
     project_root = isolated_directory_runtime
     _write_agents_registry(agent_directory_service.registry_path())
     _seed_legacy_session(project_root)
-    entered = threading.Event()
-    release = threading.Event()
-    original_clear = directory_runtime._clear_agent_direct_session_bindings
-
-    def paused_clear(root):
-        original_clear(root)
-        entered.set()
-        assert release.wait(5)
-
-    monkeypatch.setattr(directory_runtime, "_clear_agent_direct_session_bindings", paused_clear)
-    status_holder: dict[str, object] = {}
-
-    def run_initialize():
-        status_holder["status"] = directory_runtime.initialize_session_directory_runtime(
-            project_root=project_root
+    directory_runtime._LEGACY_DISCARD_IN_PROGRESS.set()
+    try:
+        changed = session_service._ensure_agent_directory_conversation_materialized(
+            "legacy-session",
+            source="test_discard_blocks_materialize",
         )
-
-    init_thread = threading.Thread(target=run_initialize)
-    init_thread.start()
-    assert entered.wait(5)
-    changed = session_service._ensure_agent_directory_conversation_materialized(
-        "legacy-session",
-        source="test_discard_blocks_materialize",
-    )
-    payload = load_chat_state(project_root)
-    chat_ids = {
-        str(item.get("conversation_id") or "")
-        for item in payload.get("conversations") or []
-        if isinstance(item, dict)
-    }
-    release.set()
-    init_thread.join(8)
-    assert not init_thread.is_alive()
+        payload = load_chat_state(project_root)
+        chat_ids = {
+            str(item.get("conversation_id") or "")
+            for item in payload.get("conversations") or []
+            if isinstance(item, dict)
+        }
+    finally:
+        directory_runtime._LEGACY_DISCARD_IN_PROGRESS.clear()
     assert changed is False
-    assert "legacy-session" not in chat_ids
-    assert getattr(status_holder.get("status"), "status", "") == "ready"
+    assert "legacy-session" in chat_ids
 
 
 def test_purge_archives_store_directory_rows(
@@ -489,3 +476,119 @@ def test_purge_archives_store_directory_rows(
     assert session_id not in _session_ids(include_hidden=True)
     rows = _store_directory_rows(include_hidden=True)
     assert all(str(row.get("sessionId") or "") != session_id for row in rows)
+
+
+def test_team_agent_direct_binding_stays_hidden_from_user_directory(
+    isolated_directory_runtime: Path,
+):
+    project_root = isolated_directory_runtime
+    path = agent_directory_service.registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 7,
+                "agents": [
+                    {
+                        "agentId": "agent-team",
+                        "displayName": "Planner",
+                        "kind": "persistent",
+                        "primaryMode": "research",
+                        "roleKey": "planner",
+                        "conversationIndexKind": "team_agent",
+                        "directSessionId": "team-direct",
+                        "llmBindings": {"dialogue": {"modelId": "gpt-5.6-luna"}},
+                        "promptTemplateId": "chat",
+                        "toolPolicyId": "tool-default",
+                        "toolPolicy": {"policyId": "tool-default"},
+                        "memoryPolicyId": "memory-default",
+                        "memoryPolicy": {"policyId": "memory-default"},
+                        "permissionPreset": "request_approval",
+                        "status": "active",
+                        "metadata": {
+                            "conversationIndexKind": "team_agent",
+                            "teamId": "research-team",
+                        },
+                    }
+                ],
+                "toolPolicies": {"tool-default": {"policyId": "tool-default"}},
+                "memoryPolicies": {"memory-default": {"policyId": "memory-default"}},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    assert "team-direct" not in _session_ids()
+    assert "team-direct" not in {
+        str(item.get("id") or "")
+        for item in session_service.query_sessions(limit=20).get("items") or []
+    }
+
+
+def test_missing_personal_direct_is_restored_on_directory_start(
+    isolated_directory_runtime: Path,
+):
+    project_root = isolated_directory_runtime
+    path = agent_directory_service.registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 7,
+                "agents": [
+                    {
+                        "agentId": "agent-chat",
+                        "displayName": "Chat Agent",
+                        "kind": "persistent",
+                        "primaryMode": "chat",
+                        "conversationIndexKind": "personal_agent",
+                        "directSessionId": "",
+                        "llmBindings": {"dialogue": {"modelId": "gpt-5.6-luna"}},
+                        "promptTemplateId": "chat",
+                        "toolPolicyId": "tool-default",
+                        "toolPolicy": {"policyId": "tool-default"},
+                        "memoryPolicyId": "memory-default",
+                        "memoryPolicy": {"policyId": "memory-default"},
+                        "permissionPreset": "request_approval",
+                        "status": "active",
+                        "metadata": {"conversationIndexKind": "personal_agent"},
+                    }
+                ],
+                "toolPolicies": {"tool-default": {"policyId": "tool-default"}},
+                "memoryPolicies": {"memory-default": {"policyId": "memory-default"}},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    agent = agent_directory_service.get_agent("agent-chat", include_archived=True)
+    session_id = str((agent or {}).get("directSessionId") or "")
+    assert session_id
+    assert session_id in _session_ids()
+
+
+def test_agent_direct_session_available_does_not_load_detail(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from core.web.services.team import system_teams
+
+    def fail_detail(*_args, **_kwargs):
+        raise AssertionError("team bootstrap must not load session detail")
+
+    monkeypatch.setattr(session_service, "get_session_detail", fail_detail)
+    monkeypatch.setattr(
+        session_service,
+        "_is_session_workspace_intentionally_deleted",
+        lambda _session_id: False,
+    )
+    assert system_teams._agent_direct_session_available(
+        {"directSessionId": "sess-keep"},
+        session_service=session_service,
+    )
+    assert not system_teams._agent_direct_session_available(
+        {"directSessionId": ""},
+        session_service=session_service,
+    )

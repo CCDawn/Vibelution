@@ -273,6 +273,7 @@ def _decorate_source_collection_work_run_snapshot(
     *,
     team_id: str = "",
     run_id: str = "",
+    data_run_exists: bool | None = None,
 ) -> dict[str, Any] | None:
     s = _service()
     if not isinstance(source_collection_work_run, dict):
@@ -292,9 +293,13 @@ def _decorate_source_collection_work_run_snapshot(
             f"{existing_reason}; {reason}" if existing_reason and existing_reason != reason else reason
         )
     if normalized_run_id:
-        data_run_exists = s._source_collection_data_run_exists(normalized_run_id)
-        payload["dataRunExists"] = data_run_exists
-        if not data_run_exists:
+        resolved_data_run_exists = (
+            data_run_exists
+            if isinstance(data_run_exists, bool)
+            else s._source_collection_data_run_exists(normalized_run_id)
+        )
+        payload["dataRunExists"] = resolved_data_run_exists
+        if not resolved_data_run_exists:
             s._mark_source_collection_work_run_stale(payload, "missing_data_processing_run")
     return payload
 

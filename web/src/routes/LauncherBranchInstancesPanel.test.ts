@@ -4,6 +4,7 @@ import type { LauncherBranchInstance } from "../api/launcher";
 import panelSource from "./LauncherBranchInstancesPanel.tsx?raw";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
+  canStartInstance,
   cleanupRiskLabels,
   formatBackendCell,
   instanceHealth,
@@ -116,5 +117,16 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(instanceWindowOpen(running, { currentId: "main", windowOpen: true })).toBe(true);
     expect(panelSource).toContain("onLifecycle");
     expect(panelSource).not.toContain("HEAD");
+  });
+
+  it("lets Start reopen a running isolated instance that has no window", () => {
+    const isolated = instance({
+      alive: true,
+      port: 8004,
+      pids: { backend: 5216, window: 0, manager: 0 },
+    });
+    expect(instanceWindowOpen(isolated)).toBe(false);
+    expect(canStartInstance(isolated)).toBe(true);
+    expect(canStartInstance({ ...isolated, pids: { backend: 5216, window: 4242, manager: 0 } })).toBe(false);
   });
 });

@@ -10,9 +10,6 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from core.web.services.runtime_scene_service import record_backend_api_event
-
-
 SENSITIVE_QUERY_KEYWORDS = (
     "authorization",
     "api_key",
@@ -68,9 +65,7 @@ def should_record_api_runtime_event(request: Request) -> bool:
     path = str(request.url.path or "")
     if not path.startswith("/api/"):
         return False
-    if path in API_RUNTIME_EXCLUDED_PATHS:
-        return False
-    return True
+    return path not in API_RUNTIME_EXCLUDED_PATHS
 
 
 def is_signal_api_response(request: Request, status_code: int, *, duration_ms: float = 0.0) -> bool:
@@ -92,6 +87,10 @@ def record_api_runtime_event(
     exception: Exception | None = None,
 ) -> None:
     try:
+        # Runtime-scene diagnostics pull in the LLM/infrastructure graph. Keep
+        # that cold import off /api/health and only pay it for a signal event.
+        from core.web.services.runtime_scene_service import record_backend_api_event
+
         route = request.scope.get("route")
         request_path = str(request.url.path or "")
         path_template = _api_runtime_path_template(request_path, str(getattr(route, "path", "") or ""))
@@ -117,7 +116,7 @@ def record_api_runtime_event(
                 "exception_message": str(exception or ""),
             }
         )
-    except Exception:
+    except Exception:  # noqa: BLE001,S110 - diagnostics must never fail the API response
         pass
 
 
