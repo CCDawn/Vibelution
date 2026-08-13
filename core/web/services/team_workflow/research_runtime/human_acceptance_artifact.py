@@ -63,7 +63,10 @@ def prepare_command_human_acceptance_artifact(
         and request.node_id == "hypothesis_design"
     ):
         target_node_id = "hypothesis_design"
-    elif request.command is WorkflowCommandKind.RECONCILE_RUN:
+    elif (
+        request.command is WorkflowCommandKind.RETRY_NODE
+        and request.node_id == "smoke_gate"
+    ) or request.command is WorkflowCommandKind.RECONCILE_RUN:
         from .protocol_freeze_artifact import prepare_protocol_freeze_artifact
 
         return prepare_protocol_freeze_artifact(

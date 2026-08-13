@@ -169,6 +169,18 @@ class WorkflowCommandService:
                 f"command {request.command.value} 尚未接入"
             )
 
+        # Recovery artifacts are materialized before a fresh readiness read so
+        # the same visible retry command can repair an old accepted handoff and
+        # immediately evaluate the successor against the canonical authority.
+        try:
+            prepared_artifact = prepare_command_human_acceptance_artifact(
+                store=self._store,
+                run=run,
+                request=request,
+            )
+        except KnowledgeAcceptanceArtifactError as exc:
+            raise WorkflowCommandError(str(exc)) from exc
+
         if request.command in _ATTEMPT_CREATING_COMMANDS:
             if not request.node_id:
                 raise WorkflowCommandError(f"{request.command.value} 需要 nodeId")
@@ -181,15 +193,6 @@ class WorkflowCommandService:
             )
             if not readiness.ready:
                 raise NodeNotReadyError(readiness, run.run_version)
-
-        try:
-            prepared_artifact = prepare_command_human_acceptance_artifact(
-                store=self._store,
-                run=run,
-                request=request,
-            )
-        except KnowledgeAcceptanceArtifactError as exc:
-            raise WorkflowCommandError(str(exc)) from exc
         if request.command is WorkflowCommandKind.RESOLVE_HUMAN_TASK:
             future = self._store.submit(
                 lambda uow: self._handle_resolve_human_task(
