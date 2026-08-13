@@ -19,7 +19,7 @@ export function WorkflowNodeInteractionBoundary(props: {
   return (
     <div
       className="h-full w-full overflow-visible"
-      onClick={activateFromClick}
+      onClickCapture={activateFromClick}
       onKeyDown={activateFromKeyboard}
     >
       {props.children}
