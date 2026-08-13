@@ -393,7 +393,11 @@ def _start_source_collection_agent_task(
             "agentRole": role_key,
             "idempotencyKey": idempotency_key,
             "returnLabel": "科研工作流",
-            "formalRetry": bool(evidence_remediation_contract),
+            # Evidence remediation defines the extraction scope, not session
+            # lifecycle.  The stage-session authority reuses a reviewable
+            # session and independently opens a formal retry after a failed
+            # terminal task.
+            "formalRetry": False,
             "evidenceRemediationContract": evidence_remediation_contract,
         },
     )

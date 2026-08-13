@@ -203,7 +203,7 @@ def test_completed_extraction_materializes_before_collecting_refs(
     assert calls == ["reconcile", "materialize", "collect"]
 
 
-def test_retry_attempt_passes_formal_evidence_scope_to_stage_task(
+def test_retry_attempt_passes_evidence_scope_without_forcing_session_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from core.web.services.team_workflow.research_runtime.real_domain_ports import (
@@ -242,7 +242,7 @@ def test_retry_attempt_passes_formal_evidence_scope_to_stage_task(
         idempotency_key="agent-task:nr-extract-8",
     )
 
-    assert captured["payload"]["formalRetry"] is True
+    assert captured["payload"]["formalRetry"] is False
     assert captured["payload"]["evidenceRemediationContract"]["scopeCandidateIds"] == [
         "candidate-a"
     ]
