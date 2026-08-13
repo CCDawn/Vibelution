@@ -73,6 +73,28 @@ describe("conversationDisplayProtocol", () => {
     })).toBe(true);
   });
 
+  it("keeps completed context compression markers visible without exposing other neutral statuses", () => {
+    expect(shouldDisplayTranscriptCell({
+      id: "compression-applied",
+      kind: "status",
+      messageId: "message-compression",
+      status: "completed",
+      tone: "neutral",
+      title: "上下文已压缩",
+      text: "节省 5,800 tokens",
+      diagnosticSummary: { kind: "context_compression_marker", status: "applied" },
+    })).toBe(true);
+    expect(shouldDisplayTranscriptCell({
+      id: "ordinary-completed-status",
+      kind: "status",
+      messageId: "message-status",
+      status: "completed",
+      tone: "neutral",
+      title: "ordinary_status",
+      text: "done",
+    })).toBe(false);
+  });
+
   it("applies the same visibility policy to transcript cells", () => {
     expect(shouldDisplayTranscriptCell({
       id: "status-context",

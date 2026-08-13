@@ -1098,6 +1098,11 @@ def _normalize_messages(
         if role not in {"user", "assistant"}:
             continue
         raw_metadata = raw.get("metadata")
+        is_context_compression_marker = (
+            role == "assistant"
+            and isinstance(raw_metadata, dict)
+            and str(raw_metadata.get("kind") or "").strip() == "context_compression_marker"
+        )
         if (
             role == "assistant"
             and isinstance(raw_metadata, dict)
@@ -1111,7 +1116,16 @@ def _normalize_messages(
         feedback_events = s._normalize_message_feedback_events(raw.get("feedback_events") or raw.get("feedbackEvents") or [])
         attachments = s._normalize_message_attachments(raw.get("attachments") or raw.get("imageAttachments") or [])
         references = s._normalize_session_references(raw.get("references") or (raw.get("metadata") or {}).get("sessionReferences") or [])
-        if not content and not thought and mental_snapshot is None and not tool_calls and not feedback_events and not attachments and not references:
+        if (
+            not content
+            and not thought
+            and mental_snapshot is None
+            and not tool_calls
+            and not feedback_events
+            and not attachments
+            and not references
+            and not is_context_compression_marker
+        ):
             continue
         # Mature chat list: one process host per turn (timeline target). Intermediate
         # tool_result shells are process data, not empty avatar bubbles.
@@ -2209,6 +2223,43 @@ def _build_session_turn_items_projection(
         or ""
     ).strip()
     normalized_message_id = str(message_id or "").strip()
+    if str(normalized_metadata.get("kind") or "").strip() == "context_compression_marker":
+        marker_status = str(normalized_metadata.get("status") or "").strip()
+        marker_title = str(normalized_metadata.get("title") or "").strip()
+        marker_detail = str(normalized_metadata.get("detail") or "").strip()
+        event_id = str(normalized_metadata.get("eventId") or "").strip()
+        item_id = (
+            f"{s._session_turn_item_base_id(session_id, normalized_turn_id or 'context-compression')}"
+            f"-context-compression-{event_id or marker_status or 'marker'}"
+        )
+        return _canonicalize_session_turn_items_for_protocol(
+            [
+                {
+                    "id": item_id,
+                    "itemId": item_id,
+                    "version": 2,
+                    "sessionId": session_id,
+                    "turnId": normalized_turn_id,
+                    "messageId": normalized_message_id,
+                    "type": "status",
+                    "status": "failed" if marker_status == "failed_preserved" else "completed",
+                    "revision": 0,
+                    "sequence": 1,
+                    "terminal": True,
+                    "code": f"context_compression_{marker_status or 'marker'}",
+                    "title": marker_title or "上下文压缩",
+                    "text": marker_detail or marker_title or "上下文压缩状态已更新",
+                    "diagnosticSummary": {
+                        "kind": "context_compression_marker",
+                        "status": marker_status or "marker",
+                    },
+                    "metadata": normalized_metadata,
+                    "source": source,
+                }
+            ],
+            session_id=session_id,
+            turn_id=normalized_turn_id,
+        )
     # Require turn_id for journal projection so we never return other turns' items.
     if normalized_turn_id:
         canonical_items = s.conversation_turn_items_from_events(
