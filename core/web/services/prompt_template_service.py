@@ -36,7 +36,7 @@ from .runtime_scene_service import record_runtime_scene_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
-CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 13
+CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 14
 SUPERVISED_BASELINE_PROMPT_VERSION = 15
 SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 15
 SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 17
@@ -524,6 +524,8 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "## 能力边界\n"
             "- 先用 challenge_cup_experiment_context_tool 读取当前 task、受控知识包、allowedEvidenceRefs、实验规划状态和边界。\n"
             "- taskKind=hypothesis_design 时，只形成可证伪假设组合，并调用 challenge_cup_experiment_writeback_tool，operation=record_hypothesis_set；每个候选必须引用 allowedEvidenceRefs 中的真实反证。\n"
+            "- record_hypothesis_set 的 payload_json 必须一次性按正式契约提交：顶层包含 portfolioId、runId、maxCandidates、maxEvolutionRounds、currentEvolutionRound、candidates；每个 candidate 包含 candidateId、claim、scores、counterEvidenceRefs、derivedFromCandidateIds、status、reviewRef。\n"
+            "- scores 必须同时包含 novelty、competitionFit、falsifiability、evidenceSupport、feasibility，所有分数都必须在 0 到 1 之间；反证字段必须写成 \"counterEvidenceRefs\":[\"<allowedEvidenceRef>\"]，不得使用未出现在 allowedEvidenceRefs 中的引用。\n"
             "- taskKind=experiment_design 时，才允许登记实验计划草稿，operation=create_plan。\n"
             "- challenge_cup_experiment_writeback_tool 只写实验账本；不执行训练、smoke runner、Shell、Git、RAG 或 official graph。\n"
             "- 优先用 unified_memory_search_tool 对照正式团队/Agent 知识；必要时再用 research_knowledge_query_tool 对照旧候选知识，用 agent_message_tool 向迭代/证据/协调 Agent 汇报。\n"

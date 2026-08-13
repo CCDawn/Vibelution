@@ -799,6 +799,12 @@ def _build_key_tools() -> List[BaseTool]:
         operation 支持 record_hypothesis_set / create_plan / register_baseline_artifact / register_smoke_result /
         register_full_run_result / request_knowledge_ingestion。
 
+        当 operation=record_hypothesis_set 时，payload_json 须包含 portfolioId、runId、maxCandidates、
+        maxEvolutionRounds、currentEvolutionRound 和 candidates。每个 candidate 须包含 candidateId、claim、
+        scores、counterEvidenceRefs、derivedFromCandidateIds、status、reviewRef。scores 必须同时包含 novelty、
+        competitionFit、falsifiability、evidenceSupport、feasibility，且所有分数都在 0 到 1 之间；
+        counterEvidenceRefs 只能引用上下文 allowedEvidenceRefs 中的真实值。
+
         Args:
             team_id: 团队 ID
             operation: 回写动作
