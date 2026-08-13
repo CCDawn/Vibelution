@@ -195,7 +195,10 @@ def _start_external_task(
                     "idempotencyKey": idempotency_key,
                     "returnTo": return_to,
                     "returnLabel": "科研工作流",
-                    "formalRetry": bool(record.get("evidenceRemediationContract")),
+                    # A remediation scope must not force a fresh project-Agent
+                    # session.  Stage-session status is the sole authority for
+                    # deciding whether a formal retry is required.
+                    "formalRetry": False,
                     "evidenceRemediationContract": dict(
                         record.get("evidenceRemediationContract") or {}
                     ),
