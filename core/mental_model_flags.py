@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
 from config.public_config import load_public_config
 from core.infrastructure.feature_gate import resolve_feature_decision
+
+logger = logging.getLogger(__name__)
 
 _MENTAL_MODEL_ENABLED_OVERRIDE: ContextVar[bool | None] = ContextVar(
     "mental_model_enabled_override",
@@ -40,7 +43,8 @@ def is_mental_model_enabled(public_config: dict[str, Any] | None = None) -> bool
     if config is None:
         try:
             config = load_public_config()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to load public config for mental_model flag; falling back to defaults. error=%s", exc)
             config = {}
 
     return resolve_feature_decision(

@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
 
 TERMINAL_BENCH_CORE_REPO = "https://github.com/harbor-framework/terminal-bench-2"
 TERMINAL_BENCH_CORE_REVISION = "2fd12b88aafdd04a52c298e3940bcb189f9766d6"
@@ -99,11 +101,6 @@ def _candidate_paths(path_text: str, aliases: Iterable[str], *, project_root: Op
     return deduped
 
 
-def _subprocess_no_window_kwargs() -> Dict[str, int]:
-    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return {"creationflags": flags} if flags else {}
-
-
 def _tool_requirement_status(name: str) -> Dict[str, Any]:
     executable = shutil.which(name)
     return {
@@ -131,7 +128,7 @@ def _docker_daemon_requirement_status(*, project_root: Optional[Path] = None) ->
             errors="replace",
             timeout=5,
             check=False,
-            **_subprocess_no_window_kwargs(),
+            **no_window_subprocess_kwargs(),
         )
     except Exception as exc:
         return {

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import hashlib
 import json
 import re
 from typing import Any
 
 from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+logger = logging.getLogger(__name__)
 
 
 ADAPTER_VERSION = "kernel-adapter-v1"
@@ -302,5 +305,10 @@ def _record_adapter_scene_event(
             },
             lifecycle=True,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Failed to record adapter scene event code=%s: %s",
+            event_code,
+            exc,
+        )
         return
