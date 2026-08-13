@@ -122,10 +122,10 @@ Avoid concurrent edits to shared hot files unless the current main integration s
 - `web/src/api/types.ts`
 - `web/src/i18n/dictionary.ts`
 - `tests/test_web_app.py`
-- `.docs/project-memory/*`
-- `PROJECT_MEMORY.html`
+- inventory `activePaths.memory/**`
+- Git common-dir coordination registry
 
-Project memory is single-writer state. Parallel Agents should write append-only memory proposals or report lane/update payloads; the current memory-sync step applies them after code merges.
+Project memory is external single-writer state. Parallel Agents should write append-only memory proposals or report lane/update payloads; the current memory-sync step applies them after code merges. Live claim and territory ownership stays in the Git common-dir registry, not project memory.
 
 ## Communication Channels
 

@@ -26,7 +26,7 @@
 | 测试 | [../tests/README.md](../tests/README.md) · 补充 [testing/README.md](testing/README.md) |
 | 运行日志 | [../core/logging/README.md](../core/logging/README.md) |
 | VUI 前端 | [../web/src/components/vui/README.md](../web/src/components/vui/README.md) |
-| 项目记忆（状态，非规范） | [../.docs/project-memory/INDEX.md](../.docs/project-memory/INDEX.md) |
+| 项目记忆（状态，非规范） | 运行 `python scripts/migrate_project_storage.py inventory`，读取 `activePaths.memory` 下的 `INDEX.md` |
 | Linux 部署 | [ops/linux-bootstrap.md](ops/linux-bootstrap.md) |
 | 本地模型监控 | [ops/local-model-monitor.md](ops/local-model-monitor.md) |
 | Gym / Evolution 产品意图 | [prds/README.md](prds/README.md) |
@@ -96,7 +96,7 @@
 
 - 全局规则正文只写一次；索引与 README 用链接。
 - 模块 README 不声明竞争性全局规则。
-- `.docs/project-memory/` 是可变状态，不是规范。
+- 外部 project `memory/` 是可变状态，不是规范；`.docs/project-memory/` 仅是迁移前只读来源。
 - 现行前端：**Tailwind-first + VUI + shadcn/Radix**（HeroUI 已移除；[ADR 0004](adr/0004-product-ui-uses-vui-shadcn-only.md)）。
 - 活跃配置：`%USERPROFILE%\Documents\Vibelution\config\config.toml`（[ADR 0003](adr/0003-operator-config-lives-outside-repo.md)）。
 - service README 的 Related 只链现行入口；历史阶段计划统一指向 `docs/archive/plans/`。

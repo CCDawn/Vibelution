@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from vibelution_storage import resolve_project_memory_home
+
 from core.infrastructure import developer_sandbox
 from core.prompt_manager.assembly_contract import (
     PromptAssemblyManifest,
@@ -852,7 +854,7 @@ def _build_project_agent_registry_context_block(
         return ""
     from core.web.services import agent_directory_service
 
-    registry_path = Path(project_root) / ".docs" / "project-memory" / "agent-registry.json"
+    registry_path = resolve_project_memory_home(project_root) / "agent-registry.json"
     registry = _ensure_project_agent_registry(
         registry_path,
         agent_id=agent_id,
@@ -871,7 +873,7 @@ def _build_project_agent_registry_context_block(
     handoff_entries = _project_agent_handoff_entries(current_entry, entries, limit=8)
     lines = [
         "## Project Agent Territory Registry",
-        "Source: .docs/project-memory/agent-registry.json + active AgentDirectory",
+        "Source: active external project memory/agent-registry.json + active AgentDirectory",
         "Contract:",
         "- You are bound to the sessionId and management territory listed below.",
         (
@@ -1041,7 +1043,7 @@ def _default_project_agent_registry(
         "updatedAt": datetime.now(timezone.utc).isoformat(),
         "sourceOfTruth": {
             "identityBinding": "AgentDirectory",
-            "territoryDefaults": ".docs/project-memory/agent-registry.json",
+            "territoryDefaults": "<active-project-memory>/agent-registry.json",
             "runtimeInjection": "core/orchestration/context_engine.py",
         },
         "policy": {
@@ -1169,7 +1171,7 @@ def _fallback_project_agent_lane_territories() -> dict[str, dict[str, Any]]:
         "quality-and-operations": {
             "managementScope": {
                 "summary": "负责测试、日志、诊断、发布收口和工作树卫生。",
-                "files": ["tests/**", "logs/runtime_scenes/**", ".docs/project-memory/**"],
+                "files": ["tests/**", "<active-project-logs>/runtime_scenes/**", "<active-project-memory>/**"],
                 "taskTypes": [
                     "testing",
                     "logging",
