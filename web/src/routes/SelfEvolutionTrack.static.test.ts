@@ -93,10 +93,11 @@ describe("SelfEvolutionTrack static assets", () => {
   it("routes self-evolution controls through VUI primitives", () => {
     expect(selfEvolutionSource).toContain('from "../components/vui"');
     expect(selfEvolutionSource).toContain("<VButton");
+    expect(selfEvolutionSource).toContain("<VContextualHint");
+    expect(selfEvolutionSource).toContain("<VIconButton");
     expect(selfEvolutionSource).toContain("<VNativeInput");
     expect(selfEvolutionSource).toContain("<VRouteLinkButton");
-    expect(selfEvolutionSource).toContain("className={styles.agentCardMain}");
-    expect(selfEvolutionSource).not.toContain("<VRouteLinkButton\n                    className={styles.agentCardMain}");
+    expect(selfEvolutionSource).toContain("className={styles.railAgentButton}");
     expect(selfEvolutionSource).not.toContain("<Link className={styles.agentCardAction}");
     expect(selfEvolutionSource).not.toMatch(/<button\b/);
     expect(selfEvolutionSource).not.toMatch(/<input\b/);
@@ -146,23 +147,20 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionStylesSource).toContain("workspaceLayout:");
     expect(selfEvolutionStylesSource).toContain("conversationShell:");
     expect(selfEvolutionStylesSource).toContain("max-h-full");
-    expect(styles.trackShell).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.trackShell).toContain("grid-rows-[minmax(0,1fr)]");
     expect(selfEvolutionStylesSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    // Status/header row stays content-height; body owns the 1fr track.
-    expect(styles.pageTabsRow).toContain("self-start");
-    expect(styles.pageTabsRow).toContain("shrink-0");
-    expect(styles.runActionBar).toContain("self-start");
+    expect(styles.workspaceLayout).toContain("h-full");
+    expect(styles.centerColumn).toContain("grid-rows-[auto_minmax(0,1fr)]");
   });
 
-  it("surfaces the active run controls before the workspace columns", () => {
-    expect(selfEvolutionSource.indexOf("styles.trackShell")).toBeLessThan(selfEvolutionSource.indexOf("styles.pageTabsRow"));
-    expect(selfEvolutionSource.indexOf("styles.pageTabsRow")).toBeLessThan(selfEvolutionSource.indexOf("styles.trackBody"));
+  it("keeps active run controls in the persistent state and configuration rail", () => {
     expect(selfEvolutionSource.indexOf("styles.trackBody")).toBeLessThan(selfEvolutionSource.indexOf("styles.workspaceLayout"));
-    expect(selfEvolutionSource).toContain("styles.runActionBar");
-    expect(selfEvolutionSource).toContain("styles.runActionCluster");
+    expect(selfEvolutionSource.indexOf("styles.railHeader")).toBeLessThan(selfEvolutionSource.indexOf("<main className={styles.centerColumn}>") );
+    expect(selfEvolutionSource).not.toContain("styles.pageTabsRow");
+    expect(selfEvolutionSource).not.toContain("styles.runActionBar");
+    expect(selfEvolutionSource).toContain("styles.railGoalInput");
+    expect(selfEvolutionSource).toContain("styles.railActionRow");
     expect(selfEvolutionSource).toContain("showTopTerminateAction");
-    expect(selfEvolutionSource).toContain("styles.dangerAction");
-    expect(selfEvolutionSource).toContain("styles.primaryAction");
     expect(selfEvolutionSource).toContain('onWorktreeAction(worktreeRun.runId, "terminate")');
     expect(selfEvolutionSource).not.toContain("observationTerminateVisible && observationRun?.runId");
     expect(selfEvolutionSource).toContain("showComposer: !runIsActive && !worktreeRunLocked && !runLocked");
@@ -280,18 +278,18 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("setObservationDurationInput");
     expect(selfEvolutionSource).toContain("parseObservationDurationInput(observationDurationInput)");
     expect(selfEvolutionSource).not.toContain("parseObservationDurationInput(String(DEFAULT_OBSERVATION_DURATION_SECONDS))");
-    expect(workspaceSurface).toContain("观察配置");
-    expect(workspaceSurface).toContain("观察提示词");
-    expect(workspaceSurface).toContain("空白输入实验");
-    expect(workspaceSurface).toContain("模型输入");
-    expect(workspaceSurface).toContain("原样发送");
-    expect(workspaceSurface).toContain("运行时长（秒）");
-    expect(workspaceSurface).toContain("开始自主观察");
-    expect(workspaceSurface).toContain("终止这一轮");
-    expect(workspaceSurface).toContain("observationPrimaryActionDisabled");
-    expect(workspaceSurface).toContain("onTerminateObservation(observationRun.runId)");
-    expect(workspaceSurface).toContain('inputMode: observationInputModeValue');
-    expect(workspaceSurface).toContain('goal: observationInputModeValue === "blank" ? "" : observationGoalInput');
+    expect(selfEvolutionSource).toContain('aria-label={lang === "zh" ? "配置" : "Configuration"}');
+    expect(selfEvolutionSource).toContain("styles.observationConfigForm");
+    expect(selfEvolutionSource).toContain("空白输入实验");
+    expect(selfEvolutionSource).toContain("观察输入说明");
+    expect(selfEvolutionSource).toContain("原样发送");
+    expect(selfEvolutionSource).toContain("时长（秒）");
+    expect(selfEvolutionSource).toContain("开始自主观察");
+    expect(selfEvolutionSource).toContain("终止这一轮");
+    expect(selfEvolutionSource).toContain("observationPrimaryActionDisabled");
+    expect(selfEvolutionSource).toContain("onTerminateObservation(observationRun.runId)");
+    expect(selfEvolutionSource).toContain('inputMode: observationInputModeValue');
+    expect(selfEvolutionSource).toContain('goal: observationInputModeValue === "blank" ? "" : observationGoalInput');
     expect(workspaceSurface).not.toContain("onStartObservation({ goal: observationGoalValue");
     expect(selfEvolutionSource).not.toContain("在底部输入观察目标后开始自主观察。");
     expect(selfEvolutionSource).not.toContain("Enter an observation goal in the composer, then start observation.");
@@ -360,6 +358,7 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(centerSurface).toContain("<ChatReadOnlySessionWorkspace");
     expect(centerSurface).toContain("sessionId={activeConversationSurface.sessionId}");
     expect(centerSurface).toContain("title={activeConversationSurface.title}");
+    expect(centerSurface).toContain("showHeader={false}");
     expect(centerSurface).toContain("messages={activeConversationSurface.messages}");
     expect(centerSurface).toContain("showComposer={activeConversationSurface.showComposer}");
     expect(centerSurface).toContain("onSubmit={activeConversationSurface.onSubmit}");
@@ -374,14 +373,15 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain('id: "prompt"');
     expect(selfEvolutionSource).toContain('disabled: observationRunActive || observationStartPending');
     expect(selfEvolutionSource).toContain('disabled={observationRunActive || observationStartPending || observationInputModeValue === "blank"}');
-    expect(selfEvolutionSource).toContain("首轮发送内容为空的 user 消息；后续复用同一模型会话");
-    expect(selfEvolutionSource).toContain("Later calls continue the same model conversation");
+    expect(selfEvolutionSource).toContain("空白实验不注入默认目标或续写提示");
+    expect(selfEvolutionSource).toContain("blank-input experiments inject no default goal or continuation prompt");
     expect(selfEvolutionSource).not.toContain("不会注入默认目标、系统提示、历史或续写提示");
     expect(selfEvolutionSource).not.toContain("with no default goal, system prompt, history, or continuation prompt");
   });
 
   it("exposes workflow and disabled action explanations through VUI tooltips", () => {
-    expect(selfEvolutionSource).toContain("tooltip={step.livePreview || step.summary || stepName}");
+    expect(selfEvolutionSource).toContain('tooltip={`${stepName} · ${statusLabel(step.status)} · ${step.livePreview || step.summary || "--"}`}');
+    expect(selfEvolutionSource).toContain("<VContextualHint");
     expect(selfEvolutionSource).toContain("disabledReason={topTerminateReason || undefined}");
     expect(selfEvolutionSource).toContain("disabledReason={observationPrimaryActionDisabledReason || undefined}");
     expect(selfEvolutionSource).toContain('tooltip={t("batchDeleteHint")}');
@@ -447,8 +447,8 @@ describe("SelfEvolutionTrack static assets", () => {
     const observationBranch = centerSurface.indexOf("observationRunModeActive ? (");
     const approvalBranch = centerSurface.indexOf('selectedWorkflowStep?.id === "approval"');
 
-    expect(selfEvolutionSource).toContain("const centerWorkflowSummary = observationRunModeActive");
-    expect(centerSurface).toContain("{centerWorkflowSummary}");
+    expect(centerSurface).toContain('label={lang === "zh" ? "当前对话说明" : "Current conversation details"}');
+    expect(centerSurface).toContain("selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction");
     expect(centerSurface).toContain("activeConversationSurface");
     expect(observationBranch).toBeGreaterThanOrEqual(0);
     expect(approvalBranch).toBeGreaterThanOrEqual(0);
@@ -466,8 +466,8 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain('returnLabel: "self_evolution"');
     expect(selfEvolutionSource).toContain('pane: "config"');
     expect(selfEvolutionSource).toContain('pane: "activity"');
-    expect(selfEvolutionStylesSource).toContain("agentCardList:");
-    expect(selfEvolutionStylesSource).toContain("agentCardAction:");
+    expect(selfEvolutionStylesSource).toContain("railAgentActions:");
+    expect(selfEvolutionStylesSource).toContain("railAgentButton:");
   });
 
   it("keeps observation side rails compact and leaves full transcripts in the conversation view", () => {
@@ -506,15 +506,16 @@ describe("SelfEvolutionTrack static assets", () => {
   it("keeps the pet companion read-only inside self-evolution", () => {
     expect(selfEvolutionSource).toContain("deriveSelfEvolutionPetCompanionState");
     expect(selfEvolutionSource).toContain("petSelfCompanion");
-    expect(selfEvolutionSource).toContain("petCompanionSurface");
     expect(selfEvolutionSource).toContain('fetchJson<PetSummary>("/api/pet/summary")');
     expect(selfEvolutionSource).not.toContain("/api/pet/actions");
   });
 
-  it("keeps pet metrics out of the workspace first screen and moves them to status", () => {
-    expect(workspaceSurface).toContain("petCompanionSurface");
+  it("removes pet copy from the primary chat workspace and keeps it in explicit run details", () => {
+    expect(workspaceSurface).not.toContain("petCompanionSurface");
+    expect(workspaceSurface).not.toContain("petCompanionState");
     expect(workspaceSurface).not.toContain("petVitals.map");
     expect(workspaceSurface).not.toContain("styles.compactMetricGrid");
+    expect(statusPageSurface).toContain("petCompanionState");
     expect(statusPageSurface).toContain("petVitals.map");
     expect(statusPageSurface).toContain("t(\"petSpace\")");
   });
@@ -537,9 +538,8 @@ describe("SelfEvolutionTrack static assets", () => {
   it("keeps self-evolution route chrome inside a single opaque workbench shell", () => {
     expect(styles.trackShell).toContain("bg-vui-surface-panel");
     expect(styles.trackShell).toContain("border border-vui-border-subtle");
-    expect(styles.pageTabsRow).toContain("border-b border-vui-border-subtle");
-    expect(styles.runActionBar).not.toContain("border border-vui-border-subtle");
-    expect(styles.runActionBar).not.toContain("bg-vui-surface-panel");
+    expect(styles.railHeader).toContain("border-b border-vui-border-subtle");
+    expect(styles.workflowHeader).toContain("border-b border-vui-border-subtle");
 
     [
       styles.trackShell,
@@ -547,22 +547,27 @@ describe("SelfEvolutionTrack static assets", () => {
       styles.surface,
       styles.approvalPanel,
       styles.subsurface,
-      styles.petCompanionSurface,
     ].forEach(expectOpaqueWorkbenchSurface);
   });
 
-  it("keeps the self-evolution workspace visually stable at desktop widths", () => {
+  it("keeps the approved desktop-only state rail and primary conversation layout", () => {
     expect(selfEvolutionSource).toContain("usePersistedPaneResize");
     expect(selfEvolutionSource).toContain("WORKBENCH_LAYOUT_IDS.evolutionSelf");
     expect(selfEvolutionSource).toContain("migrateLegacyNumericPane");
     expect(selfEvolutionSource).toContain("SELF_SIDEBAR_PANE");
-    expect(styles.workspaceLayout).toContain("var(--self-sidebar-width,360px)");
-    expect(styles.conversationShell).toContain("border border-vui-border-subtle");
+    expect(styles.workspaceLayout).toContain("var(--self-sidebar-width,340px)");
+    expect(styles.workspaceLayout).not.toContain("max-[1180px]:grid-cols-1");
+    expect(styles.conversationShell).toContain("border-0");
     expect(styles.conversationShell).toContain("bg-vui-surface-panel");
-    expect(styles.centerColumn).toContain("gap-3");
+    expect(styles.centerColumn).not.toContain("gap-3");
+    expect(selfEvolutionSource).toContain('aria-label={lang === "zh" ? "状态" : "Status"}');
+    expect(selfEvolutionSource).toContain('aria-label={lang === "zh" ? "配置" : "Configuration"}');
+    expect(selfEvolutionSource).toContain("setActivePage((current) => current === \"workspace\" ? \"status\" : \"workspace\")");
+    expect(selfEvolutionSource).toContain("stats: [],");
+    expect(selfEvolutionSource).not.toContain("styles.pageTabsRow");
   });
 
-  it("keeps the workflow step switch compact instead of rendering full-width card buttons", () => {
+  it("keeps workflow switching icon-only with hover and focus explanations", () => {
     expect(styles.centerColumn).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(selfEvolutionSource).toContain("styles.workflowHeader");
     expect(styles.workflowCardGrid).toContain("inline-flex");
@@ -570,12 +575,13 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(styles.workflowCardGrid).not.toContain("grid-cols-[minmax(0,1fr)_minmax(0,1fr)]");
     expect(styles.workflowCardGrid).not.toContain("[&>*]:w-full");
 
-    expect(styles.workflowCard).toContain("inline-flex");
-    expect(styles.workflowCard).toContain("min-h-8");
-    expect(styles.workflowCard).toContain("w-fit");
+    expect(styles.workflowCard).toContain("h-8");
+    expect(styles.workflowCard).toContain("w-8");
+    expect(styles.workflowCard).toContain("min-w-8");
     expect(styles.workflowCard).not.toContain("min-h-[72px]");
     expect(styles.workflowCard).not.toContain("content-start");
-    expect(selfEvolutionSource).toContain("styles.workflowStepSummary");
+    expect(selfEvolutionSource).toContain("<VIconButton");
+    expect(selfEvolutionSource).not.toContain("styles.workflowStepSummary");
     expect(selfEvolutionSource).not.toContain("<small>{step.livePreview || step.summary || \"--\"}</small>");
     expect(selfEvolutionSource).toContain('<div className={styles.workflowHeader}>');
     expect(selfEvolutionSource.indexOf('<div className={styles.workflowHeader}>')).toBeLessThan(selfEvolutionSource.indexOf('<div className={styles.conversationShell}>'));
@@ -583,7 +589,7 @@ describe("SelfEvolutionTrack static assets", () => {
 
   it("keeps repeated self-evolution panels and rows lighter than card walls", () => {
     [
-      styles.agentCard,
+      styles.railFact,
       styles.observationEventItem,
       styles.loadingRail,
       styles.loadingPanel,
@@ -594,7 +600,7 @@ describe("SelfEvolutionTrack static assets", () => {
     ].forEach(expectBackgroundAware);
   });
 
-  it("keeps self-evolution actions content-sized with mobile overflow guards", () => {
+  it("keeps self-evolution actions content-sized with desktop overflow guards", () => {
     [
       styles.primaryAction,
       styles.dangerAction,
@@ -618,6 +624,8 @@ describe("SelfEvolutionTrack static assets", () => {
       expect(className).toContain("max-w-full");
       expect(className).toContain("overflow-x-hidden");
     });
+    expect(styles.workspaceLayout).not.toContain("max-[1180px]:grid-cols-1");
+    expect(styles.conversationShell).not.toContain("max-[760px]");
   });
 });
 
