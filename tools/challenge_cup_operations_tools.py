@@ -92,7 +92,11 @@ def challenge_cup_experiment_context_tool(
             team_id=team_id,
             research_project_id=research_project_id,
             task_id=task_id,
-            allowed_task_kinds=("experiment_design", "experiment_evidence_review"),
+            allowed_task_kinds=(
+                "hypothesis_design",
+                "experiment_design",
+                "experiment_evidence_review",
+            ),
             recorded_by_agent="",
             load_context=True,
         )
@@ -162,20 +166,28 @@ def challenge_cup_experiment_writeback_tool(
         normalized_operation = _text(operation)
         if normalized_operation in {"run_smoke", "execute_smoke", "run_training", "execute_training", "full_run"}:
             return _unsupported_operation(normalized_operation, boundary="experiment_planning_ledger_only_not_training_execution")
-        allowed_task_kinds = (
-            ("experiment_design",)
-            if normalized_operation == "create_plan"
-            else ("experiment_evidence_review",)
-        )
-        task = _project_task_binding(
+        if normalized_operation == "record_hypothesis_set":
+            allowed_task_kinds = ("hypothesis_design",)
+        elif normalized_operation == "create_plan":
+            allowed_task_kinds = ("experiment_design",)
+        else:
+            allowed_task_kinds = ("experiment_evidence_review",)
+        task_binding = _project_task_binding(
             workflow_service,
             team_id=team_id,
             research_project_id=research_project_id,
             task_id=task_id,
             allowed_task_kinds=allowed_task_kinds,
             recorded_by_agent=recorded_by_agent,
+            load_context=normalized_operation == "record_hypothesis_set",
         )
-        bound_project_id, bound_task_id = _project_task_identity(task)
+        bound_project_id, bound_task_id = _project_task_identity(task_binding)
+        task = (
+            task_binding.get("task")
+            if isinstance(task_binding, dict)
+            and isinstance(task_binding.get("task"), dict)
+            else task_binding
+        )
         payload = _json_object(payload_json)
         actor_agent_id = (
             _text(task.get("agentId"))
@@ -199,7 +211,21 @@ def challenge_cup_experiment_writeback_tool(
             payload["createdFromTurnId"] = _text(
                 (task.get("turn") or {}).get("turnId")
             )
-        if normalized_operation == "create_plan":
+        if normalized_operation == "record_hypothesis_set":
+            if not isinstance(task_binding, dict) or not isinstance(task, dict):
+                raise ValueError(
+                    "record_hypothesis_set requires a bound hypothesis task."
+                )
+            from core.web.services.team_workflow.research_runtime.hypothesis_artifact_writer import (
+                record_hypothesis_set,
+            )
+
+            response = record_hypothesis_set(
+                team_id=team_id,
+                task_context=task_binding,
+                payload=payload,
+            )
+        elif normalized_operation == "create_plan":
             response = workflow_service.create_experiment_plan(team_id, payload)
             if task:
                 created_plan = (
@@ -259,11 +285,16 @@ def challenge_cup_experiment_writeback_tool(
             )
         task_status = None
         if task:
-            result_refs = _experiment_writeback_result_refs(
-                operation=normalized_operation,
-                requested_plan_id=_text(plan_id),
-                response=response,
+            result_refs = (
+                [_text((response.get("artifact") or {}).get("recordId"))]
+                if normalized_operation == "record_hypothesis_set"
+                else _experiment_writeback_result_refs(
+                    operation=normalized_operation,
+                    requested_plan_id=_text(plan_id),
+                    response=response,
+                )
             )
+            result_refs = [item for item in result_refs if item]
             task_status = (
                 workflow_service.update_research_project_agent_task_status(
                     team_id,
