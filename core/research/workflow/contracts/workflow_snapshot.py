@@ -147,16 +147,36 @@ class HandoffSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentBindingRef:
+    node_id: str
+    agent_id: str
+    role_key: str
+    resolved_from: str
+    snapshot_id: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "nodeId": self.node_id,
+            "agentId": self.agent_id,
+            "roleKey": self.role_key,
+            "resolvedFrom": self.resolved_from,
+            "snapshotId": self.snapshot_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AgentBindingSummary:
     binding_snapshot_set_id: str
     binding_snapshot_ids: tuple[str, ...]
     count: int
+    bindings: tuple[AgentBindingRef, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "bindingSnapshotSetId": self.binding_snapshot_set_id,
             "bindingSnapshotIds": list(self.binding_snapshot_ids),
             "count": self.count,
+            "bindings": [item.to_dict() for item in self.bindings],
         }
 
 
