@@ -482,6 +482,7 @@ def load_scoped_artifact_payload(
         "frozen_protocol",
         "evaluation_report",
         "hypothesis_set",
+        "protocol_draft",
     }:
         from .workflow_artifact_store import load_workflow_artifact_payload
 

@@ -28,6 +28,7 @@ _SUPPORTED_KINDS = frozenset(
         "frozen_protocol",
         "evaluation_report",
         "hypothesis_set",
+        "protocol_draft",
     }
 )
 

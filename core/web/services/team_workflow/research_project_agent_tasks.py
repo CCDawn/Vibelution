@@ -54,7 +54,9 @@ TASK_KIND_CONTRACTS: dict[str, dict[str, Any]] = {
         "title": "生成或修订冻结前的实验设计",
         "objective": "读取当前项目的受控实验上下文，生成可审查的实验计划，并通过实验写回工具登记结果。",
         "checklist": [
+            "以 protocolInput 中正式 workflow hypothesis_set 为假设事实源，不以旧候选计数替代",
             "核对研究问题、dataset、baseline、变量、metric 与成功/失败门禁",
+            "dataset、baseline、metric、seed、budget、stop condition 与 smoke plan 不得使用占位文本",
             "保持训练与执行为人工触发边界",
             "通过 challenge_cup_experiment_writeback_tool 登记计划或修订",
         ],
@@ -705,6 +707,12 @@ def get_research_project_agent_task_context(
         )
 
         response["hypothesisInput"] = build_hypothesis_input_context(team_id, task)
+    if task.get("taskKind") == "experiment_design":
+        from .research_project_protocol_context import (
+            build_protocol_input_context,
+        )
+
+        response["protocolInput"] = build_protocol_input_context(team_id, task)
     return response
 
 
