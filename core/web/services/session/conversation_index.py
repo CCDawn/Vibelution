@@ -1387,8 +1387,12 @@ def ensure_agent_direct_session(
     if not agent:
         raise s.SessionValidationError(s._session_agent_unavailable_message("missing_agent", lang=s.get_web_language()))
     current_session_id = str(agent.get("directSessionId") or "").strip()
-    if current_session_id and s.get_session_detail(current_session_id):
-        return s.get_session_detail(current_session_id) or {}
+    if current_session_id and not s._is_session_workspace_intentionally_deleted(current_session_id):
+        return {
+            "id": current_session_id,
+            "agentId": normalized_agent_id,
+            "title": str(title or agent.get("displayName") or "").strip(),
+        }
     lang = s.get_web_language()
     with s._CHAT_STATE_LOCK:
         payload = s.load_chat_state(s.PROJECT_ROOT)
@@ -1434,7 +1438,11 @@ def ensure_agent_direct_session(
 
     directory_bridge.sync_conversation_record(conversation)
     s._invalidate_session_list_cache()
-    return s.get_session_detail(session_id) or {}
+    return {
+        "id": session_id,
+        "agentId": normalized_agent_id,
+        "title": display_title,
+    }
 
 
 def _bind_conversation_to_agent_instance(
