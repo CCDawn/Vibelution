@@ -45,12 +45,24 @@ def _session_context_allows_internal_auto_continue(context: dict[str, Any]) -> b
         )
         if external_explicit is not None:
             return bool(external_explicit)
+    if _is_research_project_agent_task_context(context):
+        return str(context.get("user_message_source") or "").strip() == "agent_inbox"
     if not s._source_collection_stage_task_context_metadata(context):
         return False
     if str(context.get("user_message_source") or "").strip() == "agent_inbox":
         return True
     metadata = context.get("message_metadata") if isinstance(context.get("message_metadata"), dict) else {}
     return metadata.get("sourceCollectionStageContinuation") is True
+
+
+def _is_research_project_agent_task_context(context: dict[str, Any]) -> bool:
+    metadata = (
+        context.get("message_metadata")
+        if isinstance(context.get("message_metadata"), dict)
+        else {}
+    )
+    return str(metadata.get("kind") or "").strip() == "research_project_agent_task"
+
 
 def _session_context_internal_auto_continue_max_turns(context: dict[str, Any]) -> int:
     s = _service()
@@ -59,7 +71,9 @@ def _session_context_internal_auto_continue_max_turns(context: dict[str, Any]) -
     )
     if explicit:
         return max(1, explicit)
-    if s._source_collection_stage_task_context_metadata(context):
+    if s._source_collection_stage_task_context_metadata(
+        context
+    ) or _is_research_project_agent_task_context(context):
         return s.SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS
     return s.INTERNAL_AUTO_CONTINUE_MAX_TURNS
 
