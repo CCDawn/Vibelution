@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure.branch_workspace import list_branch_instances
+from core.launcher.slot_identity import apply_slot_spawn_environment, slot_fields_for_project
 from core.runtime_manager import instances_registry as registry
 from core.runtime_manager.constants import LAUNCHER_STATE_PATH, PROJECT_ROOT
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
@@ -69,6 +70,7 @@ def overlay_instance_ports(
     for item in items:
         if not isinstance(item, dict):
             continue
+        item.update(_slot_fields_for_path(item.get("path") or ""))
         entry = by_id.get(str(item.get("id") or "")) or by_root.get(_norm_path(item.get("path") or ""))
         if item.get("current"):
             if current_backend > 0:
@@ -165,25 +167,23 @@ def run_isolated_operation(
         try:
             spawn(worktree, action, backend_port, control_port)
         except BranchInstanceLifecycleError:
-            registry.upsert_instance(
+            _upsert_instance_with_slot(
                 instance_id,
-                projectRoot=str(worktree),
+                worktree,
                 branch=str(item.get("branch") or ""),
                 port=backend_port,
-                controlPort=control_port,
-                url=_loopback_url(backend_port),
+                control_port=control_port,
                 status="failed",
             )
             raise
-        registry.upsert_instance(
+        _upsert_instance_with_slot(
             instance_id,
-            projectRoot=str(worktree),
+            worktree,
             branch=str(item.get("branch") or ""),
             port=backend_port,
-            controlPort=control_port,
-            url=_loopback_url(backend_port),
+            control_port=control_port,
             status="running",
-            startedAt=_now_iso(),
+            started_at=_now_iso(),
         )
         return _isolated_response(
             operation,
@@ -201,13 +201,12 @@ def run_isolated_operation(
         or registry.DEFAULT_CONTROL_PORT
     )
     spawn(worktree, "stop", backend_port, control_port)
-    registry.upsert_instance(
+    _upsert_instance_with_slot(
         instance_id,
-        projectRoot=str(worktree),
+        worktree,
         branch=str(item.get("branch") or ""),
         port=backend_port,
-        controlPort=control_port,
-        url=_loopback_url(backend_port),
+        control_port=control_port,
         status="closed",
     )
     return _isolated_response(
@@ -237,11 +236,13 @@ def spawn_worktree_launcher(
             f"工作区缺少 scripts/vibelution_launcher.py：{root}",
         )
     python = resolve_no_console_python(root)
-    env = os.environ.copy()
-    env["VIBELUTION_PORT"] = str(int(backend_port))
-    env["VIBELUTION_LAUNCHER_PORT"] = str(int(control_port))
-    env["AGENT_WORKBENCH_BACKEND_PORT"] = str(int(backend_port))
-    env["AGENT_LAUNCHER_CONTROL_PORT"] = str(int(control_port))
+    env = apply_slot_spawn_environment(
+        os.environ,
+        root,
+        backend_port=int(backend_port),
+        control_port=int(control_port),
+        mkdir=True,
+    )
     if timeout is None:
         if action == "start":
             timeout = _ISOLATED_START_TIMEOUT_SECONDS
@@ -357,6 +358,40 @@ def _positive_int(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return max(0, parsed)
+
+
+def _upsert_instance_with_slot(
+    instance_id: str,
+    worktree: Path,
+    *,
+    branch: str,
+    port: int,
+    control_port: int,
+    status: str,
+    started_at: str | None = None,
+) -> None:
+    fields: dict[str, Any] = {
+        "projectRoot": str(worktree),
+        "branch": branch,
+        "port": int(port),
+        "controlPort": int(control_port),
+        "url": _loopback_url(port),
+        "status": status,
+        **_slot_fields_for_path(worktree),
+    }
+    if started_at:
+        fields["startedAt"] = started_at
+    registry.upsert_instance(instance_id, **fields)
+
+
+def _slot_fields_for_path(project_root: Path | str) -> dict[str, Any]:
+    text = str(project_root or "").strip()
+    if not text:
+        return {}
+    try:
+        return slot_fields_for_project(text)
+    except (OSError, TypeError, ValueError):
+        return {}
 
 
 def _norm_path(value: Any) -> str:

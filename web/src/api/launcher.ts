@@ -74,6 +74,9 @@ export type LauncherBranchInstance = {
   port: number;
   controlPort?: number;
   url?: string;
+  slotKey?: string;
+  slotId?: string;
+  dataHome?: string;
   shortName?: string;
   workbenchTitle?: string;
   launcherTitle?: string;

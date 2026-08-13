@@ -6,6 +6,26 @@ import { desktopWorkbenchCloseCanarySummary, desktopWorkbenchCloseCanarySummaryP
 describe("desktop CLI arguments", () => {
   it("does not infer a Workbench-open request from an ordinary duplicate launch", () => {
     expect(parseDesktopCliArgs(["--workspace", "C:/workspace"]).openWorkbench).toBe(false);
+    expect(parseDesktopCliArgs(["--workspace", "C:/workspace"]).projectRoot).toBe("");
+  });
+
+  it("keeps --project as a slot apply path and does not treat it as workspace root", () => {
+    const args = parseDesktopCliArgs([
+      "--workspace",
+      "C:/Users/17533/Desktop/Vibelution",
+      "--project",
+      "C:/Users/17533/Desktop/Vibelution/.worktrees/task"
+    ]);
+    expect(args.workspaceRoot).toBe("C:/Users/17533/Desktop/Vibelution");
+    expect(args.projectRoot).toBe("C:/Users/17533/Desktop/Vibelution/.worktrees/task");
+    expect(applyDesktopCliToEnvironment({ NODE_ENV: "production" } as NodeJS.ProcessEnv, args)).toMatchObject({
+      NODE_ENV: "production",
+      VIBELUTION_WORKSPACE_ROOT: "C:/Users/17533/Desktop/Vibelution"
+    });
+    expect(
+      applyDesktopCliToEnvironment({} as NodeJS.ProcessEnv, parseDesktopCliArgs(["--project", "C:/worktrees/task"]))
+        .VIBELUTION_WORKSPACE_ROOT
+    ).toBeUndefined();
   });
 
   it("maps package smoke arguments onto the existing environment contract", () => {
@@ -21,6 +41,7 @@ describe("desktop CLI arguments", () => {
 
     expect(args).toEqual({
       workspaceRoot: "C:/Users/17533/Desktop/Vibelution",
+      projectRoot: "",
       configPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
       smoke: true,
       openWorkbench: true,

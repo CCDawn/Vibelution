@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from core.launcher import app as launcher_app
 from core.launcher import branch_instance_lifecycle as lifecycle
 from core.launcher import service as launcher_service
+from core.launcher.slot_identity import data_home_for_project, slot_id_for_project
 from core.runtime_manager import instances_registry as registry
 
 
@@ -71,6 +72,12 @@ def test_overlay_uses_live_current_ports_and_registry_reservations(registry_path
     assert other["port"] == 8003
     assert other["controlPort"] == 8768
     assert other["url"] == "http://127.0.0.1:8003"
+    assert current["slotId"]
+    assert current["slotKey"]
+    assert current["dataHome"]
+    assert other["slotId"]
+    assert other["slotId"] != current["slotId"]
+    assert other["dataHome"] != current["dataHome"]
 
 
 def test_retired_and_local_branch_cannot_start():
@@ -111,6 +118,8 @@ def test_isolated_start_allocates_ports_and_spawns_without_touching_current(regi
     assert stored["status"] == "running"
     assert stored["port"] == 8001
     assert stored["controlPort"] == 8766
+    assert stored["slotId"] == slot_id_for_project(worktree)
+    assert stored["dataHome"] == str(data_home_for_project(worktree))
 
 
 def test_isolated_stop_reuses_reserved_ports(registry_path, tmp_path):
@@ -135,6 +144,7 @@ def test_isolated_stop_reuses_reserved_ports(registry_path, tmp_path):
 
 
 def test_spawn_uses_pythonw_and_hidden_console(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
     worktree = tmp_path / "task"
     scripts = worktree / "scripts"
     scripts.mkdir(parents=True)
@@ -165,6 +175,9 @@ def test_spawn_uses_pythonw_and_hidden_console(tmp_path, monkeypatch):
     assert captured["kwargs"]["cwd"] == str(worktree)
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "8002"
     assert captured["kwargs"]["env"]["VIBELUTION_LAUNCHER_PORT"] == "8767"
+    assert captured["kwargs"]["env"]["VIBELUTION_DATA_HOME"] == str(data_home_for_project(worktree))
+    assert captured["kwargs"]["env"]["VIBELUTION_WORKSPACE_ROOT"] == str(worktree.resolve())
+    assert (tmp_path / "AppData" / "Local" / "Vibelution" / "slots").exists()
     if lifecycle.os.name == "nt":
         assert captured["kwargs"]["creationflags"] & lifecycle.subprocess.CREATE_NO_WINDOW
     assert result["returncode"] == 0

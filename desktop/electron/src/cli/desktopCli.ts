@@ -1,5 +1,6 @@
 export type DesktopCliArgs = {
   workspaceRoot: string;
+  projectRoot: string;
   configPath: string;
   smoke: boolean;
   openWorkbench: boolean;
@@ -9,6 +10,7 @@ export type DesktopCliArgs = {
 export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
   const result: DesktopCliArgs = {
     workspaceRoot: "",
+    projectRoot: "",
     configPath: "",
     smoke: false,
     openWorkbench: false,
@@ -18,6 +20,11 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     const item = argv[index];
     if (item === "--workspace") {
       result.workspaceRoot = String(argv[index + 1] || "").trim();
+      index += 1;
+      continue;
+    }
+    if (item === "--project") {
+      result.projectRoot = String(argv[index + 1] || "").trim();
       index += 1;
       continue;
     }

@@ -16,6 +16,18 @@ export type TrayBranchInstance = {
   stoppable: boolean;
 };
 
+export type BranchInstanceRecord = {
+  id: string;
+  path: string;
+  slotKey: string;
+  url: string;
+  port: number;
+  alive: boolean;
+  current: boolean;
+  checkedOut: boolean;
+  kind: string;
+};
+
 export type LauncherStatusSummary = {
   overallState: string;
   observedState: string;
@@ -207,6 +219,69 @@ export async function fetchLauncherBranchInstances(input: {
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }): Promise<TrayBranchInstance[]> {
+  return classifyTrayBranchInstances(await readLauncherBranchInstancesPayload(input));
+}
+
+export function parseBranchInstanceRecords(payload: unknown): BranchInstanceRecord[] {
+  if (!isRecord(payload) || !Array.isArray(payload.items)) {
+    return [];
+  }
+  const items: BranchInstanceRecord[] = [];
+  for (const raw of payload.items) {
+    if (!isRecord(raw)) {
+      continue;
+    }
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    if (!id) {
+      continue;
+    }
+    const portValue = Number(raw.port || 0);
+    items.push({
+      id,
+      path: typeof raw.path === "string" ? raw.path.trim() : "",
+      slotKey: typeof raw.slotKey === "string" ? raw.slotKey.trim() : "",
+      url: typeof raw.url === "string" ? raw.url.trim() : "",
+      port: Number.isFinite(portValue) ? portValue : 0,
+      alive: raw.alive === true,
+      current: raw.current === true,
+      checkedOut: raw.checkedOut === true,
+      kind: typeof raw.kind === "string" ? raw.kind.trim() : ""
+    });
+  }
+  return items;
+}
+
+export function matchBranchInstanceByProjectRoot(
+  items: BranchInstanceRecord[],
+  projectRoot: string
+): BranchInstanceRecord | null {
+  const wanted = normalizeMatchPath(projectRoot);
+  if (!wanted) {
+    return null;
+  }
+  for (const item of items) {
+    if (normalizeMatchPath(item.slotKey) === wanted || normalizeMatchPath(item.path) === wanted) {
+      return item;
+    }
+  }
+  return null;
+}
+
+export async function fetchLauncherBranchInstanceRecords(input: {
+  launcherOrigin: string;
+  controlToken: string;
+  fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
+}): Promise<BranchInstanceRecord[]> {
+  return parseBranchInstanceRecords(await readLauncherBranchInstancesPayload(input));
+}
+
+async function readLauncherBranchInstancesPayload(input: {
+  launcherOrigin: string;
+  controlToken: string;
+  fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
+}): Promise<unknown> {
   const response = await boundedDesktopControlFetch({
     fetchImpl: input.fetchImpl,
     resource: `${launcherOriginBase(input.launcherOrigin)}/api/launcher/branch-instances`,
@@ -222,7 +297,15 @@ export async function fetchLauncherBranchInstances(input: {
   if (!response.ok) {
     throw new Error(await readFailureDetail(response));
   }
-  return classifyTrayBranchInstances(await response.json());
+  return response.json();
+}
+
+function normalizeMatchPath(value: string): string {
+  return String(value || "")
+    .trim()
+    .replace(/\//g, "\\")
+    .replace(/[\\/]+$/, "")
+    .toLowerCase();
 }
 
 export function formatLauncherStatusSummary(summary: LauncherStatusSummary): string {

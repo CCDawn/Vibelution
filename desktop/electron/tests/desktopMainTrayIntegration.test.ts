@@ -35,6 +35,9 @@ describe("Electron main tray integration", () => {
     expect(traySource).toContain("requestDesktopShellExit()");
     expect(mainSource).toContain("restartLauncherShell");
     expect(mainSource).toContain("app.relaunch()");
+    expect(mainSource).toContain("from \"./protocol/applyProjectSlot.js\"");
+    expect(mainSource).toContain("applyPendingProjectSlot");
+    expect(mainSource).toContain("pendingProjectRoot");
   });
 
   it("destroys the tray only after shutdown is approved", () => {
