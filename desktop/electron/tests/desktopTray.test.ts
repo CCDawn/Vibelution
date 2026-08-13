@@ -112,7 +112,7 @@ describe("Electron desktop tray", () => {
 
     expect(topLabels(menuTemplates[0])).toEqual([
       DESKTOP_TRAY_MENU_LABELS.openLauncher,
-      DESKTOP_TRAY_MENU_LABELS.freshnessUnknown,
+      DESKTOP_TRAY_MENU_LABELS.freshnessLoading,
       DESKTOP_TRAY_MENU_LABELS.restartLauncher,
       "separator",
       DESKTOP_TRAY_MENU_LABELS.startProject,
@@ -125,9 +125,12 @@ describe("Electron desktop tray", () => {
       DESKTOP_TRAY_MENU_LABELS.stopAll
     ]);
 
-    tray.emit("click");
     await vi.waitFor(() => {
       expect(menuTemplates.length).toBeGreaterThan(1);
+    });
+    tray.emit("click");
+    await vi.waitFor(() => {
+      expect(menuTemplates.length).toBeGreaterThan(2);
     });
 
     const refreshed = menuTemplates[menuTemplates.length - 1];
@@ -159,5 +162,33 @@ describe("Electron desktop tray", () => {
     expect(actions.showStatus).toHaveBeenCalledTimes(1);
     expect(actions.quit).toHaveBeenCalledTimes(1);
     expect(actions.stopAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the last readable list and marks a fetch failure instead of an empty menu", async () => {
+    const actions = createActions();
+    actions.listInstances
+      .mockResolvedValueOnce([
+        { id: "main", label: "main", startable: false, stoppable: true }
+      ])
+      .mockRejectedValueOnce(new Error("launcher backend is not available"));
+    actions.getFreshness
+      .mockResolvedValueOnce({ current: true, label: "Launcher 已是最新 · abc123" })
+      .mockRejectedValueOnce(new Error("launcher backend is not available"));
+
+    createDesktopTray(desktopPaths, actions);
+    await vi.waitFor(() => {
+      expect(menuTemplates.length).toBeGreaterThan(1);
+    });
+    const firstLive = menuTemplates[menuTemplates.length - 1];
+    expect((firstLive[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual(["main"]);
+
+    const tray = trayInstances[0];
+    tray.emit("right-click");
+    await vi.waitFor(() => {
+      expect(menuTemplates.length).toBeGreaterThan(2);
+    });
+    const failed = menuTemplates[menuTemplates.length - 1];
+    expect(failed[1]?.label).toBe("Launcher 已是最新 · abc123");
+    expect((failed[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual(["main"]);
   });
 });

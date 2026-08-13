@@ -1399,6 +1399,20 @@ async function resolveTrayLauncherControlContext(): Promise<DesktopActionLoopCon
   return resolveDesktopActionLoopContext(launcherBootstrap);
 }
 
+async function resolveTrayControlContextOrLoopback(): Promise<{
+  launcherOrigin: string;
+  controlToken: string;
+}> {
+  try {
+    return await resolveTrayLauncherControlContext();
+  } catch {
+    return {
+      launcherOrigin: "http://127.0.0.1:8765/launcher",
+      controlToken: ""
+    };
+  }
+}
+
 async function restartLauncherShell(): Promise<void> {
   notifyDesktopTray("Vibelution", "正在重启 Launcher，以加载最新本地代码…");
   try {
@@ -1570,12 +1584,16 @@ app.whenReady()
         });
       },
       listInstances: async () => {
-        const context = await resolveTrayLauncherControlContext();
-        return fetchLauncherBranchInstances(context);
+        return fetchLauncherBranchInstances({
+          ...(await resolveTrayControlContextOrLoopback()),
+          requestTimeoutMs: 20_000
+        });
       },
       getFreshness: async () => {
-        const context = await resolveTrayLauncherControlContext();
-        return fetchLauncherFreshness(context);
+        return fetchLauncherFreshness({
+          ...(await resolveTrayControlContextOrLoopback()),
+          requestTimeoutMs: 20_000
+        });
       },
       restartLauncher: () => {
         void restartLauncherShell();
