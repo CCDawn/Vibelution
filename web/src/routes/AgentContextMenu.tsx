@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
 import { VDropdownMenu } from "../components/vui";
+import { agentArchiveProtected } from "./agentArchiveProtection";
 import styles from "./AgentContextMenu.styles";
 
 const MENU_WIDTH = 188;
@@ -50,36 +51,11 @@ type AgentContextMenuProps = {
   onDismiss?: () => void;
 };
 
-function metadataFlag(agent: AgentInstance, key: string) {
-  const value = agent.metadata?.[key];
-  if (typeof value === "boolean") {
-    return value;
-  }
-  return ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
-}
-
-function metadataText(agent: AgentInstance, key: string) {
-  const value = agent.metadata?.[key];
-  return typeof value === "string" ? value.trim() : "";
-}
-
 export function agentCanArchiveFromContextMenu(agent: AgentInstance) {
   if (!agent.agentId || String(agent.status || "").trim().toLowerCase() === "archived") {
     return false;
   }
-  const systemOwnedRole = [
-    metadataText(agent, "systemRole"),
-    metadataText(agent, "selfEvolutionRole"),
-    metadataText(agent, "supervisedRole"),
-    metadataText(agent, "aiSearchRole"),
-  ].some(Boolean);
-  const researchOrgRole = metadataText(agent, "researchOrgRole");
-  return !(
-    metadataFlag(agent, "protected")
-    || metadataFlag(agent, "fixedRole")
-    || systemOwnedRole
-    || ["ceo", "organization_advisor", "capability_steward", "knowledge_steward"].includes(researchOrgRole)
-  );
+  return !agentArchiveProtected(agent);
 }
 
 export function AgentContextMenu({

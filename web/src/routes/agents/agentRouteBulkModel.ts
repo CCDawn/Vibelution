@@ -10,6 +10,7 @@ import type {
   AgentBulkConfigField,
 } from "../AgentBulkConfigPanel";
 import type { AgentBulkActionItem } from "../agentWorkspaceCache";
+import { agentArchiveProtected as agentMetadataArchiveProtected } from "../agentArchiveProtection";
 import { agentLabel } from "./agentRouteListModel";
 import { agentLlmSlotModelId, FALLBACK_AGENT_LLM_SLOTS } from "./agentRouteLlmModel";
 
@@ -179,18 +180,7 @@ export function metadataFlag(agent: AgentConfigWorkspaceAgent | null | undefined
 }
 
 export function agentArchiveProtected(agent: AgentConfigWorkspaceAgent | null | undefined) {
-  const systemRole = metadataString(agent, "systemRole");
-  const researchOrgRole = metadataString(agent, "researchOrgRole");
-  const systemOwnedRole = [
-    systemRole,
-    metadataString(agent, "selfEvolutionRole"),
-    metadataString(agent, "supervisedRole"),
-    metadataString(agent, "aiSearchRole"),
-  ].some(Boolean);
-  return metadataFlag(agent, "protected")
-    || metadataFlag(agent, "fixedRole")
-    || systemOwnedRole
-    || ["ceo", "organization_advisor", "capability_steward", "knowledge_steward"].includes(researchOrgRole);
+  return agentMetadataArchiveProtected(agent);
 }
 
 export function agentBulkActionSummary(action: string, success: number, skipped: number, failed: number, notes: string[], lang: "zh" | "en") {

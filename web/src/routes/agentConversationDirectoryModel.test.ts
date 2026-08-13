@@ -89,6 +89,63 @@ describe("agentConversationDirectoryModel", () => {
     expect(agentDirectoryBucket(observer, new Set(["agent-observer"]))).toBe("team");
   });
 
+  it("places unassigned archive-protected research-org chat agents under special", () => {
+    const capabilityAdvisor = agent({
+      agentId: "agent-capability-advisor",
+      displayName: "能力顾问",
+      primaryMode: "chat",
+      roleKey: "",
+      metadata: {
+        conversationIndexKind: "personal_agent",
+        researchOrgRole: "capability_steward",
+      },
+    });
+    const organizationAdvisor = agent({
+      agentId: "agent-org-advisor",
+      displayName: "科研组织顾问",
+      primaryMode: "chat",
+      roleKey: "",
+      metadata: {
+        conversationIndexKind: "personal_agent",
+        researchOrgRole: "organization_advisor",
+      },
+    });
+    const assignedAdvisor = agent({
+      agentId: "agent-assigned-advisor",
+      displayName: "入队能力顾问",
+      primaryMode: "chat",
+      roleKey: "",
+      metadata: {
+        conversationIndexKind: "team_agent",
+        researchOrgRole: "capability_steward",
+      },
+    });
+
+    expect(isConversationDirectoryAgent(capabilityAdvisor)).toBe(false);
+    expect(isConversationDirectoryAgent(organizationAdvisor)).toBe(false);
+    expect(agentDirectoryBucket(capabilityAdvisor, new Set())).toBe("special");
+    expect(agentDirectoryBucket(assignedAdvisor, new Set(["agent-assigned-advisor"]))).toBe("team");
+
+    const partition = buildAgentDirectoryPartition({
+      agents: [capabilityAdvisor, organizationAdvisor, assignedAdvisor, agent()],
+      teams: [team({
+        members: [member({
+          memberId: "m-advisor",
+          agentId: "agent-assigned-advisor",
+          agentName: "入队能力顾问",
+          role: "capability_steward",
+        })],
+      })],
+    });
+
+    expect(partition.conversationAgents.map((item) => item.agentId)).toEqual(["agent-1"]);
+    expect(partition.specialAgents.map((item) => item.agentId).sort()).toEqual([
+      "agent-capability-advisor",
+      "agent-org-advisor",
+    ]);
+    expect(partition.teamBlocks[0]?.agents.map((item) => item.agentId)).toEqual(["agent-assigned-advisor"]);
+  });
+
   it("places team members under their primary team and keeps special only for unassigned non-chat agents", () => {
     const chat = agent();
     const teamMemberAgent = agent({
