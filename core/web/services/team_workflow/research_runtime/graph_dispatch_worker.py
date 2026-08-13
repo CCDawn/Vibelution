@@ -20,6 +20,7 @@ from core.research.workflow.challenge_cup_runtime import (
     ChallengeCupGraphCoordinator,
     GraphDispatch,
     GraphDispatchResult,
+    PendingAction,
     action_id_for,
     build_pending_action,
     successor_map,
@@ -464,22 +465,27 @@ class GraphDispatchWorker:
     def _start_or_recover(self, dispatch: GraphDispatch) -> GraphDispatchResult:
         snapshot = self._coordinator.snapshot(dispatch.run_id)
         values = snapshot.get("values") or {}
-        node_id = str(values.get("active_node_id") or "")
+        persisted_pending = snapshot.get("pendingAction") or {}
+        node_id = str(
+            persisted_pending.get("nodeId") or values.get("active_node_id") or ""
+        )
         next_node_ids = snapshot.get("nextNodeIds") or []
-        if not next_node_ids:
-            if dispatch.attempt >= 2:
-                # 线程已完成（失败结束）：以新 attempt 重入节点。
-                return self._coordinator.retry_attempt(dispatch)
-            return self._coordinator.start_attempt(dispatch)
-        state_attempt = int(values.get("active_attempt") or 1)
+        state_attempt = int(
+            persisted_pending.get("attempt") or values.get("active_attempt") or 1
+        )
         if node_id == dispatch.node_id and state_attempt == dispatch.attempt:
             # 线程已在该节点的中断点：崩溃恢复，重派生同一 actionId；
             # adapter_dispatch 的幂等键保证不会重复建任务。
-            pending = build_pending_action(values, node_id)
+            pending = (
+                PendingAction.from_dict(dict(persisted_pending))
+                if persisted_pending
+                else build_pending_action(values, node_id)
+            )
             return GraphDispatchResult(
                 dispatch_kind="start",
                 pending_action=pending,
-                next_node_ids=tuple(str(item) for item in next_node_ids),
+                next_node_ids=tuple(str(item) for item in next_node_ids)
+                or (node_id,),
                 checkpoint_id=str(snapshot.get("checkpointId") or ""),
                 state=values,
             )
@@ -489,6 +495,11 @@ class GraphDispatchWorker:
         advanced = self._advance_lagging_checkpoint(dispatch, interrupt_node_id=node_id)
         if advanced is not None:
             return advanced
+        if not next_node_ids:
+            if dispatch.attempt >= 2:
+                # 线程已完成（失败结束）：以新 attempt 重入节点。
+                return self._coordinator.retry_attempt(dispatch)
+            return self._coordinator.start_attempt(dispatch)
         raise GraphDecisionError(
             f"thread 中断于 {node_id}，但 dispatch 目标是 {dispatch.node_id}"
         )
@@ -802,7 +813,9 @@ class GraphDispatchWorker:
 def _graph_at_node(snapshot: dict[str, Any], node_id: str) -> bool:
     next_ids = [str(item) for item in (snapshot.get("nextNodeIds") or [])]
     active = str((snapshot.get("values") or {}).get("active_node_id") or "")
-    return node_id in next_ids or active == node_id
+    pending = snapshot.get("pendingAction") or {}
+    interrupt_node = str(pending.get("nodeId") or "")
+    return node_id in next_ids or active == node_id or interrupt_node == node_id
 
 
 def _attempt_for_pending(
