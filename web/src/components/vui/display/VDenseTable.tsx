@@ -38,6 +38,14 @@ export function nextDenseTableColumnWidth(startWidth: number, delta: number, min
   return Math.max(minWidth, Math.round(startWidth + delta));
 }
 
+export function sumDenseTableColumnWidths(widths: Iterable<number>): number {
+  let total = 0;
+  for (const width of widths) {
+    total += width;
+  }
+  return total;
+}
+
 export function VDenseTable<TRow>({
   ariaLabel,
   className,
@@ -53,6 +61,10 @@ export function VDenseTable<TRow>({
   const columnWidths = useMemo(
     () => Object.fromEntries(columns.map((column) => [column.id, widths[column.id] ?? column.width ?? DEFAULT_COLUMN_WIDTH])),
     [columns, widths],
+  );
+  const tableWidth = useMemo(
+    () => sumDenseTableColumnWidths(columns.map((column) => columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTH)),
+    [columnWidths, columns],
   );
 
   const startResize = (column: VDenseTableColumn<TRow>, event: PointerEvent<HTMLSpanElement>) => {
@@ -96,11 +108,17 @@ export function VDenseTable<TRow>({
         .filter(Boolean)
         .join(" ")}
     >
-      <table className="w-full table-fixed border-collapse text-left">
+      <table
+        className={[
+          "table-fixed border-collapse text-left",
+          resizable ? "max-w-none" : "w-full",
+        ].join(" ")}
+        style={resizable ? { width: tableWidth, minWidth: tableWidth } : undefined}
+      >
         {resizable ? (
           <colgroup>
             {columns.map((column) => (
-              <col key={column.id} style={{ width: `${columnWidths[column.id]}px` }} />
+              <col key={column.id} style={{ width: `${columnWidths[column.id]}px`, minWidth: `${columnWidths[column.id]}px` }} />
             ))}
           </colgroup>
         ) : null}
