@@ -14,7 +14,7 @@ const styles = {
   rangeLabel: "min-w-0 truncate text-[var(--fg-muted)]",
   notice: "min-w-0 flex-auto truncate text-[var(--fg-secondary)]",
   noticeError: "min-w-0 flex-auto truncate text-[var(--state-error)]",
-  statusTable: `mt-1.5 min-w-0 ${rowSurfaceMuted}`,
+  statusTable: `mt-1.5 min-w-0 w-full ${rowSurfaceMuted}`,
   selectCell: "w-9 !px-1",
   branchName: "font-medium text-[var(--fg-primary)]",
   actionCell: "!overflow-visible",

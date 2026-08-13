@@ -43,6 +43,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("<VConfirmDialog");
     expect(panelSource).toContain("<VDenseTable");
     expect(panelSource).toContain("resizable");
+    expect(panelSource).toContain("fill: true");
     expect(panelSource).not.toContain("copy.branchInstancesHint");
     expect(panelSource).not.toContain("<strong>{copy.branchInstancesHint}</strong>");
     expect(panelSource).not.toContain("TeamSourcePagination");
