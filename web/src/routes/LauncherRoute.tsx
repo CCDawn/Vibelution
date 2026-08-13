@@ -1885,7 +1885,6 @@ export function LauncherRoute() {
       : projectIsClosed
         ? copy.startProjectSummary
         : lifecycleDisplay.detail || copy.checkDiagnosticsSummary;
-  const lifecycleDetailShort = summarizeLauncherMessage(lifecycleDisplay.detail, copy, uiLang) || lifecycleDisplay.detail;
   const activeWorkDetailShort = summarizeLauncherMessage(activeWorkDetail, copy, uiLang) || activeWorkDetail;
   const nextActionDetailShort = summarizeLauncherMessage(nextActionDetail, copy, uiLang) || nextActionDetail;
   const userGuideTone = activeWorkCount > 0 || restartQueuePending
@@ -2293,9 +2292,6 @@ export function LauncherRoute() {
       ariaLabel={copy.title}
       eyebrow={copy.eyebrow}
       title={copy.title}
-      meta={selectedIsCurrent
-        ? (lifecycleDetailShort || copy.subtitle)
-        : (selectedAlive ? copy.lifecycleRunningDetail : copy.lifecycleClosedDetail)}
       actions={(
         <div className={styles.statusBar}>
           <VTooltip content={statusBarBlockerReason} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">

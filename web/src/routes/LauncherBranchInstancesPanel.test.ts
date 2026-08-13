@@ -41,6 +41,10 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("<VButton");
     expect(panelSource).toContain("<VCheckbox");
     expect(panelSource).toContain("<VConfirmDialog");
+    expect(panelSource).toContain("<VDenseTable");
+    expect(panelSource).toContain("resizable");
+    expect(panelSource).not.toContain("copy.branchInstancesHint");
+    expect(panelSource).not.toContain("<strong>{copy.branchInstancesHint}</strong>");
     expect(panelSource).not.toContain("TeamSourcePagination");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);

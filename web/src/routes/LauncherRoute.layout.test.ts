@@ -329,10 +329,10 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("backendportlistening=false");
     expect(routeSource).toContain("backendPortUnavailableSummary");
     expect(routeSource).toContain("technicalDetailAvailable");
-    expect(routeSource).toContain("lifecycleDetailShort");
     expect(routeSource).toContain("noticeTextShort");
-    expect(routeSource).toContain("lifecycleDetailShort || copy.subtitle");
-    expect(routeSource).toContain("selectedAlive ? copy.lifecycleRunningDetail : copy.lifecycleClosedDetail");
+    expect(routeSource).not.toContain("lifecycleDetailShort");
+    expect(routeSource).not.toContain("selectedAlive ? copy.lifecycleRunningDetail : copy.lifecycleClosedDetail");
+    expect(routeSource).not.toContain("meta={selectedIsCurrent");
     expect(routeSource).toContain("VDenseOpsPage");
     expect(routeSource).toContain('data-vui-domain-recipe="launcher-workbench"');
     expect(routeSource).toContain("<VTooltip content={notice.text}");
