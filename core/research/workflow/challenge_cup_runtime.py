@@ -417,10 +417,21 @@ class ChallengeCupGraphCoordinator:
         graph, stack = self._compile()
         try:
             state = graph.get_state(self._config(run_id))
+            interrupts = getattr(state, "interrupts", None) or ()
+            pending_action = None
+            if interrupts:
+                pending_action = PendingAction.from_dict(
+                    dict(interrupts[-1].value or {})
+                ).to_dict()
             return {
                 "checkpointId": _checkpoint_id_of(state),
                 "nextNodeIds": [str(node) for node in state.next or ()],
                 "values": dict(state.values or {}),
+                # Persisted interrupts are the execution authority.  A graph
+                # recompile can expose an empty ``state.next`` while retaining
+                # the interrupt, so callers must not infer the active node from
+                # the task queue alone.
+                "pendingAction": pending_action,
             }
         finally:
             stack.close()
