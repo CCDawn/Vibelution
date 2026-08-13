@@ -24,7 +24,7 @@ def integrate_candidate(
     run_id: str,
     manifest_root: Path,
 ) -> dict[str, Any]:
-    """Promote the candidate Git tree onto local main (ff-only, else merge)."""
+    """Promote a frozen candidate only while local main still matches its base."""
 
     root = Path(project_root).resolve()
     candidate = Path(candidate_root).resolve()
@@ -39,58 +39,43 @@ def integrate_candidate(
         raise CandidateIntegrationError(
             f"主工作区必须完全干净后才能自动合入；当前存在 {len(dirty)} 项改动。"
         )
-    _freeze_candidate_head(candidate, changed_files=changed_files, run_id=run_id)
 
     variant_id = str(expected_variant_id or "").strip()
     if not variant_id:
         raise CandidateIntegrationError("候选版本未绑定，禁止创建合入提交。")
 
+    frozen_head = str(expected_head or "").strip()
+    if not frozen_head:
+        raise CandidateIntegrationError(
+            "missing_frozen_main: 候选未绑定冻结的 main 提交，禁止自动晋升。"
+        )
     current_head = _git_text(root, "rev-parse", "HEAD")
+    if current_head != frozen_head:
+        raise CandidateIntegrationError(
+            "stale_main: main 已从候选冻结基线前进；"
+            f"expected={frozen_head[:12]} current={current_head[:12]}。"
+            "请基于最新 main 重新生成、评估并审批候选。"
+        )
+
+    _freeze_candidate_head(candidate, changed_files=changed_files, run_id=run_id)
     candidate_head = _fetch_candidate_head(root, candidate)
     if not candidate_head:
         raise CandidateIntegrationError("无法解析候选 HEAD，禁止晋升。")
     if candidate_head == current_head:
         raise CandidateIntegrationError("候选与 main 指向同一提交，禁止空晋升。")
+    if not _is_ancestor(root, current_head, candidate_head):
+        raise CandidateIntegrationError(
+            "candidate_not_descendant: 候选提交不是冻结 main 的后代，禁止自动晋升。"
+        )
 
     current_tree = _git_text(root, "rev-parse", f"{current_head}^{{tree}}")
     candidate_tree = _git_text(root, "rev-parse", f"{candidate_head}^{{tree}}")
     if current_tree == candidate_tree:
         raise CandidateIntegrationError("候选与 main 工作树相同，禁止空晋升。")
 
-    frozen_head = str(expected_head or "").strip()
     run_label = str(run_id or "").strip()
-    message = "\n\n".join(
-        [
-            f"evolve(supervised): promote {run_label}".strip(),
-            "\n".join(
-                [
-                    f"Supervised-Run: {run_label}",
-                    f"Candidate-Variant: {variant_id}",
-                    f"Base-Commit: {current_head}",
-                    f"Candidate-Commit: {candidate_head}",
-                    f"Frozen-Main: {frozen_head}",
-                ]
-            ),
-        ]
-    )
-
-    if _is_ancestor(root, current_head, candidate_head):
-        _run_git_checked(root, "merge", "--ff-only", candidate_head)
-        mechanism = "git_merge_ff"
-    else:
-        merge_sha = _git_text(
-            root,
-            "commit-tree",
-            candidate_tree,
-            "-p",
-            current_head,
-            "-p",
-            candidate_head,
-            "-m",
-            message,
-        )
-        _run_git_checked(root, "merge", "--ff-only", merge_sha)
-        mechanism = "git_merge_no_ff"
+    _run_git_checked(root, "merge", "--ff-only", candidate_head)
+    mechanism = "git_merge_ff"
 
     commit_sha = _git_text(root, "rev-parse", "HEAD")
     if not commit_sha or commit_sha == current_head:
