@@ -233,17 +233,17 @@ git worktree add .worktrees/<task-slug> -b codex/<task-slug> main
 Before editing hot files, shared scopes, or any `STANDARD_TASK` / `HIGH_RISK` work in a multi-session project, use the project memory guard to inspect active work and, when needed, reserve a narrow write scope:
 
 ```powershell
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" status
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" check --lane "<lane-id>" --scope "<write-scope>" --scope "<second-write-scope>"
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" claim --lane "<lane-id>" --scope "<write-scope>" --agent "<agent-id>" --task "<task title>" --ttl-minutes 120 --note "<scope and validation note>"
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>"
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" status --json
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" preflight --agent-id "<agent-id>" --scope "<write-scope>" --scope "<second-write-scope>" --write-kind development --json
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" claim --lane "<lane-id>" --scope "<write-scope>" --agent-id "<agent-id>" --task "<task title>" --ttl-minutes 120 --note "<scope and validation note>" --json
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>" --json
 ```
 
 If a scope hits an active claim, coordinate with the owner, choose a non-overlapping slice, or make an explicit main-integration decision and record the reason. Hotspot status alone is not a stop sign, but it raises the review, validation, scoped staging, and reconciliation burden.
 
 One Agent should bind to one active task worktree at a time. Do not reuse an old task worktree for a new goal.
 
-The lightweight guard command vocabulary is `status`, `check`, `claim`, `activate`, `release`, and `prune`. Historical registry or merge-queue records may still use states such as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`; treat those as queue semantics, not guard subcommands.
+The lightweight guard command vocabulary includes `status`, `preflight`, `check`, `claim`, `activate`, `release`, and `prune`. Historical registry or merge-queue records may still use states such as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`; treat those as queue semantics, not guard subcommands.
 
 For `STANDARD_TASK` and `HIGH_RISK`, the Agent that implements a task owns the full local development loop by default: self-review the diff, run the scoped validation, commit the task branch, decide whether the merge gate is satisfied, and either merge the task into local `main` or explicitly hand off a ready/blocked queue state with the reason. Do not treat implementation as complete merely because a worktree commit exists.
 
@@ -650,7 +650,7 @@ Direct development on `main` is a policy violation even when the change is small
 When any gate fails, do not force the merge. `stale_main` and routine small conflicts inside the owning Agent's claimed scope return to the task worktree: merge the latest local `main` there, resolve conflicts, commit, and rerun `closeout`. Wait for a main integration session only for large conflicts, cross-lane conflicts, shared DTO/projection conflicts, hot-file conflicts with active claims, release/version conflicts, unclear semantic conflicts, or user-designated integration work. Close the lightweight guard claim as blocked, or create a separate ready/blocked queue handoff in the project memory lane if integration must happen later:
 
 ```powershell
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>"
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>" --json
 ```
 
 Self-merge may be followed by push, PR creation, `workflow_dispatch`, or publication when the remote sync gate passes, but remote push is not part of the default local closeout. Remote branch deletion, force/overwrite, and treating `origin/main` as authority to reset local `main` remain destructive choices and require explicit confirmation.
