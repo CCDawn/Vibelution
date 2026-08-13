@@ -22,6 +22,8 @@ export type ElectronWindowLike = {
   loadURL(url: string): Promise<void>;
   isDestroyed(): boolean;
   isFocused(): boolean;
+  isMinimized?(): boolean;
+  restore?(): void;
   on(event: string, listener: ElectronWindowEventListener): unknown;
   setOverlayIcon?(icon: unknown, description: string): void;
   flashFrame?(flag: boolean): void;
@@ -56,6 +58,14 @@ export type ElectronWindowProviderOptions = {
 };
 
 export const DEFAULT_HUNG_CLOSE_DESTROY_AFTER_MS = 500;
+
+export function presentElectronWindow(window: ElectronWindowLike): void {
+  if (typeof window.isMinimized === "function" && window.isMinimized() && typeof window.restore === "function") {
+    window.restore();
+  }
+  window.show();
+  window.focus();
+}
 
 function waitForWindowClosed(
   window: ElectronWindowLike,
@@ -129,7 +139,7 @@ export class ElectronWindowProvider {
       this.launcherWindow = this.createLauncherWindow(safeUrl, this.paths);
       this.attachWindowEvents("launcher", this.launcherWindow);
     }
-    this.launcherWindow.focus();
+    presentElectronWindow(this.launcherWindow);
     return this.reportAndReturn(this.stateFor("launcher"));
   }
 
@@ -156,7 +166,7 @@ export class ElectronWindowProvider {
     if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
       return this.reportAndReturn(closedWindowState("workbench"));
     }
-    this.workbenchWindow.focus();
+    presentElectronWindow(this.workbenchWindow);
     return this.reportAndReturn(this.stateFor("workbench"));
   }
 
@@ -331,8 +341,7 @@ export class ElectronWindowProvider {
       }
     }
 
-    workbenchWindow.show();
-    workbenchWindow.focus();
+    presentElectronWindow(workbenchWindow);
     return this.reportAndReturn(this.stateFor("workbench"));
   }
 

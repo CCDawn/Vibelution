@@ -22,7 +22,9 @@ class FakeWindow implements ElectronWindowLike {
   closeCount = 0;
   showCount = 0;
   hideCount = 0;
+  restoreCount = 0;
   destroyCount = 0;
+  minimized = false;
   loadedUrls: string[] = [];
   overlayCalls: Array<{ icon: unknown; description: string }> = [];
   flashCalls: boolean[] = [];
@@ -65,11 +67,21 @@ class FakeWindow implements ElectronWindowLike {
 
   show(): void {
     this.showCount += 1;
+    this.minimized = false;
   }
 
   hide(): void {
     this.hideCount += 1;
     this.focused = false;
+  }
+
+  isMinimized(): boolean {
+    return this.minimized;
+  }
+
+  restore(): void {
+    this.restoreCount += 1;
+    this.minimized = false;
   }
 
   loadURL(url: string): Promise<void> {
@@ -426,6 +438,7 @@ describe("Electron window provider state", () => {
     const second = await provider.openLauncher();
 
     expect(windows).toHaveLength(1);
+    expect(windows[0].showCount).toBe(2);
     expect(windows[0].focusCount).toBe(2);
     expect(second).toEqual(first);
     expect(second).toMatchObject({
@@ -437,6 +450,31 @@ describe("Electron window provider state", () => {
       rendererProcessId: 7070,
       url: "http://127.0.0.1:8765/launcher"
     });
+  });
+
+  it("restores a hidden or minimized launcher instead of creating a second window", async () => {
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242),
+      shouldInterceptLauncherClose: () => true
+    });
+
+    await provider.openLauncher();
+    launcherWindow.emit("close", { preventDefault: vi.fn() });
+    launcherWindow.minimized = true;
+    launcherWindow.showCount = 0;
+    launcherWindow.focusCount = 0;
+    launcherWindow.restoreCount = 0;
+
+    const restored = await provider.openLauncher();
+
+    expect(launcherWindow.hideCount).toBe(1);
+    expect(launcherWindow.restoreCount).toBe(1);
+    expect(launcherWindow.showCount).toBe(1);
+    expect(launcherWindow.focusCount).toBe(1);
+    expect(launcherWindow.isDestroyed()).toBe(false);
+    expect(restored).toMatchObject({ role: "launcher", open: true, focused: true, windowId: 7 });
   });
 
   it("hides Launcher on X so the tray control center remains alive", async () => {
