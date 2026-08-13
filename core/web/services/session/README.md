@@ -47,7 +47,7 @@ Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (s
 |-----------|-------------------|--------|
 | Session list index cache / prewarm signatures | `list_cache.py` | stream capture, agent turn |
 | Session catalog source projection / reconcile | `catalog_bridge.py` | canonical writes, HTTP DTO projection |
-| Live session directory (SQLite control plane) | `directory_runtime.py`, `directory_bridge.py` | turn journal transcript, Agent config authority; list/query wait out `starting` and do not fall back to `chat_state` |
+| Live session directory (SQLite control plane) | `directory_runtime.py`, `directory_bridge.py` | turn journal transcript, Agent config authority; list/query wait out `starting` and do not fall back to `chat_state`; default list hides `team_agent` / `team_private` unless experiment-bound |
 | Live output checkpoint / recovery state | `live_output.py` | submit validation, stream publish |
 | Conversation events cache, ledger seq helpers | `journal_bridge.py` | LLM invoke, live recovery reconcile |
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |

@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 _RUNTIME_LOCK = threading.RLock()
 _READY = threading.Event()
 _READY.set()
+_LEGACY_DISCARD_IN_PROGRESS = threading.Event()
 _STORE: ConversationStore | None = None
 _PROJECT_ROOT: Path | None = None
 _STATUS: "SessionDirectoryRuntimeStatus | None" = None
@@ -55,6 +56,10 @@ def conversation_store_path(project_root: Path) -> Path:
 def is_directory_store_open() -> bool:
     with _RUNTIME_LOCK:
         return bool(_STORE is not None and getattr(_STORE, "_open", False))
+
+
+def is_legacy_discard_in_progress() -> bool:
+    return _LEGACY_DISCARD_IN_PROGRESS.is_set()
 
 
 def directory_store_project_root() -> Path | None:
@@ -227,55 +232,60 @@ def _discard_legacy_sessions_once(
     from core.web.services import session_service as session_svc
 
     session_ids: list[str] = []
-    with session_svc._CHAT_STATE_LOCK:
-        payload = load_chat_state(project_root)
-        conversations = payload.get("conversations")
-        if not isinstance(conversations, list):
-            conversations = []
-        session_ids = [
-            str(item.get("conversation_id") or item.get("id") or "").strip()
-            for item in conversations
-            if isinstance(item, dict)
-            and str(item.get("conversation_id") or item.get("id") or "").strip()
-        ]
-        payload["conversations"] = []
-        payload["active_conversation_id"] = ""
-        payload["version"] = int(payload.get("version") or session_svc.CHAT_STATE_VERSION)
-        payload["updated_at"] = session_svc._now_timestamp()
-        save_chat_state(project_root, payload)
+    _LEGACY_DISCARD_IN_PROGRESS.set()
+    try:
+        with session_svc._CHAT_STATE_LOCK:
+            payload = load_chat_state(project_root)
+            conversations = payload.get("conversations")
+            if not isinstance(conversations, list):
+                conversations = []
+            session_ids = [
+                str(item.get("conversation_id") or item.get("id") or "").strip()
+                for item in conversations
+                if isinstance(item, dict)
+                and str(item.get("conversation_id") or item.get("id") or "").strip()
+            ]
+            payload["conversations"] = []
+            payload["active_conversation_id"] = ""
+            payload["version"] = int(payload.get("version") or session_svc.CHAT_STATE_VERSION)
+            payload["updated_at"] = session_svc._now_timestamp()
+            save_chat_state(project_root, payload)
 
-    for session_id in session_ids:
-        try:
-            session_svc._set_session_running(session_id, False)
-            session_svc._clear_session_turn_control(session_id)
-            session_svc._clear_session_live_output(session_id)
-            session_svc._invalidate_session_conversation_events_cache(session_id)
-            session_svc._invalidate_session_agent_runtime_cache(session_id)
-        except Exception as exc:
-            logger.debug(
-                "Session directory discard skipped runtime cleanup for one session (%s).",
-                type(exc).__name__,
-            )
-        journal_path = turn_journal_path(project_root, session_id)
-        session_dir = journal_path.parent
-        try:
-            if session_dir.exists() and session_dir.is_dir():
-                shutil.rmtree(session_dir, ignore_errors=True)
-        except OSError as exc:
-            logger.warning(
-                "Session directory discard could not remove a journal workspace (%s).",
-                type(exc).__name__,
-            )
+        _clear_agent_direct_session_bindings(project_root)
 
-    _clear_agent_direct_session_bindings(project_root)
-    store.repository.mark_legacy_sessions_discarded().result(timeout=5)
-    session_svc._invalidate_session_list_cache()
-    _record(
-        "session_directory.legacy.discarded",
-        outcome="completed",
-        fields={"discardedSessionCount": len(session_ids)},
-    )
-    return True, len(session_ids)
+        for session_id in session_ids:
+            try:
+                session_svc._set_session_running(session_id, False)
+                session_svc._clear_session_turn_control(session_id)
+                session_svc._clear_session_live_output(session_id)
+                session_svc._invalidate_session_conversation_events_cache(session_id)
+                session_svc._invalidate_session_agent_runtime_cache(session_id)
+            except Exception as exc:
+                logger.debug(
+                    "Session directory discard skipped runtime cleanup for one session (%s).",
+                    type(exc).__name__,
+                )
+            journal_path = turn_journal_path(project_root, session_id)
+            session_dir = journal_path.parent
+            try:
+                if session_dir.exists() and session_dir.is_dir():
+                    shutil.rmtree(session_dir, ignore_errors=True)
+            except OSError as exc:
+                logger.warning(
+                    "Session directory discard could not remove a journal workspace (%s).",
+                    type(exc).__name__,
+                )
+
+        store.repository.mark_legacy_sessions_discarded().result(timeout=5)
+        session_svc._invalidate_session_list_cache()
+        _record(
+            "session_directory.legacy.discarded",
+            outcome="completed",
+            fields={"discardedSessionCount": len(session_ids)},
+        )
+        return True, len(session_ids)
+    finally:
+        _LEGACY_DISCARD_IN_PROGRESS.clear()
 
 
 def _clear_agent_direct_session_bindings(project_root: Path) -> None:
@@ -284,23 +294,25 @@ def _clear_agent_direct_session_bindings(project_root: Path) -> None:
     if agent_directory_service.PROJECT_ROOT != project_root:
         agent_directory_service.PROJECT_ROOT = project_root
     try:
-        agents = agent_directory_service.list_agents(include_archived=True, detail="full")
-    except Exception:
-        return
-    for agent in agents:
-        if not isinstance(agent, dict):
-            continue
-        agent_id = str(agent.get("agentId") or "").strip()
-        direct_session_id = str(agent.get("directSessionId") or "").strip()
-        if not agent_id or not direct_session_id:
-            continue
-        try:
-            agent_directory_service.update_agent_instance(agent_id, direct_session_id="")
-        except Exception as exc:
-            logger.warning(
-                "Session directory discard could not clear a directSessionId (%s).",
-                type(exc).__name__,
-            )
+        with agent_directory_service._STATE_LOCK:
+            state = agent_directory_service.load_state()
+            agents = state.get("agents")
+            if not isinstance(agents, list):
+                return
+            changed = False
+            for agent in agents:
+                if not isinstance(agent, dict):
+                    continue
+                if str(agent.get("directSessionId") or "").strip():
+                    agent["directSessionId"] = ""
+                    changed = True
+            if changed:
+                agent_directory_service.save_state(state)
+    except Exception as exc:
+        logger.warning(
+            "Session directory discard could not clear directSessionId bindings (%s).",
+            type(exc).__name__,
+        )
 
 
 def _record(
