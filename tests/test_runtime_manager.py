@@ -2960,7 +2960,7 @@ def test_submit_command_ignores_stale_shutdown_state_from_previous_runtime_manag
     assert event["payload"]["currentManagerPid"] == 9912
 
 
-def test_command_queue_records_queued_claimed_and_result_written_events(tmp_path, monkeypatch):
+def test_command_queue_preserves_queued_file_event_and_projects_claimed_result_events(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
     results_dir = tmp_path / "results"
@@ -3014,7 +3014,10 @@ def test_command_queue_records_queued_claimed_and_result_written_events(tmp_path
     assert file_events[2]["payload"]["requestedBy"] == "launcher_ps"
     assert file_events[2]["payload"]["resultPath"] == f"{command['commandId']}.json"
     assert file_events[2]["payload"]["ok"] is True
-    assert [event_type for event_type, _, _ in scene_events] == [event["type"] for event in file_events]
+    assert [event_type for event_type, _, _ in scene_events] == [
+        "command_queue.command_claimed",
+        "command_queue.command_result_written",
+    ]
     assert {kwargs["phase"] for _, _, kwargs in scene_events} == {"queue"}
     assert all(kwargs["occurred_at"] for _, _, kwargs in scene_events)
 
@@ -4474,6 +4477,43 @@ def test_daemon_append_event_mirrors_runtime_scene_event(tmp_path, monkeypatch):
             "workbench.open.verification_succeeded",
             {"commandId": "cmd-open", "ok": True, "backendPid": 1234},
             {"phase": "open", "occurred_at": file_event["at"]},
+        )
+    ]
+
+
+def test_queue_enqueue_event_defers_scene_projection_but_keeps_durable_audit(tmp_path, monkeypatch):
+    events_path = tmp_path / "events.jsonl"
+    scene_events: list[tuple[str, dict, dict]] = []
+
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(
+        command_queue,
+        "record_runtime_manager_scene_event",
+        lambda event_type, payload, **kwargs: scene_events.append((event_type, payload, kwargs)) or True,
+    )
+
+    command_queue._append_queue_event(
+        "command_queue.command_queued",
+        {"commandId": "cmd-open", "type": "open_workbench"},
+    )
+
+    file_event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert file_event["type"] == "command_queue.command_queued"
+    assert file_event["payload"]["commandId"] == "cmd-open"
+    assert scene_events == []
+
+    command_queue._append_queue_event(
+        "command_queue.command_claimed",
+        {"commandId": "cmd-open", "type": "open_workbench"},
+    )
+
+    claimed_file_event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert scene_events == [
+        (
+            "command_queue.command_claimed",
+            {"commandId": "cmd-open", "type": "open_workbench"},
+            {"phase": "queue", "occurred_at": claimed_file_event["at"]},
         )
     ]
 
