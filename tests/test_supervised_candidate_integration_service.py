@@ -130,7 +130,7 @@ def test_integrate_candidate_freezes_uncommitted_candidate_then_ff(tmp_path):
     assert _git(project, "status", "--porcelain=v1").stdout == ""
 
 
-def test_integrate_candidate_merges_when_main_has_moved(tmp_path):
+def test_integrate_candidate_rejects_when_main_has_moved(tmp_path):
     project = tmp_path / "project"
     candidate = tmp_path / "candidate"
     base_commit = _init_repo(project)
@@ -138,23 +138,25 @@ def test_integrate_candidate_merges_when_main_has_moved(tmp_path):
     (project / "drift.txt").write_text("drift\n", encoding="utf-8")
     _git(project, "add", "drift.txt")
     _git(project, "commit", "-m", "advance main")
+    advanced_head = _git(project, "rev-parse", "HEAD").stdout.strip()
 
-    result = service.integrate_candidate(
-        project_root=project,
-        candidate_root=candidate,
-        changed_files=_changes(),
-        expected_head=base_commit,
-        expected_variant_id="variant-123",
-        run_id="swte-123",
-        manifest_root=tmp_path / "manifests",
-    )
+    with pytest.raises(service.CandidateIntegrationError, match="stale_main"):
+        service.integrate_candidate(
+            project_root=project,
+            candidate_root=candidate,
+            changed_files=_changes(),
+            expected_head=base_commit,
+            expected_variant_id="variant-123",
+            run_id="swte-123",
+            manifest_root=tmp_path / "manifests",
+        )
 
-    assert result["mechanism"] == "git_merge_no_ff"
-    assert (project / "agent.py").read_text(encoding="utf-8") == "BASELINE = False\n"
-    assert (project / "tests" / "candidate_marker.py").read_text(encoding="utf-8") == "CANDIDATE = True\n"
-    assert not (project / "drift.txt").exists()
-    parents = _git(project, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()
-    assert len(parents) >= 3
+    assert _git(project, "rev-parse", "HEAD").stdout.strip() == advanced_head
+    assert _git(project, "status", "--porcelain=v1").stdout == ""
+    assert (project / "agent.py").read_text(encoding="utf-8") == "BASELINE = True\n"
+    assert (project / "drift.txt").read_text(encoding="utf-8") == "drift\n"
+    assert not (project / "tests" / "candidate_marker.py").exists()
+    assert not (tmp_path / "manifests").exists()
 
 
 def test_integrate_candidate_restores_clean_tree_when_commit_fails(tmp_path, monkeypatch):
