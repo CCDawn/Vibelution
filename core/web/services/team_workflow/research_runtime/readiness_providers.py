@@ -103,29 +103,54 @@ def fetch_evidence_graph_stats(
     *,
     input_snapshot: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any] | None:
-    """Evidence/Knowledge projection for graph completeness (SC run scoped)."""
+    """Read graph completeness from the scoped artifact authority only."""
     snapshot = dict(input_snapshot or {})
     sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
     if not sc_run_id:
         return None
     try:
-        from core.web.services.team_workflow.source_collection.runs import (
-            get_source_collection_summary,
+        from .artifact_readback_registry import (
+            load_scoped_artifact_payload,
         )
 
-        summary = get_source_collection_summary(team_id, run_id=sc_run_id)
-        graph = summary.get("candidateGraph") or summary.get("graph") or {}
+        graph = load_scoped_artifact_payload(
+            "evidence_relation_graph",
+            team_id=team_id,
+            authority_run_id=sc_run_id,
+            workflow_run_id=run_id,
+        )
         if not isinstance(graph, dict):
             return None
         nodes = list(graph.get("nodes") or [])
         edges = list(graph.get("edges") or [])
         if not nodes and not edges:
             return None
+        missing_links = list(graph.get("missingLinks") or [])
+        summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
+        missing_link_count = max(
+            len(missing_links),
+            int(summary.get("missingLinkCount") or 0),
+        )
+        waiver_count = max(
+            int(summary.get("waiverCount") or 0),
+            sum(
+                1
+                for item in missing_links
+                if isinstance(item, dict)
+                and (
+                    bool(item.get("waived"))
+                    or str(item.get("status") or "").strip().lower()
+                    in {"waived", "accepted"}
+                    or isinstance(item.get("waiver"), dict)
+                )
+            ),
+        )
         return {
             "graph_count": 1,
             "node_count": len(nodes),
             "edge_count": len(edges),
-            "blocking_missing_links": int(graph.get("missingLinkCount") or 0),
+            "missing_link_count": missing_link_count,
+            "waiver_count": waiver_count,
             "teamId": team_id,
             "runId": run_id,
             "sourceCollectionRunId": sc_run_id,

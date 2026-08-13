@@ -96,6 +96,88 @@ def test_evidence_cards_stats_provider_wired(tmp_path: Path) -> None:
         harness.close()
 
 
+def test_evidence_graph_stats_uses_scoped_artifact_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import readiness_providers
+
+    calls: list[tuple[str, str, str, str]] = []
+
+    def fake_load(
+        kind: str,
+        *,
+        team_id: str,
+        authority_run_id: str,
+        workflow_run_id: str = "",
+    ):
+        calls.append((kind, team_id, authority_run_id, workflow_run_id))
+        return {
+            "nodes": [{"id": "n1"}, {"id": "n2"}],
+            "edges": [{"source": "n1", "target": "n2"}],
+            "missingLinks": [],
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.artifact_readback_registry.load_scoped_artifact_payload",
+        fake_load,
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.runs.get_source_collection_summary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("legacy Source Collection summary must not be read")
+        ),
+    )
+
+    stats = readiness_providers.fetch_evidence_graph_stats(
+        "research-team",
+        "run-current",
+        input_snapshot={"sourceCollectionRunId": "sc-current"},
+    )
+
+    assert stats == {
+        "graph_count": 1,
+        "node_count": 2,
+        "edge_count": 1,
+        "missing_link_count": 0,
+        "waiver_count": 0,
+        "teamId": "research-team",
+        "runId": "run-current",
+        "sourceCollectionRunId": "sc-current",
+    }
+    assert calls == [
+        (
+            "evidence_relation_graph",
+            "research-team",
+            "sc-current",
+            "run-current",
+        )
+    ]
+
+
+def test_evidence_graph_stats_fails_loud_for_empty_scoped_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime import readiness_providers
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.artifact_readback_registry.load_scoped_artifact_payload",
+        lambda *_args, **_kwargs: {
+            "nodes": [],
+            "edges": [],
+            "missingLinks": [],
+        },
+    )
+
+    assert (
+        readiness_providers.fetch_evidence_graph_stats(
+            "research-team",
+            "run-current",
+            input_snapshot={"sourceCollectionRunId": "sc-current"},
+        )
+        is None
+    )
+
+
 def test_production_context_does_not_require_domain_overrides_for_revision(
     tmp_path: Path,
 ) -> None:
