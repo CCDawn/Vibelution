@@ -1,4 +1,4 @@
-"""Research-project scoped, flat Agent session registry."""
+"""Research-project Agent session registry with exact workflow-node scopes."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 REGISTRY_FILE_NAME = "research_project_agent_sessions.json"
 ACTIVE_TASK_STATUSES = {"queued", "running"}
 TERMINAL_TASK_STATUSES = {
@@ -128,6 +128,7 @@ def _empty_registry(team_id: str, research_project_id: str) -> dict[str, Any]:
         "teamId": _text(team_id),
         "researchProjectId": _text(research_project_id),
         "agents": {},
+        "workflowNodes": {},
         "updatedAt": "",
     }
 
@@ -143,11 +144,17 @@ def _read_registry(team_id: str, research_project_id: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return _empty_registry(team_id, research_project_id)
     agents = payload.get("agents") if isinstance(payload.get("agents"), dict) else {}
+    workflow_nodes = (
+        payload.get("workflowNodes")
+        if isinstance(payload.get("workflowNodes"), dict)
+        else {}
+    )
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": _text(team_id),
         "researchProjectId": _text(research_project_id),
         "agents": agents,
+        "workflowNodes": workflow_nodes,
         "updatedAt": _text(payload.get("updatedAt"), limit=120),
     }
 
@@ -176,6 +183,11 @@ def _normalize_attempt(value: dict[str, Any]) -> dict[str, Any]:
     recovery_reason = _text(value.get("recoveryReason"), limit=80)
     if recovery_reason:
         normalized["recoveryReason"] = recovery_reason
+    workflow_run_id = _text(value.get("workflowRunId"))
+    workflow_node_id = _text(value.get("workflowNodeId"), limit=80)
+    if workflow_run_id and workflow_node_id:
+        normalized["workflowRunId"] = workflow_run_id
+        normalized["workflowNodeId"] = workflow_node_id
     return normalized
 
 
@@ -190,6 +202,9 @@ def _recover_agent_attempts(
     team_id: str,
     research_project_id: str,
     agent_id: str,
+    *,
+    workflow_run_id: str = "",
+    workflow_node_id: str = "",
 ) -> list[dict[str, Any]]:
     """Recover a missing registry from durable session bindings."""
     s = _service()
@@ -208,6 +223,9 @@ def _recover_agent_attempts(
             _text(binding.get("teamId")) != team_id
             or _text(binding.get("researchProjectId")) != research_project_id
             or _text(binding.get("agentId")) != agent_id
+            or _text(binding.get("workflowRunId")) != workflow_run_id
+            or _text(binding.get("workflowNodeId"), limit=80)
+            != workflow_node_id
         ):
             continue
         session_id = _text(
@@ -226,6 +244,8 @@ def _recover_agent_attempts(
                     "createdFromTaskId": binding.get("createdFromTaskId"),
                     "createdAt": binding.get("createdAt")
                     or conversation.get("created_at"),
+                    "workflowRunId": workflow_run_id,
+                    "workflowNodeId": workflow_node_id,
                 }
             )
         )
@@ -242,16 +262,33 @@ def _agent_record(
     research_project_id: str,
     agent_id: str,
     role_key: str,
+    workflow_run_id: str = "",
+    workflow_node_id: str = "",
 ) -> tuple[dict[str, Any], bool]:
-    agents = registry.setdefault("agents", {})
-    raw_record = agents.get(agent_id) if isinstance(agents.get(agent_id), dict) else {}
+    if workflow_run_id and workflow_node_id:
+        records = registry.setdefault("workflowNodes", {})
+        record_key = f"{agent_id}::{workflow_run_id}::{workflow_node_id}"
+    else:
+        records = registry.setdefault("agents", {})
+        record_key = agent_id
+    raw_record = (
+        records.get(record_key)
+        if isinstance(records.get(record_key), dict)
+        else {}
+    )
     attempts = [
         _normalize_attempt(item)
         for item in list(raw_record.get("attempts") or [])
         if isinstance(item, dict) and _text(item.get("sessionId"))
     ]
     if not attempts:
-        attempts = _recover_agent_attempts(team_id, research_project_id, agent_id)
+        attempts = _recover_agent_attempts(
+            team_id,
+            research_project_id,
+            agent_id,
+            workflow_run_id=workflow_run_id,
+            workflow_node_id=workflow_node_id,
+        )
     attempts.sort(
         key=lambda item: (int(item["attempt"]), item["createdAt"], item["sessionId"])
     )
@@ -261,8 +298,11 @@ def _agent_record(
         "currentAttempt": int(attempts[-1]["attempt"]) if attempts else 0,
         "attempts": attempts,
     }
+    if workflow_run_id and workflow_node_id:
+        record["workflowRunId"] = workflow_run_id
+        record["workflowNodeId"] = workflow_node_id
     changed = raw_record != record
-    agents[agent_id] = record
+    records[record_key] = record
     return record, changed
 
 
@@ -287,6 +327,8 @@ def _binding_payload(
     retry_of_session_id: str,
     created_from_task_id: str,
     created_at: str,
+    workflow_run_id: str = "",
+    workflow_node_id: str = "",
     recovery_reason: str = "",
 ) -> dict[str, Any]:
     """Return the allowlisted, path/secret-free binding stored with a session."""
@@ -305,6 +347,9 @@ def _binding_payload(
     normalized_recovery_reason = _text(recovery_reason, limit=80)
     if normalized_recovery_reason:
         binding["recoveryReason"] = normalized_recovery_reason
+    if workflow_run_id and workflow_node_id:
+        binding["workflowRunId"] = _text(workflow_run_id)
+        binding["workflowNodeId"] = _text(workflow_node_id, limit=80)
     return binding
 
 
@@ -343,8 +388,10 @@ def resolve_research_project_agent_session(
     formal_retry: bool = False,
     previous_task: dict[str, Any] | None = None,
     recover_missing_session: bool = False,
+    workflow_run_id: str = "",
+    workflow_node_id: str = "",
 ) -> dict[str, Any]:
-    """Resolve or create the flat session for one Agent in one research project."""
+    """Resolve a flat manual session or an exact formal workflow-node session."""
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_project_id = s._normalize_required_id(
@@ -352,6 +399,12 @@ def resolve_research_project_agent_session(
         "Research project id is required.",
     )
     normalized_agent_id = s._normalize_required_id(agent_id, "Agent id is required.")
+    normalized_workflow_run_id = _text(workflow_run_id)
+    normalized_workflow_node_id = _text(workflow_node_id, limit=80)
+    if bool(normalized_workflow_run_id) != bool(normalized_workflow_node_id):
+        raise ResearchProjectAgentSessionError(
+            "Formal workflow sessions require both workflowRunId and workflowNodeId."
+        )
     project = s.get_research_project(normalized_team_id, normalized_project_id)
     agent = s.agent_directory_service.get_agent(normalized_agent_id)
     if not isinstance(agent, dict):
@@ -374,6 +427,8 @@ def resolve_research_project_agent_session(
             research_project_id=normalized_project_id,
             agent_id=normalized_agent_id,
             role_key=normalized_role_key,
+            workflow_run_id=normalized_workflow_run_id,
+            workflow_node_id=normalized_workflow_node_id,
         )
         current = record["attempts"][-1] if record["attempts"] else None
         if current is not None and not formal_retry:
@@ -437,6 +492,8 @@ def resolve_research_project_agent_session(
             retry_of_session_id=retry_of_session_id,
             created_from_task_id=created_from_task_id,
             created_at=created_at,
+            workflow_run_id=normalized_workflow_run_id,
+            workflow_node_id=normalized_workflow_node_id,
             recovery_reason=(
                 "missing_canonical_session" if missing_session_recovery else ""
             ),
@@ -468,6 +525,10 @@ def resolve_research_project_agent_session(
             or canonical_agent_id != normalized_agent_id
             or _text(canonical_binding.get("teamId")) != normalized_team_id
             or _text(canonical_binding.get("researchProjectId")) != normalized_project_id
+            or _text(canonical_binding.get("workflowRunId"))
+            != normalized_workflow_run_id
+            or _text(canonical_binding.get("workflowNodeId"), limit=80)
+            != normalized_workflow_node_id
         ):
             raise ResearchProjectAgentSessionError(
                 "New project Agent session is missing from the canonical session index; "
@@ -482,6 +543,8 @@ def resolve_research_project_agent_session(
                 "retryOfSessionId": retry_of_session_id,
                 "createdFromTaskId": created_from_task_id,
                 "createdAt": created_at,
+                "workflowRunId": normalized_workflow_run_id,
+                "workflowNodeId": normalized_workflow_node_id,
                 "recoveryReason": (
                     "missing_canonical_session" if missing_session_recovery else ""
                 ),

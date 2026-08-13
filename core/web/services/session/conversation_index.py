@@ -1228,6 +1228,16 @@ def create_chat_session(
         "createdFromTaskId": str(raw_experiment_binding.get("createdFromTaskId") or "").strip()[:160],
         "createdAt": str(raw_experiment_binding.get("createdAt") or "").strip()[:120],
     } if raw_experiment_binding else {}
+    if normalized_experiment_binding:
+        workflow_run_id = str(raw_experiment_binding.get("workflowRunId") or "").strip()[:160]
+        workflow_node_id = str(raw_experiment_binding.get("workflowNodeId") or "").strip()[:80]
+        if bool(workflow_run_id) != bool(workflow_node_id):
+            raise s.SessionValidationError(
+                "Experiment binding workflow scope requires both workflowRunId and workflowNodeId."
+            )
+        if workflow_run_id and workflow_node_id:
+            normalized_experiment_binding["workflowRunId"] = workflow_run_id
+            normalized_experiment_binding["workflowNodeId"] = workflow_node_id
     binding_agent_id = str(normalized_experiment_binding.get("agentId") or "").strip()
     if binding_agent_id and binding_agent_id != normalized_agent_id:
         raise s.SessionValidationError("Experiment binding Agent id does not match the bound Agent.")
