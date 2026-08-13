@@ -990,8 +990,31 @@ def _source_collection_agent_context_next_actions(stage_id: str, record_count: i
     return []
 
 
-def _source_collection_agent_graph_edges(agent_graph: dict[str, Any]) -> list[dict[str, str]]:
+def _source_collection_agent_graph_edges(agent_graph: dict[str, Any]) -> list[dict[str, Any]]:
     s = _service()
+
+    def canonical_edge(
+        source_id: str,
+        target_id: str,
+        relation: str,
+        item: dict[str, Any],
+    ) -> dict[str, Any]:
+        edge: dict[str, Any] = s._candidate_graph_edge(
+            source_id,
+            target_id,
+            relation,
+        )
+        evidence_refs = s._normalize_text_list(
+            item.get("evidenceRefs")
+            or item.get("evidence_refs")
+            or item.get("evidenceRef"),
+            max_items=64,
+            max_length=320,
+        )
+        if evidence_refs:
+            edge["evidenceRefs"] = evidence_refs
+        return edge
+
     node_aliases: dict[str, str] = {}
     for item in list(agent_graph.get("nodes") or []):
         if not isinstance(item, dict):
@@ -1003,7 +1026,7 @@ def _source_collection_agent_graph_edges(agent_graph: dict[str, Any]) -> list[di
             alias = s._trim_text(raw_alias, max_length=160)
             if alias:
                 node_aliases.setdefault(alias, candidate_id)
-    edges: list[dict[str, str]] = []
+    edges: list[dict[str, Any]] = []
     for item in list(agent_graph.get("edges") or []):
         if not isinstance(item, dict):
             continue
@@ -1011,9 +1034,15 @@ def _source_collection_agent_graph_edges(agent_graph: dict[str, Any]) -> list[di
         target_token = s._trim_text(item.get("targetCandidateId") or item.get("target") or item.get("to"), max_length=160)
         source_id = node_aliases.get(source_token, source_token)
         target_id = node_aliases.get(target_token, target_token)
-        relation = s._trim_text(item.get("relation") or item.get("relationType") or item.get("type"), max_length=160)
+        relation = s._trim_text(
+            item.get("relation")
+            or item.get("relationType")
+            or item.get("predicate")
+            or item.get("type"),
+            max_length=160,
+        )
         if source_id and target_id and relation:
-            edges.append(s._candidate_graph_edge(source_id, target_id, relation))
+            edges.append(canonical_edge(source_id, target_id, relation, item))
     for item in list(agent_graph.get("sourceThemeEdges") or []):
         if not isinstance(item, dict):
             continue
@@ -1025,7 +1054,14 @@ def _source_collection_agent_graph_edges(agent_graph: dict[str, Any]) -> list[di
         theme_id = s._source_collection_agent_graph_theme_id(item)
         relation = s._trim_text(item.get("relation") or item.get("relationType") or item.get("relation_type"), max_length=160) or "source_supports_theme"
         if source_id and theme_id:
-            edges.append(s._candidate_graph_edge(source_id, s._source_collection_agent_graph_theme_node_id(theme_id), relation))
+            edges.append(
+                canonical_edge(
+                    source_id,
+                    s._source_collection_agent_graph_theme_node_id(theme_id),
+                    relation,
+                    item,
+                )
+            )
     for item in list(agent_graph.get("topicRelations") or []):
         if not isinstance(item, dict):
             continue
@@ -1048,10 +1084,11 @@ def _source_collection_agent_graph_edges(agent_graph: dict[str, Any]) -> list[di
         relation = s._trim_text(item.get("relation") or item.get("relationType") or item.get("relation_type"), max_length=160)
         if source_theme_id and target_theme_id and relation:
             edges.append(
-                s._candidate_graph_edge(
+                canonical_edge(
                     s._source_collection_agent_graph_theme_node_id(source_theme_id),
                     s._source_collection_agent_graph_theme_node_id(target_theme_id),
                     relation,
+                    item,
                 )
             )
     return edges
