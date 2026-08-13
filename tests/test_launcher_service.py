@@ -492,7 +492,9 @@ def test_standalone_launcher_app_exposes_lifecycle_intent_and_desktop_action_rou
     monkeypatch.setattr(
         launcher_service,
         "claim_desktop_action",
-        lambda desktop_session_id, *, lease_seconds=30: calls.append(("claim", desktop_session_id, lease_seconds))
+        lambda desktop_session_id, *, lease_seconds=30, wait_ms=0: calls.append(
+            ("claim", desktop_session_id, lease_seconds, wait_ms)
+        )
         or {"actionId": "action-1", "status": "claimed"},
     )
     monkeypatch.setattr(
@@ -518,7 +520,7 @@ def test_standalone_launcher_app_exposes_lifecycle_intent_and_desktop_action_rou
     claim = client.post(
         "/api/launcher/desktop-actions/claim",
         headers=token_headers,
-        json={"desktopSessionId": "desktop-session-1", "leaseSeconds": 12},
+        json={"desktopSessionId": "desktop-session-1", "leaseSeconds": 12, "waitMs": 1750},
     )
     ack = client.post(
         "/api/launcher/desktop-actions/action-1/ack",
@@ -537,7 +539,7 @@ def test_standalone_launcher_app_exposes_lifecycle_intent_and_desktop_action_rou
     assert fail.status_code == 202
     assert calls == [
         ("intent", {"action": "open_workbench", "reason": "pytest", "idempotencyKey": "intent-key-1"}),
-        ("claim", "desktop-session-1", 12),
+        ("claim", "desktop-session-1", 12, 1750),
         ("ack", "action-1", "desktop-session-1", {"ok": True}),
         ("fail", "action-2", "desktop-session-1", {"ok": False}),
     ]

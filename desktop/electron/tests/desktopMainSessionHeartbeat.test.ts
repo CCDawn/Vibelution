@@ -65,6 +65,7 @@ describe("Electron main desktop session heartbeat", () => {
     expect(heartbeatBlock).toContain("await recoverDesktopControlContext(");
     expect(actionBlock).toContain("isRecoverableDesktopControlError(error)");
     expect(actionBlock).toContain("await recoverDesktopControlContext(");
+    expect(actionBlock).toContain("waitMs: DESKTOP_ACTION_WAIT_MS");
   });
 
   it("clears the heartbeat timer on lifecycle stop and session close", () => {

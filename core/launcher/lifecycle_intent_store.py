@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -673,14 +674,73 @@ def _deadline_after_seconds(seconds: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=max(1, int(seconds)))).isoformat()
 
 
-def claim_desktop_action(*, desktop_session_id: str, lease_seconds: int = 30) -> dict[str, Any]:
-    now = _now_iso()
+def claim_desktop_action(
+    *,
+    desktop_session_id: str,
+    lease_seconds: int = 30,
+    wait_ms: int = 0,
+    poll_interval_ms: int = 50,
+) -> dict[str, Any]:
     normalized_desktop_session_id = _safe_text(desktop_session_id, max_length=160)
     if not normalized_desktop_session_id:
         return {}
-    lease_expires_at = datetime.now(timezone.utc).timestamp() + max(1, int(lease_seconds))
+    bounded_wait_ms = min(2000, max(0, int(wait_ms)))
+    bounded_poll_interval_ms = min(250, max(10, int(poll_interval_ms)))
+    deadline = time.monotonic() + (bounded_wait_ms / 1000.0)
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        claimed = _claim_desktop_action_once(
+            conn,
+            desktop_session_id=normalized_desktop_session_id,
+            lease_seconds=lease_seconds,
+        )
+        if claimed or bounded_wait_ms == 0:
+            return claimed
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {}
+            time.sleep(min(remaining, bounded_poll_interval_ms / 1000.0))
+            if not _desktop_action_maybe_claimable(
+                conn,
+                desktop_session_id=normalized_desktop_session_id,
+            ):
+                continue
+            claimed = _claim_desktop_action_once(
+                conn,
+                desktop_session_id=normalized_desktop_session_id,
+                lease_seconds=lease_seconds,
+            )
+            if claimed:
+                return claimed
+
+
+def _desktop_action_maybe_claimable(
+    conn: sqlite3.Connection,
+    *,
+    desktop_session_id: str,
+) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1 FROM desktop_actions
+        WHERE (status = 'pending' OR (status = 'claimed' AND lease_expires_at < ? AND claim_attempt < 3))
+          AND (target_desktop_session_id = '' OR target_desktop_session_id = ?)
+        LIMIT 1
+        """,
+        (_now_iso(), desktop_session_id),
+    ).fetchone()
+    return row is not None
+
+
+def _claim_desktop_action_once(
+    conn: sqlite3.Connection,
+    *,
+    desktop_session_id: str,
+    lease_seconds: int,
+) -> dict[str, Any]:
+    now = _now_iso()
+    lease_expires_at = datetime.now(timezone.utc).timestamp() + max(1, int(lease_seconds))
+    conn.execute("BEGIN IMMEDIATE")
+    try:
         _fail_exhausted_desktop_actions_locked(conn, now=now)
         row = conn.execute(
             """
@@ -690,7 +750,7 @@ def claim_desktop_action(*, desktop_session_id: str, lease_seconds: int = 30) ->
             ORDER BY created_at ASC
             LIMIT 1
             """,
-            (now, normalized_desktop_session_id),
+            (now, desktop_session_id),
         ).fetchone()
         if row is None:
             conn.execute("COMMIT")
@@ -708,10 +768,13 @@ def claim_desktop_action(*, desktop_session_id: str, lease_seconds: int = 30) ->
                 updated_at = ?
             WHERE action_id = ?
             """,
-            (normalized_desktop_session_id, now, expires_iso, now, action_id),
+            (desktop_session_id, now, expires_iso, now, action_id),
         )
         claimed = conn.execute("SELECT * FROM desktop_actions WHERE action_id = ?", (action_id,)).fetchone()
         conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
     return _public_desktop_action(claimed)
 
 
