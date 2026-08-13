@@ -17,6 +17,7 @@ from core.infrastructure.storage_paths import (
     resolve_project_memory_home,
     resolve_project_storage_paths,
     resolve_project_workspace_home,
+    project_memory_migration_state_path,
     storage_migration_state_path,
 )
 from core.infrastructure.codex_sandbox.environment import sandbox_temp_root
@@ -186,6 +187,45 @@ def test_linked_worktree_uses_integration_root_legacy_memory_before_shared_switc
     monkeypatch.setenv(PROJECTS_HOME_ENV, str(tmp_path / "project-state"))
 
     assert resolve_project_memory_home(linked) == legacy_memory
+
+
+def test_project_memory_marker_requires_matching_target_and_source(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+    _write_identity(project_root)
+    legacy_memory = project_root / ".docs" / "project-memory"
+    legacy_memory.mkdir(parents=True)
+    (legacy_memory / "INDEX.md").write_text("memory\n", encoding="utf-8")
+    projects_home = tmp_path / "project-state"
+    monkeypatch.setenv(PROJECTS_HOME_ENV, str(projects_home))
+    target = resolve_project_storage_paths(project_root)
+    marker_path = project_memory_migration_state_path(target)
+    marker_path.parent.mkdir(parents=True)
+
+    def write_marker(*, target_root: Path, source_root: Path) -> None:
+        marker_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "status": "completed",
+                    "projectId": target.project_id,
+                    "targetRoot": str(target_root),
+                    "sources": [{"sourceRoot": str(source_root)}],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    write_marker(target_root=tmp_path / "wrong-target", source_root=legacy_memory)
+    assert resolve_project_memory_home(project_root) == legacy_memory
+
+    write_marker(target_root=target.memory, source_root=tmp_path / "other-clone-memory")
+    assert resolve_project_memory_home(project_root) == legacy_memory
+
+    write_marker(target_root=target.memory, source_root=legacy_memory)
+    assert resolve_project_memory_home(project_root) == target.memory
 
 
 def test_codex_sandbox_temp_is_external_for_identified_checkout(monkeypatch, tmp_path):
