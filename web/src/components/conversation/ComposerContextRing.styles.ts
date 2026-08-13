@@ -2,9 +2,9 @@ const styles: Record<string, string> = {
   root:
     "vui-components-conversation-composercontextring root relative inline-flex shrink-0",
   trigger:
-    "vui-components-conversation-composercontextring trigger !inline-flex !size-[30px] !min-h-0 !min-w-0 !items-center !justify-center !rounded-full !border-0 !border-transparent !bg-transparent !p-0 !shadow-none !outline-none hover:!border-transparent hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_70%,transparent)] hover:!shadow-none focus-visible:!outline-none focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] focus-visible:!ring-offset-0 data-[state=open]:!border-transparent data-[state=open]:!bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] data-[state=open]:!shadow-none",
+    "vui-components-conversation-composercontextring trigger !inline-flex !size-[30px] !h-[30px] !w-[30px] !min-h-0 !min-w-0 !items-center !justify-center !overflow-hidden !rounded-full !border-0 !border-transparent !bg-transparent !p-0 !shadow-none !outline-none hover:!border-transparent hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_70%,transparent)] hover:!shadow-none focus-visible:!outline-none focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] focus-visible:!ring-offset-0 data-[state=open]:!border-transparent data-[state=open]:!bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] data-[state=open]:!shadow-none",
   ring:
-    "vui-components-conversation-composercontextring ring block size-7 overflow-visible",
+    "vui-components-conversation-composercontextring ring block size-7 overflow-hidden",
   popover:
     "vui-components-conversation-composercontextring popover grid w-[min(300px,calc(100vw-48px))] gap-2 !p-2.5",
   head:

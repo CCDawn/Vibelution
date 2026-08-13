@@ -39,6 +39,20 @@
     color 0.16s ease;
 }
 
+/* Unlayered theme chrome beats Tailwind utilities. Bare icon triggers
+   (composer context ring) must opt out or they render as a square box. */
+[data-vui-provider="shadcn"] button[data-vui="button"][data-chrome="bare"],
+[data-vui-provider="shadcn"] button[data-vui="icon-button"][data-chrome="bare"] {
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  box-shadow: none;
+  overflow: hidden;
+}
+
 [data-vui-provider="shadcn"] button[data-vui][data-focus-visible="true"] {
   outline: 1px solid color-mix(in srgb, var(--accent-cool) 58%, transparent);
   outline-offset: 1px;

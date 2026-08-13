@@ -189,6 +189,8 @@ describe("VUI dual-theme foundation", () => {
     expect(providerThemeSource).toContain('[data-vui-provider="shadcn"]');
     expect(providerThemeSource).toContain('button[data-vui="button"]');
     expect(providerThemeSource).toContain("border-width: 1px");
+    expect(providerThemeSource).toContain('button[data-vui="button"][data-chrome="bare"]');
+    expect(providerThemeSource).toContain("border-radius: 9999px");
     expect(providerThemeSource).toContain("--vui-component-control-hover-bg");
     expect(providerThemeSource).toContain("--vui-component-control-hover-border");
     expect(providerThemeSource).toContain("--vui-component-control-hover-fg");

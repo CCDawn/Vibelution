@@ -8,6 +8,8 @@ import { conversationMessageToAgentMessage } from "../../agent-thread";
 import { dictionary } from "../../i18n/dictionary";
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import { buildAgentMessageRenderState } from "./agentMessageRenderState";
+import ringStyles from "./ComposerContextRing.styles";
+import ringSource from "./ComposerContextRing.tsx?raw";
 import styles from "./ConversationView.styles";
 import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
@@ -570,10 +572,17 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("className={styles.attachButton}");
     expect(conversationViewSource).toContain("<ConversationInferenceControl {...llmControl} />");
     expect(conversationViewSource).toContain("<ComposerContextRing");
+    expect(ringSource).toContain('data-chrome="bare"');
+    expect(ringSource).toContain("isIconOnly");
+    expect(ringStyles.trigger).toContain("!overflow-hidden");
+    expect(ringStyles.trigger).toContain("!rounded-full");
+    expect(ringStyles.trigger).toContain("!border-0");
     expect(conversationViewSource).toContain("composerContextRing");
     expect(conversationViewSource).toContain('composerVariant === "codex" ? composerActions : null');
     expect(conversationViewSource).toContain('composerVariant === "compact" ? composerActions : null');
     expect(styles.composerToolbar).toContain("items-center");
+    expect(styles.composerToolbarEnd).toContain("max-w-full");
+    expect(styles.composerToolbarEnd).not.toContain("max-w-[min(200px");
     expect(conversationViewSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
     expect(conversationViewSource).toContain("styles.composerEditSubmitButton");
     // Labeled edit/rerun must not inherit square icon-only geometry.
