@@ -63,4 +63,24 @@ describe("workflow serpentine layout", () => {
       expect(label!.y + label!.height, edge.id).toBeLessThanOrEqual(targetStage.y);
     }
   });
+
+  it("uses a short narrative bridge for cross-stage handoffs", async () => {
+    const result = await layoutSerpentine();
+    for (const edgeId of ["e_kc_hypothesis", "e_smoke_run"]) {
+      const edge = result.edges.find((item) => item.id === edgeId)!;
+      expect(edge.sections.length, edgeId).toBeLessThanOrEqual(3);
+      expect(edge.sections.every((section) => section.bendPoints.length === 0), edgeId).toBe(true);
+    }
+  });
+
+  it("keeps rerun feedback on one local bottom rail", async () => {
+    const result = await layoutSerpentine();
+    const rerun = result.edges.find((edge) => edge.id === "e_decision_rerun")!;
+    expect(rerun.sections.length).toBeLessThanOrEqual(5);
+    const horizontalRail = rerun.sections.find(
+      (section) => Math.abs(section.start.y - section.end.y) < 1e-3
+        && Math.abs(section.start.x - section.end.x) > 200,
+    );
+    expect(horizontalRail).toBeDefined();
+  });
 });

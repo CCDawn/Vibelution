@@ -10,14 +10,30 @@
 export const WORKFLOW_NODE_DESIGN_WIDTH = 248;
 export const WORKFLOW_NODE_DESIGN_HEIGHT = 88;
 export const WORKFLOW_DECISION_DESIGN_HEIGHT = 112;
-export const WORKFLOW_SERPENTINE_NODE_DESIGN_WIDTH = 272;
-export const WORKFLOW_SERPENTINE_NODE_DESIGN_HEIGHT = 124;
-export const WORKFLOW_SERPENTINE_DECISION_DESIGN_HEIGHT = 144;
+export const WORKFLOW_SERPENTINE_NODE_DESIGN_WIDTH = 244;
+export const WORKFLOW_SERPENTINE_NODE_DESIGN_HEIGHT = 102;
+export const WORKFLOW_SERPENTINE_DECISION_DESIGN_HEIGHT = 102;
 export const WORKFLOW_NODE_LABEL_WIDTH = WORKFLOW_NODE_DESIGN_WIDTH - 24;
 export const WORKFLOW_NODE_LABEL_HEIGHT = 20;
 
 /** Stable VUI layout variants. Routes select a variant through VWorkflowCanvas. */
 export type WorkflowCanvasLayoutMode = "stage-columns" | "serpentine";
+
+/** Labels that carry a real transition or decision, rather than restating the adjacent cards. */
+export function workflowEdgeKeepsNarrativeLabel(edge: {
+  semanticKind?: string;
+  gateKind?: string;
+}): boolean {
+  return edge.gateKind === "knowledge_package"
+    || edge.gateKind === "smoke"
+    || edge.gateKind === "promotion"
+    || edge.semanticKind === "decision_branch"
+    || edge.semanticKind === "rerun"
+    || edge.semanticKind === "revise"
+    || edge.semanticKind === "promote"
+    || edge.semanticKind === "rollback"
+    || edge.semanticKind === "stop";
+}
 
 export function workflowStageDirection(
   layoutMode: WorkflowCanvasLayoutMode,
@@ -36,8 +52,8 @@ export function workflowStageInternalOptions(
     "elk.direction": workflowStageDirection(layoutMode, stageIndex),
     ...(layoutMode === "serpentine"
       ? {
-          "elk.spacing.nodeNode": "22",
-          "elk.spacing.edgeNode": "28",
+          "elk.spacing.nodeNode": "34",
+          "elk.spacing.edgeNode": "22",
           "elk.spacing.edgeEdge": "10",
         }
       : {}),

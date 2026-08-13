@@ -44,6 +44,7 @@ export function WorkflowDecisionNode(props: NodeProps) {
       selected={Boolean(props.selected)}
       isRuntimeCurrent={Boolean(props.data.isRuntimeCurrent)}
       attempt={attempt}
+      primaryRoleKey={props.data.primaryRoleKey ? String(props.data.primaryRoleKey) : undefined}
       subtitle={layoutMode === "serpentine" ? description || "基于证据选择晋升、修订、回滚或停止" : "条件分支"}
       decisionLayout
       sourceHandles={sourceHandles}

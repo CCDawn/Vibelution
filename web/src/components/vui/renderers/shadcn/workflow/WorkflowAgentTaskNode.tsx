@@ -26,6 +26,7 @@ export function WorkflowAgentTaskNode(props: NodeProps) {
       selected={Boolean(props.selected)}
       isRuntimeCurrent={isCurrent}
       primaryAgentId={agent || undefined}
+      primaryRoleKey={props.data.primaryRoleKey ? String(props.data.primaryRoleKey) : undefined}
       attempt={attempt}
       subtitle={layoutMode === "serpentine" ? description || (agent ? "科研 Agent 已绑定" : "等待 Agent 绑定") : agent ? agent : "未绑定"}
       portSides={portSides}
