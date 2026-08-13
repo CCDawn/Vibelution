@@ -6,7 +6,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import type { TeamsRouteProps } from "./teamsWorkbenchChrome";
 export type { TeamsRouteProps } from "./teamsWorkbenchChrome";
 import { useTeamsWorkbenchFoundation } from "./useTeamsWorkbenchFoundation";
-import { teamsWorkbenchStyles as styles } from "./teamsWorkbenchChrome";
+import { TeamsLoadingShell } from "./TeamsLoadingShell";
 
 const TeamsWorkbenchWithScPhase = lazy(() =>
   import("./TeamsWorkbenchWithScPhase").then((module) => ({
@@ -18,11 +18,7 @@ export function useTeamsWorkbenchModel(props: TeamsRouteProps): ReactNode {
   const base = useTeamsWorkbenchFoundation(props);
   return (
     <Suspense
-      fallback={(
-        <div className={styles.route} data-testid="teams-workbench-sc-loading" aria-busy="true">
-          Loading teams workbench…
-        </div>
-      )}
+      fallback={<TeamsLoadingShell lang={base.lang === "en" ? "en" : "zh"} />}
     >
       <TeamsWorkbenchWithScPhase base={base} />
     </Suspense>

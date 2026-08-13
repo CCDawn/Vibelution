@@ -28,6 +28,7 @@ from core.research.workflow.transitions import NodeAttemptStatus
 
 from .action_registry import ActionRegistry, VerifiedDomainResult
 from .domain_ports import DomainPorts
+from .failure_projection import apply_node_run_failure
 from .ids import new_id
 
 
@@ -620,12 +621,15 @@ class AdapterDispatchWorker:
             uow.repository.fail_outbox(
                 outbox.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
             )
-            uow.repository.update_attempt_status(
-                action.node_run_id,
-                NodeAttemptStatus.FAILED.value,
-                now_ms,
-                problem_json=json.dumps(problem),
-                finished_at_ms=now_ms,
+            apply_node_run_failure(
+                uow,
+                run_id=action.run_id,
+                node_run_id=action.node_run_id,
+                node_id=action.node_id,
+                problem=problem,
+                now_ms=now_ms,
+                actor_id=self._owner,
+                correlation_id=str(action.action_id or outbox.action_id),
             )
 
         self._store.submit(mutate, force_flush=True).result(timeout=30)
@@ -638,12 +642,15 @@ class AdapterDispatchWorker:
             uow.repository.fail_outbox(
                 outbox.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
             )
-            uow.repository.update_attempt_status(
-                action.node_run_id,
-                NodeAttemptStatus.FAILED.value,
-                now_ms,
-                problem_json=json.dumps(problem),
-                finished_at_ms=now_ms,
+            apply_node_run_failure(
+                uow,
+                run_id=action.run_id,
+                node_run_id=action.node_run_id,
+                node_id=action.node_id,
+                problem=problem,
+                now_ms=now_ms,
+                actor_id=self._owner,
+                correlation_id=str(action.action_id or outbox.action_id),
             )
 
         self._store.submit(mutate, force_flush=True).result(timeout=30)

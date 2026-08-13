@@ -2,6 +2,7 @@
  * R1-c: Teams shell frame — rail, toolbar, and gate early-return surface.
  */
 import type { ReactNode } from "react";
+import { LoaderCircle } from "lucide-react";
 
 import { TeamShellRail } from "./TeamShellRail";
 import { TeamShellToolbar } from "./TeamShellToolbar";
@@ -28,10 +29,7 @@ export type TeamsShellFrameArgs = {
   showGate: boolean;
   ariaLabel: string;
   meta: string;
-  gateMode: "initial-loading" | "unavailable" | "detail-unavailable";
-  initialTitle: string;
-  initialMessage: string;
-  listMetricLoadingLabel: string;
+  gateMode: "unavailable" | "detail-unavailable";
   unavailableTitle: string;
   unavailableMessage: string;
   unavailableDetail: string;
@@ -68,20 +66,32 @@ export function renderTeamsShellRail(args: Pick<
 
 export function renderTeamsShellToolbar(args: Pick<
   TeamsShellFrameArgs,
-  "lang" | "teamName" | "purpose" | "teamShellMode" | "onModeChange" | "onRefreshTeams" | "styles"
+  "lang" | "teamName" | "purpose" | "teamShellMode" | "onModeChange" | "onRefreshTeams" | "styles" | "teamsFetching"
 >): ReactNode {
   return (
-    <TeamShellToolbar
-      lang={args.lang}
-      teamName={args.teamName}
-      purpose={args.purpose}
-      mode={args.teamShellMode}
-      onModeChange={args.onModeChange}
-      onRefresh={args.onRefreshTeams}
-      identityClassName={args.styles.teamShellToolbarIdentity}
-      actionsClassName={args.styles.teamShellToolbarActions}
-      refreshButtonClassName={args.styles.teamRefreshButton}
-    />
+    <div className="flex w-full min-w-0 items-center justify-between gap-3">
+      <TeamShellToolbar
+        lang={args.lang}
+        teamName={args.teamName}
+        purpose={args.purpose}
+        mode={args.teamShellMode}
+        onModeChange={args.onModeChange}
+        onRefresh={args.onRefreshTeams}
+        identityClassName={args.styles.teamShellToolbarIdentity}
+        actionsClassName={args.styles.teamShellToolbarActions}
+        refreshButtonClassName={args.styles.teamRefreshButton}
+      />
+      {args.teamsFetching ? (
+        <span
+          className="flex shrink-0 items-center gap-2 text-[11px] text-[var(--fg-secondary)]"
+          role="status"
+          aria-live="polite"
+        >
+          <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          {args.lang === "zh" ? "正在刷新" : "Refreshing"}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -97,9 +107,6 @@ export function renderTeamsShellGate(args: TeamsShellFrameArgs): ReactNode | nul
       ariaLabel={args.ariaLabel}
       meta={args.meta}
       mode={args.gateMode}
-      initialTitle={args.initialTitle}
-      initialMessage={args.initialMessage}
-      listMetricLoadingLabel={args.listMetricLoadingLabel}
       unavailableTitle={args.unavailableTitle}
       unavailableMessage={args.unavailableMessage}
       unavailableDetail={args.unavailableDetail}

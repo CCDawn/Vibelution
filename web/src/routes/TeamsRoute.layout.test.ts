@@ -69,6 +69,7 @@ import buildSourceCollectionOverviewBagSource from "./teams/buildSourceCollectio
 import stageModulesModelSource from "./teams/source-collection/stageModulesModel.ts?raw";
 import sourceCollectionActionHandlersSource from "./teams/source-collection/createSourceCollectionActionHandlers.ts?raw";
 import teamsShellGateSurfaceSource from "./teams/TeamsShellGateSurface.tsx?raw";
+import teamsLoadingShellSource from "./teams/TeamsLoadingShell.tsx?raw";
 import teamsCanvasComposerSource from "./teams/TeamsCanvasComposer.tsx?raw";
 import teamsOverviewComposerSource from "./teams/TeamsOverviewComposer.tsx?raw";
 import renderTeamsWorkbenchCanvasPageSource from "./teams/renderTeamsWorkbenchCanvasPage.tsx?raw";
@@ -143,6 +144,7 @@ const routeSourceParts = [
   sourceCollectionControllerSource,
   sourceCollectionActionHandlersSource,
   teamsShellGateSurfaceSource,
+  teamsLoadingShellSource,
   teamsCanvasComposerSource,
   teamsOverviewComposerSource,
   researchStageWorkbenchShellSource,
@@ -980,7 +982,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("const showTeamUnavailableSurface = !teamListInitialLoading && !hasTeams");
     expect(routeSource).toContain("buildTeamsShellSurfaceModel");
     expect(routeSource).toContain("teamContextMeta");
-    expect(routeSource).toContain("teamSummaryStatusItems");
     expect(routeSource).toContain("styles.teamUnavailableSurface");
     expect(routeSource).toContain("teamListUnavailable");
     expect(routeSource).toContain("团队数据不可用");
@@ -990,16 +991,26 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("showTeamInitialLoadingSurface");
     expect(routeSource).toContain('mode={');
     expect(routeSource).toContain("showTeamUnavailableSurface");
-    expect(routeSource).toContain('tone="loading"');
-    expect(routeSource).toContain("skeletonLines={3}");
-    expect(routeSource).toContain("<VLoadingValue");
+    expect(routeSource).toContain("<TeamsLoadingShell lang={lang} />");
+    expect(useTeamsWorkbenchModelSource).toContain("fallback={<TeamsLoadingShell");
+    expect(teamsLoadingShellSource).toContain("VBoardWorkbenchPage");
+    expect(teamsLoadingShellSource).toContain("TEAMS_LAYOUT_ID");
+    expect(teamsLoadingShellSource).toContain('shellMode="loading"');
+    expect(teamsLoadingShellSource).toContain('role="status"');
+    expect(teamsLoadingShellSource).toContain('aria-live="polite"');
+    expect(teamsLoadingShellSource).toContain('aria-busy="true"');
+    expect(teamsLoadingShellSource).toContain("VSkeleton");
+    expect(teamsLoadingShellSource).toContain(
+      "narrow ? undefined : <LoadingInspector lang={lang} />",
+    );
+    expect(teamsShellGateSurfaceSource).not.toContain('mode === "initial-loading"');
+    expect(teamsShellGateSurfaceSource).not.toContain("<VLoadingValue");
     // Gate surface: list unavailable tone (TeamsShellGateSurface).
     expect(routeSource).toMatch(/tone=\{(?:props\.)?listUnavailable \? "error" : "empty"\}|tone=\{teamListUnavailable \? "error" : "empty"\}/);
     expect(routeSource).toMatch(/TeamsShellGateSurface|renderTeamsShellGate/);
-    expect(routeSource).toContain('"initial-loading"');
-    expect(routeSource).toContain("skeletonLines={3}");
-    expect(routeSource).toContain("<VLoadingValue");
-    expect(routeSource).toContain("fill");
+    expect(routeSource).not.toContain('gateMode: "initial-loading"');
+    expect(renderTeamsShellFrameSource).toContain('role="status"');
+    expect(renderTeamsShellFrameSource).toContain("args.teamsFetching");
     // Board main: research overview progressive shell (stable IA + in-place skeleton),
     // not a full-region fill "正在读取" surface and not styles.empty one-liner.
     expect(teamResearchBoardPrimarySurfaceSource).not.toContain("正在读取科研总览");
@@ -3598,6 +3609,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("VDenseOpsPage");
     expect(loadingShellSource).toContain("showTeamUnavailableSurface");
     expect(loadingShellSource).toContain("showTeamDetailUnavailableSurface");
+    expect(loadingShellSource).not.toContain("showTeamInitialLoadingSurface ||");
     expect(loadingShellSource).not.toContain("showTeamLoadingSurface ? (");
     expect(routeSource).toContain("teamWorkspaceLoadingTitle");
     expect(routeSource).toContain("className={styles.teamLoadingInlineSurface}");
