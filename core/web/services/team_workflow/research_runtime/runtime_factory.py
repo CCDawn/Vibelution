@@ -26,6 +26,7 @@ from .command_service import WorkflowCommandService
 from .formal_read_runtime import configure_formal_read_runtime, wake_stream_readers
 from .formal_write_runtime import configure_formal_write_runtime
 from .graph_dispatch_worker import GraphDispatchWorker
+from .outbox_pump import WorkflowOutboxPump
 from .real_domain_ports import RealDomainPorts
 from .real_readiness_context import RealDomainReadinessContext
 from .readiness import NodeReadinessService
@@ -151,7 +152,7 @@ def build_workflow_runtime(
         owner_id="graph-worker",
         readiness_service=readiness,
         readiness_context=lambda: readiness_context,
-        commit_hook=wake_stream_readers,
+        commit_hook=combined_wake,
     )
     adapter_worker = AdapterDispatchWorker(
         store=store,
@@ -159,13 +160,13 @@ def build_workflow_runtime(
         ports=ports,
         owner_id="adapter-worker",
         successor_fn=lambda node_id: successor_map().get(node_id, ()),
-        after_commit_hook=wake_stream_readers,
+        after_commit_hook=combined_wake,
     )
     fork_worker = CheckpointForkWorker(
         store=store,
         coordinator=coordinator,
         owner_id="checkpoint-fork-worker",
-        commit_hook=wake_stream_readers,
+        commit_hook=combined_wake,
     )
     return WorkflowRuntime(
         store=store,
@@ -182,11 +183,16 @@ def build_workflow_runtime(
 
 
 _PRODUCTION: WorkflowRuntime | None = None
+_PUMP: WorkflowOutboxPump | None = None
+
+
+def production_workflow_runtime() -> WorkflowRuntime | None:
+    return _PRODUCTION
 
 
 def start_production_workflow_runtime() -> str:
     """Open the Ledger-backed runtime or fail closed (no JSON fallback)."""
-    global _PRODUCTION
+    global _PRODUCTION, _PUMP
     from core.research.workflow.migration.manifest import is_activated
 
     from .formal_write_runtime import mark_migration_required, reset_formal_write_runtime_for_tests
@@ -203,16 +209,26 @@ def start_production_workflow_runtime() -> str:
     if legacy_json_runs_exist(data_root) and not is_activated(data_root):
         mark_migration_required()
         return "migration_required"
+    pump = WorkflowOutboxPump()
     try:
-        _PRODUCTION = build_workflow_runtime(workflow_ledger_path(data_root))
+        _PRODUCTION = build_workflow_runtime(
+            workflow_ledger_path(data_root),
+            wake_worker=pump.wake,
+        )
     except Exception:
         reset_formal_write_runtime_for_tests()
         return "unavailable"
+    pump.attach(_PRODUCTION)
+    _PUMP = pump
     return "ready"
 
 
 def stop_production_workflow_runtime() -> None:
-    global _PRODUCTION
+    global _PRODUCTION, _PUMP
+    pump = _PUMP
+    _PUMP = None
+    if pump is not None:
+        pump.stop()
     runtime = _PRODUCTION
     _PRODUCTION = None
     if runtime is not None:

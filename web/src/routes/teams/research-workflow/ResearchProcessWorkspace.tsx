@@ -57,13 +57,16 @@ export function ResearchProcessWorkspace({
 
   const graph = useMemo(() => {
     if (!runState.projection) return null;
-    if (location.runId) return projectionToCanvasGraph(runState.projection);
+    const primaryAgentIdByNode = new Map(
+      (catalog.effectiveBindings ?? [])
+        .filter((binding) => Boolean(binding.agentId))
+        .map((binding) => [binding.nodeId, binding.agentId]),
+    );
+    if (location.runId) {
+      return projectionToCanvasGraph(runState.projection, { primaryAgentIdByNode });
+    }
     return definitionToCanvasGraph(runState.projection.definition, {
-      primaryAgentIdByNode: new Map(
-        (catalog.effectiveBindings ?? [])
-          .filter((binding) => Boolean(binding.agentId))
-          .map((binding) => [binding.nodeId, binding.agentId]),
-      ),
+      primaryAgentIdByNode,
     });
   }, [catalog.effectiveBindings, location.runId, runState.projection]);
 

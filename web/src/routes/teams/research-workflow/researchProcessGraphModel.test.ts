@@ -185,6 +185,36 @@ describe("researchProcessGraphModel", () => {
     expect(JSON.stringify(graph)).not.toContain("selectedNodeId");
   });
 
+  it("overlays effective Agent bindings when a run projection omits primaryAgentId", () => {
+    const projection: WorkflowCanvasProjection = {
+      definition,
+      run: {
+        runId: "run-3",
+        status: "running",
+        runtimeCurrentNodeIds: ["source_finding"],
+        nodeRuns: {
+          source_finding: {
+            nodeId: "source_finding",
+            status: "running",
+            attempt: 1,
+            actorKind: "agent",
+          },
+        },
+        pendingHumanTasks: [],
+        blockedReason: null,
+        completionKind: "",
+        parentRunId: null,
+        childRunIds: [],
+      },
+    };
+    const graph = projectionToCanvasGraph(projection, {
+      primaryAgentIdByNode: new Map([["source_finding", "agent-finder"]]),
+    });
+    expect(graph.nodes.find((node) => node.nodeId === "source_finding")?.primaryAgentId).toBe(
+      "agent-finder",
+    );
+  });
+
   it("maps blocked and failed without collapsing them", () => {
     const projection: WorkflowCanvasProjection = {
       definition,

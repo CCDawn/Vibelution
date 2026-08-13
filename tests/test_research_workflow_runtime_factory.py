@@ -206,3 +206,101 @@ def test_composition_root_command_flow_works(
         assert run is not None and run.run_version == 2
     finally:
         runtime.close()
+
+
+def _pending_graph_dispatch(store, run_id: str):
+    return store.submit(
+        lambda uow: [
+            item
+            for item in uow.repository.list_pending_outbox(run_id)
+            if item.action_kind == "graph_dispatch"
+        ],
+        force_flush=True,
+    ).result(timeout=10)
+
+
+def test_production_runtime_drains_graph_dispatch_without_manual_run_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    from core.research.workflow.challenge_cup_runtime import (
+        GraphDispatchResult,
+        build_pending_action,
+    )
+    from core.research.workflow.contracts import ActorRef, CommandRequest
+    from core.web.services.team_workflow.research_runtime import readiness_providers
+    from core.web.services.team_workflow.research_runtime.operator_authorization import (
+        server_operator_scope,
+    )
+    from core.web.services.team_workflow.research_runtime.runtime_factory import (
+        production_workflow_runtime,
+        start_production_workflow_runtime,
+        stop_production_workflow_runtime,
+    )
+
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        readiness_providers, "is_agent_resolvable", lambda agent_id: bool(agent_id)
+    )
+    stop_production_workflow_runtime()
+    try:
+        assert start_production_workflow_runtime() == "ready"
+        runtime = production_workflow_runtime()
+        assert runtime is not None
+
+        def fake_snapshot(_run_id: str) -> dict:
+            return {"values": {}, "nextNodeIds": [], "checkpointId": ""}
+
+        def fake_start(dispatch):
+            state = {
+                "run_id": dispatch.run_id,
+                "active_node_id": dispatch.node_id,
+                "active_attempt": dispatch.attempt,
+                "node_attempts": {dispatch.node_id: dispatch.attempt},
+                "input_snapshot_hash": dispatch.input_snapshot_hash,
+                "binding_snapshot_id": dispatch.binding_snapshot_id,
+                "budget_policy_hash": dispatch.budget_policy_hash,
+            }
+            return GraphDispatchResult(
+                dispatch_kind="start",
+                pending_action=build_pending_action(state, dispatch.node_id),
+                next_node_ids=(dispatch.node_id,),
+                checkpoint_id="ckpt-test",
+                state=state,
+            )
+
+        monkeypatch.setattr(runtime.coordinator, "snapshot", fake_snapshot)
+        monkeypatch.setattr(runtime.coordinator, "start_attempt", fake_start)
+        monkeypatch.setattr(runtime.adapter_worker, "run_once", lambda limit=8: 0)
+        monkeypatch.setattr(runtime.fork_worker, "run_once", lambda limit=8: 0)
+
+        _seed_with_snapshot(runtime.store)
+        request = CommandRequest(
+            command_id="cmd-prod-pump",
+            run_id="run-test",
+            team_id="research-team",
+            command=WorkflowCommandKind.START_NODE,
+            node_id="source_finding",
+            expected_run_version=1,
+            idempotency_key="ui:prod-pump-1",
+            payload={},
+            requested_by=ActorRef("user", "u-1"),
+            requested_at_ms=1_750_000_000_000,
+        )
+        with server_operator_scope("u-1", roles=("operator",)):
+            receipt = runtime.command_service.submit(request)
+        assert receipt.status == "accepted"
+
+        deadline = time.time() + 5
+        pending = _pending_graph_dispatch(runtime.store, "run-test")
+        while time.time() < deadline and pending:
+            time.sleep(0.05)
+            pending = _pending_graph_dispatch(runtime.store, "run-test")
+        assert pending == []
+
+        attempt = runtime.store.latest_attempt("run-test", "source_finding")
+        assert attempt is not None
+        assert attempt.status != "starting"
+    finally:
+        stop_production_workflow_runtime()

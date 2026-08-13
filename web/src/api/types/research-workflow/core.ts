@@ -62,10 +62,19 @@ export type HandoffSummary = {
   count: number;
 };
 
+export type AgentBindingRef = {
+  nodeId: string;
+  agentId: string;
+  roleKey: string;
+  resolvedFrom: string;
+  snapshotId?: string;
+};
+
 export type AgentBindingSummary = {
   bindingSnapshotSetId: string;
   bindingSnapshotIds: string[];
   count: number;
+  bindings?: AgentBindingRef[];
 };
 
 export type BudgetSummary = {

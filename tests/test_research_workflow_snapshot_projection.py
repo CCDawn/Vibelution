@@ -266,3 +266,66 @@ def test_projection_builder_rejects_route_objects() -> None:
     assert snap.latest_event_sequence == 1
     assert not hasattr(inputs, "request")
     assert not hasattr(inputs, "http_exception")
+
+
+def test_snapshot_projects_frozen_agent_bindings(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        input_snapshot = {
+            "agentBindingSnapshot": [
+                {
+                    "snapshotId": "snap:run-bind:source_finding",
+                    "nodeId": "source_finding",
+                    "agentId": "agent-finder",
+                    "roleKey": "source_finder",
+                    "resolvedFrom": "workflow_default",
+                }
+            ]
+        }
+        record = build_run_record(run_id="run-bind", last_event_sequence=1)
+        record = record.__class__(
+            **{
+                **record.__dict__,
+                "input_snapshot_json": json.dumps(input_snapshot, ensure_ascii=False),
+            }
+        )
+
+        def mutate(uow):
+            uow.repository.insert_run(record)
+            uow.repository.insert_event(
+                build_event_record(
+                    sequence=1,
+                    run_id="run-bind",
+                    event_type="run_created",
+                    event_id="evt-created-run-bind",
+                )
+            )
+
+        harness.store.submit(mutate, force_flush=True).result(timeout=10)
+        run = harness.store.get_run("run-bind")
+        assert run is not None
+        snap = build_research_workflow_snapshot(
+            ProjectionInputs(
+                run=run,
+                definition=build_challenge_cup_workflow_definition(),
+                attempts=(),
+                pending_human_tasks=(),
+                handoffs=(),
+                budget_receipts=(),
+                command_offers=(),
+                latest_event_sequence=1,
+                generated_at=FIXED_GENERATED_AT,
+            )
+        )
+        payload = snap.agent_binding_summary.to_dict()
+        assert payload["bindings"] == [
+            {
+                "nodeId": "source_finding",
+                "agentId": "agent-finder",
+                "roleKey": "source_finder",
+                "resolvedFrom": "workflow_default",
+                "snapshotId": "snap:run-bind:source_finding",
+            }
+        ]
+    finally:
+        harness.close()
