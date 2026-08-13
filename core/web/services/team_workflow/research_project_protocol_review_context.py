@@ -13,6 +13,41 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _writeback_contract() -> dict[str, Any]:
+    checks = {
+        "dataset": "pass | fail",
+        "baseline": "pass | fail",
+        "metric": "pass | fail",
+        "seed": "pass | fail",
+        "budget": "pass | fail",
+        "stop_condition": "pass | fail",
+        "smoke_plan": "pass | fail",
+    }
+    return {
+        "tool": "challenge_cup_experiment_writeback_tool",
+        "operation": "record_protocol_review",
+        "payloadSchema": {
+            "status": "approved | changes_requested",
+            "blocking_issue_count": "non-negative integer",
+            "open_waivers": "non-negative integer",
+            "checks": checks,
+            "findings": "array; use [] when there are no findings",
+        },
+        "approvedPayloadExample": {
+            "status": "approved",
+            "blocking_issue_count": 0,
+            "open_waivers": 0,
+            "checks": {name: "pass" for name in checks},
+            "findings": [],
+        },
+        "rules": [
+            "Use the exact snake_case field names shown above.",
+            "Each checks value is the string pass or fail, not an object.",
+            "findings is always an array, including when it is empty.",
+        ],
+    }
+
+
 def build_protocol_review_input_context(
     team_id: str,
     task: dict[str, Any],
@@ -53,4 +88,5 @@ def build_protocol_review_input_context(
         "workflowRunId": workflow_run_id,
         "sourceCollectionRunId": source_run_id,
         "protocolDraft": payload,
+        "writebackContract": _writeback_contract(),
     }
