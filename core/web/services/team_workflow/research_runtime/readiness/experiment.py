@@ -23,8 +23,11 @@ def evaluate_hypothesis_design(
     context: DomainReadinessContext,
 ) -> DomainVerdict:
     blockers: list[Any] = []
-    knowledge = context.knowledge_package(run.team_id, run.run_id)
-    if knowledge is None or not knowledge.get("accepted"):
+    # The accepted Ledger handoff is the canonical gate decision.  Do not
+    # require a second ``knowledge_package.accepted`` flag from a parallel
+    # artifact store: the human-resolution command commits the handoff, and
+    # common readiness already validates its accepted status.
+    if not common.accepted_handoff_ids:
         blockers.append(
             blocker(
                 "knowledge_handoff_not_accepted",
