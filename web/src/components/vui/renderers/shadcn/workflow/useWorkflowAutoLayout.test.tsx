@@ -22,7 +22,11 @@ import type {
   WorkflowLayoutInput,
 } from "../../../product/workflow/workflowCanvasTypes";
 import type { WorkflowLayoutEngine } from "./workflowElkClient";
-import { layoutDiagnostic, useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
+import {
+  layoutDiagnostic,
+  mergeRuntimeFields,
+  useWorkflowAutoLayout,
+} from "./useWorkflowAutoLayout";
 import { toElkGraph } from "./workflowElkGraphAdapter";
 
 function makeNode(overrides: Partial<WorkflowCanvasNodeInput>): WorkflowCanvasNodeInput {
@@ -344,6 +348,36 @@ describe("useWorkflowAutoLayout behavior", () => {
     );
     expect(liveTask?.status).toBe("running");
     expect(latest?.edges[0].pathState).toBe("active");
+  });
+
+  it("keeps routine labels suppressed when serpentine runtime fields refresh", () => {
+    const graph = makeGraph(["knowledge_collection", "experiment_design"]);
+    const layoutEdge = {
+      id: "e1",
+      source: "knowledge_collection",
+      target: "experiment_design",
+      label: "",
+      semanticKind: "main" as const,
+      pathState: "idle" as const,
+      labelAlwaysVisible: false,
+      sections: [],
+    };
+
+    const merged = mergeRuntimeFields(
+      { nodes: [], edges: [layoutEdge] },
+      {
+        ...graph,
+        edges: graph.edges.map((edge) => ({
+          ...edge,
+          label: "普通自动交接",
+          pathState: "active" as const,
+        })),
+      },
+      "serpentine",
+    );
+
+    expect(merged.edges[0].label).toBe("");
+    expect(merged.edges[0].pathState).toBe("active");
   });
 
   it("refreshes Agent bindings without re-running ELK", async () => {

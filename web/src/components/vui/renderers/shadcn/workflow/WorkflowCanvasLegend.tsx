@@ -11,7 +11,7 @@ export function WorkflowCanvasLegend() {
   ];
   return (
     <div
-      className="pointer-events-none absolute bottom-3 right-3 z-10 flex flex-wrap items-center gap-2 rounded-md border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,transparent)] px-2 py-1.5 text-[10px] text-[var(--fg-secondary)] shadow-sm"
+      className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,transparent)] px-2.5 py-1.5 text-[10px] text-[var(--fg-secondary)] shadow-sm backdrop-blur"
       data-vui="workflow-canvas-legend"
       aria-hidden
     >

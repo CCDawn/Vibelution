@@ -3,14 +3,14 @@ import {
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
 
-const panelSurface = `${vuiFlatPanelClass} shadow-none`;
-const rowSurface = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row";
-const rowSurfaceSoft = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_84%,var(--vui-surface-panel))]";
+const panelSurface = `${vuiFlatPanelClass} !border-0 !shadow-none`;
+const rowSurface = "rounded-[var(--radius-control)] bg-vui-surface-row";
+const rowSurfaceSoft = "rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--vui-surface-row)_84%,var(--vui-surface-panel))]";
 const controlSurface = "border border-vui-border-subtle bg-vui-control-muted hover:bg-vui-control-muted-hover";
 
 export const selfEvolutionTrackStyles = {
-  pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] bg-vui-surface-panel",
-  trackShell: `grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden ${vuiFlatPanelClass}`,
+  pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden bg-vui-surface-panel",
+  trackShell: `grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden !rounded-none !border-0 ${vuiFlatPanelClass} !shadow-none`,
   trackBody:
     "flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden overflow-x-hidden",
   trackBodyContent:
@@ -25,7 +25,7 @@ export const selfEvolutionTrackStyles = {
   sideColumnScrollable: "h-full overflow-y-auto",
   paneCollapsed: "overflow-hidden p-0 invisible",
   centerColumn: "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden bg-vui-surface-panel",
-  conversationShell: `grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-none border-0 bg-vui-surface-panel`,
+  conversationShell: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-none border-0 bg-vui-surface-panel [&_.vui-components-conversationview.surface]:!rounded-none [&_.vui-components-conversationview.surface]:!border-0 [&_.vui-components-conversationview.surface]:!shadow-none [&_.vui-components-conversationview.composer]:!border-t-0",
   observationEvidenceRail:
     `grid h-full max-h-full min-h-0 content-start gap-3 overflow-auto p-3.5 max-[1180px]:h-auto max-[1180px]:max-h-none ${panelSurface}`,
   observationConfigForm: "grid gap-2.5",
@@ -33,16 +33,11 @@ export const selfEvolutionTrackStyles = {
   observationEventTimeline: `grid gap-2 p-2.5 ${rowSurfaceSoft}`,
   observationEventItem:
     `grid gap-1.5 px-2.5 py-2 ${rowSurfaceSoft} [&_strong]:overflow-wrap-anywhere [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
-  railHeader: "grid gap-2 border-b border-vui-border-subtle px-3.5 py-3",
-  railTitleRow: "flex min-w-0 items-center justify-between gap-2",
-  railIdentity: "flex min-w-0 items-center gap-1.5",
-  railTitle: "m-0 min-w-0 truncate text-[1.05rem] font-bold text-vui-fg-primary",
-  railHeaderActions: "flex shrink-0 items-center gap-1.5",
-  statusTooltipTrigger: "inline-flex rounded-full focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]",
   tooltipBlock: "grid max-w-[360px] gap-1 [&_strong]:font-semibold [&_span]:text-vui-fg-secondary",
-  railSection: "grid gap-2.5 border-b border-vui-border-subtle px-3.5 py-3 last:border-b-0",
+  railSection: "grid gap-2.5 px-3.5 py-3",
   railSectionHeader: "flex min-w-0 items-center gap-1.5",
   railSectionTitle: "inline-flex min-w-0 flex-1 items-center gap-1.5 [font-size:var(--vui-font-xs)] font-semibold uppercase tracking-[0.06em] text-vui-fg-secondary",
+  railSectionActions: "flex shrink-0 items-center gap-1",
   railFactGrid: "grid grid-cols-2 gap-1.5",
   railFact: `grid min-w-0 gap-0.5 px-2.5 py-2 ${rowSurfaceSoft} focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)] [&>span]:[font-size:var(--vui-font-xs)] [&>span]:text-vui-fg-tertiary [&>strong]:truncate [&>strong]:text-[0.9rem] [&>strong]:text-vui-fg-primary`,
   railFieldLabel: "inline-flex items-center gap-1.5",
@@ -50,19 +45,19 @@ export const selfEvolutionTrackStyles = {
   railActionRow: "flex min-w-0 items-center gap-2",
   railPrimaryAction: "min-w-0 flex-1",
   railFeedbackStack: "flex min-w-0 items-start gap-1.5 [&_p]:min-w-0 [&_p]:flex-1",
-  railAgentSection: "grid gap-2 border-b border-vui-border-subtle px-3.5 py-3 last:border-b-0",
+  railAgentSection: "grid gap-2 px-3.5 py-3",
   railAgentCount: "font-mono [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",
   railAgentActions: "flex min-h-8 min-w-0 flex-wrap items-center gap-1.5",
   railAgentGroup: "inline-flex items-center gap-1",
   railAgentButton: "h-8 w-8 min-w-8 p-0",
   railAgentButtonActive: "border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] text-vui-fg-primary",
   railEmptyValue: "font-mono text-vui-fg-tertiary",
-  workflowHeader: "flex min-w-0 items-center gap-1.5 border-b border-vui-border-subtle px-3 py-2",
-  workflowCardGrid: "inline-flex w-fit min-w-0 max-w-full items-center gap-1 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted p-1",
+  workflowHeader: "flex min-h-10 min-w-0 items-center px-2 py-1",
+  workflowCardGrid: "inline-flex w-fit min-w-0 max-w-full items-center gap-1",
   workflowCard:
     "h-8 w-8 min-w-8 cursor-pointer rounded-md border border-transparent bg-transparent p-0 text-vui-fg-secondary",
   workflowCardActive:
-    "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] text-vui-fg-primary [&_strong]:text-[var(--accent-cool)]",
+    "!border-transparent bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] text-vui-fg-primary [&_strong]:text-[var(--accent-cool)]",
   approvalPanel: `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
   statusDetailScroll: "grid h-full min-h-0 content-start gap-3 overflow-y-auto p-3",
   statusPage: "grid min-h-0",
@@ -84,7 +79,7 @@ export const selfEvolutionTrackStyles = {
   loadingPanel:
     `grid min-h-0 content-start gap-2 p-3 ${rowSurfaceSoft} [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-secondary`,
   loadingStatGrid:
-    "grid grid-cols-3 gap-1.5 [&_span]:grid [&_span]:min-w-0 [&_span]:gap-1 [&_span]:rounded-[7px] [&_span]:border [&_span]:border-[var(--border-hairline)] [&_span]:px-[7px] [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
+    "grid grid-cols-3 gap-1.5 [&_span]:grid [&_span]:min-w-0 [&_span]:gap-1 [&_span]:rounded-[7px] [&_span]:bg-vui-surface-row [&_span]:px-[7px] [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
   loadingBody: "grid min-h-0 grid-cols-3 gap-2",
   skeletonLineWide: "block h-2 w-[min(100%,620px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   skeletonLine: "block h-2 w-[min(72%,460px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
@@ -92,7 +87,7 @@ export const selfEvolutionTrackStyles = {
   sectionHeader: "flex items-start justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   itemTop: "flex items-center justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   detailRow:
-    "flex items-center justify-between gap-3 border-b border-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] pb-2 max-[760px]:flex-col max-[760px]:items-stretch [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:overflow-wrap-anywhere [&_strong]:text-[0.92rem] [&_strong]:text-[var(--fg-primary)]",
+    "flex items-center justify-between gap-3 pb-2 max-[760px]:flex-col max-[760px]:items-stretch [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:overflow-wrap-anywhere [&_strong]:text-[0.92rem] [&_strong]:text-[var(--fg-primary)]",
   paginationBar: "flex flex-wrap items-center justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   subsurfaceHeader: "flex items-start justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   eyebrow: "m-0 mb-1 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
@@ -133,7 +128,7 @@ export const selfEvolutionTrackStyles = {
   textInput: "w-full max-w-[180px]",
   textArea: "w-full",
   worktreeEscalation:
-    "flex items-center justify-between gap-3 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] px-3.5 py-3 [&_p]:flex-[1_1_220px]",
+    "flex items-center justify-between gap-3 rounded-[var(--radius-panel)] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] px-3.5 py-3 [&_p]:flex-[1_1_220px]",
   supportGrid: "grid gap-4",
   subsurface:
     `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
@@ -174,7 +169,7 @@ export const selfEvolutionTrackStyles = {
   transactionDetailsToggle:
     "inline-flex min-h-7 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_78%,transparent)] px-[9px] [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] aria-expanded:border-[color-mix(in_srgb,var(--accent-cool)_30%,transparent)] aria-expanded:text-[var(--accent-cool)]",
   transactionDateGroup:
-    "grid gap-2 pt-0.5 [&+&]:mt-1 [&+&]:border-t [&+&]:border-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] [&+&]:pt-3",
+    "grid gap-2 pt-0.5 [&+&]:mt-3 [&+&]:pt-1",
   transactionDateHeader:
     "flex min-h-[30px] items-center justify-between gap-2.5 px-0.5 max-[760px]:flex-col max-[760px]:items-stretch [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
   transactionGroupList: "grid gap-2",
@@ -183,11 +178,11 @@ export const selfEvolutionTrackStyles = {
   checkboxRow: "inline-flex items-center gap-2.5 text-[var(--fg-primary)] [&_input]:h-[15px] [&_input]:w-[15px]",
   transactionTitleStack:
     "grid min-w-0 gap-1 [&_span]:overflow-wrap-anywhere [&_span]:font-mono [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
-  transactionMetaGrid: `grid grid-cols-4 gap-1.5 max-[1180px]:grid-cols-2 [&_span]:min-w-0 [&_span]:overflow-wrap-anywhere [&_span]:rounded-[var(--radius-control)] [&_span]:border [&_span]:border-[var(--border-hairline)] [&_span]:${vuiOpaqueRowClass} [&_span]:px-2 [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-secondary)]`,
+  transactionMetaGrid: `grid grid-cols-4 gap-1.5 max-[1180px]:grid-cols-2 [&_span]:min-w-0 [&_span]:overflow-wrap-anywhere [&_span]:rounded-[var(--radius-control)] [&_span]:${vuiOpaqueRowClass} [&_span]:!border-0 [&_span]:px-2 [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-secondary)]`,
   transactionGoalPreview: "m-0 overflow-wrap-anywhere [font-size:var(--vui-font-xs)] leading-normal text-[var(--fg-secondary)]",
   previewText: "m-0 overflow-wrap-anywhere text-[0.92rem] leading-normal text-[var(--fg-primary)]",
   compactPreviewText: "m-0 line-clamp-2 overflow-wrap-anywhere [font-size:var(--vui-font-xs)] leading-normal text-[var(--fg-secondary)]",
-  rawBlock: `overflow-auto rounded-[var(--radius-panel)] border border-[var(--border-hairline)] ${vuiOpaqueRowClass} p-3 font-mono [font-size:var(--vui-font-xs)] leading-relaxed text-[var(--fg-secondary)]`,
+  rawBlock: `overflow-auto rounded-[var(--radius-panel)] ${vuiOpaqueRowClass} !border-0 p-3 font-mono [font-size:var(--vui-font-xs)] leading-relaxed text-[var(--fg-secondary)]`,
   transactionDetailsPanel:
     `grid grid-cols-2 gap-2 p-[9px] max-[1180px]:grid-cols-1 ${rowSurfaceSoft}`,
   transactionDetailRow:

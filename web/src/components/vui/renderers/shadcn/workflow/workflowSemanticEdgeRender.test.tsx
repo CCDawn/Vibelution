@@ -128,7 +128,7 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
     expect(markup).toContain("height:20px");
   });
 
-  it("always renders the label when labelAlwaysVisible is set", () => {
+  it("always renders a semantic handoff label", () => {
     const markup = renderEdge({
       sections,
       label: "人工确认",
@@ -136,9 +136,24 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
       labelBounds: { x: 40, y: 10, width: 40, height: 12 },
       pathState: "idle",
       semanticKind: "human_gate",
+      gateKind: "knowledge_package",
     });
     expect(markup).toContain('data-vui="workflow-edge-label"');
     expect(markup).toContain("人工确认");
+  });
+
+  it("hides routine human-edge labels until hover or attention", () => {
+    const markup = renderEdge({
+      sections,
+      label: "评审通过",
+      labelAlwaysVisible: true,
+      labelBounds: { x: 40, y: 10, width: 40, height: 12 },
+      pathState: "idle",
+      semanticKind: "human_gate",
+      gateKind: "human",
+    });
+    expect(markup).not.toContain('data-vui="workflow-edge-label"');
+    expect(markup).not.toContain("评审通过");
   });
 
   it("never renders a label when the engine did not place labelBounds (P1-2)", () => {
