@@ -47,13 +47,20 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from vibelution_storage import resolve_project_cache_home
-GUARD_SCRIPT = (
+
+GUARD_SCRIPT_CANDIDATES = (
+    Path.home()
+    / ".codex"
+    / "skills"
+    / "briefbound-project-memory"
+    / "scripts"
+    / "agent_coordination.py",
     Path.home()
     / ".codex"
     / "skills"
     / "ccdawn-dawn-agent-html-memory"
     / "scripts"
-    / "agent_work_guard.py"
+    / "agent_work_guard.py",
 )
 MANIFEST_SCHEMA_VERSION = 1
 PROJECT_PYTHON_NAME = Path(".venv") / "Scripts" / "python.exe"
@@ -408,9 +415,19 @@ def main_worktree(root: Path, base: str) -> Path:
     return root.resolve()
 
 
+def resolve_guard_script(candidates: Sequence[Path] | None = None) -> Path:
+    checked = tuple(candidates or GUARD_SCRIPT_CANDIDATES)
+    for candidate in checked:
+        if candidate.is_file():
+            return candidate
+    locations = ", ".join(str(candidate) for candidate in checked)
+    raise RuntimeError(f"project coordination guard not found; checked: {locations}")
+
+
 def read_guard_status(project_root: Path) -> dict[str, object]:
+    guard_script = resolve_guard_script()
     completed = run_process(
-        [sys.executable, str(GUARD_SCRIPT), str(project_root), "status", "--json"],
+        [sys.executable, str(guard_script), str(project_root), "status", "--json"],
         project_root,
     )
     if completed.returncode != 0:
