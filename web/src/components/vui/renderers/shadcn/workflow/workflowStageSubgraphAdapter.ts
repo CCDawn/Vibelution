@@ -17,12 +17,12 @@ import type {
 import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 import { resolveElkPorts } from "./workflowElkPorts";
 import {
-  WORKFLOW_DECISION_DESIGN_HEIGHT,
-  WORKFLOW_ELK_STAGE_INTERNAL_OPTIONS,
-  WORKFLOW_NODE_DESIGN_HEIGHT,
-  WORKFLOW_NODE_DESIGN_WIDTH,
   WORKFLOW_NODE_LABEL_HEIGHT,
   WORKFLOW_NODE_LABEL_WIDTH,
+  workflowNodeDesignSize,
+  workflowEdgeKeepsNarrativeLabel,
+  workflowStageInternalOptions,
+  type WorkflowCanvasLayoutMode,
 } from "./workflowElkOptions";
 import type { WorkflowNodeSize } from "./workflowLayoutHash";
 
@@ -50,8 +50,14 @@ export type StageSubgraphBundle = {
 export function buildStageSubgraphs(
   input: WorkflowLayoutInput,
   sizes?: ReadonlyMap<string, WorkflowNodeSize>,
+  layoutMode: WorkflowCanvasLayoutMode = "stage-columns",
 ): StageSubgraphBundle {
-  const { byEdgeId, byNodeId } = resolveElkPorts({ nodes: input.nodes, edges: input.edges });
+  const { byEdgeId, byNodeId } = resolveElkPorts({
+    nodes: input.nodes,
+    edges: input.edges,
+    stageOrder: input.stages.map((stage) => stage.stageId),
+    layoutMode,
+  });
   const nodeById = new Map(input.nodes.map((n) => [n.nodeId, n] as const));
   const stageOf = new Map(input.nodes.map((n) => [n.nodeId, n.stageId] as const));
 
@@ -61,13 +67,12 @@ export function buildStageSubgraphs(
       return measured;
     }
     const node = nodeById.get(nodeId);
-    const height = node?.visualKind === "decision" ? WORKFLOW_DECISION_DESIGN_HEIGHT : WORKFLOW_NODE_DESIGN_HEIGHT;
-    return { width: WORKFLOW_NODE_DESIGN_WIDTH, height };
+    return workflowNodeDesignSize(layoutMode, node?.visualKind ?? "agent_task");
   };
 
   const subgraphs: StageSubgraph[] = [];
 
-  for (const stage of input.stages) {
+  for (const [stageIndex, stage] of input.stages.entries()) {
     const stageNodeIds = stage.nodeIds.filter((id) => nodeById.has(id));
     const children: ElkNode[] = [];
     for (const nodeId of stageNodeIds) {
@@ -111,6 +116,10 @@ export function buildStageSubgraphs(
         targets: [ports.targetPortId],
         labels:
           edge.label.length > 0
+          && (
+            layoutMode !== "serpentine"
+            || (workflowEdgeKeepsNarrativeLabel(edge) && edge.semanticKind !== "rerun")
+          )
             ? [
                 {
                   ...resolveEdgeLabelSpec(edge.label),
@@ -125,7 +134,7 @@ export function buildStageSubgraphs(
       stageId: stage.stageId,
       root: {
         id: `stage:${stage.stageId}`,
-        layoutOptions: { ...WORKFLOW_ELK_STAGE_INTERNAL_OPTIONS },
+        layoutOptions: workflowStageInternalOptions(layoutMode, stageIndex),
         children,
         edges: stageEdges,
       },

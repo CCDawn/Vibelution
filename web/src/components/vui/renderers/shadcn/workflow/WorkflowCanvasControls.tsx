@@ -1,5 +1,5 @@
 import { useReactFlow } from "@xyflow/react";
-import { Focus, Maximize2, Minus, Plus, RotateCcw } from "lucide-react";
+import { Focus, Maximize2, Minus, Plus } from "lucide-react";
 
 export type WorkflowCanvasControlsProps = {
   runtimeCurrentNodeIds?: string[];
@@ -51,29 +51,27 @@ export function WorkflowCanvasControls({
   };
 
   const btn =
-    "inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] text-[var(--fg-secondary)] shadow-sm hover:bg-[var(--vui-control-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]";
+    "inline-flex size-9 items-center justify-center rounded-lg border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_94%,transparent)] text-[var(--fg-secondary)] shadow-sm transition hover:-translate-y-px hover:bg-[var(--vui-control-hover-bg)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]";
 
   return (
     <div
-      className="pointer-events-auto absolute bottom-3 left-3 z-10 flex flex-col gap-1"
+      className="pointer-events-auto absolute bottom-3 left-3 z-10 flex gap-1 rounded-xl border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_84%,transparent)] p-1 shadow-sm backdrop-blur"
       data-vui="workflow-canvas-controls"
     >
-      <button type="button" className={btn} aria-label="放大" onClick={() => void zoomIn({ duration: 120 })}>
+      <button type="button" className={btn} aria-label="放大画布" title="放大" onClick={() => void zoomIn({ duration: 120 })}>
         <Plus className="h-4 w-4" aria-hidden />
       </button>
-      <button type="button" className={btn} aria-label="缩小" onClick={() => void zoomOut({ duration: 120 })}>
+      <button type="button" className={btn} aria-label="缩小画布" title="缩小" onClick={() => void zoomOut({ duration: 120 })}>
         <Minus className="h-4 w-4" aria-hidden />
       </button>
-      <button type="button" className={btn} aria-label="适应全部" onClick={fitAll}>
+      <button type="button" className={btn} aria-label="适应全部" title="适应全部流程" onClick={fitAll}>
         <Maximize2 className="h-4 w-4" aria-hidden />
-      </button>
-      <button type="button" className={btn} aria-label="重置视图" onClick={fitAll}>
-        <RotateCcw className="h-4 w-4" aria-hidden />
       </button>
       <button
         type="button"
         className={btn}
-        aria-label="定位当前节点"
+        aria-label="定位当前工作"
+        title="定位当前"
         onClick={focusCurrent}
         disabled={runtimeCurrentNodeIds.length === 0}
       >
