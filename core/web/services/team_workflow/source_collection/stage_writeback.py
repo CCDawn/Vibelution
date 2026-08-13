@@ -325,10 +325,11 @@ def get_source_collection_stage_task_context(
     projected_source_candidates, source_family_summary = project_source_version_families(
         run_bundle["sourceCandidates"],
     )
-    source_candidates = s._rank_source_collection_context_candidates(
+    inventory_candidates = s._rank_source_collection_context_candidates(
         projected_source_candidates,
         stage_id=normalized_stage_id,
-    ) if include_candidates else []
+    )
+    source_candidates = inventory_candidates if include_candidates else []
     memory_steward_mode = s._source_collection_stage_can_materialize_formal_knowledge(
         normalized_stage_id,
         task_agent_role,
@@ -469,7 +470,11 @@ def get_source_collection_stage_task_context(
             "nextOffset": next_candidate_offset if candidate_has_more else None,
         },
         "unassessedCandidateIds": selected_unassessed_candidate_ids,
-        "allUnassessedCandidateCount": sum(1 for item in source_candidates if s._source_quality_bucket(item) == "pending"),
+        "allUnassessedCandidateCount": sum(
+            1
+            for item in inventory_candidates
+            if s._source_quality_bucket(item) == "pending"
+        ),
         "storageArtifacts": storage_artifacts,
         "writebackContract": task.get("writebackContract") if isinstance(task.get("writebackContract"), dict) else {},
         "evidenceRemediationContract": (
@@ -506,7 +511,7 @@ def get_source_collection_stage_task_context(
     )
     if memory_steward_mode:
         context["stewardActionPacket"] = s._source_collection_memory_steward_action_packet(
-            source_candidates,
+            inventory_candidates,
             writeback_contract=context["writebackContract"],
         )
         context["usage"]["fallback"] = (
