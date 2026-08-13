@@ -240,6 +240,25 @@ def challenge_cup_experiment_writeback_tool(
                     raise ValueError(
                         "Created experiment plan was not bound to the requested research project."
                     )
+                if _text(task.get("workflowNodeId")) == "protocol_design":
+                    from core.web.services.team_workflow.research_project_protocol_context import (
+                        build_protocol_input_context,
+                    )
+                    from core.web.services.team_workflow.research_runtime.protocol_artifact_writer import (
+                        record_protocol_draft,
+                    )
+
+                    response["protocolDraft"] = record_protocol_draft(
+                        team_id=team_id,
+                        task_context={
+                            "task": task,
+                            "protocolInput": build_protocol_input_context(
+                                team_id,
+                                task,
+                            ),
+                        },
+                        plan=created_plan,
+                    )
         elif normalized_operation in {
             "register_baseline_artifact",
             "register_smoke_result",
@@ -857,6 +876,11 @@ def _experiment_writeback_result_refs(
         response.get("smokeResult"),
         response.get("fullRunResult"),
         response.get("experimentResultPack"),
+        (
+            response.get("protocolDraft", {}).get("artifact")
+            if isinstance(response.get("protocolDraft"), dict)
+            else None
+        ),
     ]
     for record in candidate_records:
         if not isinstance(record, dict):
@@ -867,6 +891,7 @@ def _experiment_writeback_result_refs(
             "smokeResultId",
             "fullRunResultId",
             "packId",
+            "recordId",
         ):
             value = _text(record.get(key))
             if value and value not in refs:
