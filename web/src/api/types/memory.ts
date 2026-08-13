@@ -426,7 +426,7 @@ export type MemoryCleanupTargetResult = {
   teamId: string;
   knowledgeBaseId: string;
   scopedKnowledgeBaseId: string;
-  status: "preview" | "executed" | string;
+  status: "preview" | "executed" | "partial" | "failed" | string;
   paths: MemoryCleanupPathResult[];
   counts: MemoryCleanupCounts;
   warnings: string[];
@@ -437,14 +437,26 @@ export type MemoryCleanupPreviewResponse = {
   mode: string;
   hardDelete: boolean;
   confirmationPhrase: string;
+  previewToken: string;
+  previewExpiresAt: string;
   targets: MemoryCleanupTargetResult[];
-  totals: MemoryCleanupCounts & { targetCount: number };
+  totals: MemoryCleanupCounts & {
+    targetCount: number;
+    executedTargetCount?: number;
+    partialTargetCount?: number;
+    failedTargetCount?: number;
+    failedPathCount?: number;
+    auditFailureCount?: number;
+  };
   operatingBoundary: Record<string, boolean | string>;
   generatedAt: string;
   elapsedMs: number;
 };
 
-export type MemoryCleanupExecuteResponse = MemoryCleanupPreviewResponse;
+export type MemoryCleanupExecuteResponse = Omit<MemoryCleanupPreviewResponse, "previewToken" | "previewExpiresAt"> & {
+  outcome: "succeeded" | "partial" | "failed";
+  audit?: { status: "written" | "failed"; message?: string };
+};
 
 export type KnowledgeRagContext = {
   contextId: string;

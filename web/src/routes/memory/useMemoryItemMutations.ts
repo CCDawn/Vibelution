@@ -7,7 +7,12 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
-import type { AgentProjectMemoryUpdateProposal } from "../../api/types";
+import type {
+  AgentProjectMemoryUpdateProposal,
+  MemoryCleanupExecuteResponse,
+  MemoryCleanupPreviewResponse,
+} from "../../api/types";
+import { isMemoryCleanupExecutionSuccessful } from "./memoryCleanupSafety";
 
 type Notice = { tone: "success" | "error"; text: string };
 
@@ -162,7 +167,7 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
 
   const cleanupPreviewMutation = useMutation({
     mutationFn: async (targets: Array<Record<string, unknown>>) =>
-      fetchJson<Record<string, unknown>>("/api/memory/cleanup/preview", {
+      fetchJson<MemoryCleanupPreviewResponse>("/api/memory/cleanup/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targets }),
@@ -185,20 +190,28 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
     mutationFn: async ({
       targets,
       confirmationPhrase,
+      previewToken,
     }: {
       targets: Array<Record<string, unknown>>;
       confirmationPhrase: string;
+      previewToken: string;
     }) =>
-      fetchJson<Record<string, unknown>>("/api/memory/cleanup/execute", {
+      fetchJson<MemoryCleanupExecuteResponse>("/api/memory/cleanup/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets, confirmationPhrase }),
+        body: JSON.stringify({ targets, confirmationPhrase, previewToken }),
       }),
     onSuccess: (payload) => {
-      options.setCleanupPreview(payload);
+      const succeeded = isMemoryCleanupExecutionSuccessful(payload);
+      options.setCleanupPreview(null);
       options.setCleanupExecution(payload);
       options.setCleanupConfirmationText("");
-      options.setCleanupFeedback({ tone: "success", text: options.copy.cleanupExecuteDone });
+      options.setCleanupFeedback({
+        tone: succeeded ? "success" : "error",
+        text: succeeded
+          ? options.copy.cleanupExecuteDone
+          : `${options.copy.cleanupFailed}: ${payload.outcome}`,
+      });
       options.invalidateMemoryQueries(queryClient);
       options.invalidateKnowledgeDashboard(queryClient, options.fallbackKnowledgeActorAgentId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });

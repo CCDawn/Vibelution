@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
 from core.web.services.memory_service import (
@@ -53,6 +53,7 @@ class MemoryCleanupPreviewPayload(BaseModel):
 
 class MemoryCleanupExecutePayload(MemoryCleanupPreviewPayload):
     confirmationPhrase: str = Field("", max_length=80)
+    previewToken: str = Field("", max_length=160)
 
 
 @router.get("/memory/overview")
@@ -135,14 +136,18 @@ def memory_cleanup_preview(payload: MemoryCleanupPreviewPayload) -> dict:
 
 
 @router.post("/memory/cleanup/execute")
-def memory_cleanup_execute(payload: MemoryCleanupExecutePayload) -> dict:
+def memory_cleanup_execute(payload: MemoryCleanupExecutePayload, response: Response) -> dict:
     try:
-        return execute_memory_cleanup(
+        result = execute_memory_cleanup(
             [target.model_dump() for target in payload.targets],
             confirmation_phrase=payload.confirmationPhrase,
+            preview_token=payload.previewToken,
         )
     except MemoryCleanupError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result.get("outcome") != "succeeded":
+        response.status_code = status.HTTP_207_MULTI_STATUS
+    return result
 
 
 @router.post("/memory/items", status_code=status.HTTP_201_CREATED)

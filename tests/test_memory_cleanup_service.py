@@ -1,4 +1,5 @@
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ from core.web.services import (
 
 
 @pytest.fixture()
-def cleanup_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def cleanup_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     for service in (
         agent_directory_service,
@@ -27,7 +28,11 @@ def cleanup_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ):
         monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_cleanup_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
-    return tmp_path
+    with memory_cleanup_service._CLEANUP_OPERATION_LOCK:
+        memory_cleanup_service._PREVIEW_GRANTS.clear()
+    yield tmp_path
+    with memory_cleanup_service._CLEANUP_OPERATION_LOCK:
+        memory_cleanup_service._PREVIEW_GRANTS.clear()
 
 
 def _write(path: Path, content: str = "x") -> Path:
@@ -116,6 +121,7 @@ def test_memory_cleanup_global_runtime_memory_preserves_non_memory_database_tabl
     result = memory_cleanup_service.execute_memory_cleanup(
         [{"targetType": "global_runtime_memory"}],
         confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
     )
 
     assert result["totals"]["targetCount"] == 1
@@ -126,7 +132,9 @@ def test_memory_cleanup_global_runtime_memory_preserves_non_memory_database_tabl
     with sqlite3.connect(str(db_file)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM LongTermMemory").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM GitCommit").fetchone()[0] == 1
-    assert (cleanup_project / "logs" / "memory_cleanup" / "memory_cleanup_audit.jsonl").exists()
+    audit_path = cleanup_project / "logs" / "memory_cleanup" / "memory_cleanup_audit.jsonl"
+    assert audit_path.exists()
+    assert preview["previewToken"] not in audit_path.read_text(encoding="utf-8")
 
 
 def test_memory_cleanup_sqlite_compact_reclaims_free_pages_without_deleting_rows(cleanup_project: Path):
@@ -151,6 +159,7 @@ def test_memory_cleanup_sqlite_compact_reclaims_free_pages_without_deleting_rows
     result = memory_cleanup_service.execute_memory_cleanup(
         [{"targetType": "sqlite_database_compact"}],
         confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
     )
 
     assert result["totals"]["byteCount"] > 0
@@ -192,6 +201,7 @@ def test_memory_cleanup_maintenance_artifacts_delete_noise_without_touching_prot
     result = memory_cleanup_service.execute_memory_cleanup(
         targets,
         confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
     )
 
     assert result["totals"]["fileCount"] == 5
@@ -225,6 +235,7 @@ def test_memory_cleanup_knowledge_base_removes_owner_records_and_vector_metadata
     result = memory_cleanup_service.execute_memory_cleanup(
         [{"targetType": "knowledge_base", "knowledgeBaseId": scoped_id}],
         confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
     )
 
     assert result["totals"]["vectorRecordCount"] == 1
@@ -239,13 +250,16 @@ def test_memory_cleanup_knowledge_base_removes_owner_records_and_vector_metadata
 def test_memory_cleanup_agent_private_memory_and_policy_reset(cleanup_project: Path):
     agent = agent_directory_service.create_agent_instance(display_name="Cleanup Agent")
     memory_file = _write(cleanup_project / "workspace" / "agents" / agent["agentId"] / "memory" / "scratch.md", "delete")
+    targets = [
+        {"targetType": "agent_private_memory", "agentId": agent["agentId"]},
+        {"targetType": "agent_memory_policy", "agentId": agent["agentId"]},
+    ]
+    preview = memory_cleanup_service.preview_memory_cleanup(targets)
 
     result = memory_cleanup_service.execute_memory_cleanup(
-        [
-            {"targetType": "agent_private_memory", "agentId": agent["agentId"]},
-            {"targetType": "agent_memory_policy", "agentId": agent["agentId"]},
-        ],
+        targets,
         confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
     )
 
     assert result["totals"]["targetCount"] == 2
@@ -258,8 +272,187 @@ def test_memory_cleanup_agent_private_memory_and_policy_reset(cleanup_project: P
 
 
 def test_memory_cleanup_execute_requires_exact_confirmation(cleanup_project: Path):
+    targets = [{"targetType": "global_runtime_memory"}]
+    preview = memory_cleanup_service.preview_memory_cleanup(targets)
     with pytest.raises(memory_cleanup_service.MemoryCleanupError):
         memory_cleanup_service.execute_memory_cleanup(
-            [{"targetType": "global_runtime_memory"}],
+            targets,
             confirmation_phrase="delete",
+            preview_token=preview["previewToken"],
         )
+
+
+def test_memory_cleanup_execute_requires_matching_preview_token(cleanup_project: Path):
+    target = {"targetType": "session_artifacts"}
+    session_file = _write(cleanup_project / "workspace" / "sessions" / "session-a" / "turn.json", "{}")
+
+    with pytest.raises(memory_cleanup_service.MemoryCleanupError, match="preview"):
+        memory_cleanup_service.execute_memory_cleanup(
+            [target],
+            confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+            preview_token="",
+        )
+
+    preview = memory_cleanup_service.preview_memory_cleanup([target])
+    assert preview["previewToken"]
+
+    with pytest.raises(memory_cleanup_service.MemoryCleanupError, match="targets"):
+        memory_cleanup_service.execute_memory_cleanup(
+            [{"targetType": "evaluation_artifacts"}],
+            confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+            preview_token=preview["previewToken"],
+        )
+
+    assert session_file.exists()
+
+
+def test_memory_cleanup_preview_token_is_single_use(cleanup_project: Path):
+    target = {"targetType": "evaluation_artifacts"}
+    preview = memory_cleanup_service.preview_memory_cleanup([target])
+
+    first = memory_cleanup_service.execute_memory_cleanup(
+        [target],
+        confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
+    )
+
+    assert first["outcome"] == "succeeded"
+    with pytest.raises(memory_cleanup_service.MemoryCleanupError, match="already used"):
+        memory_cleanup_service.execute_memory_cleanup(
+            [target],
+            confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+            preview_token=preview["previewToken"],
+        )
+
+
+def test_memory_cleanup_preview_token_expires_without_deleting(
+    cleanup_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    now = {"value": 10.0}
+    monkeypatch.setattr(memory_cleanup_service.time, "monotonic", lambda: now["value"])
+    target = {"targetType": "session_artifacts"}
+    session_file = _write(cleanup_project / "workspace" / "sessions" / "session-a" / "turn.json", "{}")
+    preview = memory_cleanup_service.preview_memory_cleanup([target])
+    now["value"] += memory_cleanup_service.PREVIEW_TOKEN_TTL_SECONDS + 1
+
+    with pytest.raises(memory_cleanup_service.MemoryCleanupError, match="expired"):
+        memory_cleanup_service.execute_memory_cleanup(
+            [target],
+            confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+            preview_token=preview["previewToken"],
+        )
+
+    assert session_file.exists()
+
+
+def test_memory_cleanup_execute_rejects_stale_preview_without_deleting(cleanup_project: Path):
+    target = {"targetType": "session_artifacts"}
+    original = _write(cleanup_project / "workspace" / "sessions" / "session-a" / "turn.json", "{}")
+    preview = memory_cleanup_service.preview_memory_cleanup([target])
+    added_after_preview = _write(cleanup_project / "workspace" / "sessions" / "session-b" / "turn.json", "{}")
+
+    with pytest.raises(memory_cleanup_service.MemoryCleanupError, match="stale"):
+        memory_cleanup_service.execute_memory_cleanup(
+            [target],
+            confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+            preview_token=preview["previewToken"],
+        )
+
+    assert original.exists()
+    assert added_after_preview.exists()
+
+
+def test_memory_cleanup_execute_reports_partial_failure(cleanup_project: Path, monkeypatch: pytest.MonkeyPatch):
+    evaluation_file = _write(cleanup_project / "workspace" / "evaluation" / "candidate.json", "{}")
+    session_file = _write(cleanup_project / "workspace" / "sessions" / "session-a" / "turn.json", "{}")
+    targets = [
+        {"targetType": "evaluation_artifacts"},
+        {"targetType": "session_artifacts"},
+    ]
+    preview = memory_cleanup_service.preview_memory_cleanup(targets)
+    original_execute_delete_path = memory_cleanup_service._execute_delete_path
+
+    def execute_with_one_failure(cleanup_path):
+        if cleanup_path.path == cleanup_project / "workspace" / "sessions":
+            return memory_cleanup_service._execution_result(
+                cleanup_path.path,
+                cleanup_path.kind,
+                cleanup_path.action,
+                "failed",
+                message="simulated lock",
+            )
+        return original_execute_delete_path(cleanup_path)
+
+    monkeypatch.setattr(memory_cleanup_service, "_execute_delete_path", execute_with_one_failure)
+
+    result = memory_cleanup_service.execute_memory_cleanup(
+        targets,
+        confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
+    )
+
+    assert result["outcome"] == "partial"
+    assert result["totals"]["failedTargetCount"] == 1
+    assert [target["status"] for target in result["targets"]] == ["executed", "failed"]
+    assert not evaluation_file.exists()
+    assert session_file.exists()
+
+
+def test_memory_cleanup_execute_contains_unexpected_target_failure(
+    cleanup_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    evaluation_file = _write(cleanup_project / "workspace" / "evaluation" / "candidate.json", "{}")
+    session_file = _write(cleanup_project / "workspace" / "sessions" / "session-a" / "turn.json", "{}")
+    targets = [
+        {"targetType": "evaluation_artifacts"},
+        {"targetType": "session_artifacts"},
+    ]
+    preview = memory_cleanup_service.preview_memory_cleanup(targets)
+    original_execute_target = memory_cleanup_service._execute_target
+
+    def execute_with_unexpected_failure(target, *, before=None):
+        if target.target_type == "session_artifacts":
+            raise RuntimeError("simulated unexpected failure")
+        return original_execute_target(target, before=before)
+
+    monkeypatch.setattr(memory_cleanup_service, "_execute_target", execute_with_unexpected_failure)
+
+    result = memory_cleanup_service.execute_memory_cleanup(
+        targets,
+        confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
+    )
+
+    assert result["outcome"] == "partial"
+    assert [target["status"] for target in result["targets"]] == ["executed", "failed"]
+    assert result["targets"][1]["paths"][0]["message"] == "RuntimeError: simulated unexpected failure"
+    assert not evaluation_file.exists()
+    assert session_file.exists()
+
+
+def test_memory_cleanup_execute_reports_audit_write_failure(
+    cleanup_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    target = {"targetType": "evaluation_artifacts"}
+    preview = memory_cleanup_service.preview_memory_cleanup([target])
+
+    def fail_audit(_payload):
+        raise PermissionError("simulated audit lock")
+
+    monkeypatch.setattr(memory_cleanup_service, "_append_cleanup_audit", fail_audit)
+
+    result = memory_cleanup_service.execute_memory_cleanup(
+        [target],
+        confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
+    )
+
+    assert result["outcome"] == "partial"
+    assert result["totals"]["auditFailureCount"] == 1
+    assert result["audit"] == {
+        "status": "failed",
+        "message": "PermissionError: simulated audit lock",
+    }

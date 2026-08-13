@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import secrets
 import shutil
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,6 +24,8 @@ from .runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_VERSION = 1
 CONFIRMATION_PHRASE = "硬删除记忆"
+PREVIEW_TOKEN_TTL_SECONDS = 300
+MAX_ACTIVE_PREVIEW_TOKENS = 512
 MEMORY_DB_TABLES = ("LongTermMemory", "TaskLog", "ErrorArchive", "CodebaseKnowledge")
 TARGET_TYPES = {
     "global_runtime_memory",
@@ -83,18 +89,33 @@ class CleanupPath:
     note: str = ""
 
 
+@dataclass(frozen=True)
+class CleanupPreviewGrant:
+    target_keys: tuple[str, ...]
+    snapshot_digest: str
+    expires_at_monotonic: float
+
+
+_CLEANUP_OPERATION_LOCK = threading.RLock()
+_PREVIEW_GRANTS: dict[str, CleanupPreviewGrant] = {}
+
+
 def preview_memory_cleanup(targets: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> dict[str, Any]:
     """Return a hard-delete preview for selected memory cleanup targets."""
 
     started_at = time.perf_counter()
-    normalized_targets = _normalize_targets(targets)
-    target_previews = [_preview_target(target) for target in normalized_targets]
+    with _CLEANUP_OPERATION_LOCK:
+        normalized_targets = _normalize_targets(targets)
+        target_previews = [_preview_target(target) for target in normalized_targets]
+        preview_token, preview_expires_at = _issue_preview_grant(normalized_targets, target_previews)
     totals = _sum_target_totals(target_previews)
     payload = {
         "schemaVersion": SCHEMA_VERSION,
         "mode": "hard_delete_memory_cleanup_preview",
         "hardDelete": True,
         "confirmationPhrase": CONFIRMATION_PHRASE,
+        "previewToken": preview_token,
+        "previewExpiresAt": preview_expires_at,
         "targets": target_previews,
         "totals": totals,
         "operatingBoundary": _operating_boundary(),
@@ -109,30 +130,168 @@ def execute_memory_cleanup(
     targets: list[dict[str, Any]] | tuple[dict[str, Any], ...],
     *,
     confirmation_phrase: str = "",
+    preview_token: str = "",
 ) -> dict[str, Any]:
     """Hard-delete selected memory cleanup targets after exact confirmation."""
 
     if str(confirmation_phrase or "").strip() != CONFIRMATION_PHRASE:
         raise MemoryCleanupError(f'Confirmation phrase must be "{CONFIRMATION_PHRASE}".')
     started_at = time.perf_counter()
-    normalized_targets = _normalize_targets(targets)
-    results = [_execute_target(target) for target in normalized_targets]
+    with _CLEANUP_OPERATION_LOCK:
+        normalized_targets = _normalize_targets(targets)
+        grant = _consume_preview_grant(preview_token, normalized_targets)
+        current_previews = [_preview_target(target) for target in normalized_targets]
+        if _snapshot_digest(normalized_targets, current_previews) != grant.snapshot_digest:
+            raise MemoryCleanupError("Cleanup preview is stale; generate a new preview before executing.")
+        results = [
+            _execute_target_safely(target, before=before)
+            for target, before in zip(normalized_targets, current_previews, strict=True)
+        ]
     totals = _sum_target_totals(results)
+    outcome = _execution_outcome(totals)
     payload = {
         "schemaVersion": SCHEMA_VERSION,
         "mode": "hard_delete_memory_cleanup_execute",
         "hardDelete": True,
         "confirmationPhrase": CONFIRMATION_PHRASE,
+        "outcome": outcome,
         "targets": results,
         "totals": totals,
         "operatingBoundary": _operating_boundary(),
         "generatedAt": team_knowledge_service.utc_now_iso(),
         "elapsedMs": round((time.perf_counter() - started_at) * 1000, 1),
     }
-    _append_cleanup_audit(payload)
+    try:
+        _append_cleanup_audit(payload)
+        payload["audit"] = {"status": "written"}
+    except OSError as exc:
+        totals["auditFailureCount"] = 1
+        if outcome == "succeeded":
+            outcome = "partial"
+            payload["outcome"] = outcome
+        payload["audit"] = {
+            "status": "failed",
+            "message": f"{type(exc).__name__}: {str(exc)[:500]}",
+        }
     _clear_memory_caches()
-    _record_cleanup_event("memory.cleanup.executed", payload, outcome="succeeded")
+    _record_cleanup_event("memory.cleanup.executed", payload, outcome=outcome)
     return payload
+
+
+def _issue_preview_grant(
+    targets: list[CleanupTarget],
+    target_previews: list[dict[str, Any]],
+) -> tuple[str, str]:
+    snapshot_digest = _snapshot_digest(targets, target_previews)
+    now_monotonic = time.monotonic()
+    _prune_preview_grants(now_monotonic)
+    token = secrets.token_urlsafe(32)
+    while token in _PREVIEW_GRANTS:
+        token = secrets.token_urlsafe(32)
+    _PREVIEW_GRANTS[token] = CleanupPreviewGrant(
+        target_keys=tuple(sorted(target.key for target in targets)),
+        snapshot_digest=snapshot_digest,
+        expires_at_monotonic=now_monotonic + PREVIEW_TOKEN_TTL_SECONDS,
+    )
+    while len(_PREVIEW_GRANTS) > MAX_ACTIVE_PREVIEW_TOKENS:
+        _PREVIEW_GRANTS.pop(next(iter(_PREVIEW_GRANTS)))
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=PREVIEW_TOKEN_TTL_SECONDS)
+    return token, expires_at.isoformat().replace("+00:00", "Z")
+
+
+def _consume_preview_grant(preview_token: str, targets: list[CleanupTarget]) -> CleanupPreviewGrant:
+    token = str(preview_token or "").strip()
+    if not token:
+        raise MemoryCleanupError("A valid cleanup preview token is required.")
+    now_monotonic = time.monotonic()
+    grant = _PREVIEW_GRANTS.pop(token, None)
+    _prune_preview_grants(now_monotonic)
+    if grant is None or grant.expires_at_monotonic <= now_monotonic:
+        raise MemoryCleanupError("Cleanup preview token is invalid, expired, or already used.")
+    target_keys = tuple(sorted(target.key for target in targets))
+    if target_keys != grant.target_keys:
+        raise MemoryCleanupError("Cleanup preview targets do not match the requested targets.")
+    return grant
+
+
+def _prune_preview_grants(now_monotonic: float) -> None:
+    expired = [
+        token
+        for token, grant in _PREVIEW_GRANTS.items()
+        if grant.expires_at_monotonic <= now_monotonic
+    ]
+    for token in expired:
+        _PREVIEW_GRANTS.pop(token, None)
+
+
+def _snapshot_digest(targets: list[CleanupTarget], target_previews: list[dict[str, Any]]) -> str:
+    previews_by_key = {
+        str(preview.get("targetKey") or ""): preview
+        for preview in target_previews
+        if isinstance(preview, dict)
+    }
+    snapshot = []
+    for target in sorted(targets, key=lambda item: item.key):
+        target_state: dict[str, Any] = {
+            "targetKey": target.key,
+            "preview": previews_by_key.get(target.key) or {},
+            "paths": [_path_metadata_snapshot(path) for path in _paths_for_target(target)],
+        }
+        if target.target_type == "agent_memory_policy":
+            target_state["agent"] = agent_directory_service.get_agent(
+                target.agent_id,
+                include_archived=True,
+            ) or {}
+        if target.target_type in {"knowledge_base", "agent_formal_knowledge", "team_knowledge"}:
+            target_state["vectorRecords"] = sorted(
+                hashlib.sha256(_canonical_json(record)).hexdigest()
+                for record in rag_vector_index_service._load_all_index_records()
+                if _vector_record_matches(record, target)
+            )
+        snapshot.append(target_state)
+    return hashlib.sha256(_canonical_json(snapshot)).hexdigest()
+
+
+def _path_metadata_snapshot(cleanup_path: CleanupPath) -> dict[str, Any]:
+    resolved = _assert_allowed_cleanup_path(cleanup_path.path, action=cleanup_path.action)
+    base = {
+        "path": _relative_path(resolved),
+        "kind": cleanup_path.kind,
+        "action": cleanup_path.action,
+    }
+    if not resolved.exists():
+        return {**base, "exists": False, "entries": []}
+    try:
+        entries = [_stat_snapshot(resolved, relative_path=".")]
+        if resolved.is_dir():
+            entries.extend(
+                _stat_snapshot(child, relative_path=child.relative_to(resolved).as_posix())
+                for child in sorted(resolved.rglob("*"), key=lambda item: item.as_posix().lower())
+            )
+        return {**base, "exists": True, "entries": entries}
+    except OSError as exc:
+        return {**base, "exists": True, "error": type(exc).__name__}
+
+
+def _stat_snapshot(path: Path, *, relative_path: str) -> dict[str, Any]:
+    stat = path.lstat()
+    return {
+        "relativePath": relative_path,
+        "kind": "symlink" if path.is_symlink() else ("directory" if path.is_dir() else "file"),
+        "size": int(stat.st_size),
+        "mtimeNs": int(stat.st_mtime_ns),
+        "mode": int(stat.st_mode),
+    }
+
+
+def _canonical_json(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
 
 
 def _normalize_targets(targets: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> list[CleanupTarget]:
@@ -243,8 +402,8 @@ def _preview_target(target: CleanupTarget) -> dict[str, Any]:
     }
 
 
-def _execute_target(target: CleanupTarget) -> dict[str, Any]:
-    before = _preview_target(target)
+def _execute_target(target: CleanupTarget, *, before: dict[str, Any] | None = None) -> dict[str, Any]:
+    before = before or _preview_target(target)
     results: list[dict[str, Any]] = []
     if target.target_type == "global_runtime_memory":
         for cleanup_path in _paths_for_target(target):
@@ -263,12 +422,44 @@ def _execute_target(target: CleanupTarget) -> dict[str, Any]:
         if target.target_type in {"agent_formal_knowledge", "team_knowledge"}:
             results.extend(_delete_vector_records_for_target(target))
     counts = _counts_from_execution(before, results)
+    failed_count = sum(1 for result in results if result.get("status") == "failed")
+    if failed_count == len(results) and failed_count > 0:
+        target_status = "failed"
+    elif failed_count > 0:
+        target_status = "partial"
+    else:
+        target_status = "executed"
     return {
         **before,
-        "status": "executed",
+        "status": target_status,
         "paths": results,
         "counts": counts,
     }
+
+
+def _execute_target_safely(target: CleanupTarget, *, before: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _execute_target(target, before=before)
+    except Exception as exc:
+        preview_paths = [item for item in list(before.get("paths") or []) if isinstance(item, dict)]
+        first_path = preview_paths[0] if preview_paths else {}
+        failure = {
+            "path": str(first_path.get("path") or f"target:{target.key}"),
+            "kind": str(first_path.get("kind") or "target"),
+            "action": str(first_path.get("action") or "execute"),
+            "status": "failed",
+            "exists": bool(first_path.get("exists")),
+            "fileCount": 0,
+            "byteCount": 0,
+            "rowCount": 0,
+            "message": f"{type(exc).__name__}: {str(exc)[:500]}",
+        }
+        return {
+            **before,
+            "status": "failed",
+            "paths": [failure],
+            "counts": _counts_from_execution(before, [failure]),
+        }
 
 
 def _paths_for_target(target: CleanupTarget) -> list[CleanupPath]:
@@ -679,6 +870,10 @@ def _execution_result(
 def _sum_target_totals(targets: list[dict[str, Any]]) -> dict[str, int]:
     totals = {
         "targetCount": len(targets),
+        "executedTargetCount": 0,
+        "partialTargetCount": 0,
+        "failedTargetCount": 0,
+        "failedPathCount": 0,
         "pathCount": 0,
         "fileCount": 0,
         "byteCount": 0,
@@ -696,9 +891,38 @@ def _sum_target_totals(targets: list[dict[str, Any]]) -> dict[str, int]:
     for target in targets:
         counts = target.get("counts") if isinstance(target.get("counts"), dict) else {}
         for key in totals:
-            if key != "targetCount":
+            if key not in {
+                "targetCount",
+                "executedTargetCount",
+                "partialTargetCount",
+                "failedTargetCount",
+                "failedPathCount",
+            }:
                 totals[key] += int(counts.get(key) or 0)
+        status = str(target.get("status") or "")
+        if status == "executed":
+            totals["executedTargetCount"] += 1
+        elif status == "partial":
+            totals["partialTargetCount"] += 1
+        elif status == "failed":
+            totals["failedTargetCount"] += 1
+        totals["failedPathCount"] += sum(
+            1
+            for result in list(target.get("paths") or [])
+            if isinstance(result, dict) and result.get("status") == "failed"
+        )
     return totals
+
+
+def _execution_outcome(totals: dict[str, int]) -> str:
+    partial_count = int(totals.get("partialTargetCount") or 0)
+    failed_count = int(totals.get("failedTargetCount") or 0)
+    executed_count = int(totals.get("executedTargetCount") or 0)
+    if partial_count or (failed_count and executed_count):
+        return "partial"
+    if failed_count:
+        return "failed"
+    return "succeeded"
 
 
 def _warnings_for_target(target: CleanupTarget) -> list[str]:
