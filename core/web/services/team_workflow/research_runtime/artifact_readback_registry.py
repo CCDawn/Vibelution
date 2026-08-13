@@ -483,6 +483,7 @@ def load_scoped_artifact_payload(
         "evaluation_report",
         "hypothesis_set",
         "protocol_draft",
+        "protocol_review_report",
     }:
         from .workflow_artifact_store import load_workflow_artifact_payload
 
