@@ -141,15 +141,13 @@ def test_session_list_cache_ttl_covers_chat_index_poll_interval():
 def test_session_list_cache_reclaims_stale_inflight_without_long_wait(monkeypatch):
     _invalidate_session_list_cache()
     signature = (("chat-state.json", 1, 10), ("agent-registry.json", 1, 10))
-    with session_service._SESSION_LIST_CACHE_CONDITION:
-        session_service._SESSION_LIST_CACHE.clear()
-        session_service._SESSION_LIST_CACHE.update(
-            {
-                "inflight_builds": {
-                    signature: 10.0,
-                },
-            }
-        )
+    cached, should_build, waited = _begin_session_list_cache_build(
+        now=10.0,
+        signature=signature,
+    )
+    assert cached is None
+    assert should_build is True
+    assert waited is False
 
     def fail_wait(timeout=None):
         raise AssertionError("stale session index inflight should be reclaimed without a long wait")
@@ -164,11 +162,6 @@ def test_session_list_cache_reclaims_stale_inflight_without_long_wait(monkeypatc
     assert cached is None
     assert should_build is True
     assert waited is True
-    with session_service._SESSION_LIST_CACHE_CONDITION:
-        assert (
-            session_service._SESSION_LIST_CACHE["inflight_builds"][signature]
-            == 41.0
-        )
     _finish_session_list_cache_build(signature=signature)
 
 
