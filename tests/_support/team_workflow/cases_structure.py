@@ -229,6 +229,25 @@ def test_memory_steward_context_returns_approved_candidate_action_packet_without
     ]
     assert pending_marker not in json.dumps(context, ensure_ascii=False)
 
+    metadata_only_context = (
+        team_workflow_orchestration_service.get_source_collection_stage_task_context(
+            team["teamId"],
+            task_id="stagetask-memory-context-approved-action",
+            include_candidates=False,
+            candidate_limit=1,
+            context_mode="minimal",
+        )
+    )
+
+    assert metadata_only_context["candidates"] == []
+    assert metadata_only_context["candidatePage"]["total"] == 0
+    assert metadata_only_context["stewardActionPacket"]["approvedCandidateIds"] == [
+        approved["candidateId"]
+    ]
+    assert metadata_only_context["stewardActionPacket"]["deferredCandidateCounts"][
+        "pending"
+    ] == 14
+
 def test_source_collection_stage_session_task_writeback_records_structured_result(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
