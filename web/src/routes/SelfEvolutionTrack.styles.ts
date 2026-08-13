@@ -9,32 +9,23 @@ const rowSurfaceSoft = "rounded-[var(--radius-control)] border border-vui-border
 const controlSurface = "border border-vui-border-subtle bg-vui-control-muted hover:bg-vui-control-muted-hover";
 
 export const selfEvolutionTrackStyles = {
-  pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] bg-vui-surface-panel max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
-  trackShell: `grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] items-stretch content-start overflow-hidden overflow-x-hidden ${vuiFlatPanelClass} p-3 max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden max-[760px]:p-2`,
+  pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] bg-vui-surface-panel",
+  trackShell: `grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden ${vuiFlatPanelClass}`,
   trackBody:
-    "flex min-h-0 min-w-0 max-w-full flex-col gap-2 overflow-hidden overflow-x-hidden pt-2 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+    "flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden overflow-x-hidden",
   trackBodyContent:
-    "min-h-0 min-w-0 max-w-full flex-1 overflow-hidden overflow-x-hidden max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
-  // Header row must stay content-height (auto track) — never stretch into a tall empty band.
-  pageTabsRow:
-    "grid min-w-0 w-full shrink-0 self-start grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-vui-border-subtle pb-2 max-[1180px]:grid-cols-1 max-[1180px]:items-start",
-  runActionBar:
-    "grid min-h-[42px] max-h-none min-w-0 self-start grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 px-1 py-0 max-[900px]:grid-cols-1",
-  runActionMain: "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 self-center",
-  runActionText: "grid min-w-0 content-start gap-1 [&_strong]:overflow-wrap-anywhere [&_strong]:text-[1rem] [&_strong]:leading-tight [&_strong]:text-[var(--fg-primary)] [&>span]:line-clamp-2 [&>span]:[font-size:var(--vui-font-sm)] [&>span]:leading-normal [&>span]:text-[var(--fg-secondary)]",
-  runActionMeta: "flex min-w-0 flex-wrap items-center gap-1.5",
-  runActionCluster: "flex flex-wrap items-center justify-end gap-2 self-center max-[900px]:justify-start",
+    "min-h-0 min-w-0 max-w-full flex-1 overflow-hidden overflow-x-hidden",
   primaryAction:
     "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] px-3 [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-primary disabled:cursor-default disabled:opacity-50",
   dangerAction:
     "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_9%,var(--vui-control-muted))] px-3 [font-size:var(--vui-font-sm)] font-semibold text-[var(--state-error)] disabled:cursor-default disabled:opacity-50",
   workspaceLayout:
-    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[var(--self-sidebar-width,360px)_10px_minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
-  sideColumn: "grid min-w-0 gap-3",
-  sideColumnScrollable: "h-full overflow-y-auto pr-1.5 max-[1180px]:h-auto max-[1180px]:overflow-visible",
+    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[var(--self-sidebar-width,340px)_10px_minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden",
+  sideColumn: "grid min-w-0 content-start bg-vui-surface-rail",
+  sideColumnScrollable: "h-full overflow-y-auto",
   paneCollapsed: "overflow-hidden p-0 invisible",
-  centerColumn: "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
-  conversationShell: `grid h-full max-h-full min-h-[420px] min-w-0 max-w-full overflow-hidden overflow-x-hidden ${vuiFlatPanelClass} max-[1180px]:h-[min(74vh,760px)] max-[1180px]:overflow-hidden max-[1180px]:overflow-x-hidden max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]`,
+  centerColumn: "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden bg-vui-surface-panel",
+  conversationShell: `grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-none border-0 bg-vui-surface-panel`,
   observationEvidenceRail:
     `grid h-full max-h-full min-h-0 content-start gap-3 overflow-auto p-3.5 max-[1180px]:h-auto max-[1180px]:max-h-none ${panelSurface}`,
   observationConfigForm: "grid gap-2.5",
@@ -42,39 +33,42 @@ export const selfEvolutionTrackStyles = {
   observationEventTimeline: `grid gap-2 p-2.5 ${rowSurfaceSoft}`,
   observationEventItem:
     `grid gap-1.5 px-2.5 py-2 ${rowSurfaceSoft} [&_strong]:overflow-wrap-anywhere [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
-  agentCardList: "grid gap-2",
-  agentCard:
-    `grid min-w-0 gap-2 p-2.5 ${rowSurfaceSoft}`,
-  agentCardActive:
-    "border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))]",
-  agentCardMain:
-    "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 text-inherit no-underline",
-  agentCardText:
-    "grid min-w-0 gap-0.5 [&_strong]:truncate [&_strong]:text-[0.94rem] [&_strong]:text-[var(--fg-primary)] [&_small]:truncate [&_small]:font-mono [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-tertiary)]",
-  agentRoleBadge:
-    "inline-flex w-fit min-w-0 max-w-full items-center truncate [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
-  agentCardActions: "flex flex-wrap items-center justify-end gap-1.5",
-  agentCardAction:
-    `inline-flex min-h-7 w-fit items-center justify-center gap-1.5 rounded-md px-2 [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-secondary no-underline hover:text-vui-fg-primary ${controlSurface}`,
-  workflowHeader: "flex min-w-0 flex-wrap items-center gap-2.5",
-  workflowCardGrid: "inline-flex w-fit min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted p-1",
+  railHeader: "grid gap-2 border-b border-vui-border-subtle px-3.5 py-3",
+  railTitleRow: "flex min-w-0 items-center justify-between gap-2",
+  railIdentity: "flex min-w-0 items-center gap-1.5",
+  railTitle: "m-0 min-w-0 truncate text-[1.05rem] font-bold text-vui-fg-primary",
+  railHeaderActions: "flex shrink-0 items-center gap-1.5",
+  statusTooltipTrigger: "inline-flex rounded-full focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]",
+  tooltipBlock: "grid max-w-[360px] gap-1 [&_strong]:font-semibold [&_span]:text-vui-fg-secondary",
+  railSection: "grid gap-2.5 border-b border-vui-border-subtle px-3.5 py-3 last:border-b-0",
+  railSectionHeader: "flex min-w-0 items-center gap-1.5",
+  railSectionTitle: "inline-flex min-w-0 flex-1 items-center gap-1.5 [font-size:var(--vui-font-xs)] font-semibold uppercase tracking-[0.06em] text-vui-fg-secondary",
+  railFactGrid: "grid grid-cols-2 gap-1.5",
+  railFact: `grid min-w-0 gap-0.5 px-2.5 py-2 ${rowSurfaceSoft} focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)] [&>span]:[font-size:var(--vui-font-xs)] [&>span]:text-vui-fg-tertiary [&>strong]:truncate [&>strong]:text-[0.9rem] [&>strong]:text-vui-fg-primary`,
+  railFieldLabel: "inline-flex items-center gap-1.5",
+  railGoalInput: "min-h-[76px] resize-y bg-vui-surface-panel [font-size:var(--vui-font-xs)]",
+  railActionRow: "flex min-w-0 items-center gap-2",
+  railPrimaryAction: "min-w-0 flex-1",
+  railFeedbackStack: "flex min-w-0 items-start gap-1.5 [&_p]:min-w-0 [&_p]:flex-1",
+  railAgentSection: "grid gap-2 border-b border-vui-border-subtle px-3.5 py-3 last:border-b-0",
+  railAgentCount: "font-mono [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",
+  railAgentActions: "flex min-h-8 min-w-0 flex-wrap items-center gap-1.5",
+  railAgentGroup: "inline-flex items-center gap-1",
+  railAgentButton: "h-8 w-8 min-w-8 p-0",
+  railAgentButtonActive: "border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] text-vui-fg-primary",
+  railEmptyValue: "font-mono text-vui-fg-tertiary",
+  workflowHeader: "flex min-w-0 items-center gap-1.5 border-b border-vui-border-subtle px-3 py-2",
+  workflowCardGrid: "inline-flex w-fit min-w-0 max-w-full items-center gap-1 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted p-1",
   workflowCard:
-    "inline-flex min-h-8 w-fit cursor-pointer items-center justify-center gap-2 rounded-md border border-transparent bg-transparent px-2.5 py-1 [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-secondary [&_span]:text-inherit [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:font-semibold [&_strong]:text-vui-fg-tertiary",
+    "h-8 w-8 min-w-8 cursor-pointer rounded-md border border-transparent bg-transparent p-0 text-vui-fg-secondary",
   workflowCardActive:
     "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] text-vui-fg-primary [&_strong]:text-[var(--accent-cool)]",
-  workflowStepSummary:
-    "m-0 min-w-0 max-w-[min(100%,760px)] overflow-wrap-anywhere [font-size:var(--vui-font-xs)] leading-normal text-vui-fg-secondary",
   approvalPanel: `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
-  statusPage: "grid h-full min-h-0 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible",
+  statusDetailScroll: "grid h-full min-h-0 content-start gap-3 overflow-y-auto p-3",
+  statusPage: "grid min-h-0",
   panelStack: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden",
   // Wave 6A: PaneCollapseHandle owns the visual rule; breakpoint hide only.
-  sidebarResizer: "max-[1180px]:hidden",
-  pageTabs: "inline-grid w-fit max-w-full min-w-0 gap-0 self-center max-[1180px]:self-start",
-  pageTabsList:
-    "inline-flex min-w-0 max-w-full items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
-  pageTabsTrigger:
-    "min-h-8 rounded-md border-0 bg-transparent px-3 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)] " +
-    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] data-[state=active]:text-[var(--accent-warm-2)]",
+  sidebarResizer: "",
   modeTabs: "inline-grid w-fit max-w-full min-w-0 gap-0",
   modeTabsList:
     "inline-flex w-fit max-w-full flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
@@ -95,13 +89,6 @@ export const selfEvolutionTrackStyles = {
   skeletonLineWide: "block h-2 w-[min(100%,620px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   skeletonLine: "block h-2 w-[min(72%,460px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   skeletonLineShort: "block h-2 w-[min(42%,260px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
-  petCompanionSurface:
-    "grid gap-2.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_94%,var(--vui-surface-base))] p-3.5",
-  petCompanionTone_idle: "",
-  petCompanionTone_active: "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))]",
-  petCompanionTone_paused: "border-[color-mix(in_srgb,var(--accent-warm)_24%,var(--border-soft))]",
-  petCompanionTone_caution: "border-[color-mix(in_srgb,var(--state-warning)_28%,var(--border-soft))]",
-  petCompanionTone_error: "border-[color-mix(in_srgb,var(--state-warning)_28%,var(--border-soft))]",
   sectionHeader: "flex items-start justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   itemTop: "flex items-center justify-between gap-3 max-[760px]:flex-col max-[760px]:items-stretch",
   detailRow:
