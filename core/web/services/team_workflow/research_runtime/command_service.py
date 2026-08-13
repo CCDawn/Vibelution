@@ -50,6 +50,12 @@ from core.web.services.team_workflow.research_runtime.readiness.common import (
 )
 
 from .ids import new_id
+from .human_acceptance_artifact import (
+    KnowledgeAcceptanceArtifactError,
+    PreparedHumanAcceptanceArtifact,
+    persist_prepared_human_acceptance_artifact,
+    prepare_command_human_acceptance_artifact,
+)
 
 
 class WorkflowCommandError(RuntimeError):
@@ -176,10 +182,39 @@ class WorkflowCommandService:
             if not readiness.ready:
                 raise NodeNotReadyError(readiness, run.run_version)
 
-        future = self._store.submit(
-            lambda uow: handler(uow, request, request_hash),
-            force_flush=True,
-        )
+        try:
+            prepared_artifact = prepare_command_human_acceptance_artifact(
+                store=self._store,
+                run=run,
+                request=request,
+            )
+        except KnowledgeAcceptanceArtifactError as exc:
+            raise WorkflowCommandError(str(exc)) from exc
+        if request.command is WorkflowCommandKind.RESOLVE_HUMAN_TASK:
+            future = self._store.submit(
+                lambda uow: self._handle_resolve_human_task(
+                    uow,
+                    request,
+                    request_hash,
+                    prepared_artifact,
+                ),
+                force_flush=True,
+            )
+        elif request.command is WorkflowCommandKind.RETRY_NODE:
+            future = self._store.submit(
+                lambda uow: self._handle_retry_node(
+                    uow,
+                    request,
+                    request_hash,
+                    prepared_artifact,
+                ),
+                force_flush=True,
+            )
+        else:
+            future = self._store.submit(
+                lambda uow: handler(uow, request, request_hash),
+                force_flush=True,
+            )
         return future.result(timeout=30)
 
     def _authorize_operator(self, request: CommandRequest) -> None:
@@ -333,7 +368,13 @@ class WorkflowCommandService:
         uow.after_commit(self._wake_worker)
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
-    def _handle_retry_node(self, uow, request: CommandRequest, request_hash: str) -> CommandReceipt:
+    def _handle_retry_node(
+        self,
+        uow,
+        request: CommandRequest,
+        request_hash: str,
+        prepared_artifact: PreparedHumanAcceptanceArtifact | None = None,
+    ) -> CommandReceipt:
         node_id = request.node_id
         latest = uow.repository.latest_attempt(request.run_id, node_id)
         if latest is None:
@@ -344,6 +385,15 @@ class WorkflowCommandService:
             NodeAttemptStatus.CANCELLED.value,
         ):
             raise CommandNotAllowedError(f"attempt {latest.status} 不可重试")
+        run = uow.repository.get_run(request.run_id)
+        if run is None:
+            raise RunNotFoundError(request.run_id)
+        persist_prepared_human_acceptance_artifact(
+            uow,
+            run=run,
+            prepared=prepared_artifact,
+            now_ms=self._clock(),
+        )
         receipt = self._handle_start_node(uow, request, request_hash)
         uow.repository.update_attempt_status(
             latest.node_run_id,
@@ -435,7 +485,11 @@ class WorkflowCommandService:
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
     def _handle_resolve_human_task(
-        self, uow, request: CommandRequest, request_hash: str
+        self,
+        uow,
+        request: CommandRequest,
+        request_hash: str,
+        prepared_artifact: PreparedHumanAcceptanceArtifact | None = None,
     ) -> CommandReceipt:
         task_id = str(request.payload.get("taskId") or "")
         decision = str(request.payload.get("decision") or "")
@@ -503,11 +557,20 @@ class WorkflowCommandService:
         elif pending_action_id:
             from core.research.workflow.contracts import ExecutionReceipt
 
+            run = uow.repository.get_run(request.run_id)
+            if run is None:
+                raise RunNotFoundError(request.run_id)
+            artifact_receipt_ids = persist_prepared_human_acceptance_artifact(
+                uow,
+                run=run,
+                prepared=prepared_artifact,
+                now_ms=now_ms,
+            )
             receipt = ExecutionReceipt(
                 action_id=pending_action_id,
                 node_run_id=str(row[2]),
                 outcome="succeeded" if decision == "accept" else "failed",
-                artifact_receipt_ids=(),
+                artifact_receipt_ids=artifact_receipt_ids,
                 execution_anchor_id=None,
                 budget_receipt_id=None,
                 problem=None,

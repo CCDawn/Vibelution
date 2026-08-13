@@ -59,6 +59,81 @@ def load_knowledge_package_draft_payload(
     return None
 
 
+def load_knowledge_package_payload(
+    *,
+    team_id: str,
+    authority_run_id: str,
+    workflow_run_id: str = "",
+    content_hash: str = "",
+) -> dict[str, Any] | None:
+    """Read an accepted package from approved Team Knowledge items.
+
+    The candidate record locates the authoritative approval. The artifact
+    payload contains only stable KnowledgeItem content and approval identities,
+    so later metadata edits cannot silently change an issued receipt.
+    """
+    from core.web.services import team_knowledge_service, team_service
+    from core.web.services.team_workflow.source_collection.candidates import (
+        list_candidate_store,
+    )
+
+    try:
+        response = list_candidate_store(team_id, limit=500)
+    except team_service.TeamNotFoundError:
+        return None
+    candidates = [
+        candidate
+        for candidate in list(response.get("candidates") or [])
+        if isinstance(candidate, dict)
+        and _is_materialized_scoped_draft(
+            candidate,
+            team_id=team_id,
+            authority_run_id=authority_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+        and _official_package_identity(candidate) is not None
+    ]
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: (
+            str(candidate.get("updatedAt") or ""),
+            str(candidate.get("createdAt") or ""),
+            str(candidate.get("candidateId") or ""),
+        ),
+        reverse=True,
+    )
+    for candidate in ordered:
+        identity = _official_package_identity(candidate)
+        if identity is None:
+            continue
+        base_id, item_ids, reviewer_id = identity
+        try:
+            response = team_knowledge_service.list_knowledge_items(
+                base_id,
+                agent_id=reviewer_id,
+            )
+        except team_knowledge_service.TeamKnowledgeError:
+            continue
+        item_by_id = {
+            str(item.get("knowledgeItemId") or ""): item
+            for item in list(response.get("items") or [])
+            if isinstance(item, dict)
+        }
+        if any(item_id not in item_by_id for item_id in item_ids):
+            continue
+        payload = _accepted_package_payload(
+            candidate,
+            team_id=team_id,
+            authority_run_id=authority_run_id,
+            knowledge_base_id=base_id,
+            item_ids=item_ids,
+            item_by_id=item_by_id,
+        )
+        if not content_hash or canonical_sha256(payload) == content_hash:
+            return payload
+    return None
+
+
 def _is_materialized_scoped_draft(
     candidate: dict[str, Any],
     *,
@@ -115,4 +190,90 @@ def _draft_payload(
                 or output.get("approvalRequired") is True
             )
         ),
+    }
+
+
+def _official_package_identity(
+    candidate: dict[str, Any],
+) -> tuple[str, tuple[str, ...], str] | None:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    ingestion = (
+        metadata.get("knowledgeIngestion")
+        if isinstance(metadata.get("knowledgeIngestion"), dict)
+        else {}
+    )
+    if str(ingestion.get("status") or "") != "official_synced":
+        return None
+    base_id = str(ingestion.get("knowledgeBaseId") or "").strip()
+    item_ids = tuple(
+        sorted(
+            {
+                str(item).strip()
+                for item in list(ingestion.get("knowledgeItemIds") or [])
+                if str(item).strip()
+            }
+        )
+    )
+    reviewer_id = str(ingestion.get("reviewedByAgentId") or "").strip()
+    if not base_id or not item_ids or not reviewer_id:
+        return None
+    return base_id, item_ids, reviewer_id
+
+
+def _accepted_package_payload(
+    candidate: dict[str, Any],
+    *,
+    team_id: str,
+    authority_run_id: str,
+    knowledge_base_id: str,
+    item_ids: tuple[str, ...],
+    item_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    metadata = candidate["metadata"]
+    ingestion = metadata["knowledgeIngestion"]
+    knowledge_items = []
+    for item_id in item_ids:
+        item = item_by_id[item_id]
+        stable_content = {
+            "knowledgeItemId": item_id,
+            "knowledgeBaseId": str(item.get("knowledgeBaseId") or ""),
+            "title": str(item.get("title") or ""),
+            "summary": str(item.get("summary") or ""),
+            "content": str(item.get("content") or ""),
+            "sourceArtifactIds": sorted(
+                str(value)
+                for value in list(item.get("sourceArtifactIds") or [])
+                if str(value)
+            ),
+            "createdAt": str(item.get("createdAt") or ""),
+        }
+        knowledge_items.append(
+            {
+                "knowledgeItemId": item_id,
+                "contentHash": canonical_sha256(stable_content),
+            }
+        )
+    return {
+        "teamId": team_id,
+        "sourceCollectionRunId": authority_run_id,
+        "candidateId": str(candidate.get("candidateId") or ""),
+        "knowledgeBaseId": knowledge_base_id,
+        "knowledgeItems": knowledge_items,
+        "sourceArtifactIds": sorted(
+            {
+                str(value)
+                for value in [
+                    *list(ingestion.get("sourceArtifactIds") or []),
+                    ingestion.get("sourceArtifactId"),
+                ]
+                if str(value or "").strip()
+            }
+        ),
+        "approval": {
+            "proposalId": str(ingestion.get("proposalId") or ""),
+            "batchId": str(ingestion.get("batchId") or ""),
+            "reviewedAt": str(ingestion.get("reviewedAt") or ""),
+            "reviewedByAgentId": str(ingestion.get("reviewedByAgentId") or ""),
+        },
+        "accepted": True,
     }
