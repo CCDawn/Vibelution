@@ -1282,10 +1282,16 @@ def _record_lifecycle_terminal_event(intent: dict[str, Any], *, status: str, res
     )
 
 
-def claim_desktop_action(desktop_session_id: str, *, lease_seconds: int = 30) -> dict[str, Any]:
+def claim_desktop_action(
+    desktop_session_id: str,
+    *,
+    lease_seconds: int = 30,
+    wait_ms: int = 0,
+) -> dict[str, Any]:
     return lifecycle_intent_store.claim_desktop_action(
         desktop_session_id=desktop_session_id,
         lease_seconds=lease_seconds,
+        wait_ms=wait_ms,
     )
 
 
