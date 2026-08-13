@@ -1204,6 +1204,11 @@ def _append_queue_event(event_type: str, payload: dict[str, Any]) -> None:
         ensure_dirs=ensure_runtime_manager_dirs,
         suppress_io_errors=True,
     )
+    # The raw JSONL append is the durable audit record.  The first subsequent
+    # lifecycle event backfills it into the active Runtime Scene, so avoiding
+    # the synchronous projection here shortens API command acceptance.
+    if event_type == "command_queue.command_queued":
+        return
     record_runtime_manager_scene_event(event_type, payload, phase="queue", occurred_at=event_at)
 
 
