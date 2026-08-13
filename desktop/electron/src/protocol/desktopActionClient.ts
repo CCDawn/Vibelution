@@ -94,9 +94,11 @@ export async function claimDesktopAction(input: {
   controlToken: string;
   desktopSessionId: string;
   leaseSeconds: number;
+  waitMs?: number;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }): Promise<DesktopAction | null> {
+  const waitMs = Math.max(0, Math.round(input.waitMs ?? 0));
   const response = await boundedDesktopControlFetch({
     fetchImpl: input.fetchImpl,
     resource: launcherDesktopActionEndpoints(input.launcherOrigin).claim,
@@ -108,7 +110,11 @@ export async function claimDesktopAction(input: {
         "content-type": "application/json",
         "X-Vibelution-Control-Token": input.controlToken
       },
-      body: JSON.stringify({ desktopSessionId: input.desktopSessionId, leaseSeconds: input.leaseSeconds })
+      body: JSON.stringify({
+        desktopSessionId: input.desktopSessionId,
+        leaseSeconds: input.leaseSeconds,
+        ...(waitMs > 0 ? { waitMs } : {})
+      })
     }
   });
   if (!response.ok) {
@@ -156,6 +162,7 @@ export async function runDesktopActionOnce(input: {
   controlToken: string;
   desktopSessionId: string;
   leaseSeconds: number;
+  waitMs?: number;
   operations: DesktopWindowOperations;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
