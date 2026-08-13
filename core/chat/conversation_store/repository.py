@@ -15,6 +15,15 @@ if TYPE_CHECKING:
     from .database import ConversationDatabase
     from .writer import ConversationWriter
 
+LAST_PREVIEW_MAX_CHARS = 240
+_DIRECTORY_SESSION_COLUMNS = (
+    "session_id, agent_id, parent_session_id, agent_config_revision_id, "
+    "title, status, recency_at_ms, updated_at_ms, created_at_ms, archived_at_ms, "
+    "session_kind, session_role, conversation_index_kind, "
+    "conversation_index_visibility, hidden_from_index, team_id, "
+    "last_preview, last_preview_at_ms"
+)
+
 
 class AgentConfigRevisionConflictError(RuntimeError):
     """A config update targeted a revision that is no longer current."""
@@ -286,15 +295,27 @@ class SessionDao:
         agent_config_revision_id: str,
         title: str,
         parent_session_id: str | None = None,
+        status: str = "ready",
+        session_kind: str = "main",
+        session_role: str = "",
+        conversation_index_kind: str = "",
+        conversation_index_visibility: str = "",
+        hidden_from_index: bool = False,
+        team_id: str = "",
+        last_preview: str = "",
     ) -> dict[str, Any]:
         now_ms = _now_ms()
+        preview = _bounded_preview(last_preview)
         self._connection.execute(
             """
             INSERT INTO sessions(
               session_id, agent_id, parent_session_id,
               agent_config_revision_id, title, status,
-              recency_at_ms, updated_at_ms, created_at_ms
-            ) VALUES (?, ?, ?, ?, ?, 'ready', ?, ?, ?)
+              recency_at_ms, updated_at_ms, created_at_ms,
+              session_kind, session_role, conversation_index_kind,
+              conversation_index_visibility, hidden_from_index, team_id,
+              last_preview, last_preview_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -302,37 +323,161 @@ class SessionDao:
                 parent_session_id or None,
                 agent_config_revision_id,
                 title,
+                str(status or "ready").strip() or "ready",
                 now_ms,
                 now_ms,
                 now_ms,
+                str(session_kind or "main").strip() or "main",
+                str(session_role or "").strip(),
+                str(conversation_index_kind or "").strip(),
+                str(conversation_index_visibility or "").strip(),
+                1 if hidden_from_index else 0,
+                str(team_id or "").strip(),
+                preview,
+                now_ms if preview else None,
             ),
         )
         return {"sessionId": session_id, "agentId": agent_id}
 
     def get(self, session_id: str) -> dict[str, Any] | None:
         row = self._connection.execute(
-            """
-            SELECT session_id, agent_id, parent_session_id,
-                   agent_config_revision_id, title, status,
-                   recency_at_ms, updated_at_ms, created_at_ms, archived_at_ms
+            f"""
+            SELECT {_DIRECTORY_SESSION_COLUMNS}
             FROM sessions
             WHERE session_id=? AND archived_at_ms IS NULL
             """,
             (session_id,),
         ).fetchone()
-        if row is None:
+        return None if row is None else _session_row(row)
+
+    def upsert_directory_session(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        agent_config_revision_id: str,
+        title: str,
+        parent_session_id: str | None = None,
+        status: str = "ready",
+        session_kind: str = "main",
+        session_role: str = "",
+        conversation_index_kind: str = "",
+        conversation_index_visibility: str = "",
+        hidden_from_index: bool = False,
+        team_id: str = "",
+        last_preview: str = "",
+        touch_recency: bool = True,
+    ) -> dict[str, Any]:
+        existing = self._connection.execute(
+            f"SELECT {_DIRECTORY_SESSION_COLUMNS} FROM sessions WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        if existing is None:
+            self.create(
+                session_id=session_id,
+                agent_id=agent_id,
+                agent_config_revision_id=agent_config_revision_id,
+                title=title,
+                parent_session_id=parent_session_id,
+                status=status,
+                session_kind=session_kind,
+                session_role=session_role,
+                conversation_index_kind=conversation_index_kind,
+                conversation_index_visibility=conversation_index_visibility,
+                hidden_from_index=hidden_from_index,
+                team_id=team_id,
+                last_preview=last_preview,
+            )
+            return {"sessionId": session_id, "agentId": agent_id, "action": "created"}
+        if str(existing["agent_id"]) != str(agent_id).strip():
+            raise ValueError("Session directory record belongs to a different Agent.")
+        now_ms = _now_ms()
+        preview = _bounded_preview(last_preview)
+        recency_at_ms = now_ms if touch_recency else int(existing["recency_at_ms"])
+        preview_at = now_ms if preview else existing["last_preview_at_ms"]
+        self._connection.execute(
+            """
+            UPDATE sessions
+            SET title=?, status=?, parent_session_id=?,
+                session_kind=?, session_role=?, conversation_index_kind=?,
+                conversation_index_visibility=?, hidden_from_index=?, team_id=?,
+                last_preview=?, last_preview_at_ms=?, recency_at_ms=?,
+                updated_at_ms=?, archived_at_ms=NULL
+            WHERE session_id=?
+            """,
+            (
+                title,
+                str(status or existing["status"]).strip() or str(existing["status"]),
+                parent_session_id or None,
+                str(session_kind or "main").strip() or "main",
+                str(session_role or "").strip(),
+                str(conversation_index_kind or "").strip(),
+                str(conversation_index_visibility or "").strip(),
+                1 if hidden_from_index else 0,
+                str(team_id or "").strip(),
+                preview if preview else str(existing["last_preview"] or ""),
+                preview_at,
+                recency_at_ms,
+                now_ms,
+                session_id,
+            ),
+        )
+        return {"sessionId": session_id, "agentId": agent_id, "action": "updated"}
+
+    def touch_directory_session(
+        self,
+        *,
+        session_id: str,
+        status: str = "",
+        last_preview: str | None = None,
+        title: str | None = None,
+        touch_recency: bool = True,
+    ) -> dict[str, Any] | None:
+        existing = self.get(session_id)
+        if existing is None:
             return None
-        return {
-            "sessionId": str(row["session_id"]),
-            "agentId": str(row["agent_id"]),
-            "parentSessionId": str(row["parent_session_id"] or ""),
-            "agentConfigRevisionId": str(row["agent_config_revision_id"]),
-            "title": str(row["title"]),
-            "status": str(row["status"]),
-            "recencyAtMs": int(row["recency_at_ms"]),
-            "updatedAtMs": int(row["updated_at_ms"]),
-            "createdAtMs": int(row["created_at_ms"]),
-        }
+        now_ms = _now_ms()
+        preview = (
+            existing["lastPreview"]
+            if last_preview is None
+            else _bounded_preview(last_preview)
+        )
+        self._connection.execute(
+            """
+            UPDATE sessions
+            SET status=?, title=?, last_preview=?, last_preview_at_ms=?,
+                recency_at_ms=?, updated_at_ms=?
+            WHERE session_id=?
+            """,
+            (
+                str(status or existing["status"]).strip() or existing["status"],
+                existing["title"] if title is None else str(title),
+                preview,
+                now_ms if last_preview is not None else existing.get("lastPreviewAtMs"),
+                now_ms if touch_recency else existing["recencyAtMs"],
+                now_ms,
+                session_id,
+            ),
+        )
+        return {"sessionId": session_id, "action": "touched"}
+
+    def archive(self, session_id: str) -> dict[str, Any] | None:
+        existing = self.get(session_id)
+        if existing is None:
+            return None
+        now_ms = _now_ms()
+        self._connection.execute(
+            """
+            UPDATE sessions
+            SET archived_at_ms=?, updated_at_ms=?
+            WHERE session_id=? AND archived_at_ms IS NULL
+            """,
+            (now_ms, now_ms, session_id),
+        )
+        return {"sessionId": session_id, "action": "archived", "archivedAtMs": now_ms}
+
+    def mark_legacy_sessions_discarded(self) -> int:
+        return _mark_legacy_sessions_discarded(self._connection)
 
     def list_for_agent(
         self,
@@ -341,42 +486,96 @@ class SessionDao:
         limit: int = 50,
         before: tuple[int, str] | None = None,
     ) -> list[dict[str, Any]]:
+        page = self.list_directory_page(agent_id=agent_id, limit=limit, before=before)
+        return list(page["rows"])
+
+    def list_directory_page(
+        self,
+        *,
+        agent_id: str = "",
+        session_kind: str = "",
+        status: str = "",
+        query: str = "",
+        include_hidden: bool = False,
+        matching_agent_ids: Sequence[str] = (),
+        limit: int = 50,
+        before: tuple[int, str] | None = None,
+    ) -> dict[str, Any]:
         bounded_limit = min(200, max(1, int(limit)))
-        parameters: list[Any] = [agent_id]
-        cursor_clause = ""
+        where = ["archived_at_ms IS NULL"]
+        parameters: list[Any] = []
+        if not include_hidden:
+            where.append("hidden_from_index=0")
+        normalized_agent_id = str(agent_id or "").strip()
+        if normalized_agent_id:
+            where.append("agent_id=?")
+            parameters.append(normalized_agent_id)
+        normalized_kind = str(session_kind or "").strip().lower()
+        if normalized_kind:
+            where.append("LOWER(session_kind)=?")
+            parameters.append(normalized_kind)
+        normalized_status = str(status or "").strip().lower()
+        if normalized_status:
+            where.append("LOWER(status)=?")
+            parameters.append(normalized_status)
+        normalized_query = str(query or "").strip().lower()
+        query_clauses: list[str] = []
+        if normalized_query:
+            like = _like_contains(normalized_query)
+            query_clauses.append(
+                "(LOWER(title) LIKE ? ESCAPE '\\' "
+                "OR LOWER(last_preview) LIKE ? ESCAPE '\\' "
+                "OR LOWER(session_id) LIKE ? ESCAPE '\\')"
+            )
+            parameters.extend((like, like, like))
+        agent_ids = [
+            str(item).strip()
+            for item in matching_agent_ids
+            if str(item).strip()
+        ]
+        if agent_ids:
+            placeholders = ",".join("?" for _ in agent_ids)
+            query_clauses.append(f"agent_id IN ({placeholders})")
+            parameters.extend(agent_ids)
+        if query_clauses:
+            where.append("(" + " OR ".join(query_clauses) + ")")
+        filter_sql = " AND ".join(where)
+        filter_parameters = list(parameters)
         if before is not None:
-            cursor_clause = (
-                "AND (recency_at_ms < ? OR "
-                "(recency_at_ms = ? AND session_id < ?))"
+            where.append(
+                "(recency_at_ms < ? OR (recency_at_ms = ? AND session_id < ?))"
             )
             parameters.extend((int(before[0]), int(before[0]), str(before[1])))
-        parameters.append(bounded_limit)
+        where_sql = " AND ".join(where)
+        total = int(
+            self._connection.execute(
+                f"SELECT COUNT(*) FROM sessions WHERE {filter_sql}",
+                filter_parameters,
+            ).fetchone()[0]
+        )
+        page_parameters = [*parameters, bounded_limit]
         rows = self._connection.execute(
             f"""
-            SELECT session_id, agent_id, parent_session_id,
-                   agent_config_revision_id, title, status,
-                   recency_at_ms, updated_at_ms, created_at_ms, archived_at_ms
+            SELECT {_DIRECTORY_SESSION_COLUMNS}
             FROM sessions
-            WHERE agent_id=? AND archived_at_ms IS NULL {cursor_clause}
+            WHERE {where_sql}
             ORDER BY recency_at_ms DESC, session_id DESC
             LIMIT ?
             """,
-            parameters,
+            page_parameters,
         ).fetchall()
-        return [
-            {
-                "sessionId": str(row["session_id"]),
-                "agentId": str(row["agent_id"]),
-                "parentSessionId": str(row["parent_session_id"] or ""),
-                "agentConfigRevisionId": str(row["agent_config_revision_id"]),
-                "title": str(row["title"]),
-                "status": str(row["status"]),
-                "recencyAtMs": int(row["recency_at_ms"]),
-                "updatedAtMs": int(row["updated_at_ms"]),
-                "createdAtMs": int(row["created_at_ms"]),
-            }
-            for row in rows
-        ]
+        mapped = [_session_row(row) for row in rows]
+        child_ids = _child_session_ids(
+            self._connection,
+            [item["sessionId"] for item in mapped],
+        )
+        for item in mapped:
+            item["childSessionIds"] = child_ids.get(item["sessionId"], [])
+        next_cursor = ""
+        if mapped and len(mapped) == bounded_limit:
+            last = mapped[-1]
+            next_cursor = f"{last['recencyAtMs']}:{last['sessionId']}"
+        return {"rows": mapped, "nextCursor": next_cursor, "total": total}
 
 
 class SessionEdgeDao:
@@ -807,6 +1006,49 @@ class ConversationRepository:
                 before=before,
             )
 
+    def list_directory_page(self, **values: Any) -> dict[str, Any]:
+        with self._database.reader() as connection:
+            return SessionDao(connection).list_directory_page(**values)
+
+    def upsert_directory_session(self, **values: Any) -> Future[dict[str, Any]]:
+        frozen_values = dict(values)
+
+        def upsert_with_parent_edge(unit_of_work: ConversationUnitOfWork) -> dict[str, Any]:
+            result = unit_of_work.sessions.upsert_directory_session(**frozen_values)
+            parent_session_id = str(frozen_values.get("parent_session_id") or "").strip()
+            if result.get("action") == "created" and parent_session_id:
+                unit_of_work.session_edges.link(
+                    source_session_id=parent_session_id,
+                    target_session_id=str(result["sessionId"]),
+                    relation_kind="parent",
+                )
+            return result
+
+        return self._writer.submit(upsert_with_parent_edge, force_flush=True)
+
+    def touch_directory_session(self, **values: Any) -> Future[dict[str, Any] | None]:
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.sessions.touch_directory_session(**values),
+            force_flush=False,
+        )
+
+    def archive_directory_session(self, session_id: str) -> Future[dict[str, Any] | None]:
+        normalized = str(session_id or "").strip()
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.sessions.archive(normalized),
+            force_flush=True,
+        )
+
+    def legacy_sessions_discarded_at_ms(self) -> int | None:
+        with self._database.reader() as connection:
+            return _legacy_sessions_discarded_at_ms(connection)
+
+    def mark_legacy_sessions_discarded(self) -> Future[int]:
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.sessions.mark_legacy_sessions_discarded(),
+            force_flush=True,
+        )
+
     def get_submission_admission(
         self,
         *,
@@ -873,3 +1115,106 @@ def _admission_row(row: Any) -> dict[str, Any]:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def parse_directory_cursor(cursor: str) -> tuple[int, str] | None:
+    raw = str(cursor or "").strip()
+    if ":" not in raw:
+        return None
+    recency, session_id = raw.split(":", 1)
+    normalized_session_id = session_id.strip()
+    if not normalized_session_id:
+        return None
+    try:
+        recency_ms = int(recency)
+    except ValueError:
+        return None
+    if recency_ms < 0:
+        return None
+    return recency_ms, normalized_session_id
+
+
+def _like_contains(value: str) -> str:
+    escaped = (
+        str(value or "")
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return f"%{escaped}%"
+
+
+def _bounded_preview(value: str) -> str:
+    compact = " ".join(str(value or "").split())
+    if len(compact) <= LAST_PREVIEW_MAX_CHARS:
+        return compact
+    return compact[: LAST_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
+
+
+def _session_row(row: Any) -> dict[str, Any]:
+    preview_at = row["last_preview_at_ms"]
+    return {
+        "sessionId": str(row["session_id"]),
+        "agentId": str(row["agent_id"]),
+        "parentSessionId": str(row["parent_session_id"] or ""),
+        "agentConfigRevisionId": str(row["agent_config_revision_id"]),
+        "title": str(row["title"]),
+        "status": str(row["status"]),
+        "recencyAtMs": int(row["recency_at_ms"]),
+        "updatedAtMs": int(row["updated_at_ms"]),
+        "createdAtMs": int(row["created_at_ms"]),
+        "sessionKind": str(row["session_kind"] or "main") or "main",
+        "sessionRole": str(row["session_role"] or ""),
+        "conversationIndexKind": str(row["conversation_index_kind"] or ""),
+        "conversationIndexVisibility": str(row["conversation_index_visibility"] or ""),
+        "hiddenFromIndex": bool(int(row["hidden_from_index"] or 0)),
+        "teamId": str(row["team_id"] or ""),
+        "lastPreview": str(row["last_preview"] or ""),
+        "lastPreviewAtMs": int(preview_at) if preview_at is not None else None,
+        "childSessionIds": [],
+    }
+
+
+def _child_session_ids(
+    connection: sqlite3.Connection,
+    parent_ids: Sequence[str],
+) -> dict[str, list[str]]:
+    if not parent_ids:
+        return {}
+    placeholders = ",".join("?" for _ in parent_ids)
+    rows = connection.execute(
+        f"""
+        SELECT session_id, parent_session_id
+        FROM sessions
+        WHERE archived_at_ms IS NULL AND parent_session_id IN ({placeholders})
+        ORDER BY recency_at_ms DESC, session_id DESC
+        """,
+        tuple(parent_ids),
+    ).fetchall()
+    grouped: dict[str, list[str]] = {parent_id: [] for parent_id in parent_ids}
+    for row in rows:
+        parent_id = str(row["parent_session_id"] or "")
+        grouped.setdefault(parent_id, []).append(str(row["session_id"]))
+    return grouped
+
+
+def _legacy_sessions_discarded_at_ms(connection: sqlite3.Connection) -> int | None:
+    row = connection.execute(
+        "SELECT legacy_sessions_discarded_at_ms FROM conversation_store_meta WHERE id=1"
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return int(row[0])
+
+
+def _mark_legacy_sessions_discarded(connection: sqlite3.Connection) -> int:
+    now_ms = _now_ms()
+    connection.execute(
+        """
+        UPDATE conversation_store_meta
+        SET legacy_sessions_discarded_at_ms=?, updated_at_ms=?
+        WHERE id=1 AND legacy_sessions_discarded_at_ms IS NULL
+        """,
+        (now_ms, now_ms),
+    )
+    return now_ms

@@ -532,6 +532,10 @@ def reset_all_agent_test_conversations() -> dict[str, Any]:
         "stagingRoots": [str(path) for path in staging_roots],
     })
     s._invalidate_session_list_cache()
+    from . import directory_bridge
+
+    for session_id in session_ids:
+        directory_bridge.archive_directory_session_safe(session_id)
     result = {
         **cleanup,
         "agentBindingsCleared": len(direct_bindings_before),
@@ -944,6 +948,22 @@ def archive_agent_sessions(
         payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
         payload["updated_at"] = timestamp
         s.save_chat_state(s.PROJECT_ROOT, payload)
+        archived_rows = [
+            dict(raw)
+            for raw in conversations
+            if isinstance(raw, dict)
+            and str(raw.get("conversation_id") or "").strip() in selected
+        ]
+        replacement_row = None
+        active_after = str(payload.get("active_conversation_id") or "").strip()
+        if active_after and active_after not in selected:
+            found = s._find_conversation_entry(payload, active_after)
+            replacement_row = dict(found) if isinstance(found, dict) else None
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_records(archived_rows)
+    if replacement_row is not None:
+        directory_bridge.sync_conversation_record(replacement_row)
     s._invalidate_session_list_cache()
     result = {
         "status": "archived",
@@ -1081,6 +1101,16 @@ def create_child_session(
         payload["updated_at"] = now
         payload["conversations"] = conversations
         s.save_chat_state(s.PROJECT_ROOT, payload)
+        parent_snapshot = dict(parent)
+        child_snapshot = dict(child)
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_record(parent_snapshot)
+    directory_bridge.sync_conversation_record(
+        child_snapshot,
+        last_preview=request_text,
+        status="queued" if auto_start else "ready",
+    )
     s._append_session_conversation_event(
         root_id,
         f"child-session-{child_id}",
@@ -1269,6 +1299,10 @@ def create_supervised_agent_session(
         payload["updated_at"] = now
         payload["conversations"] = conversations
         s.save_chat_state(s.PROJECT_ROOT, payload)
+        created_supervised = dict(conversation)
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_record(created_supervised)
     s._invalidate_session_list_cache()
     return s.get_session_detail(session_id) or {}
 
@@ -1384,7 +1418,11 @@ def reset_agent_direct_session_lightweight(
             payload["updated_at"] = created_at
             payload["conversations"] = conversations
             s.save_chat_state(s.PROJECT_ROOT, payload)
+            replacement_snapshot = dict(replacement_conversation)
         s._invalidate_session_list_cache()
+        from . import directory_bridge
+
+        directory_bridge.sync_conversation_record(replacement_snapshot)
 
         s.agent_directory_service.update_agent_instance(
             normalized_agent_id,
@@ -2321,6 +2359,9 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
                     )
             raise
 
+    from . import directory_bridge
+
+    directory_bridge.archive_directory_session_safe(conversation_id)
     s._invalidate_session_list_cache()
     if target_agent and target_agent_direct_session_id == conversation_id:
         s._record_session_delete_event(
@@ -2620,6 +2661,18 @@ def _restore_agent_session_lifecycle_state(restore_token: dict[str, Any]) -> boo
             payload.get("version") or s.CHAT_STATE_VERSION
         )
         s.save_chat_state(s.PROJECT_ROOT, payload)
+        restored_rows = [
+            dict(raw)
+            for raw in conversations
+            if isinstance(raw, dict)
+            and str(raw.get("conversation_id") or "").strip() in session_ids
+        ]
+        removed_replacement_id = replacement_id
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_records(restored_rows)
+    if removed_replacement_id:
+        directory_bridge.archive_directory_session_safe(removed_replacement_id)
     s._invalidate_session_list_cache()
     return True
 

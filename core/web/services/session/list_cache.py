@@ -12,6 +12,7 @@ from typing import Any
 
 from core.ui.chat_state import chat_state_path
 
+from . import directory_runtime
 from .. import agent_directory_service
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -66,6 +67,7 @@ def session_list_source_signature() -> tuple[Any, ...]:
     return (
         str(PROJECT_ROOT.resolve()),
         signature(chat_state_path(PROJECT_ROOT)),
+        signature(directory_runtime.conversation_store_path(PROJECT_ROOT)),
         signature(agent_directory_service.registry_path()),
         tuple(inbox_signatures),
     )

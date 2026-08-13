@@ -16,7 +16,9 @@ from core.chat.conversation_store import (
     ConversationStore,
     ConversationStoreLockedError,
     ConversationStoreUnavailableError,
+    LAST_PREVIEW_MAX_CHARS,
     assess_sqlite_wal_runtime,
+    parse_directory_cursor,
 )
 
 
@@ -113,7 +115,7 @@ def test_initialize_creates_canonical_schema_and_query_only_readers(
             }
             foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
 
-        assert metadata["schemaVersion"] == 2
+        assert metadata["schemaVersion"] == 3
         assert metadata["quickCheck"] == "ok"
         assert {
             "agents",
@@ -741,4 +743,78 @@ def test_readers_and_single_writer_remain_consistent_under_concurrency(
             )
     finally:
         stop_readers.set()
+        store.close()
+
+
+def test_schema_v3_exposes_directory_columns_and_bounded_preview(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        metadata = store.database.metadata()
+        assert metadata["schemaVersion"] == 3
+        revision = _create_agent(store)
+        long_preview = "x" * (LAST_PREVIEW_MAX_CHARS + 80)
+        store.repository.upsert_directory_session(
+            session_id="session-dir",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Directory session",
+            session_kind="main",
+            last_preview=long_preview,
+        ).result(timeout=3)
+        row = store.repository.get_session("session-dir")
+        assert row is not None
+        assert row["sessionKind"] == "main"
+        assert row["lastPreview"].endswith("…")
+        assert len(row["lastPreview"]) == LAST_PREVIEW_MAX_CHARS
+        store.repository.touch_directory_session(
+            session_id="session-dir",
+            status="ready",
+            last_preview="later preview",
+        ).result(timeout=3)
+        touched = store.repository.get_session("session-dir")
+        assert touched is not None
+        assert touched["lastPreview"] == "later preview"
+        assert store.repository.legacy_sessions_discarded_at_ms() is None
+        marked = store.repository.mark_legacy_sessions_discarded().result(timeout=3)
+        assert marked > 0
+        assert store.repository.legacy_sessions_discarded_at_ms() == marked
+    finally:
+        store.close()
+
+
+def test_directory_list_uses_keyset_cursor_not_offset(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_agent(store)
+        for index in range(3):
+            store.repository.create_session(
+                session_id=f"session-{index}",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
+                title=f"Session {index}",
+            ).result(timeout=3)
+        first = store.repository.list_directory_page(agent_id="agent-a", limit=2)
+        assert len(first["rows"]) == 2
+        assert first["total"] == 3
+        assert first["nextCursor"]
+        recency, session_id = parse_directory_cursor(first["nextCursor"])
+        assert recency > 0
+        assert session_id
+        second = store.repository.list_directory_page(
+            agent_id="agent-a",
+            limit=2,
+            before=(recency, session_id),
+        )
+        first_ids = {row["sessionId"] for row in first["rows"]}
+        second_ids = {row["sessionId"] for row in second["rows"]}
+        assert first_ids.isdisjoint(second_ids)
+        assert len(first_ids | second_ids) == 3
+        assert second["nextCursor"] == ""
+    finally:
         store.close()

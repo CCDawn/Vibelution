@@ -27,6 +27,7 @@ Historical structure/optimization notes (non-authoritative): `docs/archive/plans
 | Create/select session / index repair | `conversation_index.py` |
 | List cache / prewarm | `list_cache.py` + `session_ops.py` |
 | SQLite session catalog reconcile | `catalog_bridge.py` |
+| Live session directory store (ConversationStore) | `directory_runtime.py` + `directory_bridge.py` |
 | Live overlay / checkpoint | `live_output.py` + `live_output_write.py` |
 | Timeline / tool normalize | `timeline.py` |
 | Turn errors / work-runs / review | `turn_diagnostics.py` |
@@ -46,6 +47,7 @@ Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (s
 |-----------|-------------------|--------|
 | Session list index cache / prewarm signatures | `list_cache.py` | stream capture, agent turn |
 | Session catalog source projection / reconcile | `catalog_bridge.py` | canonical writes, HTTP DTO projection |
+| Live session directory (SQLite control plane) | `directory_runtime.py`, `directory_bridge.py` | turn journal transcript, Agent config authority; list/query wait out `starting` and do not fall back to `chat_state` |
 | Live output checkpoint / recovery state | `live_output.py` | submit validation, stream publish |
 | Conversation events cache, ledger seq helpers | `journal_bridge.py` | LLM invoke, live recovery reconcile |
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |

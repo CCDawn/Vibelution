@@ -150,6 +150,10 @@ def _remember_session_uploaded_attachment(session_id: str, attachment: dict[str,
         conversation["updated_at"] = s._now_timestamp()
         payload["updated_at"] = conversation["updated_at"]
         s.save_chat_state(s.PROJECT_ROOT, payload)
+        snapshot = dict(conversation)
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_record(snapshot, wait=False)
 
 
 def _decode_attachment_filename(filename: str) -> str:

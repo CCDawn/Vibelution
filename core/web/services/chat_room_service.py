@@ -2520,6 +2520,7 @@ def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payloa
     skipped_count = 0
     missing_count = 0
     materialized_count = 0
+    materialized_snapshots: list[dict[str, Any]] = []
     with session_service._CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
         conversations = payload.get("conversations")
@@ -2538,6 +2539,8 @@ def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payloa
                 ):
                     materialized_count += 1
                     conversation = session_service._find_conversation_entry(payload, session_id)
+                    if isinstance(conversation, dict):
+                        materialized_snapshots.append(dict(conversation))
                 if conversation is None:
                     missing_count += 1
                     continue
@@ -2573,6 +2576,11 @@ def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payloa
         if synced_count:
             payload["updated_at"] = timestamp
             save_chat_state(PROJECT_ROOT, payload)
+
+    if materialized_snapshots:
+        from core.web.services.session import directory_bridge
+
+        directory_bridge.sync_conversation_records(materialized_snapshots, wait=False)
 
     _record_room_event(
         "group_context",

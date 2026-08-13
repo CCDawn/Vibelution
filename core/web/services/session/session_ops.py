@@ -1418,6 +1418,9 @@ def update_chat_session(
             s.save_chat_state(s.PROJECT_ROOT, payload)
 
     if changed:
+        from . import directory_bridge
+
+        directory_bridge.sync_conversation_record(conversation)
         s._invalidate_session_list_cache()
         s._publish_session_detail_snapshot(conversation_id)
     return s.get_session_detail(conversation_id) or {}
@@ -1477,6 +1480,13 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
     )
     detail = s._build_lightweight_session_detail(target) if target is not None else {}
     if changed:
+        from . import directory_bridge
+
+        directory_bridge.touch_directory_session_safe(
+            conversation_id,
+            title=normalized_title,
+            wait=True,
+        )
         s._invalidate_session_list_cache()
         if detail:
             s._publish_session_detail_snapshot(conversation_id, detail=detail)
