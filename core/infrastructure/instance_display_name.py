@@ -34,7 +34,9 @@ def instance_short_name_base(
     normalized_kind = str(kind or "").strip().lower()
     if normalized_kind == "main":
         return MAIN_SHORT_NAME
-    label = _branch_label(branch) or _branch_label(slug) or _branch_label(path_name) or "unnamed"
+    label = _branch_label(branch)
+    if not label or label.lower() == "detached":
+        label = _branch_label(slug) or _branch_label(path_name) or "detached"
     if normalized_kind == "retired":
         return f"{RETIRED_NAME_PREFIX}{label}"
     return f"{BRANCH_NAME_PREFIX}{label}"
