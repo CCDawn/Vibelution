@@ -2893,6 +2893,9 @@ export function ChatCodingRoute() {
     conversationsIsLoading: conversationsQuery.isLoading,
     sessionsHasData: Boolean(sessionsQuery.data),
     sessionsIsLoading: sessionsQuery.isLoading,
+    agentsHasData: Boolean(agentsQuery.data),
+    agentsIsLoading: agentsQuery.isLoading,
+    visibleSessionCount: allVisibleSessions.length,
   });
   const contextMenuAgentArchivePending = Boolean(
     agentContextMenu
@@ -2916,6 +2919,7 @@ export function ChatCodingRoute() {
         && archiveVisibleAgents.length === 0
         && filteredTeams.length === 0
         && filteredStandaloneGroupConversations.length === 0
+        && allVisibleSessions.length === 0
       }
     >
           <AgentConversationDirectory
