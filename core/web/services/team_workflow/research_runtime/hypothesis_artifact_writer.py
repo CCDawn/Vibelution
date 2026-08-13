@@ -34,15 +34,14 @@ def record_hypothesis_set(
         raise ValueError(
             "Accepted knowledge package is not ready for hypothesis writeback."
         )
-    portfolio = HypothesisPortfolio.from_dict(payload)
-    if not portfolio.candidates:
-        raise ValueError("Hypothesis portfolio requires at least one candidate.")
     workflow_run_id = _text(task.get("workflowRunId"))
     source_run_id = _text(task.get("sourceCollectionRunId"))
     if not workflow_run_id or not source_run_id:
         raise ValueError("Bound hypothesis task is missing workflow scope.")
-    if portfolio.runId != workflow_run_id:
-        raise ValueError("Hypothesis portfolio runId does not match the bound task.")
+    canonical_payload = {**payload, "runId": workflow_run_id}
+    portfolio = HypothesisPortfolio.from_dict(canonical_payload)
+    if not portfolio.candidates:
+        raise ValueError("Hypothesis portfolio requires at least one candidate.")
     allowed_refs = {
         _text(item)[:200]
         for item in list(hypothesis_input.get("allowedEvidenceRefs") or [])
@@ -92,5 +91,9 @@ def record_hypothesis_set(
             "workflowRunId": workflow_run_id,
             "sourceCollectionRunId": source_run_id,
             "contentHash": _text(record.get("contentHash")),
-        }
+        },
+        "scopeBinding": {
+            "workflowRunId": workflow_run_id,
+            "source": "bound_hypothesis_task",
+        },
     }

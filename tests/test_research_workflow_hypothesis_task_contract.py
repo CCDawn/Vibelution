@@ -230,6 +230,62 @@ def test_hypothesis_writeback_uses_scoped_formal_artifact_store(
     assert read_back["payload"]["hypothesis_count"] == 1
 
 
+@pytest.mark.parametrize("untrusted_run_id", ["", "node-run:nr-run-sci-096-hypothesis-a5"])
+def test_hypothesis_writeback_binds_run_id_from_the_formal_task(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    untrusted_run_id: str,
+) -> None:
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    context = _task_context(
+        run_id="run-sci-096",
+        counter_ref="candidate-counter-rate-code",
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_context",
+        lambda *_args, **_kwargs: context,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        lambda *_args, **kwargs: {"status": kwargs["status"]},
+        raising=False,
+    )
+    payload = _portfolio(
+        run_id=untrusted_run_id,
+        counter_ref="candidate-counter-rate-code",
+    )
+    if not untrusted_run_id:
+        payload.pop("runId")
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="challenge-sci-096",
+            task_id="task-hypothesis-a5",
+            operation="record_hypothesis_set",
+            payload_json=json.dumps(payload, ensure_ascii=False),
+            recorded_by_agent="agent-planner",
+        )
+    )
+
+    assert result["status"] == "ok", result
+    assert result["response"]["scopeBinding"] == {
+        "workflowRunId": "run-sci-096",
+        "source": "bound_hypothesis_task",
+    }
+    rows = list_workflow_artifacts(
+        "research-team",
+        kind="hypothesis_set",
+        workflow_run_id="run-sci-096",
+        source_collection_run_id="dprun-sci-096",
+    )
+    assert len(rows) == 1
+    assert rows[0]["payload"]["runId"] == "run-sci-096"
+
+
 def test_hypothesis_writeback_rejects_unbound_counter_evidence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

@@ -534,6 +534,8 @@ def test_prompt_template_registry_repairs_challenge_cup_experiment_iteration_rol
             assert "novelty、competitionFit、falsifiability、evidenceSupport、feasibility" in detail["content"]
             assert "所有分数都必须在 0 到 1 之间" in detail["content"]
             assert '"counterEvidenceRefs":["<allowedEvidenceRef>"]' in detail["content"]
+            assert "runId 由当前正式任务绑定" in detail["content"]
+            assert "不得猜测或填写" in detail["content"]
         assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
         assert _contains_tool_name(detail["content"], read_tool)
         assert _contains_tool_name(detail["content"], write_tool)

@@ -140,6 +140,8 @@ def test_hypothesis_writeback_tool_description_exposes_complete_score_contract()
         assert score_key in description
     assert "0 到 1" in description
     assert "counterEvidenceRefs" in description
+    assert "runId 由当前正式任务绑定" in description
+    assert "不得猜测或填写" in description
 
 
 def test_agent_message_tool_blocks_without_bound_agent_runtime(monkeypatch):
