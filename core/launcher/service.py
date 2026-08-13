@@ -2253,9 +2253,19 @@ def _observed_workbench() -> dict[str, Any]:
 
 
 def _status_observed_workbench(runtime_state: dict[str, Any]) -> dict[str, Any]:
-    if _runtime_manager_state_is_fresh(runtime_state) and _runtime_state_matches_effective_backend_port(runtime_state):
+    if (
+        _runtime_manager_state_is_fresh(runtime_state)
+        and _runtime_state_matches_effective_backend_port(runtime_state)
+        and _runtime_state_workbench_is_live(runtime_state)
+    ):
         return {}
     return _observed_workbench()
+
+
+def _runtime_state_workbench_is_live(runtime_state: dict[str, Any]) -> bool:
+    workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    observed = str(workbench.get("observedState") or "").strip().lower()
+    return observed in {"open", "partial"}
 
 
 def _runtime_state_matches_effective_backend_port(runtime_state: dict[str, Any]) -> bool:
