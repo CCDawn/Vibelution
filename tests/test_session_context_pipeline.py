@@ -22,8 +22,10 @@ from core.chat.conversation_ledger import (
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
+    append_context_compression_attempt,
     append_context_compression_checkpoint,
     append_conversation_event,
+    append_conversation_turn_outcome,
     conversation_model_messages_from_events,
     load_conversation_events,
 )
@@ -889,6 +891,92 @@ def test_session_detail_without_ledger_does_not_fallback_to_legacy_messages(tmp_
 
     assert messages == []
 
+
+def test_session_detail_projects_context_compression_markers_in_event_order(tmp_path, monkeypatch):
+    from core.llm.types import CanonicalItemIdentity, TurnOutcome
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    append_context_compression_checkpoint(
+        tmp_path,
+        "session-compression-markers",
+        turn_id="turn-compression-applied",
+        current_turn_id="turn-current",
+        summary="旧阶段已经压缩为摘要。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=10000,
+        after_tokens=4200,
+        trigger_source="automatic_threshold",
+    )
+    append_conversation_turn_outcome(
+        tmp_path,
+        "session-compression-markers",
+        "turn-compression-applied",
+        TurnOutcome.final_answer(
+            identity=CanonicalItemIdentity(
+                session_id="session-compression-markers",
+                turn_id="turn-compression-applied",
+                invocation_id="invocation-compression-applied",
+                iteration=0,
+                item_id="answer-after-compression",
+            ),
+            text="压缩后继续生成回答。",
+        ),
+    )
+    append_context_compression_attempt(
+        tmp_path,
+        "session-compression-markers",
+        turn_id="turn-compression-skipped",
+        status="skipped_low_savings",
+        summary="压缩摘要收益不足。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=10000,
+        after_tokens=9800,
+        trigger_source="automatic_threshold",
+    )
+    append_context_compression_attempt(
+        tmp_path,
+        "session-compression-markers",
+        turn_id="turn-compression-failed",
+        status="failed_preserved",
+        level="standard",
+        reason="compressor_error",
+        before_tokens=10000,
+        after_tokens=10000,
+        trigger_source="provider_context_length",
+        error_type="RuntimeError",
+    )
+
+    messages = session_service._messages_with_live_output("session-compression-markers")
+    markers = [
+        item
+        for message in messages
+        if message.get("role") == "assistant"
+        for item in list(message.get("turnItems") or [])
+        if item.get("type") == "status"
+    ]
+
+    assert [item.get("code") for item in markers] == [
+        "context_compression_applied",
+        "context_compression_skipped_low_savings",
+        "context_compression_failed_preserved",
+    ]
+    assert [item.get("title") for item in markers] == [
+        "上下文已压缩",
+        "压缩未应用 · 收益不足",
+        "压缩失败 · 已保留原上下文",
+    ]
+    assert [item.get("status") for item in markers] == ["completed", "completed", "failed"]
+    assert markers[0]["metadata"]["savedTokens"] == 5800
+    assert markers[2]["metadata"]["errorType"] == "RuntimeError"
+    applied_turn = next(
+        message for message in messages if message.get("turnId") == "turn-compression-applied"
+    )
+    assert [item.get("type") for item in applied_turn["turnItems"]] == ["status", "agent_message"]
+    assert applied_turn["turnItems"][1]["text"] == "压缩后继续生成回答。"
+
+
 def test_session_detail_live_overlay_replaces_open_ledger_partial(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     append_conversation_event(
@@ -1322,7 +1410,7 @@ def test_history_tools_are_registered_for_llm_use():
     }.issubset(names)
 
 
-def test_append_history_checkpoint_persists_hidden_checkpoint(tmp_path, monkeypatch):
+def test_append_history_checkpoint_projects_visible_marker_without_answer_content(tmp_path, monkeypatch):
     save_chat_state(
         tmp_path,
         build_chat_state(
@@ -1353,8 +1441,10 @@ def test_append_history_checkpoint_persists_hidden_checkpoint(tmp_path, monkeypa
     assert checkpoint.payload["summary"] == "旧阶段已经归纳为检查点。"
     assert detail_messages[0]["role"] == "user"
     assert detail_messages[0]["content"] == "旧请求"
-    assert detail_messages[-1]["role"] == "user"
-    assert detail_messages[-1]["content"] == "旧请求"
+    assert detail_messages[-1]["role"] == "assistant"
+    assert "content" not in detail_messages[-1]
+    assert detail_messages[-1]["turnItems"][0]["code"] == "context_compression_applied"
+    assert detail_messages[-1]["turnItems"][0]["title"] == "上下文已压缩"
 
     model_messages = conversation_model_messages_from_events(events)
     serialized_model_messages = json.dumps(model_messages, ensure_ascii=False)

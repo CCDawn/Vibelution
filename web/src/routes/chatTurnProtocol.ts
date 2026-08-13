@@ -197,7 +197,7 @@ export function codexTranscriptFromTurnItems(
       return [{ ...base, kind: "status", title: "model_retry", text: item.reason, summary: item.reason }];
     }
     if (item.type === "status") {
-      return [{ ...base, kind: "status", title: item.code, text: item.text, summary: item.summary }];
+      return [{ ...base, kind: "status", title: item.title || item.code, text: item.text, summary: item.summary }];
     }
     return [{ ...base, kind: "error_notice", tone: "error", title: item.code, text: item.text, summary: item.summary }];
   });

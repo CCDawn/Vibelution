@@ -230,4 +230,51 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html.slice(commentaryStart, commentaryEnd)).toContain("进展");
     expect(html.slice(commentaryStart, commentaryEnd)).not.toContain("思考");
   });
+
+  it("renders context compression outcomes in their canonical event order", () => {
+    const marker = (
+      turnId: string,
+      code: string,
+      title: string,
+      text: string,
+      status: "completed" | "failed",
+    ): ConversationMessage => ({
+      id: `${turnId}-message`,
+      role: "assistant",
+      timestamp: "2026-08-13T18:00:00Z",
+      turnId,
+      status,
+      turnItems: [{
+        id: `${turnId}-marker:0`,
+        itemId: `${turnId}-marker`,
+        version: 3,
+        sessionId: "session-1",
+        turnId,
+        type: "status",
+        code,
+        title,
+        text,
+        status,
+        revision: 0,
+        sequence: 1,
+        terminal: true,
+        diagnosticSummary: { kind: "context_compression_marker", status: code },
+      }],
+    });
+    const html = renderConversation([
+      marker("turn-applied", "context_compression_applied", "上下文已压缩", "节省 5,800 tokens", "completed"),
+      marker("turn-skipped", "context_compression_skipped_low_savings", "压缩未应用 · 收益不足", "保留原上下文", "completed"),
+      marker("turn-failed", "context_compression_failed_preserved", "压缩失败 · 已保留原上下文", "RuntimeError", "failed"),
+    ]);
+
+    const applied = html.indexOf("上下文已压缩");
+    const skipped = html.indexOf("压缩未应用 · 收益不足");
+    const failed = html.indexOf("压缩失败 · 已保留原上下文");
+    expect(applied).toBeGreaterThan(-1);
+    expect(skipped).toBeGreaterThan(applied);
+    expect(failed).toBeGreaterThan(skipped);
+    expect(html).not.toContain("context_compression_applied");
+    expect(html).not.toContain("context_compression_skipped_low_savings");
+    expect(html).not.toContain("context_compression_failed_preserved");
+  });
 });
