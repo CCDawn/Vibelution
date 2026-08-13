@@ -32,7 +32,15 @@ const styles = {
   ),
   itemStatic: cx(
     "itemStatic",
-    "flex w-full max-w-full min-w-0 items-center gap-x-2 py-[0.28rem]",
+    "flex w-full max-w-full min-w-0 cursor-pointer items-center gap-x-2 py-[0.28rem]",
+  ),
+  itemChevron: cx(
+    "itemChevron",
+    "ml-auto shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_70%,transparent)] transition-transform duration-150 group-open:rotate-90",
+  ),
+  itemDetailsEmpty: cx(
+    "itemDetailsEmpty",
+    "m-0 py-0.5 text-[color-mix(in_srgb,var(--fg-tertiary)_82%,transparent)]",
   ),
   batch: cx("batch", "w-full max-w-full min-w-0"),
   batchSummary: cx(

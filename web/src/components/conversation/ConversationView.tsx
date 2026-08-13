@@ -243,6 +243,10 @@ import {
   resolveConversationTurnErrorType,
 } from "./conversationTurnErrorPresentation";
 import {
+  buildConversationToolActivityDetailRows,
+  conversationToolActivityEmptyDetailLabel,
+} from "./conversationToolActivityDetail";
+import {
   agentInboxSourceLabel,
   agentInboxSummary,
   cliAgentLifecycleDetail,
@@ -2050,7 +2054,10 @@ export function ConversationView({
         status: cell.status,
         language: lang === "en" ? "en" : "zh",
       });
-      const diagnosticRows = buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
+      const diagnosticRows = buildConversationToolActivityDetailRows(cell, lang === "en" ? "en" : "zh");
+      const fallbackDiagnosticRows = diagnosticRows.length > 0
+        ? diagnosticRows
+        : buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
       const isCompactToolFailure = Boolean(cell.operationIds?.length);
       if (isCompactToolFailure) {
         const compactErrorSummary = (
@@ -2059,7 +2066,7 @@ export function ConversationView({
             {cell.failureCount && cell.failureCount > 1 ? (
               <span className={styles.codexTranscriptCellMeta}>· {cell.failureCount} {lang === "zh" ? "次" : "times"}</span>
             ) : null}
-            {diagnosticRows.length > 0 ? (
+            {fallbackDiagnosticRows.length > 0 ? (
               <ChevronDown className={styles.codexTranscriptInlineChevron} size={14} aria-hidden="true" />
             ) : null}
             {errorText ? <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span> : null}
@@ -2081,13 +2088,13 @@ export function ConversationView({
               <TerminalSquare size={14} />
             </span>
             <div className={styles.codexTranscriptCellBody}>
-              {diagnosticRows.length > 0 ? (
+              {fallbackDiagnosticRows.length > 0 ? (
                 <details className={styles.codexTranscriptCompactErrorDetails} data-codex-error-diagnostic="true">
                   <summary className={`${styles.codexTranscriptCellTitleRow} ${styles.codexTranscriptCompactErrorDetailsSummary}`}>
                     {compactErrorSummary}
                   </summary>
                   <dl className={styles.turnErrorReasonList}>
-                    {diagnosticRows.map((row) => (
+                    {fallbackDiagnosticRows.map((row) => (
                       <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
                         <dt>{row.label}</dt>
                         <dd>{row.value}</dd>
@@ -2127,7 +2134,7 @@ export function ConversationView({
             {errorText ? (
               <div className={styles.codexTranscriptCellSummary}>{renderResponseText(errorText)}</div>
             ) : null}
-            {diagnosticRows.length > 0 ? (
+            {fallbackDiagnosticRows.length > 0 ? (
               <details className={styles.operationDetailsDisclosure} data-codex-error-diagnostic="true">
                 <summary className={styles.operationDetailsSummary}>
                   <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "诊断详情" : "Diagnostics"}</span>
@@ -2137,7 +2144,7 @@ export function ConversationView({
                   </span>
                 </summary>
                 <dl className={styles.turnErrorReasonList}>
-                  {diagnosticRows.map((row) => (
+                  {fallbackDiagnosticRows.map((row) => (
                     <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
                       <dt>{row.label}</dt>
                       <dd>{row.value}</dd>
@@ -2397,9 +2404,14 @@ export function ConversationView({
 
   function renderCodexTranscriptToolDetailContent(cell: CodexTranscriptCell): ReactNode {
     if (cell.kind === "error_notice") {
-      const diagnosticRows = buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
+      const activityRows = buildConversationToolActivityDetailRows(cell, lang);
+      const diagnosticRows = activityRows.length > 0
+        ? activityRows
+        : buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
       if (diagnosticRows.length === 0) {
-        return null;
+        return (
+          <p className={styles.codexTranscriptCellMeta}>{conversationToolActivityEmptyDetailLabel(lang)}</p>
+        );
       }
       return (
         <dl className={styles.turnErrorReasonList} data-codex-error-diagnostic="true">
@@ -2419,7 +2431,22 @@ export function ConversationView({
     const rows = terminalDetail ? [] : codexTranscriptToolDetailRows(cell);
     const rolloutEvents = renderCodexTranscriptRolloutEvents(cell);
     if (!terminalDetail && rows.length === 0 && !rolloutEvents) {
-      return null;
+      const extraRows = buildConversationToolActivityDetailRows(cell, lang);
+      if (extraRows.length === 0) {
+        return (
+          <p className={styles.codexTranscriptCellMeta}>{conversationToolActivityEmptyDetailLabel(lang)}</p>
+        );
+      }
+      return (
+        <dl className={styles.turnErrorReasonList} data-codex-tool-activity-detail="true">
+          {extraRows.map((row) => (
+            <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      );
     }
     return (
       <>
