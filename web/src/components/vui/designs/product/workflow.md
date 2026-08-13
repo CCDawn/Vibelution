@@ -31,6 +31,14 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 />
 ```
 
+#### 可延展蛇形模式
+
+挑战杯科研流程正式工作台使用 `layoutMode="serpentine"`：阶段区域纵向堆叠，阶段内部任务横向铺开并逐阶段反向折返；它仍共享一个 React Flow viewport、同一运行投影和同一节点选择事实源。该模式可配合 `showMiniMap` 提供大型流程定位，但小地图只承担导航，不成为第二张流程图或第二状态写入者。
+
+`stage-columns` 保留为默认兼容模式；调用方不得自行复制 renderer 或直接引入 `@xyflow/react` 来实现另一套几何。
+
+节点在 `serpentine` 模式下使用较宽的层级卡片：类型图标与名称优先，状态必须有图标和文字，描述最多两行；技术 `agentId` 不作为常驻副标题，完整绑定信息仍进入节点 tooltip 与 Inspector。画布必须提供平移、缩放、适应全部和定位当前工作；页面本身不得产生横向滚动。
+
 ### 节点视觉种类
 
 | visualKind | 用途 |
@@ -69,9 +77,9 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 ### 布局与 fit 协议（T4 + 两级布局 2026-08-08 + 外层真实 ELK 2026-08-08b）
 
-- 布局：`useWorkflowAutoLayout(graph, createWorkflowLayoutEngine)` 内部走**两级布局**（`layoutTwoLevel`）：阶段 A 每阶段独立 ELK DOWN（串行，只含阶段内 edges）；阶段 B **真实外层 ELK**（`workflowOuterElkGraphAdapter`）——三阶段 meta nodes + 每条跨阶段边一个 label spacer node（尺寸 = `workflowEdgeLabelGeometry` 共享契约），跨阶段边 = 两条布局边经 spacer；ELK 输出阶段坐标（gap 随标签自动增长）、spacer 位置、边 sections。任务绝对坐标 = meta 位置 + 阶段本地坐标。结构 hash 缓存避免重复布局。
+- 布局：`useWorkflowAutoLayout(graph, createWorkflowLayoutEngine)` 内部走**两级布局**（`layoutTwoLevel`）。默认 `stage-columns` 为阶段 A 各自 ELK DOWN、阶段 B 外层 ELK RIGHT；`serpentine` 为阶段 A 依次 RIGHT / LEFT / RIGHT、阶段 B 外层 ELK DOWN。两种模式都只包含真实 edges；跨阶段边通过 label spacer 交给 ELK 分配通道，任务绝对坐标 = meta 位置 + 阶段本地坐标，结构 hash 包含 layout mode 并避免重复布局。
 - 标签契约：`workflowEdgeLabelGeometry` 是唯一几何权威——布局 spacer 尺寸与渲染 label box 完全一致（同宽高、同截断策略）；长标签截断后矩形仍参与布局；禁止渲染后 transform 移动。
-- 目标：阶段内主链单列（中心偏差 ≤24px）、Y 单调；1920 视口首屏见三阶段；gap 由 ELK 按内容自动决定（非固定值）。
+- 目标：默认模式阶段内主链单列；蛇形模式阶段内横向铺开、阶段纵向延展；gap 由 ELK 按内容自动决定（非固定值）。
 - fit：`useWorkflowInitialFit` 编排——`initialFitRevision` 只在 **settled 布局**提交后设置；等待节点进入 React Flow 内部（`useNodesInitialized`）并在下一帧执行**仅一次**；校准重排不取消 pending fit，拓扑切换（structureKey 变化）取消并重新武装；`acknowledgeInitialFit()` 后 status-only 更新不再 fit。`<ReactFlow>` 不设隐式 `fitView`；「适应全部」经 `onFitAll` 显式 fit。
 
 ### 阶段分区
@@ -85,9 +93,9 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - `@xyflow/react` 仅允许在 `renderers/shadcn/workflow/**`（入口 `ShadcnWorkflowCanvas.tsx`）
 - 业务路由禁止 import renderer 或 xyflow
 - 默认不可拖节点、不可连线（运行态，非编辑器）
-- 不提供强制 MiniMap（节点量小时不展示）
+- MiniMap 默认关闭；长流程由生产工作台显式 `showMiniMap` 开启
 - 单击节点 → 选中；点空白 → 取消；键盘可聚焦节点（aria-label 含名称/类型/状态）
-- 控件：放大、缩小、适应全部、重置、定位当前节点
+- 控件：放大、缩小、适应全部、定位当前工作
 - loading/empty：由调用方 `VStateSurface` / `VEmptyState` 处理
 - **页面壳**：`VCanvasWorkbenchPage`，`layoutId` = `WORKBENCH_LAYOUT_IDS.researchFlow`
 - 画布默认 `height="100%"`；fill 宿主 absolute inset

@@ -10,8 +10,58 @@
 export const WORKFLOW_NODE_DESIGN_WIDTH = 248;
 export const WORKFLOW_NODE_DESIGN_HEIGHT = 88;
 export const WORKFLOW_DECISION_DESIGN_HEIGHT = 112;
+export const WORKFLOW_SERPENTINE_NODE_DESIGN_WIDTH = 272;
+export const WORKFLOW_SERPENTINE_NODE_DESIGN_HEIGHT = 124;
+export const WORKFLOW_SERPENTINE_DECISION_DESIGN_HEIGHT = 144;
 export const WORKFLOW_NODE_LABEL_WIDTH = WORKFLOW_NODE_DESIGN_WIDTH - 24;
 export const WORKFLOW_NODE_LABEL_HEIGHT = 20;
+
+/** Stable VUI layout variants. Routes select a variant through VWorkflowCanvas. */
+export type WorkflowCanvasLayoutMode = "stage-columns" | "serpentine";
+
+export function workflowStageDirection(
+  layoutMode: WorkflowCanvasLayoutMode,
+  stageIndex: number,
+): "DOWN" | "RIGHT" | "LEFT" {
+  if (layoutMode !== "serpentine") return "DOWN";
+  return stageIndex % 2 === 0 ? "RIGHT" : "LEFT";
+}
+
+export function workflowStageInternalOptions(
+  layoutMode: WorkflowCanvasLayoutMode,
+  stageIndex: number,
+): Record<string, string> {
+  return {
+    ...WORKFLOW_ELK_STAGE_INTERNAL_OPTIONS,
+    "elk.direction": workflowStageDirection(layoutMode, stageIndex),
+    ...(layoutMode === "serpentine"
+      ? {
+          "elk.spacing.nodeNode": "22",
+          "elk.spacing.edgeNode": "28",
+          "elk.spacing.edgeEdge": "10",
+        }
+      : {}),
+  };
+}
+
+export function workflowNodeDesignSize(
+  layoutMode: WorkflowCanvasLayoutMode,
+  visualKind: string,
+): { width: number; height: number } {
+  if (layoutMode === "serpentine") {
+    return {
+      width: WORKFLOW_SERPENTINE_NODE_DESIGN_WIDTH,
+      height:
+        visualKind === "decision"
+          ? WORKFLOW_SERPENTINE_DECISION_DESIGN_HEIGHT
+          : WORKFLOW_SERPENTINE_NODE_DESIGN_HEIGHT,
+    };
+  }
+  return {
+    width: WORKFLOW_NODE_DESIGN_WIDTH,
+    height: visualKind === "decision" ? WORKFLOW_DECISION_DESIGN_HEIGHT : WORKFLOW_NODE_DESIGN_HEIGHT,
+  };
+}
 
 /** Stage title reserved band height; geometry tests assert edges avoid it. */
 export const WORKFLOW_STAGE_TITLE_HEIGHT = 40;

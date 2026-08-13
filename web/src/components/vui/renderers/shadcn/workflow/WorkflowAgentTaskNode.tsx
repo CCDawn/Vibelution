@@ -16,6 +16,8 @@ export function WorkflowAgentTaskNode(props: NodeProps) {
   const portSides = props.data.portSides as
     | { source: Record<string, WorkflowPortSide>; target: Record<string, WorkflowPortSide> }
     | undefined;
+  const layoutMode = props.data.layoutMode === "serpentine" ? "serpentine" : "stage-columns";
+  const description = props.data.description ? String(props.data.description) : "";
   return (
     <WorkflowNodeChrome
       label={label}
@@ -25,9 +27,10 @@ export function WorkflowAgentTaskNode(props: NodeProps) {
       isRuntimeCurrent={isCurrent}
       primaryAgentId={agent || undefined}
       attempt={attempt}
-      subtitle={agent ? agent : "未绑定"}
+      subtitle={layoutMode === "serpentine" ? description || (agent ? "科研 Agent 已绑定" : "等待 Agent 绑定") : agent ? agent : "未绑定"}
       portSides={portSides}
       title={workflowNodeTooltip({ label, status, primaryAgentId: agent || undefined, attempt })}
+      layoutMode={layoutMode}
     />
   );
 }

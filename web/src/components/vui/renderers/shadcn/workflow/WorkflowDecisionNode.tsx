@@ -24,6 +24,8 @@ export function WorkflowDecisionNode(props: NodeProps) {
   const portSides = props.data.portSides as
     | { source: Record<string, WorkflowPortSide>; target: Record<string, WorkflowPortSide> }
     | undefined;
+  const layoutMode = props.data.layoutMode === "serpentine" ? "serpentine" : "stage-columns";
+  const description = props.data.description ? String(props.data.description) : "";
   // Real current-run outgoing handles (definition edge list), never a
   // hardcoded capability list. `revise` has no current-run edge and therefore
   // no handle here; it stays a declared outcome only (P1-4).
@@ -42,7 +44,7 @@ export function WorkflowDecisionNode(props: NodeProps) {
       selected={Boolean(props.selected)}
       isRuntimeCurrent={Boolean(props.data.isRuntimeCurrent)}
       attempt={attempt}
-      subtitle="条件分支"
+      subtitle={layoutMode === "serpentine" ? description || "基于证据选择晋升、修订、回滚或停止" : "条件分支"}
       decisionLayout
       sourceHandles={sourceHandles}
       portSides={portSides}
@@ -53,6 +55,7 @@ export function WorkflowDecisionNode(props: NodeProps) {
           分支
         </span>
       }
+      layoutMode={layoutMode}
     />
   );
 }
