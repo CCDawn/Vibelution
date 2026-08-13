@@ -17,6 +17,7 @@ export type RuntimeStatusDisplayInput = {
   error?: unknown;
   failureClass?: unknown;
   timedOut?: unknown;
+  diagnosticSummary?: unknown;
 };
 
 export type TranscriptCellDisplayInput = RuntimeStatusDisplayInput & {
@@ -69,6 +70,9 @@ export function shouldDisplayRuntimeStatus(
   if (isModelTransportStatus(input)) {
     return context.surface === "active" && isActiveTransportDegradation(input);
   }
+  if (isContextCompressionStatus(input)) {
+    return true;
+  }
   return hasDisplayableDiagnosticStatus(input);
 }
 
@@ -91,7 +95,15 @@ export function shouldDisplayTranscriptCell(cell: TranscriptCellDisplayInput) {
     error: cell.error,
     failureClass: cell.failureClass,
     timedOut: cell.timedOut,
+    diagnosticSummary: cell.diagnosticSummary,
   });
+}
+
+function isContextCompressionStatus(input: RuntimeStatusDisplayInput) {
+  if (!input.diagnosticSummary || typeof input.diagnosticSummary !== "object" || Array.isArray(input.diagnosticSummary)) {
+    return false;
+  }
+  return normalizedText((input.diagnosticSummary as Record<string, unknown>).kind) === "context_compression_marker";
 }
 
 export function isInternalRuntimeStatus(input: RuntimeStatusDisplayInput) {
