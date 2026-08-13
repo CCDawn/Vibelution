@@ -164,6 +164,7 @@ export function KernelTaskCenterRoute() {
     queryKey: queryKeys.kernelTasks(status, 120),
     queryFn: () => listKernelTasks(status, 120),
   });
+  const initialTaskLoad = taskQuery.isLoading && !taskQuery.data;
   const tasks = taskQuery.data?.tasks ?? [];
   const selectedTaskId = useMemo(() => selectKernelTaskId(tasks, requestedTaskId), [requestedTaskId, tasks]);
   const selectedTask = useMemo(
@@ -192,11 +193,9 @@ export function KernelTaskCenterRoute() {
       {describeError(taskQuery.error, copy.loadFailed)}
     </VStateSurface>
   ) : taskQuery.isLoading ? (
-    <ProgressiveRegionSkeleton variant="list" label={copy.loading} className={styles.taskListClass} />
+    <ProgressiveRegionSkeleton variant="list" label={copy.loading} className={styles.loadingRegionClass} />
   ) : tasks.length === 0 ? (
-    <VStateSurface fill className={styles.emptyStateClass} title={status ? copy.noMatchingTasks : copy.noTasks} tone="empty">
-      {copy.taskList}
-    </VStateSurface>
+    <VStateSurface fill className={styles.emptyStateClass} title={status ? copy.noMatchingTasks : copy.noTasks} tone="empty" />
   ) : (
     tasks.map((task) => (
       <TaskRow
@@ -209,10 +208,10 @@ export function KernelTaskCenterRoute() {
       />
     ))
   );
-  const timelinePaneContent = !selectedTaskId ? (
-    <VStateSurface fill className={styles.emptyStateClass} title={copy.noTimeline} tone="empty">
-      {copy.detail}
-    </VStateSurface>
+  const timelinePaneContent = initialTaskLoad ? (
+    <ProgressiveRegionSkeleton variant="detail" label={copy.loading} className={styles.loadingRegionClass} />
+  ) : !selectedTaskId ? (
+    <VStateSurface fill className={styles.emptyStateClass} title={copy.noTimeline} tone="empty" />
   ) : timelineQuery.isError ? (
     <VStateSurface fill className={styles.emptyStateClass} title={copy.loadFailed} tone="error">
       {describeError(timelineQuery.error, copy.loadFailed)}
@@ -290,10 +289,8 @@ export function KernelTaskCenterRoute() {
       columnsClassName=""
       layoutId={WORKBENCH_LAYOUT_IDS.kernelTaskCenter}
       data-vui-domain-recipe="kernel-task-center-workbench"
-      eyebrow="Kernel"
-      title={copy.title}
-      meta={copy.subtitle}
-      actions={(
+      title="Kernel"
+      actions={initialTaskLoad ? undefined : (
         <VActionGroup ariaLabel={copy.status} className={styles.headerActionsClass}>
           <div className={styles.statusFilterClass}>
             <span className={styles.statusFilterLabelClass}>{copy.status}</span>
@@ -323,7 +320,7 @@ export function KernelTaskCenterRoute() {
           <div className={styles.panelHeaderClass}>
             <div>
               <p className={styles.eyebrowClass}>{copy.taskList}</p>
-              <strong className={styles.panelCountClass}>{tasks.length}</strong>
+              {initialTaskLoad ? null : <strong className={styles.panelCountClass}>{tasks.length}</strong>}
             </div>
           </div>
           <div className={styles.taskListClass}>

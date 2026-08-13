@@ -9,6 +9,7 @@ import {
   deriveSelfEvolutionPetCompanionState,
   filterSelfEvolutionTransactions,
   groupTransactionsByDate,
+  joinReadableLines,
   parseObservationDurationInput,
   pruneSelectedHistoryTxnIds,
   SELF_TRANSACTION_COLLAPSED_LIMIT,
@@ -70,6 +71,10 @@ function transaction(overrides: Partial<SelfEvolutionTransaction> & { txnId: str
 }
 
 describe("SelfEvolutionTrack static assets", () => {
+  it("deduplicates repeated readiness copy in the fallback conversation", () => {
+    expect(joinReadableLines(["等待会话", "等待会话", "开始第一轮"])).toBe("等待会话\n开始第一轮");
+  });
+
   const observationStatusStart = selfEvolutionSource.indexOf("function renderObservationStatusSurface()");
   const observationStatusEnd = selfEvolutionSource.indexOf("\n\n  return (", observationStatusStart);
   const observationStatusSurface = observationStatusStart >= 0 && observationStatusEnd > observationStatusStart
@@ -155,7 +160,8 @@ describe("SelfEvolutionTrack static assets", () => {
 
   it("keeps active run controls in the persistent state and configuration rail", () => {
     expect(selfEvolutionSource.indexOf("styles.trackBody")).toBeLessThan(selfEvolutionSource.indexOf("styles.workspaceLayout"));
-    expect(selfEvolutionSource.indexOf("styles.railHeader")).toBeLessThan(selfEvolutionSource.indexOf("<main className={styles.centerColumn}>") );
+    expect(selfEvolutionSource.indexOf("styles.railSectionActions")).toBeLessThan(selfEvolutionSource.indexOf("<main className={styles.centerColumn}>") );
+    expect(selfEvolutionSource).not.toContain("styles.railHeader");
     expect(selfEvolutionSource).not.toContain("styles.pageTabsRow");
     expect(selfEvolutionSource).not.toContain("styles.runActionBar");
     expect(selfEvolutionSource).toContain("styles.railGoalInput");
@@ -447,8 +453,8 @@ describe("SelfEvolutionTrack static assets", () => {
     const observationBranch = centerSurface.indexOf("observationRunModeActive ? (");
     const approvalBranch = centerSurface.indexOf('selectedWorkflowStep?.id === "approval"');
 
-    expect(centerSurface).toContain('label={lang === "zh" ? "当前对话说明" : "Current conversation details"}');
-    expect(centerSurface).toContain("selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction");
+    expect(centerSurface).toContain('tooltip={`${stepName} · ${statusLabel(step.status)} · ${step.livePreview || step.summary || "--"}`}');
+    expect(centerSurface).not.toContain('label={lang === "zh" ? "当前对话说明" : "Current conversation details"}');
     expect(centerSurface).toContain("activeConversationSurface");
     expect(observationBranch).toBeGreaterThanOrEqual(0);
     expect(approvalBranch).toBeGreaterThanOrEqual(0);
@@ -535,11 +541,12 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("style={{");
   });
 
-  it("keeps self-evolution route chrome inside a single opaque workbench shell", () => {
+  it("keeps self-evolution route chrome inside one borderless opaque workbench shell", () => {
     expect(styles.trackShell).toContain("bg-vui-surface-panel");
-    expect(styles.trackShell).toContain("border border-vui-border-subtle");
-    expect(styles.railHeader).toContain("border-b border-vui-border-subtle");
-    expect(styles.workflowHeader).toContain("border-b border-vui-border-subtle");
+    expect(styles.trackShell).toContain("!border-0");
+    expect(styles.workflowHeader).not.toContain("border-b");
+    expect(styles.railSection).not.toContain("border-b");
+    expect(styles.workflowCardGrid).not.toContain("border border-");
 
     [
       styles.trackShell,
@@ -559,6 +566,10 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(styles.workspaceLayout).not.toContain("max-[1180px]:grid-cols-1");
     expect(styles.conversationShell).toContain("border-0");
     expect(styles.conversationShell).toContain("bg-vui-surface-panel");
+    expect(styles.conversationShell).toContain("vui-components-conversationview.surface");
+    expect(styles.conversationShell).toContain("!border-0");
+    expect(styles.conversationShell).toContain("vui-components-conversationview.composer");
+    expect(styles.conversationShell).toContain("!border-t-0");
     expect(styles.centerColumn).not.toContain("gap-3");
     expect(selfEvolutionSource).toContain('aria-label={lang === "zh" ? "状态" : "Status"}');
     expect(selfEvolutionSource).toContain('aria-label={lang === "zh" ? "配置" : "Configuration"}');
@@ -574,6 +585,7 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(styles.workflowCardGrid).toContain("w-fit");
     expect(styles.workflowCardGrid).not.toContain("grid-cols-[minmax(0,1fr)_minmax(0,1fr)]");
     expect(styles.workflowCardGrid).not.toContain("[&>*]:w-full");
+    expect(styles.workflowCardGrid).not.toContain("bg-vui-control-muted");
 
     expect(styles.workflowCard).toContain("h-8");
     expect(styles.workflowCard).toContain("w-8");
@@ -583,8 +595,16 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("<VIconButton");
     expect(selfEvolutionSource).not.toContain("styles.workflowStepSummary");
     expect(selfEvolutionSource).not.toContain("<small>{step.livePreview || step.summary || \"--\"}</small>");
+    expect(selfEvolutionSource).not.toContain('label={lang === "zh" ? "当前对话说明" : "Current conversation details"}');
     expect(selfEvolutionSource).toContain('<div className={styles.workflowHeader}>');
     expect(selfEvolutionSource.indexOf('<div className={styles.workflowHeader}>')).toBeLessThan(selfEvolutionSource.indexOf('<div className={styles.conversationShell}>'));
+  });
+
+  it("moves the redundant self-evolution header into hover details on the status rail", () => {
+    expect(selfEvolutionSource).not.toContain('<h2 className={styles.railTitle}>');
+    expect(selfEvolutionSource).toContain('label={lang === "zh" ? "本轮状态说明" : "Current run details"}');
+    expect(selfEvolutionSource).toContain("{activeModeLabel} · {activeStatusLabel}");
+    expect(selfEvolutionSource).toContain("styles.railSectionActions");
   });
 
   it("keeps repeated self-evolution panels and rows lighter than card walls", () => {

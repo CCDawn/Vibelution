@@ -13,6 +13,8 @@ const commandSource = readFileSync(resolve(import.meta.dirname, "useResearchWork
 describe("researchWorkflowNoDuplicateSurface", () => {
   it("workspace uses VWorkflowCanvas and does not mount stage rail", () => {
     expect(canvasSource).toContain("VWorkflowCanvas");
+    expect(canvasSource).toContain('layoutMode="serpentine"');
+    expect(canvasSource).toContain("showMiniMap");
     expect(inspectorSource).toContain("ResearchProcessNodeInspector");
     expect(workspaceSource).toContain("useResearchWorkflowRun");
     expect(workspaceSource).not.toContain("ChallengeCupStageRail");

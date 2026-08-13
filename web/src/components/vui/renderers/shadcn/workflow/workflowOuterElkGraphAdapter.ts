@@ -22,6 +22,7 @@ import type {
 } from "../../../product/workflow/workflowCanvasTypes";
 import type { Rect } from "./workflowLayoutGeometry";
 import type { EdgeLabelSpec } from "./workflowEdgeLabelGeometry";
+import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 
 export const OUTER_SPACER_PREFIX = "__label_spacer__";
 
@@ -47,6 +48,7 @@ export function buildOuterElkGraph(
   input: WorkflowLayoutInput,
   stageBoxes: Map<string, Rect>,
   edgeSpecs: OuterEdgeSpec[],
+  layoutMode: WorkflowCanvasLayoutMode = "stage-columns",
 ): OuterElkGraph {
   const stageElkIds = new Map<string, string>();
   const spacerElkIds = new Map<string, string>();
@@ -90,8 +92,9 @@ export function buildOuterElkGraph(
     // Spacer node sized exactly like the rendered label (shared contract).
     // It carries WEST/EAST gateway ports so every leg is port-to-port (mixed
     // node-id/port-id edges confused ELK's routing direction).
-    const spacerWest = `${spacerId}:west`;
-    const spacerEast = `${spacerId}:east`;
+    const vertical = layoutMode === "serpentine";
+    const spacerEntry = `${spacerId}:${vertical ? "north" : "west"}`;
+    const spacerExit = `${spacerId}:${vertical ? "south" : "east"}`;
     children.push({
       id: spacerId,
       width: spec.labelSpec.width,
@@ -100,8 +103,8 @@ export function buildOuterElkGraph(
       children: [],
       edges: [],
       ports: [
-        { id: spacerWest, layoutOptions: { [PORT_SIDE_OPTION]: "WEST" } },
-        { id: spacerEast, layoutOptions: { [PORT_SIDE_OPTION]: "EAST" } },
+        { id: spacerEntry, layoutOptions: { [PORT_SIDE_OPTION]: vertical ? "NORTH" : "WEST" } },
+        { id: spacerExit, layoutOptions: { [PORT_SIDE_OPTION]: vertical ? "SOUTH" : "EAST" } },
       ],
     });
 
@@ -113,20 +116,20 @@ export function buildOuterElkGraph(
     // keeping the final polyline node-to-node continuous.
     const sourcePortId = `gate:${spec.edge.edgeId}:src`;
     const targetPortId = `gate:${spec.edge.edgeId}:tgt`;
-    ensurePort(children, sourceStageElkId, sourcePortId, "EAST");
-    ensurePort(children, targetStageElkId, targetPortId, "WEST");
+    ensurePort(children, sourceStageElkId, sourcePortId, vertical ? "SOUTH" : "EAST");
+    ensurePort(children, targetStageElkId, targetPortId, vertical ? "NORTH" : "WEST");
 
     const leg1 = `__leg1_${spec.edge.edgeId}__`;
     const leg2 = `__leg2_${spec.edge.edgeId}__`;
     edges.push({
       id: leg1,
       sources: [sourcePortId],
-      targets: [spacerWest],
+      targets: [spacerEntry],
       labels: [],
     });
     edges.push({
       id: leg2,
-      sources: [spacerEast],
+      sources: [spacerExit],
       targets: [targetPortId],
       labels: [],
     });
@@ -138,7 +141,7 @@ export function buildOuterElkGraph(
     id: "workflow:root:outer",
     layoutOptions: {
       "elk.algorithm": "layered",
-      "elk.direction": "RIGHT",
+      "elk.direction": layoutMode === "serpentine" ? "DOWN" : "RIGHT",
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.separateConnectedComponents": "false",
       "elk.spacing.nodeNodeBetweenLayers": "32",
@@ -158,7 +161,7 @@ function ensurePort(
   children: ElkNode[],
   stageElkId: string,
   portId: string,
-  side: "EAST" | "WEST",
+  side: "NORTH" | "EAST" | "SOUTH" | "WEST",
 ): void {
   const stage = children.find((c) => c.id === stageElkId);
   if (!stage) return;

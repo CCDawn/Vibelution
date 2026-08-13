@@ -17,6 +17,8 @@ export function WorkflowHumanGateNode(props: NodeProps) {
   const portSides = props.data.portSides as
     | { source: Record<string, WorkflowPortSide>; target: Record<string, WorkflowPortSide> }
     | undefined;
+  const layoutMode = props.data.layoutMode === "serpentine" ? "serpentine" : "stage-columns";
+  const description = props.data.description ? String(props.data.description) : "";
   return (
     <WorkflowNodeChrome
       label={label}
@@ -25,7 +27,8 @@ export function WorkflowHumanGateNode(props: NodeProps) {
       selected={Boolean(props.selected)}
       isRuntimeCurrent={isCurrent}
       attempt={attempt}
-      subtitle={pending ? "需人工确认" : "人工门禁"}
+      primaryRoleKey={props.data.primaryRoleKey ? String(props.data.primaryRoleKey) : undefined}
+      subtitle={layoutMode === "serpentine" ? description || (pending ? "需人工确认后才能继续" : "人工审查与冻结") : pending ? "需人工确认" : "人工门禁"}
       portSides={portSides}
       title={workflowNodeTooltip({
         label,
@@ -39,6 +42,7 @@ export function WorkflowHumanGateNode(props: NodeProps) {
           人工
         </span>
       }
+      layoutMode={layoutMode}
     />
   );
 }
