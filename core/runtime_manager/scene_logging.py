@@ -21,6 +21,7 @@ SAFE_COMMAND_ARG_KEYS = {
 }
 
 _BACKFILL_WINDOW_SECONDS = 15 * 60
+_EVENT_BACKFILL_READ_CHUNK_BYTES = 64 * 1024
 _BACKFILLED_SCENE_KEYS: set[tuple[str, str]] = set()
 
 
@@ -262,7 +263,10 @@ def _backfill_runtime_manager_scene_events(
         runtime_scene_service,
         allow_recent_completed=allow_recent_completed,
     )
-    for row in _read_runtime_manager_file_events():
+    for row in _read_runtime_manager_file_events(
+        earliest_at=earliest,
+        latest_at=cutoff + timedelta(seconds=1),
+    ):
         event_type = str(row.get("type") or "").strip()
         payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
         occurred_at = str(row.get("at") or "").strip()
@@ -287,23 +291,53 @@ def _backfill_runtime_manager_scene_events(
         )
 
 
-def _read_runtime_manager_file_events() -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+def _read_runtime_manager_file_events(
+    *,
+    earliest_at: datetime | None = None,
+    latest_at: datetime | None = None,
+) -> list[dict[str, Any]]:
+    newest_first: list[dict[str, Any]] = []
     try:
-        lines = EVENTS_PATH.read_text(encoding="utf-8-sig").splitlines()
+        handle = EVENTS_PATH.open("rb")
     except OSError:
-        return rows
-    for line in lines:
-        text = str(line or "").strip()
-        if not text:
-            continue
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            rows.append(payload)
-    return rows
+        return []
+
+    reached_before_window = False
+    with handle:
+        handle.seek(0, 2)
+        position = handle.tell()
+        partial_line = b""
+        while position > 0 and not reached_before_window:
+            read_size = min(_EVENT_BACKFILL_READ_CHUNK_BYTES, position)
+            position -= read_size
+            handle.seek(position)
+            block = handle.read(read_size) + partial_line
+            lines = block.split(b"\n")
+            if position > 0:
+                partial_line = lines.pop(0)
+            else:
+                partial_line = b""
+
+            for raw_line in reversed(lines):
+                text = raw_line.decode("utf-8-sig", errors="replace").strip()
+                if not text:
+                    continue
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                occurred_at = _parse_event_datetime(str(payload.get("at") or ""))
+                if earliest_at is not None and occurred_at is not None and occurred_at < earliest_at:
+                    reached_before_window = True
+                    break
+                if latest_at is not None and occurred_at is not None and occurred_at > latest_at:
+                    continue
+                newest_first.append(payload)
+
+    newest_first.reverse()
+    return newest_first
 
 
 def _existing_scene_event_keys(runtime_scene_service: Any, *, allow_recent_completed: bool) -> set[tuple[str, str, str]]:
