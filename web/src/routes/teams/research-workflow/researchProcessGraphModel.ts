@@ -169,13 +169,17 @@ export function definitionToCanvasGraph(
   };
 }
 
-export function projectionToCanvasGraph(projection: WorkflowCanvasProjection): WorkflowLayoutInput {
+export function projectionToCanvasGraph(
+  projection: WorkflowCanvasProjection,
+  options: { primaryAgentIdByNode?: ReadonlyMap<string, string> } = {},
+): WorkflowLayoutInput {
   const run = projection.run;
   const pendingHumanNodeIds = new Set(
     (run.pendingHumanTasks || []).map((t) => String(t.nodeId)).filter(Boolean),
   );
   const nodes = mapNodes(projection.definition, {
     nodeRuns: run.nodeRuns || {},
+    primaryAgentIdByNode: options.primaryAgentIdByNode,
     runtimeCurrentNodeIds: run.runtimeCurrentNodeIds || [],
     pendingHumanNodeIds,
     blockedReason: run.blockedReason,

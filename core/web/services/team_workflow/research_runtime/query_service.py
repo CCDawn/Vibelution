@@ -173,7 +173,12 @@ class WorkflowQueryService:
         offers = tuple(
             offer for offer in snap.command_offers if offer.node_id == node_id
         )
-        session = _session_fields(anchor, actor_kind=node.actorKind.value)
+        frozen = _frozen_binding_for(snap, node_id)
+        session = _session_fields(
+            anchor,
+            actor_kind=node.actorKind.value,
+            frozen=frozen,
+        )
         return ResearchWorkflowNodeDetail(
             run_id=run_id,
             team_id=team_id,
@@ -185,7 +190,8 @@ class WorkflowQueryService:
             runtime_current=node_id in snap.active_node_ids,
             status=latest.status if latest is not None else snap.run.status,
             binding_snapshot_id=(
-                latest.binding_snapshot_id if latest is not None else None
+                (latest.binding_snapshot_id if latest is not None else None)
+                or (frozen.snapshot_id if frozen is not None and frozen.snapshot_id else None)
             ),
             latest_attempt=latest,
             attempts=attempts,
@@ -333,29 +339,49 @@ def _load_anchor(store: Any, node_run_id: str | None) -> tuple | None:
     return load(store)
 
 
-def _session_fields(anchor: tuple | None, *, actor_kind: str) -> dict[str, Any]:
+def _frozen_binding_for(snap: ResearchWorkflowSnapshot, node_id: str):
+    for item in snap.agent_binding_summary.bindings:
+        if item.node_id == node_id:
+            return item
+    return None
+
+
+def _agent_display_name(agent_id: str) -> str:
+    if not agent_id:
+        return ""
+    try:
+        from core.web.services.agent_directory_service import get_agent
+
+        agent = get_agent(agent_id)
+        if isinstance(agent, dict):
+            return str(agent.get("displayName") or agent.get("agentName") or agent_id)
+    except (ImportError, KeyError, OSError, TypeError, ValueError):
+        return agent_id
+    return agent_id
+
+
+def _session_fields(
+    anchor: tuple | None,
+    *,
+    actor_kind: str,
+    frozen: Any | None = None,
+) -> dict[str, Any]:
     agent_id = str(anchor[3] or "").strip() if anchor is not None else ""
+    resolved_from = "workflow_default" if agent_id else "unbound"
+    if not agent_id and frozen is not None:
+        agent_id = str(getattr(frozen, "agent_id", "") or "").strip()
+        if agent_id:
+            resolved_from = str(getattr(frozen, "resolved_from", "") or "").strip() or "workflow_default"
     session_id = str(anchor[5] or "").strip() if anchor is not None else ""
     session_attempt = anchor[6] if anchor is not None else None
     task_id = str(anchor[7] or "").strip() if anchor is not None else ""
     turn_id = str(anchor[8] or "").strip() if anchor is not None else ""
     complete = bool(session_id and task_id and turn_id)
-    display_name = ""
-    if agent_id:
-        try:
-            from core.web.services.agent_directory_service import get_agent
-
-            agent = get_agent(agent_id)
-            if isinstance(agent, dict):
-                display_name = str(
-                    agent.get("displayName") or agent.get("agentName") or agent_id
-                )
-        except (ImportError, KeyError, OSError, TypeError, ValueError):
-            display_name = agent_id
+    display_name = _agent_display_name(agent_id) if agent_id else ""
     return {
         "agent_id": agent_id or None,
         "display_name": display_name or agent_id,
-        "resolved_from": "workflow_default" if agent_id else "unbound",
+        "resolved_from": resolved_from,
         "session_id": session_id or None,
         "task_id": task_id or None,
         "turn_id": turn_id or None,
