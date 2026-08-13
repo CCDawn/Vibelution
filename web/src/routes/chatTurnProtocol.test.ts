@@ -47,6 +47,28 @@ describe("canonical SessionTurnItem v3 rendering", () => {
     expect(codexTranscriptFromTurnItems([completed]).cells[0]?.id).toBe("tool");
   });
 
+  it("uses the human compression marker title instead of its internal status code", () => {
+    const marker: SessionTurnItem = {
+      ...base,
+      id: "compression-applied:0",
+      itemId: "compression-applied",
+      type: "status",
+      code: "context_compression_applied",
+      title: "上下文已压缩",
+      text: "standard · 节省 5,800 tokens · 自动阈值",
+      status: "completed",
+      revision: 0,
+      sequence: 1,
+      terminal: true,
+    };
+
+    expect(codexTranscriptFromTurnItems([marker]).cells[0]).toMatchObject({
+      kind: "status",
+      title: "上下文已压缩",
+      text: "standard · 节省 5,800 tokens · 自动阈值",
+    });
+  });
+
   it("preserves an exact tool start from an older-sequence live enrichment", () => {
     const cached: SessionTurnItem = {
       ...base, id: "tool-cached", itemId: "tool", type: "tool_call", callId: "call-1",
