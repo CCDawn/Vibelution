@@ -27,6 +27,7 @@ import { DECISION_OUTCOME_IDS } from "./workflowElkPorts";
 import type { WorkflowLayoutEngine } from "./workflowElkClient";
 import { layoutTwoLevel } from "./workflowTwoLevelLayout";
 import { isLayoutSettled } from "./workflowLayoutSettling";
+import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 import {
   structuralWorkflowLayoutHash,
   type WorkflowLayoutHash,
@@ -69,8 +70,9 @@ function designHeight(visualKind: string): number {
 export function useWorkflowAutoLayout(
   graph: WorkflowLayoutInput,
   createEngine: () => WorkflowLayoutEngine,
-  options: { fitAll?: () => void } = {},
+  options: { fitAll?: () => void; layoutMode?: WorkflowCanvasLayoutMode } = {},
 ): UseWorkflowAutoLayoutResult {
+  const layoutMode = options.layoutMode ?? "stage-columns";
   const [engine, setEngine] = useState<WorkflowLayoutEngine | null>(null);
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [degraded, setDegraded] = useState<{ reason: string } | null>(null);
@@ -101,10 +103,14 @@ export function useWorkflowAutoLayout(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const hash = useMemo(
-    () => structuralWorkflowLayoutHash(graph, sizesRef.current),
-    [graph, sizesTick],
-  );
+  const hash = useMemo(() => {
+    const graphHash = structuralWorkflowLayoutHash(graph, sizesRef.current);
+    return {
+      ...graphHash,
+      structure: `${graphHash.structure}|layout:${layoutMode}`,
+      full: `${graphHash.full}|layout:${layoutMode}`,
+    };
+  }, [graph, layoutMode, sizesTick]);
 
   useEffect(() => {
     if (!engine) {
@@ -129,7 +135,7 @@ export function useWorkflowAutoLayout(
     const input = graphRef.current;
     // Measured DOM sizes (P1-5) feed the ELK graph so the calibration pass
     // lays out with real geometry, not the design-contract defaults again.
-    runLayout(input, engine, sizesRef.current)
+    runLayout(input, engine, sizesRef.current, layoutMode)
       .then((result) => {
         if (cancelled || token !== tokenRef.current) {
           return;
@@ -179,7 +185,7 @@ export function useWorkflowAutoLayout(
     return () => {
       cancelled = true;
     };
-  }, [engine, hash, graph]);
+  }, [engine, hash, graph, layoutMode]);
 
   const reportMeasuredSize = useCallback((nodeId: string, size: WorkflowNodeSize) => {
     const previous = sizesRef.current.get(nodeId);
@@ -215,10 +221,11 @@ async function runLayout(
   input: WorkflowLayoutInput,
   engine: WorkflowLayoutEngine,
   sizes?: ReadonlyMap<string, WorkflowNodeSize>,
+  layoutMode: WorkflowCanvasLayoutMode = "stage-columns",
 ): Promise<WorkflowLayoutResult> {
   // Two-level layout: per-stage DOWN + deterministic meta row + gateway
   // cross-stage routing (architecture replaces the single compound graph).
-  return layoutTwoLevel(input, engine, sizes);
+  return layoutTwoLevel(input, engine, sizes, { layoutMode });
 }
 
 /**

@@ -22,6 +22,7 @@ import { DECISION_OUTCOME_IDS } from "./workflowElkPorts";
 import type { StageLocalLayout } from "./workflowStageLayout";
 import type { OuterLayoutResult } from "./workflowOuterElkLayout";
 import type { Rect } from "./workflowLayoutGeometry";
+import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 
 export type ComposerInput = {
   input: WorkflowLayoutInput;
@@ -30,6 +31,7 @@ export type ComposerInput = {
   stageBoxes: Map<string, Rect>;
   portSidesByNode: Map<string, WorkflowLayoutNode["portSides"]>;
   targetHandleByEdge: Map<string, string>;
+  layoutMode?: WorkflowCanvasLayoutMode;
 };
 
 export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
@@ -179,6 +181,16 @@ function withGatewayStubs(
     return sections;
   }
 
+  if (ctx.layoutMode === "serpentine") {
+    return withVerticalGatewayStubs(edge, sections, {
+      sourceTask: srcTask,
+      targetTask: tgtTask,
+      sourceStagePosition: srcPos,
+      targetStagePosition: tgtPos,
+      sourceStageBox: srcBox,
+    });
+  }
+
   const first = sections[0];
   const last = sections[sections.length - 1];
   const srcAnchorY = srcTask.y + srcTask.height / 2;
@@ -254,6 +266,75 @@ function withGatewayStubs(
     return next;
   });
   return [...srcStubs, ...updatedSections, ...tgtStubs];
+}
+
+function withVerticalGatewayStubs(
+  edge: WorkflowLayoutInput["edges"][number],
+  sections: WorkflowLayoutResult["edges"][number]["sections"],
+  geometry: {
+    sourceTask: StageLocalLayout["tasks"][number];
+    targetTask: StageLocalLayout["tasks"][number];
+    sourceStagePosition: { x: number; y: number };
+    targetStagePosition: { x: number; y: number };
+    sourceStageBox: Rect;
+  },
+): WorkflowLayoutResult["edges"][number]["sections"] {
+  const first = sections[0];
+  const last = sections[sections.length - 1];
+  if (!first || !last) return sections;
+
+  const srcAnchorX = geometry.sourceTask.x + geometry.sourceTask.width / 2;
+  const tgtAnchorX = geometry.targetTask.x + geometry.targetTask.width / 2;
+  const srcPort = offset(
+    { x: srcAnchorX, y: geometry.sourceTask.y + geometry.sourceTask.height },
+    geometry.sourceStagePosition,
+  );
+  const srcBorder = offset(
+    { x: srcAnchorX, y: geometry.sourceStageBox.height },
+    geometry.sourceStagePosition,
+  );
+  const tgtBorder = offset({ x: tgtAnchorX, y: 0 }, geometry.targetStagePosition);
+  const tgtPort = offset({ x: tgtAnchorX, y: geometry.targetTask.y }, geometry.targetStagePosition);
+
+  const srcStubs: WorkflowLayoutResult["edges"][number]["sections"] = [
+    section(`${edge.edgeId}_src_exit`, srcPort, srcBorder),
+  ];
+  if (Math.abs(srcBorder.x - first.start.x) > 1e-3) {
+    srcStubs.push(section(`${edge.edgeId}_src_shift`, srcBorder, { x: first.start.x, y: srcBorder.y }));
+  }
+
+  const tgtStubs: WorkflowLayoutResult["edges"][number]["sections"] = [];
+  if (Math.abs(tgtBorder.x - last.end.x) > 1e-3) {
+    tgtStubs.push(section(`${edge.edgeId}_tgt_shift`, { x: last.end.x, y: tgtBorder.y }, tgtBorder));
+  }
+  tgtStubs.push(section(`${edge.edgeId}_tgt_enter`, tgtBorder, tgtPort));
+
+  return linkSections([...srcStubs, ...sections, ...tgtStubs]);
+}
+
+function section(
+  id: string,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): WorkflowLayoutResult["edges"][number]["sections"][number] {
+  return {
+    id,
+    start,
+    end,
+    bendPoints: [],
+    incomingSectionIds: [],
+    outgoingSectionIds: [],
+  };
+}
+
+function linkSections(
+  sections: WorkflowLayoutResult["edges"][number]["sections"],
+): WorkflowLayoutResult["edges"][number]["sections"] {
+  return sections.map((item, index) => ({
+    ...item,
+    incomingSectionIds: index > 0 ? [sections[index - 1]!.id] : [],
+    outgoingSectionIds: index + 1 < sections.length ? [sections[index + 1]!.id] : [],
+  }));
 }
 
 /** Internal edge sections: local sections offset by the outer stage position. */

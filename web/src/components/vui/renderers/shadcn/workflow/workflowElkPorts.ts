@@ -19,6 +19,7 @@ import type {
   WorkflowCanvasNodeInput,
   WorkflowPortSide,
 } from "../../../product/workflow/workflowCanvasTypes";
+import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 
 export type EdgePortSide = WorkflowPortSide;
 
@@ -72,6 +73,22 @@ function outcomeForEdge(edge: WorkflowCanvasEdgeInput): DecisionOutcome {
   );
 }
 
+function standardEdgeSides(options: {
+  crossStage: boolean;
+  layoutMode: WorkflowCanvasLayoutMode;
+  sourceStageIndex: number;
+}): { source: EdgePortSide; target: EdgePortSide } {
+  if (options.layoutMode !== "serpentine") {
+    return options.crossStage
+      ? { source: "EAST", target: "WEST" }
+      : { source: "SOUTH", target: "NORTH" };
+  }
+  if (options.crossStage) return { source: "SOUTH", target: "NORTH" };
+  return options.sourceStageIndex % 2 === 0
+    ? { source: "EAST", target: "WEST" }
+    : { source: "WEST", target: "EAST" };
+}
+
 /**
  * Maps a current-run edge list to (a) per-edge source/target port ids and
  * (b) per-node ordered port specs. Port ids are globally unique; ordering
@@ -80,10 +97,16 @@ function outcomeForEdge(edge: WorkflowCanvasEdgeInput): DecisionOutcome {
 export function resolveElkPorts(options: {
   nodes: FlowNodePortInput[];
   edges: WorkflowCanvasEdgeInput[];
+  stageOrder?: readonly string[];
+  layoutMode?: WorkflowCanvasLayoutMode;
 }): PortResolution {
-  const { nodes, edges } = options;
+  const { nodes, edges, layoutMode = "stage-columns" } = options;
   const nodeById = new Map(nodes.map((n) => [n.nodeId, n] as const));
   const stageOf = new Map(nodes.map((n) => [n.nodeId, n.stageId] as const));
+  const inferredStageOrder = Array.from(new Set(nodes.map((node) => node.stageId)));
+  const stageIndex = new Map(
+    (options.stageOrder ?? inferredStageOrder).map((stageId, index) => [stageId, index] as const),
+  );
 
   const perNode = new Map<string, ElkPortSpec[]>();
   const occ = new Map<string, number>();
@@ -133,15 +156,22 @@ export function resolveElkPorts(options: {
       byEdgeId.set(edge.edgeId, { sourcePortId, targetPortId });
     } else {
       const cross = sourceStage !== targetStage;
+      const index = stageIndex.get(sourceRef.stageId) ?? 0;
+      const { source: sourceSide, target: targetSide } = standardEdgeSides({
+        crossStage: cross,
+        layoutMode,
+        sourceStageIndex: index,
+      });
+      const sideRole = (side: EdgePortSide) => side.toLowerCase();
       const sourcePortId = addPort(
         sourceRef.nodeId,
-        cross ? "out:east" : "out:south",
-        cross ? "EAST" : "SOUTH",
+        `out:${sideRole(sourceSide)}`,
+        sourceSide,
       );
       const targetPortId = addPort(
         targetRef.nodeId,
-        cross ? "in:west" : "in:north",
-        cross ? "WEST" : "NORTH",
+        `in:${sideRole(targetSide)}`,
+        targetSide,
       );
       byEdgeId.set(edge.edgeId, { sourcePortId, targetPortId });
     }
