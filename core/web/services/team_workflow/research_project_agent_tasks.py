@@ -86,6 +86,7 @@ TASK_KIND_CONTRACTS: dict[str, dict[str, Any]] = {
             "只以 protocolReviewInput 中正式 workflow protocol_draft 为协议事实源",
             "逐项给出 dataset、baseline、metric、seed、budget、stop_condition 与 smoke_plan 检查",
             "批准时 blocking_issue_count 与 open_waivers 必须为 0，全部检查必须为 pass",
+            "严格复用 protocolReviewInput.writebackContract 的 snake_case 字段；checks 的值是 pass/fail 字符串，findings 即使为空也必须传 []",
             "通过 challenge_cup_experiment_writeback_tool 的 operation=record_protocol_review 写回",
             "不得把旧实验结果账本、普通文本回答或未写回结论当作协议评审产物",
         ],

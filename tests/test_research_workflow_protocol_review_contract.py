@@ -100,6 +100,22 @@ def test_protocol_review_context_reads_formal_protocol_draft(monkeypatch) -> Non
     assert context["authority"] == "workflow_protocol_draft"
     assert context["workflowRunId"] == "run-1"
     assert context["protocolDraft"]["planId"] == "plan-1"
+    writeback = context["writebackContract"]
+    assert writeback["tool"] == "challenge_cup_experiment_writeback_tool"
+    assert writeback["operation"] == "record_protocol_review"
+    assert writeback["payloadSchema"]["blocking_issue_count"] == (
+        "non-negative integer"
+    )
+    assert writeback["approvedPayloadExample"]["checks"] == {
+        "dataset": "pass",
+        "baseline": "pass",
+        "metric": "pass",
+        "seed": "pass",
+        "budget": "pass",
+        "stop_condition": "pass",
+        "smoke_plan": "pass",
+    }
+    assert writeback["approvedPayloadExample"]["findings"] == []
 
 
 def test_protocol_review_task_context_exposes_formal_input(monkeypatch) -> None:
@@ -142,6 +158,11 @@ def test_protocol_review_task_message_embeds_formal_input(monkeypatch) -> None:
             "authority": "workflow_protocol_draft",
             "workflowRunId": "run-1",
             "protocolDraft": _protocol_draft(),
+            "writebackContract": {
+                "tool": "challenge_cup_experiment_writeback_tool",
+                "operation": "record_protocol_review",
+                "approvedPayloadExample": _review_payload(),
+            },
         },
     )
 
@@ -154,6 +175,9 @@ def test_protocol_review_task_message_embeds_formal_input(monkeypatch) -> None:
     assert '"authority":"workflow_protocol_draft"' in message
     assert '"planId":"plan-1"' in message
     assert "operation=record_protocol_review" in message
+    assert '"blocking_issue_count":0' in message
+    assert '"dataset":"pass"' in message
+    assert '"findings":[]' in message
     assert "旧实验结果账本不得覆盖" in message
 
 
