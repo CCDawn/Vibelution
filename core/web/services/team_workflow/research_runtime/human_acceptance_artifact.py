@@ -38,7 +38,7 @@ def prepare_command_human_acceptance_artifact(
     run: RunRecord,
     request: CommandRequest,
 ) -> PreparedHumanAcceptanceArtifact | None:
-    """Select the knowledge artifact needed by an accept or retry command."""
+    """Select the canonical artifact needed by a human-gate command."""
     task_id = ""
     target_node_id = ""
     if (
@@ -46,11 +46,32 @@ def prepare_command_human_acceptance_artifact(
         and str(request.payload.get("decision") or "") == "accept"
     ):
         task_id = str(request.payload.get("taskId") or "")
+        task_kind = store.read(
+            lambda repo: _human_task_kind(repo, run_id=run.run_id, task_id=task_id)
+        )
+        if task_kind == "gate:protocol_freeze":
+            from .protocol_freeze_artifact import prepare_protocol_freeze_artifact
+
+            return prepare_protocol_freeze_artifact(
+                store=store,
+                run=run,
+                task_id=task_id,
+                resolved_by=str(request.requested_by.actor_id or "").strip(),
+            )
     elif (
         request.command is WorkflowCommandKind.RETRY_NODE
         and request.node_id == "hypothesis_design"
     ):
         target_node_id = "hypothesis_design"
+    elif request.command is WorkflowCommandKind.RECONCILE_RUN:
+        from .protocol_freeze_artifact import prepare_protocol_freeze_artifact
+
+        return prepare_protocol_freeze_artifact(
+            store=store,
+            run=run,
+            target_node_id="smoke_gate",
+            resolved_by=str(request.requested_by.actor_id or "").strip(),
+        )
     else:
         return None
     return prepare_knowledge_handoff_artifact(
@@ -218,6 +239,15 @@ def _find_knowledge_handoff(
         ):
             return str(handoff[0]), str(handoff[3])
     return None
+
+
+def _human_task_kind(repo: Any, *, run_id: str, task_id: str) -> str:
+    if not task_id:
+        return ""
+    task = repo.get_human_task(task_id)
+    if task is None or str(task[1]) != run_id:
+        return ""
+    return str(task[4] or "")
 
 
 def _json_object(raw: str) -> dict[str, Any]:
