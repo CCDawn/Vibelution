@@ -1516,6 +1516,49 @@ def test_responses_stream_exhaustion_after_partial_output_does_not_retry(monkeyp
     assert attempts["count"] == 1
 
 
+def test_chat_reasoning_only_exhaustion_retries_without_exposing_transient_reasoning(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-v4-flash",
+            "llm.profiles.primary.retry_policy.max_attempts": 2,
+        }
+    )
+    attempts = {"count": 0}
+
+    def backend(_payload):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return iter([{"choices": [{"index": 0, "delta": {"reasoning_content": "transient"}}]}])
+        return iter(
+            [
+                {"choices": [{"index": 0, "delta": {"reasoning_content": "recovered"}}]},
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": "answer"},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                },
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._sleep_with_llm_cancel_check", lambda _seconds: None)
+    client = LLMClient(config=config, backend=backend)
+
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert attempts["count"] == 2
+    assert [event.type for event in events] == ["reasoning_delta", "text_delta", "done"]
+    assert events[0].text == "recovered"
+    assert events[1].text == "answer"
+
+
 def test_responses_transport_streams_output_item_done_message_when_no_delta(monkeypatch):
     config = make_config(
         **{

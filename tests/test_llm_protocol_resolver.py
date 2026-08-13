@@ -133,6 +133,40 @@ def test_deepseek_reasoning_contract_selects_reasoning_protocol():
     assert route.compat.reasoning_roundtrip is True
 
 
+@pytest.mark.parametrize(
+    ("model", "explicit_protocol"),
+    [
+        ("deepseek-v4-flash", "openai_chat_tools"),
+        ("deepseek-v4-pro", "tool_chat"),
+    ],
+)
+def test_opencode_go_deepseek_v4_corrects_generic_explicit_protocol(model, explicit_protocol):
+    provider = ProviderConfig(
+        provider_id="opencode_go",
+        kind="opencode",
+        driver="openai",
+        api="chat-completions",
+        base_url="https://opencode.ai/zen/go/v1",
+    )
+    profile = LLMProfile(
+        profile_id="primary",
+        provider_id="opencode_go",
+        model=model,
+        contract="tool_chat",
+        protocol=explicit_protocol,
+        reasoning_effort_values=["low", "medium", "high"],
+        default_reasoning_effort="high",
+        reasoning_effort_adapter="reasoning_effort",
+    )
+
+    route = resolve_model_protocol(profile, provider)
+
+    assert route.protocol == ModelProtocol.DEEPSEEK_REASONING
+    assert route.compat.reasoning_roundtrip is True
+    assert route.source == "provider_model_compat"
+    assert "model_protocol.deepseek_reasoning_required" in route.warnings
+
+
 def test_reasoning_chat_contract_does_not_force_non_deepseek_to_deepseek():
     config = make_config(
         **{

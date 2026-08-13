@@ -168,6 +168,21 @@ def test_chat_stream_exhaustion_without_finish_reason_is_incomplete():
 
     assert decoded.outcome.kind == "incomplete"
     assert decoded.outcome.final_text == ""
+    assert decoded.outcome.error == "stream_exhausted_without_finish_reason"
+
+
+@pytest.mark.parametrize("finish_reason", ["length", "content_filter", "insufficient_system_resource"])
+def test_chat_incomplete_finish_reason_is_preserved(finish_reason):
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [{"choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]}],
+        route=route(),
+        scope=scope(),
+    )
+
+    tuple(decoded)
+
+    assert decoded.outcome.kind == "incomplete"
+    assert decoded.outcome.error == finish_reason
 
 
 def test_chat_tool_started_waits_for_provider_call_id_and_matches_ready_identity():
