@@ -21,6 +21,7 @@ def stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- 资料提炼采用宽松保留：只要有可用内容或有价值线索，就写 `decision=keep` 或 `needs_more_info`，并填写 `valueSummary`、`defects`、`followUpSuggestion`；不要因为缺 DOI/缺全文直接丢弃。",
             "- 资料提炼必须区分来源定位与主张级证据：DOI/URL/论文 ID 只能写入 `sourceRefs[]`；它们只能说明资料在哪里，不能单独证明资料支持某个结论。",
             "- `evidenceRefs[]` 只写页码、PDF 页、段落、章节、引文或受控记录锚点；`claims[]` / `keyFindings[]` / `citations[]` 每项必须包含 `sourceRef`，并至少包含 `page/pageRange/citation/evidenceRef` 之一。",
+            "- 要进入正式 `ClaimEvidenceStore` 的主张，`claims[]` 还必须提供来源中可复核的有界原文 `quote`；`claim` 是归纳主张，不能冒充原文。没有真实 `quote` 时必须保持 `missing_evidence_anchor`，不得为通过门禁改写或补造引文。",
             "- 对摘要或元数据足以支持的范围，可把 `candidates[].evidenceRefs` 中已有的真实锚点原样写入对应 extraction；如果只有 DOI/URL 或摘要定位，保留 `keep/needs_more_info` 决定，但证据状态必须保持 `missing_evidence_anchor`，不得虚构页码、直接引语或全文结论。",
         ]
     if stage_id == "relations":

@@ -187,6 +187,22 @@ def repair_conversation_index_records() -> dict[str, Any]:
             )
     if repaired_conversations:
         s.save_chat_state(s.PROJECT_ROOT, payload)
+        from . import directory_bridge
+
+        repaired_ids = {
+            str(item.get("sessionId") or "").strip()
+            for item in repaired_conversations
+            if str(item.get("sessionId") or "").strip()
+        }
+        directory_bridge.sync_conversation_records(
+            [
+                item
+                for item in conversations
+                if isinstance(item, dict)
+                and str(item.get("conversation_id") or item.get("id") or "").strip()
+                in repaired_ids
+            ]
+        )
 
     if repaired_agents or repaired_conversations:
         s._invalidate_session_list_cache()
@@ -1695,6 +1711,10 @@ def _ensure_agent_directory_conversation_materialized(
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return False
+    from . import directory_runtime
+
+    if directory_runtime.is_legacy_discard_in_progress():
+        return False
     with s._CHAT_STATE_LOCK:
         payload = s.load_chat_state(s.PROJECT_ROOT)
         changed = s._materialize_agent_directory_conversation_locked(
@@ -1731,6 +1751,10 @@ def _ensure_session_conversation_record(
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
+        return False
+    from . import directory_runtime
+
+    if directory_runtime.is_legacy_discard_in_progress():
         return False
     s._ensure_agent_directory_conversation_materialized(
         normalized_session_id,

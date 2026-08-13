@@ -373,3 +373,119 @@ def test_direct_session_collision_repair_upserts_replacement(
     assert len(replacement_ids) == 2
     visible = _session_ids()
     assert replacement_ids <= visible
+
+
+def test_team_agent_session_is_hidden_from_user_directory(
+    isolated_directory_runtime: Path,
+):
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    created = session_service.create_chat_session(
+        title="Challenge cup planner",
+        agent_id="agent-alpha",
+        conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+        activate=True,
+    )
+    session_id = str(created.get("id") or "").strip()
+    assert session_id
+    assert session_id not in _session_ids()
+    assert session_id in _session_ids(include_hidden=True)
+    query_ids = {
+        str(item.get("id") or "")
+        for item in session_service.query_sessions(limit=20).get("items") or []
+    }
+    assert session_id not in query_ids
+    rows = _store_directory_rows(include_hidden=True)
+    match = next(row for row in rows if str(row.get("sessionId") or "") == session_id)
+    assert match.get("conversationIndexKind") == agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    assert match.get("hiddenFromIndex") is True
+
+
+def test_experiment_bound_team_session_stays_visible_in_user_directory(
+    isolated_directory_runtime: Path,
+):
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    created = session_service.create_chat_session(
+        title="Experiment planner",
+        agent_id="agent-alpha",
+        conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+        experiment_binding={
+            "teamId": "research-team",
+            "researchProjectId": "research-alpha",
+            "experimentName": "Alpha experiment",
+            "agentId": "agent-alpha",
+            "roleKey": "planner",
+            "attempt": 1,
+        },
+    )
+    session_id = str(created.get("id") or "").strip()
+    assert session_id
+    assert session_id in _session_ids()
+    rows = _store_directory_rows(include_hidden=True)
+    match = next(row for row in rows if str(row.get("sessionId") or "") == session_id)
+    assert match.get("hiddenFromIndex") is False
+
+
+def test_discard_blocks_materialize_while_bindings_are_cleared(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    _seed_legacy_session(project_root)
+    entered = threading.Event()
+    release = threading.Event()
+    original_clear = directory_runtime._clear_agent_direct_session_bindings
+
+    def paused_clear(root):
+        original_clear(root)
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(directory_runtime, "_clear_agent_direct_session_bindings", paused_clear)
+    status_holder: dict[str, object] = {}
+
+    def run_initialize():
+        status_holder["status"] = directory_runtime.initialize_session_directory_runtime(
+            project_root=project_root
+        )
+
+    init_thread = threading.Thread(target=run_initialize)
+    init_thread.start()
+    assert entered.wait(5)
+    changed = session_service._ensure_agent_directory_conversation_materialized(
+        "legacy-session",
+        source="test_discard_blocks_materialize",
+    )
+    payload = load_chat_state(project_root)
+    chat_ids = {
+        str(item.get("conversation_id") or "")
+        for item in payload.get("conversations") or []
+        if isinstance(item, dict)
+    }
+    release.set()
+    init_thread.join(8)
+    assert not init_thread.is_alive()
+    assert changed is False
+    assert "legacy-session" not in chat_ids
+    assert getattr(status_holder.get("status"), "status", "") == "ready"
+
+
+def test_purge_archives_store_directory_rows(
+    isolated_directory_runtime: Path,
+):
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    created = session_service.create_chat_session(title="Purge me", agent_id="agent-alpha")
+    session_id = str(created.get("id") or "").strip()
+    assert session_id in _session_ids()
+    agent_directory_service.update_agent_instance("agent-alpha", direct_session_id=session_id)
+    agent_directory_service.archive_agent_instance("agent-alpha", repair_mode_bindings=False)
+    session_service.stage_agent_session_purge("agent-alpha", direct_session_id=session_id)
+    assert session_id not in _session_ids(include_hidden=True)
+    rows = _store_directory_rows(include_hidden=True)
+    assert all(str(row.get("sessionId") or "") != session_id for row in rows)

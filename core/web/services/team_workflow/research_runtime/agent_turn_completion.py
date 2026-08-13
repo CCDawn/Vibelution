@@ -214,6 +214,18 @@ def complete_agent_turn_outputs(
             reason="session_turn_completed",
         )
 
+        if action.node_id == "source_extraction":
+            from .agent_claim_evidence_materializer import (
+                materialize_completed_extraction_task,
+            )
+
+            materialize_completed_extraction_task(
+                team_id=team_id,
+                workflow_run_id=str(action.run_id or ""),
+                source_collection_run_id=source_collection_run_id,
+                task_id=task_id,
+            )
+
     return collect_required_artifact_refs(
         action.node_id,
         team_id=team_id,

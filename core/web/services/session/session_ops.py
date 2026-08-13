@@ -830,6 +830,9 @@ def _remove_replacement_direct_session_after_failed_agent_reset(
         payload["conversations"] = remaining
         s.save_chat_state(s.PROJECT_ROOT, payload)
     s._invalidate_session_list_cache()
+    from . import directory_bridge
+
+    directory_bridge.archive_directory_session_safe(normalized_session_id)
     s._record_session_delete_event(
         "agent_reset_replacement_rolled_back",
         session_id=normalized_session_id,
