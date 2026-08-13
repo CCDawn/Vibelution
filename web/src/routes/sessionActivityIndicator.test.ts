@@ -32,8 +32,25 @@ describe("sessionActivityIndicator", () => {
     expect(resolveAgentActivityTone(["completed", "running"])).toBe("running");
   });
 
+  it("does not treat historical ready sessions as unread completed", () => {
+    expect(resolveSessionActivityTone({
+      id: "s-ready",
+      status: "ready",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    })).toBe("none");
+  });
+
+  it("shows unread completed when a previously read ready session gets a new stamp", () => {
+    const previous = { id: "s-ready", status: "ready", updatedAt: "t1" };
+    markSessionActivitySeen(previous.id, sessionActivityStamp(previous));
+    const updated = { id: "s-ready", status: "ready", updatedAt: "t2" };
+    expect(resolveSessionActivityTone(updated)).toBe("completed");
+    markSessionActivitySeen(updated.id, sessionActivityStamp(updated));
+    expect(resolveSessionActivityTone(updated)).toBe("none");
+  });
+
   it("shows completed until marked seen, then none", () => {
-    const session = { id: "s-done", status: "ready", updatedAt: "2026-01-01T00:00:00.000Z" };
+    const session = { id: "s-done", status: "completed", updatedAt: "2026-01-01T00:00:00.000Z" };
     expect(resolveSessionActivityTone(session)).toBe("completed");
     markSessionActivitySeen(session.id, sessionActivityStamp(session));
     expect(isSessionActivitySeen(session.id, sessionActivityStamp(session))).toBe(true);
@@ -67,7 +84,7 @@ describe("sessionActivityIndicator", () => {
     expect(resolveSessionActivityTone(
       { id: "s-stale", status: "ready", updatedAt: "t1" },
       { isRuntimeRunning: true },
-    )).toBe("completed");
+    )).toBe("none");
     expect(resolveSessionActivityTone(
       { id: "s-stale-done", status: "done", updatedAt: "t1" },
       { isRuntimeRunning: true },
