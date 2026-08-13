@@ -4,10 +4,10 @@ import {
 
 const styles = {
   root: "relative flex min-w-0 max-w-full items-center",
-  fixedLabel: "inline-flex min-h-7 max-w-[200px] items-center truncate px-1.5 [font-size:var(--vui-font-xs)] font-medium tracking-[-0.01em] text-[var(--fg-tertiary)] max-[719px]:max-w-[120px]",
-  // Compact trigger: model truncates first; effort + chevron stay visible next to send.
-  trigger: "!inline-flex !min-h-7 !h-7 !w-auto !max-w-[min(200px,38vw)] !items-center !gap-1 !rounded-full !border-0 !bg-transparent !px-1.5 !py-0 ![font-size:var(--vui-font-xs)] !font-medium !tracking-[-0.01em] !text-[var(--fg-tertiary)] !shadow-none hover:!bg-[var(--vui-control-muted)] hover:!text-[var(--fg-primary)] focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] data-[open=true]:!bg-[var(--vui-control-muted)] data-[open=true]:!text-[var(--fg-primary)] max-[719px]:!max-w-[min(148px,44vw)]",
-  triggerModel: "min-w-0 truncate",
+  fixedLabel: "inline-flex min-h-7 max-w-full items-center whitespace-nowrap px-1.5 [font-size:var(--vui-font-xs)] font-medium tracking-[-0.01em] text-[var(--fg-tertiary)]",
+  // Model name stays fully visible; shrink only if the whole toolbar is actually overflowing.
+  trigger: "!inline-flex !min-h-7 !h-7 !w-auto !max-w-full !items-center !gap-1 !rounded-full !border-0 !bg-transparent !px-1.5 !py-0 ![font-size:var(--vui-font-xs)] !font-medium !tracking-[-0.01em] !text-[var(--fg-tertiary)] !shadow-none hover:!bg-[var(--vui-control-muted)] hover:!text-[var(--fg-primary)] focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] data-[open=true]:!bg-[var(--vui-control-muted)] data-[open=true]:!text-[var(--fg-primary)]",
+  triggerModel: "min-w-0 whitespace-nowrap",
   triggerSeparator: "shrink-0 opacity-55",
   triggerEffort: "shrink-0 font-semibold text-[var(--fg-secondary)]",
   triggerChevron: "shrink-0 opacity-70 transition-transform duration-150 data-[open=true]:rotate-180",

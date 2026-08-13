@@ -66,6 +66,13 @@ describe("ConversationInferenceControl", () => {
     expect(styles.trigger).toContain("data-[open=true]");
     expect(styles.triggerChevron).toContain("data-[open=true]:rotate-180");
     expect(styles.trigger).toContain("!px-1.5");
+    expect(styles.trigger).toContain("!max-w-full");
+    expect(styles.trigger).not.toContain("max-w-[min(200px");
+    expect(styles.trigger).not.toContain("max-[719px]:!max-w-[min(148px");
+    expect(styles.triggerModel).toContain("whitespace-nowrap");
+    expect(styles.triggerModel).not.toContain("truncate");
+    expect(styles.fixedLabel).toContain("max-w-full");
+    expect(styles.fixedLabel).not.toContain("max-w-[200px]");
     expect(styles.triggerSeparator).toContain("opacity-55");
   });
 

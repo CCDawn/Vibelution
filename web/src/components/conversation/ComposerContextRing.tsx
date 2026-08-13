@@ -111,14 +111,16 @@ export function ComposerContextRing({
           <VButton
             type="button"
             variant="ghost"
+            isIconOnly
             contentLayout="plain"
             className={styles.trigger}
             title={ringTitle}
             aria-label={ringTitle}
+            data-chrome="bare"
             data-empty={model.empty ? "true" : "false"}
             data-session={sessionId || undefined}
           >
-            <svg className={styles.ring} viewBox="0 0 32 32" aria-hidden="true" overflow="visible">
+            <svg className={styles.ring} viewBox="0 0 32 32" aria-hidden="true">
               <circle
                 cx="16"
                 cy="16"
