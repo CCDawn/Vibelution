@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -140,6 +141,49 @@ def test_snapshot_rebuilds_deterministically_from_ledger(tmp_path: Path) -> None
             assert forbidden not in json.dumps(payload)
     finally:
         harness.close()
+
+
+def test_snapshot_prefers_live_attempt_over_stale_run_pointer() -> None:
+    run = replace(
+        build_run_record(run_id="run-human-gate"),
+        status="waiting_human",
+        active_node_id="protocol_review",
+    )
+    attempts = (
+        build_attempt_record(
+            node_run_id="nr-run-human-gate-protocol_review-a4",
+            run_id=run.run_id,
+            node_id="protocol_review",
+            attempt=4,
+            status="succeeded",
+            command_id="cmd-review",
+        ),
+        build_attempt_record(
+            node_run_id="nr-run-human-gate-protocol_freeze-a1",
+            run_id=run.run_id,
+            node_id="protocol_freeze",
+            attempt=1,
+            status="waiting_human",
+            command_id="cmd-freeze",
+        ),
+    )
+
+    snapshot = build_research_workflow_snapshot(
+        ProjectionInputs(
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=attempts,
+            pending_human_tasks=(),
+            handoffs=(),
+            budget_receipts=(),
+            command_offers=(),
+            latest_event_sequence=4,
+            generated_at=FIXED_GENERATED_AT,
+        )
+    )
+
+    assert snapshot.active_node_ids == ("protocol_freeze",)
+    assert snapshot.run.active_node_id == "protocol_freeze"
 
 
 def test_snapshot_query_is_zero_write(tmp_path: Path) -> None:
