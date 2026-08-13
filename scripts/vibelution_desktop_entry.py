@@ -285,6 +285,71 @@ def _pid_alive(pid: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
+def _managed_launcher_process_snapshot_matches(
+    snapshot: dict[str, object],
+    *,
+    port: int,
+    workspace_root: Path,
+) -> bool:
+    name = str(snapshot.get("name") or "").strip().lower()
+    if name not in {"python.exe", "pythonw.exe"}:
+        return False
+    try:
+        process_cwd = Path(str(snapshot.get("cwd") or "")).resolve()
+        requested_root = workspace_root.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    if process_cwd != requested_root:
+        return False
+    cmdline = snapshot.get("cmdline")
+    if not isinstance(cmdline, (list, tuple)):
+        return False
+    args = [str(item).strip() for item in cmdline]
+    command_text = " ".join(args).lower()
+    if "core.launcher.app:app" not in command_text or "--managed-launcher-control" not in args:
+        return False
+    try:
+        port_index = args.index("--port")
+    except ValueError:
+        return False
+    return port_index + 1 < len(args) and args[port_index + 1] == str(int(port))
+
+
+def _managed_launcher_listener_pid(port: int, workspace_root: Path) -> int:
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return 0
+    try:
+        connections = psutil.net_connections(kind="tcp")
+    except Exception:
+        return 0
+    for connection in connections:
+        local_address = getattr(connection, "laddr", None)
+        local_port = int(getattr(local_address, "port", 0) or 0)
+        if local_port != int(port) or str(getattr(connection, "status", "")).upper() != "LISTEN":
+            continue
+        pid = int(getattr(connection, "pid", 0) or 0)
+        if pid <= 0:
+            continue
+        try:
+            process = psutil.Process(pid)
+            snapshot = {
+                "name": process.name(),
+                "cwd": process.cwd(),
+                "cmdline": process.cmdline(),
+            }
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            continue
+        if _managed_launcher_process_snapshot_matches(
+            snapshot,
+            port=port,
+            workspace_root=workspace_root,
+        ):
+            return pid
+    return 0
+
+
 def _terminate_pid(pid: int) -> None:
     if pid <= 0 or not _pid_alive(pid):
         return
@@ -990,14 +1055,27 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
     before = _read_state()
     before_pid = int(before.get("launcherBackendPid") or 0)
     attach_healthy_launcher = bool(getattr(args, "attach_healthy_launcher", False))
+    attached_existing = False
     port = _launcher_control_port()
     if attach_healthy_launcher and _launcher_control_healthy(port):
-        _assert_managed_launcher_attachment(before, args=args, port=port)
-        after = before
+        attached_pid = _assert_managed_launcher_attachment(before, args=args, port=port)
+        attached_existing = True
+        after = dict(before)
+        if attached_pid != before_pid:
+            after["launcherBackendPid"] = attached_pid
+            after["launcherBackendLaunchPid"] = attached_pid
+            _write_state(after)
+            _append_log(
+                "desktop_entry_python.backend.attachment_pid_recovered",
+                level="warning",
+                port=port,
+                backend_pid=attached_pid,
+                reason="shared_state_pid_missing",
+            )
         _append_log(
             "desktop_entry_python.backend.attached_managed_healthy",
             port=port,
-            backend_pid=before_pid,
+            backend_pid=attached_pid,
             reason="electron_bootstrap",
             source_signature_policy="ignored_for_attach",
         )
@@ -1006,7 +1084,7 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
         after = _read_state()
     backend_pid = int(after.get("launcherBackendPid") or 0)
     port = int(after.get("launcherControlPort") or _launcher_control_port())
-    mode = _launcher_bootstrap_mode(before_pid=before_pid, backend_pid=backend_pid)
+    mode = "attached" if attached_existing else _launcher_bootstrap_mode(before_pid=before_pid, backend_pid=backend_pid)
     ready = _launcher_control_healthy(port)
     return {
         "schemaVersion": 1,
@@ -1036,7 +1114,7 @@ def _assert_managed_launcher_attachment(
     *,
     args: argparse.Namespace,
     port: int,
-) -> None:
+) -> int:
     backend_pid = int(state.get("launcherBackendPid") or 0)
     state_port = int(state.get("launcherControlPort") or 0)
     adapter = str(state.get("launcherAdapter") or "").strip()
@@ -1046,10 +1124,14 @@ def _assert_managed_launcher_attachment(
         raise RuntimeError("Healthy Launcher control port is not owned by a supported managed adapter.")
     if state_port != int(port):
         raise RuntimeError("Healthy Launcher control port does not match the managed Launcher state.")
-    if backend_pid <= 0 or not _pid_alive(backend_pid):
-        raise RuntimeError("Healthy Launcher control port has no live managed backend PID.")
     if not state_root or Path(state_root).resolve() != requested_root:
         raise RuntimeError("Healthy Launcher control port does not belong to this workspace.")
+    if backend_pid > 0 and _pid_alive(backend_pid):
+        return backend_pid
+    recovered_pid = _managed_launcher_listener_pid(port, requested_root)
+    if recovered_pid <= 0:
+        raise RuntimeError("Healthy Launcher control port has no live managed backend PID.")
+    return recovered_pid
 
 
 def _launcher_bootstrap_mode(*, before_pid: int, backend_pid: int) -> str:

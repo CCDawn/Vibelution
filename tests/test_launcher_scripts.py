@@ -2574,6 +2574,81 @@ def test_desktop_entry_bootstrap_json_reports_attached_or_started(monkeypatch, t
     assert "workbench_close.transaction.v1" in payload["capabilities"]
 
 
+def test_desktop_entry_bootstrap_repairs_managed_listener_pid_lost_from_shared_state(monkeypatch, tmp_path, capsys):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "launcherBackendPid": 0,
+        "launcherBackendLaunchPid": 0,
+        "launcherAdapter": "python_headless",
+        "launcherControlPort": 8765,
+        "runtimeProjectRoot": str(tmp_path),
+        "sessionId": "launcher-session-1",
+        "workspaceId": "workspace-1",
+        "url": "http://127.0.0.1:8002",
+    }
+    saved_states: list[dict[str, object]] = []
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: saved_states.append(dict(next_state)))
+    monkeypatch.setattr(bridge, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: True)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(bridge, "_managed_launcher_listener_pid", lambda port, workspace_root: 35496)
+
+    result = bridge.main(
+        [
+            "--action",
+            "bootstrap",
+            "--output",
+            "json",
+            "--workspace",
+            str(tmp_path),
+            "--config",
+            "C:/operator/config.toml",
+            "--no-browser",
+            "--attach-healthy-launcher",
+        ]
+    )
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "attached"
+    assert payload["launcherBackendPid"] == 35496
+    assert saved_states[-1]["launcherBackendPid"] == 35496
+    assert saved_states[-1]["launcherBackendLaunchPid"] == 35496
+
+
+def test_managed_launcher_process_snapshot_fails_closed_for_unrelated_listener(tmp_path):
+    bridge = _load_desktop_entry_py()
+
+    assert bridge._managed_launcher_process_snapshot_matches(
+        {
+            "name": "pythonw.exe",
+            "cwd": str(tmp_path),
+            "cmdline": [
+                str(tmp_path / ".venv" / "Scripts" / "pythonw.exe"),
+                "-c",
+                "import uvicorn; uvicorn.run('core.launcher.app:app', host='127.0.0.1', port=8765)",
+                "--managed-launcher-control",
+                "--port",
+                "8765",
+            ],
+        },
+        port=8765,
+        workspace_root=tmp_path,
+    )
+    assert not bridge._managed_launcher_process_snapshot_matches(
+        {
+            "name": "pythonw.exe",
+            "cwd": str(tmp_path),
+            "cmdline": ["pythonw.exe", "-m", "http.server", "8765"],
+        },
+        port=8765,
+        workspace_root=tmp_path,
+    )
+
+
 def test_desktop_entry_stop_owned_launcher_terminates_matching_state_pids(monkeypatch, capsys):
     bridge = _load_desktop_entry_py()
     state = {
