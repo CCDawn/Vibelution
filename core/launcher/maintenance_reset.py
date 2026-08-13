@@ -20,9 +20,12 @@ from core.infrastructure import developer_sandbox
 from core.runtime_manager.scene_logging import append_runtime_manager_file_event
 from core.ui.chat_state import build_chat_state, chat_state_path, save_chat_state
 from core.web.services.i18n import get_web_language, text_for
+from vibelution_storage import resolve_project_logs_home, resolve_project_runtime_home
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_RUNTIME_ROOT = resolve_project_runtime_home(PROJECT_ROOT)
+PROJECT_LOG_ROOT = resolve_project_logs_home(PROJECT_ROOT)
 MAX_PREVIEW_PATHS = 120
 MAX_SUMMARY_SCAN_ITEMS = 80_000
 MAX_SUMMARY_FAST_SCAN_ITEMS = 5_000
@@ -30,7 +33,7 @@ RUNNING_SCENE_STATUSES = {"running", "starting", "queued", "stopping"}
 MEMORY_DB_TABLES = ("LongTermMemory", "TaskLog", "ErrorArchive", "CodebaseKnowledge")
 MAINTENANCE_PLAN_SCHEMA_VERSION = 1
 MAINTENANCE_PLAN_TTL_MINUTES = 30
-MAINTENANCE_PLAN_DIR = PROJECT_ROOT / ".runtime" / "launcher" / "maintenance-reset-plans"
+MAINTENANCE_PLAN_DIR = PROJECT_RUNTIME_ROOT / "launcher" / "maintenance-reset-plans"
 LauncherMaintenanceProfile = Literal["custom", "clean_start", "factory_runtime"]
 SAFE_RUNTIME_CLEAN_ITEM_IDS = (
     "conversation_logs",
@@ -1231,8 +1234,8 @@ def _execute_chat_history(candidate: ResetCandidate) -> ResetActionResult:
 
 def _collect_conversation_logs() -> list[ResetCandidate]:
     roots = [
-        PROJECT_ROOT / "logs" / "conversations",
-        PROJECT_ROOT / "logs" / "debug",
+        PROJECT_LOG_ROOT / "conversations",
+        PROJECT_LOG_ROOT / "debug",
         PROJECT_ROOT / "log_info",
     ]
     candidates: list[ResetCandidate] = []
@@ -1251,7 +1254,7 @@ def _collect_conversation_logs() -> list[ResetCandidate]:
 
 def _collect_diagnostic_payloads() -> list[ResetCandidate]:
     paths = [
-        PROJECT_ROOT / "logs" / "conversations" / "payloads",
+        PROJECT_LOG_ROOT / "conversations" / "payloads",
         PROJECT_ROOT / "log_info" / "payloads",
         PROJECT_ROOT / "log_info" / "harness_reports",
     ]
@@ -1261,7 +1264,7 @@ def _collect_diagnostic_payloads() -> list[ResetCandidate]:
 
 
 def _collect_runtime_logs() -> list[ResetCandidate]:
-    root = PROJECT_ROOT / "logs"
+    root = PROJECT_LOG_ROOT
     if not root.exists():
         return [_candidate_for_path(root, kind="directory", missing=True)]
     candidates: list[ResetCandidate] = []
@@ -1278,7 +1281,7 @@ def _collect_runtime_logs() -> list[ResetCandidate]:
 
 
 def _collect_stopped_runtime_scenes() -> list[ResetCandidate]:
-    root = PROJECT_ROOT / "logs" / "runtime_scenes"
+    root = PROJECT_LOG_ROOT / "runtime_scenes"
     if not root.exists():
         return [_candidate_for_path(root, kind="directory", missing=True)]
     active_scene_dir = _current_runtime_scene_dir()
@@ -1314,12 +1317,12 @@ def _collect_stopped_runtime_scenes() -> list[ResetCandidate]:
 
 
 def _collect_runtime_manager_results() -> list[ResetCandidate]:
-    path = PROJECT_ROOT / ".runtime" / "runtime-manager" / "results"
+    path = PROJECT_RUNTIME_ROOT / "runtime-manager" / "results"
     return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
 
 
 def _collect_browser_profiles() -> list[ResetCandidate]:
-    runtime_root = PROJECT_ROOT / ".runtime"
+    runtime_root = PROJECT_RUNTIME_ROOT
     if not runtime_root.exists():
         return [_candidate_for_path(runtime_root, kind="directory", missing=True)]
     current_profile = _current_browser_profile_dir()
@@ -1392,7 +1395,7 @@ def _collect_temp_artifacts() -> list[ResetCandidate]:
         for path in workspace.glob("tmp-*"):
             if path.exists():
                 candidates.append(_candidate_for_path(path, kind="directory" if path.is_dir() else "file"))
-    runtime_root = PROJECT_ROOT / ".runtime"
+    runtime_root = PROJECT_RUNTIME_ROOT
     if runtime_root.exists():
         for pattern in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.html", "*.htm", "*.log", "*.txt"):
             for path in runtime_root.glob(pattern):
@@ -1427,7 +1430,7 @@ def _collect_root_temp_artifacts() -> list[ResetCandidate]:
 
 
 def _collect_runtime_preview_artifacts() -> list[ResetCandidate]:
-    runtime_root = PROJECT_ROOT / ".runtime"
+    runtime_root = PROJECT_RUNTIME_ROOT
     if not runtime_root.exists():
         return [_candidate_for_path(runtime_root, kind="directory", missing=True)]
     current_profile = _current_browser_profile_dir()
@@ -1819,7 +1822,7 @@ def _runtime_scene_status(scene_dir: Path) -> str:
 
 
 def _launcher_state() -> dict[str, Any]:
-    path = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
+    path = PROJECT_RUNTIME_ROOT / "launcher" / "state.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
@@ -1835,7 +1838,7 @@ def _current_runtime_scene_dir() -> Path | None:
         path = Path(raw).resolve()
     except OSError:
         return None
-    root = (PROJECT_ROOT / "logs" / "runtime_scenes").resolve()
+    root = (PROJECT_LOG_ROOT / "runtime_scenes").resolve()
     if not _is_relative_to(path, root):
         return None
     return path if path.exists() else None
@@ -1849,7 +1852,7 @@ def _current_browser_profile_dir() -> Path | None:
         path = Path(raw).resolve()
     except OSError:
         return None
-    runtime_root = (PROJECT_ROOT / ".runtime").resolve()
+    runtime_root = PROJECT_RUNTIME_ROOT.resolve()
     if not _is_relative_to(path, runtime_root):
         return None
     return path if path.exists() else None

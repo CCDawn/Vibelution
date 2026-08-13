@@ -11,7 +11,8 @@
 Launcher → Runtime Manager → FastAPI (core/web) + agent.py turn
                           → React Workbench (web/)
 Config: Documents\Vibelution\config\config.toml   (ADR0003)
-Evidence: logs/runtime_scenes/
+State: %LOCALAPPDATA%\Vibelution\projects\<projectId>\instances\<instanceId>\
+Evidence: <active-state>\logs\runtime_scenes\
 Turn SSOT: turn_journal.jsonl → SessionTurnItem 投影
 ```
 

@@ -17,6 +17,7 @@ from core.infrastructure.codex_cli_sandbox import (
     write_codex_sandbox_terminal_stdin,
 )
 from scripts.evolution_harness import HarnessResult
+from vibelution_storage import resolve_project_runtime_home
 
 
 CANDIDATE_RUNTIME_PROTOCOL_VERSION = 1
@@ -172,9 +173,7 @@ def _candidate_runtime_events(result: HarnessResult) -> list[dict[str, Any]]:
 
 
 def _runtime_input_path(candidate_path: Path) -> Path:
-    runtime_dir = (candidate_path / ".runtime" / "supervised-candidate-runtime").resolve()
-    if not runtime_dir.is_relative_to(candidate_path):
-        raise CandidateRuntimeExecutionError("Candidate runtime input path escaped the candidate worktree.")
+    runtime_dir = (resolve_project_runtime_home(candidate_path) / "supervised-candidate-runtime").resolve()
     runtime_dir.mkdir(parents=True, exist_ok=True)
     return runtime_dir / f"{uuid.uuid4().hex}.json"
 

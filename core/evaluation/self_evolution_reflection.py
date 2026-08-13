@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from core.gym.models import utcnow_iso
 from core.infrastructure.workspace_manager import get_workspace
+from vibelution_storage import resolve_project_workspace_home
 
 
 REFLECTION_ROOT = Path("self_evolution/reflection")
@@ -46,7 +47,7 @@ def _workspace_root(project_root: Optional[Path] = None) -> Path:
     if project_root is None:
         return get_workspace().root.resolve()
     root = Path(project_root).resolve()
-    return root if root.name.lower() == "workspace" else root / "workspace"
+    return root if root.name.lower() == "workspace" else resolve_project_workspace_home(root)
 
 
 def build_bounded_self_evolution_reflection(experience: dict[str, Any]) -> dict[str, Any]:

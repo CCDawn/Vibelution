@@ -7,6 +7,7 @@ from pathlib import Path
 
 import tomllib
 from .paths import ensure_global_config_initialized, resolve_config_path
+from vibelution_storage import ProjectIdentityError, resolve_active_project_storage_paths
 
 
 DEFAULT_WORKBENCH_HOST = "127.0.0.1"
@@ -55,7 +56,11 @@ def _project_local_backend_port() -> int | None:
 
     from config.paths import PROJECT_ROOT
 
-    ports_path = PROJECT_ROOT / ".runtime" / "launcher" / "ports.json"
+    try:
+        runtime_root = resolve_active_project_storage_paths(PROJECT_ROOT).runtime
+    except ProjectIdentityError:
+        runtime_root = PROJECT_ROOT / ".runtime"
+    ports_path = runtime_root / "launcher" / "ports.json"
     try:
         raw = json.loads(ports_path.read_text(encoding="utf-8"))
     except (OSError, TypeError, ValueError):

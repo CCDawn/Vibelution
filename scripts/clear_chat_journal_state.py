@@ -15,6 +15,7 @@ from typing import Any
 
 from core.infrastructure import developer_sandbox
 from core.ui.chat_state import build_chat_state, chat_state_path, save_chat_state
+from vibelution_storage import resolve_project_runtime_home
 
 
 def clear_chat_journal_state(project_root: Path, *, confirm_delete: bool) -> dict[str, Any]:
@@ -50,7 +51,7 @@ def clear_chat_journal_state(project_root: Path, *, confirm_delete: bool) -> dic
 def _cleanup_targets(project_root: Path) -> list[Path]:
     workspace_sessions = developer_sandbox.sandboxed_workspace_path(project_root, "sessions")
     formal_sessions = developer_sandbox.formal_workspace_path(project_root, "sessions")
-    runtime_root = project_root / ".runtime" / "cli_agents"
+    runtime_root = resolve_project_runtime_home(project_root) / "cli_agents"
     raw_targets = [
         workspace_sessions,
         formal_sessions,
@@ -77,6 +78,8 @@ def _safe_runtime_target(project_root: Path, target: Path) -> Path:
     allowed_roots = [
         developer_sandbox.formal_workspace_path(resolved_root),
         resolved_root / "workspace",
+        resolve_project_runtime_home(resolved_root) / "cli_agents",
+        resolve_project_runtime_home(resolved_root) / "developer-mode" / "sandboxes",
         resolved_root / ".runtime" / "cli_agents",
         resolved_root / ".runtime" / "developer-mode" / "sandboxes",
     ]

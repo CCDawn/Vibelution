@@ -25,7 +25,13 @@ from typing import Iterator
 import tomllib
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vibelution_storage import resolve_active_project_storage_paths, resolve_project_runtime_home
+
+PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
+RUNTIME_DIR = PROJECT_STORAGE.runtime / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
 PYTHON_BRIDGE_LOG_PATH = RUNTIME_DIR / "desktop-entry-python.log"
 LAUNCHER_STDOUT_PATH = RUNTIME_DIR / "launcher-backend.stdout.log"
@@ -159,7 +165,7 @@ def _env_port(names: tuple[str, ...]) -> int | None:
 def _project_local_backend_port() -> int | None:
     """Read checkout-local port assignment written by the launcher on multi-project conflict."""
 
-    ports_path = PROJECT_ROOT / ".runtime" / "launcher" / "ports.json"
+    ports_path = resolve_project_runtime_home(PROJECT_ROOT) / "launcher" / "ports.json"
     try:
         raw = json.loads(ports_path.read_text(encoding="utf-8"))
     except (OSError, TypeError, ValueError, json.JSONDecodeError):

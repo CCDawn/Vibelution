@@ -18,6 +18,7 @@ from core.infrastructure import developer_sandbox
 from core.infrastructure.git_process import run_git
 from core.runtime_manager.constants import PROJECT_ROOT
 from core.runtime_manager.scene_logging import append_runtime_manager_file_event
+from vibelution_storage import resolve_project_runtime_home
 
 
 DeveloperCleanupAction = Literal["quick_clean", "db_compact", "worktree_cleanup"]
@@ -26,7 +27,7 @@ DEVELOPER_MODE_SCHEMA_VERSION = 1
 PLAN_SCHEMA_VERSION = 1
 PLAN_TTL_MINUTES = 30
 WORKTREE_SNAPSHOT_KEEP_LATEST = 50
-DEVELOPER_MODE_PLAN_DIR = PROJECT_ROOT / ".runtime" / "launcher" / "developer-mode-plans"
+DEVELOPER_MODE_PLAN_DIR = resolve_project_runtime_home(PROJECT_ROOT) / "launcher" / "developer-mode-plans"
 QUICK_CLEAN_DIR_NAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".vitest"}
 QUICK_CLEAN_EXCLUDED_DIRS = {
     ".git",
@@ -132,8 +133,8 @@ def get_noise_overview(*, config_path: Path | None = None, project_root: Path | 
     root = _project_root(project_root)
     quick_targets = _quick_clean_targets(root)
     worktree_targets, worktree_skipped = _worktree_cleanup_candidates(root)
-    db_path = root / "workspace" / "agent_brain.db"
-    daemon_log_path = root / ".runtime" / "runtime-manager" / "daemon.out.log"
+    db_path = developer_sandbox.formal_workspace_path(root, "agent_brain.db")
+    daemon_log_path = resolve_project_runtime_home(root) / "runtime-manager" / "daemon.out.log"
     items = [
         _overview_item(
             "git_memory_db",
@@ -414,7 +415,7 @@ def _targets_for_action(action: DeveloperCleanupAction, root: Path) -> tuple[lis
     if action == "quick_clean":
         return _quick_clean_targets(root), []
     if action == "db_compact":
-        db_path = root / "workspace" / "agent_brain.db"
+        db_path = developer_sandbox.formal_workspace_path(root, "agent_brain.db")
         if not db_path.is_file():
             return [], [{"path": str(db_path), "reason": "agent_brain.db 不存在"}]
         return [_target_payload(db_path, root=root, operation="prune_worktree_snapshots_vacuum")], []
@@ -719,7 +720,7 @@ def _apply_targets(plan: dict[str, Any], root: Path) -> list[dict[str, Any]]:
 
 
 def _apply_db_compact(root: Path, target: dict[str, Any]) -> dict[str, Any]:
-    db_path = root / "workspace" / "agent_brain.db"
+    db_path = developer_sandbox.formal_workspace_path(root, "agent_brain.db")
     before_size = _path_size(db_path)
     try:
         from core.infrastructure.git_memory import prune_worktree_snapshots

@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from core.infrastructure.codex_sandbox.platform import host_platform
+from vibelution_storage import ProjectIdentityError, resolve_active_project_storage_paths
 
 CANDIDATE_RUNTIME_ENVIRONMENT_POLICY = "candidate_runtime"
 VIBELUTION_DATA_HOME_ENV = "VIBELUTION_DATA_HOME"
@@ -104,9 +105,7 @@ def sandbox_process_environment(
 ) -> tuple[dict[str, str], Path]:
     """Build the sandbox child environment and its private temp directory."""
     system = (platform or host_platform()).lower()
-    temp_root = (workdir / ".runtime" / "codex-cli").resolve()
-    if not temp_root.is_relative_to(workdir):
-        raise RuntimeError("Codex CLI 沙盒临时目录越出工作区")
+    temp_root = sandbox_temp_root(workdir)
     sandbox_temp = (
         temp_root
         / f"{command_hash}-{os.getpid()}-{time.monotonic_ns()}"
@@ -151,10 +150,13 @@ def sandbox_process_environment(
         environment = scrub_credential_environment(os.environ)
     for name in ("TMP", "TEMP", "TMPDIR"):
         environment[name] = str(sandbox_temp)
-    relative_temp = sandbox_temp.relative_to(workdir).as_posix()
+    try:
+        pytest_temp = sandbox_temp.relative_to(workdir).as_posix()
+    except ValueError:
+        pytest_temp = sandbox_temp.as_posix()
     pytest_options = (
-        f"--basetemp={relative_temp}/pytest "
-        f"-o cache_dir={relative_temp}/pytest-cache"
+        f"--basetemp={pytest_temp}/pytest "
+        f"-o cache_dir={pytest_temp}/pytest-cache"
     )
     existing_pytest_options = str(environment.get("PYTEST_ADDOPTS") or "").strip()
     environment["PYTEST_ADDOPTS"] = " ".join(
@@ -171,3 +173,11 @@ def sandbox_process_environment(
         sandbox_config_home / "config.toml"
     )
     return environment, sandbox_temp
+
+
+def sandbox_temp_root(workdir: Path) -> Path:
+    root = Path(workdir).resolve()
+    try:
+        return (resolve_active_project_storage_paths(root).cache / "codex-cli").resolve()
+    except ProjectIdentityError:
+        return (root / ".runtime" / "codex-cli").resolve()

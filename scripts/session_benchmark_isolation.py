@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,10 @@ from core.ui.chat_state import formal_chat_state_path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vibelution_storage import resolve_project_runtime_home
 DATA_ROOT_SENTINEL = ".vibelution-session-benchmark-root.json"
 DATA_ROOT_SENTINEL_PAYLOAD = {
     "schemaVersion": 1,
@@ -71,7 +76,7 @@ def launcher_mount_roots() -> set[Path]:
         checkout_roots.add(primary_root)
     mounted: set[Path] = set()
     for checkout_root in checkout_roots:
-        state_path = checkout_root / ".runtime" / "launcher" / "state.json"
+        state_path = resolve_project_runtime_home(checkout_root) / "launcher" / "state.json"
         try:
             state = json.loads(state_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError, OSError):
