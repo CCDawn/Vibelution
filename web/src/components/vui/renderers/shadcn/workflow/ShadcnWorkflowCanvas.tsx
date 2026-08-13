@@ -9,6 +9,7 @@
 import {
   Background,
   MarkerType,
+  MiniMap,
   ReactFlow,
   ReactFlowProvider,
   useNodesInitialized,
@@ -37,6 +38,7 @@ import { WorkflowStageRegionNode } from "./WorkflowStageRegionNode";
 import { WorkflowStartEndNode } from "./WorkflowStartEndNode";
 import { WorkflowSystemTaskNode } from "./WorkflowSystemTaskNode";
 import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
+import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 
 export type ShadcnWorkflowCanvasProps = {
   graph: WorkflowLayoutInput;
@@ -51,6 +53,10 @@ export type ShadcnWorkflowCanvasProps = {
   height?: number | string;
   /** When true, show compact status legend. Default true. */
   showLegend?: boolean;
+  /** Stable graph geometry variant; serpentine uses horizontal stage lanes. */
+  layoutMode?: WorkflowCanvasLayoutMode;
+  /** Secondary navigation overview for extendable production canvases. */
+  showMiniMap?: boolean;
 };
 
 type MeasuredNodeProps = {
@@ -145,13 +151,15 @@ function WorkflowCanvasInner({
   className,
   height = "100%",
   showLegend = true,
+  layoutMode = "stage-columns",
+  showMiniMap = false,
 }: ShadcnWorkflowCanvasProps) {
   const rf = useReactFlow();
   const fitAll = useCallback(() => {
     void rf.fitView({ padding: 0.1, duration: 200 });
   }, [rf]);
 
-  const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine);
+  const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine, { layoutMode });
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
   const nodesInitialized = useNodesInitialized();
 
@@ -201,6 +209,11 @@ function WorkflowCanvasInner({
               label: node.label,
               stageTone: node.stageTone,
               stageIndex: stageIndexById.get(node.stageId) ?? 0,
+              taskCount: graph.stages.find((stage) => stage.stageId === node.stageId)?.nodeIds.length ?? 0,
+              completedCount: graph.nodes.filter(
+                (task) => task.stageId === node.stageId && task.status === "succeeded",
+              ).length,
+              layoutMode,
             },
             style: { width: node.width, height: node.height },
             selectable: false,
@@ -233,6 +246,7 @@ function WorkflowCanvasInner({
             portSides: node.portSides,
             sourceHandleIds: node.sourceHandleIds,
             decisionOutcomeIds: node.decisionOutcomeIds,
+            layoutMode,
           },
           style: { width: node.width, height: node.height },
           selectable: true,
@@ -241,7 +255,7 @@ function WorkflowCanvasInner({
           zIndex: 2,
         } satisfies Node;
       }),
-    [layout.nodes, currentSet, selectedNodeId, stageIndexById],
+    [layout.nodes, currentSet, graph.nodes, graph.stages, layoutMode, selectedNodeId, stageIndexById],
   );
 
   const edges: Edge[] = useMemo(
@@ -274,6 +288,7 @@ function WorkflowCanvasInner({
           semanticKind: edge.semanticKind,
           pathState: edge.pathState,
           labelAlwaysVisible: edge.labelAlwaysVisible,
+          gateKind: edge.gateKind,
           sections: edge.sections,
           labelBounds: edge.labelBounds,
         },
@@ -304,6 +319,7 @@ function WorkflowCanvasInner({
       )}
       style={fillHost ? { height: "100%", minHeight: 0 } : { height }}
       data-vui="workflow-canvas"
+      data-layout-mode={layoutMode}
     >
       <div
         className={fillHost ? "absolute inset-0 min-h-0" : "h-full w-full"}
@@ -314,13 +330,15 @@ function WorkflowCanvasInner({
           edges={edges}
           nodeTypes={measuredNodeTypes}
           edgeTypes={edgeTypes}
-          minZoom={0.35}
+          minZoom={layoutMode === "serpentine" ? 0.28 : 0.35}
           maxZoom={1.6}
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable
+          panOnDrag
           panOnScroll
           zoomOnScroll
+          zoomOnPinch
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
           proOptions={{ hideAttribution: true }}
@@ -328,12 +346,36 @@ function WorkflowCanvasInner({
           className={fillHost ? "h-full w-full" : undefined}
           defaultEdgeOptions={{ type: "workflowSemantic" }}
         >
-          <Background gap={20} size={1} color="var(--vui-border, #e4e4e7)" />
+          <Background
+            gap={layoutMode === "serpentine" ? 18 : 20}
+            size={1}
+            color="var(--vui-border, #e4e4e7)"
+          />
           <WorkflowCanvasControls
             runtimeCurrentNodeIds={runtimeCurrentNodeIds}
             onFitAll={fitAll}
           />
           {showLegend ? <WorkflowCanvasLegend /> : null}
+          {showMiniMap ? (
+            <MiniMap
+              pannable
+              zoomable
+              position="bottom-right"
+              ariaLabel="科研流程小地图"
+              className="!h-[96px] !w-[158px] !rounded-xl !border !border-[var(--vui-border-subtle)] !bg-[color-mix(in_srgb,var(--vui-surface-panel)_94%,transparent)] !shadow-sm"
+              maskColor="color-mix(in srgb, var(--vui-surface-workspace) 76%, transparent)"
+              nodeColor={(node) => {
+                if (node.type === "stageRegion") return "color-mix(in srgb, var(--accent-cool) 8%, transparent)";
+                const status = String(node.data?.status ?? "pending");
+                if (status === "failed" || status === "blocked") return "var(--state-error)";
+                if (status === "waiting_human") return "var(--state-warning)";
+                if (status === "running" || status === "ready") return "var(--accent-cool)";
+                if (status === "succeeded") return "var(--fg-tertiary)";
+                return "var(--vui-border-strong)";
+              }}
+              nodeStrokeWidth={2}
+            />
+          ) : null}
         </ReactFlow>
       </div>
       {layout.degraded ? (

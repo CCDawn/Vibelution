@@ -29,12 +29,14 @@ import {
   resolveEdgeLabelAnchor,
   sectionsToSvgPath,
 } from "./workflowElkEdgePath";
+import { workflowEdgeKeepsNarrativeLabel } from "./workflowElkOptions";
 
 export type WorkflowSemanticEdgeData = {
   label?: string;
   semanticKind?: WorkflowEdgeSemanticKind;
   pathState?: WorkflowEdgePathState;
   labelAlwaysVisible?: boolean;
+  gateKind?: string;
   /** Engine-owned ORTHOGONAL route. Absent only on legacy/defensive fixtures. */
   sections?: WorkflowEdgeSection[];
   /** Engine-owned label anchor; without it the label is not rendered. */
@@ -48,6 +50,7 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
   const pathState = edgeData?.pathState ?? "idle";
   const label = String(edgeData?.label ?? "");
   const always = Boolean(edgeData?.labelAlwaysVisible);
+  const gateKind = String(edgeData?.gateKind ?? "");
   const stroke = resolveEdgeStroke(pathState, semanticKind);
 
   const sections = edgeData?.sections;
@@ -66,7 +69,10 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
   // layout and render.
   const labelSpec = useMemo(() => resolveEdgeLabelSpec(label), [label]);
 
-  const showLabel = Boolean(label) && (always || hovered || pathState === "active" || pathState === "attention") && labelAnchor !== null;
+  const semanticTransition = workflowEdgeKeepsNarrativeLabel({ semanticKind, gateKind });
+  const showLabel = Boolean(label)
+    && ((always && semanticTransition) || hovered || pathState === "active" || pathState === "attention")
+    && labelAnchor !== null;
 
   if ((sectionFault || labelFault) && import.meta.env.DEV) {
     // eslint-disable-next-line no-console
@@ -121,6 +127,7 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
             )}
             data-vui="workflow-edge-label"
             data-semantic={semanticKind}
+            data-gate-kind={gateKind || undefined}
             data-path-state={pathState}
             title={labelFault ? undefined : label}
             onMouseEnter={() => setHovered(true)}

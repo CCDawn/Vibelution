@@ -4953,7 +4953,8 @@ class RuntimeManagerDaemon:
             else:
                 build_preflight = _preflight_frontend_build_for_restart(command_id)
             lifecycle_timings_ms["build_preflight_ms"] = _elapsed_monotonic_ms(build_preflight_started)
-        if requested_no_browser and _restart_should_preserve_visible_browser(workbench):
+        initial_observation = observe_workbench()
+        if requested_no_browser and _restart_should_preserve_visible_browser(initial_observation):
             effective_no_browser = False
             _append_event(
                 "workbench.restart.no_browser_overridden",
@@ -4962,16 +4963,16 @@ class RuntimeManagerDaemon:
                     "requestedNoBrowser": True,
                     "effectiveNoBrowser": False,
                     "reason": "preserve_existing_managed_browser_window",
-                    "browserWindowPid": int(workbench.get("browserWindowPid") or 0),
-                    "browserManaged": bool(workbench.get("browserManaged")),
-                    "browserWindowAlive": bool(workbench.get("browserWindowAlive")),
+                    "browserWindowPid": int(initial_observation.get("browserWindowPid") or 0),
+                    "browserManaged": bool(initial_observation.get("browserManaged")),
+                    "browserWindowAlive": bool(initial_observation.get("browserWindowAlive")),
                     "requestedReason": str(args.get("reason") or ""),
                     "requestedSource": str(args.get("source") or ""),
                 },
             )
         close_outcome = self._close_workbench_with_fast_path(
             command_id=command_id,
-            initial_observation=observe_workbench(),
+            initial_observation=initial_observation,
             launcher_failure_message="Closing the workbench for restart failed.",
         )
         lifecycle_timings_ms.update(
