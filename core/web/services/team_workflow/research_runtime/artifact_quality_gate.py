@@ -154,6 +154,10 @@ def validate_artifact_quality(
             portfolio = HypothesisPortfolio.from_dict(payload)
             if portfolio.runId != record["runId"]:
                 raise ArtifactQualityError("hypothesis portfolio runId mismatch")
+            if not portfolio.candidates:
+                raise ArtifactQualityError(
+                    "hypothesis portfolio requires at least one candidate"
+                )
             if any(not candidate.counterEvidenceRefs for candidate in portfolio.candidates):
                 raise ArtifactQualityError(
                     "every hypothesis candidate requires counter-evidence references"

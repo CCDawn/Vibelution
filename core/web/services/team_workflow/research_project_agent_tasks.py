@@ -31,6 +31,22 @@ _SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$")
 _TASK_LOCK = threading.RLock()
 
 TASK_KIND_CONTRACTS: dict[str, dict[str, Any]] = {
+    "hypothesis_design": {
+        "teamRole": "experiment_planner",
+        "roleKey": "challenge_cup_experiment_planner",
+        "roleLabel": "假设设计",
+        "title": "生成受证据约束的可证伪假设集",
+        "objective": (
+            "读取本次工作流已接受的知识包，只基于其中可追溯的证据形成有界、"
+            "可证伪、可审查的假设组合，并通过实验写回工具登记 hypothesis_set。"
+        ),
+        "checklist": [
+            "每个候选假设包含完整评分、状态和至少一条真实反证引用",
+            "反证引用只能来自当前受控知识包给出的 allowedEvidenceRefs",
+            "通过 challenge_cup_experiment_writeback_tool 的 record_hypothesis_set 写回",
+            "本节点到 hypothesis_set 写回即结束，不提前承担后继节点职责",
+        ],
+    },
     "experiment_design": {
         "teamRole": "experiment_planner",
         "roleKey": "challenge_cup_experiment_planner",
@@ -191,6 +207,9 @@ def _normalize_task(value: Any) -> dict[str, Any]:
         ),
         "teamId": _text(payload.get("teamId")),
         "researchProjectId": _text(payload.get("researchProjectId")),
+        "workflowRunId": _text(payload.get("workflowRunId")),
+        "workflowNodeId": _text(payload.get("workflowNodeId"), limit=120),
+        "sourceCollectionRunId": _text(payload.get("sourceCollectionRunId")),
         "experimentName": _text(payload.get("experimentName"), limit=160),
         "targetRef": _text(payload.get("targetRef"), limit=200),
         "agentId": _text(payload.get("agentId")),
@@ -661,7 +680,7 @@ def get_research_project_agent_task_context(
     if task.get("taskKind") == "experiment_evidence_review" and target_ref:
         plans = [item for item in plans if item.get("planId") == target_ref]
     plans = plans[-12:]
-    return {
+    response = {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": _text(team_id),
         "researchProjectId": _text(research_project_id),
@@ -680,6 +699,13 @@ def get_research_project_agent_task_context(
             "rawLogsIncluded": False,
         },
     }
+    if task.get("taskKind") == "hypothesis_design":
+        from .research_project_hypothesis_context import (
+            build_hypothesis_input_context,
+        )
+
+        response["hypothesisInput"] = build_hypothesis_input_context(team_id, task)
+    return response
 
 
 def research_project_iteration_readiness(
@@ -809,6 +835,27 @@ def start_research_project_agent_task(
     )
     agent_id = _text(agent.get("agentId"))
     target_ref = _safe_ref(request_payload.get("targetRef"), field_name="targetRef")
+    workflow_run_id = _safe_ref(
+        request_payload.get("workflowRunId"),
+        field_name="workflowRunId",
+    )
+    workflow_node_id = _safe_ref(
+        request_payload.get("workflowNodeId"),
+        field_name="workflowNodeId",
+    )
+    source_collection_run_id = _safe_ref(
+        request_payload.get("sourceCollectionRunId"),
+        field_name="sourceCollectionRunId",
+    )
+    if task_kind == "hypothesis_design" and (
+        not workflow_run_id
+        or workflow_node_id != "hypothesis_design"
+        or not source_collection_run_id
+    ):
+        raise ResearchProjectAgentTaskError(
+            "Hypothesis design requires exact workflowRunId, workflowNodeId and sourceCollectionRunId scope.",
+            code="missing_workflow_scope",
+        )
     idempotency_key = _text(request_payload.get("idempotencyKey"), limit=240)
     formal_retry = bool(request_payload.get("formalRetry"))
     retry_task_id = _safe_ref(
@@ -922,6 +969,9 @@ def start_research_project_agent_task(
                 "taskTitle": contract["title"],
                 "teamId": normalized_team_id,
                 "researchProjectId": normalized_project_id,
+                "workflowRunId": workflow_run_id,
+                "workflowNodeId": workflow_node_id,
+                "sourceCollectionRunId": source_collection_run_id,
                 "experimentName": project.get("name"),
                 "targetRef": target_ref,
                 "agentId": agent_id,
@@ -962,6 +1012,9 @@ def start_research_project_agent_task(
                 "sourceSurface": "team_workflow_project_agent_task",
                 "teamId": normalized_team_id,
                 "researchProjectId": normalized_project_id,
+                "workflowRunId": workflow_run_id,
+                "workflowNodeId": workflow_node_id,
+                "sourceCollectionRunId": source_collection_run_id,
                 "experimentName": task["experimentName"],
                 "taskId": task_id,
                 "taskKind": task_kind,
