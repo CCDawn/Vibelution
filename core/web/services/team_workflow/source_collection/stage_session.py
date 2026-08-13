@@ -350,10 +350,6 @@ def start_source_collection_stage_session_task(
     if not agent_id:
         raise s.TeamWorkflowOrchestrationError("Agent id is required for source collection stage session task.")
 
-    agent = s.agent_directory_service.get_agent(agent_id)
-    if not isinstance(agent, dict):
-        raise s.TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
-
     run_bundle = s._source_collection_run_context_bundle(normalized_team_id, normalized_run_id)
     run = run_bundle["run"]
     assignments = run_bundle["assignments"]
@@ -506,6 +502,14 @@ def start_source_collection_stage_session_task(
                     agent_role=agent_role,
                 ),
             }
+
+    # The canonical stage task/session/turn is the idempotency authority for a
+    # replay.  Only a genuinely new task needs a fresh Agent-directory lookup;
+    # otherwise a transient directory refresh can turn a healthy running turn
+    # into a false terminal "Agent not found" failure.
+    agent = s.agent_directory_service.get_agent(agent_id)
+    if not isinstance(agent, dict):
+        raise s.TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
 
     dialogue_model_id = s.agent_directory_service.agent_dialogue_model_id(agent)
     try:
