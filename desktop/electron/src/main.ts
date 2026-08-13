@@ -27,6 +27,7 @@ import {
 } from "./notifications/conversationNotifications.js";
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
+import { applyProjectSlot } from "./protocol/applyProjectSlot.js";
 import {
   fetchLauncherBranchInstances,
   fetchLauncherFreshness,
@@ -132,6 +133,7 @@ const desktopSessionMutations = new DesktopSessionMutationQueue();
 let conversationNotificationService: ConversationNotificationService | null = null;
 const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
 let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench;
+let pendingProjectRoot = desktopCliArgs.projectRoot;
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
 let pendingWorkbenchCloseAck: PendingWorkbenchCloseAck | null = null;
 let electronStartupStage = "electron_process_ready";
@@ -1522,6 +1524,33 @@ function requestOpenWorkbench(): void {
   });
 }
 
+async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
+  const wanted = projectRoot.trim();
+  if (!wanted) {
+    return;
+  }
+  const provider = windowProvider;
+  if (provider === null || launcherBootstrap === null) {
+    pendingProjectRoot = wanted;
+    return;
+  }
+  pendingProjectRoot = "";
+  try {
+    const context = await resolveTrayLauncherControlContext();
+    const result = await applyProjectSlot({
+      projectRoot: wanted,
+      launcherOrigin: context.launcherOrigin,
+      controlToken: context.controlToken
+    });
+    currentWorkbenchUrl = result.url;
+    markWorkbenchOpenRequested();
+    await provider.openOrFocusWorkbench(result.url);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `应用工作区失败：${detail.slice(0, 300)}`, "warning");
+  }
+}
+
 app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
@@ -1623,6 +1652,9 @@ app.whenReady()
       await handlePublicDeepLinkUrl(rawUrl, "startup");
     }
     await flushPendingPublicDeepLinks();
+    if (pendingProjectRoot) {
+      await applyPendingProjectSlot(pendingProjectRoot);
+    }
     if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary) {
       pendingOpenWorkbenchRequest = false;
       electronStartupStage = "workbench_window_ready";
@@ -1634,7 +1666,7 @@ app.whenReady()
       return;
     }
     startDesktopActionLoop(paths, launcherBootstrap, windowProvider);
-    if (!desktopCliArgs.openWorkbench) {
+    if (!desktopCliArgs.openWorkbench && !desktopCliArgs.projectRoot) {
       scheduleTelemetryWithoutWaiting(() =>
         recordElectronStartupSummaryOnce(launcherBootstrap, {
           outcome: "succeeded",
@@ -1665,7 +1697,12 @@ app.on("second-instance", (_event, argv) => {
     void handlePublicDeepLinkUrl(rawUrl, "second_instance");
     return;
   }
-  if (parseDesktopCliArgs(argv).openWorkbench) {
+  const secondCli = parseDesktopCliArgs(argv);
+  if (secondCli.projectRoot) {
+    void applyPendingProjectSlot(secondCli.projectRoot);
+    return;
+  }
+  if (secondCli.openWorkbench) {
     requestOpenWorkbench();
     return;
   }
