@@ -1,7 +1,6 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, LoaderCircle, Play, RefreshCw } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -46,11 +45,7 @@ import {
 } from "../app/projectCloseGuard";
 import { useStableBeforeUnload } from "../app/useStableBeforeUnload";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VDenseOpsPage, VStateSurface, VTooltip } from "../components/vui";
-import {
-  VWorkbenchPowerMenu,
-  type VWorkbenchPowerMenuAction,
-} from "../components/vui/product/workbench-shell";
+import { VDenseOpsPage, VStateSurface, VTooltip } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
@@ -936,7 +931,7 @@ export function LauncherRoute() {
     ? {
         eyebrow: "Launcher",
         title: "项目启动器",
-        subtitle: "统一控制前端、后端和浏览器生命周期",
+        subtitle: "分支实例是本页主内容；启动、停止和电源由 Electron 托盘管理",
         refresh: "刷新",
         start: "启动",
         stop: "停止",
@@ -1198,7 +1193,7 @@ export function LauncherRoute() {
     : {
         eyebrow: "Launcher",
         title: "Project Launcher",
-        subtitle: "Control frontend, backend, and browser as one lifecycle bundle",
+        subtitle: "Branch instances are the main content; Electron tray owns start, stop, and power",
         refresh: "Refresh",
         start: "Start",
         stop: "Stop",
@@ -2301,73 +2296,6 @@ export function LauncherRoute() {
       ariaLabel={copy.title}
       eyebrow={copy.eyebrow}
       title={copy.title}
-      actions={(
-        <div className={styles.statusBar}>
-          <VTooltip content={statusBarBlockerReason} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">
-            <div className={styles.statusBarReason} data-tone={userGuideTone} tabIndex={0}>
-              <span>{copy.lifecycleStatus}</span>
-              <strong>{projectSummary}</strong>
-              {selectedIsCurrent && (activeWorkCount > 0 || restartQueueActive || launcherControlLimited || launcherStatusDisconnected) ? <small>{statusBarReasonText}</small> : null}
-            </div>
-          </VTooltip>
-          <div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>
-            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => void statusQuery.refetch()} isDisabled={statusQuery.isFetching} disabledReason={copy.loading} tooltip={copy.refresh} icon={statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
-              <span>{copy.refresh}</span>
-            </VButton>
-            <VButton type="button" variant="primary" className={`${styles.statusBarButton} ${styles.primaryButton}`} onPress={() => controlMutation.mutate("start")} isDisabled={startDisabled} disabledReason={startDisabledReason} tooltip={copy.start} icon={<Play size={15} />}>
-              <span>{copy.start}</span>
-            </VButton>
-            <VWorkbenchPowerMenu
-              variant="labeled"
-              labels={{
-                menu: copy.powerMenu,
-                restart: copy.restart,
-                stop: copy.stopWorkbench,
-                forceStop: copy.forceStop,
-              }}
-              disabled={busy}
-              disabledReason={busy ? copy.startDisabledBusy : undefined}
-              restartDisabled={destructiveActionDisabled}
-              stopDisabled={stopDisabled}
-              forceStopDisabled={forceStopDisabled}
-              restartDisabledReason={destructiveActionDisabledReason}
-              stopDisabledReason={stopDisabledReason}
-              forceStopDisabledReason={forceStopDisabledReason}
-              showForceStop
-              triggerClassName={styles.statusBarButton}
-              contentClassName="vui-app-appshell lifecycleMenuPanel min-w-0"
-              itemClassName="vui-app-appshell lifecycleMenuItem min-w-0"
-              dangerItemClassName="vui-app-appshell lifecycleMenuDangerItem min-w-0"
-              onBlockedAction={(_action, reason) => {
-                setNotice({
-                  tone: "warning",
-                  text: reason,
-                  source: "lifecycle-control",
-                });
-              }}
-              onAction={(action: VWorkbenchPowerMenuAction) => {
-                if (action === "restart") {
-                  controlMutation.mutate("restart");
-                  return;
-                }
-                if (action === "stop") {
-                  controlMutation.mutate("stop");
-                  return;
-                }
-                controlMutation.mutate("force-stop");
-              }}
-            />
-            {(selectedIsCurrent ? bundle?.url : (selectedBranch?.url || (selectedBranch && selectedBranch.port > 0 ? `http://127.0.0.1:${selectedBranch.port}` : ""))) ? (
-              <VTooltip content={copy.open} width="compact">
-                <a className={styles.statusBarButton} href={selectedIsCurrent ? String(bundle?.url || "") : String(selectedBranch?.url || (selectedBranch && selectedBranch.port > 0 ? `http://127.0.0.1:${selectedBranch.port}` : ""))} target="_blank" rel="noreferrer">
-                  <ExternalLink size={15} />
-                  <span>{copy.open}</span>
-                </a>
-              </VTooltip>
-            ) : null}
-          </div>
-        </div>
-      )}
     >
       <LauncherBranchInstancesPanel
         copy={copy}

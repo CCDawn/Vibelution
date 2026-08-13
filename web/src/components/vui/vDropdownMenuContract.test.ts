@@ -33,9 +33,10 @@ describe("VDropdownMenu contract", () => {
     expect(session).not.toContain('role="menuitem"');
   });
 
-  it("keeps lifecycle management in Launcher and removes the duplicate AppShell power menu", () => {
+  it("keeps project power off AppShell and the Launcher page", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
     const launcher = readFileSync(resolve(vuiRoot, "../../routes/LauncherRoute.tsx"), "utf8");
+    const tray = readFileSync(resolve(vuiRoot, "../../../../desktop/electron/src/tray/desktopTray.ts"), "utf8");
     const powerMenu = readFileSync(
       resolve(vuiRoot, "product/workbench-shell/VWorkbenchPowerMenu.tsx"),
       "utf8",
@@ -51,16 +52,19 @@ describe("VDropdownMenu contract", () => {
     expect(shell).not.toContain("VWorkbenchPowerMenu");
     expect(shell).not.toContain("lifecycleMenuRef");
     expect(shell).not.toContain('role="menuitem"');
-    expect(launcher).toContain("VWorkbenchPowerMenu");
-    expect(launcher).toContain('variant="labeled"');
-    // No parallel status-bar restart/stop/force buttons outside the unified menu.
+    expect(launcher).not.toContain("VWorkbenchPowerMenu");
+    expect(launcher).not.toContain("statusBarActions");
+    expect(launcher).not.toContain('controlMutation.mutate("start")');
     expect(launcher).not.toContain('onPress={() => controlMutation.mutate("restart")}');
     expect(launcher).not.toContain('onPress={() => controlMutation.mutate("stop")}');
     expect(launcher).not.toContain('onPress={() => controlMutation.mutate("force-stop")}');
-    // Launcher remains the lifecycle management owner.
     expect(launcher).toContain('useWorkbenchLifecycleActions("launcher_route")');
     expect(lifecycleActions).toContain("requestWorkbenchLifecycleOperation");
     expect(lifecycleActions).toContain("app_shell_shutdown_button");
     expect(lifecycleActions).toContain("launcher_route_stop_button");
+    expect(tray).toContain("startProject:");
+    expect(tray).toContain("stopProject:");
+    expect(tray).toContain("restartProject:");
+    expect(tray).toContain("stopAll:");
   });
 });
