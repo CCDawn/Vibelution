@@ -91,6 +91,7 @@ describe("runDesktopActionOnce", () => {
       controlToken: "token",
       desktopSessionId: "desktop-session-1",
       leaseSeconds: 30,
+      waitMs: 1750,
       fetchImpl,
       operations: {
         openOrFocusWorkbench: async () => {
@@ -122,7 +123,8 @@ describe("runDesktopActionOnce", () => {
     ]);
     expect(JSON.parse(String(requests[0].init.body))).toEqual({
       desktopSessionId: "desktop-session-1",
-      leaseSeconds: 30
+      leaseSeconds: 30,
+      waitMs: 1750
     });
     expect(JSON.parse(String(requests[1].init.body))).toEqual({
       desktopSessionId: "desktop-session-1",

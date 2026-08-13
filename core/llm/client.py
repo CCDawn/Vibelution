@@ -28,7 +28,7 @@ from .payload_builder import PayloadBuildInput, compose_runtime_wire_payload
 from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
 from .protocol_resolver import ProtocolResolutionError, resolve_model_protocol
-from .protocols import WireProtocol
+from .protocols import ModelProtocol, WireProtocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
 from .responses_websocket import (
     RESPONSES_WEBSOCKET_TRANSPORT_KEY,
@@ -42,6 +42,7 @@ from .types import LLMCapabilities, LLMError, LLMProtocolEvent, StreamChunk, Too
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import cache_usage_observation_from_payload, usage_stats_from_payload, usage_to_dict
 from .wire.registry import build_default_wire_adapter_registry
+from .wire.chat_completions import STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
 from .wire.responses import STREAM_EXHAUSTED_WITHOUT_TERMINAL
 
 
@@ -63,6 +64,14 @@ _PROXY_ENV_CONDITION = threading.Condition(threading.RLock())
 _PROXY_ENV_STATE = {"readers": 0, "writer": False}
 PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
 _CANONICAL_WIRE_ADAPTERS = build_default_wire_adapter_registry()
+
+
+def _is_retryable_stream_exhaustion(outcome: TurnOutcome, *, allow_chat: bool = False) -> bool:
+    if outcome.kind != "incomplete":
+        return False
+    if outcome.error == STREAM_EXHAUSTED_WITHOUT_TERMINAL:
+        return True
+    return allow_chat and outcome.error == STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
 
 
 def _safe_semantic_projection_snapshot(messages: List[Any]) -> Dict[str, Any]:
@@ -2742,6 +2751,16 @@ class LLMClient:
             nonlocal emitted, turn_outcome
             iterator: Any = None
             normalized_iterator: Any = None
+            pending_reasoning: list[StreamChunk] = []
+
+            def flush_pending_reasoning() -> Iterator[StreamChunk]:
+                nonlocal emitted
+                buffered = tuple(pending_reasoning)
+                pending_reasoning.clear()
+                for chunk in buffered:
+                    emitted = True
+                    yield chunk
+
             with _llm_provider_proxy_env(self.config, payload.get("base_url")):
                 iterator = self._open_provider_stream(payload)
                 wire_adapter = self._required_wire_adapter()
@@ -2812,12 +2831,16 @@ class LLMClient:
                                         ),
                                     }
                                 )
-                            if projected is not None:
+                            if projected is not None and projected.type == "reasoning_delta":
+                                pending_reasoning.append(projected)
+                            elif projected is not None:
+                                yield from flush_pending_reasoning()
                                 emitted = True
                                 yield projected
                             _raise_if_llm_cancelled()
                         turn_outcome = normalized_iterator.outcome
                         if turn_outcome.tool_calls:
+                            yield from flush_pending_reasoning()
                             emitted = True
                             yield StreamChunk(
                                 type="tool_call_final",
@@ -2831,10 +2854,13 @@ class LLMClient:
                                     for call in turn_outcome.tool_calls
                                 ],
                             )
-                        if not (
-                            turn_outcome.kind == "incomplete"
-                            and turn_outcome.error == STREAM_EXHAUSTED_WITHOUT_TERMINAL
-                        ):
+                        allow_chat_retry = self.protocol_route.protocol == ModelProtocol.DEEPSEEK_REASONING
+                        suppress_transient_done = _is_retryable_stream_exhaustion(
+                            turn_outcome,
+                            allow_chat=allow_chat_retry,
+                        ) and (turn_outcome.error == STREAM_EXHAUSTED_WITHOUT_TERMINAL or not emitted)
+                        if not suppress_transient_done:
+                            yield from flush_pending_reasoning()
                             emitted = True
                             yield StreamChunk(
                                 type="done",
@@ -3200,17 +3226,21 @@ class LLMClient:
                         model=self.profile.model,
                     )
                 self._record_canonical_outcome(canonical_outcome, phase="stream")
-                if (
-                    canonical_outcome.kind == "incomplete"
-                    and canonical_outcome.error == STREAM_EXHAUSTED_WITHOUT_TERMINAL
-                ):
+                chat_partial_output = (
+                    canonical_outcome.error == STREAM_EXHAUSTED_WITHOUT_FINISH_REASON and emitted
+                )
+                allow_chat_retry = self.protocol_route.protocol == ModelProtocol.DEEPSEEK_REASONING
+                if _is_retryable_stream_exhaustion(
+                    canonical_outcome,
+                    allow_chat=allow_chat_retry,
+                ) and not chat_partial_output:
                     raise LLMError(
                         "server_error",
-                        "Responses stream ended before a canonical terminal event.",
+                        "LLM stream ended before a complete canonical terminal event.",
                         retryable=True,
                         provider=self.provider.kind,
                         model=self.profile.model,
-                        details={"terminal_reason": STREAM_EXHAUSTED_WITHOUT_TERMINAL},
+                        details={"terminal_reason": canonical_outcome.error},
                     )
                 if attempt > 1 and canonical_outcome.kind in {"final_answer", "tool_calls"}:
                     _publish_llm_status_event(
