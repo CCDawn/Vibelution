@@ -11,8 +11,11 @@ type LauncherStartupSettingsCopy = {
   startupSettings: string;
   runtimeProfile: string;
   launcherControlPort: string;
+  launcherControlPortHint: string;
   backendPort: string;
+  backendPortHint: string;
   frontendPort: string;
+  frontendPortHint: string;
   portOverride: string;
   effectiveValue: string;
   windowMode: string;
@@ -228,13 +231,8 @@ export function LauncherStartupSettingsPanel({
 
   return (
     <div className={styles.settingsStrip} aria-label={copy.startupSettings}>
+      <p className={styles.settingsTitle}>{copy.startupSettings}</p>
       <div className={styles.settingsPrimary}>
-        <VTooltip content={windowModeDetail} width="wide">
-          <div className={styles.settingsHeader} tabIndex={0}>
-            <span>{copy.startupSettings}</span>
-            <strong>{effectiveWindowModeLabel}</strong>
-          </div>
-        </VTooltip>
         <label className={styles.settingField}>
           <span>{copy.runtimeProfile}</span>
           <VStringSelect
@@ -249,7 +247,9 @@ export function LauncherStartupSettingsPanel({
           />
         </label>
         <label className={styles.settingField}>
-          <span>{copy.launcherControlPort}</span>
+          <VTooltip content={copy.launcherControlPortHint} width="wide">
+            <span tabIndex={0}>{copy.launcherControlPort}</span>
+          </VTooltip>
           <VNativeInput
             type="number"
             min={1}
@@ -261,7 +261,9 @@ export function LauncherStartupSettingsPanel({
           {controlOverride ? <small>{copy.effectiveValue}: {controlOverride}</small> : null}
         </label>
         <label className={styles.settingField}>
-          <span>{copy.backendPort}</span>
+          <VTooltip content={copy.backendPortHint} width="wide">
+            <span tabIndex={0}>{copy.backendPort}</span>
+          </VTooltip>
           <VNativeInput
             type="number"
             min={1}
@@ -273,7 +275,9 @@ export function LauncherStartupSettingsPanel({
           {backendOverride ? <small>{copy.effectiveValue}: {backendOverride}</small> : null}
         </label>
         <label className={styles.settingField}>
-          <span>{copy.frontendPort}</span>
+          <VTooltip content={copy.frontendPortHint} width="wide">
+            <span tabIndex={0}>{copy.frontendPort}</span>
+          </VTooltip>
           <VNativeInput
             type="number"
             min={1}
@@ -284,46 +288,53 @@ export function LauncherStartupSettingsPanel({
           />
           {frontendOverride ? <small>{copy.effectiveValue}: {frontendOverride}</small> : null}
         </label>
-        <VTabs
-          density="compact"
-          className={styles.windowModeTabs}
-          listClassName={styles.windowModeTabsList}
-          triggerClassName={styles.windowModeTabsTrigger}
-          aria-label={copy.windowMode}
-          value={draft.workbench.windowMode === "windowed" ? "windowed" : "fullscreen"}
-          onValueChange={(value) => {
-            if (controlsDisabled) {
-              return;
-            }
-            if (value === "fullscreen" || value === "windowed") {
-              saveWindowMode({ windowMode: value });
-            }
-          }}
-          items={[
-            {
-              id: "fullscreen",
-              label: (
-                <span className={styles.windowModeTabLabel}>
-                  {pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
-                  <span>{copy.windowModeFullscreen}</span>
-                </span>
-              ),
-              title: copy.windowModeFullscreen,
-              disabled: controlsDisabled,
-            },
-            {
-              id: "windowed",
-              label: (
-                <span className={styles.windowModeTabLabel}>
-                  {pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Minimize2 size={14} aria-hidden="true" />}
-                  <span>{copy.windowModeWindowed}</span>
-                </span>
-              ),
-              title: copy.windowModeWindowed,
-              disabled: controlsDisabled,
-            },
-          ]}
-        />
+      </div>
+      <div className={styles.settingsWindow}>
+        <div className={styles.settingField}>
+          <VTooltip content={`${effectiveWindowModeLabel} · ${windowModeDetail}`} width="wide">
+            <span tabIndex={0}>{copy.windowMode}</span>
+          </VTooltip>
+          <VTabs
+            density="compact"
+            className={styles.windowModeTabs}
+            listClassName={styles.windowModeTabsList}
+            triggerClassName={styles.windowModeTabsTrigger}
+            aria-label={copy.windowMode}
+            value={draft.workbench.windowMode === "windowed" ? "windowed" : "fullscreen"}
+            onValueChange={(value) => {
+              if (controlsDisabled) {
+                return;
+              }
+              if (value === "fullscreen" || value === "windowed") {
+                saveWindowMode({ windowMode: value });
+              }
+            }}
+            items={[
+              {
+                id: "fullscreen",
+                label: (
+                  <span className={styles.windowModeTabLabel}>
+                    {pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
+                    <span>{copy.windowModeFullscreen}</span>
+                  </span>
+                ),
+                title: copy.windowModeFullscreen,
+                disabled: controlsDisabled,
+              },
+              {
+                id: "windowed",
+                label: (
+                  <span className={styles.windowModeTabLabel}>
+                    {pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Minimize2 size={14} aria-hidden="true" />}
+                    <span>{copy.windowModeWindowed}</span>
+                  </span>
+                ),
+                title: copy.windowModeWindowed,
+                disabled: controlsDisabled,
+              },
+            ]}
+          />
+        </div>
         <label className={styles.settingField}>
           <span>{copy.windowSize}</span>
           <VStringSelect
