@@ -16,7 +16,9 @@ describe("WorkflowNodeInteractionBoundary", () => {
     await act(async () => {
       root.render(
         <WorkflowNodeInteractionBoundary onActivate={onActivate}>
-          <button type="button">协议冻结</button>
+          <button type="button" onClick={(event) => event.stopPropagation()}>
+            协议冻结
+          </button>
         </WorkflowNodeInteractionBoundary>,
       );
     });
