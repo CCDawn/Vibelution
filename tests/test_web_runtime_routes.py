@@ -2161,6 +2161,104 @@ def test_launcher_lifecycle_intent_claim_ack_updates_pending_row(tmp_path, monke
     assert lifecycle_intent_store.claim_desktop_action(desktop_session_id="desktop-session-1", lease_seconds=30) == {}
 
 
+def test_web_launcher_desktop_action_claim_forwards_bounded_wait(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "claim_desktop_action",
+        lambda desktop_session_id, *, lease_seconds=30, wait_ms=0: calls.append(
+            (desktop_session_id, lease_seconds, wait_ms)
+        )
+        or {},
+    )
+
+    response = client.post(
+        "/api/launcher/desktop-actions/claim",
+        json={"desktopSessionId": "desktop-session-1", "leaseSeconds": 30, "waitMs": 1750},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {}
+    assert calls == [("desktop-session-1", 30, 1750)]
+
+
+def test_launcher_lifecycle_intent_long_poll_claims_action_created_while_waiting(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "LIFECYCLE_DB_PATH",
+        tmp_path / "launcher" / "lifecycle.sqlite3",
+    )
+    submitted = False
+
+    def submit_after_first_wait(_seconds: float) -> None:
+        nonlocal submitted
+        if submitted:
+            return
+        submitted = True
+        lifecycle_intent_store.submit_lifecycle_intent(
+            {
+                "action": "focus_workbench",
+                "reason": "wake bounded desktop action poll",
+                "idempotencyKey": "long-poll:focus",
+            },
+            actor_context={
+                "actorType": "desktop_supervisor",
+                "actorId": "desktop-1",
+                "sourceRunId": "",
+                "sourceTaskId": "",
+                "sourceWorktree": "",
+            },
+            active_work_runs=[],
+        )
+
+    monkeypatch.setattr(lifecycle_intent_store.time, "sleep", submit_after_first_wait)
+
+    claimed = lifecycle_intent_store.claim_desktop_action(
+        desktop_session_id="desktop-session-1",
+        lease_seconds=30,
+        wait_ms=100,
+        poll_interval_ms=10,
+    )
+
+    assert submitted is True
+    assert claimed["action"] == "focus_workbench"
+    assert claimed["claimedBy"] == "desktop-session-1"
+
+
+def test_launcher_lifecycle_intent_empty_long_poll_does_not_repeat_write_claims(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    monkeypatch.setattr(
+        lifecycle_intent_store,
+        "LIFECYCLE_DB_PATH",
+        tmp_path / "launcher" / "lifecycle.sqlite3",
+    )
+    monotonic_values = iter([0.0, 0.0, 0.2])
+    monkeypatch.setattr(lifecycle_intent_store.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(lifecycle_intent_store.time, "sleep", lambda _seconds: None)
+    original_claim_once = lifecycle_intent_store._claim_desktop_action_once
+    claim_attempts = 0
+
+    def count_claim_attempts(*args, **kwargs):
+        nonlocal claim_attempts
+        claim_attempts += 1
+        return original_claim_once(*args, **kwargs)
+
+    monkeypatch.setattr(lifecycle_intent_store, "_claim_desktop_action_once", count_claim_attempts)
+
+    assert (
+        lifecycle_intent_store.claim_desktop_action(
+            desktop_session_id="desktop-session-1",
+            wait_ms=100,
+            poll_interval_ms=10,
+        )
+        == {}
+    )
+    assert claim_attempts == 1
+
+
 def test_launcher_lifecycle_intent_rejects_runtime_effects_during_active_work(tmp_path, monkeypatch):
     from core.launcher import lifecycle_intent_store
 

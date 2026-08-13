@@ -80,6 +80,7 @@ class WorkbenchCloseWindowClosedPayload(BaseModel):
 class DesktopActionClaimPayload(BaseModel):
     desktopSessionId: str
     leaseSeconds: int = 30
+    waitMs: int = Field(default=0, ge=0, le=2000)
 
 
 class DesktopActionResultPayload(BaseModel):
