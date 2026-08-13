@@ -149,11 +149,6 @@ export function TeamShellRail({
           </p>
         )}
       </div>
-      <p className="m-0 px-0.5 text-[11px] leading-snug text-[var(--fg-tertiary)]">
-        {lang === "zh"
-          ? "左侧选团队，右侧展示整队内容。拖拽分隔条可调整宽度。"
-          : "Select a team on the left. Drag the separator to resize."}
-      </p>
     </VSurface>
   );
 }

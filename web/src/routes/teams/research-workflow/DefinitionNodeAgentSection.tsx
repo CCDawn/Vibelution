@@ -20,7 +20,7 @@ export function DefinitionNodeAgentSection({
 
   return (
     <section data-vui="definition-node-agent-section">
-      <TeamSourceCollectionStageAgentsPanel lang="zh" agents={[card]} />
+      <TeamSourceCollectionStageAgentsPanel lang="zh" agents={[card]} layout="stacked" />
     </section>
   );
 }
