@@ -295,6 +295,7 @@ export function LauncherBranchInstancesPanel({
             header: copy.instancePath,
             width: 220,
             minWidth: 96,
+            fill: true,
             render: (item) => item.displayPath || "-",
           },
           {

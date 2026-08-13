@@ -2,7 +2,12 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { nextDenseTableColumnWidth, sumDenseTableColumnWidths, VDenseTable } from "./VDenseTable";
+import {
+  nextDenseTableColumnWidth,
+  resolveDenseTableFillColumnId,
+  sumDenseTableColumnWidths,
+  VDenseTable,
+} from "./VDenseTable";
 
 describe("VDenseTable", () => {
   it("aligns headers and cells in one table and exposes column resize handles", () => {
@@ -21,15 +26,40 @@ describe("VDenseTable", () => {
 
     expect(html).toContain("<table");
     expect(html).toContain("<colgroup>");
-    expect(html).toContain("width:240px");
-    expect(html).toContain("min-width:240px");
-    expect(html).toContain("width:160px");
-    expect(html).toContain("width:80px");
-    expect(html).not.toContain("w-full");
+    expect(html).toContain("w-full");
+    expect(html).toContain('style="min-width:240px"');
+    expect(html).toContain('style="width:160px;min-width:160px"');
+    expect(html).toContain('style="width:80px;min-width:80px"');
     expect(html).toContain('role="separator"');
     expect(html).toContain("Resize name");
     expect(html).toContain("Branch");
     expect(html).toContain("main");
+  });
+
+  it("lets a fill column absorb leftover width while the table stretches", () => {
+    const html = renderToStaticMarkup(
+      <VDenseTable
+        ariaLabel="instances"
+        resizable
+        rows={[{ id: "main", path: ".worktrees/task" }]}
+        getRowKey={(row) => row.id}
+        columns={[
+          { id: "path", header: "Path", width: 220, fill: true, render: (row) => row.path },
+          { id: "state", header: "State", width: 80, render: () => "idle" },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("w-full");
+    expect(html).toContain('style="min-width:300px"');
+    expect(html).toContain('data-vui-fill="true"');
+    expect(html).toContain('style="min-width:220px"');
+    expect(html).toContain('style="width:80px;min-width:80px"');
+    expect(html).not.toContain("width:220px;");
+    expect(resolveDenseTableFillColumnId([
+      { id: "path", header: "Path", fill: true, render: () => null },
+      { id: "state", header: "State", render: () => null },
+    ])).toBe("path");
   });
 
   it("keeps existing non-resizable tables without drag handles", () => {

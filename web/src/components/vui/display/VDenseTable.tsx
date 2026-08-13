@@ -3,6 +3,8 @@ import { type KeyboardEvent, type PointerEvent, type ReactNode, useMemo, useStat
 export type VDenseTableColumn<TRow> = {
   align?: "left" | "center" | "right";
   className?: string;
+  /** Absorb leftover width when the resizable table stretches to the container. */
+  fill?: boolean;
   header: ReactNode;
   id: string;
   minWidth?: number;
@@ -46,6 +48,10 @@ export function sumDenseTableColumnWidths(widths: Iterable<number>): number {
   return total;
 }
 
+export function resolveDenseTableFillColumnId<TRow>(columns: Array<VDenseTableColumn<TRow>>): string | undefined {
+  return columns.find((column) => column.fill)?.id;
+}
+
 export function VDenseTable<TRow>({
   ariaLabel,
   className,
@@ -66,6 +72,7 @@ export function VDenseTable<TRow>({
     () => sumDenseTableColumnWidths(columns.map((column) => columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTH)),
     [columnWidths, columns],
   );
+  const fillColumnId = useMemo(() => resolveDenseTableFillColumnId(columns), [columns]);
 
   const startResize = (column: VDenseTableColumn<TRow>, event: PointerEvent<HTMLSpanElement>) => {
     if (!canResizeColumn(column, resizable)) {
@@ -101,7 +108,7 @@ export function VDenseTable<TRow>({
       data-vui-resizable={resizable ? "true" : undefined}
       aria-label={ariaLabel}
       className={[
-        "min-w-0 rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
+        "min-w-0 w-full rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
         resizable ? "overflow-x-auto" : "overflow-hidden",
         className,
       ]
@@ -109,16 +116,17 @@ export function VDenseTable<TRow>({
         .join(" ")}
     >
       <table
-        className={[
-          "table-fixed border-collapse text-left",
-          resizable ? "max-w-none" : "w-full",
-        ].join(" ")}
-        style={resizable ? { width: tableWidth, minWidth: tableWidth } : undefined}
+        className="w-full table-fixed border-collapse text-left"
+        style={resizable ? { minWidth: tableWidth } : undefined}
       >
         {resizable ? (
           <colgroup>
             {columns.map((column) => (
-              <col key={column.id} style={{ width: `${columnWidths[column.id]}px`, minWidth: `${columnWidths[column.id]}px` }} />
+              <col
+                key={column.id}
+                data-vui-fill={column.id === fillColumnId ? "true" : undefined}
+                style={columnColStyle(columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTH, column.id === fillColumnId)}
+              />
             ))}
           </colgroup>
         ) : null}
@@ -213,6 +221,13 @@ export function VDenseTable<TRow>({
 
 function initialColumnWidths<TRow>(columns: Array<VDenseTableColumn<TRow>>): Record<string, number> {
   return Object.fromEntries(columns.map((column) => [column.id, column.width ?? DEFAULT_COLUMN_WIDTH]));
+}
+
+function columnColStyle(width: number, fill: boolean): { minWidth: string; width?: string } {
+  if (fill) {
+    return { minWidth: `${width}px` };
+  }
+  return { width: `${width}px`, minWidth: `${width}px` };
 }
 
 function canResizeColumn<TRow>(column: VDenseTableColumn<TRow>, tableResizable: boolean): boolean {

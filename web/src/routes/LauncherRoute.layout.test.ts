@@ -53,6 +53,7 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelSource).toContain("from \"../components/vui\"");
     expect(branchInstancesPanelSource).toContain("from \"../components/vui\"");
     expect(branchInstancesPanelStyles.statusTable).toBeTypeOf("string");
+    expect(branchInstancesPanelStyles.statusTable).toContain("w-full");
     expect(developerModePanelSource).toContain('from "./LauncherDeveloperModePanel.styles"');
     expect(diagnosticsPanelSource).toContain('from "./LauncherDiagnosticsPanel.styles"');
     expect(projectMaintenancePanelSource).toContain('from "./LauncherProjectMaintenancePanel.styles"');
