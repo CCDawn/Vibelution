@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Mapping
 
 from config.public_config import load_public_config
 from core.infrastructure.feature_gate import resolve_feature_decision
+
+logger = logging.getLogger(__name__)
 
 _RUNTIME_STATUS_ENABLED_OVERRIDE: ContextVar[bool | None] = ContextVar(
     "runtime_status_enabled_override",
@@ -64,7 +67,8 @@ def is_runtime_status_enabled(
     if config is None:
         try:
             config = load_public_config()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to load public config for runtime_status flag; falling back to defaults. error=%s", exc)
             config = {}
 
     override = _RUNTIME_STATUS_ENABLED_OVERRIDE.get()

@@ -14,6 +14,7 @@ Phase 2 核心模块
 
 from __future__ import annotations
 
+import logging
 import os
 import json
 from pathlib import Path
@@ -23,6 +24,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from dataclasses import asdict
 
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # 数据结构
@@ -649,8 +651,8 @@ class ToolTracker:
         try:
             with open(self._stats_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to save tool tracker stats to %s: %s", self._stats_file, exc)
 
     def clear_stats(self) -> None:
         """清除所有统计数据"""

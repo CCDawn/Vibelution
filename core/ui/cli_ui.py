@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -40,8 +41,8 @@ from rich.text import Text
 from rich.tree import Tree
 
 from core.pet_system import get_pet_system as get_pet
-from core.infrastructure.tool_intents import (
-    humanize_reading_task,
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
+from core.infrastructure.tool_intents import (    humanize_reading_task,
 )
 from core.logging import debug as _debug_logger
 from core.ui.ascii_art import get_avatar_manager
@@ -371,8 +372,15 @@ class UIManager:
             _debug_logger.warning("Failed to request terminal resize via ANSI escape sequence.")
         if os.name == "nt":
             try:
-                exit_code = os.system(f"mode con: cols={cols} lines={rows} > nul")
-                resized = resized or exit_code == 0
+                completed = subprocess.run(
+                    ["mode", f"con: cols={cols} lines={rows}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                    **no_window_subprocess_kwargs(),
+                )
+                resized = resized or completed.returncode == 0
             except Exception as exc:
                 _debug_logger.warning(f"Failed to request terminal resize via Windows mode command. error={exc}")
         return resized
