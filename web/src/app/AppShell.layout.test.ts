@@ -297,7 +297,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("syncWorkbenchThemeRoot(theme)");
     expect(shellSource).toContain("useEffect(() => syncWorkbenchThemeRoot(theme), [theme])");
     expect(launcherShellSource).toContain("applyWorkbenchDocumentTheme(document, theme)");
-    expect(launcherShellSource).toContain("}, [lang, theme])");
+    expect(launcherShellSource).toContain("}, [lang, theme, launcherWindowTitle])");
   });
 
   it("can hide the web top bar while keeping a restore control", () => {

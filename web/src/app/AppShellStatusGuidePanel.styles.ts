@@ -5,7 +5,7 @@ const styles = {
   lifecycleProofCard:
     "vui-app-appshell lifecycleProofCard grid min-w-0 gap-2 !border-0 !bg-transparent !p-0 !shadow-none",
   lifecycleProofHeader:
-    "vui-app-appshell lifecycleProofHeader min-w-0 [&_h4]:text-[var(--vui-font-sm)] [&_h4]:font-semibold",
+    "vui-app-appshell lifecycleProofHeader min-w-0 [&_h4]:[font-size:var(--vui-font-sm)] [&_h4]:font-semibold",
   lifecycleProofItem: `vui-app-appshell lifecycleProofItem flex min-w-0 items-center justify-between gap-2 ${vuiOpaqueRowClass} p-2`,
   lifecycleProofList: "vui-app-appshell lifecycleProofList grid min-w-0 min-h-0 content-start gap-1.5 overflow-auto",
   lifecycleProofMeta: "vui-app-appshell lifecycleProofMeta min-w-0",
@@ -16,7 +16,7 @@ const styles = {
   statusGuideCardHeader: "vui-app-appshell statusGuideCardHeader flex min-w-0 items-center gap-1.5",
   statusGuideGrid: "vui-app-appshell statusGuideGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   statusGuideHeader:
-    "vui-app-appshell statusGuideHeader min-w-0 [&_h3]:text-[var(--vui-font-sm)] [&_h3]:font-semibold",
+    "vui-app-appshell statusGuideHeader min-w-0 [&_h3]:[font-size:var(--vui-font-sm)] [&_h3]:font-semibold",
   statusGuideList: "vui-app-appshell statusGuideList grid min-w-0 min-h-0 content-start gap-1 overflow-auto",
   statusGuideListItem:
     "vui-app-appshell statusGuideListItem min-w-0 list-none rounded-[var(--radius-control)] p-0.5 data-[current=true]:ring-1 data-[current=true]:ring-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)]",

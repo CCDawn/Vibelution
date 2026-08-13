@@ -41,7 +41,7 @@ describe("workbenchLayoutIds", () => {
       { file: "routes/SupervisedReviewRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.supervisedReview" },
       { file: "routes/EvolutionRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.evolution" },
       { file: "routes/SelfEvolutionTrack.tsx", token: "WORKBENCH_LAYOUT_IDS.evolutionSelf" },
-      { file: "routes/chat/ChatCodingRouteWorkbench.tsx", token: "WORKBENCH_LAYOUT_IDS.chat" },
+      { file: "routes/chat/ChatSessionWorkbenchShell.tsx", token: "WORKBENCH_LAYOUT_IDS.chat" },
       { file: "routes/RuntimeScenesPane.tsx", token: "WORKBENCH_LAYOUT_IDS.logsRuntimeScenes" },
     ];
 

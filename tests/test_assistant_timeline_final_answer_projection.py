@@ -464,6 +464,100 @@ def test_turn_items_projection_merges_thought_when_journal_has_answer_only(monke
     assert transcript["cells"][0]["text"] == thought
 
 
+def test_turn_items_projection_appends_new_reasoning_segment_after_prior_tool(monkeypatch) -> None:
+    session_id = "session-segment-order"
+    turn_id = "turn-segment-order"
+    message_id = "message-segment-order"
+    base_id = session_service._session_turn_item_base_id(session_id, turn_id)
+    canonical = [
+        {
+            "itemId": f"{base_id}-reasoning-1",
+            "type": "reasoning",
+            "kind": "reasoning",
+            "status": "completed",
+            "text": "先检查日志。",
+            "sequence": 10,
+            "revision": 2,
+        },
+        {
+            "itemId": "commentary-1",
+            "type": "commentary",
+            "kind": "commentary",
+            "channel": "commentary",
+            "phase": "commentary",
+            "status": "completed",
+            "text": "日志已读取，继续检查投影。",
+            "sequence": 11,
+            "revision": 0,
+        },
+        {
+            "itemId": "tool-1",
+            "type": "tool_call",
+            "kind": "tool_call",
+            "status": "completed",
+            "callId": "call-read-log",
+            "toolName": "read_log",
+            "sequence": 12,
+            "revision": 0,
+        },
+    ]
+    transcript = {
+        "cells": [
+            {
+                "id": f"{message_id}-feedback-1",
+                "sourceItemId": f"{message_id}-feedback-1",
+                "kind": "reasoning_summary",
+                "status": "completed",
+                "text": "先检查日志。",
+                "sequence": 1,
+                "revision": 2,
+            },
+            {
+                "id": "tool-cell",
+                "kind": "tool_call",
+                "status": "completed",
+                "callId": "call-read-log",
+                "sequence": 2,
+            },
+            {
+                "id": f"{message_id}-feedback-3",
+                "sourceItemId": f"{message_id}-feedback-3",
+                "kind": "reasoning_summary",
+                "status": "running",
+                "text": "再检查投影顺序。",
+                "sequence": 3,
+                "revision": 1,
+            },
+        ]
+    }
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", lambda _session_id: [])
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [dict(item) for item in canonical],
+    )
+
+    items = session_service._build_session_turn_items_projection(
+        session_id=session_id,
+        turn_id=turn_id,
+        message_id=message_id,
+        thought="先检查日志。再检查投影顺序。",
+        codex_transcript=transcript,
+        done=False,
+        source="session_live_overlay",
+        stage="model_thinking",
+    )
+
+    assert [(item["type"], item.get("text")) for item in items] == [
+        ("reasoning", "先检查日志。"),
+        ("agent_message", "日志已读取，继续检查投影。"),
+        ("tool_call", None),
+        ("reasoning", "再检查投影顺序。"),
+    ]
+    assert items[-1]["itemId"].endswith("-reasoning-3")
+    assert items[-1]["status"] == "running"
+
+
 def test_turn_items_projection_extends_provisional_final_with_faster_content(monkeypatch) -> None:
     provisional = {
         "version": 2,
