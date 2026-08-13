@@ -36,7 +36,9 @@ def list_sessions(
     started_at = s._perf_counter()
     from . import directory_bridge, directory_runtime
 
-    if directory_runtime.wait_for_directory_startup() == "starting":
+    if directory_runtime.wait_for_directory_startup(
+        timeout=directory_runtime.LIST_QUERY_STARTUP_WAIT_SECONDS,
+    ) == "starting":
         return []
     s._sync_agent_directory_project_root()
     signature = (s._session_list_source_signature(), bool(include_hidden_internal))

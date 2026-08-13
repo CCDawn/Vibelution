@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -80,6 +81,42 @@ def test_overlay_uses_live_current_ports_and_registry_reservations(registry_path
     assert other["dataHome"] != current["dataHome"]
 
 
+def test_overlay_copies_live_window_pid_for_isolated_rows(registry_path):
+    registry.upsert_instance(
+        "worktree:task",
+        projectRoot=r"C:\repo\.worktrees\task",
+        port=8003,
+        controlPort=8768,
+        url="http://127.0.0.1:8003",
+        windowPid=os.getpid(),
+        windowTitle="branch+task 台",
+    )
+    payload = {
+        "items": [
+            {"id": "main", "kind": "main", "path": r"C:\repo", "current": True, "port": 0},
+            {
+                "id": "worktree:task",
+                "kind": "worktree",
+                "path": r"C:\repo\.worktrees\task",
+                "current": False,
+                "port": 0,
+                "pids": {"backend": 0, "window": 0, "manager": 0},
+            },
+        ]
+    }
+
+    overlayed = lifecycle.overlay_instance_ports(
+        payload,
+        launcher_state={
+            "launcherControlPort": 8765,
+            "workbench": {"backendPort": 8000, "url": "http://127.0.0.1:8000"},
+        },
+    )
+
+    _current, other = overlayed["items"]
+    assert other["pids"]["window"] == os.getpid()
+
+
 def test_retired_and_local_branch_cannot_start():
     with pytest.raises(lifecycle.BranchInstanceLifecycleError) as retired:
         lifecycle.assert_instance_operable(_item(kind="retired", checkedOut=False), "start")
@@ -113,7 +150,7 @@ def test_isolated_start_allocates_ports_and_spawns_without_touching_current(regi
     assert response["mode"] == "isolated_worktree"
     assert response["port"] == 8001
     assert response["controlPort"] == 8766
-    assert calls == [(worktree, "start", 8001, 8766, {})]
+    assert calls == [(worktree, "start", 8001, 8766, {"short_name": ""})]
     stored = registry.get_instance("worktree:task")
     assert stored["status"] == "running"
     assert stored["port"] == 8001
@@ -172,6 +209,7 @@ def test_spawn_uses_pythonw_and_hidden_console(tmp_path, monkeypatch):
     assert captured["command"][0].lower().endswith("pythonw.exe")
     assert captured["command"][1].endswith("vibelution_launcher.py")
     assert captured["command"][2:6] == ["--action", "start", "--port", "8002"]
+    assert captured["command"][-1] == "--no-browser"
     assert captured["kwargs"]["cwd"] == str(worktree)
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "8002"
     assert captured["kwargs"]["env"]["VIBELUTION_LAUNCHER_PORT"] == "8767"
@@ -246,3 +284,91 @@ def test_standalone_launcher_maps_not_startable_to_409(monkeypatch):
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "instance_not_startable"
+
+
+def test_isolated_start_records_named_window_pid(registry_path, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: {8000, 8765})
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    (worktree / "scripts").mkdir()
+    (worktree / "scripts" / "vibelution_launcher.py").write_text("# launcher\n", encoding="utf-8")
+    monkeypatch.setattr(
+        lifecycle,
+        "open_isolated_workbench_window",
+        lambda item, **kwargs: {
+            "provider": "electron",
+            "windowPid": 4242,
+            "title": "branch+task 台",
+        },
+    )
+
+    response = lifecycle.run_isolated_operation(
+        _item(path=str(worktree), shortName="branch+task", workbenchTitle="branch+task 台"),
+        "start",
+        runner=lambda *args, **kwargs: {"returncode": 0},
+    )
+
+    stored = registry.get_instance("worktree:task")
+    assert response["accepted"] is True
+    assert stored["windowPid"] == 4242
+    assert stored["windowTitle"] == "branch+task 台"
+
+
+def test_isolated_start_reopens_window_when_backend_already_alive(registry_path, tmp_path, monkeypatch):
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    opened: list[dict] = []
+
+    def fake_open(item, **kwargs):
+        opened.append(dict(item))
+        return {"provider": "electron", "windowPid": 7, "title": "branch+task 台"}
+
+    monkeypatch.setattr(lifecycle, "open_isolated_workbench_window", fake_open)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("already-running isolated start must not respawn the backend")
+
+    response = lifecycle.run_isolated_operation(
+        _item(
+            path=str(worktree),
+            alive=True,
+            port=8004,
+            controlPort=8769,
+            shortName="branch+task",
+            workbenchTitle="branch+task 台",
+        ),
+        "start",
+        runner=boom,
+    )
+
+    assert response["accepted"] is True
+    assert response["message"] == "已打开该分支工作台窗口。"
+    assert opened[0]["url"] == "http://127.0.0.1:8004"
+    assert registry.get_instance("worktree:task")["windowPid"] == 7
+
+
+def test_spawn_sets_instance_short_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    worktree = tmp_path / "task"
+    scripts = worktree / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "vibelution_launcher.py").write_text("# launcher\n", encoding="utf-8")
+    pythonw = worktree / ".venv" / "Scripts" / "pythonw.exe"
+    pythonw.parent.mkdir(parents=True)
+    pythonw.write_text("", encoding="utf-8")
+    captured: dict = {}
+
+    def fake_run(command, **kwargs):
+        captured["env"] = kwargs["env"]
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)
+    lifecycle.spawn_worktree_launcher(worktree, "start", 8002, 8767, short_name="branch+task")
+    assert captured["env"]["VIBELUTION_INSTANCE_SHORT_NAME"] == "branch+task"

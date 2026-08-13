@@ -1298,9 +1298,21 @@ def _apply_window_icon(hwnd: int, icon_path: Path) -> bool:
     return applied
 
 
-def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str, object]:
-    app_id = "Vibelution.Launcher" if role == "launcher" else "Vibelution.Workbench"
-    display_name = "Vibelution Launcher" if role == "launcher" else "Vibelution Workbench"
+def _apply_managed_browser_app_identity(
+    browser_pid: int,
+    role: str,
+    *,
+    app_id: str = "",
+    display_name: str = "",
+) -> dict[str, object]:
+    resolved_app_id = str(app_id or "").strip() or (
+        "Vibelution.Launcher" if role == "launcher" else "Vibelution.Workbench"
+    )
+    resolved_display_name = str(display_name or "").strip() or (
+        "Vibelution Launcher" if role == "launcher" else "Vibelution Workbench"
+    )
+    app_id = resolved_app_id
+    display_name = resolved_display_name
     icon_resource = f"{LAUNCHER_ICON_PATH},0" if LAUNCHER_ICON_PATH.exists() else ""
     if os.name != "nt":
         return {"applied": False, "windowPid": int(browser_pid), "appUserModelId": app_id, "iconResource": icon_resource, "reason": "non_windows"}
@@ -1319,6 +1331,7 @@ def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str
                     ctypes.windll.ole32.CoInitialize(None)
                 _set_window_app_identity(hwnd, app_id, display_name, icon_resource)
                 window_icon_applied = _apply_window_icon(int(hwnd), LAUNCHER_ICON_PATH)
+                _set_window_title(hwnd, display_name)
                 return {
                     "applied": True,
                     "windowIconApplied": bool(window_icon_applied),
@@ -1377,27 +1390,54 @@ def _managed_edge_args(url: str, profile_dir: Path) -> list[str]:
     return args
 
 
-def _start_managed_browser(url: str) -> dict[str, object]:
+def _set_window_title(hwnd: int, title: str) -> bool:
+    text = str(title or "").strip()
+    if os.name != "nt" or int(hwnd or 0) <= 0 or not text:
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        user32.SetWindowTextW.argtypes = (ctypes.wintypes.HWND, ctypes.wintypes.LPCWSTR)
+        user32.SetWindowTextW.restype = ctypes.wintypes.BOOL
+        return bool(user32.SetWindowTextW(ctypes.wintypes.HWND(int(hwnd)), text))
+    except Exception:
+        return False
+
+
+def start_named_workbench_browser(
+    url: str,
+    *,
+    profile_dir: Path | None = None,
+    app_id: str = "",
+    display_name: str = "",
+) -> dict[str, object]:
+    """Open a visible Edge --app window with a caller-chosen taskbar identity."""
+
     if os.name != "nt":
         return {
             "browserManaged": False,
             "browserExecutable": "",
             "browserLaunchPid": 0,
             "browserWindowPid": 0,
-            "browserProfileDir": "",
+            "browserProfileDir": str(profile_dir or ""),
         }
+    resolved_profile = Path(profile_dir) if profile_dir is not None else WORKBENCH_BROWSER_PROFILE_DIR
     executable = _edge_executable()
-    WORKBENCH_BROWSER_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    resolved_profile.mkdir(parents=True, exist_ok=True)
     # Edge is the user-visible Workbench surface.  The no-console policy applies
     # to background service children, not this GUI process.
     process = subprocess.Popen(
-        [executable, *_managed_edge_args(url, WORKBENCH_BROWSER_PROFILE_DIR)],
+        [executable, *_managed_edge_args(url, resolved_profile)],
         cwd=str(PROJECT_ROOT),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    app_identity = _apply_managed_browser_app_identity(int(process.pid), "workbench")
+    app_identity = _apply_managed_browser_app_identity(
+        int(process.pid),
+        "workbench",
+        app_id=app_id,
+        display_name=display_name,
+    )
     window_pid = int(app_identity.get("windowPid") or process.pid)
     # Collapse dual Edge --app frames (blank shell + titled workbench) under the
     # same profile process. Import is local to avoid circular import at module load.
@@ -1406,6 +1446,9 @@ def _start_managed_browser(url: str) -> dict[str, object]:
         from core.runtime_manager.workbench_controller import _converge_browser_windows
 
         converge = dict(_converge_browser_windows(int(window_pid), focus_kept=True) or {})
+        kept_hwnd = int(converge.get("keptHwnd") or 0)
+        if kept_hwnd > 0 and display_name:
+            _set_window_title(kept_hwnd, display_name)
     except Exception:
         converge = {}
     return {
@@ -1413,7 +1456,7 @@ def _start_managed_browser(url: str) -> dict[str, object]:
         "browserExecutable": executable,
         "browserLaunchPid": int(process.pid),
         "browserWindowPid": int(window_pid),
-        "browserProfileDir": str(WORKBENCH_BROWSER_PROFILE_DIR),
+        "browserProfileDir": str(resolved_profile),
         "browserAppUserModelId": str(app_identity.get("appUserModelId") or ""),
         "browserIconResource": str(app_identity.get("iconResource") or ""),
         "browserAppIdentityApplied": bool(app_identity.get("applied")),
@@ -1421,6 +1464,10 @@ def _start_managed_browser(url: str) -> dict[str, object]:
         "browserWindowKeptHwnd": int(converge.get("keptHwnd") or 0),
         "browserWindowClosedCount": len(list(converge.get("closedHwnds") or [])),
     }
+
+
+def _start_managed_browser(url: str) -> dict[str, object]:
+    return start_named_workbench_browser(url)
 
 
 def _preserved_launcher_control_state(state: dict) -> dict[str, object]:

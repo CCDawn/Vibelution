@@ -23,6 +23,7 @@ import { formatTime } from "./source-collection/presentationModel";
 import { EMPTY_SOURCE_COLLECTION_DISPLAY_STATE } from "./source-collection/runModel";
 import { researchStageStartFeedbackText as researchStageStartFeedbackTextFn } from "./teamRouteShellModel";
 import { buildTeamsShellSurfaceModel } from "./teamsShellSurfaceModel";
+import { TeamsLoadingShell } from "./TeamsLoadingShell";
 import { buildTeamWorkflowCandidatePreviewItems } from "./buildTeamWorkflowCandidatePreviewItems";
 import { buildSourceCollectionOverviewBag } from "./buildSourceCollectionOverviewBag";
 import {
@@ -278,7 +279,6 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     researchCanvasVisible,
     researchCanvasReadOnly,
     teamDetailErrorMessage: teamDetailQuery.error instanceof Error ? teamDetailQuery.error.message : "",
-    visibleTeamSummary,
     styles,
   });
   const {
@@ -290,8 +290,6 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     researchTeamDetailDegraded,
     showTeamLoadingSurface,
     showTeamDetailUnavailableSurface,
-    teamInitialLoadingTitle,
-    teamInitialLoadingMessage,
     teamUnavailableTitle,
     teamUnavailableMessage,
     teamUnavailableDetail,
@@ -302,8 +300,6 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     teamWorkspaceUnavailableDetail,
     teamContextMeta,
     teamSummaryUnavailableText,
-    teamListMetricLoadingLabel,
-    teamSummaryStatusItems,
     showNodeBindingPanel,
   } = shellSurface;
 
@@ -501,6 +497,10 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     });
   }
 
+  if (showTeamInitialLoadingSurface) {
+    return <TeamsLoadingShell lang={lang} />;
+  }
+
   const teamShellRail = renderTeamsShellRail({
     lang,
     visibleTeams,
@@ -515,6 +515,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     teamShellMode,
     onModeChange: selectTeamShellMode,
     onRefreshTeams: () => void teamsQuery.refetch(),
+    teamsFetching: teamsQuery.isFetching && Boolean(teamsQuery.data),
     styles,
   });
 
@@ -529,17 +530,10 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     teamShellMode,
     onModeChange: selectTeamShellMode,
     onRefreshTeams: () => void teamsQuery.refetch(),
-    showGate: showTeamInitialLoadingSurface || showTeamUnavailableSurface || showTeamDetailUnavailableSurface,
+    showGate: showTeamUnavailableSurface || showTeamDetailUnavailableSurface,
     ariaLabel: selectedTeamContextTitle,
     meta: teamContextMeta,
-    gateMode: showTeamInitialLoadingSurface
-      ? "initial-loading"
-      : showTeamUnavailableSurface
-        ? "unavailable"
-        : "detail-unavailable",
-    initialTitle: teamInitialLoadingTitle,
-    initialMessage: teamInitialLoadingMessage,
-    listMetricLoadingLabel: teamListMetricLoadingLabel,
+    gateMode: showTeamUnavailableSurface ? "unavailable" : "detail-unavailable",
     unavailableTitle: teamUnavailableTitle,
     unavailableMessage: teamUnavailableMessage,
     unavailableDetail: teamUnavailableDetail,

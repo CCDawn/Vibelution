@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Bot,
   LoaderCircle,
+  MessageSquareText,
   ScrollText,
   Settings,
   ShieldCheck,
@@ -25,8 +26,6 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
-
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -55,15 +54,17 @@ import { usePersistedPaneResize } from "../components/layout/usePersistedPaneRes
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
+  VContextualHint,
+  VIconButton,
   VNativeInput,
   VNativeTextarea,
   VRouteLinkButton,
   VStateSurface,
   VStatusChip,
   VTabs,
+  VTooltip,
 } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
-import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { agentCenterConfigRoute } from "./agentCenterRoutes";
 import { ChatReadOnlySessionWorkspace } from "./chat/ChatReadOnlySessionWorkspace";
@@ -177,13 +178,6 @@ type SelfEvolutionConversationSurface = {
 };
 
 type SelfEvolutionPetCompanionTone = "idle" | "active" | "paused" | "caution" | "error";
-const SELF_EVOLUTION_PET_COMPANION_TONE_CLASS: Record<SelfEvolutionPetCompanionTone, string> = {
-  idle: styles.petCompanionTone_idle,
-  active: styles.petCompanionTone_active,
-  paused: styles.petCompanionTone_paused,
-  caution: styles.petCompanionTone_caution,
-  error: styles.petCompanionTone_error,
-};
 type SelfEvolutionMode = "isolated_development" | "observation";
 const OBSERVATION_MODE_TOOL_COUNT = "0";
 const OBSERVATION_MODE_WORKTREE_STATE = "no";
@@ -585,8 +579,8 @@ function collectUniqueLines(values: Array<string | null | undefined>) {
   return result;
 }
 
-function joinReadableLines(values: Array<string | null | undefined>) {
-  return values.map((value) => String(value || "").trim()).filter(Boolean).join("\n");
+export function joinReadableLines(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))].join("\n");
 }
 
 export function buildTransactionDisplayTitle(
@@ -1053,7 +1047,6 @@ export function SelfEvolutionTrack({
           : (pet?.energy ?? 0) < 35
             ? t("petCompanionLowEnergy")
             : t("petCompanionStable");
-  const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
   const petAvatarFallback = selfEvolutionConversationAvatarFallback(pet?.name, lang);
 
   function disabledReason(state: { enabled: boolean; reason: string } | undefined) {
@@ -1160,9 +1153,6 @@ export function SelfEvolutionTrack({
       ? (lang === "zh" ? "观察会话运行中，完整输出保留在中央会话区。" : "Observation is running; full output stays in the center conversation area.")
       : (lang === "zh" ? "在左侧观察配置里填写完整提示词和时长后开始自主观察。" : "Set the full prompt and duration in the left observation config, then start observation."))
     : conversationTask.nextAction;
-  const centerWorkflowSummary = observationRunModeActive
-    ? activeNextAction
-    : selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction;
   const activeConversationSurface: SelfEvolutionConversationSurface = {
     sessionId: selectedWorkflowStep?.conversationSessionId || worktreeRun?.runId || "self-evolution",
     eyebrowLabel: selfEvolutionStep.label,
@@ -1171,12 +1161,7 @@ export function SelfEvolutionTrack({
     messages: conversationMessages,
     taskSummary: conversationTask.latestSummary,
     defaultFileContext: SELF_EVOLUTION_CONVERSATION_CONTEXT,
-    stats: [
-      { label: lang === "zh" ? "目标" : "Goal", value: conversationTask.goal },
-      { label: lang === "zh" ? "事务" : "Txn", value: transactionItems.length },
-      { label: lang === "zh" ? "文件" : "Files", value: changedFiles.length || overview?.worktree.dirtyFileCount || 0 },
-      { label: lang === "zh" ? "更新" : "Updated", value: compactTimestamp(conversationTask.updatedAt) },
-    ],
+    stats: [],
     autoScrollToLatest: runIsActive,
     showComposer: !runIsActive && !worktreeRunLocked && !runLocked,
     composerValue: goalInput,
@@ -1352,91 +1337,64 @@ export function SelfEvolutionTrack({
       ? selfEvolutionAgentCards.filter((card) => card.role === SELF_OBSERVATION_AGENT_ROLE)
       : selfEvolutionAgentCards.filter((card) => SELF_EVOLUTION_AGENT_ROLE_SET.has(card.role));
     return (
-      <section className={styles.surface}>
-        <div className={styles.sectionHeader}>
-          <div>
-            <p className={styles.eyebrow}>
-              {observationRunModeActive ? (lang === "zh" ? "观察成员" : "Observation member") : (lang === "zh" ? "自进化成员" : "Self-evolution agents")}
-            </p>
-            <h3 className={styles.sectionTitle}>
-              {observationRunModeActive ? (lang === "zh" ? "观察 Agent" : "Observation agent") : (lang === "zh" ? "Agent 卡片" : "Agent cards")}
-            </h3>
-          </div>
-          <span className={styles.counter}>{visibleSelfEvolutionAgentCards.length}</span>
+      <section className={styles.railAgentSection} aria-label={lang === "zh" ? "自进化 Agent" : "Self-evolution agents"}>
+        <div className={styles.railSectionHeader}>
+          <span className={styles.railSectionTitle}><Bot size={14} /> Agent</span>
+          <span className={styles.railAgentCount}>{visibleSelfEvolutionAgentCards.length}</span>
+          <VContextualHint
+            label={lang === "zh" ? "Agent 说明" : "Agent details"}
+            content={lang === "zh" ? "悬停各图标查看角色、模型与职责；进入配置或活动记录。" : "Hover each icon for role, model, and responsibility; open configuration or activity."}
+            width="wide"
+          />
         </div>
 
-        <div className={styles.agentCardList}>
-          {visibleSelfEvolutionAgentCards.length ? (
-            visibleSelfEvolutionAgentCards.map((card) => {
-              const agent = card.agent;
-              const agentId = agent?.agentId || card.agentId;
-              const roleLabel = selfEvolutionAgentRoleLabel(card.role, lang);
-              const roleSummary = selfEvolutionAgentRoleSummary(card.role, lang);
-              const modelLabel = agentBindingModelLabel(agent);
-              const configRoute = agentCenterConfigRoute({
-                agentId,
-                pane: "config",
-                returnLabel: "self_evolution",
-                returnTo: SELF_EVOLUTION_RETURN_TO,
-              });
-              const activityRoute = agentCenterConfigRoute({
-                agentId,
-                pane: "activity",
-                returnLabel: "self_evolution",
-                returnTo: SELF_EVOLUTION_RETURN_TO,
-              });
-              const active = String(card.role).trim().toLowerCase() === activeRole;
-              return (
-                <article
-                  key={`${card.role}-${agentId}`}
-                  className={active ? `${styles.agentCard} ${styles.agentCardActive}` : styles.agentCard}
-                >
-                  <Link
-                    className={styles.agentCardMain}
+        <div className={styles.railAgentActions}>
+          {visibleSelfEvolutionAgentCards.length ? visibleSelfEvolutionAgentCards.map((card) => {
+            const agent = card.agent;
+            const agentId = agent?.agentId || card.agentId;
+            const roleLabel = selfEvolutionAgentRoleLabel(card.role, lang);
+            const roleSummary = selfEvolutionAgentRoleSummary(card.role, lang);
+            const modelLabel = agentBindingModelLabel(agent);
+            const configRoute = agentCenterConfigRoute({
+              agentId,
+              pane: "config",
+              returnLabel: "self_evolution",
+              returnTo: SELF_EVOLUTION_RETURN_TO,
+            });
+            const activityRoute = agentCenterConfigRoute({
+              agentId,
+              pane: "activity",
+              returnLabel: "self_evolution",
+              returnTo: SELF_EVOLUTION_RETURN_TO,
+            });
+            const active = String(card.role).trim().toLowerCase() === activeRole;
+            const agentSummary = `${roleLabel} · ${agent?.displayName || agentId || "--"} · ${modelLabel} · ${roleSummary}`;
+            return (
+              <span key={`${card.role}-${agentId}`} className={styles.railAgentGroup}>
+                <VTooltip content={agentSummary} width="wide">
+                  <VRouteLinkButton
+                    className={active ? `${styles.railAgentButton} ${styles.railAgentButtonActive}` : styles.railAgentButton}
                     to={configRoute}
                     aria-label={lang === "zh" ? `配置 ${roleLabel}` : `Configure ${roleLabel}`}
-                  >
-                    <span className={styles.statusIcon}><Bot size={15} /></span>
-                    <span className={styles.agentCardText}>
-                      <span className={styles.agentRoleBadge}>{roleLabel}</span>
-                      <strong>{agent?.displayName || agentId || "--"}</strong>
-                      <small>{modelLabel}</small>
-                    </span>
-                  </Link>
-                  <p className={styles.compactPreviewText}>{roleSummary}</p>
-                  <div className={styles.agentCardActions}>
+                    icon={<Settings size={14} />}
+                  />
+                </VTooltip>
+                {active ? (
+                  <VTooltip content={lang === "zh" ? `${roleLabel}活动记录` : `${roleLabel} activity`}>
                     <VRouteLinkButton
-                      className={styles.agentCardAction}
-                      to={configRoute}
-                      icon={<Settings size={13} />}
-                    >
-                      {lang === "zh" ? "配置" : "Config"}
-                    </VRouteLinkButton>
-                    <VRouteLinkButton
-                      className={styles.agentCardAction}
+                      className={styles.railAgentButton}
                       to={activityRoute}
-                      icon={<ScrollText size={13} />}
-                    >
-                      {lang === "zh" ? "日志" : "Logs"}
-                    </VRouteLinkButton>
-                  </div>
-                </article>
-              );
-            })
-          ) : agentConfigWorkspaceQuery.isLoading ? (
-            <ProgressiveRegionSkeleton
-              variant="list"
-              label={lang === "zh" ? "正在加载 Agent 绑定" : "Loading Agent bindings"}
-            />
+                      aria-label={lang === "zh" ? `查看 ${roleLabel} 活动` : `Open ${roleLabel} activity`}
+                      icon={<ScrollText size={14} />}
+                    />
+                  </VTooltip>
+                ) : null}
+              </span>
+            );
+          }) : agentConfigWorkspaceQuery.isLoading ? (
+            <LoaderCircle size={15} className={styles.spinning} aria-label={lang === "zh" ? "正在加载 Agent 绑定" : "Loading Agent bindings"} />
           ) : (
-            <VStateSurface
-              tone="empty"
-              title={
-                observationRunModeActive
-                  ? (lang === "zh" ? "还没有可展示的观察 Agent 绑定" : "No observation Agent binding is available")
-                  : (lang === "zh" ? "还没有可展示的自进化 Agent 绑定" : "No self-evolution Agent binding is available")
-              }
-            />
+            <span className={styles.railEmptyValue}>--</span>
           )}
         </div>
       </section>
@@ -1604,99 +1562,8 @@ export function SelfEvolutionTrack({
   return (
     <div className={styles.pageStack}>
       <div className={styles.trackShell}>
-        <div className={styles.pageTabsRow}>
-          <section className={styles.runActionBar} aria-label={lang === "zh" ? "自进化当前运行" : "Current self-evolution run"}>
-            <div className={styles.runActionMain}>
-              <span className={styles.statusIcon}><Activity size={17} /></span>
-              <div className={styles.runActionText}>
-                <div className={styles.runActionMeta}>
-                  <span className={styles.secondaryPill}>{activeModeLabel}</span>
-                  <VStatusChip tone="accent">{activeStatusLabel}</VStatusChip>
-                  <span className={styles.secondaryPill}>
-                    {lang === "zh" ? `事务 ${transactionItems.length}` : `Transactions ${transactionItems.length}`}
-                  </span>
-                </div>
-                <strong>{activeSummary}</strong>
-                <span>{activeNextAction}</span>
-              </div>
-            </div>
-            <div className={styles.runActionCluster}>
-              {showTopTerminateAction ? (
-                <VButton
-                  type="button"
-                  className={styles.dangerAction}
-                  isDisabled={topTerminateDisabled}
-                  tooltip={lang === "zh" ? "请求终止当前自进化运行。" : "Request termination of the current self-evolution run."}
-                  disabledReason={topTerminateReason || undefined}
-                  onClick={() => {
-                    if (worktreeRun) {
-                      onWorktreeAction(worktreeRun.runId, "terminate");
-                    }
-                  }}
-
-                    icon={(observationActionPending || worktreeActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
-                  >
-                    {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
-                  </VButton>
-              ) : !observationRunModeActive ? (
-                <VButton
-                  type="button"
-                  className={styles.primaryAction}
-                  isDisabled={runLocked || worktreeRunLocked || startPending || !goalInput.trim()}
-                  tooltip={lang === "zh" ? "启动无评分的自进化自动闭环。" : "Start the no-score autonomous self-evolution loop."}
-                  disabledReason={
-                    startPending
-                      ? lang === "zh" ? "自进化自动闭环正在启动。" : "The autonomous loop is starting."
-                      : runLocked || worktreeRunLocked
-                        ? lang === "zh" ? "当前已有运行占用工作区。" : "Another run currently owns the workspace."
-                        : !goalInput.trim()
-                          ? lang === "zh" ? "请先填写自进化目标。" : "Enter a self-evolution goal first."
-                          : undefined
-                  }
-                  onClick={onStartRun}
-
-                    icon={startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-                  >
-                    {lang === "zh" ? "启动自动闭环" : "Start autonomous loop"}
-                  </VButton>
-              ) : null}
-            </div>
-          </section>
-          <VTabs
-            density="compact"
-            className={styles.pageTabs}
-            listClassName={styles.pageTabsList}
-            triggerClassName={styles.pageTabsTrigger}
-            aria-label={lang === "zh" ? "自进化页面" : "Self-evolution page"}
-            value={activePage}
-            onValueChange={(value) => {
-              if (value === "workspace" || value === "status") {
-                setActivePage(value);
-              }
-            }}
-            items={[
-              { id: "workspace", label: t("selfWorkspacePage") },
-              { id: "status", label: t("selfStatusPage") },
-            ]}
-          />
-        </div>
-
         <div className={styles.trackBody}>
-          {activePage === "workspace" && !observationRunModeActive ? (
-            <SelfEvolutionAutonomousLoopPanel
-              lang={lang}
-              run={autonomousRun}
-              pending={startPending || autonomousActionPending}
-              error={autonomousActionError || startWorktreeError}
-              onAction={(action, comment) => {
-                if (autonomousRun?.runId) {
-                  onAutonomousAction(autonomousRun.runId, action, comment);
-                }
-              }}
-            />
-          ) : null}
           <div className={styles.trackBodyContent}>
-          {activePage === "workspace" ? (
             <div
               ref={selfLayoutRef}
               className={styles.workspaceLayout}
@@ -1712,15 +1579,62 @@ export function SelfEvolutionTrack({
             }
             aria-hidden={sidebarCollapsed}
           >
-            <section className={styles.surface}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <p className={styles.eyebrow}>{t("selfEvolutionMode")}</p>
-                  <h3 className={styles.sectionTitle}>{observationRunModeActive ? (lang === "zh" ? "观察配置" : "Observation config") : t("selfWorkspacePage")}</h3>
+            <section className={styles.railSection} aria-label={lang === "zh" ? "状态" : "Status"}>
+              <div className={styles.railSectionHeader}>
+                <span className={styles.railSectionTitle}><Activity size={14} />{lang === "zh" ? "状态" : "Status"}</span>
+                <div className={styles.railSectionActions}>
+                  <VContextualHint
+                    label={lang === "zh" ? "本轮状态说明" : "Current run details"}
+                    content={(
+                      <span className={styles.tooltipBlock}>
+                        <strong>{activeModeLabel} · {activeStatusLabel}</strong>
+                        <span>{activeSummary || "--"}</span>
+                        <span>{activeNextAction || "--"}</span>
+                      </span>
+                    )}
+                    width="wide"
+                  />
+                  <VIconButton
+                    label={activePage === "workspace"
+                      ? (lang === "zh" ? "查看运行详情" : "Open run details")
+                      : (lang === "zh" ? "返回 Agent 对话" : "Return to Agent conversation")}
+                    tooltip={activePage === "workspace"
+                      ? (lang === "zh" ? "查看阶段、候选、验证、事务与审计证据。" : "Open phases, candidate, verification, transactions, and audit evidence.")
+                      : (lang === "zh" ? "返回默认 Agent 对话。" : "Return to the default Agent conversation.")}
+                    variant={activePage === "status" ? "primary" : "ghost"}
+                    icon={activePage === "workspace" ? <ScrollText size={15} /> : <MessageSquareText size={15} />}
+                    onPress={() => setActivePage((current) => current === "workspace" ? "status" : "workspace")}
+                  />
                 </div>
-                <VStatusChip tone="neutral">
-                  {statusLabel(observationRunModeActive ? (observationRun?.status || "idle") : conversationTask.status)}
-                </VStatusChip>
+              </div>
+              <div className={styles.railFactGrid}>
+                <VTooltip content={sceneSemantics?.sceneSummary || runSemantics?.rollbackSummary || activeSummary} width="wide">
+                  <span className={styles.railFact} tabIndex={0}>
+                    <span>{lang === "zh" ? "阶段" : "Phase"}</span>
+                    <strong>{observationRunModeActive
+                      ? statusLabel(observationRun?.phase || observationRun?.status || "idle")
+                      : selectedWorkflowStep?.label || statusLabel(conversationTask.status)}</strong>
+                  </span>
+                </VTooltip>
+                <VTooltip content={lang === "zh" ? "当前可追溯事务数量。" : "Current traceable transaction count."}>
+                  <span className={styles.railFact} tabIndex={0}><span>{lang === "zh" ? "事务" : "Txn"}</span><strong>{transactionItems.length}</strong></span>
+                </VTooltip>
+                <VTooltip content={changedFiles.join("\n") || (lang === "zh" ? "当前没有候选文件。" : "No candidate files currently.")} width="wide">
+                  <span className={styles.railFact} tabIndex={0}><span>{lang === "zh" ? "文件" : "Files"}</span><strong>{changedFiles.length || overview.worktree.dirtyFileCount || 0}</strong></span>
+                </VTooltip>
+                <VTooltip content={conversationTask.updatedAt || "--"}>
+                  <span className={styles.railFact} tabIndex={0}><span>{lang === "zh" ? "更新" : "Updated"}</span><strong>{compactTimestamp(conversationTask.updatedAt)}</strong></span>
+                </VTooltip>
+              </div>
+            </section>
+
+            <section className={styles.railSection} aria-label={lang === "zh" ? "配置" : "Configuration"}>
+              <div className={styles.railSectionHeader}>
+                <span className={styles.railSectionTitle}><Settings size={14} />{lang === "zh" ? "配置" : "Configuration"}</span>
+                <VContextualHint
+                  label={lang === "zh" ? "配置说明" : "Configuration details"}
+                  content={lang === "zh" ? "设置下一轮模式、目标边界与运行参数。" : "Set the next run mode, target boundary, and runtime parameters."}
+                />
               </div>
               <VTabs
                 density="compact"
@@ -1750,7 +1664,14 @@ export function SelfEvolutionTrack({
                 <>
                   <div className={styles.observationConfigForm}>
                     <div className={styles.formField}>
-                      <span>{lang === "zh" ? "模型输入" : "Model input"}</span>
+                      <span className={styles.railFieldLabel}>
+                        {lang === "zh" ? "输入" : "Input"}
+                        <VContextualHint
+                          label={lang === "zh" ? "观察输入说明" : "Observation input details"}
+                          content={lang === "zh" ? "提示词会原样发送；空白实验不注入默认目标或续写提示。" : "Prompts are sent verbatim; blank-input experiments inject no default goal or continuation prompt."}
+                          width="wide"
+                        />
+                      </span>
                       <VTabs
                         density="compact"
                         className={styles.modeTabs}
@@ -1781,7 +1702,7 @@ export function SelfEvolutionTrack({
                       />
                     </div>
                     <label className={styles.formField}>
-                      <span>{lang === "zh" ? "观察提示词" : "Observation prompt"}</span>
+                      <span>{lang === "zh" ? "提示词" : "Prompt"}</span>
                       <VNativeTextarea
                         className={styles.textArea}
                         rows={4}
@@ -1794,7 +1715,7 @@ export function SelfEvolutionTrack({
                       />
                     </label>
                     <label className={styles.formField}>
-                      <span>{lang === "zh" ? "运行时长（秒）" : "Duration seconds"}</span>
+                      <span>{lang === "zh" ? "时长（秒）" : "Duration (seconds)"}</span>
                       <VNativeInput
                         className={styles.textInput}
                         type="number"
@@ -1838,18 +1759,13 @@ export function SelfEvolutionTrack({
                           : (lang === "zh" ? "开始自主观察" : "Start observation")}</VButton>
                     </div>
                   </div>
-                  <div className={styles.noticeStack}>
-                    <p className={styles.noticeText}>
-                      {observationRunActive
-                        ? (lang === "zh" ? "观察会话正在运行，完整输出在中间会话区。" : "Observation is running; full output stays in the center conversation.")
-                        : observationInputModeValue === "blank"
-                          ? (lang === "zh"
-                            ? "首轮发送内容为空的 user 消息；后续复用同一模型会话，只携带上一轮真实 assistant 输出的有界历史和新的空 user 消息，不注入默认目标、系统提示或续写提示。"
-                            : "The first call sends an empty user message. Later calls continue the same model conversation with bounded prior assistant output and a new empty user message; no default goal, system prompt, or continuation prompt is injected.")
-                          : (lang === "zh" ? "提示词会作为完整用户消息原样发送。" : "The prompt is sent verbatim as the full user message.")}
-                    </p>
+                  <div className={styles.railFeedbackStack}>
                     {compactObservationPreview(observationRun?.latestMessage, 110) ? (
-                      <p className={styles.compactPreviewText}>{compactObservationPreview(observationRun?.latestMessage, 110)}</p>
+                      <VContextualHint
+                        label={lang === "zh" ? "最近观察输出" : "Latest observation output"}
+                        content={compactObservationPreview(observationRun?.latestMessage, 220)}
+                        width="wide"
+                      />
                     ) : null}
                     {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
                     {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
@@ -1857,38 +1773,72 @@ export function SelfEvolutionTrack({
                 </>
               ) : (
                 <>
-                  <p className={styles.sectionSummary}>{conversationTask.goal}</p>
-
-                  <div className={styles.detailStack}>
-                    <div className={styles.detailRow}>
-                      <span>{t("sceneStateTitle")}</span>
-                      <strong>{sceneSemantics?.sceneTitle || statusLabel(overview.readiness.state)}</strong>
-                    </div>
-                    <div className={styles.detailRow}>
-                      <span>{t("currentRunTitle")}</span>
-                      <strong>{runSemantics?.phaseLabel || statusLabel(worktreeRun?.runtimeStatus || worktreeRun?.status || overview.readiness.state)}</strong>
-                    </div>
-                    <div className={styles.detailRow}>
-                      <span>{t("rollbackStateTitle")}</span>
-                      <strong>{runSemantics?.rollbackStateLabel || statusLabel(conversationTask.verificationStatus)}</strong>
-                    </div>
-                    <div className={styles.detailRow}>
-                      <span>{t("lastUpdated")}</span>
-                      <strong>{compactTimestamp(conversationTask.updatedAt)}</strong>
-                    </div>
+                  <label className={styles.formField}>
+                    <span className={styles.railFieldLabel}>
+                      {lang === "zh" ? "目标" : "Goal"}
+                      <VContextualHint
+                        label={lang === "zh" ? "目标边界说明" : "Goal boundary details"}
+                        content={lang === "zh" ? "写清允许修改的文件、验证方式与禁止事项。右侧输入区与此目标同步。" : "State allowed files, verification, and prohibitions. The right composer stays synchronized with this goal."}
+                        width="wide"
+                      />
+                    </span>
+                    <VNativeTextarea
+                      className={styles.railGoalInput}
+                      rows={4}
+                      value={goalInput}
+                      disabled={runLocked || worktreeRunLocked || startPending}
+                      placeholder={t("selfGoalPlaceholder")}
+                      onChange={(event) => onGoalInputChange(event.target.value)}
+                    />
+                  </label>
+                  <div className={styles.railActionRow}>
+                    {showTopTerminateAction ? (
+                      <VButton
+                        type="button"
+                        className={styles.railPrimaryAction}
+                        variant="danger"
+                        isDisabled={topTerminateDisabled}
+                        tooltip={lang === "zh" ? "请求终止当前自进化运行。" : "Request termination of the current self-evolution run."}
+                        disabledReason={topTerminateReason || undefined}
+                        onClick={() => {
+                          if (worktreeRun) {
+                            onWorktreeAction(worktreeRun.runId, "terminate");
+                          }
+                        }}
+                        icon={(observationActionPending || worktreeActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
+                      >
+                        {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
+                      </VButton>
+                    ) : (
+                      <VButton
+                        type="button"
+                        className={styles.railPrimaryAction}
+                        variant="primary"
+                        isDisabled={runLocked || worktreeRunLocked || startPending || !goalInput.trim()}
+                        tooltip={lang === "zh" ? "启动无评分的隔离自进化闭环。" : "Start the no-score isolated self-evolution loop."}
+                        disabledReason={
+                          startPending
+                            ? lang === "zh" ? "自进化闭环正在启动。" : "The autonomous loop is starting."
+                            : runLocked || worktreeRunLocked
+                              ? lang === "zh" ? "当前已有运行占用工作区。" : "Another run currently owns the workspace."
+                              : !goalInput.trim()
+                                ? lang === "zh" ? "请先填写自进化目标。" : "Enter a self-evolution goal first."
+                                : undefined
+                        }
+                        onClick={onStartRun}
+                        icon={startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
+                      >
+                        {lang === "zh" ? "开始" : "Start"}
+                      </VButton>
+                    )}
+                    <VIconButton
+                      label={lang === "zh" ? "运行约束" : "Runtime constraints"}
+                      tooltip={lang === "zh" ? "迭代上限 1 · 隔离工作树 · 提交前必须审批" : "Iteration limit 1 · isolated worktree · approval required before commit"}
+                      variant="ghost"
+                      icon={<Settings size={15} />}
+                    />
                   </div>
-
-                  <div className={styles.noticeStack}>
-                    <p className={styles.noticeText}>{sceneSemantics?.sceneSummary || conversationTask.latestSummary}</p>
-                    <p className={styles.noticeText}>
-                      {runSemantics?.rollbackSummary || conversationTask.nextAction}
-                    </p>
-                    {sceneSemantics?.nextAction ? <p className={styles.noticeText}>{sceneSemantics.nextAction}</p> : null}
-                    {!startSelfAction?.enabled && disabledReason(startSelfAction) ? (
-                      <p className={styles.noticeText}>{disabledReason(startSelfAction)}</p>
-                    ) : null}
-                    {runLocked ? <p className={styles.noticeText}>{t("selfRunningLockHint")}</p> : null}
-                    {worktreeRunLocked ? <p className={styles.noticeText}>{t("selfWorktreeRunningLockHint")}</p> : null}
+                  <div className={styles.railFeedbackStack}>
                     {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
                     {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
                   </div>
@@ -1897,23 +1847,6 @@ export function SelfEvolutionTrack({
             </section>
 
             {renderSelfEvolutionAgentCards()}
-
-            <section className={`${styles.petCompanionSurface} ${SELF_EVOLUTION_PET_COMPANION_TONE_CLASS[petCompanionState.tone]}`}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <p className={styles.eyebrow}>{t("petSelfCompanion")}</p>
-                  <h3 className={styles.sectionTitle}>{pet?.name ?? t("loadingPetState")}</h3>
-                </div>
-                <VStatusChip tone="neutral">{t(petCompanionState.stateKey)}</VStatusChip>
-              </div>
-
-              <div className={styles.petCompanionCopy}>
-                <p>{t(petCompanionState.detailKey)}</p>
-                <span>{pet?.statusLine ?? t("readingCompanionState")}</span>
-                <span>{petCompanionLine}</span>
-                <span>{petPresetLabel} {t("preset")}</span>
-              </div>
-            </section>
           </aside>
 
           <PaneCollapseHandle
@@ -1933,7 +1866,8 @@ export function SelfEvolutionTrack({
           />
 
           <main className={styles.centerColumn}>
-            <>
+            {activePage === "workspace" ? (
+              <>
                 <div className={styles.workflowHeader}>
                   <div className={styles.workflowCardGrid} aria-label={lang === "zh" ? "自进化步骤导航" : "Self-evolution workflow"}>
                     {workflowSteps.map((step) => {
@@ -1941,23 +1875,19 @@ export function SelfEvolutionTrack({
                       const selected = selectedWorkflowStep?.id === step.id;
                       const stepName = definition ? (lang === "zh" ? definition.zh : definition.en) : step.label;
                       return (
-                        <VButton
+                        <VIconButton
                           key={step.id}
                           type="button"
+                          label={stepName}
                           className={selected ? `${styles.workflowCard} ${styles.workflowCardActive}` : styles.workflowCard}
                           aria-pressed={selected}
-                          tooltip={step.livePreview || step.summary || stepName}
-                          onClick={() => setSelectedWorkflowStepId(step.id as SelfEvolutionWorkflowStepId)}
-                        >
-                          <span>{stepName}</span>
-                          <strong>{statusLabel(step.status)}</strong>
-                        </VButton>
+                          tooltip={`${stepName} · ${statusLabel(step.status)} · ${step.livePreview || step.summary || "--"}`}
+                          icon={step.id === "approval" ? <ShieldCheck size={15} /> : <MessageSquareText size={15} />}
+                          onPress={() => setSelectedWorkflowStepId(step.id as SelfEvolutionWorkflowStepId)}
+                        />
                       );
                     })}
                   </div>
-                  <p className={styles.workflowStepSummary}>
-                    {centerWorkflowSummary}
-                  </p>
                 </div>
                 <div className={styles.conversationShell}>
                   {!observationRunModeActive && selectedWorkflowStep?.id === "approval" ? (
@@ -2051,6 +1981,7 @@ export function SelfEvolutionTrack({
                       eyebrowLabel={activeConversationSurface.eyebrowLabel}
                       title={activeConversationSurface.title}
                       phase={activeConversationSurface.phase}
+                      showHeader={false}
                       messages={activeConversationSurface.messages}
                       assistantDisplayName={pet?.name}
                       assistantAvatarFallback={petAvatarFallback}
@@ -2077,12 +2008,22 @@ export function SelfEvolutionTrack({
                   )}
                 </div>
               </>
-          </main>
-            </div>
-          ) : observationRunModeActive ? (
-            renderObservationStatusSurface()
-          ) : (
-            <div className={styles.statusPage}>
+            ) : observationRunModeActive ? (
+              renderObservationStatusSurface()
+            ) : (
+              <div className={styles.statusDetailScroll}>
+                <SelfEvolutionAutonomousLoopPanel
+                  lang={lang}
+                  run={autonomousRun}
+                  pending={startPending || autonomousActionPending}
+                  error={autonomousActionError || startWorktreeError}
+                  onAction={(action, comment) => {
+                    if (autonomousRun?.runId) {
+                      onAutonomousAction(autonomousRun.runId, action, comment);
+                    }
+                  }}
+                />
+                <div className={styles.statusPage}>
           <div className={styles.panelStack}>
             <div className={styles.metricStrip}>
               <article className={styles.stripItem}>
@@ -2574,8 +2515,11 @@ export function SelfEvolutionTrack({
               </section>
             </div>
           </div>
+                </div>
+              </div>
+            )}
+          </main>
             </div>
-          )}
           </div>
         </div>
       </div>

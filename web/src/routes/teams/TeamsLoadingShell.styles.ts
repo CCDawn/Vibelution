@@ -1,0 +1,52 @@
+import shellStyles from "../TeamsRoute.styles";
+
+const styles = {
+  route: shellStyles.route,
+  rail: "flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden p-2.5",
+  railHeader: "flex min-h-6 items-center justify-between gap-3",
+  railTitle: "text-[13px] font-[760]",
+  railHeaderSkeleton: "!size-4",
+  railControlSkeleton: "!min-h-8 rounded-[var(--radius-control)]",
+  railList: "grid min-h-0 flex-1 content-start gap-1.5 overflow-hidden",
+  railItem:
+    "grid min-h-[4.5rem] gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2.5 py-2",
+  railItemHeader: "flex items-center justify-between gap-3",
+  railItemTitle: "!w-[68%]",
+  railItemTitleAlternate: "!w-[58%]",
+  railItemMetric: "!w-10",
+  railItemPrimaryLine: "!w-[72%] opacity-80",
+  railItemSecondaryLine: "!w-[90%] opacity-70",
+  railFooter: "grid gap-1.5",
+  railFooterPrimaryLine: "!w-full opacity-70",
+  railFooterSecondaryLine: "!w-[76%] opacity-60",
+  toolbar: "flex w-full min-w-0 items-center justify-between gap-3",
+  toolbarSkeletons: "grid min-w-0 flex-1 gap-1.5",
+  toolbarTitle: "!w-40",
+  toolbarSubtitle: "!w-[min(22rem,68%)] opacity-75",
+  toolbarStatus: "flex shrink-0 items-center gap-2 text-[11px] text-[var(--fg-secondary)]",
+  toolbarSpinner: "size-3.5 animate-spin motion-reduce:animate-none",
+  board: "!h-full !min-h-0 !overflow-hidden !p-0",
+  canvas: `${shellStyles.canvas} !h-full !min-h-0 !overflow-hidden !p-4`,
+  canvasViewport: "grid h-full min-h-0 place-items-center overflow-hidden",
+  canvasGridWide: "grid w-full max-w-4xl grid-cols-3 gap-6",
+  canvasGridNarrow: "grid w-full max-w-4xl grid-cols-2 gap-6",
+  canvasNode:
+    "grid min-h-20 min-w-0 content-center gap-2.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-3.5 shadow-[var(--vui-shadow-hairline)]",
+  canvasNodeTitle: "!w-[58%]",
+  canvasNodeTitleAlternate: "!w-[46%]",
+  canvasNodePrimaryLine: "!w-full opacity-80",
+  canvasNodeSecondaryLine: "!w-[72%] opacity-65",
+  inspector: "grid h-full min-h-0 content-start gap-3 overflow-hidden p-3",
+  inspectorHeader: "flex min-h-6 items-center justify-between gap-3",
+  inspectorTitle: "whitespace-nowrap text-[13px] font-[760]",
+  inspectorHeaderSkeleton: "!w-14",
+  inspectorCard:
+    "grid gap-2.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3",
+  inspectorCardTitle: "!w-[48%]",
+  inspectorCardTitleAlternate: "!w-[38%]",
+  inspectorCardPrimaryLine: "!w-full opacity-80",
+  inspectorCardSecondaryLine: "!w-[88%] opacity-70",
+  inspectorCardTertiaryLine: "!w-[68%] opacity-60",
+} as const;
+
+export default styles;

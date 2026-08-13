@@ -922,6 +922,34 @@ def test_source_stage_tasks_use_project_session_without_direct_session_and_retry
         retry["sessionId"],
     ]
 
+    reviewable = dict(retry["task"])
+    reviewable["status"] = "needs_review"
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run["runId"],
+        reviewable,
+    )
+    session_service.delete_chat_session(retry["sessionId"])
+    recovered = (
+        team_workflow_orchestration_service.start_source_collection_stage_session_task(
+            team["teamId"],
+            run["runId"],
+            {
+                "stageId": "finding",
+                "agentId": agent["agentId"],
+                "agentRole": "source_finder",
+                "idempotencyKey": "missing-session-after-review",
+            },
+        )
+    )
+
+    assert recovered["sessionAttempt"] == 3
+    assert recovered["sessionId"] != retry["sessionId"]
+    assert recovered["retryOfSessionId"] == retry["sessionId"]
+    assert recovered["task"]["formalRetry"] is True
+    assert recovered["task"]["formalRetryReason"] == "missing_canonical_session"
+    assert submitted_sessions[-1] == recovered["sessionId"]
+
 
 def test_formal_retry_selects_the_same_agent_previous_task_when_roles_match(
     tmp_path, monkeypatch
