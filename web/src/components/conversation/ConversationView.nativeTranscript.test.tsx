@@ -179,4 +179,55 @@ describe("ConversationView native Codex transcript surface", () => {
       'item.status === "running" || item.status === "pending" || assistantTurnIsStreaming(message)',
     );
   });
+
+  it("labels commentary as progress while keeping reasoning labeled as thinking", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-commentary-reasoning-labels",
+        role: "assistant",
+        timestamp: "2026-08-13T18:00:00Z",
+        turnId: "turn-commentary-reasoning-labels",
+        status: "completed",
+        turnItems: [
+          {
+            id: "reasoning-label:0",
+            itemId: "reasoning-label",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-commentary-reasoning-labels",
+            type: "reasoning",
+            status: "completed",
+            revision: 0,
+            sequence: 1,
+            terminal: true,
+            text: "这是模型推理摘要。",
+          },
+          {
+            id: "commentary-label:0",
+            itemId: "commentary-label",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-commentary-reasoning-labels",
+            type: "agent_message",
+            phase: "commentary",
+            status: "completed",
+            revision: 0,
+            sequence: 2,
+            terminal: true,
+            text: "这是对用户可见的进展说明。",
+          },
+        ],
+      },
+    ]);
+
+    const reasoningText = html.indexOf("这是模型推理摘要。");
+    const commentaryText = html.indexOf("这是对用户可见的进展说明。");
+    const reasoningStart = html.lastIndexOf("<section", reasoningText);
+    const commentaryStart = html.lastIndexOf("<section", commentaryText);
+    const reasoningEnd = html.indexOf("</section>", reasoningText);
+    const commentaryEnd = html.indexOf("</section>", commentaryText);
+    expect(html.slice(reasoningStart, reasoningEnd)).toContain("思考");
+    expect(html.slice(commentaryStart, commentaryEnd)).toContain("进展");
+    expect(html.slice(commentaryStart, commentaryEnd)).not.toContain("思考");
+  });
 });

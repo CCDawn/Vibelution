@@ -2110,6 +2110,76 @@ def _merge_live_tool_start_metadata_into_turn_items(
     return merged
 
 
+def _merge_live_reasoning_cells_into_turn_items(
+    items: list[dict[str, Any]],
+    codex_transcript: dict[str, Any] | None,
+    *,
+    session_id: str,
+    turn_id: str,
+    message_id: str,
+    source: str,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Merge each feedback reasoning segment by stable identity, never as one turn blob."""
+
+    s = _service()
+    merged = [dict(item) for item in list(items or []) if isinstance(item, dict)]
+    reasoning_cells = [
+        (index, cell)
+        for index, cell in enumerate(list((codex_transcript or {}).get("cells") or []), start=1)
+        if isinstance(cell, dict) and str(cell.get("kind") or "").strip() == "reasoning_summary"
+    ]
+    if not reasoning_cells:
+        return merged, False
+
+    next_sequence = max((s._coerce_nonnegative_int(item.get("sequence")) for item in merged), default=0)
+    for index, cell in reasoning_cells:
+        live_item = s._session_turn_item_from_codex_cell(
+            session_id=session_id,
+            turn_id=turn_id,
+            message_id=message_id,
+            cell=cell,
+            index=index,
+            source=source,
+        )
+        if not live_item:
+            continue
+        feedback_sequence = s._coerce_nonnegative_int(cell.get("sequence") or index)
+        item_id = f"{s._session_turn_item_base_id(session_id, turn_id)}-reasoning-{feedback_sequence}"
+        live_item["id"] = f"{item_id}:{s._coerce_nonnegative_int(live_item.get('revision'))}"
+        live_item["itemId"] = item_id
+        live_text = str(live_item.get("text") or live_item.get("summary") or "").strip()
+        existing_index = next(
+            (
+                item_index
+                for item_index, item in enumerate(merged)
+                if str(item.get("itemId") or item.get("id") or "").split(":", 1)[0] == item_id
+            ),
+            -1,
+        )
+        if existing_index >= 0:
+            existing = merged[existing_index]
+            existing_text = str(existing.get("text") or existing.get("summary") or "").strip()
+            if (
+                s._coerce_nonnegative_int(live_item.get("revision"))
+                > s._coerce_nonnegative_int(existing.get("revision"))
+                or len(live_text) > len(existing_text)
+            ):
+                live_item["sequence"] = existing.get("sequence")
+                merged[existing_index] = live_item
+            continue
+        live_text_key = s._assistant_projection_text_key(live_text)
+        if live_text_key and any(
+            _is_session_turn_reasoning_item(item)
+            and s._assistant_projection_text_key(item.get("text") or item.get("summary") or "") == live_text_key
+            for item in merged
+        ):
+            continue
+        next_sequence += 1
+        live_item["sequence"] = next_sequence
+        merged.append(live_item)
+    return merged, True
+
+
 def _build_session_turn_items_projection(
     *,
     session_id: str,
@@ -2155,6 +2225,14 @@ def _build_session_turn_items_projection(
                 message_id=normalized_message_id,
                 source=source,
             )
+            stamped, has_reasoning_cells = _merge_live_reasoning_cells_into_turn_items(
+                stamped,
+                codex_transcript,
+                session_id=session_id,
+                turn_id=normalized_turn_id,
+                message_id=normalized_message_id,
+                source=source,
+            )
             merged = _merge_live_content_into_turn_items(
                 stamped,
                 session_id=session_id,
@@ -2164,10 +2242,9 @@ def _build_session_turn_items_projection(
                 done=done,
                 source=source,
             )
-            # Journal final_answer / tools often land without a reasoning commit.
-            # Bridge live/durable thought so package_cells keep thinking visible.
-            return _canonicalize_session_turn_items_for_protocol(
-                _merge_live_thought_into_turn_items(
+            # Legacy sources without segment cells still need the aggregate bridge.
+            if not has_reasoning_cells:
+                merged = _merge_live_thought_into_turn_items(
                     merged,
                     session_id=session_id,
                     turn_id=normalized_turn_id,
@@ -2176,7 +2253,9 @@ def _build_session_turn_items_projection(
                     done=done,
                     source=source,
                     stage=stage,
-                ),
+                )
+            return _canonicalize_session_turn_items_for_protocol(
+                merged,
                 session_id=session_id,
                 turn_id=normalized_turn_id,
             )
@@ -2200,6 +2279,10 @@ def _build_session_turn_items_projection(
     if not normalized_message_id:
         return []
     transcript_cells = list((codex_transcript or {}).get("cells") or [])
+    has_transcript_reasoning = any(
+        isinstance(cell, dict) and str(cell.get("kind") or "").strip() == "reasoning_summary"
+        for cell in transcript_cells
+    )
     content_text = s._sanitize_message_content("assistant", content)
     assistant_markdown_text = s._session_turn_assistant_markdown_text(transcript_cells)
     thought_text = s._sanitize_message_content("assistant", thought)
@@ -2247,7 +2330,7 @@ def _build_session_turn_items_projection(
                 }
             )
         )
-    if thought_text:
+    if thought_text and not has_transcript_reasoning:
         reasoning_id = f"{s._session_turn_item_base_id(session_id, normalized_turn_id or 'turn')}-reasoning"
         items.append(
             s._compact_codex_record(
@@ -2314,12 +2397,7 @@ def _build_session_turn_items_projection(
     for index, cell in enumerate(transcript_cells, start=1):
         if not isinstance(cell, dict):
             continue
-        # Live thought is already represented by the canonical reasoning item
-        # above.  A legacy feedback-derived reasoning cell would otherwise
-        # create a second spinner/body for the same progress update.
         cell_kind = str(cell.get("kind") or "").strip()
-        if thought_text and cell_kind == "reasoning_summary":
-            continue
         # A stream tail was only a renderer placeholder for the retired
         # transcript envelope.  The running status item is the authoritative
         # progress signal now, so emitting both would show duplicate spinners.
@@ -2334,6 +2412,14 @@ def _build_session_turn_items_projection(
             source=source,
         )
         if item:
+            if cell_kind == "reasoning_summary":
+                feedback_sequence = s._coerce_nonnegative_int(cell.get("sequence") or index)
+                item_id = (
+                    f"{s._session_turn_item_base_id(session_id, normalized_turn_id or 'turn')}"
+                    f"-reasoning-{feedback_sequence}"
+                )
+                item["id"] = f"{item_id}:{s._coerce_nonnegative_int(item.get('revision'))}"
+                item["itemId"] = item_id
             # Promote legacy cell-derived rows to v2 identity when missing.
             if not item.get("version"):
                 item["version"] = 2
