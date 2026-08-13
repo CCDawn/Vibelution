@@ -402,6 +402,15 @@ describe("VUI workbench layout templates", () => {
 
     expect(tableMarkup).toContain('data-vui="dense-table"');
     expect(tableMarkup).toContain("Job A");
+
+    const headerlessMarkup = renderToStaticMarkup(
+      <VDenseOpsPage ariaLabel="Launcher" hideHeader>
+        <span>Instances</span>
+      </VDenseOpsPage>,
+    );
+    expect(headerlessMarkup).toContain('data-vui-recipe="dense-ops-page"');
+    expect(headerlessMarkup).toContain("Instances");
+    expect(headerlessMarkup).not.toContain('data-vui="route-header"');
   });
 
   it("supports reusable start-aligned empty states without route-owned markup", () => {

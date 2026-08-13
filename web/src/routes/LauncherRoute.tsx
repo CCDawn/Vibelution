@@ -2290,12 +2290,10 @@ export function LauncherRoute() {
   return (
     <VDenseOpsPage
       className={styles.route}
-      headerClassName={styles.header}
       fill={false}
+      hideHeader
       data-vui-domain-recipe="launcher-workbench"
       ariaLabel={copy.title}
-      eyebrow={copy.eyebrow}
-      title={copy.title}
     >
       <LauncherBranchInstancesPanel
         copy={copy}

@@ -124,6 +124,7 @@ import { VDenseOpsPage } from "@/components/vui";
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
 | title / eyebrow / meta / actions | 顶栏 | domain 用 `data-vui-domain-recipe` |
+| `hideHeader` | 不渲染顶栏 | 窗口标题已能识别该页时使用，例如桌面 Launcher |
 | `toolbar` / `toolbarSlot` | 过滤条 / 指标条 | 已是 strip 用 toolbarSlot |
 | children / empty / isEmpty | 主区 | 默认 fill |
 
