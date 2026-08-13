@@ -28,10 +28,13 @@ Runtime scene pack：[`runtime_scene/README.md`](runtime_scene/README.md)。
 ## 生命周期（谁拥有什么）
 
 ```text
-Electron (product tray owner)
+Electron (product tray owner, globally unique desktop shell)
+  → pin userData to %LOCALAPPDATA%\\Vibelution\\DesktopShell before requestSingleInstanceLock
+  → second launch without --project/--open-workbench/deep-link focuses the existing Launcher window
   → claim .runtime/launcher/desktop_shell_owner.json
   → Python launcher service (vibelution_desktop_entry.py bootstrap)
   → Runtime Manager → FastAPI + Workbench
+  → isolated worktree backends stay allowed; they do not spawn a second desktop shell
 
 VibelutionLauncher.exe --project <root> launcher
   → if Electron owner pid is alive: no NotifyIcon (thin shim / open console)

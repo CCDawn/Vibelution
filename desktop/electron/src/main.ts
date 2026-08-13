@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
-import { singleInstanceDecision } from "./appLock.js";
+import {
+  pinSharedDesktopShellUserData,
+  resolveSecondInstanceIntent,
+  singleInstanceDecision
+} from "./appLock.js";
 import { applyDesktopCliToEnvironment, parseDesktopCliArgs } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import {
@@ -159,6 +163,7 @@ type PendingPublicDeepLink = {
 };
 
 const pendingPublicDeepLinks: PendingPublicDeepLink[] = [];
+pinSharedDesktopShellUserData(app, { smoke: desktopCliArgs.smoke, env: process.env });
 const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
 nativeTheme.themeSource = "light";
 if (!desktopCliArgs.smoke && lockDecision.action === "focus_existing") {
@@ -695,6 +700,12 @@ async function recordElectronSupervisorEvent(
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
   }
+}
+
+function focusExistingDesktopShell(): void {
+  void windowProvider?.openLauncher().catch((error: unknown) => {
+    console.warn(error instanceof Error ? error.message : String(error));
+  });
 }
 
 async function handlePublicDeepLinkUrl(rawUrl: string, source: PublicDeepLinkSource): Promise<void> {
@@ -1710,19 +1721,26 @@ app.whenReady()
   });
 
 app.on("second-instance", (_event, argv) => {
-  const rawUrl = findVibelutionDeepLinkArg(argv);
-  if (rawUrl) {
-    void handlePublicDeepLinkUrl(rawUrl, "second_instance");
-    return;
-  }
   const secondCli = parseDesktopCliArgs(argv);
-  if (secondCli.projectRoot) {
-    void applyPendingProjectSlot(secondCli.projectRoot);
+  const intent = resolveSecondInstanceIntent({
+    deepLinkUrl: findVibelutionDeepLinkArg(argv) ?? "",
+    projectRoot: secondCli.projectRoot,
+    openWorkbench: secondCli.openWorkbench
+  });
+  if (intent.action === "handle_deep_link") {
+    void handlePublicDeepLinkUrl(intent.rawUrl, "second_instance");
     return;
   }
-  if (secondCli.openWorkbench) {
+  if (intent.action === "apply_project") {
+    void applyPendingProjectSlot(intent.projectRoot);
+    return;
+  }
+  if (intent.action === "open_workbench") {
     requestOpenWorkbench();
     return;
+  }
+  if (intent.action === "focus_existing_shell") {
+    focusExistingDesktopShell();
   }
 });
 
