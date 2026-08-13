@@ -22,6 +22,7 @@ from core.external_agent.contracts import (
     SERVER_VERSION,
     TASK_TERMINAL_STATUSES,
 )
+from vibelution_storage import resolve_project_runtime_home
 
 CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
@@ -497,7 +498,7 @@ class ManagedAgentBackendClient:
 
     def _runtime_descriptor(self) -> dict[str, str]:
         launcher_state = _read_json(
-            self.project_root / ".runtime" / "launcher" / "state.json"
+            resolve_project_runtime_home(self.project_root) / "launcher" / "state.json"
         )
         url = str(launcher_state.get("url") or "").strip().rstrip("/")
         if not url:

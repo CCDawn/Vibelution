@@ -39,7 +39,7 @@
 
 - 全局规则正文只写一次；其他文档使用链接。
 - 模块 README 只负责局部 ownership、目录和实现地图，不声明竞争性的全局规则。
-- `.docs/project-memory/` 是运行状态与协作数据，不是规范目录。
+- 外部 project `memory/` 是恢复投影，Git common-dir registry 是实时协作权威；旧 `.docs/project-memory/` 只读兼容，二者都不是规范目录。
 - `docs/archive/`（含原 `docs/plans/`、`docs/superpowers/`）不是现行规则来源，除非本索引或 `AGENTS.md` 明确提升。
 - 文档总图：[../README.md](../README.md)；配置入口：[../ops/config/INDEX.md](../ops/config/INDEX.md)。
 - 新增或修改全局规则时，必须同步检查 `AGENTS.md` 路由、相关守卫测试和项目记忆决策。

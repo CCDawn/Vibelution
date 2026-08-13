@@ -1520,7 +1520,13 @@ def _runtime_scene_research_summary_payload(events: list[dict[str, Any]]) -> dic
 
 def _runtime_scene_root() -> Path:
     s = _service()
-    return (s.PROJECT_ROOT / "logs" / "runtime_scenes").resolve()
+    from vibelution_storage import ProjectIdentityError, resolve_active_project_storage_paths
+
+    try:
+        logs_root = resolve_active_project_storage_paths(s.PROJECT_ROOT).logs
+    except ProjectIdentityError:
+        logs_root = s.PROJECT_ROOT / "logs"
+    return (logs_root / "runtime_scenes").resolve()
 
 
 def _runtime_scene_safe_id(value: Any) -> str:

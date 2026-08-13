@@ -47,13 +47,15 @@ from .session_service import (
 )
 from .runtime_scene_service import record_runtime_scene_event
 from .workbench_contract_service import get_workbench_contract
+from vibelution_storage import resolve_project_runtime_home
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_STATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "ui_runtime_state.json")
 LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
-LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
-LAUNCHER_SHUTDOWN_LOG_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "shutdown-request.log"
+LAUNCHER_RUNTIME_ROOT = resolve_project_runtime_home(PROJECT_ROOT) / "launcher"
+LAUNCHER_STATE_PATH = LAUNCHER_RUNTIME_ROOT / "state.json"
+LAUNCHER_SHUTDOWN_LOG_PATH = LAUNCHER_RUNTIME_ROOT / "shutdown-request.log"
 RUNNING_SESSION_PHASES = {"running", "stopping"}
 RESUMABLE_TERMINAL_SESSION_PHASES = {"needs_continue", "paused_limit", "stopped_by_user"}
 _RUNTIME_SUMMARY_AGENT_CACHE: ContextVar[dict[tuple[str, bool], object] | None] = ContextVar(

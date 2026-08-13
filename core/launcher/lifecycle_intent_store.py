@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from core.runtime_manager.constants import PROJECT_ROOT
+from core.runtime_manager.constants import RUNTIME_ROOT
 
 
-LIFECYCLE_DB_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "lifecycle.sqlite3"
+LIFECYCLE_DB_PATH = RUNTIME_ROOT / "launcher" / "lifecycle.sqlite3"
 DESKTOP_ACTIONS = {
     "open_workbench",
     "focus_workbench",

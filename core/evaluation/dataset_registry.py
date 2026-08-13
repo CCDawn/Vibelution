@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from core.infrastructure.workspace_manager import get_workspace
+from vibelution_storage import resolve_project_workspace_home
 
 from .chat_case_lifecycle import chat_reviewed_dataset_metadata
 from .dataset_adapters import (
@@ -407,7 +408,7 @@ def _workspace_root(project_root: Optional[Path] = None) -> Path:
     if project_root is None:
         return get_workspace().root.resolve()
     root = Path(project_root).resolve()
-    return root if root.name.lower() == "workspace" else root / "workspace"
+    return root if root.name.lower() == "workspace" else resolve_project_workspace_home(root)
 
 
 def _text_list(value: Any) -> List[str]:

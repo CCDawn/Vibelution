@@ -19,6 +19,7 @@ from . import cli_agent_service
 from . import cli_agent_task_kernel
 from .terminal_screen_buffer import TerminalScreenBuffer, TerminalScreenSnapshot
 from core.logging import debug as _debug_logger
+from vibelution_storage import resolve_project_runtime_home
 
 try:  # pragma: no cover - availability is platform/package dependent
     from winpty import PtyProcess
@@ -27,7 +28,7 @@ except Exception:  # pragma: no cover - fallback is covered by unit tests
 
 
 PROJECT_ROOT = cli_agent_service.PROJECT_ROOT
-RUNTIME_ROOT = PROJECT_ROOT / ".runtime" / "cli_agents"
+RUNTIME_ROOT = resolve_project_runtime_home(PROJECT_ROOT) / "cli_agents"
 SESSION_STATE_DIR = RUNTIME_ROOT / "sessions"
 TRANSCRIPT_DIR = RUNTIME_ROOT / "transcripts"
 DEFAULT_ROWS = 28

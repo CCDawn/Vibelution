@@ -1,8 +1,9 @@
 """Per-checkout slot identity and isolated data home.
 
-Slot identity is the normalized worktree path, not a branch slug. Isolation
-happens only when spawn env is injected; resolve_data_home() defaults stay
-unchanged so the integration-root main checkout keeps Documents\\Vibelution\\data.
+Slot identity is the normalized checkout path, not a branch slug. Vibelution
+checkouts with a tracked project identity use the canonical external project
+storage root. The historical ``slots`` root remains a compatibility fallback
+for third-party or fixture checkouts that do not yet carry that identity.
 """
 
 from __future__ import annotations
@@ -12,6 +13,11 @@ from pathlib import Path
 from typing import Any
 
 from config.paths import CONFIG_HOME_ENV, DATA_HOME_ENV, resolve_config_home
+from core.infrastructure.storage_paths import (
+    ProjectIdentityError,
+    instance_id_for_project,
+    resolve_active_project_storage_paths,
+)
 
 WORKSPACE_ROOT_ENV = "VIBELUTION_WORKSPACE_ROOT"
 _FNV32_OFFSET = 2166136261
@@ -34,7 +40,7 @@ def slot_id_for_key(slot_key: str) -> str:
 
 
 def slot_id_for_project(project_root: str | os.PathLike[str]) -> str:
-    return slot_id_for_key(normalize_slot_key(project_root))
+    return instance_id_for_project(project_root)
 
 
 def slots_root() -> Path:
@@ -51,7 +57,10 @@ def slot_data_home(slot_id: str) -> Path:
 
 
 def data_home_for_project(project_root: str | os.PathLike[str]) -> Path:
-    return slot_data_home(slot_id_for_project(project_root))
+    try:
+        return resolve_active_project_storage_paths(project_root).data.resolve()
+    except ProjectIdentityError:
+        return slot_data_home(slot_id_for_project(project_root))
 
 
 def apply_slot_spawn_environment(
@@ -66,8 +75,7 @@ def apply_slot_spawn_environment(
 
     next_env = {str(key): str(value) for key, value in dict(env or {}).items()}
     resolved_root = Path(str(project_root).strip()).expanduser().resolve()
-    slot_id = slot_id_for_project(resolved_root)
-    data_home = slot_data_home(slot_id)
+    data_home = data_home_for_project(resolved_root)
     if mkdir:
         data_home.mkdir(parents=True, exist_ok=True)
     next_env[WORKSPACE_ROOT_ENV] = str(resolved_root)
@@ -88,5 +96,5 @@ def slot_fields_for_project(project_root: str | os.PathLike[str]) -> dict[str, A
     return {
         "slotKey": slot_key,
         "slotId": slot_id,
-        "dataHome": str(slot_data_home(slot_id)),
+        "dataHome": str(data_home_for_project(project_root)),
     }

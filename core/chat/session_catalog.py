@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from core.infrastructure.atomic_io import atomic_write_text
+from vibelution_storage import resolve_project_cache_home
 
 
 SCHEMA_VERSION = 2
@@ -355,11 +356,7 @@ def resolve_session_catalog_path(
             / "session-catalogs"
         )
     elif normalized_environment == "developer" and project_root is not None:
-        catalog_root = (
-            Path(project_root).expanduser().resolve(strict=False)
-            / ".runtime"
-            / "session-catalogs"
-        )
+        catalog_root = resolve_project_cache_home(project_root) / "session-catalogs"
     else:
         raise CatalogUnavailableError(
             "Session catalog requires an explicit local runtime cache root."

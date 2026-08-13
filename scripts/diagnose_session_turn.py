@@ -18,6 +18,7 @@ from core.chat.turn_journal import (  # noqa: E402
     TurnJournalEvent,
     turn_journal_path,
 )
+from vibelution_storage import resolve_project_logs_home
 
 
 TERMINAL_EVENT_TYPES = {
@@ -55,7 +56,7 @@ def build_session_turn_diagnosis(
         "paths": {
             "journal": str(journal_path),
             "liveOutput": str(live_output_path),
-            "runtimeScenes": str(root / "logs" / "runtime_scenes"),
+            "runtimeScenes": str(resolve_project_logs_home(root) / "runtime_scenes"),
         },
         "journal": journal,
         "liveOutput": live_output,
@@ -190,7 +191,7 @@ def _find_runtime_evidence(
     *,
     max_matches: int,
 ) -> dict[str, Any]:
-    runtime_root = project_root / "logs" / "runtime_scenes"
+    runtime_root = resolve_project_logs_home(project_root) / "runtime_scenes"
     tokens = [token for token in (session_id, turn_id) if token]
     matches: list[dict[str, Any]] = []
     decode_errors: list[dict[str, Any]] = []

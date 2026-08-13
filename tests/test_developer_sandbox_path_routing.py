@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from core.chat.conversation_ledger import conversation_ledger_path
 from core.infrastructure import developer_sandbox
 from core.gym import episodes as gym_episodes
@@ -103,3 +105,31 @@ def test_high_roi_state_paths_stay_formal_when_developer_mode_is_off(tmp_path, m
         workspace / "supervised_evolution" / "decisions" / "debug-session.json"
     )
     assert supervised_control_service._supervised_history_path() == workspace / "supervised_evolution" / "history.jsonl"
+
+
+def test_identified_project_routes_formal_workspace_and_runtime_outside_checkout(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    identity_path = project_root / ".vibelution" / "project.json"
+    identity_path.parent.mkdir()
+    identity_path.write_text(
+        json.dumps({"schemaVersion": 1, "projectId": "test-vibelution"}) + "\n",
+        encoding="utf-8",
+    )
+    projects_home = tmp_path / "external" / "projects"
+    monkeypatch.setenv("VIBELUTION_PROJECTS_HOME", str(projects_home))
+    monkeypatch.delenv("VIBELUTION_DATA_HOME", raising=False)
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "missing-config.toml"))
+
+    workspace_path = developer_sandbox.formal_workspace_path(project_root, "teams", "team-a")
+    runtime_path = developer_sandbox.route_runtime_path(
+        project_root,
+        "runtime_manager",
+        "state.json",
+        intent="state",
+    )
+
+    assert workspace_path.is_relative_to(projects_home)
+    assert runtime_path.is_relative_to(projects_home)
+    assert not workspace_path.is_relative_to(project_root)
+    assert not runtime_path.is_relative_to(project_root)

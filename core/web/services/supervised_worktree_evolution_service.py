@@ -17,6 +17,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from core.evaluation import load_supervised_bundle, prepare_dataset_run
+from vibelution_storage import resolve_project_workspace_home
 from core.evaluation.supervised_evolution import (
     normalize_supervised_mental_model_mode,
     supervised_mental_model_enabled_for_mode,
@@ -2133,7 +2134,7 @@ def _ensure_bundle_available_in_candidate(project_root: Path, *, candidate_path:
     source = developer_sandbox.seeded_sandbox_workspace_path(project_root, "evaluation", "bundles", f"{bundle_name}.json")
     if not source.exists():
         return
-    target = candidate_path / "workspace" / "evaluation" / "bundles" / source.name
+    target = resolve_project_workspace_home(candidate_path) / "evaluation" / "bundles" / source.name
     if target.exists():
         return
     target.parent.mkdir(parents=True, exist_ok=True)

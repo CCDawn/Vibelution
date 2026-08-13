@@ -39,7 +39,7 @@
   → docs/adr/* + 模块 README
   → docs/ops/config/* + core/llm/PROTOCOL.md
   → docs/guides/*（本目录：路由，不发明规则）
-  → docs/archive/* · .docs/project-memory/*（只读状态/考古）
+  → docs/archive/* · 外部 project memory（恢复投影；旧 .docs/project-memory 只读）
 ```
 
 ## 默认禁止

@@ -11,6 +11,7 @@
 | [0005](0005-docs-authority-and-archive-policy.md) | 文档权威层与 archive 策略 | Accepted |
 | [0006](0006-challenge-cup-workflow-runtime-and-single-canvas.md) | 挑战杯科研流程使用 LangGraph 运行权威与单画布三阶段投影 | Accepted |
 | [0007](0007-research-workflow-handoff-and-agent-session-binding.md) | 科研工作流节点交接、Agent 配置继承与精确会话锚点 | Accepted |
+| [0008](0008-project-mutable-state-lives-outside-source-tree.md) | 项目可变状态统一放到源码树外，并以双层身份隔离 | Accepted |
 
 ## 写法
 

@@ -20,6 +20,7 @@ from core.launcher import desktop_session_store, lifecycle_intent_store
 from core.launcher.slot_identity import slot_id_for_project
 from core.runtime_manager import instances_registry as registry
 from core.runtime_manager.constants import PROJECT_ROOT
+from vibelution_storage import resolve_project_runtime_home
 
 OPEN_INSTANCE_WORKBENCH = "open_instance_workbench"
 CLOSE_INSTANCE_WORKBENCH = "close_instance_workbench"
@@ -169,7 +170,7 @@ def _open_via_named_edge(item: dict[str, Any], *, url: str, title: str) -> dict[
     if os.name != "nt":
         return {"provider": "none", "windowPid": 0, "title": title}
     worktree = Path(str(item.get("path") or "")).expanduser()
-    profile_dir = worktree / ".runtime" / "launcher" / "workbench-app-profile"
+    profile_dir = resolve_project_runtime_home(worktree) / "launcher" / "workbench-app-profile"
     slot_id = str(item.get("slotId") or "")
     if not slot_id and worktree.exists():
         try:
@@ -266,7 +267,7 @@ def _persist_window_fields(instance_id: str, *, window_pid: int, window_title: s
 
 
 def _write_worktree_window_pid(worktree: Path, pid: int) -> None:
-    path = worktree / ".runtime" / "launcher" / "state.json"
+    path = resolve_project_runtime_home(worktree) / "launcher" / "state.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):

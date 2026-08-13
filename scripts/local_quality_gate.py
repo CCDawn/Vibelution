@@ -43,6 +43,10 @@ Outcome = Literal[
 
 FATAL_RUFF_RULES = "E9,F63,F7,F82"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vibelution_storage import resolve_project_cache_home
 GUARD_SCRIPT = (
     Path.home()
     / ".codex"
@@ -520,7 +524,7 @@ def manifest_payload(
 
 
 def write_manifest(root: Path, task_id: str, payload: dict[str, object]) -> Path:
-    directory = root / ".runtime" / "quality_gates"
+    directory = resolve_project_cache_home(root) / "quality_gates"
     directory.mkdir(parents=True, exist_ok=True)
     safe_task_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", task_id).strip("-") or "task"
     path = directory / f"{safe_task_id}.json"

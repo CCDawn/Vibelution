@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from core.chatroom.store import utc_now_iso
+from vibelution_storage import resolve_project_workspace_home
 
 
 SCHEMA_VERSION = 1
@@ -368,7 +369,7 @@ def _workspace_path(*parts: str) -> Path:
 
         return Path(developer_sandbox.route_workspace_path(PROJECT_ROOT, "user_content", *parts, intent="state", seed=True))
     except Exception:
-        return Path(PROJECT_ROOT) / "workspace" / "user_content" / Path(*parts)
+        return resolve_project_workspace_home(PROJECT_ROOT) / "user_content" / Path(*parts)
 
 
 def _resolve_source_dir(source_path: str) -> Path:

@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+from vibelution_storage import resolve_project_workspace_home
 
 from core.prompt_manager.core_prompt_sources import (
     CORE_PROMPT_NAMES,
@@ -299,7 +300,7 @@ def make_codebase_map_section(
 
 def make_git_rules_section(project_root: Path) -> SystemPromptSection:
     """Git 提交规则摘要 — 从工作流文档提炼运行时提醒。"""
-    workflow_path = project_root / "workspace" / "prompts" / "GIT_WORKFLOW.md"
+    workflow_path = resolve_project_workspace_home(project_root) / "prompts" / "GIT_WORKFLOW.md"
 
     def compute() -> Optional[str]:
         try:

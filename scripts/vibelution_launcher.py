@@ -27,11 +27,17 @@ from pathlib import Path
 import tomllib
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vibelution_storage import resolve_active_project_storage_paths
+
+PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
+RUNTIME_DIR = PROJECT_STORAGE.runtime / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
 PORTS_PATH = RUNTIME_DIR / "ports.json"
 ACTIVE_RUNTIME_SCENE_PATH = RUNTIME_DIR / "active-runtime-scene.json"
-RUNTIME_SCENE_ROOT = PROJECT_ROOT / "logs" / "runtime_scenes"
+RUNTIME_SCENE_ROOT = PROJECT_STORAGE.logs / "runtime_scenes"
 BACKEND_STDOUT_PATH = RUNTIME_DIR / "backend.stdout.log"
 BACKEND_STDERR_PATH = RUNTIME_DIR / "backend.stderr.log"
 FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"

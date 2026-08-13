@@ -40,6 +40,10 @@ except ModuleNotFoundError:  # Direct execution sets sys.path[0] to scripts/.
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vibelution_storage import resolve_project_logs_home
 DEFAULT_HOST = "bossai-server-b"
 DEFAULT_REMOTE_ROOT = "/home/enrigin/Vibelution-test"
 DEFAULT_WORKERS = 8
@@ -804,7 +808,7 @@ def parse_args(argv: Sequence[str]) -> RemoteTestConfig:
     parser.add_argument(
         "--artifacts-dir",
         type=Path,
-        default=PROJECT_ROOT / "logs" / "remote_test_runs",
+        default=resolve_project_logs_home(PROJECT_ROOT) / "remote_test_runs",
         help="Local directory for copied remote artifacts.",
     )
     args = parser.parse_args(argv)

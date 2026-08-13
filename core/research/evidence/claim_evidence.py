@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.infrastructure.storage_paths import resolve_project_workspace_home
+
 
 SCHEMA_VERSION = 1
 _LOCK = threading.RLock()
@@ -231,7 +233,13 @@ class ClaimEvidenceStore:
         return projected
 
     def _path(self, team_id: str) -> Path:
-        return self.project_root / "workspace" / "teams" / team_id / "claim_evidence" / "index.jsonl"
+        return (
+            resolve_project_workspace_home(self.project_root)
+            / "teams"
+            / team_id
+            / "claim_evidence"
+            / "index.jsonl"
+        )
 
 
 def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:

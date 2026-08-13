@@ -13,10 +13,11 @@ from typing import Any
 
 from . import cli_agent_protocols as protocols
 from . import cli_agent_service
+from vibelution_storage import resolve_project_runtime_home
 
 
 PROJECT_ROOT = cli_agent_service.PROJECT_ROOT
-TASK_STATE_DIR = PROJECT_ROOT / ".runtime" / "cli_agents" / "tasks"
+TASK_STATE_DIR = resolve_project_runtime_home(PROJECT_ROOT) / "cli_agents" / "tasks"
 MAX_TASK_OUTPUT_CHARS = 180_000
 WATCH_INTERVAL_SECONDS = 1.0
 

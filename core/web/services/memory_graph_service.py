@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from vibelution_storage import resolve_project_logs_home
 
 from . import agent_directory_service, team_knowledge_service, team_service
 from .runtime_scene_service import record_runtime_scene_event
@@ -389,7 +390,7 @@ class _GraphBuilder:
 
 
 def _add_runtime_scene_nodes(graph: _GraphBuilder, project_node_id: str) -> None:
-    scene_root = _project_root() / "logs" / "runtime_scenes"
+    scene_root = resolve_project_logs_home(_project_root()) / "runtime_scenes"
     if not scene_root.exists():
         return
     scene_dirs = sorted([path for path in scene_root.iterdir() if path.is_dir()], key=lambda path: path.stat().st_mtime, reverse=True)[:12]

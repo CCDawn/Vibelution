@@ -693,8 +693,10 @@ class TaskAnalyzer:
                 raise FileNotFoundError(f"会话日志不存在: {path}")
             return path
 
+        from vibelution_storage import resolve_project_logs_home
+
         log_dirs = [
-            self.project_root / "logs" / "conversations",
+            resolve_project_logs_home(self.project_root) / "conversations",
             self.project_root / "log_info",
         ]
         if session_id:
@@ -1161,12 +1163,13 @@ _task_analyzer: Optional[TaskAnalyzer] = None
 
 def _workspace_root(project_root: Path) -> Path:
     from core.infrastructure.workspace_manager import get_workspace
+    from vibelution_storage import resolve_project_workspace_home
 
     root = Path(project_root).resolve()
     workspace = get_workspace()
     if root == workspace.project_root.resolve():
         return workspace.root.resolve()
-    return root if root.name.lower() == "workspace" else root / "workspace"
+    return root if root.name.lower() == "workspace" else resolve_project_workspace_home(root)
 
 
 def get_task_analyzer(project_root: Optional[str] = None) -> TaskAnalyzer:

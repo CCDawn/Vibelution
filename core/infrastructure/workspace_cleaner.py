@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import json
+from vibelution_storage import resolve_project_workspace_home
 import shutil
 from pathlib import Path
 from typing import Dict, List, Set, Optional, Any
@@ -406,7 +407,7 @@ def clean_workspace_debris_tool(
         JSON 格式的清理报告
     """
     project_root = Path(__file__).parent.parent.parent
-    ws_root = str(project_root / "workspace")
+    ws_root = str(resolve_project_workspace_home(project_root))
 
     # 解析类别
     cat_str_map = {

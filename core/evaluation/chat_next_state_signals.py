@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from core.infrastructure.workspace_manager import get_workspace
+from vibelution_storage import resolve_project_workspace_home
 
 
 SIGNAL_SCHEMA_VERSION = 1
@@ -61,7 +62,7 @@ def _workspace_root(project_root: Path) -> Path:
     root = Path(project_root).resolve()
     if root == PROJECT_ROOT.resolve():
         return get_workspace().root.resolve()
-    return root if root.name.lower() == "workspace" else root / "workspace"
+    return root if root.name.lower() == "workspace" else resolve_project_workspace_home(root)
 
 
 def _trim_text(value: Any, *, max_chars: int = MAX_SUMMARY_CHARS) -> str:
