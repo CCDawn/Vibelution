@@ -373,6 +373,19 @@ def _start_source_collection_agent_task(
             input_snapshot["sourceCollectionRunId"] = source_run_id
     if not source_run_id:
         raise RuntimeError("source collection adapter did not return a runId")
+    from .source_stage_task_replay import find_reusable_source_stage_task
+
+    reusable_task = find_reusable_source_stage_task(
+        store=store,
+        action=action,
+        team_id=team_id,
+        source_run_id=source_run_id,
+        stage_id=stage_id,
+        agent_id=binding.agent_id,
+        agent_role=role_key,
+    )
+    if reusable_task is not None:
+        return reusable_task
     evidence_remediation_contract: dict[str, Any] = {}
     if action.node_id == "source_extraction" and int(action.attempt) > 1:
         from .agent_claim_evidence_materializer import (
