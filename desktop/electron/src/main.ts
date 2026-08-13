@@ -436,7 +436,10 @@ function startDesktopActionLoop(
         operations: {
           openOrFocusWorkbench: (payload) => openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, payload),
           focusWorkbench: () => provider.focusWorkbench(),
-          closeWorkbench: (payload) => requestTransactionalWorkbenchClose(paths, bootstrap, payload)
+          closeWorkbench: (payload) => requestTransactionalWorkbenchClose(paths, bootstrap, payload),
+          openOrFocusInstanceWorkbench: (payload) => openIsolatedInstanceWorkbench(provider, payload),
+          closeInstanceWorkbench: (payload) =>
+            provider.closeInstanceWorkbench(String(payload.instanceId || "").trim())
         }
       });
       if (result.claimed) {
@@ -471,6 +474,23 @@ function startDesktopActionLoop(
 
   void pollOnce();
   desktopActionTimer = setInterval(() => void pollOnce(), DESKTOP_ACTION_POLL_MS);
+}
+
+async function openIsolatedInstanceWorkbench(
+  provider: ElectronWindowProvider,
+  payload: Record<string, unknown> = {}
+): Promise<ManagedWindowState> {
+  const instanceId = typeof payload.instanceId === "string" ? payload.instanceId.trim() : "";
+  const workbenchUrl = typeof payload.workbenchUrl === "string" ? payload.workbenchUrl.trim() : "";
+  const windowTitle = typeof payload.windowTitle === "string" ? payload.windowTitle.trim() : "";
+  if (!instanceId || !workbenchUrl) {
+    throw new Error("instance workbench requires instanceId and workbenchUrl");
+  }
+  return provider.openOrFocusInstanceWorkbench({
+    instanceId,
+    url: workbenchUrl,
+    title: windowTitle
+  });
 }
 
 async function openWorkbenchAtCurrentLauncherUrl(

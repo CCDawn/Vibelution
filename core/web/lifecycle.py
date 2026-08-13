@@ -15,6 +15,34 @@ from fastapi import FastAPI
 logger = logging.getLogger(__name__)
 
 
+def _record_backend_ready_scene_event(
+    *,
+    pre_yield_ms: int,
+    routes_ready: bool,
+    background_tasks: list[str],
+) -> None:
+    """Record startup diagnostics after health readiness is no longer blocked."""
+
+    try:
+        from .services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "backend",
+            "startup",
+            "backend.lifespan.ready_to_serve",
+            message="Workbench lifespan yielded; health is up while routes mount in background.",
+            outcome="started",
+            fields={
+                "preYieldMs": max(0, int(pre_yield_ms)),
+                "routesReady": bool(routes_ready),
+                "backgroundTasks": list(background_tasks),
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - startup diagnostics are best effort
+        logger.debug("Backend ready runtime-scene event failed: %s", type(exc).__name__)
+
+
 def initialize_session_catalog_on_startup() -> object:
     """Start the optional catalog candidate without changing the legacy read path."""
 
@@ -42,6 +70,22 @@ def initialize_session_directory_on_startup() -> object:
     return initialize_session_directory_runtime(
         project_root=Path(__file__).resolve().parents[2],
     )
+
+
+def _reconcile_cli_agent_terminal_states_on_startup() -> object:
+    from .services.cli_agent_terminal_service import (
+        reconcile_cli_agent_terminal_states_on_startup,
+    )
+
+    return reconcile_cli_agent_terminal_states_on_startup(reason="backend_startup")
+
+
+def _recover_wakeable_agent_inbox_messages_on_startup() -> object:
+    from .services.session_service import (
+        recover_wakeable_agent_inbox_messages_on_startup,
+    )
+
+    return recover_wakeable_agent_inbox_messages_on_startup()
 
 
 def shutdown_session_catalog_on_shutdown() -> None:
@@ -112,12 +156,6 @@ async def web_workbench_lifespan(app: FastAPI | None):
 
     loop.set_exception_handler(handle_loop_exception)
     from .route_bootstrap import warm_web_routes_in_background
-    from .services.cli_agent_terminal_service import (
-        reconcile_cli_agent_terminal_states_on_startup,
-    )
-    from .services.session_service import (
-        recover_wakeable_agent_inbox_messages_on_startup,
-    )
 
     startup_routes_task: asyncio.Task[Any] | None = None
     if app is not None:
@@ -132,7 +170,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
     # Do not await terminal reconcile before yield — it blocked /api/health readiness
     # and stretched launcher open_launcher_action by the full reconcile cost.
     startup_cli_reconcile_task = asyncio.create_task(
-        asyncio.to_thread(reconcile_cli_agent_terminal_states_on_startup, reason="backend_startup")
+        asyncio.to_thread(_reconcile_cli_agent_terminal_states_on_startup)
     )
     startup_cache_prewarm_task = asyncio.create_task(prewarm_ui_caches_on_startup())
     from .services.session.directory_runtime import (
@@ -149,7 +187,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         asyncio.to_thread(initialize_session_catalog_on_startup)
     )
     startup_agent_inbox_recovery_task = asyncio.create_task(
-        asyncio.to_thread(recover_wakeable_agent_inbox_messages_on_startup)
+        asyncio.to_thread(_recover_wakeable_agent_inbox_messages_on_startup)
     )
     startup_external_agent_reconcile_task = asyncio.create_task(
         reconcile_external_agent_tasks_forever()
@@ -163,7 +201,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task.result()
         except asyncio.CancelledError:
             return
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - route task failures use the loop handler
             loop.call_exception_handler(
                 {
                     "message": message,
@@ -209,23 +247,19 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="Research workflow Ledger runtime failed during startup."
         )
     )
+    startup_scene_event_task: asyncio.Task[Any] | None = None
     try:
-        # Emit after tasks are scheduled so open-path diagnosis can see pre-yield cost.
+        # Schedule the informational event immediately before yield, but do not
+        # import the runtime-scene/LLM graph until health is already available.
         try:
-            from .services.runtime_scene_service import record_runtime_scene_event
-
-            record_runtime_scene_event(
-                "backend",
-                "startup",
-                "backend.lifespan.ready_to_serve",
-                message="Workbench lifespan yielded; health is up while routes mount in background.",
-                outcome="started",
-                fields={
-                    "preYieldMs": max(0, int((time.perf_counter() - lifespan_started) * 1000)),
-                    "routesReady": bool(
+            startup_scene_event_task = asyncio.create_task(
+                asyncio.to_thread(
+                    _record_backend_ready_scene_event,
+                    pre_yield_ms=max(0, int((time.perf_counter() - lifespan_started) * 1000)),
+                    routes_ready=bool(
                         app is not None and getattr(app.state, "web_routes_registered", False)
                     ),
-                    "backgroundTasks": [
+                    background_tasks=[
                         *(["web_routes_bootstrap"] if startup_routes_task is not None else []),
                         "cli_terminal_reconcile",
                         "ui_cache_prewarm",
@@ -234,11 +268,10 @@ async def web_workbench_lifespan(app: FastAPI | None):
                         "agent_inbox_recovery",
                         "external_agent_task_reconcile",
                     ],
-                },
-                lifecycle=True,
+                )
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - health must not depend on diagnostics
+            logger.debug("Backend ready runtime-scene task scheduling failed: %s", type(exc).__name__)
         yield
     finally:
         shutdown_session_catalog_on_shutdown()
@@ -252,6 +285,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_external_agent_reconcile_task,
             startup_code_fingerprint_task,
             startup_workflow_runtime_task,
+            startup_scene_event_task,
         ):
             if startup_task is None:
                 continue

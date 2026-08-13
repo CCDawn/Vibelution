@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 class EvidenceMaterializationError(RuntimeError):
@@ -69,7 +70,16 @@ def _materializable_claims(task: dict[str, Any]) -> Iterable[tuple[dict[str, Any
             evidence_status = _text(extraction.get("evidenceStatus")).lower()
             if evidence_status in {"missing_evidence_anchor", "missing", "unverified"}:
                 continue
-            for raw_claim in extraction.get("claims") or []:
+            # Source Collection's canonical extraction contract names verified
+            # per-source findings ``keyFindings``.  Older formal tasks may use
+            # ``claims``.  Both collections carry the same bounded
+            # finding/quote/source/locator evidence shape; accepting either at
+            # this boundary avoids requiring a parallel write solely for the
+            # formal workflow while preserving the exact anchor checks below.
+            for raw_claim in (
+                list(extraction.get("claims") or [])
+                + list(extraction.get("keyFindings") or [])
+            ):
                 if isinstance(raw_claim, dict):
                     yield extraction, dict(raw_claim)
 
@@ -102,7 +112,7 @@ def materialize_claim_evidence_from_task(
     materialized: list[dict[str, Any]] = []
     for extraction, claim in _materializable_claims(task):
         candidate_id = _text(extraction.get("candidateId") or extraction.get("recordId"))
-        claim_text = _text(claim.get("claim"))
+        claim_text = _text(claim.get("claim") or claim.get("finding"))
         quote = _text(claim.get("quote"))
         source_ref = _text(claim.get("sourceRef"))
         locator = _claim_locator(claim)

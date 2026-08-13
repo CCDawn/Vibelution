@@ -28,6 +28,7 @@ class FakeWindow implements ElectronWindowLike {
   loadedUrls: string[] = [];
   overlayCalls: Array<{ icon: unknown; description: string }> = [];
   flashCalls: boolean[] = [];
+  title = "";
   private destroyed = false;
   private focused = false;
   private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
@@ -120,6 +121,10 @@ class FakeWindow implements ElectronWindowLike {
     this.overlayCalls.push({ icon, description });
   }
 
+  setTitle(value: string): void {
+    this.title = value;
+  }
+
   flashFrame(flag: boolean): void {
     this.flashCalls.push(flag);
   }
@@ -191,6 +196,47 @@ describe("Electron window provider state", () => {
       rendererProcessId: 4242,
       url: "http://127.0.0.1:8000/"
     });
+  });
+
+  it("opens an isolated instance window without navigating the current workbench", async () => {
+    const primary = new FakeWindow(42, "", 4242);
+    const isolated = new FakeWindow(99, "", 9999);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: (url, _paths, options) => {
+        if (String(url).includes(":8004")) {
+          if (options?.title) {
+            isolated.setTitle(options.title);
+          }
+          return isolated;
+        }
+        return primary;
+      }
+    });
+
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+    const instance = await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/",
+      title: "branch+task 台"
+    });
+
+    expect(primary.loadedUrls).toEqual(["http://127.0.0.1:8002/"]);
+    expect(isolated.loadedUrls).toEqual(["http://127.0.0.1:8004/"]);
+    expect(isolated.title).toBe("branch+task 台");
+    expect(isolated.showCount).toBe(1);
+    expect(instance).toMatchObject({
+      open: true,
+      instanceId: "worktree:task",
+      title: "branch+task 台",
+      url: "http://127.0.0.1:8004/",
+      rendererProcessId: 9999
+    });
+    expect(provider.snapshot().workbench.url).toBe("http://127.0.0.1:8002/");
+
+    await provider.closeInstanceWorkbench("worktree:task");
+    expect(isolated.closeCount).toBe(1);
+    expect(provider.snapshot().workbench.open).toBe(true);
   });
 
   it("navigates to a refreshed Workbench URL before revealing or reporting the window", async () => {
