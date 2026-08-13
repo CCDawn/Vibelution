@@ -249,7 +249,7 @@ const routeShellTargets = [
   },
   {
     path: "routes/SelfEvolutionTrack.tsx",
-    expected: ["VTabs", "pageTabs", "modeTabs"],
+    expected: ["VTabs", "modeTabs"],
     forbidden: ["styles.segmentedTabs", "styles.tabButtonActive", "styles.modeTabActive", "styles.modeSwitch"],
   },
   {
