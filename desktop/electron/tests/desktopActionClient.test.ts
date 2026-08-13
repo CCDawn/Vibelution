@@ -6,11 +6,18 @@ import {
   runDesktopActionOnce
 } from "../src/protocol/desktopActionClient.js";
 
+const unusedInstanceWindowOps = {
+  openOrFocusInstanceWorkbench: async () => ({ open: true }),
+  closeInstanceWorkbench: async () => ({ open: false })
+};
+
 describe("desktopWindowOperationForAction", () => {
   it("maps approved desktop actions to window operations", () => {
     expect(desktopWindowOperationForAction("open_workbench")).toBe("open_or_focus_workbench");
     expect(desktopWindowOperationForAction("focus_workbench")).toBe("focus_workbench");
     expect(desktopWindowOperationForAction("close_workbench")).toBe("close_workbench");
+    expect(desktopWindowOperationForAction("open_instance_workbench")).toBe("open_or_focus_instance_workbench");
+    expect(desktopWindowOperationForAction("close_instance_workbench")).toBe("close_instance_workbench");
   });
 
   it("does not map runtime-effect actions into Electron process commands", () => {
@@ -98,7 +105,8 @@ describe("runDesktopActionOnce", () => {
         closeWorkbench: async () => {
           operations.push("close_workbench");
           return { open: false };
-        }
+        },
+        ...unusedInstanceWindowOps
       }
     });
 
@@ -161,7 +169,8 @@ describe("runDesktopActionOnce", () => {
             return { open: true };
           },
           focusWorkbench: async () => ({ focused: true }),
-          closeWorkbench: async () => ({ open: false })
+          closeWorkbench: async () => ({ open: false }),
+          ...unusedInstanceWindowOps
         }
       })
     ).resolves.toMatchObject({ claimed: true, status: "acked" });
@@ -207,7 +216,8 @@ describe("runDesktopActionOnce", () => {
         closeWorkbench: async (payload) => {
           receivedPayload = payload;
           return { open: false };
-        }
+        },
+        ...unusedInstanceWindowOps
       }
     });
 
@@ -248,7 +258,8 @@ describe("runDesktopActionOnce", () => {
       operations: {
         openOrFocusWorkbench: async () => operations.push("open"),
         focusWorkbench: async () => operations.push("focus"),
-        closeWorkbench: async () => operations.push("close")
+        closeWorkbench: async () => operations.push("close"),
+        ...unusedInstanceWindowOps
       }
     });
 
@@ -302,6 +313,12 @@ describe("runDesktopActionOnce", () => {
           throw new Error("must not execute");
         },
         closeWorkbench: async () => {
+          throw new Error("must not execute");
+        },
+        openOrFocusInstanceWorkbench: async () => {
+          throw new Error("must not execute");
+        },
+        closeInstanceWorkbench: async () => {
           throw new Error("must not execute");
         }
       }

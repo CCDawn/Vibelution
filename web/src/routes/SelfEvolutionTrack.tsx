@@ -579,8 +579,8 @@ function collectUniqueLines(values: Array<string | null | undefined>) {
   return result;
 }
 
-function joinReadableLines(values: Array<string | null | undefined>) {
-  return values.map((value) => String(value || "").trim()).filter(Boolean).join("\n");
+export function joinReadableLines(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))].join("\n");
 }
 
 export function buildTransactionDisplayTitle(
@@ -1579,27 +1579,21 @@ export function SelfEvolutionTrack({
             }
             aria-hidden={sidebarCollapsed}
           >
-            <header className={styles.railHeader}>
-              <div className={styles.railTitleRow}>
-                <div className={styles.railIdentity}>
-                  <h2 className={styles.railTitle}>{lang === "zh" ? "自进化" : "Self-evolution"}</h2>
+            <section className={styles.railSection} aria-label={lang === "zh" ? "状态" : "Status"}>
+              <div className={styles.railSectionHeader}>
+                <span className={styles.railSectionTitle}><Activity size={14} />{lang === "zh" ? "状态" : "Status"}</span>
+                <div className={styles.railSectionActions}>
                   <VContextualHint
                     label={lang === "zh" ? "本轮状态说明" : "Current run details"}
                     content={(
                       <span className={styles.tooltipBlock}>
-                        <strong>{activeSummary || "--"}</strong>
+                        <strong>{activeModeLabel} · {activeStatusLabel}</strong>
+                        <span>{activeSummary || "--"}</span>
                         <span>{activeNextAction || "--"}</span>
                       </span>
                     )}
                     width="wide"
                   />
-                </div>
-                <div className={styles.railHeaderActions}>
-                  <VTooltip content={`${activeModeLabel} · ${activeSummary || activeNextAction || "--"}`} width="wide">
-                    <span className={styles.statusTooltipTrigger} tabIndex={0}>
-                      <VStatusChip tone="accent">{activeStatusLabel}</VStatusChip>
-                    </span>
-                  </VTooltip>
                   <VIconButton
                     label={activePage === "workspace"
                       ? (lang === "zh" ? "查看运行详情" : "Open run details")
@@ -1612,16 +1606,6 @@ export function SelfEvolutionTrack({
                     onPress={() => setActivePage((current) => current === "workspace" ? "status" : "workspace")}
                   />
                 </div>
-              </div>
-            </header>
-
-            <section className={styles.railSection} aria-label={lang === "zh" ? "状态" : "Status"}>
-              <div className={styles.railSectionHeader}>
-                <span className={styles.railSectionTitle}><Activity size={14} />{lang === "zh" ? "状态" : "Status"}</span>
-                <VContextualHint
-                  label={lang === "zh" ? "状态指标说明" : "Status metric details"}
-                  content={lang === "zh" ? "悬停或聚焦指标查看完整状态来源。" : "Hover or focus a metric for its full status source."}
-                />
               </div>
               <div className={styles.railFactGrid}>
                 <VTooltip content={sceneSemantics?.sceneSummary || runSemantics?.rollbackSummary || activeSummary} width="wide">
@@ -1904,11 +1888,6 @@ export function SelfEvolutionTrack({
                       );
                     })}
                   </div>
-                  <VContextualHint
-                    label={lang === "zh" ? "当前对话说明" : "Current conversation details"}
-                    content={selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction}
-                    width="wide"
-                  />
                 </div>
                 <div className={styles.conversationShell}>
                   {!observationRunModeActive && selectedWorkflowStep?.id === "approval" ? (

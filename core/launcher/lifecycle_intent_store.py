@@ -12,7 +12,13 @@ from core.runtime_manager.constants import PROJECT_ROOT
 
 
 LIFECYCLE_DB_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "lifecycle.sqlite3"
-DESKTOP_ACTIONS = {"open_workbench", "focus_workbench", "close_workbench"}
+DESKTOP_ACTIONS = {
+    "open_workbench",
+    "focus_workbench",
+    "close_workbench",
+    "open_instance_workbench",
+    "close_instance_workbench",
+}
 RUNTIME_EFFECT_ACTIONS = {"restart_after_apply", "resume_self_evolution", "recover_after_crash", "request_app_exit"}
 ALLOWED_ACTIONS = DESKTOP_ACTIONS | RUNTIME_EFFECT_ACTIONS
 TERMINAL_INTENT_STATUSES = {"succeeded", "failed", "superseded"}

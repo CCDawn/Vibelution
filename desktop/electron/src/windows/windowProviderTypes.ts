@@ -8,6 +8,8 @@ export type ManagedWindowState = {
   windowId: number;
   rendererProcessId: number;
   url: string;
+  instanceId?: string;
+  title?: string;
 };
 
 export function closedWindowState(role: ElectronWindowRole): ManagedWindowState {
