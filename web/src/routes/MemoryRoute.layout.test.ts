@@ -749,8 +749,12 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("MemoryCleanupPreviewResponse");
     expect(itemMutationsSource).toContain('"/api/memory/cleanup/preview"');
     expect(itemMutationsSource).toContain('"/api/memory/cleanup/execute"');
+    expect(itemMutationsSource).toContain("previewToken");
+    expect(itemMutationsSource).toContain("isMemoryCleanupExecutionSuccessful");
     expect(routeSource).toContain("confirmationPhrase");
-    expect(routeSource).toContain("cleanupConfirmationText.trim()");
+    expect(routeSource).toContain("canExecuteMemoryCleanup(");
+    expect(routeSource).toContain("cleanupPreview.previewToken");
+    expect(routeSource).not.toContain('report?.confirmationPhrase || "硬删除记忆"');
     expect(cleanupPanelSource).toContain("copy.cleanupHardDelete");
     expect(cleanupPanelSource).toContain("copy.cleanupNoBackup");
     expect(cleanupPanelSource).toContain("copy.cleanupCentralSourceBoundary");
