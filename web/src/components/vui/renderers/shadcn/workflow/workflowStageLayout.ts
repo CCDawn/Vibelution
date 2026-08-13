@@ -16,9 +16,9 @@ import { WORKFLOW_STAGE_TITLE_HEIGHT } from "./workflowElkOptions";
 import { boundsOf, type Rect } from "./workflowLayoutGeometry";
 /** Design budgets (two-level layout contract §四). */
 export const STAGE_HORIZONTAL_PADDING = 20;
-export const STAGE_VERTICAL_PADDING_BOTTOM = 24;
+export const STAGE_VERTICAL_PADDING_BOTTOM = 34;
 export const STAGE_MIN_WIDTH = 300;
-export const STAGE_MIN_HEIGHT = 160;
+export const STAGE_MIN_HEIGHT = 190;
 
 export type StageLocalTask = {
   id: string;
