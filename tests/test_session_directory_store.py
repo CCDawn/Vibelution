@@ -9,7 +9,7 @@ import pytest
 
 from core.chat.turn_journal import turn_journal_path
 from core.infrastructure import developer_sandbox
-from core.ui.chat_state import load_chat_state, save_chat_state
+from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, session_service
 from core.web.services.session import directory_runtime
 
@@ -68,9 +68,10 @@ def _write_agents_registry(path: Path) -> None:
 
 
 def _seed_legacy_session(project_root: Path) -> Path:
-    save_chat_state(
-        project_root,
-        {
+    path = chat_state_path(project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
             "version": 1,
             "active_conversation_id": "legacy-session",
             "conversations": [
@@ -83,7 +84,8 @@ def _seed_legacy_session(project_root: Path) -> Path:
                 }
             ],
             "updated_at": "2026-01-01T00:00:00",
-        },
+        }, ensure_ascii=False),
+        encoding="utf-8",
     )
     journal_path = turn_journal_path(project_root, "legacy-session")
     journal_path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,7 +97,7 @@ def _seed_legacy_session(project_root: Path) -> Path:
     return journal_path
 
 
-def test_directory_runtime_discards_legacy_sessions_without_importing_journals(
+def test_directory_runtime_migrates_legacy_sessions_without_importing_journals(
     isolated_directory_runtime: Path,
 ):
     project_root = isolated_directory_runtime
@@ -105,16 +107,17 @@ def test_directory_runtime_discards_legacy_sessions_without_importing_journals(
     status = directory_runtime.initialize_session_directory_runtime(project_root=project_root)
 
     assert status.status == "ready"
-    assert status.discarded_legacy is True
-    assert status.discarded_session_count == 1
+    assert status.migrated_legacy is True
+    assert status.migrated_session_count == 1
+    assert status.migration_backup_created is True
     payload = load_chat_state(project_root)
-    assert payload.get("conversations") == []
-    assert str(payload.get("active_conversation_id") or "") == ""
-    assert not journal_path.exists()
+    assert [item["conversation_id"] for item in payload.get("conversations") or []] == ["legacy-session"]
+    assert str(payload.get("active_conversation_id") or "") == "legacy-session"
+    assert journal_path.exists()
     store = directory_runtime.get_open_directory_store()
     assert store is not None
     assert store.repository.list_sessions(agent_id="agent-alpha") == []
-    assert store.repository.legacy_sessions_discarded_at_ms() is not None
+    assert store.repository.legacy_sessions_discarded_at_ms() is None
     agent = agent_directory_service.get_agent("agent-alpha", include_archived=True)
     assert str((agent or {}).get("directSessionId") or "") == "legacy-session"
     assert "legacy-session" in _session_ids()
@@ -141,8 +144,8 @@ def test_directory_runtime_second_initialize_keeps_new_sessions(
 
     second = directory_runtime.initialize_session_directory_runtime(project_root=project_root)
 
-    assert first.discarded_legacy is True
-    assert second.discarded_legacy is False
+    assert first.migrated_legacy is True
+    assert second.migrated_legacy is False
     store = directory_runtime.get_open_directory_store()
     assert store is not None
     rows = store.repository.list_sessions(agent_id="agent-alpha")
@@ -189,7 +192,7 @@ def _store_directory_rows(*, include_hidden: bool = True) -> list[dict]:
     return list(page.get("rows") or [])
 
 
-def test_startup_query_waits_for_discard_and_does_not_flash_legacy(
+def test_startup_query_waits_for_migration_and_does_not_flash_legacy(
     isolated_directory_runtime: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -198,14 +201,14 @@ def test_startup_query_waits_for_discard_and_does_not_flash_legacy(
     _seed_legacy_session(project_root)
     entered = threading.Event()
     release = threading.Event()
-    original_discard = directory_runtime._discard_legacy_sessions_once
+    original_migrate = directory_runtime._migrate_legacy_chat_state_once
 
-    def paused_discard(store, root):
+    def paused_migrate(store, root):
         entered.set()
         assert release.wait(5)
-        return original_discard(store, root)
+        return original_migrate(store, root)
 
-    monkeypatch.setattr(directory_runtime, "_discard_legacy_sessions_once", paused_discard)
+    monkeypatch.setattr(directory_runtime, "_migrate_legacy_chat_state_once", paused_migrate)
     directory_runtime.begin_directory_startup()
     status_holder: dict[str, object] = {}
 

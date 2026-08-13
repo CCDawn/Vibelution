@@ -47,6 +47,7 @@ def query_session_summaries(
     session_kind: str = "",
     state: str = "",
     sort: str = "updatedAt_desc",
+    agent_by_id: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     if directory_runtime.wait_for_directory_startup(
         timeout=directory_runtime.LIST_QUERY_STARTUP_WAIT_SECONDS,
@@ -62,7 +63,11 @@ def query_session_summaries(
     normalized_session_kind = str(session_kind or "").strip().lower()
     normalized_state = str(state or "").strip().lower()
     normalized_sort = s._normalize_session_query_sort(sort)
-    agent_by_id = s._agent_lookup_for_conversations()
+    agent_by_id = (
+        dict(agent_by_id)
+        if agent_by_id is not None
+        else s._agent_lookup_for_conversations()
+    )
     matching_agent_ids: tuple[str, ...] = ()
     if normalized_query and not normalized_agent_id:
         needle = normalized_query.lower()
@@ -451,23 +456,16 @@ def _experiment_binding_for_directory(value: Any) -> dict[str, Any] | None:
 
 
 def _chat_state_directory_overlay() -> tuple[str, dict[str, dict[str, Any]]]:
-    s = _service()
-    try:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-    except Exception:
+    store = directory_runtime.get_open_directory_store()
+    if store is None:
         return "", {}
-    active_id = str(payload.get("active_conversation_id") or "").strip()
-    bindings: dict[str, dict[str, Any]] = {}
-    for item in payload.get("conversations") or []:
-        if not isinstance(item, dict):
-            continue
-        session_id = str(item.get("conversation_id") or item.get("id") or "").strip()
-        binding = _experiment_binding_for_directory(
-            item.get("experimentBinding") or item.get("experiment_binding")
-        )
-        if session_id and binding:
-            bindings[session_id] = binding
-    return active_id, bindings
+    active_id, raw_bindings = store.repository.get_chat_state_directory_overlay()
+    bindings = {
+        session_id: binding
+        for session_id, value in raw_bindings.items()
+        if (binding := _experiment_binding_for_directory(value)) is not None
+    }
+    return str(active_id or "").strip(), bindings
 
 
 def _merge_agent_directory_stub_summaries(

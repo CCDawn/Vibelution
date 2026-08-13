@@ -12,6 +12,7 @@ import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentInstance,
+  ChatWorkbenchBootstrap,
   ChatRoomDetail,
   ChatRoomMode,
   ChatRoomPurpose,
@@ -95,9 +96,19 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const activeSessionBootstrapQuery = useQuery({
     queryKey: ["sessions", "active-bootstrap"],
-    queryFn: ({ signal }) => fetchJson<{ activeSessionId: string }>("/api/sessions/active", { signal }),
+    queryFn: async ({ signal }) => {
+      const payload = await fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50", { signal });
+      queryClient.setQueryData(queryKeys.agents(), payload.agents);
+      queryClient.setQueryData(queryKeys.conversations(), payload.conversations);
+      queryClient.setQueryData(
+        queryKeys.sessionQuery("", 50),
+        { pages: [payload.sessionPage], pageParams: [""] },
+      );
+      return payload;
+    },
     staleTime: 5_000,
   });
+  const bootstrapSettled = activeSessionBootstrapQuery.isFetched || activeSessionBootstrapQuery.isError;
   // Prefer URL targets immediately. If the bootstrap is cancelled or fails, let
   // the canonical session index recover instead of leaving the directory gated.
   const sessionIndexQueryEnabled = shouldEnableSessionIndexQuery({
@@ -140,7 +151,8 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const conversationsQueryRaw = useQuery({
     queryKey: queryKeys.conversations(),
     queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),
-    enabled: secondaryChatDataEnabled,
+    enabled: secondaryChatDataEnabled && bootstrapSettled,
+    staleTime: 5_000,
     refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground,
   });
@@ -164,7 +176,10 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
-    enabled: secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive,
+    enabled:
+      bootstrapSettled &&
+      (secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive),
+    staleTime: 5_000,
   });
   const skillsQuery = useQuery({
     queryKey: queryKeys.skills(),

@@ -121,9 +121,15 @@ def _memory_overview_section_signature(root: Path, section_id: str) -> str | Non
     if normalized == "team-knowledge":
         return _dir_signature(_sandboxed_workspace_path(root, "teams"))
     if normalized == "chat-session-memory":
+        conversation_store = _sandboxed_workspace_path(
+            root,
+            "chat",
+            "conversations.sqlite3",
+        )
         return "|".join(
             [
-                _path_signature(_sandboxed_workspace_path(root, "chat", "chat_state.json")),
+                _path_signature(conversation_store),
+                _path_signature(Path(f"{conversation_store}-wal")),
                 _dir_signature(_sandboxed_workspace_path(root, "sessions")),
             ]
         )
@@ -1355,7 +1361,7 @@ def _git_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = N
 
 
 def _chat_session_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    chat_state = _sandboxed_workspace_path(root, "chat", "chat_state.json")
+    conversation_store = _sandboxed_workspace_path(root, "chat", "conversations.sqlite3")
     session_root = _sandboxed_workspace_path(root, "sessions")
     sessions_payload = _time_memory_overview_step(
         sub_timings,
@@ -1363,18 +1369,28 @@ def _chat_session_memory_section(root: Path, sub_timings: list[dict[str, Any]] |
         lambda: _session_memory_summary(root, session_root),
     )
     items = [
-        _file_item(
+        _data_item(
             root,
-            chat_state,
             item_id="chat-state",
-            title="chat_state.json",
+            title="conversations.sqlite3 / chat control state",
             kind="chat_conversation_memory",
             source="Web Chat 会话状态",
+            path=_rel(root, conversation_store),
+            updated_at=_mtime(conversation_store),
             agent_visible=True,
             in_prompt=True,
             used_by=["session_service", "Web chat turn history"],
             channels=["conversation"],
-            summary="Web 对话历史和 active_task；当前会话历史会作为 chat agent 的上下文来源。",
+            summary=(
+                "会话控制态与 active session 位于 ConversationStore；"
+                "消息、工具事件与回放事实继续来自 turn_journal.jsonl。"
+            ),
+            content={
+                "canonicalControlSource": "workspace/chat/conversations.sqlite3",
+                "transcriptSource": "workspace/sessions/*/turn_journal.jsonl",
+                "legacyChatStateJson": "migration_input_only",
+            },
+            content_type="json",
         ),
         _data_item(
             root,

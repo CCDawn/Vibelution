@@ -2,9 +2,11 @@ import json
 import multiprocessing
 import os
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
 from core.web.services import session_service
 
@@ -12,20 +14,24 @@ from core.web.services import session_service
 @pytest.fixture(autouse=True)
 def _isolated_data_home(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
+    monkeypatch.setattr(developer_sandbox, "is_developer_mode_enabled", lambda: False)
 
 
 def test_save_chat_state_uses_valid_replace_target(tmp_path):
     payload = {"version": 1, "conversations": [{"conversation_id": "default", "messages": []}]}
     expected = {
         "version": 1,
+        "active_conversation_id": "",
         "state_revision": 1,
+        "updated_at": "",
         "conversations": [{"conversation_id": "default"}],
     }
 
     save_chat_state(tmp_path, payload)
 
     path = chat_state_path(tmp_path)
-    assert json.loads(path.read_text(encoding="utf-8")) == expected
+    assert load_chat_state(tmp_path) == expected
+    assert not path.exists()
     assert payload["conversations"][0]["messages"] == []
     assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
@@ -104,6 +110,7 @@ def test_session_mutation_lock_holds_file_transaction_for_full_mutation(monkeypa
 
 def _create_session_in_competing_process(
     data_home: str,
+    workspace_home: str,
     agent_id: str,
     role: str,
     first_loaded,
@@ -113,7 +120,11 @@ def _create_session_in_competing_process(
 ) -> None:
     """Force the pre-fix stale-snapshot ordering across independent processes."""
     os.environ["VIBELUTION_DATA_HOME"] = data_home
+    from core.infrastructure import developer_sandbox as child_developer_sandbox
     from core.web.services import session_service as child_session_service
+
+    child_developer_sandbox.is_developer_mode_enabled = lambda: False
+    child_developer_sandbox.resolve_workspace_home = lambda *args, **kwargs: Path(workspace_home)
 
     original_load = child_session_service.load_chat_state
     original_save = child_session_service.save_chat_state
@@ -151,6 +162,7 @@ def _create_session_in_competing_process(
 def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, monkeypatch):
     """A concurrent session create must retain both rows, not only the last writer."""
     data_home = tmp_path / "operator-data"
+    workspace_home = tmp_path / "workspace"
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
     context = multiprocessing.get_context("spawn")
     first_loaded = context.Event()
@@ -161,6 +173,7 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
         target=_create_session_in_competing_process,
         args=(
             str(data_home),
+            str(workspace_home),
             "",
             "first",
             first_loaded,
@@ -173,6 +186,7 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
         target=_create_session_in_competing_process,
         args=(
             str(data_home),
+            str(workspace_home),
             "",
             "second",
             first_loaded,
@@ -199,8 +213,7 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
     assert not [result for result in results if result.get("error")]
     created_ids = {str(result.get("sessionId") or "") for result in results}
     assert all(created_ids)
-    state_path = data_home / "workspace" / "chat" / "chat_state.json"
-    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state = load_chat_state(tmp_path)
     indexed_ids = {
         str(item.get("conversation_id") or "")
         for item in state.get("conversations", [])

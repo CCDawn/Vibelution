@@ -23,6 +23,25 @@ _DIRECTORY_SESSION_COLUMNS = (
     "conversation_index_visibility, hidden_from_index, team_id, "
     "last_preview, last_preview_at_ms"
 )
+_CHAT_STATE_ROOT_KEYS = {
+    "version",
+    "active_conversation_id",
+    "state_revision",
+    "updated_at",
+    "conversations",
+}
+_CHAT_STATE_DEBUG_KEYS = {
+    "agentPromptSnapshot",
+    "agent_prompt_snapshot",
+    "last_prompt_assembly",
+    "lastPromptAssembly",
+    "last_context_composition",
+    "lastContextComposition",
+    "last_cache_composition",
+    "lastCacheComposition",
+    "last_llm_payload_trace",
+    "lastLlmPayloadTrace",
+}
 
 
 class AgentConfigRevisionConflictError(RuntimeError):
@@ -813,6 +832,184 @@ class SessionProjectionOffsetDao:
         return int(row["journal_sequence"]) if row is not None else None
 
 
+class WorkspaceChatStateDao:
+    """Canonical compatibility document backed by normalized SQLite rows."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+
+    def get(self) -> dict[str, Any]:
+        root = self._connection.execute(
+            "SELECT version, active_session_id, state_revision, updated_at, extras_json "
+            "FROM workspace_chat_state WHERE id=1"
+        ).fetchone()
+        if root is None:
+            return {}
+        try:
+            extras = json.loads(str(root["extras_json"] or "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("SQLite chat state extras are invalid JSON.") from exc
+        payload = dict(extras) if isinstance(extras, dict) else {}
+        payload.update(
+            {
+                "version": int(root["version"]),
+                "active_conversation_id": str(root["active_session_id"] or ""),
+                "state_revision": int(root["state_revision"]),
+                "updated_at": str(root["updated_at"] or ""),
+            }
+        )
+        debug_by_session: dict[str, dict[str, Any]] = {}
+        for row in self._connection.execute(
+            "SELECT session_id, payload_json FROM session_debug_snapshots"
+        ).fetchall():
+            try:
+                decoded = json.loads(str(row["payload_json"] or "{}"))
+            except json.JSONDecodeError as exc:
+                raise ValueError("SQLite session debug snapshot is invalid JSON.") from exc
+            if isinstance(decoded, dict):
+                debug_by_session[str(row["session_id"])] = decoded
+        conversations: list[dict[str, Any]] = []
+        rows = self._connection.execute(
+            "SELECT session_id, payload_json FROM session_runtime_state "
+            "ORDER BY position ASC"
+        ).fetchall()
+        for row in rows:
+            try:
+                decoded = json.loads(str(row["payload_json"] or "{}"))
+            except json.JSONDecodeError as exc:
+                raise ValueError("SQLite session runtime state is invalid JSON.") from exc
+            if not isinstance(decoded, dict):
+                raise ValueError("SQLite session runtime state must be an object.")
+            decoded.update(debug_by_session.get(str(row["session_id"]), {}))
+            conversations.append(decoded)
+        payload["conversations"] = conversations
+        return payload
+
+    def replace(
+        self,
+        state: Mapping[str, Any],
+        *,
+        imported_source_sha256: str = "",
+        imported_at_ms: int | None = None,
+    ) -> dict[str, Any]:
+        frozen = dict(state)
+        raw_conversations = frozen.get("conversations")
+        if raw_conversations is None:
+            raw_conversations = []
+        if not isinstance(raw_conversations, list):
+            raise ValueError("Chat state conversations must be a list.")
+        conversations: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+        seen: set[str] = set()
+        for index, raw in enumerate(raw_conversations):
+            if not isinstance(raw, Mapping):
+                raise ValueError(f"Chat state conversation at index {index} must be an object.")
+            conversation = dict(raw)
+            session_id = str(
+                conversation.get("conversation_id")
+                or conversation.get("conversationId")
+                or conversation.get("id")
+                or ""
+            ).strip()
+            if not session_id:
+                raise ValueError(f"Chat state conversation at index {index} requires an id.")
+            if session_id in seen:
+                raise ValueError(f"Chat state contains duplicate conversation id: {session_id}")
+            seen.add(session_id)
+            debug = {
+                key: conversation.pop(key)
+                for key in tuple(conversation)
+                if key in _CHAT_STATE_DEBUG_KEYS
+            }
+            conversations.append((session_id, conversation, debug))
+
+        existing = self._connection.execute(
+            "SELECT state_revision, imported_source_sha256, imported_at_ms "
+            "FROM workspace_chat_state WHERE id=1"
+        ).fetchone()
+        revision = max(0, int(existing["state_revision"] if existing is not None else 0)) + 1
+        now_ms = _now_ms()
+        extras = {key: value for key, value in frozen.items() if key not in _CHAT_STATE_ROOT_KEYS}
+        source_hash = str(imported_source_sha256 or "").strip()
+        if not source_hash and existing is not None:
+            source_hash = str(existing["imported_source_sha256"] or "")
+        effective_imported_at = imported_at_ms
+        if effective_imported_at is None and existing is not None:
+            effective_imported_at = existing["imported_at_ms"]
+        self._connection.execute(
+            """
+            INSERT INTO workspace_chat_state(
+              id, version, active_session_id, state_revision, updated_at,
+              extras_json, imported_source_sha256, imported_at_ms
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              version=excluded.version,
+              active_session_id=excluded.active_session_id,
+              state_revision=excluded.state_revision,
+              updated_at=excluded.updated_at,
+              extras_json=excluded.extras_json,
+              imported_source_sha256=excluded.imported_source_sha256,
+              imported_at_ms=excluded.imported_at_ms
+            """,
+            (
+                max(1, int(frozen.get("version") or 1)),
+                str(frozen.get("active_conversation_id") or "").strip(),
+                revision,
+                str(frozen.get("updated_at") or ""),
+                _canonical_json(extras),
+                source_hash,
+                effective_imported_at,
+            ),
+        )
+        self._connection.execute("DELETE FROM session_runtime_state")
+        self._connection.execute("DELETE FROM session_debug_snapshots")
+        for position, (session_id, conversation, debug) in enumerate(conversations):
+            self._connection.execute(
+                "INSERT INTO session_runtime_state("
+                "session_id, position, payload_json, experiment_binding_json, updated_at_ms"
+                ") VALUES (?, ?, ?, ?, ?)",
+                (
+                    session_id,
+                    position,
+                    _canonical_json(conversation),
+                    _canonical_json(
+                        conversation.get("experimentBinding")
+                        or conversation.get("experiment_binding")
+                        or {}
+                    ),
+                    now_ms,
+                ),
+            )
+            if debug:
+                self._connection.execute(
+                    "INSERT INTO session_debug_snapshots(session_id, payload_json, updated_at_ms) "
+                    "VALUES (?, ?, ?)",
+                    (session_id, _canonical_json(debug), now_ms),
+                )
+        return {
+            "stateRevision": revision,
+            "conversationCount": len(conversations),
+            "activeSessionId": str(frozen.get("active_conversation_id") or "").strip(),
+        }
+
+    def directory_overlay(self) -> tuple[str, dict[str, dict[str, Any]]]:
+        root = self._connection.execute(
+            "SELECT active_session_id FROM workspace_chat_state WHERE id=1"
+        ).fetchone()
+        active_id = str(root["active_session_id"] or "") if root is not None else ""
+        bindings: dict[str, dict[str, Any]] = {}
+        for row in self._connection.execute(
+            "SELECT session_id, experiment_binding_json FROM session_runtime_state "
+            "WHERE experiment_binding_json <> '{}'"
+        ).fetchall():
+            try:
+                decoded = json.loads(str(row["experiment_binding_json"] or "{}"))
+            except json.JSONDecodeError as exc:
+                raise ValueError("SQLite experiment binding is invalid JSON.") from exc
+            if isinstance(decoded, dict) and decoded:
+                bindings[str(row["session_id"])] = decoded
+        return active_id, bindings
+
+
 class ConversationUnitOfWork:
     """One writer-thread transaction with explicit after-commit callbacks."""
 
@@ -822,6 +1019,7 @@ class ConversationUnitOfWork:
         self.session_edges = SessionEdgeDao(connection)
         self.admissions = SessionAdmissionDao(connection)
         self.projection_offsets = SessionProjectionOffsetDao(connection)
+        self.chat_state = WorkspaceChatStateDao(connection)
         self._after_commit: list[Callable[[], None]] = []
 
     def after_commit(self, callback: Callable[[], None]) -> None:
@@ -1064,6 +1262,31 @@ class ConversationRepository:
     def get_session_projection_offset(self, session_id: str) -> int | None:
         with self._database.reader() as connection:
             return SessionProjectionOffsetDao(connection).get(session_id)
+
+    def get_chat_state(self) -> dict[str, Any]:
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).get()
+
+    def get_chat_state_directory_overlay(self) -> tuple[str, dict[str, dict[str, Any]]]:
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).directory_overlay()
+
+    def replace_chat_state(
+        self,
+        state: Mapping[str, Any],
+        *,
+        imported_source_sha256: str = "",
+        imported_at_ms: int | None = None,
+    ) -> Future[dict[str, Any]]:
+        frozen = dict(state)
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.chat_state.replace(
+                frozen,
+                imported_source_sha256=imported_source_sha256,
+                imported_at_ms=imported_at_ms,
+            ),
+            force_flush=True,
+        )
 
 
 def _canonical_json(value: Mapping[str, Any]) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import subprocess
 import sys
@@ -11,12 +12,15 @@ import pytest
 
 import core.chat.conversation_store.database as conversation_database
 import core.chat.conversation_store.runtime as conversation_sqlite_runtime
+import core.chat.conversation_store.schema as conversation_schema
 from core.chat.conversation_store import (
     ConversationBackpressureError,
     ConversationStore,
     ConversationStoreLockedError,
     ConversationStoreUnavailableError,
     LAST_PREVIEW_MAX_CHARS,
+    LegacyChatStateImporter,
+    ChatStateImportError,
     assess_sqlite_wal_runtime,
     parse_directory_cursor,
 )
@@ -61,6 +65,169 @@ def _create_agent(store: ConversationStore, agent_id: str = "agent-a") -> str:
         source="test",
     ).result(timeout=3)
     return str(result["configRevisionId"])
+
+
+def test_chat_state_roundtrip_preserves_order_and_separates_debug_snapshots(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        result = store.repository.replace_chat_state(
+            {
+                "version": 1,
+                "active_conversation_id": "session-b",
+                "updated_at": "2026-08-14T01:02:03Z",
+                "custom": {"kept": True},
+                "conversations": [
+                    {
+                        "conversation_id": "session-b",
+                        "title": "Second alphabetically, first by position",
+                        "experimentBinding": {"teamId": "team-1"},
+                        "last_llm_payload_trace": {"large": "trace"},
+                    },
+                    {
+                        "conversation_id": "session-a",
+                        "title": "First alphabetically, second by position",
+                        "agentPromptSnapshot": {"prompt": "snapshot"},
+                    },
+                ],
+            }
+        ).result(timeout=3)
+
+        assert result["stateRevision"] == 1
+        restored = store.repository.get_chat_state()
+        assert [item["conversation_id"] for item in restored["conversations"]] == [
+            "session-b",
+            "session-a",
+        ]
+        assert restored["custom"] == {"kept": True}
+        assert restored["conversations"][0]["last_llm_payload_trace"] == {"large": "trace"}
+        assert restored["conversations"][1]["agentPromptSnapshot"] == {"prompt": "snapshot"}
+        active_id, bindings = store.repository.get_chat_state_directory_overlay()
+        assert active_id == "session-b"
+        assert bindings == {"session-b": {"teamId": "team-1"}}
+    finally:
+        store.close()
+
+    connection = sqlite3.connect(tmp_path / "workspace" / "chat" / "conversations.sqlite3")
+    try:
+        runtime_payloads = [
+            json.loads(row[0])
+            for row in connection.execute(
+                "SELECT payload_json FROM session_runtime_state ORDER BY position"
+            ).fetchall()
+        ]
+        debug_payloads = [
+            json.loads(row[0])
+            for row in connection.execute(
+                "SELECT payload_json FROM session_debug_snapshots ORDER BY session_id"
+            ).fetchall()
+        ]
+    finally:
+        connection.close()
+    assert all("last_llm_payload_trace" not in item for item in runtime_payloads)
+    assert all("agentPromptSnapshot" not in item for item in runtime_payloads)
+    assert debug_payloads == [
+        {"agentPromptSnapshot": {"prompt": "snapshot"}},
+        {"last_llm_payload_trace": {"large": "trace"}},
+    ]
+
+
+def test_chat_state_invalid_replace_rolls_back_to_previous_document(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state(
+            {"version": 1, "conversations": [{"conversation_id": "kept"}]}
+        ).result(timeout=3)
+        before = store.repository.get_chat_state()
+
+        with pytest.raises(ValueError, match="duplicate conversation id"):
+            store.repository.replace_chat_state(
+                {
+                    "version": 1,
+                    "conversations": [
+                        {"conversation_id": "duplicate"},
+                        {"conversation_id": "duplicate"},
+                    ],
+                }
+            ).result(timeout=3)
+
+        assert store.repository.get_chat_state() == before
+    finally:
+        store.close()
+
+
+def test_legacy_chat_state_import_is_backed_up_and_idempotent(tmp_path: Path):
+    store = _open_store(tmp_path)
+    source = tmp_path / "chat_state.json"
+    source_bytes = json.dumps(
+        {
+            "version": 1,
+            "active_conversation_id": "legacy",
+            "conversations": [{"conversation_id": "legacy", "messages": []}],
+        }
+    ).encode("utf-8")
+    source.write_bytes(source_bytes)
+    try:
+        importer = LegacyChatStateImporter(store.repository)
+        first = importer.import_file(source, project_root=tmp_path)
+        second = importer.import_file(source, project_root=tmp_path)
+
+        assert first["action"] == "imported"
+        assert Path(first["backupPath"]).read_bytes() == source_bytes
+        assert second == {"action": "reused", "conversationCount": 1, "backupPath": ""}
+        assert source.read_bytes() == source_bytes
+        assert len(list(tmp_path.glob("chat_state.json.pre-sqlite.*.bak.json"))) == 1
+        assert store.repository.get_chat_state()["conversations"] == [
+            {"conversation_id": "legacy"}
+        ]
+    finally:
+        store.close()
+
+
+def test_invalid_legacy_chat_state_does_not_create_sqlite_root_or_backup(tmp_path: Path):
+    store = _open_store(tmp_path)
+    source = tmp_path / "chat_state.json"
+    source.write_text('{"version": 1,', encoding="utf-8")
+    try:
+        with pytest.raises(ChatStateImportError, match="valid UTF-8 JSON"):
+            LegacyChatStateImporter(store.repository).import_file(source, project_root=tmp_path)
+        assert store.repository.get_chat_state() == {}
+        assert not list(tmp_path.glob("chat_state.json.pre-sqlite.*.bak.json"))
+        assert source.read_text(encoding="utf-8") == '{"version": 1,'
+    finally:
+        store.close()
+
+
+def test_existing_schema_v3_store_migrates_to_chat_state_tables(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    database_path = tmp_path / "conversations.sqlite3"
+    with monkeypatch.context() as migration_patch:
+        migration_patch.setattr(
+            conversation_database,
+            "MIGRATIONS",
+            conversation_schema.MIGRATIONS[:3],
+        )
+        migration_patch.setattr(conversation_database, "SCHEMA_VERSION", 3)
+        v3_store = ConversationStore(database_path)
+        try:
+            assert v3_store.open()["schemaVersion"] == 3
+        finally:
+            v3_store.close()
+
+    migrated = ConversationStore(database_path)
+    try:
+        metadata = migrated.open()
+        assert metadata["schemaVersion"] == 4
+        assert migrated.repository.get_chat_state() == {}
+        migrated.repository.replace_chat_state(
+            {"version": 1, "conversations": [{"conversation_id": "after-upgrade"}]}
+        ).result(timeout=3)
+        assert migrated.repository.get_chat_state()["conversations"] == [
+            {"conversation_id": "after-upgrade"}
+        ]
+    finally:
+        migrated.close()
 
 
 def test_project_local_sqlite_runtime_is_used_without_version_spoofing(
@@ -115,7 +282,7 @@ def test_initialize_creates_canonical_schema_and_query_only_readers(
             }
             foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
 
-        assert metadata["schemaVersion"] == 3
+        assert metadata["schemaVersion"] == 4
         assert metadata["quickCheck"] == "ok"
         assert {
             "agents",
@@ -128,6 +295,9 @@ def test_initialize_creates_canonical_schema_and_query_only_readers(
             "session_edges",
             "session_admissions",
             "session_projection_offsets",
+            "workspace_chat_state",
+            "session_runtime_state",
+            "session_debug_snapshots",
         }.issubset(tables)
         assert foreign_keys == []
 
@@ -746,14 +916,14 @@ def test_readers_and_single_writer_remain_consistent_under_concurrency(
         store.close()
 
 
-def test_schema_v3_exposes_directory_columns_and_bounded_preview(
+def test_schema_v4_exposes_directory_columns_and_bounded_preview(
     tmp_path: Path,
     safe_sqlite_runtime: None,
 ):
     store = _open_store(tmp_path)
     try:
         metadata = store.database.metadata()
-        assert metadata["schemaVersion"] == 3
+        assert metadata["schemaVersion"] == 4
         revision = _create_agent(store)
         long_preview = "x" * (LAST_PREVIEW_MAX_CHARS + 80)
         store.repository.upsert_directory_session(

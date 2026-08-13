@@ -23,6 +23,7 @@ from core.web.services import (
     agent_directory_service,
     agent_mode_binding_service,
     chat_room_service,
+    conversation_service,
     team_service,
     runtime_service,
     self_evolution_control_service,
@@ -30,7 +31,7 @@ from core.web.services import (
     session_service,
     supervised_control_service,
 )
-from core.web.services.session import catalog_bridge
+from core.web.services.session import catalog_bridge, directory_runtime
 from tests.helpers.web_chat_state import _bind_seeded_session_agent, _seed_chat_state
 
 pytestmark = pytest.mark.serial
@@ -110,6 +111,65 @@ def test_active_session_route_returns_empty_id_without_persisted_selection(monke
 
     assert response.status_code == 200
     assert response.json() == {"activeSessionId": ""}
+
+
+def test_session_bootstrap_route_delegates_to_one_service_boundary(monkeypatch):
+    calls: list[dict] = []
+    expected = {
+        "activeSessionId": "session-active",
+        "sessionPage": {"items": [], "nextCursor": ""},
+        "agents": [],
+        "conversations": [],
+    }
+    monkeypatch.setattr(
+        conversation_service,
+        "build_chat_workbench_bootstrap",
+        lambda **kwargs: calls.append(kwargs) or expected,
+    )
+
+    response = client.get("/api/sessions/bootstrap?limit=25&cursor=next&q=needle")
+
+    assert response.status_code == 200
+    assert response.json() == expected
+    assert calls == [{"limit": 25, "cursor": "next", "q": "needle"}]
+
+
+def test_chat_workbench_bootstrap_reuses_agent_projection_for_session_query(monkeypatch):
+    agents = [{"agentId": "agent-a", "displayName": "Agent A"}]
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agent_directory_service, "list_agents", lambda **_kwargs: agents)
+
+    def fake_query_sessions(**kwargs):
+        captured.update(kwargs)
+        return {"items": [{"id": "session-a"}], "nextCursor": ""}
+
+    monkeypatch.setattr(session_service, "query_sessions", fake_query_sessions)
+    monkeypatch.setattr(
+        conversation_service,
+        "list_group_conversations",
+        lambda sessions: [{"conversationId": f"room-for-{sessions[0]['id']}"}],
+    )
+
+    class _Repository:
+        @staticmethod
+        def get_chat_state_directory_overlay():
+            return "session-a", {}
+
+    class _Store:
+        repository = _Repository()
+
+    monkeypatch.setattr(directory_runtime, "get_open_directory_store", lambda: _Store())
+
+    payload = conversation_service.build_chat_workbench_bootstrap(limit=10)
+
+    assert captured["agent_by_id"] == {"agent-a": agents[0]}
+    assert payload == {
+        "activeSessionId": "session-a",
+        "sessionPage": {"items": [{"id": "session-a"}], "nextCursor": ""},
+        "agents": agents,
+        "conversations": [{"conversationId": "room-for-session-a"}],
+    }
 
 
 def test_lightweight_session_preview_avoids_full_ledger_replay_after_twelve_tool_rows(
