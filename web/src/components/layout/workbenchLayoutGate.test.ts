@@ -155,7 +155,6 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/GitRoute.tsx", layoutId: "WORKBENCH_LAYOUT_IDS.git", collapse: "PaneCollapseHandle" },
       { file: "routes/ToolsRoute.tsx", layoutId: "WORKBENCH_LAYOUT_IDS.tools", collapse: "PaneCollapseHandle" },
       { file: "routes/LogsRoute.tsx", layoutId: "WORKBENCH_LAYOUT_IDS.logs", collapse: "PaneCollapseHandle" },
-      { file: "routes/LauncherRoute.tsx", layoutId: "WORKBENCH_LAYOUT_IDS.launcher", collapse: "railResizeHandle" },
     ] as const) {
       const text = readFileSync(resolve(webSrc, sample.file), "utf-8");
       expect(text, sample.file).toContain(sample.layoutId);

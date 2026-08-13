@@ -141,7 +141,7 @@ function AgentRow({
         </span>
         <span className="grid min-w-0 gap-1">
           <span className="flex min-w-0 items-center gap-1.5">
-            <strong className="min-w-0 overflow-hidden text-[var(--fg-primary)] text-[var(--vui-font-sm)] text-ellipsis whitespace-nowrap">
+            <strong className="min-w-0 overflow-hidden text-[var(--fg-primary)] [font-size:var(--vui-font-sm)] text-ellipsis whitespace-nowrap">
               {row.name}
             </strong>
             {showIssue ? (

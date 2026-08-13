@@ -16,7 +16,7 @@ const styles = {
   userTurn:
     "ml-auto grid w-[min(420px,62%)] min-w-[220px] justify-items-end gap-2",
   userBubble:
-    "h-11 w-full rounded-[14px] border border-[var(--vui-border-subtle)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)] opacity-75",
+    "h-11 w-full rounded-[14px] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] opacity-75",
   visuallyHidden: "sr-only",
 } as const;
 
