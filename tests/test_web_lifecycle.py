@@ -1,10 +1,114 @@
 import asyncio
+import os
+import subprocess
+import sys
 import threading
 
-from core.web import lifecycle
-from core.web.router_registry import _ROUTE_MODULE_NAMES, import_web_route_modules, register_web_routers
-from core.web.services import cli_agent_terminal_service, session_service
 from fastapi import FastAPI
+
+from core.web import lifecycle
+from core.web.router_registry import (
+    _ROUTE_MODULE_NAMES,
+    import_web_route_modules,
+    register_web_routers,
+)
+from core.web.services import cli_agent_terminal_service, session_service
+
+
+def test_web_app_import_keeps_runtime_scene_service_off_health_path():
+    project_root = os.path.dirname(os.path.dirname(__file__))
+    environment = dict(os.environ)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import core.web.app; "
+                "print('core.web.services.runtime_scene_service' in sys.modules)"
+            ),
+        ],
+        cwd=project_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == "False"
+
+
+def test_directory_runtime_import_keeps_heavy_dependencies_lazy():
+    project_root = os.path.dirname(os.path.dirname(__file__))
+    environment = dict(os.environ)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json, sys; import core.web.services.session.directory_runtime; "
+                "print(json.dumps({"
+                "'conversationStore': 'core.chat.conversation_store' in sys.modules, "
+                "'runtimeScene': 'core.web.services.runtime_scene_service' in sys.modules, "
+                "'infrastructure': 'core.infrastructure' in sys.modules"
+                "}))"
+            ),
+        ],
+        cwd=project_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == (
+        '{"conversationStore": false, "runtimeScene": false, "infrastructure": false}'
+    )
+
+
+def test_web_lifespan_records_ready_scene_event_after_entering_context(monkeypatch):
+    entered = threading.Event()
+    recorded = threading.Event()
+    observed = {}
+
+    def record_ready_event(**fields) -> None:
+        observed["entered"] = entered.is_set()
+        observed.update(fields)
+        recorded.set()
+
+    monkeypatch.setattr(lifecycle, "_record_backend_ready_scene_event", record_ready_event)
+    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(lifecycle, "initialize_session_directory_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda: None)
+    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
+    monkeypatch.setattr(
+        cli_agent_terminal_service,
+        "reconcile_cli_agent_terminal_states_on_startup",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: None)
+    monkeypatch.setattr(
+        session_service,
+        "recover_wakeable_agent_inbox_messages_on_startup",
+        dict,
+        raising=False,
+    )
+
+    async def exercise() -> None:
+        async with lifecycle.web_workbench_lifespan(None):
+            entered.set()
+            assert await asyncio.to_thread(recorded.wait, 1)
+
+    asyncio.run(exercise())
+
+    assert observed["entered"] is True
+    assert observed["pre_yield_ms"] >= 0
+    assert observed["routes_ready"] is False
+    assert "cli_terminal_reconcile" in observed["background_tasks"]
 
 
 def test_web_lifespan_schedules_agent_inbox_recovery_without_blocking_startup(monkeypatch):

@@ -48,7 +48,9 @@ def query_session_summaries(
     state: str = "",
     sort: str = "updatedAt_desc",
 ) -> dict[str, Any] | None:
-    if directory_runtime.wait_for_directory_startup() == "starting":
+    if directory_runtime.wait_for_directory_startup(
+        timeout=directory_runtime.LIST_QUERY_STARTUP_WAIT_SECONDS,
+    ) == "starting":
         return _empty_query_payload()
     store = directory_runtime.get_open_directory_store()
     if store is None:
@@ -78,6 +80,7 @@ def query_session_summaries(
         )
     include_hidden = bool(normalized_agent_id)
     before = parse_directory_cursor(cursor)
+    started_at_head = before is None
     _active_id, experiment_bindings = _chat_state_directory_overlay()
     if normalized_sort != "updatedAt_desc":
         page = store.repository.list_directory_page(
@@ -100,6 +103,14 @@ def query_session_summaries(
         summaries = _filter_user_directory_summaries(
             summaries,
             include_hidden=include_hidden,
+        )
+        summaries = _merge_agent_directory_stub_summaries(
+            summaries,
+            agent_by_id=agent_by_id,
+            include_hidden=include_hidden,
+            agent_id=normalized_agent_id,
+            query=normalized_query,
+            matching_agent_ids=matching_agent_ids,
         )
         summaries.sort(
             key=s._session_query_sort_key(normalized_sort),
@@ -156,6 +167,15 @@ def query_session_summaries(
         if before is None:
             next_cursor = ""
             break
+    if started_at_head:
+        items = _merge_agent_directory_stub_summaries(
+            items,
+            agent_by_id=agent_by_id,
+            include_hidden=include_hidden,
+            agent_id=normalized_agent_id,
+            query=normalized_query,
+            matching_agent_ids=matching_agent_ids,
+        )
     return {
         "items": items,
         "nextCursor": next_cursor if len(items) >= normalized_limit else "",
@@ -164,7 +184,9 @@ def query_session_summaries(
 
 
 def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, Any]] | None:
-    if directory_runtime.wait_for_directory_startup() == "starting":
+    if directory_runtime.wait_for_directory_startup(
+        timeout=directory_runtime.LIST_QUERY_STARTUP_WAIT_SECONDS,
+    ) == "starting":
         return []
     store = directory_runtime.get_open_directory_store()
     if store is None:
@@ -198,6 +220,11 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
     ]
     summaries = _filter_user_directory_summaries(
         summaries,
+        include_hidden=include_hidden,
+    )
+    summaries = _merge_agent_directory_stub_summaries(
+        summaries,
+        agent_by_id=agent_by_id,
         include_hidden=include_hidden,
     )
     summaries.sort(
@@ -441,6 +468,80 @@ def _chat_state_directory_overlay() -> tuple[str, dict[str, dict[str, Any]]]:
         if session_id and binding:
             bindings[session_id] = binding
     return active_id, bindings
+
+
+def _merge_agent_directory_stub_summaries(
+    summaries: list[dict[str, Any]],
+    *,
+    agent_by_id: Mapping[str, Mapping[str, Any]],
+    include_hidden: bool,
+    agent_id: str = "",
+    query: str = "",
+    matching_agent_ids: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    """Surface Agent direct bindings that exist in agents.json but not yet in Store."""
+
+    s = _service()
+    lookup: dict[str, Any] = {
+        str(key): value
+        for key, value in dict(agent_by_id).items()
+        if str(key).strip() and isinstance(value, Mapping)
+    }
+    normalized_agent_id = str(agent_id or "").strip()
+    if normalized_agent_id:
+        item = lookup.get(normalized_agent_id)
+        lookup = {normalized_agent_id: item} if isinstance(item, Mapping) else {}
+    elif str(query or "").strip():
+        allowed = {str(item).strip() for item in matching_agent_ids if str(item).strip()}
+        lookup = {key: value for key, value in lookup.items() if key in allowed}
+    existing = {
+        str(item.get("id") or "").strip()
+        for item in summaries
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    seed = [{"id": session_id} for session_id in existing]
+    try:
+        conversations = s._append_agent_directory_conversations(
+            seed,
+            agent_by_id=lookup,
+        )
+    except Exception:
+        return summaries
+    extra: list[dict[str, Any]] = []
+    for conversation in conversations:
+        if not isinstance(conversation, Mapping):
+            continue
+        session_id = str(conversation.get("id") or "").strip()
+        if not session_id or session_id in existing:
+            continue
+        extra.append(
+            _summary_from_directory_row(
+                {
+                    "sessionId": session_id,
+                    "agentId": str(conversation.get("agentId") or "").strip(),
+                    "title": str(conversation.get("title") or "").strip(),
+                    "status": "ready",
+                    "sessionKind": "main",
+                    "hiddenFromIndex": False,
+                    "conversationIndexKind": str(
+                        conversation.get("conversationIndexKind") or ""
+                    ).strip(),
+                    "conversationIndexVisibility": str(
+                        conversation.get("conversationIndexVisibility") or ""
+                    ).strip(),
+                    "teamId": str(conversation.get("teamId") or "").strip(),
+                    "lastPreview": "",
+                    "recencyAtMs": 0,
+                    "childSessionIds": [],
+                },
+                agent_by_id=agent_by_id,
+            )
+        )
+        existing.add(session_id)
+    extra = _filter_user_directory_summaries(extra, include_hidden=include_hidden)
+    if not extra:
+        return summaries
+    return summaries + extra
 
 
 def _filter_user_directory_summaries(
