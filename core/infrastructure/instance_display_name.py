@@ -1,45 +1,19 @@
-"""Launcher-assigned short names for branch instances and window titles.
+"""Launcher-assigned names for branch instances and window titles.
 
-Main stays 「主」. Other checkouts take the last branch/path segment, drop
-noise tokens, and keep the longest remaining token so the taskbar still
-distinguishes windows after Windows elides the rest.
+Main stays ``main``. Other checkouts keep the full Git branch as
+``branch+<name>`` so Launcher, tray, and status bar stay recognizable.
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from typing import Any
 
-MAIN_SHORT_NAME = "主"
+MAIN_SHORT_NAME = "main"
+BRANCH_NAME_PREFIX = "branch+"
+RETIRED_NAME_PREFIX = "retired+"
 WORKBENCH_TITLE_SUFFIX = "台"
 LAUNCHER_TITLE_SUFFIX = "控"
-MAX_SHORT_NAME_LEN = 12
-_SEGMENT_SPLIT = re.compile(r"[-_./]+")
-_STOP_TOKENS = frozenset(
-    {
-        "slot",
-        "s1",
-        "s1s8",
-        "s1s8b",
-        "codex",
-        "feat",
-        "fix",
-        "test",
-        "impl",
-        "implementation",
-        "registry",
-        "runtime",
-        "worktree",
-        "electron",
-        "desktop",
-        "launcher",
-        "web",
-        "src",
-        "app",
-        "vibelution",
-    }
-)
 
 
 def workbench_window_title(short_name: str) -> str:
@@ -57,19 +31,13 @@ def instance_short_name_base(
     slug: str = "",
     path_name: str = "",
 ) -> str:
-    if str(kind or "").strip().lower() == "main":
+    normalized_kind = str(kind or "").strip().lower()
+    if normalized_kind == "main":
         return MAIN_SHORT_NAME
-    raw = _last_segment(branch) or _last_segment(slug) or _last_segment(path_name)
-    tokens = [token for token in _SEGMENT_SPLIT.split(raw.lower()) if token]
-    kept = [token for token in tokens if token not in _STOP_TOKENS and len(token) > 1]
-    if kept:
-        longest = max(len(token) for token in kept)
-        # Tie-break toward the last token so "close-fail-open-fetch" prefers fetch.
-        chosen = next(token for token in reversed(kept) if len(token) == longest)
-        return chosen[:MAX_SHORT_NAME_LEN]
-    if raw:
-        return raw[:MAX_SHORT_NAME_LEN]
-    return "branch"
+    label = _branch_label(branch) or _branch_label(slug) or _branch_label(path_name) or "unnamed"
+    if normalized_kind == "retired":
+        return f"{RETIRED_NAME_PREFIX}{label}"
+    return f"{BRANCH_NAME_PREFIX}{label}"
 
 
 def assign_instance_display_names(items: Iterable[dict[str, Any]]) -> None:
@@ -111,11 +79,11 @@ def current_instance_display(items: Iterable[dict[str, Any]]) -> dict[str, str]:
     }
 
 
-def _last_segment(value: str) -> str:
+def _branch_label(value: str) -> str:
     text = str(value or "").strip().replace("\\", "/")
-    if not text:
-        return ""
-    return text.rsplit("/", 1)[-1]
+    if text.startswith("refs/heads/"):
+        text = text.removeprefix("refs/heads/")
+    return text.strip("/")
 
 
 def _slug_from_id(instance_id: str) -> str:
