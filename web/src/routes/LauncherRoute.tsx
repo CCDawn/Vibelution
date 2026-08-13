@@ -1002,7 +1002,7 @@ export function LauncherRoute() {
         processMonitor: "进程监控",
         processMonitorHint: "托管进程与残留子进程",
         branchInstances: "分支实例",
-        branchInstancesHint: "本地分支与 worktree；点选一行查看该实例进程",
+        branchInstancesHint: "一行一个分支：状态、后端、窗口和操作",
         branchColumn: "分支",
         instanceState: "状态",
         instanceKind: "类型",
@@ -1261,7 +1261,7 @@ export function LauncherRoute() {
         processMonitor: "Process monitor",
         processMonitorHint: "Owned and leftover child processes",
         branchInstances: "Branch instances",
-        branchInstancesHint: "Local branches and worktrees; select a row to inspect that instance",
+        branchInstancesHint: "One row per branch: status, backend, window, and actions",
         branchColumn: "Branch",
         instanceState: "State",
         instanceKind: "Kind",
@@ -1501,14 +1501,26 @@ export function LauncherRoute() {
     enabled: Boolean(statusQuery.data && !statusQuery.isError),
     refetchInterval: false,
   });
+  const runInstanceLifecycle = (instanceId: string, operation: LauncherOperation) => {
+    const item = branchItems.find((candidate) => candidate.id === instanceId);
+    if (item && !item.current) {
+      return requestBranchInstanceLifecycle(item.id, operation);
+    }
+    return requestLifecycle(operation);
+  };
+  const resolveControlRequest = (input: LauncherOperation | { operation: LauncherOperation; instanceId?: string }) => {
+    if (typeof input === "string") {
+      return { operation: input, instanceId: selectedBranchId };
+    }
+    return { operation: input.operation, instanceId: input.instanceId || selectedBranchId };
+  };
   const controlMutation = useMutation({
-    mutationFn: async (operation: LauncherOperation) => {
-      if (selectedBranch && !selectedBranch.current) {
-        return requestBranchInstanceLifecycle(selectedBranch.id, operation);
-      }
-      return requestLifecycle(operation);
+    mutationFn: async (input: LauncherOperation | { operation: LauncherOperation; instanceId?: string }) => {
+      const request = resolveControlRequest(input);
+      return runInstanceLifecycle(request.instanceId, request.operation);
     },
-    onMutate: (operation) => {
+    onMutate: (input) => {
+      const operation = resolveControlRequest(input).operation;
       setLastControlOperation(operation);
       markControlledProjectLifecycleOperation(operation);
       postLauncherLifecycleControlTelemetry(operation, "requested");
@@ -1527,7 +1539,8 @@ export function LauncherRoute() {
         });
       }
     },
-    onSuccess: (response, operation) => {
+    onSuccess: (response, input) => {
+      const operation = resolveControlRequest(input).operation;
       postLauncherLifecycleControlTelemetry(
         operation,
         response.accepted ? "accepted" : "rejected",
@@ -1543,7 +1556,7 @@ export function LauncherRoute() {
         text: launcherControlNoticeMessage(response, operation, uiLang, copy.commandDone),
         source: "lifecycle-control",
       });
-      const startedId = String(response.instanceId || selectedBranch?.id || currentInstanceId || "").trim();
+      const startedId = String(response.instanceId || resolveControlRequest(input).instanceId || currentInstanceId || "").trim();
       if (response.accepted && (operation === "start" || operation === "restart") && startedId) {
         setSelectedInstanceId(startedId);
       }
@@ -1551,8 +1564,8 @@ export function LauncherRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherBranchInstances() });
     },
-    onError: (error, operation) => {
-      postLauncherLifecycleControlTelemetry(operation, "request_failed", {
+    onError: (error, input) => {
+      postLauncherLifecycleControlTelemetry(resolveControlRequest(input).operation, "request_failed", {
         errorMessage: error instanceof Error ? error.message : String(error),
       });
       clearControlledProjectLifecycleOperation();
@@ -2356,15 +2369,19 @@ export function LauncherRoute() {
         items={branchItems}
         selectedId={selectedBranchId}
         onSelect={setSelectedInstanceId}
-      />
-      <LauncherProcessMonitorPanel
-        copy={{
-          ...copy,
-          processMonitorHint: selectedProcessHint,
+        live={{
+          currentId: currentInstanceId,
+          backendPid: bundle?.backend.pid,
+          windowPid: bundle?.browser.windowPid,
+          port: bundle?.backend.port,
+          alive: Boolean(bundle?.backend.alive || bundle?.backend.healthy),
+          windowOpen: Boolean(bundle?.browser.alive || (bundle?.browser.windowPid || 0) > 0),
         }}
-        rows={selectedProcessRows}
-        residualCount={selectedResidualCount}
-        selectedId={selectedBranchId}
+        lifecyclePending={controlMutation.isPending}
+        onLifecycle={(instanceId, operation) => {
+          setSelectedInstanceId(instanceId);
+          controlMutation.mutate({ operation, instanceId });
+        }}
       />
       <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
         <LauncherStartupSettingsPanel
@@ -2417,6 +2434,15 @@ export function LauncherRoute() {
             <strong>{copy.advancedFoldHint}</strong>
           </summary>
           <div className={styles.advancedFoldBody}>
+            <LauncherProcessMonitorPanel
+              copy={{
+                ...copy,
+                processMonitorHint: selectedProcessHint,
+              }}
+              rows={selectedProcessRows}
+              residualCount={selectedResidualCount}
+              selectedId={selectedBranchId}
+            />
             <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
               <LauncherProjectMaintenancePanel
                 copy={copy}

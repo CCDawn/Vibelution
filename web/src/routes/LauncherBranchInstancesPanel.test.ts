@@ -5,6 +5,10 @@ import panelSource from "./LauncherBranchInstancesPanel.tsx?raw";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
   cleanupRiskLabels,
+  formatBackendCell,
+  instanceHealth,
+  instanceHealthLabel,
+  instanceWindowOpen,
   isCleanupEligible,
   paginateItems,
 } from "./LauncherBranchInstancesPanel.model";
@@ -88,5 +92,24 @@ describe("LauncherBranchInstancesPanel contracts", () => {
       "将先停止再拆除运行中的实例",
       "将删除尚未合入 main 的本地提交",
     ]);
+  });
+
+  it("uses one Chinese health label and backend cell per instance", () => {
+    const running = instance({
+      id: "main",
+      kind: "main",
+      current: true,
+      alive: true,
+      port: 8002,
+      pids: { backend: 14220, window: 0, manager: 0 },
+      shortName: "主",
+    });
+    const dirty = instance({ dirty: true, port: 8001, shortName: "timing" });
+    expect(instanceHealthLabel(instanceHealth(running), true)).toBe("运行中");
+    expect(instanceHealthLabel(instanceHealth(dirty), true)).toBe("有未提交");
+    expect(formatBackendCell(running)).toBe("14220 · 8002");
+    expect(instanceWindowOpen(running, { currentId: "main", windowOpen: true })).toBe(true);
+    expect(panelSource).toContain("onLifecycle");
+    expect(panelSource).not.toContain("HEAD");
   });
 });
