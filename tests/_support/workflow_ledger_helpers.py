@@ -122,6 +122,7 @@ def build_attempt_record(
     command_id: str = "cmd-1",
     input_snapshot_hash: str = "a" * 64,
     started_at_ms: int = FIXED_NOW_MS,
+    problem_json: str | None = None,
 ) -> NodeAttemptRecord:
     return NodeAttemptRecord(
         node_run_id=node_run_id,
@@ -136,7 +137,7 @@ def build_attempt_record(
         pending_action_id=None,
         execution_anchor_id=None,
         retry_of_node_run_id=None,
-        problem_json=None,
+        problem_json=problem_json,
         started_at_ms=started_at_ms,
         updated_at_ms=started_at_ms,
         finished_at_ms=None,

@@ -2637,6 +2637,75 @@ class RuntimeManagerDaemon:
     def __init__(self) -> None:
         self._pid = os.getpid()
         self._owns_daemon_lock = False
+        self._idle_reconcile_lock = threading.Lock()
+        self._idle_reconcile_epoch = 0
+        self._idle_reconcile_running = False
+        self._idle_reconcile_result: dict[str, Any] | None = None
+        self._idle_reconcile_error: Exception | None = None
+
+    def _idle_reconcile_observation(self) -> dict[str, Any]:
+        return observe_workbench(recover_browser_window=False)
+
+    def _start_idle_reconcile_probe(self, observation: dict[str, Any]) -> bool:
+        with self._idle_reconcile_lock:
+            if self._idle_reconcile_running:
+                return False
+            epoch = self._idle_reconcile_epoch
+            self._idle_reconcile_running = True
+            self._idle_reconcile_result = None
+            self._idle_reconcile_error = None
+
+        observation_snapshot = dict(observation)
+
+        def collect_process_inventory() -> None:
+            result: dict[str, Any] | None = None
+            error: Exception | None = None
+            try:
+                recovered_observation = observation_snapshot
+                if str(observation_snapshot.get("lifecycleConsistency") or "").strip() == "browser_missing":
+                    recovered_observation = observe_workbench()
+                result = {
+                    "observation": recovered_observation,
+                    "residualProcesses": residual_process_payload(
+                        project_root=PROJECT_ROOT,
+                        exclude_pids=_snapshot_residual_excluded_pids(recovered_observation, self._pid),
+                    ),
+                }
+            except Exception as exc:  # noqa: BLE001 - surfaced on the command loop thread
+                error = exc
+            with self._idle_reconcile_lock:
+                self._idle_reconcile_running = False
+                if epoch != self._idle_reconcile_epoch:
+                    return
+                self._idle_reconcile_result = result
+                self._idle_reconcile_error = error
+
+        threading.Thread(
+            target=collect_process_inventory,
+            name="vibelution-runtime-idle-reconcile",
+            daemon=True,
+        ).start()
+        return True
+
+    def _idle_reconcile_probe_running(self) -> bool:
+        with self._idle_reconcile_lock:
+            return self._idle_reconcile_running
+
+    def _take_idle_reconcile_probe(self) -> dict[str, Any] | None:
+        with self._idle_reconcile_lock:
+            error = self._idle_reconcile_error
+            result = self._idle_reconcile_result
+            self._idle_reconcile_error = None
+            self._idle_reconcile_result = None
+        if error is not None:
+            raise error
+        return result
+
+    def _invalidate_idle_reconcile_probe(self) -> None:
+        with self._idle_reconcile_lock:
+            self._idle_reconcile_epoch += 1
+            self._idle_reconcile_result = None
+            self._idle_reconcile_error = None
 
     def _claim_startup_grace_command(self) -> tuple[Path, dict[str, Any]] | None:
         deadline = time.monotonic() + _STARTUP_COMMAND_GRACE_SECONDS
@@ -2797,36 +2866,48 @@ class RuntimeManagerDaemon:
                 },
                 phase="startup",
             )
-        startup_reconciled = False
+        startup_reconcile_scheduled = False
 
         try:
             while True:
                 command = claim_next_command()
                 if command is not None:
+                    self._invalidate_idle_reconcile_probe()
                     path, payload = command
                     if self._process_claimed_command(path, payload):
                         return
-                    if not startup_reconciled:
-                        startup_reconciled = True
+                    if not startup_reconcile_scheduled:
+                        startup_reconcile_scheduled = True
                     continue
 
-                if not startup_reconciled:
+                if not startup_reconcile_scheduled:
                     command = self._claim_startup_grace_command()
                     if command is not None:
+                        self._invalidate_idle_reconcile_probe()
                         path, payload = command
                         if self._process_claimed_command(path, payload):
                             return
-                        startup_reconciled = True
+                        startup_reconcile_scheduled = True
                         continue
-                    state = self._reconcile_observation(load_state())
-                    save_state(state)
-                    startup_reconciled = True
+                    observation = self._idle_reconcile_observation()
+                    self._start_idle_reconcile_probe(observation)
+                    startup_reconcile_scheduled = True
                     continue
 
-                self._process_self_evolution_restart_intent()
-                state = self._reconcile_observation(load_state())
-                state = self._maybe_auto_close_on_browser_missing(state)
-                save_state(state)
+                probe = self._take_idle_reconcile_probe()
+                if probe is not None:
+                    self._process_self_evolution_restart_intent()
+                    state = self._reconcile_observation(
+                        load_state(),
+                        observation=probe["observation"],
+                        residual_processes=probe["residualProcesses"],
+                    )
+                    state = self._maybe_auto_close_on_browser_missing(state)
+                    save_state(state)
+
+                if not self._idle_reconcile_probe_running():
+                    observation = self._idle_reconcile_observation()
+                    self._start_idle_reconcile_probe(observation)
                 time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
         finally:
             clear_pid(self._pid)
@@ -3282,11 +3363,21 @@ class RuntimeManagerDaemon:
             },
         )
 
-    def _reconcile_observation(self, state: dict[str, Any], *, observation: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _reconcile_observation(
+        self,
+        state: dict[str, Any],
+        *,
+        observation: dict[str, Any] | None = None,
+        residual_processes: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         observation = observation if isinstance(observation, dict) else observe_workbench()
-        residual_processes = residual_process_payload(
-            project_root=PROJECT_ROOT,
-            exclude_pids=_snapshot_residual_excluded_pids(observation, self._pid),
+        residual_processes = (
+            residual_processes
+            if isinstance(residual_processes, dict)
+            else residual_process_payload(
+                project_root=PROJECT_ROOT,
+                exclude_pids=_snapshot_residual_excluded_pids(observation, self._pid),
+            )
         )
         workbench = state.setdefault("workbench", {})
         desired_state = str(workbench.get("desiredState") or "closed").strip() or "closed"

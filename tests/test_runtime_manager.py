@@ -1,8 +1,10 @@
-import json
 import http.client
+import io
+import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1826,7 +1828,7 @@ def test_run_forever_claims_lifecycle_command_before_startup_reconcile(monkeypat
     with pytest.raises(StopLoop):
         runtime_daemon.run_forever()
 
-    assert events.index("claim") < events.index("reconcile_after_claim")
+    assert "reconcile_after_claim" not in events
     assert ("handle", command_payload) in events
 
 
@@ -1948,6 +1950,162 @@ def test_run_forever_emits_command_loop_ready_before_startup_reconcile(monkeypat
 
     assert order.index("recover") < order.index("ready") < order.index("claim")
     assert "reconcile" not in order
+
+
+def test_idle_reconcile_probe_collects_process_inventory_off_command_loop(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    observation = {"observedState": "closed", "backendPid": 0}
+
+    def blocking_residual_process_payload(**kwargs):
+        probe_started.set()
+        assert release_probe.wait(timeout=2.0)
+        return {"count": 0, "items": [], "projectRoot": str(kwargs["project_root"])}
+
+    monkeypatch.setattr(daemon, "_snapshot_residual_excluded_pids", lambda *_args, **_kwargs: set())
+    monkeypatch.setattr(daemon, "residual_process_payload", blocking_residual_process_payload)
+
+    assert runtime_daemon._start_idle_reconcile_probe(observation) is True
+    assert probe_started.wait(timeout=1.0)
+    assert runtime_daemon._take_idle_reconcile_probe() is None
+
+    release_probe.set()
+    deadline = time.time() + 2.0
+    result = None
+    while result is None and time.time() < deadline:
+        result = runtime_daemon._take_idle_reconcile_probe()
+        time.sleep(0.01)
+
+    assert result is not None
+    assert result["observation"] == observation
+    assert result["residualProcesses"]["count"] == 0
+
+
+def test_idle_reconcile_probe_discards_result_after_lifecycle_command(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+
+    def blocking_residual_process_payload(**_kwargs):
+        probe_started.set()
+        assert release_probe.wait(timeout=2.0)
+        return {"count": 1, "items": [{"pid": 1234}]}
+
+    monkeypatch.setattr(daemon, "_snapshot_residual_excluded_pids", lambda *_args, **_kwargs: set())
+    monkeypatch.setattr(daemon, "residual_process_payload", blocking_residual_process_payload)
+
+    assert runtime_daemon._start_idle_reconcile_probe({"observedState": "closed"}) is True
+    assert probe_started.wait(timeout=1.0)
+    runtime_daemon._invalidate_idle_reconcile_probe()
+    release_probe.set()
+
+    deadline = time.time() + 2.0
+    while runtime_daemon._idle_reconcile_probe_running() and time.time() < deadline:
+        time.sleep(0.01)
+
+    assert runtime_daemon._take_idle_reconcile_probe() is None
+
+
+def test_idle_reconcile_probe_recovers_missing_browser_off_command_loop(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    full_probe_started = threading.Event()
+    release_full_probe = threading.Event()
+    calls: list[bool] = []
+
+    def fake_observe_workbench(*, recover_browser_window=True):
+        calls.append(recover_browser_window)
+        if not recover_browser_window:
+            return {"observedState": "partial", "lifecycleConsistency": "browser_missing"}
+        full_probe_started.set()
+        assert release_full_probe.wait(timeout=2.0)
+        return {"observedState": "open", "lifecycleConsistency": "consistent", "browserWindowAlive": True}
+
+    monkeypatch.setattr(daemon, "observe_workbench", fake_observe_workbench)
+    monkeypatch.setattr(daemon, "_snapshot_residual_excluded_pids", lambda *_args, **_kwargs: set())
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **_kwargs: {"count": 0, "items": []})
+
+    observation = runtime_daemon._idle_reconcile_observation()
+    assert calls == [False]
+    assert runtime_daemon._start_idle_reconcile_probe(observation) is True
+    assert full_probe_started.wait(timeout=1.0)
+    assert runtime_daemon._take_idle_reconcile_probe() is None
+
+    release_full_probe.set()
+    deadline = time.time() + 2.0
+    result = None
+    while result is None and time.time() < deadline:
+        result = runtime_daemon._take_idle_reconcile_probe()
+        time.sleep(0.01)
+
+    assert calls == [False, True]
+    assert result is not None
+    assert result["observation"]["lifecycleConsistency"] == "consistent"
+
+
+def test_run_forever_claims_command_while_idle_process_probe_is_running(monkeypatch, tmp_path):
+    class StopLoop(Exception):
+        pass
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    events: list[object] = []
+    claim_calls = {"count": 0}
+    command_path = tmp_path / "cmd-open.json"
+    command_payload = {
+        "commandId": "cmd-open",
+        "type": "open_workbench",
+        "requestedBy": "launcher_api",
+        "args": {},
+    }
+
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    _patch_daemon_ownership_available(monkeypatch)
+    monkeypatch.setattr(daemon, "load_state", lambda: {"command": {}, "workbench": {}})
+    monkeypatch.setattr(daemon, "save_state", lambda state: state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-08-13T02:00:00+00:00")
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "recover_processing_queue", lambda: None)
+    monkeypatch.setattr(daemon, "clear_pid", lambda _pid: None)
+    monkeypatch.setattr(daemon, "enforce_runtime_scene_retention_on_startup", dict)
+    monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime_daemon, "_claim_startup_grace_command", lambda: None)
+    monkeypatch.setattr(runtime_daemon, "_idle_reconcile_observation", lambda: {"observedState": "closed"})
+    monkeypatch.setattr(daemon, "_snapshot_residual_excluded_pids", lambda *_args, **_kwargs: set())
+    monkeypatch.setattr(daemon.time, "sleep", lambda _seconds: None)
+
+    def blocking_residual_process_payload(**_kwargs):
+        probe_started.set()
+        assert release_probe.wait(timeout=2.0)
+        return {"count": 0, "items": []}
+
+    def fake_claim_next_command():
+        claim_calls["count"] += 1
+        if claim_calls["count"] == 1:
+            return None
+        if claim_calls["count"] == 2:
+            assert probe_started.wait(timeout=1.0)
+            events.append("command_claimed_while_probe_running")
+            return command_path, command_payload
+        raise StopLoop()
+
+    monkeypatch.setattr(daemon, "residual_process_payload", blocking_residual_process_payload)
+    monkeypatch.setattr(daemon, "claim_next_command", fake_claim_next_command)
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_process_claimed_command",
+        lambda path, payload: events.append((path, payload, runtime_daemon._idle_reconcile_probe_running())) or False,
+    )
+
+    try:
+        with pytest.raises(StopLoop):
+            runtime_daemon.run_forever()
+    finally:
+        release_probe.set()
+
+    assert events[0] == "command_claimed_while_probe_running"
+    assert events[1] == (command_path, command_payload, True)
 
 
 def test_daemon_unexpected_exit_marks_manager_not_running(monkeypatch):
@@ -4401,6 +4559,57 @@ def test_runtime_manager_scene_event_backfills_recent_queue_events(tmp_path, mon
     assert recorded[0]["kwargs"]["occurred_at"] == "2026-05-24T10:40:43+00:00"
     assert recorded[0]["kwargs"]["fields"]["runtimeManagerBackfill"] is True
     assert recorded[-1]["kwargs"]["fields"]["runtimeManagerEventAt"] == "2026-05-24T10:41:27+00:00"
+
+
+def test_runtime_manager_event_backfill_reads_only_recent_file_tail(monkeypatch):
+    old_event = json.dumps(
+        {
+            "type": "command_queue.command_queued",
+            "at": "2026-05-24T10:00:00+00:00",
+            "payload": {"commandId": "cmd-old"},
+        }
+    ).encode("utf-8")
+    recent_events = [
+        {
+            "type": "command_queue.command_queued",
+            "at": "2026-05-24T10:40:43+00:00",
+            "payload": {"commandId": "cmd-open"},
+        },
+        {
+            "type": "command_queue.command_claimed",
+            "at": "2026-05-24T10:40:52+00:00",
+            "payload": {"commandId": "cmd-open"},
+        },
+    ]
+    raw = b"x" * 100_000 + b"\n" + old_event + b"\n" + b"\n".join(
+        json.dumps(row).encode("utf-8") for row in recent_events
+    ) + b"\n"
+    read_bytes = {"count": 0}
+
+    class CountingBytesIO(io.BytesIO):
+        def read(self, size=-1):
+            data = super().read(size)
+            read_bytes["count"] += len(data)
+            return data
+
+    class CountingEventPath:
+        def open(self, mode):
+            assert mode == "rb"
+            return CountingBytesIO(raw)
+
+    monkeypatch.setattr(scene_logging, "EVENTS_PATH", CountingEventPath())
+    monkeypatch.setattr(scene_logging, "_EVENT_BACKFILL_READ_CHUNK_BYTES", 256)
+
+    rows = scene_logging._read_runtime_manager_file_events(
+        earliest_at=datetime(2026, 5, 24, 10, 30, tzinfo=timezone.utc),
+        latest_at=datetime(2026, 5, 24, 10, 41, tzinfo=timezone.utc),
+    )
+
+    assert [row["type"] for row in rows] == [
+        "command_queue.command_queued",
+        "command_queue.command_claimed",
+    ]
+    assert read_bytes["count"] < len(raw) // 2
 
 
 def test_runtime_manager_queue_event_does_not_target_recent_completed_package(tmp_path, monkeypatch):

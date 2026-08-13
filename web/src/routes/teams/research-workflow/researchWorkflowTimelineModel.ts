@@ -66,18 +66,33 @@ function groupIdentity(event: WorkflowEventEnvelope): { key: string; title: stri
   return { key: "run", title: "运行治理" };
 }
 
+function eventLabel(event: WorkflowEventEnvelope): string {
+  const eventType = field(event, "type");
+  const base = EVENT_LABELS[eventType] || "运行状态已更新";
+  const reason = field(event, "reason") || field(event, "detail");
+  if ((eventType === "node_blocked" || eventType === "run_blocked") && reason) {
+    return `${base} · ${reason}`;
+  }
+  return base;
+}
+
 export function buildResearchTimelineGroups(
   events: WorkflowEventEnvelope[] = [],
+  options?: {
+    nodeRuns?: Record<string, { nodeId: string; status?: string; attempt?: number }>;
+    blockedReason?: string | null;
+  },
 ): ResearchTimelineGroup[] {
+  const projected = projectMissingBlockEvents(events, options);
   const groups = new Map<string, ResearchTimelineGroup>();
-  for (const event of events ?? []) {
+  for (const event of projected) {
     const identity = groupIdentity(event);
     const group = groups.get(identity.key) ?? { ...identity, items: [] };
     const eventType = field(event, "type");
     group.items.push({
       key: field(event, "eventId") || `${field(event, "sequence")}:${eventType}`,
-      label: EVENT_LABELS[eventType] || "运行状态已更新",
-      status: field(event, "status") || field(event, "decision") || field(event, "outcome"),
+      label: eventLabel(event),
+      status: field(event, "status") || field(event, "decision") || field(event, "outcome") || field(event, "reason"),
       occurredAt: field(event, "occurredAt"),
     });
     groups.set(identity.key, group);
@@ -86,4 +101,43 @@ export function buildResearchTimelineGroups(
     ...group,
     items: group.items.slice().reverse(),
   })).reverse();
+}
+
+function projectMissingBlockEvents(
+  events: WorkflowEventEnvelope[],
+  options?: {
+    nodeRuns?: Record<string, { nodeId: string; status?: string; attempt?: number }>;
+    blockedReason?: string | null;
+  },
+): WorkflowEventEnvelope[] {
+  const nodeRuns = options?.nodeRuns;
+  if (!nodeRuns) return events ?? [];
+  const blockedEventNodes = new Set(
+    (events ?? [])
+      .filter((event) => field(event, "type") === "node_blocked")
+      .map((event) => field(event, "nodeId"))
+      .filter(Boolean),
+  );
+  const extra: WorkflowEventEnvelope[] = [];
+  for (const node of Object.values(nodeRuns)) {
+    if (node.status !== "blocked" || !node.nodeId || blockedEventNodes.has(node.nodeId)) {
+      continue;
+    }
+    extra.push({
+      eventId: `projected-block:${node.nodeId}:a${node.attempt ?? 0}`,
+      sequence: Number.MAX_SAFE_INTEGER,
+      runId: "",
+      teamId: "",
+      runVersion: 0,
+      type: "node_blocked",
+      correlationId: "",
+      occurredAt: "",
+      payload: {
+        nodeId: node.nodeId,
+        attempt: node.attempt,
+        reason: options?.blockedReason || "节点已阻塞",
+      },
+    });
+  }
+  return extra.length ? [...(events ?? []), ...extra] : (events ?? []);
 }

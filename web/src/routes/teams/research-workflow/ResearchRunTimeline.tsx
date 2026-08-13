@@ -15,6 +15,10 @@ export function ResearchRunTimeline(props: {
 }) {
   const groups = buildResearchTimelineGroups(
     (props.run?.events ?? []) as WorkflowEventEnvelope[],
+    {
+      nodeRuns: props.projection?.run.nodeRuns,
+      blockedReason: props.projection?.run.blockedReason ?? props.run?.blockedReason,
+    },
   );
   return (
     <div className={styles.root}>
