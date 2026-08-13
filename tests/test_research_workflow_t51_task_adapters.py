@@ -205,6 +205,13 @@ def test_adapter_worker_contains_phase_exceptions(tmp_path: Path, boom_phase: st
         assert attempt is not None
         assert attempt.status in {"failed", "blocked", "reconciliation_required"}
         assert attempt.status != "dispatching"
+        run = harness.store.get_run(action.run_id)
+        assert run is not None
+        assert run.status == "blocked"
+        event_types = [item.event_type for item in harness.store.list_events(action.run_id)]
+        assert "run_blocked" in event_types
+        if attempt.status == "failed":
+            assert "node_failed" in event_types
 
         outbox_rows = harness.store.submit(
             lambda uow: uow.repository.execute(
