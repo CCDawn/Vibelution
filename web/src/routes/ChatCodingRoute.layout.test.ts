@@ -2382,6 +2382,24 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground");
   });
 
+  it("defers neighbor session prefetch until the visible active detail is ready and runs it serially", () => {
+    const prefetchStart = routeSource.indexOf("// C: idle-prefetch a few neighbor session detail windows");
+    const prefetchEffectStart = routeSource.indexOf("useEffect(() => {", prefetchStart);
+    const prefetchEnd = routeSource.indexOf("\n  useEffect(() => {", prefetchEffectStart + 1);
+    const prefetchSource = routeSource.slice(prefetchStart, prefetchEnd);
+
+    expect(prefetchStart).toBeGreaterThanOrEqual(0);
+    expect(prefetchEffectStart).toBeGreaterThan(prefetchStart);
+    expect(prefetchSource).toContain("!secondaryChatDataEnabled");
+    expect(prefetchSource).toContain("!pageVisible");
+    expect(prefetchSource).toContain("const run = async () =>");
+    expect(prefetchSource).toContain("await prefetchSessionDetailWindow(queryClient, sessionId)");
+    expect(prefetchSource).not.toContain("void prefetchSessionDetailWindow(queryClient, sessionId)");
+    expect(prefetchSource).toContain(
+      "[activeSessionId, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]",
+    );
+  });
+
   it("updates active direct session before pushing the route", () => {
     const openDirectSessionSource = routeAndActionsSource.slice(
       routeAndActionsSource.indexOf("const handleOpenDirectSession = useCallback"),
