@@ -35,6 +35,7 @@ Electron (product tray owner, globally unique desktop shell)
   → Python launcher service (vibelution_desktop_entry.py bootstrap)
   → Runtime Manager → FastAPI + Workbench
   → isolated worktree backends stay allowed; they do not spawn a second desktop shell
+  → isolated start opens a named Workbench window (`{shortName} 台`) inside that existing Electron shell
 
 VibelutionLauncher.exe --project <root> launcher
   → if Electron owner pid is alive: no NotifyIcon (thin shim / open console)

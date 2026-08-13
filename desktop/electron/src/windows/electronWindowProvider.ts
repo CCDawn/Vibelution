@@ -25,6 +25,7 @@ export type ElectronWindowLike = {
   isMinimized?(): boolean;
   restore?(): void;
   on(event: string, listener: ElectronWindowEventListener): unknown;
+  setTitle?(title: string): void;
   setOverlayIcon?(icon: unknown, description: string): void;
   flashFrame?(flag: boolean): void;
   webContents: {
@@ -42,7 +43,15 @@ export type WorkbenchAttentionOptions = {
   flash?: boolean;
 };
 
-export type ElectronWindowFactory = (url: string, paths: DesktopPaths) => ElectronWindowLike;
+export type ElectronWindowCreateOptions = {
+  title?: string;
+};
+
+export type ElectronWindowFactory = (
+  url: string,
+  paths: DesktopPaths,
+  options?: ElectronWindowCreateOptions
+) => ElectronWindowLike;
 
 export type ElectronWindowProviderOptions = {
   createLauncherWindow?: ElectronWindowFactory;
@@ -92,9 +101,18 @@ function waitForWindowClosed(
   });
 }
 
+type InstanceWorkbenchEntry = {
+  instanceId: string;
+  url: string;
+  title: string;
+  window: ElectronWindowLike;
+  readyUrl: string | null;
+};
+
 export class ElectronWindowProvider {
   private launcherWindow: ElectronWindowLike | null = null;
   private workbenchWindow: ElectronWindowLike | null = null;
+  private readonly instanceWindows = new Map<string, InstanceWorkbenchEntry>();
   private readonly createLauncherWindow: ElectronWindowFactory;
   private readonly createWorkbenchWindow: ElectronWindowFactory;
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
@@ -207,6 +225,83 @@ export class ElectronWindowProvider {
     }
   }
 
+  async openOrFocusInstanceWorkbench(input: {
+    instanceId: string;
+    url: string;
+    title?: string;
+  }): Promise<ManagedWindowState> {
+    const instanceId = String(input.instanceId || "").trim();
+    const title = String(input.title || "").trim();
+    const safeUrl = localWorkbenchUrl(input.url);
+    if (!instanceId) {
+      throw new Error("instance workbench requires instanceId");
+    }
+    let entry = this.instanceWindows.get(instanceId);
+    let window = entry?.window;
+    if (!window || window.isDestroyed()) {
+      window = this.createWorkbenchWindow(safeUrl, this.paths, title ? { title } : undefined);
+      if (typeof window.setTitle === "function" && title) {
+        window.setTitle(title);
+      }
+      this.lockInstanceWindowTitle(window, title);
+      this.attachInstanceWindowEvents(instanceId, window);
+      entry = { instanceId, url: safeUrl, title, window, readyUrl: null };
+      this.instanceWindows.set(instanceId, entry);
+    } else if (entry && title) {
+      entry.title = title;
+      if (typeof window.setTitle === "function") {
+        window.setTitle(title);
+      }
+    }
+    if (!entry) {
+      throw new Error("instance workbench window was not created");
+    }
+
+    if (entry.readyUrl !== safeUrl) {
+      window.hide();
+      try {
+        await window.loadURL(safeUrl);
+        if (window.isDestroyed()) {
+          throw new Error("Instance workbench window closed before navigation completed");
+        }
+        entry.readyUrl = safeUrl;
+        entry.url = safeUrl;
+      } catch (error: unknown) {
+        this.discardInstanceWindow(instanceId, window);
+        throw navigationFailure(safeUrl, error);
+      }
+    }
+
+    presentElectronWindow(window);
+    if (typeof window.setTitle === "function" && title) {
+      window.setTitle(title);
+    }
+    return this.instanceState(instanceId);
+  }
+
+  async closeInstanceWorkbench(instanceId: string): Promise<ManagedWindowState> {
+    const id = String(instanceId || "").trim();
+    const entry = this.instanceWindows.get(id);
+    if (!entry || entry.window.isDestroyed()) {
+      this.instanceWindows.delete(id);
+      return { ...closedWindowState("workbench"), instanceId: id };
+    }
+    entry.window.close();
+    if (!entry.window.isDestroyed()) {
+      const outcome = await waitForWindowClosed(entry.window, this.hungCloseDestroyAfterMs);
+      if (outcome === "timeout" && !entry.window.isDestroyed()) {
+        try {
+          entry.window.destroy();
+        } catch {
+          // A hung isolated window must not keep a stale renderer.
+        }
+      }
+    }
+    this.instanceWindows.delete(id);
+    this.attachedWindows.delete(entry.window);
+    return { ...closedWindowState("workbench"), instanceId: id };
+  }
+
   async focusWorkbench(): Promise<ManagedWindowState> {
     if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
       return this.reportAndReturn(closedWindowState("workbench"));
@@ -294,6 +389,68 @@ export class ElectronWindowProvider {
       launcher: this.stateFor("launcher"),
       workbench: this.stateFor("workbench")
     };
+  }
+
+  private attachInstanceWindowEvents(instanceId: string, window: ElectronWindowLike): void {
+    if (this.attachedWindows.has(window)) {
+      return;
+    }
+    this.attachedWindows.add(window);
+    window.on("closed", () => {
+      this.attachedWindows.delete(window);
+      const entry = this.instanceWindows.get(instanceId);
+      if (entry?.window === window) {
+        this.instanceWindows.delete(instanceId);
+      }
+    });
+    window.on("query-session-end", () => this.onOsSessionEnd("query-session-end", "workbench"));
+    window.on("session-end", () => this.onOsSessionEnd("session-end", "workbench"));
+  }
+
+  private lockInstanceWindowTitle(window: ElectronWindowLike, title: string): void {
+    if (!title) {
+      return;
+    }
+    window.on("page-title-updated", (event) => {
+      preventWindowClose(event);
+      if (typeof window.setTitle === "function") {
+        window.setTitle(title);
+      }
+    });
+  }
+
+  private instanceState(instanceId: string): ManagedWindowState {
+    const entry = this.instanceWindows.get(instanceId);
+    const window = entry?.window;
+    if (!window || window.isDestroyed() || !entry?.readyUrl) {
+      return { ...closedWindowState("workbench"), instanceId };
+    }
+    return {
+      role: "workbench",
+      provider: "electron",
+      open: true,
+      focused: window.isFocused(),
+      windowId: window.id,
+      rendererProcessId: window.webContents.getOSProcessId(),
+      url: window.webContents.getURL(),
+      instanceId,
+      title: entry.title
+    };
+  }
+
+  private discardInstanceWindow(instanceId: string, window: ElectronWindowLike): void {
+    const entry = this.instanceWindows.get(instanceId);
+    if (entry?.window === window) {
+      this.instanceWindows.delete(instanceId);
+    }
+    this.attachedWindows.delete(window);
+    if (!window.isDestroyed()) {
+      try {
+        window.destroy();
+      } catch {
+        // Preserve the original navigation failure for the desktop action result.
+      }
+    }
   }
 
   private attachWindowEvents(role: ElectronWindowRole, window: ElectronWindowLike): void {
