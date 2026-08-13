@@ -5,8 +5,120 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from core.research.workflow.challenge_cup_runtime import (
+    GraphDispatch,
+    action_id_for,
+    merge_node_attempts,
+)
+from core.research.workflow.contracts import ExecutionReceipt
 from tests._support.graph_helpers import GraphHarness
 from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
+
+
+def test_node_attempt_reducer_keeps_each_nodes_highest_durable_attempt() -> None:
+    assert merge_node_attempts(
+        {"source_finding": 1, "source_extraction": 4},
+        {"source_extraction": 1, "evidence_relations": 2},
+    ) == {
+        "source_finding": 1,
+        "source_extraction": 4,
+        "evidence_relations": 2,
+    }
+
+
+def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
+    tmp_path: Path,
+) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        start = GraphDispatch(
+            action_id="act-driver",
+            run_id="run-restart",
+            node_run_id="nr-run-restart-source_finding-a1",
+            node_id="source_finding",
+            attempt=1,
+            dispatch_kind="start",
+            input_snapshot_hash="a" * 64,
+            workflow_version_id="challenge-cup-research-v2.1.0",
+            team_id="research-team",
+        )
+        finding = harness.coordinator.start_attempt(start)
+        assert finding.pending_action is not None
+
+        finding_receipt = ExecutionReceipt(
+            action_id=action_id_for("run-restart", "source_finding", 1),
+            node_run_id="nr-run-restart-source_finding-a1",
+            outcome="succeeded",
+            artifact_receipt_ids=(),
+            execution_anchor_id=None,
+            budget_receipt_id=None,
+            problem=None,
+            completed_at_ms=FIXED_NOW_MS,
+        )
+        extraction = harness.coordinator.resume_action(
+            GraphDispatch(
+                action_id=finding_receipt.action_id,
+                run_id="run-restart",
+                node_run_id=finding_receipt.node_run_id,
+                node_id="source_finding",
+                attempt=1,
+                dispatch_kind="resume_action",
+                receipt=finding_receipt,
+            )
+        )
+        assert extraction.pending_action is not None
+        assert extraction.pending_action.node_id == "source_extraction"
+        assert extraction.pending_action.attempt == 1
+
+        # Reproduce the stale task-specific resume left by a failed replay.
+        # The durable checkpoint must remain recoverable even though the bad
+        # receipt was persisted as a pending write before the task failed.
+        stale_receipt = ExecutionReceipt(
+            action_id=finding_receipt.action_id,
+            node_run_id=finding_receipt.node_run_id,
+            outcome="succeeded",
+            artifact_receipt_ids=(),
+            execution_anchor_id=None,
+            budget_receipt_id=None,
+            problem=None,
+            completed_at_ms=FIXED_NOW_MS,
+        )
+        with pytest.raises(ValueError, match="execution receipt identity mismatch"):
+            harness.coordinator.resume_action(
+                GraphDispatch(
+                    action_id=stale_receipt.action_id,
+                    run_id="run-restart",
+                    node_run_id=stale_receipt.node_run_id,
+                    node_id="source_extraction",
+                    attempt=1,
+                    dispatch_kind="resume_action",
+                    team_id="research-team",
+                    receipt=stale_receipt,
+                )
+            )
+
+        restarted = harness.coordinator.restart_attempt(
+            GraphDispatch(
+                action_id="act-driver-retry",
+                run_id="run-restart",
+                node_run_id="nr-run-restart-source_extraction-a4",
+                node_id="source_extraction",
+                attempt=4,
+                dispatch_kind="start",
+                team_id="research-team",
+            )
+        )
+
+        assert restarted.pending_action is not None
+        assert restarted.pending_action.node_id == "source_extraction"
+        assert restarted.pending_action.attempt == 4
+        assert restarted.pending_action.action_id == action_id_for(
+            "run-restart", "source_extraction", 4
+        )
+    finally:
+        harness.close()
 
 
 def test_retry_uses_persisted_interrupt_when_checkpoint_next_is_empty(
