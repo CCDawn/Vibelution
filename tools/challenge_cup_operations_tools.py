@@ -95,6 +95,7 @@ def challenge_cup_experiment_context_tool(
             allowed_task_kinds=(
                 "hypothesis_design",
                 "experiment_design",
+                "protocol_review",
                 "experiment_evidence_review",
             ),
             recorded_by_agent="",
@@ -170,6 +171,8 @@ def challenge_cup_experiment_writeback_tool(
             allowed_task_kinds = ("hypothesis_design",)
         elif normalized_operation == "create_plan":
             allowed_task_kinds = ("experiment_design",)
+        elif normalized_operation == "record_protocol_review":
+            allowed_task_kinds = ("protocol_review",)
         else:
             allowed_task_kinds = ("experiment_evidence_review",)
         task_binding = _project_task_binding(
@@ -179,7 +182,8 @@ def challenge_cup_experiment_writeback_tool(
             task_id=task_id,
             allowed_task_kinds=allowed_task_kinds,
             recorded_by_agent=recorded_by_agent,
-            load_context=normalized_operation == "record_hypothesis_set",
+            load_context=normalized_operation
+            in {"record_hypothesis_set", "record_protocol_review"},
         )
         bound_project_id, bound_task_id = _project_task_identity(task_binding)
         task = (
@@ -221,6 +225,20 @@ def challenge_cup_experiment_writeback_tool(
             )
 
             response = record_hypothesis_set(
+                team_id=team_id,
+                task_context=task_binding,
+                payload=payload,
+            )
+        elif normalized_operation == "record_protocol_review":
+            if not isinstance(task_binding, dict) or not isinstance(task, dict):
+                raise ValueError(
+                    "record_protocol_review requires a bound protocol review task."
+                )
+            from core.web.services.team_workflow.research_runtime.protocol_review_artifact_writer import (
+                record_protocol_review_report,
+            )
+
+            response = record_protocol_review_report(
                 team_id=team_id,
                 task_context=task_binding,
                 payload=payload,
@@ -306,7 +324,8 @@ def challenge_cup_experiment_writeback_tool(
         if task:
             result_refs = (
                 [_text((response.get("artifact") or {}).get("recordId"))]
-                if normalized_operation == "record_hypothesis_set"
+                if normalized_operation
+                in {"record_hypothesis_set", "record_protocol_review"}
                 else _experiment_writeback_result_refs(
                     operation=normalized_operation,
                     requested_plan_id=_text(plan_id),

@@ -528,7 +528,7 @@ def test_partial_agent_start_replays_persisted_key_and_budget(
     ("node_id", "role_key", "task_kind"),
     (
         ("protocol_design", "experiment_planner", "experiment_design"),
-        ("protocol_review", "experiment_ledger", "experiment_evidence_review"),
+        ("protocol_review", "experiment_ledger", "protocol_review"),
         ("result_evaluation", "experiment_ledger", "experiment_evidence_review"),
         ("iteration_decision", "iteration_planner", "iteration_decision"),
         ("version_governance", "iteration_versioning", "version_governance"),
