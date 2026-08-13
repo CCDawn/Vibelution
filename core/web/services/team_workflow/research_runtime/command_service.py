@@ -49,13 +49,13 @@ from core.web.services.team_workflow.research_runtime.readiness.common import (
     DomainReadinessContext,
 )
 
-from .ids import new_id
 from .human_acceptance_artifact import (
     KnowledgeAcceptanceArtifactError,
     PreparedHumanAcceptanceArtifact,
     persist_prepared_human_acceptance_artifact,
     prepare_command_human_acceptance_artifact,
 )
+from .ids import new_id
 
 
 class WorkflowCommandError(RuntimeError):
@@ -203,6 +203,16 @@ class WorkflowCommandService:
         elif request.command is WorkflowCommandKind.RETRY_NODE:
             future = self._store.submit(
                 lambda uow: self._handle_retry_node(
+                    uow,
+                    request,
+                    request_hash,
+                    prepared_artifact,
+                ),
+                force_flush=True,
+            )
+        elif request.command is WorkflowCommandKind.RECONCILE_RUN:
+            future = self._store.submit(
+                lambda uow: self._handle_reconcile_run(
                     uow,
                     request,
                     request_hash,
@@ -631,7 +641,13 @@ class WorkflowCommandService:
         )
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
-    def _handle_reconcile_run(self, uow, request: CommandRequest, request_hash: str) -> CommandReceipt:
+    def _handle_reconcile_run(
+        self,
+        uow,
+        request: CommandRequest,
+        request_hash: str,
+        prepared_artifact: PreparedHumanAcceptanceArtifact | None = None,
+    ) -> CommandReceipt:
         now_ms = self._clock()
         run = uow.repository.get_run(request.run_id)
         require_run_transition(RunStatus(run.status), RunStatus.RUNNING)
@@ -647,6 +663,12 @@ class WorkflowCommandService:
                 now_ms=now_ms,
             )
         )
+        artifact_receipt_ids = persist_prepared_human_acceptance_artifact(
+            uow,
+            run=run,
+            prepared=prepared_artifact,
+            now_ms=now_ms,
+        )
         uow.repository.update_run_status(request.run_id, request.team_id, RunStatus.RUNNING.value, now_ms)
         uow.repository.insert_event(
             _event_record(
@@ -656,7 +678,10 @@ class WorkflowCommandService:
                 run_version=accepted_version,
                 event_type="run_blocked",
                 correlation_id=request.idempotency_key,
-                payload={"reconciled": True},
+                payload={
+                    "reconciled": True,
+                    "artifactReceiptIds": list(artifact_receipt_ids),
+                },
                 now_ms=now_ms,
             )
         )
