@@ -31,5 +31,7 @@ describe("ConversationActiveTurnStatusNote canonical turn items", () => {
 
     expect(html).toContain("data-active-turn-stage=\"model_retry\"");
     expect(html).toContain("请求");
+    expect(html).not.toContain("data-stage-phase");
+    expect(html).not.toContain("stageDot");
   });
 });

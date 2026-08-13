@@ -16,30 +16,7 @@ const styles = {
     "text",
     "min-w-0 max-w-[min(100%,48ch)] truncate [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]",
   ),
-  // Compact 4-step track: no labels, only reached/current fill.
-  stageBar: cv(
-    "stageBar",
-    "inline-flex shrink-0 items-center gap-1",
-  ),
-  stageBarItem: cv("stageBarItem", "inline-flex items-center"),
-  stageDot: cv(
-    "stageDot",
-    "block h-1.5 w-1.5 shrink-0 rounded-full bg-[color-mix(in_srgb,var(--fg-tertiary)_42%,transparent)]",
-  ),
-  stageDotReached: cv(
-    "stageDotReached",
-    "block h-1.5 w-1.5 shrink-0 rounded-full bg-[color-mix(in_srgb,var(--accent-cool)_48%,var(--fg-tertiary))]",
-  ),
-  stageDotCurrent: cv(
-    "stageDotCurrent",
-    "block h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cool)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_20%,transparent)]",
-  ),
-  // Kept for older test selectors that sample class map keys.
   label: cv("label", "sr-only"),
-  stageItem: cv("stageItem", "sr-only"),
-  stageItemReached: cv("stageItemReached", "sr-only"),
-  stageItemCurrent: cv("stageItemCurrent", "sr-only"),
-  stageSeparator: cv("stageSeparator", "sr-only"),
 } as const;
 
 export default styles;
