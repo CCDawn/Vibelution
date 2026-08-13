@@ -68,6 +68,8 @@ from scripts.evolution_harness import (
     SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
     stdout_tail_looks_like_idle_chat_ui,
 )
+from vibelution_storage import resolve_project_logs_home
+
 pytestmark = pytest.mark.serial
 
 
@@ -869,8 +871,8 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
 
     monkeypatch.setattr("scripts.evolution_harness.write_report", fake_write_report)
     monkeypatch.setattr("scripts.evolution_harness.remove_worktree", lambda repo_root, path: None)
-    log_info = worktree / "log_info"
-    log_info.mkdir()
+    log_info = resolve_project_logs_home(worktree) / "legacy-log_info"
+    log_info.mkdir(parents=True)
     (log_info / "conversation_case.jsonl").write_text('{"type":"external_request","content":"probe"}\n', encoding="utf-8")
     (log_info / "debug_case.log").write_text("[debug] probe\n", encoding="utf-8")
 
