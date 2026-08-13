@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from core.web.services.team_workflow.research_runtime.readiness import NodeReadinessService
+from core.web.services.team_workflow.research_runtime.readiness import (
+    NodeReadinessService,
+)
+from core.web.services.team_workflow.research_runtime.readiness.common import (
+    HandoffSnapshot,
+)
 from tests._support.readiness_fakes import FakeDomainContext, make_run
 
 
@@ -20,18 +25,26 @@ def _evaluate(context, node_id):
     )
 
 
-def test_hypothesis_design_blocks_without_accepted_package() -> None:
+def test_hypothesis_design_blocks_without_accepted_handoff() -> None:
     context = FakeDomainContext()
-    context._knowledge_package = {"accepted": False}
     result = _evaluate(context, "hypothesis_design")
     assert result.ready is False
     assert any(b.code == "knowledge_handoff_not_accepted" for b in result.blockers)
 
 
-def test_hypothesis_design_ready_with_accepted_package() -> None:
+def test_hypothesis_design_ready_with_accepted_handoff_even_without_parallel_package_flag() -> None:
     context = FakeDomainContext()
+    context._knowledge_package = {"accepted": False}
+    context.handoffs["hypothesis_design"] = [
+        HandoffSnapshot(
+            handoff_id="ho-knowledge-hypothesis",
+            from_node_run_id="nr-knowledge-handoff-a1",
+            status="accepted",
+        )
+    ]
     result = _evaluate(context, "hypothesis_design")
     assert result.ready is True
+    assert "knowledge_package" not in context.calls
 
 
 def test_protocol_design_blocks_without_hypotheses() -> None:
