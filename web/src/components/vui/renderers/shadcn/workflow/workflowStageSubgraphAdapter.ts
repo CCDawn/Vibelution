@@ -20,6 +20,7 @@ import {
   WORKFLOW_NODE_LABEL_HEIGHT,
   WORKFLOW_NODE_LABEL_WIDTH,
   workflowNodeDesignSize,
+  workflowEdgeKeepsNarrativeLabel,
   workflowStageInternalOptions,
   type WorkflowCanvasLayoutMode,
 } from "./workflowElkOptions";
@@ -115,6 +116,10 @@ export function buildStageSubgraphs(
         targets: [ports.targetPortId],
         labels:
           edge.label.length > 0
+          && (
+            layoutMode !== "serpentine"
+            || (workflowEdgeKeepsNarrativeLabel(edge) && edge.semanticKind !== "rerun")
+          )
             ? [
                 {
                   ...resolveEdgeLabelSpec(edge.label),

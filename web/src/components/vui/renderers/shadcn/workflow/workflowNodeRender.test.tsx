@@ -87,17 +87,21 @@ describe("WorkflowAgentTaskNode render (P1-4)", () => {
     expect(markup).toContain("待运行");
   });
 
-  it("uses the approved spacious card hierarchy in serpentine mode", () => {
+  it("uses the approved compact card hierarchy in serpentine mode", () => {
     const markup = renderNode(WorkflowAgentTaskNode, {
       label: "协议设计",
       status: "ready",
       primaryAgentId: "agent-technical-id",
+      primaryRoleKey: "experiment_planner",
       description: "冻结变量、数据切分、预算和停止条件。",
       layoutMode: "serpentine",
     });
     expect(markup).toContain('data-layout-mode="serpentine"');
     expect(markup).toContain("Agent 任务");
-    expect(markup).toContain("冻结变量、数据切分、预算和停止条件。");
+    expect(markup).toContain("实验规划");
+    expect(markup).toContain("Agent 已绑定");
+    expect(markup).not.toContain("冻结变量、数据切分、预算和停止条件。");
+    expect(markup).not.toContain(">agent-technical-id<");
   });
 });
 

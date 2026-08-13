@@ -25,6 +25,7 @@ export function WorkflowStartEndNode(props: NodeProps) {
       status={status}
       selected={Boolean(props.selected)}
       isRuntimeCurrent={Boolean(props.data.isRuntimeCurrent)}
+      primaryRoleKey={props.data.primaryRoleKey ? String(props.data.primaryRoleKey) : undefined}
       subtitle={layoutMode === "serpentine" ? description || (visualKind === "start" ? "研究流程起点" : "形成可提交结果包") : visualKind === "start" ? "起点" : "终点"}
       showTargetHandle={visualKind !== "start"}
       showSourceHandle={visualKind !== "end"}

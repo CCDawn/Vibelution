@@ -147,11 +147,15 @@ export function resolveElkPorts(options: {
         sourcePortId = addPort(sourceRef.nodeId, "decision:rerun", "WEST");
         targetPortId = addPort(targetRef.nodeId, "feedback:in", "EAST");
       } else if (outcome === "promote" || outcome === "rollback") {
-        sourcePortId = addPort(sourceRef.nodeId, `decision:${outcome}`, "SOUTH");
-        targetPortId = addPort(targetRef.nodeId, `in:${outcome}`, "NORTH");
+        const sourceSide = layoutMode === "serpentine" ? "EAST" : "SOUTH";
+        const targetSide = layoutMode === "serpentine" ? "WEST" : "NORTH";
+        sourcePortId = addPort(sourceRef.nodeId, `decision:${outcome}`, sourceSide);
+        targetPortId = addPort(targetRef.nodeId, `in:${outcome}`, targetSide);
       } else {
-        sourcePortId = addPort(sourceRef.nodeId, "decision:stop", "SOUTH");
-        targetPortId = addPort(targetRef.nodeId, "in:north", "NORTH");
+        const sourceSide = layoutMode === "serpentine" ? "EAST" : "SOUTH";
+        const targetSide = layoutMode === "serpentine" ? "WEST" : "NORTH";
+        sourcePortId = addPort(sourceRef.nodeId, "decision:stop", sourceSide);
+        targetPortId = addPort(targetRef.nodeId, "in:north", targetSide);
       }
       byEdgeId.set(edge.edgeId, { sourcePortId, targetPortId });
     } else {

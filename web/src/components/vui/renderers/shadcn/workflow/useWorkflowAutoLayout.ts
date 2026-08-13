@@ -27,7 +27,10 @@ import { DECISION_OUTCOME_IDS } from "./workflowElkPorts";
 import type { WorkflowLayoutEngine } from "./workflowElkClient";
 import { layoutTwoLevel } from "./workflowTwoLevelLayout";
 import { isLayoutSettled } from "./workflowLayoutSettling";
-import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
+import {
+  workflowEdgeKeepsNarrativeLabel,
+  type WorkflowCanvasLayoutMode,
+} from "./workflowElkOptions";
 import {
   structuralWorkflowLayoutHash,
   type WorkflowLayoutHash,
@@ -118,7 +121,7 @@ export function useWorkflowAutoLayout(
     }
     const cache = cacheRef.current;
     if (cache && cache.hash.full === hash.full) {
-      setDisplay(mergeRuntimeFields(cache, graph));
+      setDisplay(mergeRuntimeFields(cache, graph, layoutMode));
       return;
     }
     const structuralChange = !cache || cache.hash.structure !== hash.structure;
@@ -126,7 +129,7 @@ export function useWorkflowAutoLayout(
       // Calibration budget already spent: accept the measured sizes as the
       // new fact without rerunning ELK, so the hash converges.
       cacheRef.current = { ...cache!, hash };
-      setDisplay(mergeRuntimeFields(cacheRef.current, graph));
+      setDisplay(mergeRuntimeFields(cacheRef.current, graph, layoutMode));
       return;
     }
 
@@ -147,7 +150,7 @@ export function useWorkflowAutoLayout(
         if (diagnostic) {
           setDegraded(diagnostic);
           if (cache) {
-            setDisplay(mergeRuntimeFields(cache, graph));
+            setDisplay(mergeRuntimeFields(cache, graph, layoutMode));
           }
           return;
         }
@@ -171,7 +174,7 @@ export function useWorkflowAutoLayout(
           edges: result.edges,
         };
         setDegraded(null);
-        setDisplay(mergeRuntimeFields(cacheRef.current, input));
+        setDisplay(mergeRuntimeFields(cacheRef.current, input, layoutMode));
       })
       .catch((error: unknown) => {
         if (cancelled || token !== tokenRef.current) {
@@ -179,7 +182,7 @@ export function useWorkflowAutoLayout(
         }
         setDegraded({ reason: error instanceof Error ? error.message : String(error) });
         if (cache) {
-          setDisplay(mergeRuntimeFields(cache, graph));
+          setDisplay(mergeRuntimeFields(cache, graph, layoutMode));
         }
       });
     return () => {
@@ -261,6 +264,7 @@ export function layoutDiagnostic(result: WorkflowLayoutResult): { reason: string
 export function mergeRuntimeFields(
   layout: { nodes: WorkflowLayoutNode[]; edges: WorkflowLayoutResult["edges"] },
   input: WorkflowLayoutInput,
+  layoutMode: WorkflowCanvasLayoutMode = "stage-columns",
 ): { nodes: WorkflowLayoutNode[]; edges: WorkflowLayoutResult["edges"] } {
   const nodeById = new Map(input.nodes.map((n) => [n.nodeId, n] as const));
   const edgeById = new Map(input.edges.map((e) => [e.edgeId, e] as const));
@@ -303,7 +307,10 @@ export function mergeRuntimeFields(
     }
     return {
       ...edge,
-      label: live.label,
+      label:
+        layoutMode === "serpentine" && !workflowEdgeKeepsNarrativeLabel(live)
+          ? ""
+          : live.label,
       pathState: live.pathState,
       labelAlwaysVisible: live.labelAlwaysVisible,
       sourceHandle: live.sourceHandle ?? edge.sourceHandle,

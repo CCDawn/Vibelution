@@ -27,6 +27,7 @@ export function WorkflowHumanGateNode(props: NodeProps) {
       selected={Boolean(props.selected)}
       isRuntimeCurrent={isCurrent}
       attempt={attempt}
+      primaryRoleKey={props.data.primaryRoleKey ? String(props.data.primaryRoleKey) : undefined}
       subtitle={layoutMode === "serpentine" ? description || (pending ? "需人工确认后才能继续" : "人工审查与冻结") : pending ? "需人工确认" : "人工门禁"}
       portSides={portSides}
       title={workflowNodeTooltip({

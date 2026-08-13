@@ -288,6 +288,7 @@ function WorkflowCanvasInner({
           semanticKind: edge.semanticKind,
           pathState: edge.pathState,
           labelAlwaysVisible: edge.labelAlwaysVisible,
+          gateKind: edge.gateKind,
           sections: edge.sections,
           labelBounds: edge.labelBounds,
         },

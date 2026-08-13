@@ -24,6 +24,7 @@ export function WorkflowSystemTaskNode(props: NodeProps) {
       selected={Boolean(props.selected)}
       isRuntimeCurrent={Boolean(props.data.isRuntimeCurrent)}
       attempt={attempt}
+      primaryRoleKey={props.data.primaryRoleKey ? String(props.data.primaryRoleKey) : undefined}
       subtitle={layoutMode === "serpentine" ? description || "受控系统执行" : "系统执行"}
       portSides={portSides}
       title={workflowNodeTooltip({ label, status, attempt })}
