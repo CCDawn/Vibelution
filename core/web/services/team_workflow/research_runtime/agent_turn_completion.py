@@ -182,7 +182,9 @@ def complete_agent_turn_outputs(
     timeout_ms: int = DEFAULT_AGENT_TURN_TIMEOUT_MS,
     poll_ms: int = 200,
 ) -> list[dict[str, str]]:
-    """Wait for turn terminal, reconcile SC stage writeback, collect store refs."""
+    """Wait for turn terminal, reconcile its task authority, collect store refs."""
+    from .task_adapter_registry import resolve_agent_task_adapter
+
     team_id = str(input_snapshot.get("teamId") or "").strip()
     if not team_id:
         raise RuntimeError("input snapshot has no teamId for agent turn completion")
@@ -199,7 +201,8 @@ def complete_agent_turn_outputs(
     )
 
     task_id = str(handle.task_id or "").strip()
-    if task_id:
+    adapter_spec = resolve_agent_task_adapter(action.node_id)
+    if task_id and adapter_spec is not None and adapter_spec.family == "source_collection":
         from core.web.services.team_workflow.source_collection.stage_writeback import (
             reconcile_source_collection_stage_session_task_after_turn,
         )
@@ -226,9 +229,64 @@ def complete_agent_turn_outputs(
                 task_id=task_id,
             )
 
-    return collect_required_artifact_refs(
+    refs = collect_required_artifact_refs(
         action.node_id,
         team_id=team_id,
         workflow_run_id=str(action.run_id or ""),
         source_collection_run_id=source_collection_run_id,
     )
+    if task_id and adapter_spec is not None and adapter_spec.family == "research_project":
+        _require_project_task_terminal(
+            team_id=team_id,
+            project_id=str(input_snapshot.get("projectId") or "").strip(),
+            task_id=task_id,
+        )
+    return refs
+
+
+def _require_project_task_terminal(
+    *, team_id: str, project_id: str, task_id: str
+) -> None:
+    """Close the canonical project task before the same Agent can take a successor."""
+    if not project_id:
+        raise RuntimeError("input snapshot has no projectId for project Agent task completion")
+    from core.web.services.team_workflow.research_project_agent_tasks import (
+        get_research_project_agent_task_status,
+    )
+
+    status = get_research_project_agent_task_status(team_id, project_id)
+    task = next(
+        (
+            item
+            for item in list(status.get("tasks") or [])
+            if isinstance(item, dict) and str(item.get("taskId") or "") == task_id
+        ),
+        None,
+    )
+    if task is None:
+        raise RuntimeError("completed project Agent task is missing from its authority")
+    task_status = str(task.get("status") or "").strip().lower()
+    if task_status in {"queued", "running"}:
+        raise TurnNotReadyError(
+            json.dumps(
+                {
+                    "code": "project_agent_task_not_reconciled",
+                    "taskId": task_id,
+                    "status": task_status,
+                },
+                ensure_ascii=False,
+            ),
+            snapshot=task,
+        )
+    if task_status != "completed":
+        raise RuntimeError(
+            json.dumps(
+                {
+                    "code": "project_agent_task_terminal_failed",
+                    "taskId": task_id,
+                    "status": task_status,
+                    "failureCode": task.get("failureCode"),
+                },
+                ensure_ascii=False,
+            )
+        )
