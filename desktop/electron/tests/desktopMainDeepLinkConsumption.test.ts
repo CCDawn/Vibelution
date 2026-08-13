@@ -38,4 +38,13 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain('intent.action === "focus_existing_shell"');
     expect(source).toContain("focusExistingDesktopShell()");
   });
+
+  it("opens the Launcher window on a bare first launch and does not quit when python is missing", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+
+    expect(source).toContain("await windowProvider.openLauncher()");
+    expect(source).toContain('else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot)');
+    expect(source).toContain("Launcher Service bootstrap skipped");
+    expect(source).not.toContain("VIBELUTION_PYTHON_PATH or PYTHON is required to bootstrap the Launcher Service");
+  });
 });

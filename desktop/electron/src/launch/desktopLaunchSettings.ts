@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DesktopCliArgs } from "../cli/desktopCli.js";
 
@@ -28,6 +28,7 @@ export type DesktopLaunchSettingsInput = {
   userDataRoot: string;
   resourcesRoot: string;
   readTextFile?: (path: string) => string | null;
+  fileExists?: (path: string) => boolean;
 };
 
 type LoadedLaunchProfile = {
@@ -44,16 +45,39 @@ export function resolveDesktopLaunchSettings(input: DesktopLaunchSettingsInput):
   const profileWorkspaceRoot = readProfileString(profile?.workspaceRoot);
   const profileConfigPath = readProfileString(profile?.operatorConfigPath) || readProfileString(profile?.configPath);
   const profilePythonPath = readProfileString(profile?.pythonPath);
+  const workspaceRoot = firstString(input.cliArgs.workspaceRoot, input.env.VIBELUTION_WORKSPACE_ROOT, profileWorkspaceRoot);
+  const fileExists = input.fileExists ?? existsSync;
 
   return {
     schemaVersion: 1,
-    workspaceRoot: firstString(input.cliArgs.workspaceRoot, input.env.VIBELUTION_WORKSPACE_ROOT, profileWorkspaceRoot),
+    workspaceRoot,
     configPath: firstString(input.cliArgs.configPath, input.env.VIBELUTION_CONFIG_PATH, profileConfigPath),
-    pythonPath: firstString(input.env.VIBELUTION_PYTHON_PATH, input.env.PYTHON, profilePythonPath),
+    pythonPath: firstString(
+      input.env.VIBELUTION_PYTHON_PATH,
+      input.env.PYTHON,
+      profilePythonPath,
+      resolveWorkspacePythonPath(workspaceRoot, fileExists)
+    ),
     profilePath: loadedProfile.path,
     profileError: loadedProfile.error,
     searchedProfilePaths
   };
+}
+
+export function resolveWorkspacePythonPath(
+  workspaceRoot: string,
+  fileExists: (path: string) => boolean = existsSync
+): string {
+  const root = readProfileString(workspaceRoot);
+  if (!root) {
+    return "";
+  }
+  const candidates = [
+    join(root, ".venv", "Scripts", "python.exe"),
+    join(root, ".venv", "Scripts", "pythonw.exe"),
+    join(root, ".venv", "bin", "python")
+  ];
+  return candidates.find((candidate) => fileExists(candidate)) ?? "";
 }
 
 export function applyDesktopLaunchSettingsToEnvironment(

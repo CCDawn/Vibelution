@@ -380,7 +380,8 @@ async function bootstrapLauncherIfEnabled(paths: DesktopPaths): Promise<Launcher
   }
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   if (!pythonPath) {
-    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to bootstrap the Launcher Service");
+    console.warn("Launcher Service bootstrap skipped: no VIBELUTION_PYTHON_PATH, PYTHON, or workspace .venv interpreter.");
+    return null;
   }
   electronStartupStage = "control_plane_attach";
   const stageStartedAtMs = performance.now();
@@ -1669,7 +1670,7 @@ app.whenReady()
     });
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.tray.ready",
-      message: "Lightweight tray started without opening the Launcher window.",
+      message: "Lightweight tray started.",
       fields: electronStartupFields({
         provider: "electron",
         stage: "tray_ready",
@@ -1689,6 +1690,8 @@ app.whenReady()
       electronStartupStage = "workbench_window_ready";
       markWorkbenchOpenRequested();
       await windowProvider.openOrFocusWorkbench();
+    } else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot) {
+      await windowProvider.openLauncher();
     }
     if (desktopCliArgs.workbenchCloseCanary) {
       await windowProvider.openOrFocusWorkbench();
