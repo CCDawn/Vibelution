@@ -127,6 +127,23 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
         assert restarted.pending_action.action_id == action_id_for(
             "run-restart", "source_extraction", 4
         )
+
+        restarted_again = harness.coordinator.restart_attempt(
+            GraphDispatch(
+                action_id="act-driver-retry-again",
+                run_id="run-restart",
+                node_run_id="nr-run-restart-source_extraction-a5",
+                node_id="source_extraction",
+                attempt=5,
+                dispatch_kind="start",
+                team_id="research-team",
+            )
+        )
+        assert restarted_again.pending_action is not None
+        assert restarted_again.pending_action.attempt == 5
+        assert restarted_again.pending_action.action_id == action_id_for(
+            "run-restart", "source_extraction", 5
+        )
     finally:
         harness.close()
 

@@ -414,41 +414,40 @@ class ChallengeCupGraphCoordinator:
         return self.resume_action(dispatch)
 
     def restart_attempt(self, dispatch: GraphDispatch) -> GraphDispatchResult:
-        """Retry/restart: acknowledge the old interrupt and re-enter the node
-        with a new attempt so the node interrupts with a fresh actionId."""
+        """Retry from the persisted checkpoint with one fresh interrupt.
+
+        A retry must not append another ``interrupt()`` position inside the
+        same LangGraph task.  Doing that works once, then the next restart
+        marker is consumed as the prior attempt's receipt.  Replaying the
+        explicit checkpoint with a state-only Command is LangGraph's
+        time-travel branch: cached task resumes/errors are discarded, the
+        already scheduled node runs once, and its sole interrupt is rebuilt
+        from the new attempt counter.
+        """
         graph, stack = self._compile()
         try:
             config = self._config(dispatch.run_id)
             state = graph.get_state(config)
-            failed_tasks = [task for task in state.tasks if task.error]
-            if failed_tasks:
-                interrupted_nodes = {
-                    str(item.value.get("nodeId") or "")
-                    for task in failed_tasks
-                    for item in task.interrupts
-                    if isinstance(item.value, Mapping)
-                }
-                if dispatch.node_id not in interrupted_nodes:
-                    raise RuntimeError(
-                        "failed checkpoint cannot be replayed for requested node: "
-                        f"expected {dispatch.node_id}, found {sorted(interrupted_nodes)}"
-                    )
-                # A failed LangGraph task retains task-scoped ``__resume__``
-                # pending writes.  Sending another resume directly makes the
-                # first interrupt consume that stale value again.  Replaying
-                # the exact checkpoint with ``None`` is LangGraph's supported
-                # time-travel path: it drops cached resume writes and re-emits
-                # the same side-effect-free interrupt on a clean descendant.
-                graph.invoke(None, state.config)
+            interrupted_nodes = {
+                str(item.value.get("nodeId") or "")
+                for task in state.tasks
+                for item in task.interrupts
+                if isinstance(item.value, Mapping)
+            }
+            if dispatch.node_id not in interrupted_nodes:
+                raise RuntimeError(
+                    "checkpoint cannot be replayed for requested node: "
+                    f"expected {dispatch.node_id}, found {sorted(interrupted_nodes)}"
+                )
             result = graph.invoke(
                 Command(
-                    resume={
-                        "restart": True,
-                        "attempt": dispatch.attempt,
-                        "nodeId": dispatch.node_id,
-                    }
+                    update={
+                        "active_node_id": dispatch.node_id,
+                        "active_attempt": dispatch.attempt,
+                        "node_attempts": {dispatch.node_id: dispatch.attempt},
+                    },
                 ),
-                config,
+                state.config,
             )
             return self._dispatch_result(dispatch, result, graph)
         finally:
