@@ -19,6 +19,8 @@ from .repository import (
     AgentConfigRevisionConflictError,
     ConversationRepository,
     ConversationUnitOfWork,
+    LAST_PREVIEW_MAX_CHARS,
+    parse_directory_cursor,
 )
 from .store import ConversationStore
 from .writer import (
@@ -41,7 +43,9 @@ __all__ = [
     "ConversationUnitOfWork",
     "ConversationWriter",
     "ConversationWriterClosedError",
+    "LAST_PREVIEW_MAX_CHARS",
     "LegacyAgentConfigImporter",
     "SqliteWalRuntimeAssessment",
     "assess_sqlite_wal_runtime",
+    "parse_directory_cursor",
 ]

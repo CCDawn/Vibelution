@@ -1,10 +1,10 @@
 """Schema contract for the Agent/session SQLite control plane.
 
-The package is intentionally isolated from the live chat path until the later
-cutover phases in the migration plan.  It holds Agent/config/session control
-metadata only; turn journal remains the durable transcript.  Every control
-write must go through the single writer coordinator; this module only owns
-deterministic schema declarations and migration checksums.
+The package holds Agent/config/session directory control metadata.
+Turn journal remains the durable transcript; no live repository API writes
+turns or turn_items.  Every control write must go through the single writer
+coordinator; this module only owns deterministic schema declarations and
+migration checksums.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -239,8 +239,52 @@ _SCHEMA_V2_STATEMENTS = (
     """,
 )
 
+# Version 3 is the live session directory control plane.  It does not import
+# historical transcripts; list/filter/pagination read these columns instead of
+# scanning chat_state.json or turn_journal.jsonl.
+_SCHEMA_V3_STATEMENTS = (
+    """
+    ALTER TABLE sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'main'
+    """,
+    """
+    ALTER TABLE sessions ADD COLUMN session_role TEXT NOT NULL DEFAULT ''
+    """,
+    """
+    ALTER TABLE sessions ADD COLUMN conversation_index_kind TEXT NOT NULL DEFAULT ''
+    """,
+    """
+    ALTER TABLE sessions ADD COLUMN conversation_index_visibility TEXT NOT NULL DEFAULT ''
+    """,
+    """
+    ALTER TABLE sessions ADD COLUMN hidden_from_index INTEGER NOT NULL DEFAULT 0
+      CHECK (hidden_from_index IN (0, 1))
+    """,
+    """
+    ALTER TABLE sessions ADD COLUMN team_id TEXT NOT NULL DEFAULT ''
+    """,
+    """
+    ALTER TABLE sessions ADD COLUMN last_preview TEXT NOT NULL DEFAULT ''
+    """,
+    """
+    ALTER TABLE sessions ADD COLUMN last_preview_at_ms INTEGER
+    """,
+    """
+    ALTER TABLE conversation_store_meta
+    ADD COLUMN legacy_sessions_discarded_at_ms INTEGER
+    """,
+    """
+    CREATE INDEX idx_sessions_directory_recency
+    ON sessions(archived_at_ms, hidden_from_index, recency_at_ms DESC, session_id DESC)
+    """,
+    """
+    CREATE INDEX idx_sessions_kind_recency
+    ON sessions(session_kind, archived_at_ms, recency_at_ms DESC, session_id DESC)
+    """,
+)
+
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, statements=_SCHEMA_V1_STATEMENTS),
     Migration(version=2, statements=_SCHEMA_V2_STATEMENTS),
+    Migration(version=3, statements=_SCHEMA_V3_STATEMENTS),
 )

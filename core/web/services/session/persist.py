@@ -500,6 +500,13 @@ def _persist_session_turn_result(
                 },
                 source="persist_session_turn_result",
             )
+            from . import directory_bridge
+
+            directory_bridge.touch_directory_session_safe(
+                session_id,
+                status="failed",
+                last_preview=str(turn_error.get("message") or ""),
+            )
             return
         assistant_text = (
             s.text_for(
@@ -869,6 +876,17 @@ def _persist_session_turn_result(
             },
             source="persist_session_turn_result",
         )
+    from . import directory_bridge
+
+    directory_bridge.touch_directory_session_safe(
+        session_id,
+        status=(
+            "failed"
+            if final_status in {"failed_provider", "failed_runtime", "failed"}
+            else "ready"
+        ),
+        last_preview=visible_assistant_text,
+    )
     s._reconcile_source_collection_stage_task_after_turn(
         source_collection_stage_task_metadata,
         session_id=session_id,
@@ -917,6 +935,13 @@ def _persist_session_turn_runtime_error(
         conversation["updated_at"] = timestamp
         payload["updated_at"] = timestamp
         s.save_chat_state(s.PROJECT_ROOT, payload)
+    from . import directory_bridge
+
+    directory_bridge.touch_directory_session_safe(
+        session_id,
+        status="failed",
+        last_preview=message,
+    )
     s._clear_session_live_output(session_id, turn_id=turn_id)
     s._persist_chat_turn_work_run(
         session_id=session_id,
@@ -1099,6 +1124,13 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 },
                 source="persist_session_turn_failure",
             )
+            from . import directory_bridge
+
+            directory_bridge.touch_directory_session_safe(
+                session_id,
+                status="failed",
+                last_preview=str(turn_error.get("message") or work_run_summary or ""),
+            )
             return
         turn_error = s._make_session_turn_error(
             raw_error,
@@ -1165,6 +1197,13 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             raw_error=raw_error,
             status="failed",
         )
+    from . import directory_bridge
+
+    directory_bridge.touch_directory_session_safe(
+        session_id,
+        status="failed",
+        last_preview=str(turn_error.get("message") or work_run_summary or ""),
+    )
     s._record_session_cycle_message(
         session_id,
         error_entry,

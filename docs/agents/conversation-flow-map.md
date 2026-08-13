@@ -51,7 +51,8 @@
 
 | 事实 | canonical source | 派生面 |
 | --- | --- | --- |
-| session 索引/状态壳 | `workspace/chat/chat_state.json`，通过 `session_service` 写入 | session list/detail summary、active phase、last error、active task。 |
+| session 目录/索引（创建、标题、归档、父子、recency、status、kind/visibility、有界 preview） | `workspace/chat/conversations.sqlite3`，通过 `ConversationStore` + `session/directory_runtime.py` | session list/`query_sessions`、taskSummary、lastActive。列表禁止扫描 `turn_journal.jsonl`。 |
+| session 热路径薄壳（submit/detail 仍读 conversation 行） | `workspace/chat/chat_state.json`，通过 `session_service` 双写 | running/error 壳、active session、submit 定位。不是目录 SSOT。 |
 | turn transcript/replay 事实 | `turn_journal.jsonl`，通过 `core/chat/turn_journal.py` | model-visible messages、`SessionDetail.messages`、native transcript/timeline 投影。 |
 | 运行中 assistant text/thought/tools | `SessionLiveOutputState` 和可选 live-output checkpoint | `assistant_delta` SSE、live overlay message、active-turn layer。 |
 | 最终 assistant 回复 | `turn_journal.jsonl` 里的 `assistant_item_committed` / final answer | 持久 `SessionDetail.messages.turnItems`；`content` 为兼容镜像；`codexTranscript` 由 items 单向派生。 |

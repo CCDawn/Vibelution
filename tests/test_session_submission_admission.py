@@ -129,7 +129,7 @@ def test_repository_has_no_transcript_write_or_read_facade(tmp_path: Path):
         store.close()
 
 
-def test_v1_store_upgrades_to_control_plane_v2_without_creating_transcript_rows(
+def test_v1_store_upgrades_to_directory_control_plane_without_creating_transcript_rows(
     tmp_path: Path,
 ):
     database_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
@@ -150,8 +150,8 @@ def test_v1_store_upgrades_to_control_plane_v2_without_creating_transcript_rows(
 
     store = ConversationStore(database_path)
     try:
-        assert store.open()["schemaVersion"] == 2
-        assert store.database.metadata()["schemaVersion"] == 2
+        assert store.open()["schemaVersion"] == 3
+        assert store.database.metadata()["schemaVersion"] == 3
         with sqlite3.connect(database_path) as connection:
             tables = {
                 row[0]
@@ -164,6 +164,11 @@ def test_v1_store_upgrades_to_control_plane_v2_without_creating_transcript_rows(
                 "session_admissions",
                 "session_projection_offsets",
             }.issubset(tables)
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(sessions)")
+            }
+            assert {"last_preview", "session_kind", "hidden_from_index"}.issubset(columns)
             assert connection.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 0
             assert connection.execute("SELECT COUNT(*) FROM turn_items").fetchone()[0] == 0
     finally:

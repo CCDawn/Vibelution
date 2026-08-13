@@ -34,6 +34,10 @@ def list_sessions(
     s = _service()
 
     started_at = s._perf_counter()
+    from . import directory_bridge, directory_runtime
+
+    if directory_runtime.wait_for_directory_startup() == "starting":
+        return []
     s._sync_agent_directory_project_root()
     signature = (s._session_list_source_signature(), bool(include_hidden_internal))
     if repair_collisions and s._repair_agent_direct_session_collisions(source_signature=signature):
@@ -58,6 +62,33 @@ def list_sessions(
         return sessions
     if not should_build:
         return []
+
+    directory_sessions = None
+    try:
+        directory_sessions = directory_bridge.list_session_summaries(
+            include_hidden=include_hidden_internal,
+        )
+    except Exception:
+        directory_sessions = None
+    if directory_sessions is not None:
+        s._finish_session_list_cache_build(
+            signature=signature,
+            sessions=directory_sessions,
+            started_at=started_at,
+            conversation_count=len(directory_sessions),
+            agent_count=0,
+        )
+        s._record_session_list_loaded_event(
+            session_count=len(directory_sessions),
+            conversation_count=len(directory_sessions),
+            agent_count=0,
+            elapsed_ms=s._elapsed_ms(started_at),
+            cache_hit=False,
+            cache_age_ms=0,
+            cache_ttl_ms=int(round(s._SESSION_LIST_CACHE_TTL_SECONDS * 1000)),
+            waited_for_inflight=waited_for_inflight,
+        )
+        return directory_sessions
 
     try:
         agent_directory_started_at = s._perf_counter()

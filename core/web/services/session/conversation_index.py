@@ -881,6 +881,44 @@ def query_sessions(
 
     catalog_status = "disabled"
     catalog_error_type = ""
+    from . import directory_bridge
+
+    directory_payload = None
+    try:
+        directory_payload = directory_bridge.query_session_summaries(
+            limit=normalized_limit,
+            cursor=str(cursor or ""),
+            q=str(q or "").strip(),
+            agent_id=normalized_agent_id,
+            session_kind=normalized_session_kind,
+            state=normalized_state,
+            sort=normalized_sort,
+        )
+    except Exception:
+        directory_payload = None
+    if directory_payload is not None:
+        page_items = list(directory_payload.get("items") or [])
+        total = max(0, int(directory_payload.get("totalEstimate") or 0))
+        payload = {
+            "items": page_items,
+            "nextCursor": str(directory_payload.get("nextCursor") or ""),
+            "totalEstimate": total,
+            "filters": filter_payload(0),
+        }
+        s._record_session_list_query_event(
+            result_count=len(page_items),
+            matched_count=total,
+            total_count=total,
+            limit=normalized_limit,
+            cursor=0,
+            elapsed_ms=s._elapsed_ms(started_at),
+            has_query=bool(normalized_query),
+            has_agent_filter=bool(normalized_agent_id),
+            has_kind_filter=bool(normalized_session_kind),
+            has_state_filter=bool(normalized_state),
+            sort=normalized_sort,
+        )
+        return payload
     if catalog_mode == "read_preferred" and not agent_direct_hidden_from_index:
         candidate_payload: dict[str, Any] | None = None
         try:
@@ -1085,6 +1123,9 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
             payload["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
             s.save_chat_state(s.PROJECT_ROOT, payload)
         selected_conversation = dict(conversation)
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_record(selected_conversation)
     s._invalidate_session_list_cache()
     if lightweight:
         normalized = s._normalize_conversation(selected_conversation) or selected_conversation
@@ -1248,6 +1289,9 @@ def create_chat_session(
         payload["conversations"] = conversations
         s.save_chat_state(s.PROJECT_ROOT, payload)
         created_conversation = dict(conversation)
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_record(created_conversation)
     s._invalidate_session_list_cache()
 
     # Prompt snapshot warm must not block create latency.
@@ -1370,6 +1414,9 @@ def ensure_agent_direct_session(
         payload["updated_at"] = now
         payload["conversations"] = conversations
         s.save_chat_state(s.PROJECT_ROOT, payload)
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_record(conversation)
     s._invalidate_session_list_cache()
     return s.get_session_detail(session_id) or {}
 
@@ -1477,6 +1524,7 @@ def _repair_agent_direct_session_collisions(
         now = s._now_timestamp()
         repaired: list[dict[str, str]] = []
         preserved_session_ids: set[str] = set()
+        synced_rows: list[dict[str, Any]] = []
         for session_id, colliding_agents in sorted(duplicate_groups.items()):
             owner = s._select_direct_session_collision_owner(
                 session_id,
@@ -1515,6 +1563,7 @@ def _repair_agent_direct_session_collisions(
                         "replacementSessionId": replacement_session_id,
                     }
                 )
+                synced_rows.append(dict(conversation))
         if not repaired:
             return False
         payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
@@ -1524,6 +1573,10 @@ def _repair_agent_direct_session_collisions(
         state["agents"] = raw_agents
         s.agent_directory_service.save_state(state)
         s.save_chat_state(s.PROJECT_ROOT, payload)
+        collision_snapshots = list(synced_rows)
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_records(collision_snapshots)
     s._invalidate_session_list_cache()
     with s._DIRECT_SESSION_COLLISION_REPAIR_LOCK:
         s._DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = s._session_list_source_signature()
@@ -1652,7 +1705,16 @@ def _ensure_agent_directory_conversation_materialized(
         )
         if changed:
             s.save_chat_state(s.PROJECT_ROOT, payload)
-        return changed
+            materialized = s._find_conversation_entry(payload, normalized_session_id)
+            snapshot = dict(materialized) if isinstance(materialized, dict) else None
+        else:
+            snapshot = None
+    if snapshot is not None:
+        from . import directory_bridge
+
+        directory_bridge.sync_conversation_record(snapshot)
+        s._invalidate_session_list_cache()
+    return changed
 
 
 def _ensure_session_conversation_record(
@@ -1676,17 +1738,23 @@ def _ensure_session_conversation_record(
     )
     with s._CHAT_STATE_LOCK:
         payload = s.load_chat_state(s.PROJECT_ROOT)
-        if s._find_conversation_entry(payload, normalized_session_id) is not None:
-            return True
-        recovered = s._recover_missing_conversation_from_workspace_locked(
-            payload,
-            normalized_session_id,
-            source=source,
-        )
-        if recovered:
-            s.save_chat_state(s.PROJECT_ROOT, payload)
-            s._invalidate_session_list_cache()
-        return recovered
+        entry = s._find_conversation_entry(payload, normalized_session_id)
+        if entry is None:
+            recovered = s._recover_missing_conversation_from_workspace_locked(
+                payload,
+                normalized_session_id,
+                source=source,
+            )
+            if recovered:
+                s.save_chat_state(s.PROJECT_ROOT, payload)
+                s._invalidate_session_list_cache()
+                entry = s._find_conversation_entry(payload, normalized_session_id)
+        snapshot = dict(entry) if isinstance(entry, dict) else None
+    if snapshot is not None:
+        from . import directory_bridge
+
+        directory_bridge.sync_conversation_record(snapshot)
+    return snapshot is not None
 
 
 SESSION_DELETED_MARKER_NAME = ".session_deleted"

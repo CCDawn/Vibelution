@@ -512,6 +512,14 @@ def submit_session_message(
             updated_at=user_entry["timestamp"],
         )
         submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(lock_acquired_at)
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_record(
+        conversation,
+        last_preview=message,
+        status="running",
+        wait=False,
+    )
     stage_started_at = s._perf_counter()
     journal_receipt = _append_initial_session_journal_markers(
         session_id=conversation_id,

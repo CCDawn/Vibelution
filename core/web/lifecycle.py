@@ -28,11 +28,29 @@ def initialize_session_catalog_on_startup() -> object:
     )
 
 
+def initialize_session_directory_on_startup() -> object:
+    """Open the live session directory store and discard unmigrated JSON sessions."""
+
+    from .services.session.directory_runtime import (
+        SessionDirectoryRuntimeStatus,
+        initialize_session_directory_runtime,
+        should_skip_directory_runtime_for_pytest,
+    )
+
+    if should_skip_directory_runtime_for_pytest():
+        return SessionDirectoryRuntimeStatus(status="skipped_pytest")
+    return initialize_session_directory_runtime(
+        project_root=Path(__file__).resolve().parents[2],
+    )
+
+
 def shutdown_session_catalog_on_shutdown() -> None:
     """Cancel opt-in catalog-only work before web shutdown completes."""
 
     from .services.session.catalog_runtime import shutdown_session_catalog_runtime
+    from .services.session.directory_runtime import shutdown_session_directory_runtime
 
+    shutdown_session_directory_runtime()
     shutdown_session_catalog_runtime()
 
 
@@ -117,6 +135,16 @@ async def web_workbench_lifespan(app: FastAPI | None):
         asyncio.to_thread(reconcile_cli_agent_terminal_states_on_startup, reason="backend_startup")
     )
     startup_cache_prewarm_task = asyncio.create_task(prewarm_ui_caches_on_startup())
+    from .services.session.directory_runtime import (
+        begin_directory_startup,
+        should_skip_directory_runtime_for_pytest,
+    )
+
+    if not should_skip_directory_runtime_for_pytest():
+        begin_directory_startup()
+    startup_directory_task = asyncio.create_task(
+        asyncio.to_thread(initialize_session_directory_on_startup)
+    )
     startup_catalog_task = asyncio.create_task(
         asyncio.to_thread(initialize_session_catalog_on_startup)
     )
@@ -154,6 +182,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
     )
     startup_cache_prewarm_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="UI cache prewarm failed during startup.")
+    )
+    startup_directory_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Session directory store startup failed."
+        )
     )
     startup_catalog_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Session catalog startup failed.")
@@ -196,6 +229,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                         *(["web_routes_bootstrap"] if startup_routes_task is not None else []),
                         "cli_terminal_reconcile",
                         "ui_cache_prewarm",
+                        "session_directory",
                         "session_catalog",
                         "agent_inbox_recovery",
                         "external_agent_task_reconcile",
@@ -212,6 +246,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             startup_routes_task,
             startup_cli_reconcile_task,
             startup_cache_prewarm_task,
+            startup_directory_task,
             startup_catalog_task,
             startup_agent_inbox_recovery_task,
             startup_external_agent_reconcile_task,
