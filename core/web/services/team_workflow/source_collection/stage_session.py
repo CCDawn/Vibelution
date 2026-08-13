@@ -603,7 +603,7 @@ def start_source_collection_stage_session_task(
             created_from_task_id=task_id,
             formal_retry=formal_retry,
             previous_task=previous_stage_task,
-            recover_missing_session=previous_stage_task is None,
+            recover_missing_session=True,
         )
     except s.ResearchProjectAgentSessionError as exc:
         raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
