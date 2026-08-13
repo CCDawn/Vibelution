@@ -60,7 +60,8 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).toContain('ariaLabel={copy.taskList}');
     expect(routeSource).toContain('ariaLabel={copy.detail}');
     expect(styles.taskRowClass).toContain("w-full");
-    expect(styles.taskRowSelectedClass).toContain("border-");
+    expect(styles.taskRowSelectedClass).not.toContain("border-");
+    expect(styles.taskRowSelectedClass).toContain("shadow-[var(--vui-shadow-inset-accent)]");
   });
 
   it("is wired as a read-only kernel route", () => {
@@ -96,19 +97,19 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).toContain("title={status ? copy.noMatchingTasks : copy.noTasks}");
   });
 
-  it("keeps the route root background-aware", () => {
-    expect(styles.routeClass).not.toContain("bg-[var(--surface-page)]");
+  it("covers decorative workbench backgrounds with a stable Kernel surface", () => {
+    expect(styles.routeClass).toContain("!bg-vui-surface-panel");
     expect(styles.routeClass).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(styles.routeClass).toContain("min-w-0");
     expect(styles.routeClass).toContain("max-w-full");
     expect(styles.routeClass).toContain("overflow-x-hidden");
-    expectBackgroundAware(styles.headerClass);
-    expect(styles.headerClass).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(styles.headerClass).toContain("!border-0");
+    expect(styles.headerClass).toContain("!bg-transparent");
+    expect(styles.headerClass).toContain("!shadow-none");
   });
 
-  it("keeps repeated Kernel panels as light background-aware surfaces", () => {
+  it("keeps repeated Kernel rows light while major surfaces stay borderless", () => {
     [
-      styles.paneClass,
       styles.detailHeaderClass,
       styles.deliveryRowClass,
       styles.lifecycleSectionClass,
@@ -118,18 +119,18 @@ describe("KernelTaskCenterRoute layout contract", () => {
 
     [
       styles.paneClass,
-      styles.detailHeaderClass,
-      styles.lifecycleSectionClass,
+      styles.taskRowClass,
+      styles.emptyStateClass,
     ].forEach((className) => {
-      expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-      expect(className).not.toContain("bg-[var(--surface-panel)]");
-      expect(className).not.toContain("bg-[var(--surface-card)]");
+      expect(className).toContain("border-0");
     });
+    expect(styles.panelHeaderClass).not.toContain("border-b");
+    expect(styles.lifecycleSectionClass).not.toContain("border border-");
   });
 
-  it("keeps the Kernel ledger as a flat bordered structure", () => {
+  it("keeps the Kernel ledger flat without divider borders", () => {
     expect(styles.ledgerSectionClass).toContain("grid");
-    expect(styles.ledgerSectionClass).toContain("border-t");
+    expect(styles.ledgerSectionClass).not.toContain("border-t");
     expect(styles.ledgerSectionClass).toContain("pt-2");
     expect(styles.ledgerSectionClass).not.toContain("bg-");
     expect(styles.ledgerSectionClass).not.toContain("[background:");
@@ -143,6 +144,15 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.ledgerBucketClass).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.ledgerBucketClass).not.toContain("cardSurface");
     expect(styles.ledgerBucketClass).not.toContain("shadow-");
+  });
+
+  it("uses one stable borderless layout while initial task data is pending", () => {
+    expect(routeSource).toContain("const initialTaskLoad = taskQuery.isLoading && !taskQuery.data");
+    expect(routeSource).toContain('variant="list"');
+    expect(routeSource).toContain('variant="detail"');
+    expect(routeSource).toContain("actions={initialTaskLoad ? undefined");
+    expect(routeSource).toContain('{initialTaskLoad ? null : <strong className={styles.panelCountClass}>{tasks.length}</strong>}');
+    expect(styles.loadingRegionClass).toContain("!border-0");
   });
 
   it("keeps Kernel panel surface tokens centralized in route-local constants", () => {

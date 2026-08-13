@@ -4,12 +4,20 @@ export type DesktopActionName =
   | "open_workbench"
   | "focus_workbench"
   | "close_workbench"
+  | "open_instance_workbench"
+  | "close_instance_workbench"
   | "restart_after_apply"
   | "resume_self_evolution"
   | "recover_after_crash"
   | "request_app_exit";
 
-export type DesktopWindowOperation = "open_or_focus_workbench" | "focus_workbench" | "close_workbench" | "none";
+export type DesktopWindowOperation =
+  | "open_or_focus_workbench"
+  | "focus_workbench"
+  | "close_workbench"
+  | "open_or_focus_instance_workbench"
+  | "close_instance_workbench"
+  | "none";
 
 export type DesktopAction = {
   actionId: string;
@@ -37,6 +45,8 @@ export type DesktopWindowOperations = {
   openOrFocusWorkbench(payload?: Record<string, unknown>): Promise<unknown>;
   focusWorkbench(): Promise<unknown>;
   closeWorkbench(payload: Record<string, unknown>): Promise<unknown>;
+  openOrFocusInstanceWorkbench(payload: Record<string, unknown>): Promise<unknown>;
+  closeInstanceWorkbench(payload: Record<string, unknown>): Promise<unknown>;
 };
 
 type DesktopActionEndpointTemplates = {
@@ -54,6 +64,12 @@ export function desktopWindowOperationForAction(action: string): DesktopWindowOp
   }
   if (action === "close_workbench") {
     return "close_workbench";
+  }
+  if (action === "open_instance_workbench") {
+    return "open_or_focus_instance_workbench";
+  }
+  if (action === "close_instance_workbench") {
+    return "close_instance_workbench";
   }
   return "none";
 }
@@ -236,5 +252,11 @@ function executeDesktopWindowOperation(
   if (operation === "focus_workbench") {
     return operations.focusWorkbench();
   }
-  return operations.closeWorkbench(payload);
+  if (operation === "close_workbench") {
+    return operations.closeWorkbench(payload);
+  }
+  if (operation === "open_or_focus_instance_workbench") {
+    return operations.openOrFocusInstanceWorkbench(payload);
+  }
+  return operations.closeInstanceWorkbench(payload);
 }

@@ -969,6 +969,7 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
             active_snapshot,
             team_id=normalized_team_id,
             run_id=normalized_run_id,
+            data_run_exists=selected_run is not None,
         )
         if isinstance(active_snapshot, dict)
         else {}

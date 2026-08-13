@@ -1296,11 +1296,15 @@ def claim_desktop_action(
 
 
 def ack_desktop_action(action_id: str, desktop_session_id: str, result: dict[str, Any]) -> dict[str, Any]:
-    return lifecycle_intent_store.ack_desktop_action(
+    finished = lifecycle_intent_store.ack_desktop_action(
         action_id,
         desktop_session_id=desktop_session_id,
         result=result,
     )
+    from core.launcher.isolated_workbench_window import persist_instance_window_from_desktop_action
+
+    persist_instance_window_from_desktop_action(finished)
+    return finished
 
 
 def fail_desktop_action(action_id: str, desktop_session_id: str, result: dict[str, Any]) -> dict[str, Any]:
