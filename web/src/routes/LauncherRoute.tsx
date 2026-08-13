@@ -57,6 +57,7 @@ import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
 /** T4: secondary launcher panels load as route packs — keep lifecycle shell first. */
 import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
+import { resolveProcessMonitorTarget } from "./LauncherProcessMonitor.binding";
 import { LauncherProcessMonitorPanel, type LauncherProcessRow } from "./LauncherProcessMonitorPanel";
 
 const LauncherStartupSettingsPanel = lazy(() =>
@@ -1528,12 +1529,20 @@ export function LauncherRoute() {
     refetchInterval: pageVisible ? 20_000 : false,
   });
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
+  const [lastStartedInstanceId, setLastStartedInstanceId] = useState("");
+  const [explicitInstanceSelect, setExplicitInstanceSelect] = useState(false);
   const branchItems = branchInstancesQuery.data?.items ?? [];
   const currentInstanceId = branchInstancesQuery.data?.currentId || "main";
   const selectedBranchId = branchItems.some((item) => item.id === selectedInstanceId)
     ? selectedInstanceId
     : currentInstanceId;
   const selectedBranch = branchItems.find((item) => item.id === selectedBranchId);
+  const monitorBranch = resolveProcessMonitorTarget(branchItems, {
+    selectedId: selectedBranchId,
+    currentId: currentInstanceId,
+    lastStartedId: lastStartedInstanceId,
+    explicitSelect: explicitInstanceSelect,
+  });
   const selectedIsCurrent = !selectedBranch || selectedBranch.current;
   const selectedStartable = Boolean(
     selectedBranch
@@ -1596,6 +1605,12 @@ export function LauncherRoute() {
         text: launcherControlNoticeMessage(response, operation, uiLang, copy.commandDone),
         source: "lifecycle-control",
       });
+      const startedId = String(response.instanceId || selectedBranch?.id || currentInstanceId || "").trim();
+      if (response.accepted && (operation === "start" || operation === "restart") && startedId) {
+        setLastStartedInstanceId(startedId);
+        setSelectedInstanceId(startedId);
+        setExplicitInstanceSelect(false);
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherBranchInstances() });
@@ -2127,12 +2142,12 @@ export function LauncherRoute() {
   }, [bundle, componentRows, copy, evidence?.state.updatedAt, lang, launcherStatusDisconnected, locale, residualItems, startupSettings, status, uiLang]);
 
   const keyStatusRows = statusRows;
-  const inspectSelectedInstance = Boolean(selectedBranch && !selectedBranch.current);
+  const inspectSelectedInstance = Boolean(monitorBranch && !monitorBranch.current);
   const selectedProcessRows = inspectSelectedInstance
-    ? observationProcessRows(selectedBranch, copy, uiLang)
+    ? observationProcessRows(monitorBranch, copy, uiLang)
     : keyStatusRows;
   const selectedProcessHint = inspectSelectedInstance
-    ? `${copy.selectedInstance}: ${selectedBranch?.branch || selectedBranchId}`
+    ? `${copy.selectedInstance}: ${monitorBranch?.shortName || monitorBranch?.branch || monitorBranch?.id}`
     : copy.processMonitorHint;
   const selectedResidualCount = inspectSelectedInstance ? 0 : residualCount;
   const diagnosticStatusRows = statusRows.filter((row) => row.id === "runtime_manager");
@@ -2390,7 +2405,10 @@ export function LauncherRoute() {
         copy={copy}
         items={branchItems}
         selectedId={selectedBranchId}
-        onSelect={setSelectedInstanceId}
+        onSelect={(id) => {
+          setSelectedInstanceId(id);
+          setExplicitInstanceSelect(true);
+        }}
       />
       <LauncherProcessMonitorPanel
         copy={{

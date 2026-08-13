@@ -112,6 +112,15 @@ export function LauncherBranchInstancesPanel({
       setPage(paged.page);
     }
   }, [page, paged.page]);
+  useEffect(() => {
+    const index = items.findIndex((item) => item.id === selectedId);
+    if (index < 0) {
+      return;
+    }
+    const nextPage = Math.floor(index / BRANCH_INSTANCE_PAGE_SIZE) + 1;
+    setPage((current) => (current === nextPage ? current : nextPage));
+    // Jump only when the bound row changes, not on every list refresh.
+  }, [selectedId, items.length]);
 
   const knownIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
   const visibleSelected = selectedIds.filter((id) => knownIds.has(id) && items.some((item) => item.id === id && isCleanupEligible(item)));
