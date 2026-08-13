@@ -1436,7 +1436,7 @@ export function ChatCodingRoute() {
 
   // C: idle-prefetch a few neighbor session detail windows (Cursor list warm pattern).
   useEffect(() => {
-    if (groupPanelActive || !sessionsQuery.data?.length) {
+    if (groupPanelActive || !secondaryChatDataEnabled || !pageVisible || !sessionsQuery.data?.length) {
       return;
     }
     const neighborIds = resolveNeighborSessionIdsForPrefetch({
@@ -1447,20 +1447,24 @@ export function ChatCodingRoute() {
       return;
     }
     let cancelled = false;
-    const run = () => {
-      if (cancelled) {
-        return;
-      }
+    const run = async () => {
       for (const sessionId of neighborIds) {
-        void prefetchSessionDetailWindow(queryClient, sessionId);
+        if (cancelled) {
+          return;
+        }
+        try {
+          await prefetchSessionDetailWindow(queryClient, sessionId);
+        } catch {
+          return;
+        }
       }
     };
     const idleRequest = (window as Window & {
       requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
     }).requestIdleCallback;
     const handle = typeof idleRequest === "function"
-      ? idleRequest(run, { timeout: 1_500 })
-      : window.setTimeout(run, 280);
+      ? idleRequest(() => void run(), { timeout: 1_500 })
+      : window.setTimeout(() => void run(), 280);
     return () => {
       cancelled = true;
       if (typeof idleRequest === "function") {
@@ -1469,7 +1473,7 @@ export function ChatCodingRoute() {
         window.clearTimeout(handle as number);
       }
     };
-  }, [activeSessionId, groupPanelActive, queryClient, sessionsQuery.data]);
+  }, [activeSessionId, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]);
 
   useEffect(() => {
     if (!activeGroupRoom) {
