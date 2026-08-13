@@ -47,6 +47,7 @@ export type ElectronWindowFactory = (url: string, paths: DesktopPaths) => Electr
 export type ElectronWindowProviderOptions = {
   createLauncherWindow?: ElectronWindowFactory;
   createWorkbenchWindow?: ElectronWindowFactory;
+  listLauncherWindows?: (launcherOrigin: string) => ElectronWindowLike[];
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
   shouldInterceptLauncherClose?: () => boolean;
   shouldInterceptWorkbenchClose?: () => boolean;
@@ -108,6 +109,9 @@ export class ElectronWindowProvider {
   private workbenchNavigation: Promise<ManagedWindowState> | null = null;
   private workbenchCloseAuthorized = false;
   private workbenchCloseInFlight = false;
+  private launcherOpen: Promise<ManagedWindowState> | null = null;
+  private readonly attachedWindows = new Set<ElectronWindowLike>();
+  private readonly listLauncherWindows: (launcherOrigin: string) => ElectronWindowLike[];
   private readonly hungCloseDestroyAfterMs: number;
 
   constructor(
@@ -119,6 +123,7 @@ export class ElectronWindowProvider {
     this.workbenchUrl = workbenchUrl;
     this.createLauncherWindow = options.createLauncherWindow ?? missingWindowFactory("launcher");
     this.createWorkbenchWindow = options.createWorkbenchWindow ?? missingWindowFactory("workbench");
+    this.listLauncherWindows = options.listLauncherWindows ?? (() => []);
     this.reportState = options.reportState ?? (() => undefined);
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
     this.shouldInterceptWorkbenchClose = options.shouldInterceptWorkbenchClose ?? (() => false);
@@ -133,14 +138,54 @@ export class ElectronWindowProvider {
   }
 
   async openLauncher(): Promise<ManagedWindowState> {
+    if (this.launcherOpen) {
+      return this.launcherOpen;
+    }
+    const pending = this.presentLauncher();
+    this.launcherOpen = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.launcherOpen === pending) {
+        this.launcherOpen = null;
+      }
+    }
+  }
+
+  private async presentLauncher(): Promise<ManagedWindowState> {
     const launcherOrigin = new URL(this.launcherUrl).origin;
     const safeUrl = assertLocalHttpUrl(this.launcherUrl, launcherOrigin);
-    if (!this.launcherWindow || this.launcherWindow.isDestroyed()) {
-      this.launcherWindow = this.createLauncherWindow(safeUrl, this.paths);
-      this.attachWindowEvents("launcher", this.launcherWindow);
+    const existing = this.listLauncherWindows(launcherOrigin).filter((window) => !window.isDestroyed());
+    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
+      this.discardExtraLauncherWindows(existing, this.launcherWindow);
+      presentElectronWindow(this.launcherWindow);
+      return this.reportAndReturn(this.stateFor("launcher"));
     }
+    const adopted = existing[0] ?? null;
+    if (adopted) {
+      this.launcherWindow = adopted;
+      this.attachWindowEvents("launcher", adopted);
+      this.discardExtraLauncherWindows(existing, adopted);
+      presentElectronWindow(adopted);
+      return this.reportAndReturn(this.stateFor("launcher"));
+    }
+    this.launcherWindow = this.createLauncherWindow(safeUrl, this.paths);
+    this.attachWindowEvents("launcher", this.launcherWindow);
     presentElectronWindow(this.launcherWindow);
     return this.reportAndReturn(this.stateFor("launcher"));
+  }
+
+  private discardExtraLauncherWindows(windows: ElectronWindowLike[], keep: ElectronWindowLike): void {
+    for (const window of windows) {
+      if (window === keep || window === this.workbenchWindow || window.isDestroyed()) {
+        continue;
+      }
+      try {
+        window.destroy();
+      } catch {
+        // An extra Launcher window is disposable; keep presenting the owned one.
+      }
+    }
   }
 
   async openOrFocusWorkbench(workbenchUrl = this.workbenchUrl): Promise<ManagedWindowState> {
@@ -252,6 +297,10 @@ export class ElectronWindowProvider {
   }
 
   private attachWindowEvents(role: ElectronWindowRole, window: ElectronWindowLike): void {
+    if (this.attachedWindows.has(window)) {
+      return;
+    }
+    this.attachedWindows.add(window);
     if (role === "launcher") {
       this.interceptLauncherWindowOpenRequests(window);
       window.on("close", (event) => {
@@ -273,6 +322,7 @@ export class ElectronWindowProvider {
       });
     }
     window.on("closed", () => {
+      this.attachedWindows.delete(window);
       if (role === "launcher" && this.launcherWindow === window) {
         this.launcherWindow = null;
       }
