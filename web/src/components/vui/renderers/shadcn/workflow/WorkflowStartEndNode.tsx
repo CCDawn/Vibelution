@@ -16,6 +16,8 @@ export function WorkflowStartEndNode(props: NodeProps) {
   const portSides = props.data.portSides as
     | { source: Record<string, WorkflowPortSide>; target: Record<string, WorkflowPortSide> }
     | undefined;
+  const layoutMode = props.data.layoutMode === "serpentine" ? "serpentine" : "stage-columns";
+  const description = props.data.description ? String(props.data.description) : "";
   return (
     <WorkflowNodeChrome
       label={label}
@@ -23,7 +25,8 @@ export function WorkflowStartEndNode(props: NodeProps) {
       status={status}
       selected={Boolean(props.selected)}
       isRuntimeCurrent={Boolean(props.data.isRuntimeCurrent)}
-      subtitle={visualKind === "start" ? "起点" : "终点"}
+      primaryRoleKey={props.data.primaryRoleKey ? String(props.data.primaryRoleKey) : undefined}
+      subtitle={layoutMode === "serpentine" ? description || (visualKind === "start" ? "研究流程起点" : "形成可提交结果包") : visualKind === "start" ? "起点" : "终点"}
       showTargetHandle={visualKind !== "start"}
       showSourceHandle={visualKind !== "end"}
       portSides={portSides}
@@ -33,6 +36,7 @@ export function WorkflowStartEndNode(props: NodeProps) {
           ? "border-[color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))]"
           : ""
       }
+      layoutMode={layoutMode}
     />
   );
 }
