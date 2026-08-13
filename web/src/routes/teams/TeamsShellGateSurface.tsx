@@ -1,5 +1,5 @@
 /**
- * Teams shell gate surfaces: initial load / no teams / detail unavailable.
+ * Teams shell terminal gate surfaces: no teams / detail unavailable.
  * Keeps TeamsRoute early-return chrome out of the main workbench path.
  */
 import { RefreshCw } from "lucide-react";
@@ -7,7 +7,6 @@ import { RefreshCw } from "lucide-react";
 import {
   VButton,
   VDenseOpsPage,
-  VLoadingValue,
   VStateSurface,
 } from "../../components/vui";
 
@@ -16,11 +15,7 @@ export type TeamsShellGateSurfaceProps = {
   styles: Record<string, string>;
   ariaLabel: string;
   meta: string;
-  mode: "initial-loading" | "unavailable" | "detail-unavailable";
-  // initial loading
-  initialTitle?: string;
-  initialMessage?: string;
-  listMetricLoadingLabel?: string;
+  mode: "unavailable" | "detail-unavailable";
   // list unavailable
   unavailableTitle?: string;
   unavailableMessage?: string;
@@ -64,32 +59,7 @@ export function TeamsShellGateSurface(props: TeamsShellGateSurfaceProps) {
       meta={meta}
       actions={null}
     >
-      {mode === "initial-loading" ? (
-        <main className={styles.teamUnavailableSurface} aria-label={props.initialTitle}>
-          <VStateSurface
-            className={styles.teamUnavailableCard}
-            fill
-            title={props.initialTitle}
-            tone="loading"
-            skeletonLines={3}
-            facts={[
-              {
-                key: "teams",
-                label: lang === "zh" ? "团队" : "Teams",
-                value: <VLoadingValue label={props.listMetricLoadingLabel || ""} />,
-              },
-              {
-                key: "members",
-                label: lang === "zh" ? "成员" : "Members",
-                value: <VLoadingValue label={props.listMetricLoadingLabel || ""} />,
-              },
-              { key: "source", label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
-            ]}
-          >
-            {props.initialMessage}
-          </VStateSurface>
-        </main>
-      ) : mode === "unavailable" ? (
+      {mode === "unavailable" ? (
         <main className={styles.teamUnavailableSurface} aria-label={props.unavailableTitle}>
           <VStateSurface
             className={styles.teamUnavailableCard}
