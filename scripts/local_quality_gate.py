@@ -524,7 +524,19 @@ def manifest_payload(
 
 
 def write_manifest(root: Path, task_id: str, payload: dict[str, object]) -> Path:
-    directory = resolve_project_cache_home(root) / "quality_gates"
+    cache_home = resolve_project_cache_home(root).resolve()
+    try:
+        cache_home.relative_to(root.resolve())
+    except ValueError:
+        manifest_home = cache_home
+    else:
+        completed = run_process(["git", "rev-parse", "--git-common-dir"], root)
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr.strip() or "unable to resolve Git common dir")
+        raw_common_dir = Path(completed.stdout.strip())
+        common_dir = raw_common_dir if raw_common_dir.is_absolute() else root / raw_common_dir
+        manifest_home = common_dir.resolve() / "vibelution-cache"
+    directory = manifest_home / "quality_gates"
     directory.mkdir(parents=True, exist_ok=True)
     safe_task_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", task_id).strip("-") or "task"
     path = directory / f"{safe_task_id}.json"

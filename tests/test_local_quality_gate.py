@@ -578,6 +578,8 @@ def test_closeout_writes_bounded_passed_manifest(
 
     assert result.outcome == "passed"
     assert result.manifest_path is not None
+    assert result.manifest_path.is_relative_to(git_repo / ".git")
+    assert git(git_repo, "status", "--porcelain").stdout.strip() == ""
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["schemaVersion"] == 1
     assert manifest["taskId"] == "test-task"
