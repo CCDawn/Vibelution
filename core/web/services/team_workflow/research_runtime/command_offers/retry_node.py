@@ -9,6 +9,9 @@ from core.research.workflow.ledger.records import NodeAttemptRecord, RunRecord
 from core.research.workflow.models import ActorKind, WorkflowDefinition
 
 
+_RETRYABLE_ATTEMPT_STATUSES = frozenset({"failed", "blocked", "cancelled"})
+
+
 def build_retry_node_offers(
     *,
     run: RunRecord,
@@ -23,10 +26,13 @@ def build_retry_node_offers(
 
     offers: list[CommandOffer] = []
     for node in definition.nodes:
-        if node.actorKind == ActorKind.HUMAN:
-            continue
         latest = latest_by_node.get(node.nodeId)
-        available = bool(latest and latest.status in {"failed", "blocked"})
+        available = bool(latest and latest.status in _RETRYABLE_ATTEMPT_STATUSES)
+        if node.actorKind == ActorKind.HUMAN and not available:
+            # A healthy human gate is operated through resolve_human_task.
+            # Only surface retry when readiness previously blocked or the
+            # attempt otherwise ended before a pending human task existed.
+            continue
         offers.append(
             CommandOffer(
                 command=WorkflowCommandKind.RETRY_NODE,

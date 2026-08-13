@@ -136,6 +136,66 @@ def test_human_resolve_offers_are_decision_complete(tmp_path: Path) -> None:
         harness.close()
 
 
+def test_blocked_human_gate_exposes_executable_retry_offer(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-human-blocked", status="blocked", run_version=1)
+
+        def seed_blocked_human(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-human-blocked",
+                    run_id="run-human-blocked",
+                    node_id="knowledge_handoff",
+                    command_kind="start_node",
+                    idempotency_key="seed-human-blocked",
+                )
+            )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="nr-human-blocked-a1",
+                    run_id="run-human-blocked",
+                    node_id="knowledge_handoff",
+                    actor_kind="human",
+                    status="blocked",
+                    command_id="cmd-human-blocked",
+                    attempt=1,
+                )
+            )
+
+        harness.store.submit(seed_blocked_human, force_flush=True).result(timeout=10)
+
+        snap = _query(harness).get_snapshot(
+            team_id="research-team", run_id="run-human-blocked"
+        )
+        retry = next(
+            offer
+            for offer in snap.command_offers
+            if offer.command == WorkflowCommandKind.RETRY_NODE
+            and offer.node_id == "knowledge_handoff"
+        )
+        assert retry.available is True
+        assert retry.reason_code == "retry_available"
+
+        receipt = harness.service.submit(
+            harness.request(
+                run_id="run-human-blocked",
+                command=retry.command,
+                node_id=retry.node_id,
+                expected_run_version=retry.expected_run_version,
+                idempotency_key=retry.idempotency_key,
+                payload=dict(retry.payload),
+            )
+        )
+        assert receipt.status == "accepted"
+        latest = harness.store.latest_attempt("run-human-blocked", "knowledge_handoff")
+        assert latest is not None
+        assert latest.attempt == 2
+        assert latest.status == "starting"
+    finally:
+        harness.close()
+
+
 def test_all_available_snapshot_offers_are_executable(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3", context=FakeDomainContext())
     try:
