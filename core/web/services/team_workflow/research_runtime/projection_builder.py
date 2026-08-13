@@ -9,6 +9,7 @@ from typing import Any
 
 from core.research.workflow.contracts import CommandOffer, ResearchWorkflowSnapshot
 from core.research.workflow.contracts.workflow_snapshot import (
+    AgentBindingRef,
     AgentBindingSummary,
     BudgetReceiptRef,
     BudgetSummary,
@@ -58,6 +59,15 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
             }
         )
     )
+    frozen_bindings = frozen_agent_bindings(run.input_snapshot_json)
+    binding_ids = tuple(
+        dict.fromkeys(
+            [
+                *binding_refs,
+                *(item.snapshot_id for item in frozen_bindings if item.snapshot_id),
+            ]
+        )
+    )
 
     safety_limits = _loads(run.safety_limits_json)
     return ResearchWorkflowSnapshot(
@@ -74,8 +84,9 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
         handoff_summary=_handoff_summary(inputs.handoffs),
         agent_binding_summary=AgentBindingSummary(
             binding_snapshot_set_id=run.binding_snapshot_set_id,
-            binding_snapshot_ids=binding_refs,
-            count=len(binding_refs),
+            binding_snapshot_ids=binding_ids,
+            count=len(binding_ids),
+            bindings=frozen_bindings,
         ),
         budget_summary=BudgetSummary(
             safety_limits=safety_limits,
@@ -182,6 +193,33 @@ def _as_optional_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def frozen_agent_bindings(input_snapshot_json: str | None) -> tuple[AgentBindingRef, ...]:
+    payload = _loads(input_snapshot_json or "")
+    if not isinstance(payload, dict):
+        return ()
+    refs: list[AgentBindingRef] = []
+    seen: set[str] = set()
+    for item in payload.get("agentBindingSnapshot") or []:
+        if not isinstance(item, Mapping):
+            continue
+        node_id = str(item.get("nodeId") or "").strip()
+        agent_id = str(item.get("agentId") or "").strip()
+        if not node_id or not agent_id or node_id in seen:
+            continue
+        seen.add(node_id)
+        resolved = str(item.get("resolvedFrom") or "").strip() or "workflow_default"
+        refs.append(
+            AgentBindingRef(
+                node_id=node_id,
+                agent_id=agent_id,
+                role_key=str(item.get("roleKey") or "").strip(),
+                resolved_from=resolved,
+                snapshot_id=str(item.get("snapshotId") or "").strip(),
+            )
+        )
+    return tuple(refs)
 
 
 def _loads(raw: str) -> Any:

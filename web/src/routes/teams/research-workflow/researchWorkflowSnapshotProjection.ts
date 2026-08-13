@@ -20,9 +20,20 @@ function asWorkflowDefinition(raw: Record<string, unknown>): WorkflowDefinition 
   return raw as unknown as WorkflowDefinition;
 }
 
+function bindingsByNode(snapshot: ResearchWorkflowSnapshot): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const binding of snapshot.agentBindingSummary?.bindings ?? []) {
+    const nodeId = String(binding.nodeId || "").trim();
+    const agentId = String(binding.agentId || "").trim();
+    if (nodeId && agentId) map.set(nodeId, agentId);
+  }
+  return map;
+}
+
 function nodeRunsFromAttempts(
   snapshot: ResearchWorkflowSnapshot,
 ): Record<string, WorkflowNodeRunProjection> {
+  const bindings = bindingsByNode(snapshot);
   const nodeRuns: Record<string, WorkflowNodeRunProjection> = {};
   for (const [nodeId, attempts] of Object.entries(snapshot.nodeAttempts ?? {})) {
     const latest = attempts[attempts.length - 1];
@@ -33,6 +44,17 @@ function nodeRunsFromAttempts(
       nodeRunId: latest.nodeRunId,
       attempt: latest.attempt,
       actorKind: latest.actorKind as ActorKind,
+      primaryAgentId: bindings.get(nodeId),
+    };
+  }
+  for (const [nodeId, agentId] of bindings) {
+    if (nodeRuns[nodeId]) continue;
+    nodeRuns[nodeId] = {
+      nodeId,
+      status: "pending",
+      attempt: 0,
+      primaryAgentId: agentId,
+      actorKind: "agent",
     };
   }
   return nodeRuns;
@@ -82,5 +104,12 @@ export function snapshotToRunRecord(
     events: events as Array<Record<string, unknown>>,
     completionKind: run.completionKind ?? undefined,
     terminalReason: run.terminalReason ?? undefined,
+    bindingSnapshots: (snapshot.agentBindingSummary?.bindings ?? []).map((binding) => ({
+      nodeId: binding.nodeId,
+      agentId: binding.agentId,
+      roleKey: binding.roleKey,
+      resolvedFrom: binding.resolvedFrom,
+      snapshotId: binding.snapshotId,
+    })),
   };
 }

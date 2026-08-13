@@ -184,3 +184,82 @@ def test_node_detail_rejects_unknown_node(tmp_path: Path) -> None:
             pass
     finally:
         harness.close()
+
+
+def test_node_detail_uses_frozen_binding_when_anchor_missing(tmp_path: Path) -> None:
+    import json as _json
+
+    from tests._support.workflow_ledger_helpers import (
+        build_event_record,
+        build_run_record,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        input_snapshot = {
+            "teamId": "research-team",
+            "projectId": "challenge-sci-096",
+            "questionId": "SCI-096",
+            "workflowVersionId": "challenge-cup-research-v2.1.0",
+            "researchBriefHash": "b" * 64,
+            "datasetRefs": [],
+            "metricContract": {},
+            "constraintSnapshot": {},
+            "competitionRuleRef": "rule",
+            "competitionRuleVersion": "1",
+            "trackAndRubricSnapshot": {},
+            "researchObjectiveContract": {},
+            "sourcePolicy": {},
+            "budgetPolicy": {},
+            "stopPolicy": {},
+            "environmentSnapshotRef": "env-1",
+            "modelRoutingPolicy": {},
+            "evaluationContract": {},
+            "agentBindingSnapshot": [
+                {
+                    "snapshotId": "snap:run-bound:source_finding",
+                    "nodeId": "source_finding",
+                    "agentId": "agent-finder",
+                    "roleKey": "source_finder",
+                    "resolvedFrom": "workflow_default",
+                }
+            ],
+            "createdBy": "u-1",
+            "createdAt": "2026-08-12T00:00:00Z",
+            "snapshotHash": "c" * 64,
+        }
+        record = build_run_record(run_id="run-bound", last_event_sequence=1)
+        record = record.__class__(
+            **{
+                **record.__dict__,
+                "input_snapshot_json": _json.dumps(input_snapshot, ensure_ascii=False),
+            }
+        )
+
+        def mutate(uow):
+            uow.repository.insert_run(record)
+            uow.repository.insert_event(
+                build_event_record(
+                    sequence=1,
+                    run_id="run-bound",
+                    event_type="run_created",
+                    event_id="evt-created-run-bound",
+                )
+            )
+
+        harness.store.submit(mutate, force_flush=True).result(timeout=10)
+        harness.service.submit(
+            harness.request(run_id="run-bound", idempotency_key="seed-bound")
+        )
+        payload = _query(harness).get_node_detail(
+            team_id="research-team",
+            run_id="run-bound",
+            node_id="source_finding",
+        ).to_dict()
+        assert payload["agentId"] == "agent-finder"
+        assert payload["resolvedFrom"] == "workflow_default"
+        assert payload["sessionAnchorDegraded"] is True
+        assert payload["sessionId"] is None
+        assert payload["chatDeepLink"] is None
+    finally:
+        harness.close()
