@@ -1,4 +1,4 @@
-import { Notification, app, dialog, ipcMain, nativeImage, nativeTheme, type BrowserWindow } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -279,6 +279,14 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
     {
       createLauncherWindow,
       createWorkbenchWindow,
+      listLauncherWindows: (launcherOrigin) =>
+        BrowserWindow.getAllWindows().filter((window) => {
+          try {
+            return new URL(window.webContents.getURL()).origin === launcherOrigin;
+          } catch {
+            return false;
+          }
+        }),
       reportState: (state) => reportManagedWindowState(paths, bootstrap, state),
       shouldInterceptLauncherClose: () => !shutdownApproved,
       shouldInterceptWorkbenchClose: () => true,

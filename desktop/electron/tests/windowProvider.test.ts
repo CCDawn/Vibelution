@@ -436,10 +436,12 @@ describe("Electron window provider state", () => {
 
     const first = await provider.openLauncher();
     const second = await provider.openLauncher();
+    const [left, right] = await Promise.all([provider.openLauncher(), provider.openLauncher()]);
 
     expect(windows).toHaveLength(1);
-    expect(windows[0].showCount).toBe(2);
-    expect(windows[0].focusCount).toBe(2);
+    expect(windows[0].showCount).toBeGreaterThanOrEqual(3);
+    expect(windows[0].focusCount).toBeGreaterThanOrEqual(3);
+    expect(left).toEqual(right);
     expect(second).toEqual(first);
     expect(second).toMatchObject({
       role: "launcher",
@@ -498,6 +500,28 @@ describe("Electron window provider state", () => {
     expect(launcherWindow.hideCount).toBe(1);
     expect(launcherWindow.isDestroyed()).toBe(false);
     expect(reports).toEqual([{ role: "launcher", open: true, focused: false }]);
+  });
+
+  it("adopts one existing launcher window and destroys extras", async () => {
+    const first = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const extra = new FakeWindow(8, "http://127.0.0.1:8765/launcher", 8080);
+    let created = 0;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => {
+        created += 1;
+        return new FakeWindow(9, url, 9090);
+      },
+      createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242),
+      listLauncherWindows: () => [first, extra]
+    });
+
+    const state = await provider.openLauncher();
+
+    expect(created).toBe(0);
+    expect(state.windowId).toBe(7);
+    expect(first.showCount).toBe(1);
+    expect(extra.destroyCount).toBe(1);
+    expect(extra.isDestroyed()).toBe(true);
   });
 
   it("closes only Workbench while Launcher remains available", async () => {
