@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { LauncherBranchInstance } from "../api/launcher";
-import { resolveLiveInstance, resolveProcessMonitorTarget } from "./LauncherProcessMonitor.binding";
+import {
+  buildAllInstanceMonitorRows,
+  listMonitoredInstances,
+  resolveLiveInstance,
+  resolveProcessMonitorTarget,
+} from "./LauncherProcessMonitor.binding";
 
 function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBranchInstance {
   return {
@@ -75,5 +80,39 @@ describe("process monitor auto-bind", () => {
       explicitSelect: true,
     });
     expect(bound?.id).toBe("worktree:idle");
+  });
+
+  it("lists every checked-out instance instead of only the selected one", () => {
+    const composer = instance({
+      id: "worktree:fix-composer-dialog-chrome",
+      shortName: "composer",
+      alive: true,
+      port: 8000,
+      pids: { backend: 29300, window: 0, manager: 0 },
+      displayPath: ".worktrees/fix-composer-dialog-chrome",
+    });
+    const apply = instance({
+      id: "worktree:slot-data-home-apply",
+      shortName: "apply",
+      displayPath: ".worktrees/slot-data-home-apply",
+    });
+    const items = [main, composer, apply, abandoned];
+    expect(listMonitoredInstances(items).map((item) => item.shortName)).toEqual(["主", "composer", "apply"]);
+    const rows = buildAllInstanceMonitorRows(
+      items,
+      { currentId: "main", backendPid: 44100, port: 8002, alive: true },
+      {
+        running: "运行中",
+        stopped: "已停止",
+        owned: "托管",
+        windowRunning: "窗口运行中",
+        windowStopped: "窗口已停止",
+      },
+    );
+    expect(rows.map((row) => `${row.label}:${row.pid}:${row.port}`)).toEqual([
+      "主:44100:8002",
+      "composer:29300:8000",
+      "apply:-:-",
+    ]);
   });
 });

@@ -133,7 +133,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('useWorkbenchLifecycleActions("launcher_route")');
     expect(routeSource).toContain("requestLifecycle(operation)");
     expect(routeSource).toContain("requestBranchInstanceLifecycle");
-    expect(routeSource).toContain("resolveProcessMonitorTarget");
+    expect(routeSource).toContain("buildAllInstanceMonitorRows");
     expect(routeSource).not.toContain("startLauncherBundle");
     expect(routeSource).not.toContain("stopLauncherBundle");
     expect(routeSource).not.toContain("forceStopLauncherBundle");
