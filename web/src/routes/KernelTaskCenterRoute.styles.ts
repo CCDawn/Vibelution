@@ -1,18 +1,11 @@
-import {
-  vuiFlatPanelClass,
-  vuiOpaqueRowClass,
-  vuiWorkspaceFillClass,
-} from "../design/vuiSurfaceRecipes";
+import { vuiWorkspaceFillClass } from "../design/vuiSurfaceRecipes";
 
-const panelSurface =
-  `${vuiFlatPanelClass}`;
-const cardSurface =
-  `${vuiFlatPanelClass} p-2`;
-const rowSurface =
-  `${vuiOpaqueRowClass} p-2`;
+const panelSurface = "!rounded-none !border-0 !shadow-none";
+const cardSurface = "rounded-[var(--radius-control)] border-0 bg-vui-surface-row p-2 shadow-none";
+const rowSurface = "rounded-[var(--radius-control)] border-0 bg-vui-surface-row p-2 shadow-none";
 
-const routeClass = "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden";
-const headerClass = `mx-2 mt-1.5 min-w-0 border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] ${vuiFlatPanelClass}`;
+const routeClass = "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden !bg-vui-surface-panel";
+const headerClass = "mx-2 mt-1.5 min-w-0 !rounded-none !border-0 !bg-transparent !shadow-none !backdrop-blur-none";
 const headerActionsClass = "flex flex-wrap items-center justify-end gap-2 max-[720px]:items-stretch max-[720px]:flex-col";
 const statusFilterClass = "flex w-fit max-w-full min-w-[210px] items-center gap-[7px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const statusFilterLabelClass = "whitespace-nowrap [font-size:var(--vui-font-xs)] font-bold";
@@ -22,12 +15,12 @@ const paneClass = `min-h-0 min-w-0 overflow-hidden ${panelSurface}`;
 const taskPaneClass = `${paneClass} grid grid-rows-[auto_minmax(0,1fr)]`;
 const detailPaneClass = `${paneClass} grid max-w-full grid-cols-[minmax(0,1fr)_clamp(280px,26vw,380px)] grid-rows-[minmax(0,1fr)] gap-2 p-2 max-[1280px]:grid-cols-1 max-[1280px]:grid-rows-[minmax(0,0.98fr)_minmax(240px,0.82fr)] max-[720px]:grid-rows-none max-[720px]:overflow-y-auto max-[720px]:overflow-x-hidden`;
 const detailContentClass = "grid min-h-0 min-w-0 max-w-full content-start gap-2 overflow-auto overflow-x-hidden pr-1";
-const panelHeaderClass = "flex items-center justify-between gap-2 border-b border-vui-border-soft p-2";
+const panelHeaderClass = "flex items-center justify-between gap-2 px-2 pb-1 pt-2";
 const eyebrowClass = "m-0 mb-0.5 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary";
 const panelCountClass = "text-base text-vui-fg-primary";
 const taskListClass = "grid min-h-0 min-w-0 max-w-full content-start gap-[7px] overflow-auto overflow-x-hidden p-2 max-[1120px]:max-h-[min(38vh,320px)]";
-const taskRowClass = `grid !h-auto !min-h-[72px] w-full min-w-0 max-w-full content-start justify-self-stretch gap-1 overflow-hidden whitespace-normal ${vuiOpaqueRowClass} px-2 py-1.5 text-left text-vui-fg-primary hover:border-[var(--border-strong)] hover:!bg-[var(--vui-surface-row-hover)] [&_[data-slot=vui-button-content]]:grid [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-content]]:items-start [&_[data-slot=vui-button-content]]:justify-stretch [&_[data-slot=vui-button-content]]:gap-1 [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:overflow-visible [&_[data-slot=vui-button-label]]:whitespace-normal`;
-const taskRowSelectedClass = "border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
+const taskRowClass = "grid !h-auto !min-h-[72px] w-full min-w-0 max-w-full content-start justify-self-stretch gap-1 overflow-hidden whitespace-normal !rounded-[var(--radius-control)] !border-0 !bg-vui-surface-row px-2 py-1.5 text-left text-vui-fg-primary !shadow-none hover:!bg-[var(--vui-surface-row-hover)] [&_[data-slot=vui-button-content]]:grid [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-content]]:items-start [&_[data-slot=vui-button-content]]:justify-stretch [&_[data-slot=vui-button-content]]:gap-1 [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:overflow-visible [&_[data-slot=vui-button-label]]:whitespace-normal";
+const taskRowSelectedClass = "!bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const taskRowTopClass = "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2";
 const taskRowTitleClass = "block min-w-0 truncate";
 const taskRowMetaClass = "grid w-full min-w-0 gap-[3px] [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
@@ -36,19 +29,19 @@ const detailHeaderClass = `flex min-w-0 max-w-full items-center justify-between 
 const detailTitleWrapClass = "min-w-0";
 const detailTitleClass = "m-0 min-w-0 truncate text-base text-vui-fg-primary";
 const summaryGridClass = "min-w-0 max-w-full overflow-x-auto";
-const selectionNoticeClass = "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-warning)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-2 py-[7px] [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
-const ledgerSectionClass = "grid min-w-0 gap-[7px] border-t border-vui-border-soft pt-2";
+const selectionNoticeClass = "rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-2 py-[7px] [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
+const ledgerSectionClass = "grid min-w-0 gap-[7px] pt-2";
 const ledgerFlowClass = "grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 max-[1280px]:grid-cols-1";
 const ledgerBucketClass = "grid min-w-0 content-start gap-[7px]";
 const sectionHeaderClass = "flex items-center justify-between gap-2";
 const sectionTitleClass = "m-0 text-[0.9rem] text-vui-fg-primary";
 const sectionCountClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const deliveryGridClass = "grid min-h-0 min-w-0 max-w-full content-start gap-1.5 overflow-auto overflow-x-hidden pr-1";
-const deliveryRowClass = `grid min-w-0 max-w-full gap-1 rounded-[var(--radius-control)] ${vuiOpaqueRowClass} p-[7px]`;
+const deliveryRowClass = "grid min-w-0 max-w-full gap-1 rounded-[var(--radius-control)] border-0 bg-vui-surface-row p-[7px]";
 const deliveryRowTopClass = "grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 [&>strong]:min-w-0 [&>strong]:truncate";
 const mutedLineClass = "min-w-0 break-words [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const warningLineClass = "min-w-0 break-words [font-size:var(--vui-font-xs)] not-italic leading-[1.35] text-[var(--state-warning)]";
-const lifecycleSectionClass = `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-[7px] overflow-hidden ${vuiFlatPanelClass} p-2`;
+const lifecycleSectionClass = `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-[7px] overflow-hidden ${cardSurface}`;
 const lifecycleTimelineClass = "grid min-h-0 min-w-0 max-w-full content-start gap-1.5 overflow-auto overflow-x-hidden pr-1";
 const lifecycleRowClass = `grid grid-cols-[auto_minmax(0,1fr)] items-start gap-[7px] ${rowSurface}`;
 const lifecycleToneChipClass = "!min-h-5 !w-5 !min-w-5 !justify-center !px-0 !text-[10px]";
@@ -61,7 +54,8 @@ const refListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const evidenceRefListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const emptyInlineClass = "[font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const statusPillBaseClass = "!min-h-[22px] max-w-full truncate !px-[7px] !text-[var(--vui-font-xs)]";
-const emptyStateClass = `grid min-h-16 content-start gap-1 break-words rounded-[var(--radius-panel)] border border-dashed border-vui-border-soft ${vuiOpaqueRowClass} p-2.5`;
+const emptyStateClass = "grid min-h-16 content-start gap-1 break-words rounded-[var(--radius-control)] !border-0 bg-vui-surface-row p-2.5 shadow-none";
+const loadingRegionClass = "min-h-0 min-w-0 [&_[aria-hidden=true]>div]:!border-0";
 
 const styles = {
   routeClass,
@@ -115,6 +109,7 @@ const styles = {
   emptyInlineClass,
   statusPillBaseClass,
   emptyStateClass,
+  loadingRegionClass,
 } as const;
 
 export default styles;
