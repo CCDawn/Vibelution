@@ -3210,6 +3210,8 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
         blockers.append("main_branch_required")
     if dirty_main:
         blockers.append("main_workspace_dirty")
+    if main_head_drifted:
+        blockers.append("main_head_drifted")
     variant_status = "verified"
     current_variant: dict[str, Any] = {}
     if not _candidate_variant_is_bound(frozen_variant):
@@ -3485,10 +3487,15 @@ def _request_independent_agent_approval(
 def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]:
     updated = _with_merge_analysis(snapshot)
     analysis = updated.get("mergeAnalysis") if isinstance(updated.get("mergeAnalysis"), dict) else {}
-    blockers = set(str(item) for item in list(analysis.get("blockers") or []))
+    blockers = {str(item) for item in list(analysis.get("blockers") or [])}
     if "supervised_review_pending" in blockers:
         raise SupervisedWorktreeRunActionError(
             "候选仍处于最终审批 pending，必须先完成审批，不能用 force 绕过。"
+        )
+    if "main_head_drifted" in blockers:
+        raise SupervisedWorktreeRunActionError(
+            "stale_main: main 已从候选冻结基线前进；"
+            "force 不能绕过主线漂移，请基于最新 main 重新生成、评估并审批候选。"
         )
     judgment = updated.get("candidateJudgment") if isinstance(updated.get("candidateJudgment"), dict) else {}
     approval = updated.get("approvalDecision") if isinstance(updated.get("approvalDecision"), dict) else {}

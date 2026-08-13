@@ -1926,7 +1926,7 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
 
     assert merged["merge"]["status"] == "committed"
     assert merged["merge"]["triggeredBy"]["role"] == "approval_executor"
-    assert merged["merge"]["triggeredBy"]["mechanism"] in {"git_merge_ff", "git_merge_no_ff"}
+    assert merged["merge"]["triggeredBy"]["mechanism"] == "git_merge_ff"
     assert merged["merge"]["triggeredBy"]["conversationSessionId"] == ""
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
     manifest_path = Path(merged["rollback"]["manifestPath"])
@@ -1940,7 +1940,7 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
     assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('base')\n"
 
 
-def test_force_merge_promotes_candidate_tree_when_main_has_moved(tmp_path):
+def test_force_merge_rejects_candidate_when_main_has_moved(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
     (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
@@ -1951,6 +1951,7 @@ def test_force_merge_promotes_candidate_tree_when_main_has_moved(tmp_path):
     (project_root / "unrelated.py").write_text("UNRELATED = True\n", encoding="utf-8")
     _run_git(project_root, "add", "unrelated.py")
     _run_git(project_root, "commit", "-m", "advance main")
+    advanced_head = _run_git(project_root, "rev-parse", "HEAD")
     snapshot = {
         "runId": "swte-merge-moved-main",
         "runKind": service.RUN_KIND,
@@ -1973,18 +1974,29 @@ def test_force_merge_promotes_candidate_tree_when_main_has_moved(tmp_path):
     }
     service._persist_snapshot(snapshot, active_run_id="")
 
-    merged = service.execute_supervised_worktree_action(
+    analyzed = service.execute_supervised_worktree_action(
         "swte-merge-moved-main",
-        "merge",
-        force=True,
+        "analyze_merge",
     )
 
-    assert merged["merge"]["status"] == "committed"
-    assert merged["merge"]["triggeredBy"]["mechanism"] == "git_merge_no_ff"
-    assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
-    assert not (project_root / "unrelated.py").exists()
-    parents = _run_git(project_root, "rev-list", "--parents", "-n", "1", "HEAD").split()
-    assert len(parents) >= 3
+    assert analyzed["mergeAnalysis"]["mainHeadDrifted"] is True
+    assert "main_head_drifted" in analyzed["mergeAnalysis"]["blockers"]
+    assert analyzed["mergeAnalysis"]["mergeAllowed"] is False
+
+    with pytest.raises(
+        service.SupervisedWorktreeRunActionError,
+        match="stale_main",
+    ):
+        service.execute_supervised_worktree_action(
+            "swte-merge-moved-main",
+            "merge",
+            force=True,
+        )
+
+    assert _run_git(project_root, "rev-parse", "HEAD") == advanced_head
+    assert _run_git(project_root, "status", "--porcelain=v1") == ""
+    assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('base')\n"
+    assert (project_root / "unrelated.py").read_text(encoding="utf-8") == "UNRELATED = True\n"
 
 
 def test_approved_candidate_creates_commit_and_queues_runtime_activation(
@@ -2046,7 +2058,7 @@ def test_approved_candidate_creates_commit_and_queues_runtime_activation(
     assert merged["merge"]["status"] == "committed"
     assert merged["merge"]["baseCommit"] == base_commit
     assert merged["merge"]["commitSha"] == commit_sha
-    assert merged["merge"]["triggeredBy"]["mechanism"] in {"git_merge_ff", "git_merge_no_ff"}
+    assert merged["merge"]["triggeredBy"]["mechanism"] == "git_merge_ff"
     assert merged["runtimeActivation"] == {
         "status": "activating",
         "attempt": 1,
