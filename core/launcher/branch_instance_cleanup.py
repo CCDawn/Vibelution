@@ -10,7 +10,9 @@ refs are never deleted.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import stat
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -211,9 +213,41 @@ def _remove_worktree(root: Path, worktree: Path) -> None:
             detail = _git_detail(result)
             raise RuntimeError(f"拆除 worktree 失败：{detail or resolved}")
     if resolved.exists():
-        shutil.rmtree(resolved, ignore_errors=True)
+        _remove_directory(resolved)
     if resolved.exists():
         raise RuntimeError(f"worktree 目录仍存在：{resolved}")
+
+
+def _remove_directory(path: Path) -> None:
+    """Remove leftover checkout dirs, including Windows paths longer than MAX_PATH."""
+
+    target = path.resolve() if path.exists() else path
+    if not target.exists():
+        return
+    shutil.rmtree(_os_remove_target(target), onexc=_clear_readonly)
+    if target.exists():
+        raise RuntimeError(f"worktree 目录仍存在：{target}")
+
+
+def _os_remove_target(path: Path) -> str:
+    text = str(path)
+    if os.name != "nt":
+        return text
+    resolved = str(path.resolve())
+    if resolved.startswith("\\\\?\\"):
+        return resolved
+    if resolved.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + resolved.lstrip("\\")
+    return "\\\\?\\" + resolved
+
+
+def _clear_readonly(func, target: str, exc: BaseException) -> None:
+    del exc
+    try:
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+    except OSError:
+        return
 
 
 def _delete_local_branch(root: Path, branch: str) -> None:

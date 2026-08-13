@@ -107,6 +107,41 @@ def test_cleanup_refuses_main_and_current(tmp_path):
     assert _git(root, "branch", "--show-current") == "main"
 
 
+def test_cleanup_removes_retired_leftover_with_windows_long_path(tmp_path):
+    import os
+
+    root = _init_repo(tmp_path / "repo")
+    leftover = root / ".worktrees" / "_retired" / "chat-status-rail-topbar-polish"
+    nested = leftover / "logs" / "runtime_scenes" / ("s" * 40) / "sessions" / ("session-" + "x" * 40) / "turns" / ("turn-" + "y" * 50)
+    os.makedirs(cleanup._os_remove_target(nested), exist_ok=True)
+    with open(cleanup._os_remove_target(nested / "execution_registry.jsonl"), "w", encoding="utf-8") as handle:
+        handle.write("{}\n")
+
+    payload = {
+        "integrationRoot": str(root),
+        "items": [
+            _item(
+                id="retired:chat-status-rail-topbar-polish",
+                kind="retired",
+                branch="",
+                path=str(leftover),
+                checkedOut=False,
+                shortName="polish",
+            )
+        ],
+    }
+
+    result = cleanup.cleanup_branch_instances(
+        ["retired:chat-status-rail-topbar-polish"],
+        confirm=True,
+        list_payload=payload,
+    )
+
+    assert result["ok"] is True
+    assert result["cleaned"][0]["actions"] == ["worktree_removed"]
+    assert not leftover.exists()
+
+
 def test_cleanup_deletes_unmerged_local_branch_without_touching_remote(tmp_path):
     root = _init_repo(tmp_path / "repo")
     remote = tmp_path / "remote.git"
