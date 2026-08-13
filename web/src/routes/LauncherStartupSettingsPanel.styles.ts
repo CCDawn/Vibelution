@@ -17,14 +17,16 @@ const styles = {
   windowModeTabLabel: "inline-flex min-w-0 items-center gap-[5px]",
   settingError: "col-span-full [font-size:var(--vui-font-xs)] text-[var(--state-error)]",
   settingField: "grid min-w-0 gap-[3px] [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&>small]:min-w-0 [&>small]:truncate [&>small]:[font-size:var(--vui-font-xs)] [&>small]:text-[var(--fg-secondary)] [&_input]:min-h-7 [&_input]:w-full [&_input]:min-w-0 [&_input]:rounded-[var(--radius-control)] [&_input]:border [&_input]:border-[var(--border-soft)] [&_input]:bg-[var(--vui-surface-row)] [&_input]:px-[7px] [&_input]:py-[3px] [&_input]:[font-size:var(--vui-font-xs)] [&_input]:text-[var(--fg-primary)] [&_select]:min-h-7 [&_select]:w-full [&_select]:min-w-0 [&_select]:rounded-[var(--radius-control)] [&_select]:border [&_select]:border-[var(--border-soft)] [&_select]:bg-[var(--vui-surface-row)] [&_select]:px-[7px] [&_select]:py-[3px] [&_select]:[font-size:var(--vui-font-xs)] [&_select]:text-[var(--fg-primary)]",
-  settingToggle: "inline-flex min-h-7 min-w-0 items-center gap-1.5 whitespace-nowrap pb-px [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&_input]:m-0 [&_input]:h-3.5 [&_input]:w-3.5",
-  settingsHeader: "grid self-center gap-0.5 [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:[font-size:var(--vui-font-xs)] [&>strong]:text-[var(--fg-primary)] [&>small]:min-w-0 [&>small]:truncate [&>small]:[font-size:var(--vui-font-xs)] [&>small]:text-[var(--fg-secondary)]",
-  settingsSaveButton: `${primaryControl} justify-self-start py-[3px]`,
-  settingsStrip: `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full gap-1.5 self-start overflow-hidden ${panelSurface} px-2 py-1.5`,
+  settingToggle: "inline-flex min-h-7 min-w-0 items-center gap-1.5 whitespace-nowrap self-end pb-px [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&_input]:m-0 [&_input]:h-3.5 [&_input]:w-3.5",
+  settingsTitle: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
+  settingsSaveButton: `${primaryControl} justify-self-end self-end py-[3px]`,
+  settingsStrip: `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full gap-2 self-start overflow-hidden ${panelSurface} px-2 py-1.5`,
   settingsPrimary:
-    "grid min-w-0 max-w-full grid-cols-[minmax(96px,max-content)_minmax(118px,0.7fr)_repeat(3,minmax(88px,0.55fr))_max-content_minmax(120px,0.7fr)_max-content] items-end gap-1.5 max-[1180px]:grid-cols-[minmax(96px,max-content)_minmax(118px,0.8fr)_repeat(3,minmax(88px,1fr))] max-[860px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[620px]:grid-cols-[minmax(0,1fr)]",
+    "grid min-w-0 max-w-full grid-cols-4 items-end gap-1.5 max-[860px]:grid-cols-2 max-[620px]:grid-cols-[minmax(0,1fr)]",
+  settingsWindow:
+    "grid min-w-0 max-w-full grid-cols-[max-content_minmax(140px,0.4fr)_max-content] items-end gap-1.5 max-[860px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[620px]:grid-cols-[minmax(0,1fr)]",
   settingsSecondary:
-    "grid min-w-0 max-w-full grid-cols-[minmax(140px,0.5fr)_repeat(2,max-content)] items-center gap-1.5 max-[620px]:grid-cols-[minmax(0,1fr)]",
+    "grid min-w-0 max-w-full grid-cols-[minmax(140px,0.4fr)_repeat(2,max-content)] items-end gap-1.5 max-[620px]:grid-cols-[minmax(0,1fr)]",
   spin: "animate-spin",
 } as const;
 

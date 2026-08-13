@@ -209,7 +209,8 @@ describe("LauncherRoute layout contract", () => {
     expect(diagnosticsPanelSource).toContain("diagnosticSection");
     expect(routeSource).toContain("LauncherStartupSettingsPanel");
     expect(startupSettingsPanelSource).toContain("settingsStrip");
-    expect(startupSettingsPanelSource).toContain("settingsHeader");
+    expect(startupSettingsPanelSource).toContain("settingsTitle");
+    expect(startupSettingsPanelSource).toContain("settingsWindow");
     expect(startupSettingsPanelSource).toContain("settingField");
     expect(startupSettingsPanelSource).toContain("settingToggle");
     expect(startupSettingsPanelSource).toContain("settingsSaveButton");
@@ -228,7 +229,8 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelStyles.settingsStrip).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingsPrimary).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingsSecondary).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.settingsHeader).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingsTitle).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingsWindow).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingField).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingToggle).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingsSaveButton).toBeTypeOf("string");
@@ -424,7 +426,7 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelStyles.settingsStrip).toContain("mx-2");
     expect(startupSettingsPanelStyles.settingsStrip).toContain("overflow-hidden");
     expect(startupSettingsPanelStyles.settingsPrimary).toContain("grid-cols-");
-    expect(startupSettingsPanelStyles.settingsSaveButton).toContain("justify-self-start");
+    expect(startupSettingsPanelStyles.settingsSaveButton).toContain("justify-self-end");
     expect(startupSettingsPanelStyles.settingsStrip).not.toContain("mx-3");
 
     for (const panelStyles of [developerModePanelStyles, projectMaintenancePanelStyles]) {
@@ -623,8 +625,17 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelSource).toContain("configHash");
     expect(startupSettingsPanelSource).toContain("runtimeProfile");
     expect(startupSettingsPanelSource).toContain("launcherControlPort");
+    expect(startupSettingsPanelSource).toContain("launcherControlPortHint");
+    expect(startupSettingsPanelSource).toContain("backendPortHint");
+    expect(startupSettingsPanelSource).toContain("frontendPortHint");
+    expect(startupSettingsPanelSource).toContain("settingsWindow");
+    expect(startupSettingsPanelSource).toContain("settingsTitle");
     expect(startupSettingsPanelSource).toContain("backendPort");
     expect(startupSettingsPanelSource).toContain("frontendPort");
+    expect(routeSource).toContain("Launcher 端口");
+    expect(routeSource).toContain("默认后端");
+    expect(routeSource).toContain("开发前端");
+    expect(branchInstancesPanelSource).toContain("实例端口");
     expect(startupSettingsPanelSource).toContain("windowSize");
     expect(startupSettingsPanelSource).toContain("windowSizeOptions");
     expect(startupSettingsPanelSource).toContain("interfaceLanguage");

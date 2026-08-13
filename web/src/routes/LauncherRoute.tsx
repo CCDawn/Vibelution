@@ -251,8 +251,11 @@ type LauncherCopy = {
   preflightDoctor: string;
   requireVenv: string;
   launcherControlPort: string;
+  launcherControlPortHint: string;
   backendPort: string;
+  backendPortHint: string;
   frontendPort: string;
+  frontendPortHint: string;
   windowSize: string;
   windowSizeAuto: string;
   windowSizeEnvOverride: string;
@@ -1102,9 +1105,12 @@ export function LauncherRoute() {
         runtimeProfile: "运行档位",
         preflightDoctor: "启动前自检",
         requireVenv: "要求 .venv",
-        launcherControlPort: "控制端口",
-        backendPort: "后端端口",
-        frontendPort: "前端端口",
+        launcherControlPort: "Launcher 端口",
+        launcherControlPortHint: "本页控制面端口，不是某个分支实例的端口。",
+        backendPort: "默认后端",
+        backendPortHint: "启动主项目时的工作台后端默认值。上面表格「实例端口」是各分支当前占用。",
+        frontendPort: "开发前端",
+        frontendPortHint: "Vite 开发热更新端口。打包工作台走实例后端，不走这里。",
         windowSize: "窗口尺寸",
         windowSizeAuto: "自动",
         windowSizeEnvOverride: "窗口尺寸被环境变量覆盖",
@@ -1361,9 +1367,12 @@ export function LauncherRoute() {
         runtimeProfile: "Runtime mode",
         preflightDoctor: "Preflight doctor",
         requireVenv: "Require .venv",
-        launcherControlPort: "Control port",
-        backendPort: "Backend port",
-        frontendPort: "Frontend port",
+        launcherControlPort: "Launcher port",
+        launcherControlPortHint: "Control-plane port for this Launcher page, not a branch instance port.",
+        backendPort: "Default backend",
+        backendPortHint: "Default workbench backend when starting the main project. The table “Instance port” shows what each branch currently uses.",
+        frontendPort: "Dev frontend",
+        frontendPortHint: "Vite dev-server port. Packaged workbench uses the instance backend, not this port.",
         windowSize: "Window size",
         windowSizeAuto: "Auto",
         windowSizeEnvOverride: "Window size is overridden by environment",
