@@ -18,6 +18,11 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure.branch_workspace import list_branch_instances
+from core.launcher.isolated_workbench_window import (
+    close_isolated_workbench_window,
+    open_isolated_workbench_window,
+    overlay_instance_window_pid,
+)
 from core.launcher.slot_identity import apply_slot_spawn_environment, slot_fields_for_project
 from core.runtime_manager import instances_registry as registry
 from core.runtime_manager.constants import LAUNCHER_STATE_PATH, PROJECT_ROOT
@@ -96,6 +101,7 @@ def overlay_instance_ports(
             item["url"] = _loopback_url(int(item["port"]))
         else:
             item["url"] = ""
+        overlay_instance_window_pid(item, entry)
     return payload
 
 
@@ -157,6 +163,27 @@ def run_isolated_operation(
     used.update(int(port) for port in (extra_used or []) if int(port or 0) > 0)
     spawn = runner or spawn_worktree_launcher
     if operation in {"start", "restart"}:
+        if operation == "start" and _isolated_backend_alive(item):
+            backend_port = _positive_int(item.get("port")) or registry.DEFAULT_BASE_PORT
+            control_port = _positive_int(item.get("controlPort")) or registry.DEFAULT_CONTROL_PORT
+            window = _open_instance_window(item, backend_port=backend_port)
+            _upsert_instance_with_slot(
+                instance_id,
+                worktree,
+                branch=str(item.get("branch") or ""),
+                port=backend_port,
+                control_port=control_port,
+                status="running",
+                window_pid=_positive_int(window.get("windowPid")),
+                window_title=str(window.get("title") or ""),
+            )
+            return _isolated_response(
+                operation,
+                instance_id=instance_id,
+                port=backend_port,
+                control_port=control_port,
+                message="已打开该分支工作台窗口。",
+            )
         backend_port, control_port = registry.allocate_instance_ports(
             instance_id,
             preferred_backend=_positive_int(item.get("port")) or registry.DEFAULT_BASE_PORT,
@@ -165,7 +192,13 @@ def run_isolated_operation(
         )
         action = "restart" if operation == "restart" else "start"
         try:
-            spawn(worktree, action, backend_port, control_port)
+            spawn(
+                worktree,
+                action,
+                backend_port,
+                control_port,
+                short_name=str(item.get("shortName") or ""),
+            )
         except BranchInstanceLifecycleError:
             _upsert_instance_with_slot(
                 instance_id,
@@ -176,6 +209,7 @@ def run_isolated_operation(
                 status="failed",
             )
             raise
+        window = _open_instance_window(item, backend_port=backend_port)
         _upsert_instance_with_slot(
             instance_id,
             worktree,
@@ -184,6 +218,8 @@ def run_isolated_operation(
             control_port=control_port,
             status="running",
             started_at=_now_iso(),
+            window_pid=_positive_int(window.get("windowPid")),
+            window_title=str(window.get("title") or ""),
         )
         return _isolated_response(
             operation,
@@ -200,6 +236,7 @@ def run_isolated_operation(
         or _positive_int(item.get("controlPort"))
         or registry.DEFAULT_CONTROL_PORT
     )
+    close_isolated_workbench_window(item)
     spawn(worktree, "stop", backend_port, control_port)
     _upsert_instance_with_slot(
         instance_id,
@@ -208,6 +245,7 @@ def run_isolated_operation(
         port=backend_port,
         control_port=control_port,
         status="closed",
+        window_pid=0,
     )
     return _isolated_response(
         operation,
@@ -225,6 +263,7 @@ def spawn_worktree_launcher(
     control_port: int,
     *,
     timeout: float | None = None,
+    short_name: str = "",
 ) -> dict[str, Any]:
     """Run the target checkout's launcher script without a visible console."""
 
@@ -243,6 +282,9 @@ def spawn_worktree_launcher(
         control_port=int(control_port),
         mkdir=True,
     )
+    name = str(short_name or "").strip()
+    if name:
+        env["VIBELUTION_INSTANCE_SHORT_NAME"] = name
     if timeout is None:
         if action == "start":
             timeout = _ISOLATED_START_TIMEOUT_SECONDS
@@ -251,6 +293,8 @@ def spawn_worktree_launcher(
         else:
             timeout = _ISOLATED_STOP_TIMEOUT_SECONDS
     command = [python, str(script), "--action", str(action), "--port", str(int(backend_port))]
+    if action in {"start", "restart"}:
+        command.append("--no-browser")
     try:
         result = subprocess.run(
             command,
@@ -360,6 +404,19 @@ def _positive_int(value: Any) -> int:
     return max(0, parsed)
 
 
+def _open_instance_window(item: dict[str, Any], *, backend_port: int) -> dict[str, Any]:
+    window_item = dict(item)
+    window_item["port"] = int(backend_port)
+    window_item["url"] = _loopback_url(backend_port)
+    return open_isolated_workbench_window(window_item)
+
+
+def _isolated_backend_alive(item: dict[str, Any]) -> bool:
+    if not item.get("alive"):
+        return False
+    return _positive_int(item.get("port")) > 0
+
+
 def _upsert_instance_with_slot(
     instance_id: str,
     worktree: Path,
@@ -369,6 +426,8 @@ def _upsert_instance_with_slot(
     control_port: int,
     status: str,
     started_at: str | None = None,
+    window_pid: int | None = None,
+    window_title: str | None = None,
 ) -> None:
     fields: dict[str, Any] = {
         "projectRoot": str(worktree),
@@ -381,6 +440,10 @@ def _upsert_instance_with_slot(
     }
     if started_at:
         fields["startedAt"] = started_at
+    if window_pid is not None:
+        fields["windowPid"] = int(window_pid)
+    if window_title is not None:
+        fields["windowTitle"] = str(window_title)
     registry.upsert_instance(instance_id, **fields)
 
 
