@@ -228,6 +228,10 @@ def _record_scene_event(
         lifecycle=True,
         occurred_at=occurred_at,
         allow_recent_completed=allow_recent_completed,
+        # Lifecycle command acceptance and execution must not synchronously
+        # rebuild summary/package_index. The durable event is already appended;
+        # warning/error events still request their immediate full projection.
+        refresh_package_if_due=False,
     )
 
 
