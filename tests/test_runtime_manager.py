@@ -6942,6 +6942,54 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
     assert _event_payload(events, "workbench.open.fast_path_started")["prelaunchProbeSkipped"] is True
 
 
+def test_open_observation_skips_browser_recovery_after_electron_close_authorized(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_observe_workbench(**kwargs):
+        calls.append(dict(kwargs))
+        return {"observedState": "closed", "lifecycleConsistency": "consistent"}
+
+    monkeypatch.setattr(daemon, "observe_workbench", fake_observe_workbench)
+
+    observation = daemon._observe_workbench_for_open(
+        {
+            "desiredState": "closed",
+            "observedState": "partial",
+            "phase": "closing",
+            "externalWindowOwner": "electron",
+            "closePhase": "window_close_authorized",
+        }
+    )
+
+    assert observation["observedState"] == "closed"
+    assert calls == [
+        {
+            "recover_browser_window": False,
+            "recover_browser_window_for_backend_observed": False,
+        }
+    ]
+
+
+def test_open_observation_keeps_browser_recovery_for_unverified_partial_state(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_observe_workbench(**kwargs):
+        calls.append(dict(kwargs))
+        return {"observedState": "partial", "lifecycleConsistency": "backend_running_browser_missing"}
+
+    monkeypatch.setattr(daemon, "observe_workbench", fake_observe_workbench)
+
+    daemon._observe_workbench_for_open(
+        {
+            "desiredState": "open",
+            "observedState": "partial",
+            "phase": "steady",
+        }
+    )
+
+    assert calls == [{}]
+
+
 def test_successful_open_stable_backup_runs_in_background(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     events: list[tuple[str, dict]] = []
@@ -10510,7 +10558,13 @@ def test_electron_owned_normal_close_stops_backend_without_terminating_window_ow
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
     monkeypatch.setattr(daemon, "observe_workbench", lambda **_kwargs: dict(observation))
-    monkeypatch.setattr(daemon, "residual_process_payload", lambda **_kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(
+        daemon,
+        "residual_process_payload",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("verified Electron backend cleanup must not trigger a second residual process scan")
+        ),
+    )
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(daemon, "_backend_port_is_closed_for_fast_close", lambda _port: True)
@@ -10540,6 +10594,7 @@ def test_electron_owned_normal_close_stops_backend_without_terminating_window_ow
     assert state["workbench"]["phase"] == "closing"
     assert state["workbench"]["externalWindowOwner"] == "electron"
     assert state["workbench"]["closePhase"] == "window_close_authorized"
+    assert state["residualProcesses"] == {"count": 0, "items": []}
     assert cleanup_calls[0]["browser_profile_dir"] == ""
     assert {runtime_daemon._pid, 52001, 52002}.issubset(set(cleanup_calls[0]["exclude_pids"]))
 
