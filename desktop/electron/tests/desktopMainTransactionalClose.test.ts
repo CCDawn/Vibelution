@@ -13,11 +13,11 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("capabilities: desktopSessionCapabilities(bootstrap)");
   });
 
-  it("routes Workbench X and desktop actions through the same transaction before approval", () => {
+  it("routes Workbench X and desktop actions through the same transaction before shell shutdown approval", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain('from "./protocol/workbenchCloseTransactionClient.js"');
-    expect(source).toContain("shouldInterceptWorkbenchClose: () => true");
+    expect(source).toContain("shouldInterceptWorkbenchClose: () => !shutdownApproved");
     expect(source).toContain("onWorkbenchCloseRequest: () =>");
     expect(source).toContain("requestTransactionalWorkbenchClose(paths, bootstrap)");
     expect(source).toContain("closeWorkbench: (payload) => requestTransactionalWorkbenchClose(paths, bootstrap, payload)");

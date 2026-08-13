@@ -313,6 +313,29 @@ describe("Electron window provider state", () => {
     expect(provider.isWorkbenchCloseInFlight()).toBe(false);
   });
 
+  it("does not start a Workbench close transaction after shell exit is approved", async () => {
+    let shellExitApproved = false;
+    const closeRequests: string[] = [];
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      shouldInterceptWorkbenchClose: () => !shellExitApproved,
+      onWorkbenchCloseRequest: () => {
+        closeRequests.push("workbench");
+      }
+    });
+    await provider.openOrFocusWorkbench();
+    shellExitApproved = true;
+
+    const closeEvent = { preventDefault: vi.fn() };
+    workbenchWindow.emit("close", closeEvent);
+
+    expect(closeEvent.preventDefault).not.toHaveBeenCalled();
+    expect(closeRequests).toEqual([]);
+    expect(provider.isWorkbenchCloseInFlight()).toBe(false);
+  });
+
   it("destroys an authorized Workbench window when close is ignored by a hung renderer", async () => {
     const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
     const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
