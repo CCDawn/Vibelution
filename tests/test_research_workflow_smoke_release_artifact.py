@@ -1,0 +1,301 @@
+"""Smoke human decisions require passed evidence and one canonical release."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from core.research.workflow.contracts import WorkflowCommandKind
+from core.web.services.team_workflow.research_runtime.command_service import (
+    WorkflowCommandError,
+)
+from tests._support.command_helpers import CommandHarness
+from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
+    build_attempt_record,
+    build_command_record,
+    build_event_record,
+    build_run_record,
+)
+
+
+def _seed_smoke_gate(
+    harness: CommandHarness,
+    *,
+    historical_accept: bool = False,
+) -> None:
+    run = replace(
+        build_run_record(
+            last_event_sequence=1,
+            status="blocked" if historical_accept else "running",
+        ),
+        active_node_id="controlled_run" if historical_accept else "smoke_gate",
+        input_snapshot_json=json.dumps(
+            {
+                "snapshotHash": "a" * 64,
+                "sourceCollectionRunId": "sc-run-1",
+            }
+        ),
+        blocked_problem_json=(
+            json.dumps({"code": "formal_run_not_released"})
+            if historical_accept
+            else None
+        ),
+    )
+    smoke_attempt = replace(
+        build_attempt_record(
+            node_run_id="nr-run-test-smoke_gate-a1",
+            node_id="smoke_gate",
+            actor_kind="human",
+            status="succeeded" if historical_accept else "waiting_human",
+            command_id="cmd-smoke-a1",
+        ),
+        pending_action_id="act-smoke-human",
+        finished_at_ms=FIXED_NOW_MS if historical_accept else None,
+    )
+
+    def mutate(uow):
+        uow.repository.insert_run(run)
+        uow.repository.insert_event(
+            build_event_record(sequence=1, event_id="evt-created-run-test")
+        )
+        uow.repository.insert_command(
+            build_command_record(
+                command_id="cmd-smoke-a1",
+                command_kind="start_node",
+                node_id="smoke_gate",
+            )
+        )
+        uow.repository.insert_attempt(smoke_attempt)
+        uow.repository.insert_handoff(
+            handoff_id="ho-smoke-controlled",
+            run_id="run-test",
+            edge_id="e-smoke-controlled",
+            from_node_run_id=smoke_attempt.node_run_id,
+            to_node_id="controlled_run",
+            to_node_run_id=None,
+            gate_kind="human",
+            input_snapshot_hash="a" * 64,
+            offered_at_ms=FIXED_NOW_MS,
+        )
+        uow.repository.update_handoff_status(
+            "ho-smoke-controlled",
+            "waiting_human",
+            FIXED_NOW_MS,
+        )
+        if historical_accept:
+            uow.repository.update_handoff_status(
+                "ho-smoke-controlled",
+                "accepted",
+                FIXED_NOW_MS,
+            )
+        uow.repository.insert_human_task(
+            task_id="ht-smoke",
+            run_id="run-test",
+            node_run_id=smoke_attempt.node_run_id,
+            handoff_id="ho-smoke-controlled",
+            task_kind="gate:smoke_gate",
+            prompt_json='{"nodeId":"smoke_gate"}',
+            created_at_ms=FIXED_NOW_MS,
+        )
+        if historical_accept:
+            uow.repository.update_human_task_decision(
+                "ht-smoke",
+                "accepted",
+                FIXED_NOW_MS,
+                decision_json='{"decision":"accept"}',
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-controlled-a1",
+                    command_kind="start_node",
+                    node_id="controlled_run",
+                    idempotency_key="seed-controlled",
+                )
+            )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="nr-run-test-controlled_run-a1",
+                    node_id="controlled_run",
+                    actor_kind="system",
+                    status="blocked",
+                    command_id="cmd-controlled-a1",
+                    problem_json=json.dumps({"code": "formal_run_not_released"}),
+                )
+            )
+
+    harness.store.submit(mutate, force_flush=True).result(timeout=10)
+
+
+def _authority_state() -> dict[str, dict[str, object] | None]:
+    return {
+        "frozen_protocol": {
+            "teamId": "research-team",
+            "kind": "frozen_protocol",
+            "workflowRunId": "run-test",
+            "sourceCollectionRunId": "sc-run-1",
+            "payload": {
+                "planId": "exp-plan-1",
+                "protocolId": "exp-plan-1",
+                "status": "frozen",
+            },
+        },
+        "smoke_evidence": None,
+    }
+
+
+def _install_smoke_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    state: dict[str, dict[str, object] | None],
+) -> tuple[list[dict[str, object]], list[str]]:
+    writes: list[dict[str, object]] = []
+    executions: list[str] = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime."
+        "smoke_release_artifact.load_scoped_artifact_payload",
+        lambda kind, **kwargs: state.get(kind),
+    )
+
+    def execute_smoke(*, store, run, plan_id, handoff_id):
+        executions.append(plan_id)
+        state["smoke_evidence"] = {
+            "teamId": run.team_id,
+            "kind": "smoke_evidence",
+            "workflowRunId": run.run_id,
+            "sourceCollectionRunId": "sc-run-1",
+            "payload": {
+                "planId": plan_id,
+                "smokeRunId": "smoke-1",
+                "status": "passed",
+                "artifactHash": "f" * 64,
+            },
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime."
+        "smoke_release_artifact._execute_smoke_observation",
+        execute_smoke,
+    )
+
+    def capture_put(team_id: str, **kwargs):
+        writes.append({"teamId": team_id, **kwargs})
+        return {"recordId": kwargs["artifact_identity"], "payload": kwargs["payload"]}
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime."
+        "smoke_release_artifact.put_workflow_artifact",
+        capture_put,
+    )
+    return writes, executions
+
+
+def test_smoke_accept_executes_observation_then_binds_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_smoke_gate(harness)
+        state = _authority_state()
+        writes, executions = _install_smoke_authority(monkeypatch, state)
+
+        receipt = harness.service.submit(
+            harness.request(
+                command=WorkflowCommandKind.RESOLVE_HUMAN_TASK,
+                node_id="smoke_gate",
+                expected_run_version=1,
+                idempotency_key="ui:accept-smoke",
+                payload={"taskId": "ht-smoke", "decision": "accept"},
+            )
+        )
+
+        assert receipt.status == "accepted"
+        assert executions == ["exp-plan-1"]
+        assert len(writes) == 1 and writes[0]["kind"] == "smoke_release"
+        release = writes[0]["payload"]
+        assert isinstance(release, dict)
+        assert release["planId"] == "exp-plan-1"
+        assert release["smokeRunId"] == "smoke-1"
+        assert release["decision"] == "accept"
+        assert release["resolvedBy"] == "u-1"
+        refs = harness.store.read(
+            lambda repo: repo.list_handoff_artifact_refs_for_run("run-test")
+        )
+        assert len(refs) == 1 and refs[0][2] == "smoke_release"
+    finally:
+        harness.close()
+
+
+def test_smoke_failure_keeps_human_task_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_smoke_gate(harness)
+        state = _authority_state()
+        writes, _ = _install_smoke_authority(monkeypatch, state)
+
+        def failed_smoke(**kwargs):
+            state["smoke_evidence"] = {
+                "payload": {
+                    "planId": "exp-plan-1",
+                    "smokeRunId": "smoke-failed",
+                    "status": "failed",
+                }
+            }
+
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_runtime."
+            "smoke_release_artifact._execute_smoke_observation",
+            failed_smoke,
+        )
+
+        with pytest.raises(WorkflowCommandError, match="smoke_evidence_not_passed"):
+            harness.service.submit(
+                harness.request(
+                    command=WorkflowCommandKind.RESOLVE_HUMAN_TASK,
+                    node_id="smoke_gate",
+                    expected_run_version=1,
+                    idempotency_key="ui:accept-failed-smoke",
+                    payload={"taskId": "ht-smoke", "decision": "accept"},
+                )
+            )
+
+        assert writes == []
+        task = harness.store.read(lambda repo: repo.get_human_task("ht-smoke"))
+        assert task is not None and task[6] == "pending"
+    finally:
+        harness.close()
+
+
+def test_controlled_retry_recovers_historical_smoke_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_smoke_gate(harness, historical_accept=True)
+        state = _authority_state()
+        writes, executions = _install_smoke_authority(monkeypatch, state)
+
+        receipt = harness.service.submit(
+            harness.request(
+                command=WorkflowCommandKind.RETRY_NODE,
+                node_id="controlled_run",
+                expected_run_version=1,
+                idempotency_key="ui:retry-controlled-with-smoke-release",
+            )
+        )
+
+        assert receipt.status == "accepted"
+        assert executions == ["exp-plan-1"]
+        assert len(writes) == 1 and writes[0]["kind"] == "smoke_release"
+        latest = harness.store.latest_attempt("run-test", "controlled_run")
+        assert latest is not None and latest.attempt == 2
+        assert latest.status == "starting"
+    finally:
+        harness.close()

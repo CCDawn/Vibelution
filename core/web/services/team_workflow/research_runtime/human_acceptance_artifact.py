@@ -58,6 +58,15 @@ def prepare_command_human_acceptance_artifact(
                 task_id=task_id,
                 resolved_by=str(request.requested_by.actor_id or "").strip(),
             )
+        if task_kind == "gate:smoke_gate":
+            from .smoke_release_artifact import prepare_smoke_release_artifact
+
+            return prepare_smoke_release_artifact(
+                store=store,
+                run=run,
+                task_id=task_id,
+                resolved_by=str(request.requested_by.actor_id or "").strip(),
+            )
     elif (
         request.command is WorkflowCommandKind.RETRY_NODE
         and request.node_id == "hypothesis_design"
@@ -73,6 +82,18 @@ def prepare_command_human_acceptance_artifact(
             store=store,
             run=run,
             target_node_id="smoke_gate",
+            resolved_by=str(request.requested_by.actor_id or "").strip(),
+        )
+    elif (
+        request.command is WorkflowCommandKind.RETRY_NODE
+        and request.node_id == "controlled_run"
+    ):
+        from .smoke_release_artifact import prepare_smoke_release_artifact
+
+        return prepare_smoke_release_artifact(
+            store=store,
+            run=run,
+            target_node_id="controlled_run",
             resolved_by=str(request.requested_by.actor_id or "").strip(),
         )
     else:
