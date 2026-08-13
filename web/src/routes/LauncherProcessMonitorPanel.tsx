@@ -30,12 +30,14 @@ type LauncherProcessMonitorPanelProps = {
   copy: LauncherProcessMonitorCopy;
   rows: LauncherProcessRow[];
   residualCount: number;
+  selectedId?: string;
 };
 
 export function LauncherProcessMonitorPanel({
   copy,
   rows,
   residualCount,
+  selectedId = "",
 }: LauncherProcessMonitorPanelProps) {
   return (
     <section className={styles.panel} data-vui-region="launcher-process-monitor" aria-label={copy.processMonitor}>
@@ -54,7 +56,13 @@ export function LauncherProcessMonitorPanel({
         </div>
         {rows.map((row) => (
           <VTooltip key={row.id} content={row.technical} width="wide">
-            <div className={styles.statusRow} role="row" data-tone={row.tone || "neutral"} tabIndex={0}>
+            <div
+              className={styles.statusRow}
+              role="row"
+              data-tone={row.tone || "neutral"}
+              data-selected={selectedId && (row.id === selectedId || row.id.startsWith(`${selectedId}-`)) ? "true" : "false"}
+              tabIndex={0}
+            >
               <span role="cell"><strong>{row.label}</strong></span>
               <span role="cell">{row.status}</span>
               <span role="cell">{row.pid}</span>

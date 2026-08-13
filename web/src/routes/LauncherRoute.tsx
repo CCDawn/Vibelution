@@ -8,7 +8,6 @@ import {
   getLauncherBranchInstances,
   requestBranchInstanceLifecycle,
   getLauncherStatus,
-  type LauncherBranchInstance,
   getLauncherDeveloperNoiseOverview,
   getLauncherMaintenanceSummary,
   applyLauncherDeveloperCleanup,
@@ -57,7 +56,7 @@ import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
 /** T4: secondary launcher panels load as route packs — keep lifecycle shell first. */
 import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
-import { resolveProcessMonitorTarget } from "./LauncherProcessMonitor.binding";
+import { buildAllInstanceMonitorRows } from "./LauncherProcessMonitor.binding";
 import { LauncherProcessMonitorPanel, type LauncherProcessRow } from "./LauncherProcessMonitorPanel";
 
 const LauncherStartupSettingsPanel = lazy(() =>
@@ -432,59 +431,6 @@ function displayPid(value: unknown) {
 function displayPort(value: unknown) {
   const port = Number(value || 0);
   return Number.isFinite(port) && port > 0 ? String(port) : "-";
-}
-
-function observationProcessRows(
-  instance: LauncherBranchInstance | undefined,
-  copy: LauncherCopy,
-  uiLang: "zh" | "en",
-): LauncherProcessRow[] {
-  if (!instance) {
-    return [];
-  }
-  if (!instance.checkedOut) {
-    return [
-      {
-        id: `${instance.id}-missing`,
-        label: instance.branch || instance.id,
-        status: copy.notCheckedOut,
-        pid: "-",
-        port: "-",
-        ownership: copy.notCheckedOut,
-        detail: copy.instanceNoObservation,
-        technical: instance.id,
-        ok: false,
-        tone: "neutral",
-      },
-    ];
-  }
-  const pids = instance.pids;
-  return [
-    {
-      id: `${instance.id}-backend`,
-      label: uiLang === "zh" ? "后端" : "Backend",
-      status: instance.alive ? humanState("running", uiLang) : humanState("stopped", uiLang),
-      pid: displayPid(pids.backend),
-      port: displayPort(instance.port),
-      ownership: copy.ownedProcess,
-      detail: instance.observedState || copy.instanceNoObservation,
-      technical: `${instance.path} · port ${displayPort(instance.port)}`,
-      ok: instance.alive,
-      tone: instance.alive ? "success" : "neutral",
-    },
-    {
-      id: `${instance.id}-window`,
-      label: uiLang === "zh" ? "窗口" : "Window",
-      status: displayPid(pids.window) === "-" ? humanState("stopped", uiLang) : humanState("running", uiLang),
-      pid: displayPid(pids.window),
-      port: "-",
-      ownership: copy.ownedProcess,
-      detail: instance.displayPath || instance.path,
-      technical: `pid ${displayPid(pids.window)}`,
-      ok: pids.window > 0,
-      tone: pids.window > 0 ? "success" : "neutral",
-    },
-  ];
 }
 
 function residualKindLabel(kind: string, lang: "zh" | "en") {
@@ -1529,20 +1475,12 @@ export function LauncherRoute() {
     refetchInterval: pageVisible ? 20_000 : false,
   });
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
-  const [lastStartedInstanceId, setLastStartedInstanceId] = useState("");
-  const [explicitInstanceSelect, setExplicitInstanceSelect] = useState(false);
   const branchItems = branchInstancesQuery.data?.items ?? [];
   const currentInstanceId = branchInstancesQuery.data?.currentId || "main";
   const selectedBranchId = branchItems.some((item) => item.id === selectedInstanceId)
     ? selectedInstanceId
     : currentInstanceId;
   const selectedBranch = branchItems.find((item) => item.id === selectedBranchId);
-  const monitorBranch = resolveProcessMonitorTarget(branchItems, {
-    selectedId: selectedBranchId,
-    currentId: currentInstanceId,
-    lastStartedId: lastStartedInstanceId,
-    explicitSelect: explicitInstanceSelect,
-  });
   const selectedIsCurrent = !selectedBranch || selectedBranch.current;
   const selectedStartable = Boolean(
     selectedBranch
@@ -1607,9 +1545,7 @@ export function LauncherRoute() {
       });
       const startedId = String(response.instanceId || selectedBranch?.id || currentInstanceId || "").trim();
       if (response.accepted && (operation === "start" || operation === "restart") && startedId) {
-        setLastStartedInstanceId(startedId);
         setSelectedInstanceId(startedId);
-        setExplicitInstanceSelect(false);
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
@@ -2141,15 +2077,29 @@ export function LauncherRoute() {
     return [...ownedRows, ...leftoverRows];
   }, [bundle, componentRows, copy, evidence?.state.updatedAt, lang, launcherStatusDisconnected, locale, residualItems, startupSettings, status, uiLang]);
 
-  const keyStatusRows = statusRows;
-  const inspectSelectedInstance = Boolean(monitorBranch && !monitorBranch.current);
-  const selectedProcessRows = inspectSelectedInstance
-    ? observationProcessRows(monitorBranch, copy, uiLang)
-    : keyStatusRows;
-  const selectedProcessHint = inspectSelectedInstance
-    ? `${copy.selectedInstance}: ${monitorBranch?.shortName || monitorBranch?.branch || monitorBranch?.id}`
-    : copy.processMonitorHint;
-  const selectedResidualCount = inspectSelectedInstance ? 0 : residualCount;
+  const instanceProcessRows = buildAllInstanceMonitorRows(
+    branchItems,
+    {
+      currentId: currentInstanceId,
+      backendPid: bundle?.backend.pid,
+      windowPid: bundle?.browser.windowPid,
+      port: bundle?.backend.port,
+      alive: Boolean(bundle?.backend.alive || bundle?.backend.healthy),
+    },
+    {
+      running: humanState("running", uiLang),
+      stopped: humanState("stopped", uiLang),
+      owned: copy.ownedProcess,
+      windowRunning: uiLang === "zh" ? "窗口运行中" : "Window running",
+      windowStopped: uiLang === "zh" ? "窗口已停止" : "Window stopped",
+    },
+  );
+  const sharedProcessRows = statusRows.filter((row) => (
+    row.id === "launcher_control" || row.id === "runtime_manager" || row.id === "frontend" || row.id.startsWith("residual-")
+  ));
+  const selectedProcessRows = [...instanceProcessRows, ...sharedProcessRows];
+  const selectedProcessHint = uiLang === "zh" ? "全部已打开分支的进程" : "Processes for every checked-out instance";
+  const selectedResidualCount = residualCount;
   const diagnosticStatusRows = statusRows.filter((row) => row.id === "runtime_manager");
   const activeCommand = evidence?.state.activeCommand;
   const recovery = evidence?.recovery;
@@ -2213,7 +2163,7 @@ export function LauncherRoute() {
     { label: copy.proof, value: status?.lifecycleProof.summary || "-" },
     { label: copy.supervisor, value: guardian?.supervisor?.blocking === false && guardian.supervisor.impact ? humanState(guardian.supervisor.impact, uiLang) : guardian?.supervisor?.status || "-" },
     { label: copy.internalMigrationDetails, value: [status?.launcher.mode, guardian?.mode, status?.launcher.controlPlane.nextPhase, guardian?.targetMode].filter(Boolean).join(" | ") || "-" },
-    { label: copy.advancedDetails, value: [...keyStatusRows, ...diagnosticStatusRows].map((row) => `${row.label}: ${row.technical}`).join(" | ") || "-" },
+    { label: copy.advancedDetails, value: [...statusRows, ...diagnosticStatusRows].map((row) => `${row.label}: ${row.technical}`).join(" | ") || "-" },
     { label: copy.scene, value: guardian?.supervisor?.runtimeSceneId || "-" },
     { label: copy.stdout, value: guardian?.supervisor?.stdoutPath || "-" },
     { label: copy.stderr, value: guardian?.supervisor?.stderrPath || "-" },
@@ -2405,10 +2355,7 @@ export function LauncherRoute() {
         copy={copy}
         items={branchItems}
         selectedId={selectedBranchId}
-        onSelect={(id) => {
-          setSelectedInstanceId(id);
-          setExplicitInstanceSelect(true);
-        }}
+        onSelect={setSelectedInstanceId}
       />
       <LauncherProcessMonitorPanel
         copy={{
@@ -2417,6 +2364,7 @@ export function LauncherRoute() {
         }}
         rows={selectedProcessRows}
         residualCount={selectedResidualCount}
+        selectedId={selectedBranchId}
       />
       <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
         <LauncherStartupSettingsPanel
