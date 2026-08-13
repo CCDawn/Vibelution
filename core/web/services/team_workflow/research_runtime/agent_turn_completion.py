@@ -33,6 +33,8 @@ _FAILURE_TERMINAL_STATUSES = frozenset(
     }
 )
 
+DEFAULT_AGENT_TURN_TIMEOUT_MS = 120_000
+
 
 class TurnNotReadyError(RuntimeError):
     """Turn is still running; adapter should requeue rather than fail permanently."""
@@ -46,7 +48,7 @@ def wait_for_agent_turn_terminal(
     session_id: str,
     turn_id: str,
     *,
-    timeout_ms: int = 120_000,
+    timeout_ms: int = DEFAULT_AGENT_TURN_TIMEOUT_MS,
     poll_ms: int = 200,
 ) -> dict[str, Any]:
     """Poll canonical turn completion until terminal success, failure, or timeout."""
@@ -177,7 +179,7 @@ def complete_agent_turn_outputs(
     action: PendingAction,
     handle: AgentTaskHandle,
     input_snapshot: dict[str, Any],
-    timeout_ms: int = 120_000,
+    timeout_ms: int = DEFAULT_AGENT_TURN_TIMEOUT_MS,
     poll_ms: int = 200,
 ) -> list[dict[str, str]]:
     """Wait for turn terminal, reconcile SC stage writeback, collect store refs."""

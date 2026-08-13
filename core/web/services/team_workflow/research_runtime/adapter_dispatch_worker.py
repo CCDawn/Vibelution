@@ -31,6 +31,12 @@ from .domain_ports import DomainPorts
 from .ids import new_id
 
 
+# Adapter execution may synchronously wait for a canonical Agent turn.  The
+# lease must outlive that bounded wait so another Workbench process cannot
+# concurrently reclaim the same action while the first execution is live.
+DEFAULT_ADAPTER_DISPATCH_LEASE_MS = 150_000
+
+
 class AdapterDispatchWorker:
     def __init__(
         self,
@@ -39,7 +45,7 @@ class AdapterDispatchWorker:
         registry: ActionRegistry,
         ports: DomainPorts,
         owner_id: str = "adapter-worker",
-        lease_ms: int = 30_000,
+        lease_ms: int = DEFAULT_ADAPTER_DISPATCH_LEASE_MS,
         now_provider: Callable[[], int] | None = None,
         successor_fn: Callable[[str], tuple[str, ...]] | None = None,
         commit_hook: Callable[[], None] | None = None,

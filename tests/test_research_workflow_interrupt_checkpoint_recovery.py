@@ -13,6 +13,12 @@ from core.research.workflow.challenge_cup_runtime import (
     merge_node_attempts,
 )
 from core.research.workflow.contracts import ExecutionReceipt
+from core.web.services.team_workflow.research_runtime.adapter_dispatch_worker import (
+    DEFAULT_ADAPTER_DISPATCH_LEASE_MS,
+)
+from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+    DEFAULT_AGENT_TURN_TIMEOUT_MS,
+)
 from tests._support.graph_helpers import GraphHarness
 from tests._support.workflow_ledger_helpers import FIXED_NOW_MS
 
@@ -26,6 +32,10 @@ def test_node_attempt_reducer_keeps_each_nodes_highest_durable_attempt() -> None
         "source_extraction": 4,
         "evidence_relations": 2,
     }
+
+
+def test_adapter_lease_outlives_bounded_agent_turn_wait() -> None:
+    assert DEFAULT_ADAPTER_DISPATCH_LEASE_MS > DEFAULT_AGENT_TURN_TIMEOUT_MS
 
 
 def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
