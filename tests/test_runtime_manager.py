@@ -4599,6 +4599,7 @@ def test_runtime_manager_scene_event_backfills_recent_queue_events(tmp_path, mon
     assert recorded[0]["kwargs"]["occurred_at"] == "2026-05-24T10:40:43+00:00"
     assert recorded[0]["kwargs"]["fields"]["runtimeManagerBackfill"] is True
     assert recorded[-1]["kwargs"]["fields"]["runtimeManagerEventAt"] == "2026-05-24T10:41:27+00:00"
+    assert all(event["kwargs"]["refresh_package_if_due"] is False for event in recorded)
 
 
 def test_runtime_manager_event_backfill_reads_only_recent_file_tail(monkeypatch):
@@ -4701,6 +4702,7 @@ def test_runtime_manager_queue_event_does_not_target_recent_completed_package(tm
                 "lifecycle": True,
                 "occurred_at": "2026-05-24T11:19:55+00:00",
                 "allow_recent_completed": False,
+                "refresh_package_if_due": False,
             },
         }
     ]
@@ -4767,6 +4769,7 @@ def test_runtime_manager_scene_event_backfills_to_recent_completed_package(tmp_p
     assert [event["eventCode"] for event in recorded] == ["command_queue.command_queued", "command.failed"]
     assert recorded[0]["kwargs"]["fields"]["runtimeManagerBackfill"] is True
     assert all(event["kwargs"]["fields"]["commandId"] == "cmd-failed" for event in recorded)
+    assert all(event["kwargs"]["refresh_package_if_due"] is False for event in recorded)
 
 
 def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_path):
