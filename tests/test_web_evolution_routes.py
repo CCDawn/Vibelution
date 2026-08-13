@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from core.evaluation import self_evolution_workbench
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService, resolve_chat_dataset_paths
 from core.evaluation.chat_segmenter import ChatTurnRecord
-from core.evaluation.dataset_registry import list_dataset_status
+from core.evaluation.dataset_registry import ensure_dataset_registry, list_dataset_status
 from core.evaluation.self_evolution_candidate_pool import append_candidate_record
 from core.gym import run_gym_collection_episode
 from core.gym.promotion import (
@@ -1918,6 +1918,8 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
         encoding="utf-8",
     )
     monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
+    ensure_dataset_registry(tmp_path)
     monkeypatch.setattr(
         "core.evaluation.dataset_adapters.preflight_environment_contract",
         lambda *args, **kwargs: {
