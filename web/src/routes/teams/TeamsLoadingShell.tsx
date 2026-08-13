@@ -2,11 +2,11 @@ import { LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { VBoardWorkbenchPage, VSkeleton } from "../../components/vui";
+import styles from "./TeamsLoadingShell.styles";
 import {
   TEAMS_BOARD_INSPECTOR_PANE,
   TEAMS_LAYOUT_ID,
   TEAMS_RAIL_PANE,
-  teamsWorkbenchStyles as styles,
 } from "./teamsWorkbenchChrome";
 
 type TeamsLoadingShellProps = {
@@ -39,33 +39,33 @@ function useNarrowLoadingShell(): boolean {
 function LoadingRail({ lang }: { lang: "zh" | "en" }) {
   return (
     <div
-      className="flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden p-2.5"
+      className={styles.rail}
       aria-hidden="true"
       data-vui-region="teams-sidebar"
     >
-      <div className="flex min-h-6 items-center justify-between gap-3">
-        <strong className="text-[13px] font-[760]">{lang === "zh" ? "团队" : "Teams"}</strong>
-        <VSkeleton shape="circle" className="!size-4" />
+      <div className={styles.railHeader}>
+        <strong className={styles.railTitle}>{lang === "zh" ? "团队" : "Teams"}</strong>
+        <VSkeleton shape="circle" className={styles.railHeaderSkeleton} />
       </div>
-      <VSkeleton shape="block" className="!min-h-8 rounded-[var(--radius-control)]" />
-      <div className="grid min-h-0 flex-1 content-start gap-1.5 overflow-hidden">
+      <VSkeleton shape="block" className={styles.railControlSkeleton} />
+      <div className={styles.railList}>
         {Array.from({ length: 5 }, (_, index) => (
           <div
             key={index}
-            className="grid min-h-[4.5rem] gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2.5 py-2"
+            className={styles.railItem}
           >
-            <div className="flex items-center justify-between gap-3">
-              <VSkeleton className={index % 2 ? "!w-[58%]" : "!w-[68%]"} />
-              <VSkeleton className="!w-10" />
+            <div className={styles.railItemHeader}>
+              <VSkeleton className={index % 2 ? styles.railItemTitleAlternate : styles.railItemTitle} />
+              <VSkeleton className={styles.railItemMetric} />
             </div>
-            <VSkeleton className="!w-[72%] opacity-80" />
-            <VSkeleton className="!w-[90%] opacity-70" />
+            <VSkeleton className={styles.railItemPrimaryLine} />
+            <VSkeleton className={styles.railItemSecondaryLine} />
           </div>
         ))}
       </div>
-      <div className="grid gap-1.5">
-        <VSkeleton className="!w-full opacity-70" />
-        <VSkeleton className="!w-[76%] opacity-60" />
+      <div className={styles.railFooter}>
+        <VSkeleton className={styles.railFooterPrimaryLine} />
+        <VSkeleton className={styles.railFooterSecondaryLine} />
       </div>
     </div>
   );
@@ -73,13 +73,13 @@ function LoadingRail({ lang }: { lang: "zh" | "en" }) {
 
 function LoadingToolbar({ label }: { label: string }) {
   return (
-    <div className="flex w-full min-w-0 items-center justify-between gap-3">
-      <div className="grid min-w-0 flex-1 gap-1.5" aria-hidden="true">
-        <VSkeleton className="!w-40" />
-        <VSkeleton className="!w-[min(22rem,68%)] opacity-75" />
+    <div className={styles.toolbar}>
+      <div className={styles.toolbarSkeletons} aria-hidden="true">
+        <VSkeleton className={styles.toolbarTitle} />
+        <VSkeleton className={styles.toolbarSubtitle} />
       </div>
-      <span className="flex shrink-0 items-center gap-2 text-[11px] text-[var(--fg-secondary)]">
-        <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+      <span className={styles.toolbarStatus}>
+        <LoaderCircle className={styles.toolbarSpinner} aria-hidden="true" />
         {label}
       </span>
     </div>
@@ -88,17 +88,17 @@ function LoadingToolbar({ label }: { label: string }) {
 
 function LoadingCanvas({ narrow }: { narrow: boolean }) {
   return (
-    <div className={`${styles.canvas} !h-full !min-h-0 !overflow-hidden !p-4`} aria-hidden="true">
-      <div className="grid h-full min-h-0 place-items-center overflow-hidden">
-        <div className={`grid w-full max-w-4xl gap-6 ${narrow ? "grid-cols-2" : "grid-cols-3"}`}>
+    <div className={styles.canvas} aria-hidden="true">
+      <div className={styles.canvasViewport}>
+        <div className={narrow ? styles.canvasGridNarrow : styles.canvasGridWide}>
           {Array.from({ length: 6 }, (_, index) => (
             <div
               key={index}
-              className="grid min-h-20 min-w-0 content-center gap-2.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-3.5 shadow-[var(--vui-shadow-hairline)]"
+              className={styles.canvasNode}
             >
-              <VSkeleton className={index % 2 ? "!w-[46%]" : "!w-[58%]"} />
-              <VSkeleton className="!w-full opacity-80" />
-              <VSkeleton className="!w-[72%] opacity-65" />
+              <VSkeleton className={index % 2 ? styles.canvasNodeTitleAlternate : styles.canvasNodeTitle} />
+              <VSkeleton className={styles.canvasNodePrimaryLine} />
+              <VSkeleton className={styles.canvasNodeSecondaryLine} />
             </div>
           ))}
         </div>
@@ -109,20 +109,20 @@ function LoadingCanvas({ narrow }: { narrow: boolean }) {
 
 function LoadingInspector({ lang }: { lang: "zh" | "en" }) {
   return (
-    <div className="grid h-full min-h-0 content-start gap-3 overflow-hidden p-3" aria-hidden="true">
-      <div className="flex min-h-6 items-center justify-between gap-3">
-        <strong className="whitespace-nowrap text-[13px] font-[760]">{lang === "zh" ? "检查器" : "Inspector"}</strong>
-        <VSkeleton className="!w-14" />
+    <div className={styles.inspector} aria-hidden="true">
+      <div className={styles.inspectorHeader}>
+        <strong className={styles.inspectorTitle}>{lang === "zh" ? "检查器" : "Inspector"}</strong>
+        <VSkeleton className={styles.inspectorHeaderSkeleton} />
       </div>
       {Array.from({ length: 2 }, (_, index) => (
         <div
           key={index}
-          className="grid gap-2.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3"
+          className={styles.inspectorCard}
         >
-          <VSkeleton className={index ? "!w-[38%]" : "!w-[48%]"} />
-          <VSkeleton className="!w-full opacity-80" />
-          <VSkeleton className="!w-[88%] opacity-70" />
-          <VSkeleton className="!w-[68%] opacity-60" />
+          <VSkeleton className={index ? styles.inspectorCardTitleAlternate : styles.inspectorCardTitle} />
+          <VSkeleton className={styles.inspectorCardPrimaryLine} />
+          <VSkeleton className={styles.inspectorCardSecondaryLine} />
+          <VSkeleton className={styles.inspectorCardTertiaryLine} />
         </div>
       ))}
     </div>
@@ -146,7 +146,7 @@ export function TeamsLoadingShell({ lang }: TeamsLoadingShellProps) {
       title={lang === "zh" ? "团队工作台" : "Team workbench"}
       rail={<LoadingRail lang={lang} />}
       toolbar={<LoadingToolbar label={label} />}
-      boardClassName="!h-full !min-h-0 !overflow-hidden !p-0"
+      boardClassName={styles.board}
       board={<LoadingCanvas narrow={narrow} />}
       aside={narrow ? undefined : <LoadingInspector lang={lang} />}
       role="status"
