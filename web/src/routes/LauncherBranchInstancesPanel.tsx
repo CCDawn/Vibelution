@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import { VButton, VCheckbox, VConfirmDialog, VTooltip } from "../components/vui";
+import { VButton, VCheckbox, VConfirmDialog, VDenseTable, VTooltip } from "../components/vui";
 import type { LauncherOperation } from "../api/types";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
@@ -185,7 +185,6 @@ export function LauncherBranchInstancesPanel({
     <section className={styles.panel} data-vui-region="launcher-branch-instances" aria-label={copy.branchInstances}>
       <div className={styles.panelHeader}>
         <p className={styles.panelEyebrow}>{copy.branchInstances}</p>
-        <strong>{copy.branchInstancesHint}</strong>
       </div>
       <div className={styles.toolbar}>
         <div className={styles.toolbarActions}>
@@ -214,102 +213,123 @@ export function LauncherBranchInstancesPanel({
           </VButton>
         </div>
       </div>
-      <div className={styles.statusTable} role="table" aria-label={copy.branchInstances}>
-        <div className={styles.statusHead} role="row">
-          <span role="columnheader" className={styles.selectCell}>
-            <VCheckbox
-              aria-label={labels.selectPage}
-              isSelected={allPageSelected}
-              isDisabled={pageEligible.length === 0}
-              onChange={togglePage}
-            />
-          </span>
-          <span role="columnheader">{copy.branchColumn}</span>
-          <span role="columnheader">{copy.instanceState}</span>
-          <span role="columnheader">{labels.backend}</span>
-          <span role="columnheader">{labels.window}</span>
-          <span role="columnheader">{copy.instancePath}</span>
-          <span role="columnheader">{labels.actions}</span>
-        </div>
-        {paged.items.map((item) => {
-          const selected = item.id === selectedId;
-          const eligible = isCleanupEligible(item);
-          const checked = eligible && visibleSelected.includes(item.id);
+      <VDenseTable
+        ariaLabel={copy.branchInstances}
+        className={styles.statusTable}
+        resizable
+        rows={paged.items}
+        getRowKey={(item) => item.id}
+        onRowClick={(item) => onSelect(item.id)}
+        getRowState={(item) => {
           const health = instanceHealth(item, live);
-          const windowOpen = instanceWindowOpen(item, live);
-          return (
-            <div
-              key={item.id}
-              className={styles.statusRow}
-              role="row"
-              tabIndex={0}
-              data-tone={health === "running" ? "success" : health === "dirty" ? "warning" : "neutral"}
-              data-selected={selected ? "true" : "false"}
-              aria-selected={selected}
-              onClick={() => onSelect(item.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onSelect(item.id);
-                }
-              }}
-            >
-              <span role="cell" className={styles.selectCell} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                <VCheckbox
-                  aria-label={`${labels.cleanup} ${item.shortName || item.branch || item.id}`}
-                  isSelected={checked}
-                  isDisabled={!eligible}
-                  onChange={(next) => toggleSelected(item, next)}
-                />
-              </span>
-              <span role="cell">
-                <VTooltip content={`${item.shortName || item.branch || item.id} · ${item.branch || item.id} · ${item.path || item.displayPath || item.id}`} width="wide">
-                  <strong>{item.shortName || item.branch || item.id}</strong>
-                </VTooltip>
-              </span>
-              <span role="cell">{instanceHealthLabel(health, zh)}</span>
-              <span role="cell">{formatBackendCell(item, live)}</span>
-              <span role="cell">{windowOpen ? labels.windowOpen : labels.windowClosed}</span>
-              <span role="cell">{item.displayPath || "-"}</span>
-              <span role="cell" className={styles.actionCell} onClick={(event) => event.stopPropagation()}>
-                {canStartInstance(item, live) ? (
-                  <VButton
-                    type="button"
-                    variant="primary"
-                    density="compact"
-                    isDisabled={lifecyclePending}
-                    onPress={() => onLifecycle?.(item.id, "start")}
-                  >
-                    {labels.start}
-                  </VButton>
-                ) : null}
-                {canStopInstance(item, live) ? (
-                  <VButton
-                    type="button"
-                    variant="secondary"
-                    density="compact"
-                    isDisabled={lifecyclePending}
-                    onPress={() => onLifecycle?.(item.id, "stop")}
-                  >
-                    {labels.stop}
-                  </VButton>
-                ) : null}
-                {eligible ? (
-                  <VButton
-                    type="button"
-                    variant="danger"
-                    density="compact"
-                    isDisabled={cleanupMutation.isPending}
-                    onPress={() => askCleanup([item.id])}
-                  >
-                    {labels.cleanup}
-                  </VButton>
-                ) : null}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+          return {
+            selected: item.id === selectedId,
+            tone: health === "running" ? "success" : health === "dirty" ? "warning" : "neutral",
+          };
+        }}
+        columns={[
+          {
+            id: "select",
+            header: (
+              <VCheckbox
+                aria-label={labels.selectPage}
+                isSelected={allPageSelected}
+                isDisabled={pageEligible.length === 0}
+                onChange={togglePage}
+              />
+            ),
+            align: "center",
+            width: 36,
+            minWidth: 36,
+            resizable: false,
+            truncate: false,
+            className: styles.selectCell,
+            render: (item) => {
+              const eligible = isCleanupEligible(item);
+              return (
+                <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                  <VCheckbox
+                    aria-label={`${labels.cleanup} ${item.shortName || item.branch || item.id}`}
+                    isSelected={eligible && visibleSelected.includes(item.id)}
+                    isDisabled={!eligible}
+                    onChange={(next) => toggleSelected(item, next)}
+                  />
+                </span>
+              );
+            },
+          },
+          {
+            id: "branch",
+            header: copy.branchColumn,
+            width: 188,
+            minWidth: 96,
+            render: (item) => (
+              <VTooltip content={`${item.shortName || item.branch || item.id} · ${item.branch || item.id} · ${item.path || item.displayPath || item.id}`} width="wide">
+                <span className={styles.branchName}>{item.shortName || item.branch || item.id}</span>
+              </VTooltip>
+            ),
+          },
+          {
+            id: "state",
+            header: copy.instanceState,
+            width: 88,
+            minWidth: 64,
+            render: (item) => instanceHealthLabel(instanceHealth(item, live), zh),
+          },
+          {
+            id: "backend",
+            header: labels.backend,
+            width: 112,
+            minWidth: 72,
+            render: (item) => formatBackendCell(item, live),
+          },
+          {
+            id: "window",
+            header: labels.window,
+            width: 56,
+            minWidth: 44,
+            render: (item) => (instanceWindowOpen(item, live) ? labels.windowOpen : labels.windowClosed),
+          },
+          {
+            id: "path",
+            header: copy.instancePath,
+            width: 220,
+            minWidth: 96,
+            render: (item) => item.displayPath || "-",
+          },
+          {
+            id: "actions",
+            header: labels.actions,
+            align: "right",
+            width: 176,
+            minWidth: 120,
+            truncate: false,
+            className: styles.actionCell,
+            render: (item) => {
+              const eligible = isCleanupEligible(item);
+              return (
+                <span className={styles.actionButtons} onClick={(event) => event.stopPropagation()}>
+                  {canStartInstance(item, live) ? (
+                    <VButton type="button" variant="primary" density="compact" isDisabled={lifecyclePending} onPress={() => onLifecycle?.(item.id, "start")}>
+                      {labels.start}
+                    </VButton>
+                  ) : null}
+                  {canStopInstance(item, live) ? (
+                    <VButton type="button" variant="secondary" density="compact" isDisabled={lifecyclePending} onPress={() => onLifecycle?.(item.id, "stop")}>
+                      {labels.stop}
+                    </VButton>
+                  ) : null}
+                  {eligible ? (
+                    <VButton type="button" variant="danger" density="compact" isDisabled={cleanupMutation.isPending} onPress={() => askCleanup([item.id])}>
+                      {labels.cleanup}
+                    </VButton>
+                  ) : null}
+                </span>
+              );
+            },
+          },
+        ]}
+      />
       <VConfirmDialog
         open={pendingIds !== null}
         onOpenChange={(open) => {
