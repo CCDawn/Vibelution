@@ -58,6 +58,36 @@ export type LauncherStatus = Omit<BaseLauncherStatus, "settings"> & {
   };
 };
 
+export type LauncherBranchInstanceRuntime = {
+  lifecycleState: "closed" | "starting" | "running" | "stopping" | "restarting" | "partial" | "error";
+  desiredState: string;
+  observedState: string;
+  phase: string;
+  backend: {
+    alive: boolean;
+    healthy: boolean;
+    listening: boolean;
+    port: number;
+    portReserved: boolean;
+    portConflict: boolean;
+    pid: number;
+  };
+  frontend: {
+    mode: "bundled_static_dist" | "dev_server" | string;
+    ready: boolean;
+  };
+  window: {
+    open: boolean;
+    pid: number;
+    title: string;
+    titleObserved: boolean;
+  };
+  error?: {
+    code: string;
+    message: string;
+  };
+};
+
 export type LauncherBranchInstance = {
   id: string;
   kind: "main" | "worktree" | "local_branch" | "retired" | string;
@@ -89,6 +119,9 @@ export type LauncherBranchInstance = {
   mergedToMain?: boolean;
   cleanupEligible?: boolean;
   cleanupRisks?: string[];
+  runtime: LauncherBranchInstanceRuntime;
+  startable: boolean;
+  startBlockReason?: string;
 };
 
 export type LauncherBranchInstanceCleanupResult = {

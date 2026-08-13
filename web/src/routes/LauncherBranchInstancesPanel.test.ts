@@ -5,11 +5,14 @@ import panelSource from "./LauncherBranchInstancesPanel.tsx?raw";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
   canStartInstance,
+  canStopInstance,
   cleanupRiskLabels,
-  formatBackendCell,
-  instanceHealth,
-  instanceHealthLabel,
-  instanceWindowOpen,
+  formatBackendStatus,
+  formatFrontendStatus,
+  formatGitStatus,
+  formatWorkbenchStatus,
+  groupBranchInstances,
+  instanceRuntimeState,
   isCleanupEligible,
   paginateItems,
 } from "./LauncherBranchInstancesPanel.model";
@@ -27,51 +30,174 @@ function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBran
     dirty: false,
     checkedOut: true,
     alive: false,
-    observedState: "idle",
+    observedState: "closed",
     port: 0,
     pids: { backend: 0, window: 0, manager: 0 },
     promotable: true,
     shortName: "task",
+    workbenchTitle: "task 台",
+    runtime: {
+      lifecycleState: "closed",
+      desiredState: "closed",
+      observedState: "closed",
+      phase: "steady",
+      backend: {
+        alive: false,
+        healthy: false,
+        listening: false,
+        port: 0,
+        portReserved: false,
+        portConflict: false,
+        pid: 0,
+      },
+      frontend: { mode: "bundled_static_dist", ready: true },
+      window: { open: false, pid: 0, title: "task 台", titleObserved: false },
+    },
+    startable: true,
+    startBlockReason: "",
     ...overrides,
   };
 }
 
 describe("LauncherBranchInstancesPanel contracts", () => {
-  it("keeps the product table on VUI primitives and a confirm dialog", () => {
+  it("keeps the two primary sections on VUI primitives", () => {
     expect(panelSource).toContain("from \"../components/vui\"");
+    expect(panelSource).toContain("正在运行");
+    expect(panelSource).toContain("可启动");
+    expect(panelSource).toContain("Launcher 控制窗口");
+    expect(panelSource).toContain("Workbench 窗口");
+    expect(panelSource).toContain("启动工作台");
+    expect(panelSource).toContain("<details");
+    expect(panelSource).toContain("维护与清理");
     expect(panelSource).toContain("<VButton");
     expect(panelSource).toContain("<VCheckbox");
     expect(panelSource).toContain("<VConfirmDialog");
     expect(panelSource).toContain("<VDenseTable");
     expect(panelSource).toContain("resizable");
-    expect(panelSource).toContain("fill: true");
-    expect(panelSource).not.toContain("copy.branchInstancesHint");
-    expect(panelSource).not.toContain("<strong>{copy.branchInstancesHint}</strong>");
-    expect(panelSource).not.toContain("TeamSourcePagination");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);
     expect(panelSource).not.toMatch(/<button\b/);
     expect(BRANCH_INSTANCE_PAGE_SIZE).toBe(8);
   });
 
-  it("pages every instance at 8 per page and keeps main on page 1", () => {
-    const items = [
-      instance({ id: "main", kind: "main", branch: "main", current: true, shortName: "主" }),
-      ...Array.from({ length: 10 }, (_, index) => instance({
-        id: `branch:${index + 1}`,
-        kind: "local_branch",
-        branch: `codex/item-${index + 1}`,
-        shortName: `item-${index + 1}`,
-      })),
-    ];
+  it("keeps active, transitional, partial, and failed instances in the running section", () => {
+    const running = instance({
+      id: "main",
+      kind: "main",
+      branch: "main",
+      current: true,
+      startable: false,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "running",
+        backend: {
+          ...instance().runtime.backend,
+          alive: true,
+          healthy: true,
+          listening: true,
+          port: 8002,
+          pid: 1200,
+        },
+        window: { open: true, pid: 1300, title: "main 台", titleObserved: true },
+      },
+    });
+    const partial = instance({
+      id: "worktree:partial",
+      shortName: "partial",
+      startable: false,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "partial",
+        window: { open: true, pid: 1400, title: "partial 台", titleObserved: true },
+      },
+    });
+    const failed = instance({
+      id: "worktree:failed",
+      shortName: "failed",
+      startable: false,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "error",
+        error: { code: "registry_failed", message: "上次启动失败" },
+      },
+    });
+    const startable = instance({ id: "worktree:startable", shortName: "startable" });
+    const retired = instance({
+      id: "retired:old",
+      kind: "retired",
+      checkedOut: false,
+      startable: false,
+      startBlockReason: "unsupported_kind",
+    });
 
-    const first = paginateItems(items, 1);
-    const second = paginateItems(items, 2);
+    const groups = groupBranchInstances(
+      [startable, retired, partial, running, failed],
+      { instanceId: startable.id, operation: "start" },
+    );
 
-    expect(first.pageCount).toBe(2);
-    expect(first.items).toHaveLength(8);
-    expect(first.items[0]?.id).toBe("main");
-    expect(second.items).toHaveLength(3);
+    expect(groups.running.map((item) => item.id)).toEqual([
+      "main",
+      "worktree:failed",
+      "worktree:partial",
+      "worktree:startable",
+    ]);
+    expect(groups.startable).toEqual([]);
+    expect(groups.maintenance.map((item) => item.id)).toEqual(["retired:old"]);
+    expect(instanceRuntimeState(startable, { instanceId: startable.id, operation: "start" })).toBe("starting");
+  });
+
+  it("does not present a reserved port as a running backend", () => {
+    const stopped = instance({
+      port: 8005,
+      runtime: {
+        ...instance().runtime,
+        backend: { ...instance().runtime.backend, port: 8005, portReserved: true },
+      },
+    });
+    const running = instance({
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "running",
+        backend: {
+          ...instance().runtime.backend,
+          alive: true,
+          healthy: true,
+          listening: true,
+          port: 8002,
+          pid: 1200,
+        },
+      },
+      startable: false,
+    });
+
+    expect(formatBackendStatus(stopped, true)).toBe("未运行");
+    expect(formatBackendStatus(running, true)).toBe("健康 · :8002");
+    expect(formatFrontendStatus(stopped, true)).toBe("内置模式 · 已构建");
+    expect(formatFrontendStatus(running, true)).toBe("内置资源就绪");
+  });
+
+  it("shows the Workbench title, window state, and Git state independently", () => {
+    const dirty = instance({
+      dirty: true,
+      mergedToMain: false,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "partial",
+        window: { open: true, pid: 2200, title: "实际 task 台", titleObserved: true },
+      },
+      startable: false,
+    });
+
+    expect(formatWorkbenchStatus(dirty, true)).toBe("实际 task 台 · 已打开");
+    expect(formatGitStatus(dirty, true)).toBe("有未提交 · 未合入 main");
+    expect(canStartInstance(dirty)).toBe(false);
+    expect(canStopInstance(dirty)).toBe(true);
+  });
+
+  it("pages startable or maintenance lists at 8 rows", () => {
+    const items = Array.from({ length: 11 }, (_, index) => instance({ id: `worktree:${index + 1}` }));
+    expect(paginateItems(items, 1).items).toHaveLength(8);
+    expect(paginateItems(items, 2).items).toHaveLength(3);
     expect(paginateItems(items, 99).page).toBe(2);
   });
 
@@ -98,35 +224,5 @@ describe("LauncherBranchInstancesPanel contracts", () => {
       "将先停止再拆除运行中的实例",
       "将删除尚未合入 main 的本地提交",
     ]);
-  });
-
-  it("uses one Chinese health label and backend cell per instance", () => {
-    const running = instance({
-      id: "main",
-      kind: "main",
-      current: true,
-      alive: true,
-      port: 8002,
-      pids: { backend: 14220, window: 0, manager: 0 },
-      shortName: "主",
-    });
-    const dirty = instance({ dirty: true, port: 8001, shortName: "timing" });
-    expect(instanceHealthLabel(instanceHealth(running), true)).toBe("运行中");
-    expect(instanceHealthLabel(instanceHealth(dirty), true)).toBe("有未提交");
-    expect(formatBackendCell(running)).toBe("14220 · 8002");
-    expect(instanceWindowOpen(running, { currentId: "main", windowOpen: true })).toBe(true);
-    expect(panelSource).toContain("onLifecycle");
-    expect(panelSource).not.toContain("HEAD");
-  });
-
-  it("lets Start reopen a running isolated instance that has no window", () => {
-    const isolated = instance({
-      alive: true,
-      port: 8004,
-      pids: { backend: 5216, window: 0, manager: 0 },
-    });
-    expect(instanceWindowOpen(isolated)).toBe(false);
-    expect(canStartInstance(isolated)).toBe(true);
-    expect(canStartInstance({ ...isolated, pids: { backend: 5216, window: 4242, manager: 0 } })).toBe(false);
   });
 });

@@ -1103,7 +1103,7 @@ export function LauncherRoute() {
         launcherControlPort: "Launcher 端口",
         launcherControlPortHint: "本页控制面端口，不是某个分支实例的端口。",
         backendPort: "默认后端",
-        backendPortHint: "启动主项目时的工作台后端默认值。上面表格「实例端口」是各分支当前占用。",
+        backendPortHint: "启动主项目时的工作台后端默认值；分支区只在后端实际运行时显示监听端口。",
         frontendPort: "开发前端",
         frontendPortHint: "Vite 开发热更新端口。打包工作台走实例后端，不走这里。",
         windowSize: "窗口尺寸",
@@ -1365,7 +1365,7 @@ export function LauncherRoute() {
         launcherControlPort: "Launcher port",
         launcherControlPortHint: "Control-plane port for this Launcher page, not a branch instance port.",
         backendPort: "Default backend",
-        backendPortHint: "Default workbench backend when starting the main project. The table “Instance port” shows what each branch currently uses.",
+        backendPortHint: "Default workbench backend when starting the main project. Branch rows show a port only when the backend is actually running.",
         frontendPort: "Dev frontend",
         frontendPortHint: "Vite dev-server port. Packaged workbench uses the instance backend, not this port.",
         windowSize: "Window size",
@@ -1759,6 +1759,15 @@ export function LauncherRoute() {
   const bundleObserved = String(bundle?.observedState || "").toLowerCase();
   const launcherStatusDisconnected = statusQuery.isError && isLauncherStatusNetworkDisconnect(statusQuery.error);
   const launcherControlLimited = statusQuery.isError && isControlTokenError(statusQuery.error);
+  const pendingBranchOperation = controlMutation.isPending && controlMutation.variables
+    ? (() => {
+        const request = resolveControlRequest(controlMutation.variables);
+        return {
+          instanceId: request.instanceId,
+          operation: request.operation === "force-stop" ? "stop" : request.operation,
+        } as const;
+      })()
+    : undefined;
   const lifecycleDisplay = resolveLifecycleDisplay(status, copy, { disconnected: launcherStatusDisconnected, controlLimited: launcherControlLimited });
   const projectIsOpen = lifecycleDisplay.state === "running";
   const projectIsPartial = lifecycleDisplay.state === "partial";
@@ -2300,14 +2309,9 @@ export function LauncherRoute() {
         items={branchItems}
         selectedId={selectedBranchId}
         onSelect={setSelectedInstanceId}
-        live={{
-          currentId: currentInstanceId,
-          backendPid: bundle?.backend.pid,
-          windowPid: bundle?.browser.windowPid,
-          port: bundle?.backend.port,
-          alive: Boolean(bundle?.backend.alive || bundle?.backend.healthy),
-          windowOpen: Boolean(bundle?.browser.alive || (bundle?.browser.windowPid || 0) > 0),
-        }}
+        launcherTitle={branchInstancesQuery.data?.currentLauncherTitle}
+        launcherOnline={Boolean(status && !launcherStatusDisconnected && !launcherControlLimited)}
+        pendingOperation={pendingBranchOperation}
         lifecyclePending={controlMutation.isPending}
         onLifecycle={(instanceId, operation) => {
           setSelectedInstanceId(instanceId);

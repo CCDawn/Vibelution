@@ -35,7 +35,7 @@ export function inferCleanupRisks(item: LauncherBranchInstance): string[] {
   if (item.alive) {
     risks.push("stop_then_remove");
   }
-  if (item.kind !== "retired" && !item.mergedToMain && (item.head || item.branch)) {
+  if (item.mergedToMain === false) {
     risks.push("delete_unmerged");
   }
   return risks;
@@ -46,98 +46,179 @@ export function cleanupRiskLabels(item: LauncherBranchInstance, isZh: boolean): 
   return inferCleanupRisks(item).map((code) => labels[code] || code);
 }
 
-export type InstanceHealth = "running" | "stopped" | "dirty" | "not_open";
+export type InstanceRuntimeState = "starting" | "running" | "partial" | "stopping" | "restarting" | "failed" | "stopped";
 
-export type InstanceLiveOverlay = {
-  currentId?: string;
-  backendPid?: number;
-  windowPid?: number;
-  port?: number;
-  alive?: boolean;
-  windowOpen?: boolean;
+export type InstancePendingOperation = {
+  instanceId: string;
+  operation: "start" | "stop" | "restart";
 };
 
-export function applyLiveOverlay(item: LauncherBranchInstance, live?: InstanceLiveOverlay): LauncherBranchInstance {
-  if (!live || !(item.current || item.id === live.currentId)) {
-    return item;
+export type BranchInstanceGroups = {
+  running: LauncherBranchInstance[];
+  startable: LauncherBranchInstance[];
+  maintenance: LauncherBranchInstance[];
+};
+
+export function instanceWindowOpen(item: LauncherBranchInstance): boolean {
+  return Boolean(item.runtime.window.open);
+}
+
+export function instanceRuntimeState(
+  item: LauncherBranchInstance,
+  pending?: InstancePendingOperation,
+): InstanceRuntimeState {
+  if (pending?.instanceId === item.id) {
+    if (pending.operation === "stop") {
+      return "stopping";
+    }
+    return pending.operation === "restart" ? "restarting" : "starting";
   }
-  return {
-    ...item,
-    alive: live.alive ?? item.alive,
-    port: live.port && live.port > 0 ? live.port : item.port,
-    pids: {
-      backend: live.backendPid && live.backendPid > 0 ? live.backendPid : item.pids?.backend || 0,
-      window: live.windowPid && live.windowPid > 0 ? live.windowPid : item.pids?.window || 0,
-      manager: item.pids?.manager || 0,
-    },
+  const states: Record<LauncherBranchInstance["runtime"]["lifecycleState"], InstanceRuntimeState> = {
+    closed: "stopped",
+    starting: "starting",
+    running: "running",
+    stopping: "stopping",
+    restarting: "restarting",
+    partial: "partial",
+    error: "failed",
   };
+  return states[item.runtime.lifecycleState];
 }
 
-export function instanceHealth(item: LauncherBranchInstance, live?: InstanceLiveOverlay): InstanceHealth {
-  const merged = applyLiveOverlay(item, live);
-  if (item.kind === "local_branch" || item.kind === "retired" || !item.checkedOut) {
-    return "not_open";
-  }
-  if (merged.alive) {
-    return "running";
-  }
-  if (item.dirty) {
-    return "dirty";
-  }
-  return "stopped";
-}
-
-export function instanceHealthLabel(health: InstanceHealth, isZh: boolean): string {
+export function instanceRuntimeStateLabel(state: InstanceRuntimeState, isZh: boolean): string {
   if (isZh) {
     return {
-      running: "运行中",
+      starting: "启动中",
+      running: "正常运行",
+      partial: "部分运行",
+      stopping: "停止中",
+      restarting: "重启中",
+      failed: "需要处理",
       stopped: "已停止",
-      dirty: "有未提交",
-      not_open: "未打开",
-    }[health];
+    }[state];
   }
   return {
+    starting: "Starting",
     running: "Running",
+    partial: "Partially running",
+    stopping: "Stopping",
+    restarting: "Restarting",
+    failed: "Needs attention",
     stopped: "Stopped",
-    dirty: "Uncommitted",
-    not_open: "Not opened",
-  }[health];
+  }[state];
 }
 
-export function formatBackendCell(item: LauncherBranchInstance, live?: InstanceLiveOverlay): string {
-  const merged = applyLiveOverlay(item, live);
-  const pid = Number(merged.pids?.backend || 0);
-  const port = Number(merged.port || 0);
-  if (pid <= 0 && port <= 0) {
-    return "-";
-  }
-  if (pid > 0 && port > 0) {
-    return `${pid} · ${port}`;
-  }
-  return pid > 0 ? String(pid) : String(port);
+export function isOperableInstance(item: LauncherBranchInstance): boolean {
+  return Boolean(item.checkedOut && (item.kind === "main" || item.kind === "worktree"));
 }
 
-export function instanceWindowOpen(item: LauncherBranchInstance, live?: InstanceLiveOverlay): boolean {
-  const merged = applyLiveOverlay(item, live);
-  if (Number(merged.pids?.window || 0) > 0) {
-    return true;
-  }
-  return Boolean(item.current && live?.windowOpen);
+export function isStartableInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+  return Boolean(item.startable && isOperableInstance(item) && instanceRuntimeState(item, pending) === "stopped");
 }
 
-export function canStartInstance(item: LauncherBranchInstance, live?: InstanceLiveOverlay): boolean {
-  if (!item.checkedOut || item.kind === "retired" || item.kind === "local_branch") {
+function compareInstances(a: LauncherBranchInstance, b: LauncherBranchInstance): number {
+  if (a.current !== b.current) {
+    return a.current ? -1 : 1;
+  }
+  if (a.alive !== b.alive) {
+    return a.alive ? -1 : 1;
+  }
+  return String(a.shortName || a.branch || a.id).localeCompare(String(b.shortName || b.branch || b.id));
+}
+
+export function groupBranchInstances(
+  items: readonly LauncherBranchInstance[],
+  pending?: InstancePendingOperation,
+): BranchInstanceGroups {
+  const groups: BranchInstanceGroups = { running: [], startable: [], maintenance: [] };
+  items.forEach((item) => {
+    if (instanceRuntimeState(item, pending) !== "stopped") {
+      groups.running.push(item);
+    } else if (isStartableInstance(item, pending)) {
+      groups.startable.push(item);
+    } else {
+      groups.maintenance.push(item);
+    }
+  });
+  groups.running.sort(compareInstances);
+  groups.startable.sort(compareInstances);
+  groups.maintenance.sort(compareInstances);
+  return groups;
+}
+
+function withPort(label: string, port: number): string {
+  return port > 0 ? `${label} · :${port}` : label;
+}
+
+export function formatBackendStatus(item: LauncherBranchInstance, isZh: boolean): string {
+  const backend = item.runtime.backend;
+  const port = Number(backend.port || 0);
+  if (backend.portConflict) {
+    return withPort(isZh ? "端口冲突" : "Port conflict", port);
+  }
+  if (!backend.alive && !backend.listening) {
+    return isZh ? "未运行" : "Not running";
+  }
+  if (backend.alive && backend.healthy && backend.listening) {
+    return withPort(isZh ? "健康" : "Healthy", port);
+  }
+  return withPort(isZh ? "需检查" : "Check required", port);
+}
+
+export function formatFrontendStatus(item: LauncherBranchInstance, isZh: boolean): string {
+  const frontend = item.runtime.frontend;
+  const stopped = item.runtime.lifecycleState === "closed";
+  if (String(frontend.mode).includes("dev")) {
+    if (stopped) {
+      return isZh ? "Dev Server 模式" : "Dev server mode";
+    }
+    return frontend.ready
+      ? (isZh ? "Dev Server 就绪" : "Dev server ready")
+      : (isZh ? "Dev Server 异常" : "Dev server unavailable");
+  }
+  if (stopped) {
+    return frontend.ready
+      ? (isZh ? "内置模式 · 已构建" : "Bundled · Built")
+      : (isZh ? "内置模式 · 启动时构建" : "Bundled · Build on start");
+  }
+  return frontend.ready
+    ? (isZh ? "内置资源就绪" : "Bundled assets ready")
+    : (isZh ? "内置资源缺失" : "Bundled assets missing");
+}
+
+export function formatWorkbenchStatus(item: LauncherBranchInstance, isZh: boolean): string {
+  const title = String(item.runtime.window.title || item.workbenchTitle || `${item.shortName || item.branch || item.id}${isZh ? " 台" : " Workbench"}`);
+  return `${title} · ${instanceWindowOpen(item) ? (isZh ? "已打开" : "Open") : (isZh ? "未打开" : "Closed")}`;
+}
+
+export function formatGitStatus(item: LauncherBranchInstance, isZh: boolean): string {
+  const states: string[] = [];
+  if (item.dirty) {
+    states.push(isZh ? "有未提交" : "Uncommitted");
+  }
+  if (item.mergedToMain === false) {
+    states.push(isZh ? "未合入 main" : "Not merged to main");
+  }
+  return states.length > 0 ? states.join(" · ") : (isZh ? "干净" : "Clean");
+}
+
+export function canRequestOpenInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+  if (!isOperableInstance(item)) {
     return false;
   }
-  const health = instanceHealth(item, live);
-  if (health !== "running") {
-    return true;
-  }
-  return !instanceWindowOpen(item, live);
+  return !["starting", "stopping", "restarting"].includes(instanceRuntimeState(item, pending));
 }
 
-export function canStopInstance(item: LauncherBranchInstance, live?: InstanceLiveOverlay): boolean {
-  return instanceHealth(item, live) === "running";
+export function canStartInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+  return isStartableInstance(item, pending)
+    || (canRequestOpenInstance(item, pending) && !instanceWindowOpen(item));
+}
+
+export function canStopInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+  const backend = item.runtime.backend;
+  return isOperableInstance(item)
+    && !["starting", "stopping", "restarting"].includes(instanceRuntimeState(item, pending))
+    && Boolean(backend.alive || backend.listening || instanceWindowOpen(item));
 }
 
 export function paginateItems<T>(items: readonly T[], page: number, pageSize = BRANCH_INSTANCE_PAGE_SIZE) {
