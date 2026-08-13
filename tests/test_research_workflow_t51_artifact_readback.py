@@ -182,6 +182,118 @@ def test_read_back_rejects_forged_team_run_and_hash(
     assert read_domain_artifact(forged_hash) is None
 
 
+def test_knowledge_draft_readback_uses_scoped_authority_and_preserves_old_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services.team_workflow.research_runtime.agent_turn_completion import (
+        collect_required_artifact_refs,
+    )
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        load_scoped_artifact_payload,
+        read_domain_artifact,
+    )
+
+    candidates = [
+        _knowledge_draft_candidate(
+            candidate_id="draft-1",
+            team_id="team-a",
+            source_collection_run_id="sc-run-1",
+            workflow_run_id="wf-run-1",
+            updated_at="2026-08-13T10:00:00Z",
+        )
+    ]
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
+        lambda team_id, **_: {"teamId": team_id, "candidates": list(candidates)},
+    )
+
+    payload = load_scoped_artifact_payload(
+        "knowledge_package_draft",
+        team_id="team-a",
+        authority_run_id="sc-run-1",
+        workflow_run_id="wf-run-1",
+    )
+    assert payload is not None
+    assert payload["candidateId"] == "draft-1"
+    assert payload["draft"]["sourceTrace"]["sourceCollectionRunId"] == "sc-run-1"
+    assert "knowledgeIngestion" not in payload
+
+    refs = collect_required_artifact_refs(
+        "knowledge_ingestion",
+        team_id="team-a",
+        workflow_run_id="wf-run-1",
+        source_collection_run_id="sc-run-1",
+    )
+    assert len(refs) == 1
+    assert refs[0]["kind"] == "knowledge_package_draft"
+    old_ref = refs[0]["canonicalRef"]
+    assert read_domain_artifact(old_ref) is not None
+
+    candidates.append(
+        _knowledge_draft_candidate(
+            candidate_id="draft-2",
+            team_id="team-a",
+            source_collection_run_id="sc-run-1",
+            workflow_run_id="wf-run-1",
+            updated_at="2026-08-13T11:00:00Z",
+        )
+    )
+    assert read_domain_artifact(old_ref) is not None
+    assert (
+        load_scoped_artifact_payload(
+            "knowledge_package_draft",
+            team_id="team-b",
+            authority_run_id="sc-run-1",
+            workflow_run_id="wf-run-1",
+        )
+        is None
+    )
+    assert (
+        load_scoped_artifact_payload(
+            "knowledge_package_draft",
+            team_id="team-a",
+            authority_run_id="sc-run-other",
+            workflow_run_id="wf-run-other",
+        )
+        is None
+    )
+
+
+def _knowledge_draft_candidate(
+    *,
+    candidate_id: str,
+    team_id: str,
+    source_collection_run_id: str,
+    workflow_run_id: str,
+    updated_at: str,
+) -> dict[str, object]:
+    return {
+        "candidateId": candidate_id,
+        "candidateType": "review_record",
+        "teamId": team_id,
+        "currentState": "official_synced",
+        "updatedAt": updated_at,
+        "metadata": {
+            "taskType": "steward_pack_draft",
+            "validation": {"valid": True, "schemaVersion": 1},
+            "knowledgeIngestion": {
+                "status": "official_synced",
+                "knowledgeBaseId": "team:team-a:kb-1",
+                "proposalId": f"proposal-{candidate_id}",
+            },
+            "output": {
+                "title": f"Knowledge draft {candidate_id}",
+                "claims": [{"claim": f"claim-{candidate_id}"}],
+                "sourceTrace": {
+                    "teamId": team_id,
+                    "sourceCollectionRunId": source_collection_run_id,
+                    "workflowRunId": workflow_run_id,
+                },
+            },
+        },
+    }
+
+
 def test_agent_verify_blocks_when_required_outputs_missing() -> None:
     ports = FakeDomainPorts()
     ports.turn_results_by_action["act-empty"] = []  # force empty refs
