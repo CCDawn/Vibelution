@@ -817,14 +817,13 @@ def _ensure_knowledge_expansion_team_role_agent(role: dict[str, Any], *, session
 
 
 def _agent_direct_session_available(agent: dict[str, Any], *, session_service: Any) -> bool:
-    s = _service()
     session_id = str(agent.get("directSessionId") or "").strip()
     if not session_id:
         return False
     try:
-        return bool(session_service.get_session_detail(session_id))
+        return not bool(session_service._is_session_workspace_intentionally_deleted(session_id))
     except Exception:
-        return False
+        return True
 
 
 def _find_challenge_cup_research_team_agent(role_name: str) -> dict[str, Any] | None:

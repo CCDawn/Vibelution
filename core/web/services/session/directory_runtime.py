@@ -31,6 +31,9 @@ _STORE: ConversationStore | None = None
 _PROJECT_ROOT: Path | None = None
 _STATUS: "SessionDirectoryRuntimeStatus | None" = None
 STARTING_WAIT_SECONDS = 30.0
+# List/query must not block HTTP on startup; an empty page is preferable to a
+# 30s hang, and callers must not fall back to discarded JSON.
+LIST_QUERY_STARTUP_WAIT_SECONDS = 0.0
 
 
 @dataclass(frozen=True)
@@ -143,6 +146,7 @@ def initialize_session_directory_runtime(
                 store,
                 root,
             )
+        _restore_missing_personal_direct_sessions(root)
         status = SessionDirectoryRuntimeStatus(
             status="ready",
             schema_version=int(metadata.get("schemaVersion") or 0),
@@ -251,8 +255,6 @@ def _discard_legacy_sessions_once(
             payload["updated_at"] = session_svc._now_timestamp()
             save_chat_state(project_root, payload)
 
-        _clear_agent_direct_session_bindings(project_root)
-
         for session_id in session_ids:
             try:
                 session_svc._set_session_running(session_id, False)
@@ -288,31 +290,77 @@ def _discard_legacy_sessions_once(
         _LEGACY_DISCARD_IN_PROGRESS.clear()
 
 
-def _clear_agent_direct_session_bindings(project_root: Path) -> None:
-    from core.web.services import agent_directory_service
+def _restore_missing_personal_direct_sessions(project_root: Path) -> int:
+    """Bind empty personal chat Agents to a Store-backed direct session.
+
+    Team-private Agents stay with system-team bootstrap. This must not call
+    ``get_session_detail``; ``ensure_agent_direct_session`` returns a lightweight
+    payload after the cutover.
+    """
+
+    from core.web.services import agent_directory_service, session_service as session_svc
 
     if agent_directory_service.PROJECT_ROOT != project_root:
         agent_directory_service.PROJECT_ROOT = project_root
+    previous_root = session_svc.PROJECT_ROOT
+    session_svc.PROJECT_ROOT = project_root
+    restored = 0
     try:
-        with agent_directory_service._STATE_LOCK:
-            state = agent_directory_service.load_state()
-            agents = state.get("agents")
-            if not isinstance(agents, list):
-                return
-            changed = False
-            for agent in agents:
-                if not isinstance(agent, dict):
-                    continue
-                if str(agent.get("directSessionId") or "").strip():
-                    agent["directSessionId"] = ""
-                    changed = True
-            if changed:
-                agent_directory_service.save_state(state)
+        state = agent_directory_service.load_state()
+        hidden_kinds = {
+            agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+            agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+        }
+        for agent in state.get("agents") or []:
+            if not isinstance(agent, dict):
+                continue
+            if str(agent.get("status") or "active").strip().lower() == "archived":
+                continue
+            if str(agent.get("directSessionId") or "").strip():
+                continue
+            agent_id = str(agent.get("agentId") or "").strip()
+            if not agent_id:
+                continue
+            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            kind = str(
+                agent.get("conversationIndexKind") or metadata.get("conversationIndexKind") or ""
+            ).strip()
+            if kind in hidden_kinds:
+                continue
+            primary_mode = str(agent.get("primaryMode") or "").strip().lower()
+            role_key = str(agent.get("roleKey") or "").strip()
+            if primary_mode not in {"", "chat"} or role_key:
+                continue
+            try:
+                session_svc.ensure_agent_direct_session(
+                    agent_id=agent_id,
+                    title=str(agent.get("displayName") or "").strip(),
+                    created_by="session_directory_direct_restore",
+                    conversation_index_kind=(
+                        kind or agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+                    ),
+                )
+                restored += 1
+            except Exception as exc:
+                logger.debug(
+                    "Session directory skipped restoring a personal direct session (%s).",
+                    type(exc).__name__,
+                )
     except Exception as exc:
         logger.warning(
-            "Session directory discard could not clear directSessionId bindings (%s).",
+            "Session directory could not restore missing personal direct sessions (%s).",
             type(exc).__name__,
         )
+        restored = 0
+    finally:
+        session_svc.PROJECT_ROOT = previous_root
+    if restored:
+        _record(
+            "session_directory.runtime.directs_restored",
+            outcome="completed",
+            fields={"restoredCount": restored},
+        )
+    return restored
 
 
 def _record(
