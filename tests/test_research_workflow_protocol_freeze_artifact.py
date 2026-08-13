@@ -313,3 +313,34 @@ def test_reconcile_backfills_historical_protocol_freeze_artifact(
         assert refs[0][2] == "frozen_protocol"
     finally:
         harness.close()
+
+
+def test_visible_smoke_retry_backfills_historical_frozen_protocol(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_protocol_freeze_gate(harness, historical_accept=True)
+        writes = _install_protocol_authority(monkeypatch)
+
+        receipt = harness.service.submit(
+            harness.request(
+                command=WorkflowCommandKind.RETRY_NODE,
+                node_id="smoke_gate",
+                expected_run_version=1,
+                idempotency_key="ui:retry-smoke-with-frozen-protocol",
+            )
+        )
+
+        assert receipt.status == "accepted"
+        assert len(writes) == 1 and writes[0]["kind"] == "frozen_protocol"
+        refs = harness.store.read(
+            lambda repo: repo.list_handoff_artifact_refs_for_run("run-test")
+        )
+        assert len(refs) == 1 and refs[0][2] == "frozen_protocol"
+        latest = harness.store.latest_attempt("run-test", "smoke_gate")
+        assert latest is not None and latest.attempt == 2
+        assert latest.status == "starting"
+    finally:
+        harness.close()
