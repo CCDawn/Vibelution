@@ -7,6 +7,8 @@ import json
 import os
 import shutil
 import tempfile
+import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -137,32 +139,35 @@ def apply_storage_migration(
     )
     target = resolve_project_storage_paths(project_root, projects_home=projects_home)
     _assert_destinations_within_target(plan.entries, target)
-    conflicts = _destination_conflicts(plan.entries)
+    memory_entries = tuple(entry for entry in plan.entries if entry.category == "project_memory")
+    instance_entries = tuple(entry for entry in plan.entries if entry.category != "project_memory")
+    conflicts = _destination_conflicts(instance_entries)
     if conflicts:
         raise StorageMigrationError("destination conflicts: " + "; ".join(conflicts[:8]))
 
-    copied = 0
-    reused = 0
-    for entry in plan.entries:
-        source = Path(entry.source)
-        destination = Path(entry.destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.exists():
-            reused += 1
-        else:
-            shutil.copy2(source, destination)
-            copied += 1
-        _verify_entry(entry)
+    copied, reused = _copy_and_verify_entries(instance_entries)
+    with _project_memory_marker_lock(target):
+        memory_conflicts = _destination_conflicts(memory_entries)
+        if memory_conflicts:
+            raise StorageMigrationError("destination conflicts: " + "; ".join(memory_conflicts[:8]))
+        memory_copied, memory_reused = _copy_and_verify_entries(memory_entries)
+        copied += memory_copied
+        reused += memory_reused
+        refreshed = plan_storage_migration(
+            project_root,
+            projects_home=projects_home,
+            config_path=config_path,
+        )
+        if _plan_signature(refreshed) != _plan_signature(plan):
+            raise StorageMigrationError("legacy sources changed during migration; completion marker not written")
+        completed_at = _now_iso()
+        _register_project_memory_source(
+            target,
+            source_root=legacy_project_storage_paths(target.project_root, target=target).memory,
+            memory_entries=memory_entries,
+            completed_at=completed_at,
+        )
 
-    refreshed = plan_storage_migration(
-        project_root,
-        projects_home=projects_home,
-        config_path=config_path,
-    )
-    if _plan_signature(refreshed) != _plan_signature(plan):
-        raise StorageMigrationError("legacy sources changed during migration; completion marker not written")
-
-    completed_at = _now_iso()
     migrations_dir = target.instance_home / "migrations"
     migrations_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = migrations_dir / f"manifest-{completed_at.replace(':', '').replace('-', '')}.jsonl"
@@ -181,22 +186,6 @@ def apply_storage_migration(
         "manifestPath": str(manifest_path),
         "legacyDeleteAllowed": False,
     }
-    memory_entries = tuple(entry for entry in plan.entries if entry.category == "project_memory")
-    memory_marker = {
-        "schemaVersion": STORAGE_MIGRATION_SCHEMA_VERSION,
-        "status": "completed",
-        "projectId": target.project_id,
-        "activatedByInstanceId": target.instance_id,
-        "projectRoot": str(target.project_root),
-        "sourceRoot": str(legacy_project_storage_paths(target.project_root, target=target).memory),
-        "targetRoot": str(target.memory),
-        "completedAt": completed_at,
-        "totalFiles": len(memory_entries),
-        "totalBytes": sum(entry.size for entry in memory_entries),
-        "aggregateSha256": _aggregate_digest(memory_entries),
-        "legacyDeleteAllowed": False,
-    }
-    _atomic_write_json(project_memory_migration_state_path(target), memory_marker)
     _atomic_write_json(storage_migration_state_path(target), marker)
     return {**marker, "copiedFiles": copied, "reusedFiles": reused}
 
@@ -215,23 +204,32 @@ def rollback_storage_switch(
         return {"rolledBack": False, "reason": "completion_marker_missing", "markerPath": str(marker_path)}
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     archived = marker_path.with_name(f"storage-migration.rolled-back-{stamp}.json")
-    os.replace(marker_path, archived)
     archived_memory_marker: Path | None = None
-    try:
-        memory_marker = json.loads(memory_marker_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        memory_marker = {}
-    if (
-        isinstance(memory_marker, dict)
-        and memory_marker.get("status") == "completed"
-        and str(memory_marker.get("projectId") or "") == target.project_id
-        and str(memory_marker.get("activatedByInstanceId") or "") == target.instance_id
-        and _same_path(Path(str(memory_marker.get("projectRoot") or target.project_root)), target.project_root)
-    ):
-        archived_memory_marker = memory_marker_path.with_name(
-            f"project-memory-migration.rolled-back-{stamp}.json"
-        )
-        os.replace(memory_marker_path, archived_memory_marker)
+    registration_removed = False
+    remaining_memory_sources = 0
+    source_root = legacy_project_storage_paths(target.project_root, target=target).memory
+    with _project_memory_marker_lock(target):
+        memory_marker = _load_project_memory_marker(target, required=False)
+        os.replace(marker_path, archived)
+        if memory_marker:
+            sources = list(memory_marker["sources"])
+            retained = [
+                item
+                for item in sources
+                if not _same_path(Path(str(item["sourceRoot"])), source_root)
+            ]
+            registration_removed = len(retained) != len(sources)
+            remaining_memory_sources = len(retained)
+            if registration_removed and retained:
+                memory_marker["sources"] = retained
+                memory_marker["sourceCount"] = len(retained)
+                memory_marker["updatedAt"] = _now_iso()
+                _atomic_write_json(memory_marker_path, memory_marker)
+            elif registration_removed:
+                archived_memory_marker = memory_marker_path.with_name(
+                    f"project-memory-migration.rolled-back-{stamp}.json"
+                )
+                os.replace(memory_marker_path, archived_memory_marker)
     return {
         "rolledBack": True,
         "markerPath": str(marker_path),
@@ -239,8 +237,156 @@ def rollback_storage_switch(
         "archivedProjectMemoryMarkerPath": (
             str(archived_memory_marker) if archived_memory_marker is not None else None
         ),
+        "projectMemoryRegistrationRemoved": registration_removed,
+        "remainingProjectMemorySources": remaining_memory_sources,
         "copiedDataRetained": True,
     }
+
+
+def _copy_and_verify_entries(entries: Iterable[StorageMigrationEntry]) -> tuple[int, int]:
+    copied = 0
+    reused = 0
+    for entry in entries:
+        source = Path(entry.source)
+        destination = Path(entry.destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            reused += 1
+        else:
+            shutil.copy2(source, destination)
+            copied += 1
+        _verify_entry(entry)
+    return copied, reused
+
+
+def _register_project_memory_source(
+    target: ProjectStoragePaths,
+    *,
+    source_root: Path,
+    memory_entries: tuple[StorageMigrationEntry, ...],
+    completed_at: str,
+) -> None:
+    marker = _load_project_memory_marker(target, required=False)
+    existing_sources = list(marker.get("sources") or []) if marker else []
+    retained = [
+        item
+        for item in existing_sources
+        if not _same_path(Path(str(item["sourceRoot"])), source_root)
+    ]
+    retained.append(
+        {
+            "sourceRoot": str(source_root.resolve()),
+            "projectRoot": str(target.project_root),
+            "activatedByInstanceId": target.instance_id,
+            "completedAt": completed_at,
+            "totalFiles": len(memory_entries),
+            "totalBytes": sum(entry.size for entry in memory_entries),
+            "aggregateSha256": _aggregate_digest(memory_entries),
+        }
+    )
+    retained.sort(key=lambda item: os.path.normcase(str(item["sourceRoot"])))
+    payload = {
+        "schemaVersion": STORAGE_MIGRATION_SCHEMA_VERSION,
+        "status": "completed",
+        "projectId": target.project_id,
+        "targetRoot": str(target.memory),
+        "sources": retained,
+        "sourceCount": len(retained),
+        "updatedAt": completed_at,
+        "legacyDeleteAllowed": False,
+    }
+    _atomic_write_json(project_memory_migration_state_path(target), payload)
+
+
+def _load_project_memory_marker(
+    target: ProjectStoragePaths,
+    *,
+    required: bool,
+) -> dict[str, object]:
+    marker_path = project_memory_migration_state_path(target)
+    try:
+        payload = json.loads(marker_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if required:
+            raise StorageMigrationError(f"project memory marker is missing: {marker_path}")
+        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise StorageMigrationError(f"invalid project memory marker: {marker_path}") from exc
+    sources = payload.get("sources") if isinstance(payload, dict) else None
+    valid_sources = bool(
+        isinstance(sources, list)
+        and all(
+            isinstance(item, dict) and str(item.get("sourceRoot") or "").strip()
+            for item in sources
+        )
+    )
+    if not (
+        isinstance(payload, dict)
+        and payload.get("schemaVersion") == STORAGE_MIGRATION_SCHEMA_VERSION
+        and payload.get("status") == "completed"
+        and str(payload.get("projectId") or "") == target.project_id
+        and _same_path(Path(str(payload.get("targetRoot") or "")), target.memory)
+        and valid_sources
+    ):
+        raise StorageMigrationError(f"project memory marker does not match target: {marker_path}")
+    return payload
+
+
+@contextmanager
+def _project_memory_marker_lock(target: ProjectStoragePaths, *, timeout_seconds: float = 10.0):
+    lock_path = target.project_home / "project-memory-migration.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        while not _try_lock_handle(handle):
+            if time.monotonic() >= deadline:
+                raise StorageMigrationError(f"timed out acquiring project memory marker lock: {lock_path}")
+            time.sleep(0.01)
+        try:
+            yield
+        finally:
+            _unlock_handle(handle)
+
+
+def _try_lock_handle(handle) -> bool:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        return False
+    return True
+
+
+def _unlock_handle(handle) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        return
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
 
 
 def _iter_source_files(root: Path) -> Iterable[Path]:
@@ -348,7 +494,10 @@ def _plan_signature(plan: StorageMigrationPlan) -> tuple[tuple[str, str, int, st
 
 
 def _same_path(left: Path, right: Path) -> bool:
-    return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
+    try:
+        return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def _now_iso() -> str:

@@ -119,6 +119,96 @@ def test_project_memory_switch_is_shared_with_linked_worktrees(tmp_path, monkeyp
     assert resolve_project_memory_home(linked) == legacy_memory
 
 
+def test_independent_clones_register_memory_sources_without_cross_switching(
+    tmp_path, monkeypatch
+):
+    projects_home = tmp_path / "external" / "projects"
+    data_home = tmp_path / "legacy-operator-data"
+    monkeypatch.setenv("VIBELUTION_PROJECTS_HOME", str(projects_home))
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    clones = []
+    for name, filename in (("clone-a", "A.md"), ("clone-b", "B.md")):
+        clone = tmp_path / name
+        (clone / ".git").mkdir(parents=True)
+        identity = clone / ".vibelution" / "project.json"
+        identity.parent.mkdir()
+        identity.write_text(
+            json.dumps({"schemaVersion": 1, "projectId": "test-vibelution"}) + "\n",
+            encoding="utf-8",
+        )
+        memory = clone / ".docs" / "project-memory"
+        memory.mkdir(parents=True)
+        (memory / filename).write_text(f"{name}\n", encoding="utf-8")
+        clones.append((clone, memory))
+    (clone_a, memory_a), (clone_b, memory_b) = clones
+
+    apply_storage_migration(clone_a)
+    target = resolve_project_storage_paths(clone_a)
+
+    assert resolve_project_memory_home(clone_a) == target.memory
+    assert resolve_project_memory_home(clone_b) == memory_b
+    marker_path = project_memory_migration_state_path(target)
+    marker_after_a = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert marker_after_a["targetRoot"] == str(target.memory)
+    assert [item["sourceRoot"] for item in marker_after_a["sources"]] == [str(memory_a)]
+
+    apply_storage_migration(clone_b)
+
+    assert resolve_project_memory_home(clone_b) == target.memory
+    assert (target.memory / "A.md").read_text(encoding="utf-8") == "clone-a\n"
+    assert (target.memory / "B.md").read_text(encoding="utf-8") == "clone-b\n"
+    marker_after_b = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert {item["sourceRoot"] for item in marker_after_b["sources"]} == {
+        str(memory_a),
+        str(memory_b),
+    }
+
+    rollback = rollback_storage_switch(clone_a)
+
+    assert rollback["projectMemoryRegistrationRemoved"] is True
+    assert rollback["remainingProjectMemorySources"] == 1
+    assert resolve_project_memory_home(clone_a) == memory_a
+    assert resolve_project_memory_home(clone_b) == target.memory
+    marker_after_rollback = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert [item["sourceRoot"] for item in marker_after_rollback["sources"]] == [str(memory_b)]
+
+
+def test_independent_clone_memory_conflict_keeps_unregistered_clone_on_legacy(
+    tmp_path, monkeypatch
+):
+    projects_home = tmp_path / "external" / "projects"
+    data_home = tmp_path / "legacy-operator-data"
+    monkeypatch.setenv("VIBELUTION_PROJECTS_HOME", str(projects_home))
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    clones = []
+    for name, content in (("clone-a", "memory-a\n"), ("clone-b", "memory-b\n")):
+        clone = tmp_path / name
+        (clone / ".git").mkdir(parents=True)
+        identity = clone / ".vibelution" / "project.json"
+        identity.parent.mkdir()
+        identity.write_text(
+            json.dumps({"schemaVersion": 1, "projectId": "test-vibelution"}) + "\n",
+            encoding="utf-8",
+        )
+        memory = clone / ".docs" / "project-memory"
+        memory.mkdir(parents=True)
+        (memory / "INDEX.md").write_text(content, encoding="utf-8")
+        clones.append((clone, memory))
+    (clone_a, memory_a), (clone_b, memory_b) = clones
+
+    apply_storage_migration(clone_a)
+    target = resolve_project_storage_paths(clone_a)
+
+    assert resolve_project_memory_home(clone_a) == target.memory
+    assert resolve_project_memory_home(clone_b) == memory_b
+    with pytest.raises(StorageMigrationError, match="destination conflicts"):
+        apply_storage_migration(clone_b)
+
+    assert resolve_project_memory_home(clone_b) == memory_b
+    assert (memory_b / "INDEX.md").read_text(encoding="utf-8") == "memory-b\n"
+    marker = json.loads(project_memory_migration_state_path(target).read_text(encoding="utf-8"))
+    assert [item["sourceRoot"] for item in marker["sources"]] == [str(memory_a)]
+
 def test_conflict_fails_without_switching_or_overwriting(tmp_path, monkeypatch):
     project, _projects_home, data_home = _project(tmp_path, monkeypatch)
     source = data_home / "workspace" / "agent.json"

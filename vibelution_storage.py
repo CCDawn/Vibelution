@@ -166,11 +166,23 @@ def project_memory_migration_complete(paths: ProjectStoragePaths) -> bool:
         payload = json.loads(project_memory_migration_state_path(paths).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    return bool(
+    if not (
         isinstance(payload, dict)
         and payload.get("schemaVersion") == STORAGE_MIGRATION_SCHEMA_VERSION
         and payload.get("status") == "completed"
         and str(payload.get("projectId") or "") == paths.project_id
+        and _marker_path_matches(payload.get("targetRoot"), paths.memory)
+    ):
+        return False
+    current_source = _integration_project_root(paths.project_root) / ".docs" / "project-memory"
+    sources = payload.get("sources")
+    return bool(
+        isinstance(sources, list)
+        and any(
+            isinstance(item, dict)
+            and _marker_path_matches(item.get("sourceRoot"), current_source)
+            for item in sources
+        )
     )
 
 
@@ -351,6 +363,18 @@ def _directory_has_entries(path: Path) -> bool:
     except (FileNotFoundError, NotADirectoryError, StopIteration, OSError):
         return False
     return True
+
+
+def _marker_path_matches(value: object, expected: Path) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    try:
+        actual = Path(raw).expanduser().resolve()
+        target = expected.expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return os.path.normcase(str(actual)) == os.path.normcase(str(target))
 
 
 def _integration_project_root(project_root: Path) -> Path:

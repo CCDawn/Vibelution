@@ -46,6 +46,11 @@ single identity, root, migration gate, or rollback contract.
    archives only the completion marker and retains both copies. Physical legacy
    cleanup requires a separate, explicit destructive confirmation.
 6. `.docs/project-memory/` is a legacy read-only projection after migration.
+   The shared memory marker records each verified integration source root;
+   another independent clone with the same `projectId` remains on its own
+   legacy memory until that source root is copied and registered. Linked
+   worktrees normalize to their integration root and therefore share one
+   registration.
    Live Agent coordination remains under the Git common dir; durable project
    memory resolves from the external `memory` path and never becomes runtime
    authority over code, Git, tests, or logs.
