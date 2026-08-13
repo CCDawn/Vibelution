@@ -527,6 +527,10 @@ def test_prompt_template_registry_repairs_challenge_cup_experiment_iteration_rol
             assert "writebackContract" in detail["content"]
             assert "evidenceType" in detail["content"]
             assert "不要猜字段名" in detail["content"]
+        if template_id == "prompt-challenge-cup-experiment-planner":
+            assert "taskKind=hypothesis_design" in detail["content"]
+            assert "operation=record_hypothesis_set" in detail["content"]
+            assert "不得把假设设计提前扩成完整实验计划" in detail["content"]
         assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
         assert _contains_tool_name(detail["content"], read_tool)
         assert _contains_tool_name(detail["content"], write_tool)

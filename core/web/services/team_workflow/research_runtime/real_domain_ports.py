@@ -321,7 +321,12 @@ def _create_real_agent_task(
                 "taskKind": spec.task_key,
                 "agentId": binding.agent_id,
                 "idempotencyKey": idempotency_key,
-                "targetRef": f"node-run:{action.node_id}",
+                "targetRef": f"node-run:{action.node_run_id}",
+                "workflowRunId": action.run_id,
+                "workflowNodeId": action.node_id,
+                "sourceCollectionRunId": str(
+                    input_snapshot.get("sourceCollectionRunId") or ""
+                ),
             },
         )
     return _agent_handle_from_started(started)

@@ -793,16 +793,16 @@ def _build_key_tools() -> List[BaseTool]:
         recorded_by_agent: str = "",
     ) -> str:
         """
-        【挑战杯实验账本回写】登记实验计划、baseline、smoke/full-run 结果或入库申请。
+        【挑战杯实验账本回写】登记假设集、实验计划、baseline、smoke/full-run 结果或入库申请。
 
         该工具只写实验账本，不执行训练、smoke runner、Shell、Git、RAG 或 official graph。
-        operation 支持 create_plan / register_baseline_artifact / register_smoke_result /
+        operation 支持 record_hypothesis_set / create_plan / register_baseline_artifact / register_smoke_result /
         register_full_run_result / request_knowledge_ingestion。
 
         Args:
             team_id: 团队 ID
             operation: 回写动作
-            plan_id: 实验计划 ID，create_plan 可留空
+            plan_id: 实验计划 ID，record_hypothesis_set / create_plan 可留空
             payload_json: JSON 对象字符串
             recorded_by_agent: 记录者 Agent
 
