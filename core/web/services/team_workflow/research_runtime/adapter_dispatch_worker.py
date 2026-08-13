@@ -579,17 +579,30 @@ class AdapterDispatchWorker:
 
     def _block_attempt(self, outbox: Any, action: PendingAction, code: str, detail: str) -> None:
         now_ms = self._now()
-        problem = {"code": code, "detail": detail}
+        from .block_projection import apply_node_run_block
+        from .blocked_reason import parse_problem_json
+
+        parsed = parse_problem_json(detail)
+        problem = {
+            "code": code,
+            "detail": (parsed or {}).get("detail") or detail,
+        }
+        if parsed and parsed.get("code") and parsed.get("code") != "workflow_blocked":
+            problem["code"] = str(parsed.get("code") or code)
 
         def mutate(uow):
             uow.repository.fail_outbox(
                 outbox.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
             )
-            uow.repository.update_attempt_status(
-                action.node_run_id,
-                NodeAttemptStatus.BLOCKED.value,
-                now_ms,
-                problem_json=json.dumps(problem),
+            apply_node_run_block(
+                uow,
+                run_id=action.run_id,
+                node_run_id=action.node_run_id,
+                node_id=action.node_id,
+                problem=problem,
+                now_ms=now_ms,
+                actor_id=self._owner,
+                correlation_id=str(action.action_id or outbox.action_id),
             )
 
         self._store.submit(mutate, force_flush=True).result(timeout=30)

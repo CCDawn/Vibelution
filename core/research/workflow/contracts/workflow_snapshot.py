@@ -33,6 +33,7 @@ class WorkflowRunSummary:
     created_at_ms: int
     updated_at_ms: int
     completed_at_ms: int | None
+    blocked_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +53,7 @@ class WorkflowRunSummary:
             "forkedFromCheckpointId": self.forked_from_checkpoint_id,
             "completionKind": self.completion_kind,
             "terminalReason": self.terminal_reason,
+            "blockedReason": self.blocked_reason,
             "createdAtMs": self.created_at_ms,
             "updatedAtMs": self.updated_at_ms,
             "completedAtMs": self.completed_at_ms,
@@ -72,6 +74,7 @@ class NodeAttemptSummary:
     started_at_ms: int
     updated_at_ms: int
     finished_at_ms: int | None
+    problem: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -87,6 +90,7 @@ class NodeAttemptSummary:
             "startedAtMs": self.started_at_ms,
             "updatedAtMs": self.updated_at_ms,
             "finishedAtMs": self.finished_at_ms,
+            "problem": dict(self.problem) if self.problem else None,
         }
 
 
@@ -121,14 +125,24 @@ class HandoffRefSummary:
     status: str
     handoff_id: str | None = None
     to_node_id: str | None = None
+    from_node_id: str | None = None
+    from_node_run_id: str | None = None
     input_snapshot_hash: str | None = None
+    output_artifact_refs: tuple[Mapping[str, Any], ...] = ()
+    offered_at_ms: int | None = None
+    accepted_at_ms: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "handoffId": self.handoff_id,
+            "fromNodeId": self.from_node_id,
+            "fromNodeRunId": self.from_node_run_id,
             "toNodeId": self.to_node_id,
             "status": self.status,
             "inputSnapshotHash": self.input_snapshot_hash,
+            "outputArtifactRefs": [dict(item) for item in self.output_artifact_refs],
+            "offeredAtMs": self.offered_at_ms,
+            "acceptedAtMs": self.accepted_at_ms,
         }
 
 

@@ -1139,6 +1139,8 @@ class WorkflowLedgerRepository:
         accepted_at_ms: int | None = None,
     ) -> bool:
         self._require_handoff_transition(handoff_id, status)
+        if accepted_at_ms is None and status == "accepted":
+            accepted_at_ms = now_ms
         cursor = self.execute(
             """
             UPDATE handoffs
@@ -1160,6 +1162,20 @@ class WorkflowLedgerRepository:
             """,
             (handoff_id, receipt_id, ordinal),
         )
+
+    def list_handoff_artifact_refs_for_run(self, run_id: str) -> list[tuple]:
+        return self.execute(
+            """
+            SELECT hr.handoff_id, ar.receipt_id, ar.artifact_kind,
+                   ar.canonical_ref_json, ar.artifact_version, ar.sha256
+            FROM handoff_receipts hr
+            JOIN artifact_receipts ar ON ar.receipt_id = hr.receipt_id
+            JOIN handoffs h ON h.handoff_id = hr.handoff_id
+            WHERE h.run_id = ?
+            ORDER BY hr.handoff_id ASC, hr.ordinal ASC
+            """,
+            (run_id,),
+        ).fetchall()
 
     def list_handoff_receipts(self, handoff_id: str) -> list[str]:
         rows = self.execute(

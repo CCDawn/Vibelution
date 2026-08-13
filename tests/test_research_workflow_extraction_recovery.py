@@ -1,0 +1,430 @@
+"""Recovery: lagging checkpoint retry, blocked events, handoff artifact projection."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from core.research.workflow.contracts import WorkflowCommandKind
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.web.services.team_workflow.research_runtime.blocked_reason import (
+    format_blocked_reason,
+    parse_problem_json,
+    problem_from_graph_error,
+)
+from core.web.services.team_workflow.research_runtime.command_offers import (
+    build_command_offers,
+)
+from core.web.services.team_workflow.research_runtime.query_service import (
+    WorkflowQueryService,
+)
+from tests._support.graph_helpers import GraphHarness
+from tests._support.command_helpers import CommandHarness
+from tests._support.workflow_ledger_helpers import (
+    FIXED_NOW_MS,
+    build_attempt_record,
+    build_command_record,
+)
+
+
+def test_parse_nested_required_artifact_problem() -> None:
+    raw = json.dumps(
+        {
+            "code": "required_artifact_missing",
+            "detail": json.dumps(
+                {
+                    "code": "required_artifact_missing",
+                    "detail": "source_extraction requires ['evidence_card_batch']",
+                }
+            ),
+        }
+    )
+    problem = parse_problem_json(raw)
+    assert problem is not None
+    assert problem["code"] == "required_artifact_missing"
+    assert "evidence_card_batch" in problem["detail"]
+    assert "缺少必需产物" in format_blocked_reason(problem)
+
+
+def test_checkpoint_mismatch_is_not_iteration_decision() -> None:
+    problem = problem_from_graph_error(
+        "thread 中断于 source_finding，但 dispatch 目标是 source_extraction"
+    )
+    assert problem["code"] == "checkpoint_node_mismatch"
+
+
+def test_dispatch_mismatch_writes_blocked_event_and_run_status(tmp_path: Path) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        harness.enqueue_graph_dispatch("run-test", "source_extraction", 1)
+        harness.worker.run_once()
+
+        extraction = harness.commands.store.latest_attempt(
+            "run-test", "source_extraction"
+        )
+        assert extraction is not None
+        assert extraction.status == "blocked"
+        assert "checkpoint_node_mismatch" in (extraction.problem_json or "")
+        assert "iteration_decision_invalid" not in (extraction.problem_json or "")
+
+        run = harness.commands.store.get_run("run-test")
+        assert run is not None
+        assert run.status == "blocked"
+        assert run.blocked_problem_json
+        assert "checkpoint_node_mismatch" in run.blocked_problem_json
+
+        events = harness.commands.store.list_events("run-test")
+        types = {event.event_type for event in events}
+        assert "node_blocked" in types
+        assert "run_blocked" in types
+        blocked = next(event for event in events if event.event_type == "node_blocked")
+        payload = json.loads(blocked.payload_json)
+        assert payload["nodeId"] == "source_extraction"
+        assert payload["code"] == "checkpoint_node_mismatch"
+        assert payload["reason"]
+    finally:
+        harness.close()
+
+
+def test_retry_advances_lagging_source_finding_checkpoint(tmp_path: Path) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        first_action_id = json.loads(first_pending.payload_json)["actionId"]
+        harness.consume_adapter(first_pending.action_id)
+
+        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
+        assert finding is not None
+
+        def prepare(uow):
+            uow.repository.update_attempt_status(
+                finding.node_run_id,
+                "succeeded",
+                FIXED_NOW_MS + 10,
+                finished_at_ms=FIXED_NOW_MS + 10,
+            )
+            uow.repository.insert_handoff(
+                handoff_id="ho-finding-extract",
+                run_id="run-test",
+                edge_id="source_finding->source_extraction",
+                from_node_run_id=finding.node_run_id,
+                to_node_id="source_extraction",
+                to_node_run_id=None,
+                gate_kind="auto",
+                input_snapshot_hash="a" * 64,
+                offered_at_ms=FIXED_NOW_MS + 10,
+            )
+            uow.repository.update_handoff_status(
+                "ho-finding-extract", "ready", FIXED_NOW_MS + 11
+            )
+            uow.repository.update_handoff_status(
+                "ho-finding-extract", "accepted", FIXED_NOW_MS + 12
+            )
+            uow.repository.insert_artifact_receipt(
+                receipt_id="ar-candidates",
+                run_id="run-test",
+                node_run_id=finding.node_run_id,
+                team_id="research-team",
+                artifact_kind="source_candidate_batch",
+                canonical_ref_json=json.dumps(
+                    {"canonicalRef": "source_candidate_batch://research-team/run-test/abc"}
+                ),
+                artifact_version="1.0.0",
+                sha256="a" * 64,
+                domain_revision="rev-1",
+                materialized=1,
+                verified_at_ms=FIXED_NOW_MS + 10,
+            )
+            uow.repository.insert_handoff_receipt(
+                "ho-finding-extract", "ar-candidates", 0
+            )
+
+        harness.commands.store.submit(prepare, force_flush=True).result(timeout=10)
+
+        snapshot_before = harness.coordinator.snapshot("run-test")
+        assert "source_finding" in (snapshot_before.get("nextNodeIds") or [])
+
+        harness.enqueue_graph_dispatch("run-test", "source_extraction", 2)
+        harness.worker.run_once()
+
+        snapshot_after = harness.coordinator.snapshot("run-test")
+        assert "source_extraction" in (snapshot_after.get("nextNodeIds") or []) or (
+            (snapshot_after.get("values") or {}).get("active_node_id")
+            == "source_extraction"
+        )
+        extraction = harness.commands.store.latest_attempt(
+            "run-test", "source_extraction"
+        )
+        assert extraction is not None
+        assert extraction.attempt == 2
+        assert extraction.status == "dispatching"
+        assert "checkpoint_node_mismatch" not in (extraction.problem_json or "")
+        pending = harness.latest_adapter_pending()
+        assert pending is not None
+        payload = json.loads(pending.payload_json)
+        assert payload["nodeId"] == "source_extraction"
+        assert int(payload["attempt"]) == 2
+    finally:
+        harness.close()
+
+
+def test_half_advanced_resumes_when_checkpoint_still_at_predecessor(
+    tmp_path: Path,
+) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        first_action_id = json.loads(first_pending.payload_json)["actionId"]
+        harness.consume_adapter(first_pending.action_id)
+        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
+        assert finding is not None
+
+        def prepare(uow):
+            uow.repository.update_attempt_status(
+                finding.node_run_id,
+                "succeeded",
+                FIXED_NOW_MS + 10,
+                finished_at_ms=FIXED_NOW_MS + 10,
+            )
+            uow.repository.insert_handoff(
+                handoff_id="ho-lag",
+                run_id="run-test",
+                edge_id="source_finding->source_extraction",
+                from_node_run_id=finding.node_run_id,
+                to_node_id="source_extraction",
+                to_node_run_id=None,
+                gate_kind="auto",
+                input_snapshot_hash="a" * 64,
+                offered_at_ms=FIXED_NOW_MS + 10,
+            )
+            uow.repository.update_handoff_status("ho-lag", "ready", FIXED_NOW_MS + 11)
+            uow.repository.update_handoff_status(
+                "ho-lag", "accepted", FIXED_NOW_MS + 12
+            )
+
+        harness.commands.store.submit(prepare, force_flush=True).result(timeout=10)
+        harness.resume(
+            run_id="run-test",
+            node_id="source_finding",
+            attempt=1,
+            action_id=first_action_id,
+            outcome="succeeded",
+        )
+        harness.worker.run_once()
+        snapshot = harness.coordinator.snapshot("run-test")
+        assert "source_extraction" in (snapshot.get("nextNodeIds") or [])
+        extraction = harness.commands.store.latest_attempt(
+            "run-test", "source_extraction"
+        )
+        assert extraction is not None
+    finally:
+        harness.close()
+
+
+def test_handoff_summary_includes_output_artifact_refs(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-ho", status="running", run_version=2)
+
+        def seed(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-ho",
+                    run_id="run-ho",
+                    node_id="source_finding",
+                    idempotency_key="seed-ho",
+                )
+            )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="nr-run-ho-source_finding-a1",
+                    run_id="run-ho",
+                    node_id="source_finding",
+                    attempt=1,
+                    status="succeeded",
+                    command_id="cmd-ho",
+                )
+            )
+            uow.repository.insert_handoff(
+                handoff_id="ho-1",
+                run_id="run-ho",
+                edge_id="source_finding->source_extraction",
+                from_node_run_id="nr-run-ho-source_finding-a1",
+                to_node_id="source_extraction",
+                to_node_run_id=None,
+                gate_kind="auto",
+                input_snapshot_hash="a" * 64,
+                offered_at_ms=FIXED_NOW_MS,
+            )
+            uow.repository.update_handoff_status("ho-1", "ready", FIXED_NOW_MS)
+            uow.repository.update_handoff_status("ho-1", "accepted", FIXED_NOW_MS)
+            uow.repository.insert_artifact_receipt(
+                receipt_id="ar-1",
+                run_id="run-ho",
+                node_run_id="nr-run-ho-source_finding-a1",
+                team_id="research-team",
+                artifact_kind="source_candidate_batch",
+                canonical_ref_json=json.dumps(
+                    {"canonicalRef": "source_candidate_batch://research-team/run-ho/hash"}
+                ),
+                artifact_version="1.0.0",
+                sha256="b" * 64,
+                domain_revision="rev",
+                materialized=1,
+                verified_at_ms=FIXED_NOW_MS,
+            )
+            uow.repository.insert_handoff_receipt("ho-1", "ar-1", 0)
+
+        harness.store.submit(seed, force_flush=True).result(timeout=10)
+        query = WorkflowQueryService(
+            store=harness.store,
+            readiness_service=harness.readiness,
+            readiness_context=lambda: harness.context,
+            clock_iso=lambda: "2026-08-13T01:00:00.000Z",
+            evaluated_at_ms=lambda: FIXED_NOW_MS,
+        )
+        snap = query.get_snapshot(team_id="research-team", run_id="run-ho")
+        refs = snap.handoff_summary.refs
+        assert len(refs) == 1
+        assert refs[0].from_node_id == "source_finding"
+        assert refs[0].to_node_id == "source_extraction"
+        assert len(refs[0].output_artifact_refs) == 1
+        assert refs[0].output_artifact_refs[0]["kind"] == "source_candidate_batch"
+        payload = refs[0].to_dict()
+        assert payload["outputArtifactRefs"][0]["kind"] == "source_candidate_batch"
+    finally:
+        harness.close()
+
+
+def test_blocked_node_disables_start_and_keeps_retry(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-offers", status="blocked", run_version=3)
+
+        def seed(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-ex",
+                    run_id="run-offers",
+                    node_id="source_extraction",
+                    idempotency_key="seed-ex",
+                )
+            )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="nr-run-offers-source_extraction-a2",
+                    run_id="run-offers",
+                    node_id="source_extraction",
+                    attempt=2,
+                    status="blocked",
+                    command_id="cmd-ex",
+                    problem_json=json.dumps(
+                        {
+                            "code": "checkpoint_node_mismatch",
+                            "detail": "thread 中断于 source_finding，但 dispatch 目标是 source_extraction",
+                        }
+                    ),
+                )
+            )
+
+        harness.store.submit(seed, force_flush=True).result(timeout=10)
+        run = harness.store.get_run("run-offers")
+        assert run is not None
+        offers = build_command_offers(
+            readiness_service=harness.readiness,
+            context=harness.context,
+            team_id=run.team_id,
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+            attempts=harness.store.list_attempts("run-offers"),
+            evaluated_at_ms=FIXED_NOW_MS,
+        )
+        start = next(
+            offer
+            for offer in offers
+            if offer.command == WorkflowCommandKind.START_NODE
+            and offer.node_id == "source_extraction"
+        )
+        retry = next(
+            offer
+            for offer in offers
+            if offer.command == WorkflowCommandKind.RETRY_NODE
+            and offer.node_id == "source_extraction"
+        )
+        assert start.available is False
+        assert start.reason_code == "retry_owns_recovery"
+        assert retry.available is True
+    finally:
+        harness.close()
+
+
+def test_snapshot_overlays_blocked_status_from_active_attempt(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-overlay", status="running", run_version=2)
+
+        def seed(uow):
+            uow.repository.execute(
+                "UPDATE workflow_runs SET active_node_id = ? WHERE run_id = ?",
+                ("source_extraction", "run-overlay"),
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-overlay",
+                    run_id="run-overlay",
+                    node_id="source_extraction",
+                    idempotency_key="seed-overlay",
+                )
+            )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="nr-run-overlay-source_extraction-a2",
+                    run_id="run-overlay",
+                    node_id="source_extraction",
+                    attempt=2,
+                    status="blocked",
+                    command_id="cmd-overlay",
+                    problem_json=json.dumps(
+                        {
+                            "code": "checkpoint_node_mismatch",
+                            "detail": "thread 中断于 source_finding，但 dispatch 目标是 source_extraction",
+                        }
+                    ),
+                )
+            )
+
+        harness.store.submit(seed, force_flush=True).result(timeout=10)
+        query = WorkflowQueryService(
+            store=harness.store,
+            readiness_service=harness.readiness,
+            readiness_context=lambda: harness.context,
+            clock_iso=lambda: "2026-08-13T01:00:00.000Z",
+            evaluated_at_ms=lambda: FIXED_NOW_MS,
+        )
+        snap = query.get_snapshot(team_id="research-team", run_id="run-overlay")
+        assert snap.run.status == "blocked"
+        assert snap.run.blocked_reason
+        assert "source_finding" in snap.run.blocked_reason
+        detail = query.get_node_detail(
+            team_id="research-team",
+            run_id="run-overlay",
+            node_id="source_extraction",
+        )
+        assert detail.status == "blocked"
+        assert "source_finding" in (detail.blocked_reason or "")
+        ledger_run = harness.store.get_run("run-overlay")
+        assert ledger_run is not None
+        assert ledger_run.status == "running"
+    finally:
+        harness.close()
