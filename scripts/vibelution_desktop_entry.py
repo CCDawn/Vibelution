@@ -1061,9 +1061,11 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
         attached_pid = _assert_managed_launcher_attachment(before, args=args, port=port)
         attached_existing = True
         after = dict(before)
-        if attached_pid != before_pid:
+        if attached_pid != before_pid or int(before.get("launcherControlPort") or 0) != port:
             after["launcherBackendPid"] = attached_pid
             after["launcherBackendLaunchPid"] = attached_pid
+            after["launcherControlPort"] = port
+            after["launcherControlUrl"] = _launcher_control_url(port)
             _write_state(after)
             _append_log(
                 "desktop_entry_python.backend.attachment_pid_recovered",
@@ -1122,11 +1124,11 @@ def _assert_managed_launcher_attachment(
     requested_root = Path(str(args.workspace or PROJECT_ROOT)).resolve()
     if adapter not in {"python_headless", "python_desktop_entry_native"}:
         raise RuntimeError("Healthy Launcher control port is not owned by a supported managed adapter.")
-    if state_port != int(port):
+    if state_port > 0 and state_port != int(port):
         raise RuntimeError("Healthy Launcher control port does not match the managed Launcher state.")
     if not state_root or Path(state_root).resolve() != requested_root:
         raise RuntimeError("Healthy Launcher control port does not belong to this workspace.")
-    if backend_pid > 0 and _pid_alive(backend_pid):
+    if state_port == int(port) and backend_pid > 0 and _pid_alive(backend_pid):
         return backend_pid
     recovered_pid = _managed_launcher_listener_pid(port, requested_root)
     if recovered_pid <= 0:
