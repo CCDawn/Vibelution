@@ -86,6 +86,23 @@ describe("WorkflowAgentTaskNode render (P1-4)", () => {
     expect(markup).toContain("未绑定");
     expect(markup).toContain("待运行");
   });
+
+  it("uses the approved compact card hierarchy in serpentine mode", () => {
+    const markup = renderNode(WorkflowAgentTaskNode, {
+      label: "协议设计",
+      status: "ready",
+      primaryAgentId: "agent-technical-id",
+      primaryRoleKey: "experiment_planner",
+      description: "冻结变量、数据切分、预算和停止条件。",
+      layoutMode: "serpentine",
+    });
+    expect(markup).toContain('data-layout-mode="serpentine"');
+    expect(markup).toContain("Agent 任务");
+    expect(markup).toContain("实验规划");
+    expect(markup).toContain("Agent 已绑定");
+    expect(markup).not.toContain("冻结变量、数据切分、预算和停止条件。");
+    expect(markup).not.toContain(">agent-technical-id<");
+  });
 });
 
 describe("WorkflowHumanGateNode render (P1-4)", () => {
@@ -234,6 +251,20 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
     expect(markup).toContain('data-stage-tone="active"');
     expect(markup).toContain("知识搜集");
     expect(markup).toContain(">1<");
+  });
+
+  it("shows compact progress in a serpentine territory", () => {
+    const markup = renderNode(WorkflowStageRegionNode, {
+      label: "实验设计",
+      stageTone: "attention",
+      stageIndex: 1,
+      taskCount: 5,
+      completedCount: 2,
+      layoutMode: "serpentine",
+    });
+    expect(markup).toContain('data-layout-mode="serpentine"');
+    expect(markup).toContain("2");
+    expect(markup).toContain("/ 5");
   });
 
   it("is never focusable or selectable (no role/tabIndex/selection attributes)", () => {

@@ -26,6 +26,7 @@ import { layoutOuter } from "./workflowOuterElkLayout";
 import { composeFinalLayout } from "./workflowLayoutComposer";
 import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 import type { WorkflowNodeSize } from "./workflowLayoutHash";
+import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 
 export type TwoLevelLayoutEngine = {
   layout: (graph: ElkNode) => Promise<ElkNode>;
@@ -35,9 +36,11 @@ export async function layoutTwoLevel(
   input: WorkflowLayoutInput,
   engine: TwoLevelLayoutEngine,
   sizes?: ReadonlyMap<string, WorkflowNodeSize>,
+  options: { layoutMode?: WorkflowCanvasLayoutMode } = {},
 ): Promise<WorkflowLayoutResult> {
+  const layoutMode = options.layoutMode ?? "stage-columns";
   // Phase A: per-stage subgraphs + DOWN layouts (parallel).
-  const bundle = buildStageSubgraphs(input, sizes);
+  const bundle = buildStageSubgraphs(input, sizes, layoutMode);
   const stageLayouts = await layoutStages(
     bundle.subgraphs.map((s) => ({ stageId: s.stageId, root: s.root, nodeIds: s.nodeIds })),
     engine,
@@ -75,7 +78,7 @@ export async function layoutTwoLevel(
   }
 
   // Phase B: real outer ELK layout (spacer-node architecture).
-  const outerGraph = buildOuterElkGraph(input, stageBoxes, edgeSpecs);
+  const outerGraph = buildOuterElkGraph(input, stageBoxes, edgeSpecs, layoutMode);
   const outer = await layoutOuter(outerGraph, engine);
 
   // Port sides / target handles (same semantics as before).
@@ -96,6 +99,7 @@ export async function layoutTwoLevel(
     stageBoxes,
     portSidesByNode,
     targetHandleByEdge,
+    layoutMode,
   });
 }
 

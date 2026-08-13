@@ -19,9 +19,12 @@ import type {
   WorkflowPortSide,
 } from "../../../product/workflow/workflowCanvasTypes";
 import { DECISION_OUTCOME_IDS } from "./workflowElkPorts";
+import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 import type { StageLocalLayout } from "./workflowStageLayout";
 import type { OuterLayoutResult } from "./workflowOuterElkLayout";
 import type { Rect } from "./workflowLayoutGeometry";
+import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
+import { workflowEdgeKeepsNarrativeLabel } from "./workflowElkOptions";
 
 export type ComposerInput = {
   input: WorkflowLayoutInput;
@@ -30,6 +33,7 @@ export type ComposerInput = {
   stageBoxes: Map<string, Rect>;
   portSidesByNode: Map<string, WorkflowLayoutNode["portSides"]>;
   targetHandleByEdge: Map<string, string>;
+  layoutMode?: WorkflowCanvasLayoutMode;
 };
 
 export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
@@ -101,22 +105,26 @@ export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
 
   const edges: WorkflowLayoutResult["edges"] = input.edges.map((edge) => {
     const internal = collectInternalSections(input, localLayouts, edge.edgeId, outer);
-    let sections = internal ?? outer.edgeSections.get(edge.edgeId) ?? [];
-    if (!internal) {
+    const narrative = serpentineNarrativeRoute(edge, ctx);
+    let sections = narrative?.sections ?? internal ?? outer.edgeSections.get(edge.edgeId) ?? [];
+    if (!internal && !narrative) {
       // Cross-stage edges: the outer ELK sections start/end at the stage
       // gateway ports; append the internal legs from the source task's right
       // edge to the source gateway and from the target gateway to the target
       // task's left edge, so the final polyline is continuous node-to-node.
       sections = withGatewayStubs(edge, sections, ctx);
     }
-    const labelBounds = internal
+    const labelBounds = narrative?.labelBounds ?? (internal
       ? internalLabelBounds(localLayouts, input, edge.edgeId, outer)
-      : outer.labelPositions.get(edge.edgeId);
+      : outer.labelPositions.get(edge.edgeId));
+    const visibleLabel = ctx.layoutMode === "serpentine" && !workflowEdgeKeepsNarrativeLabel(edge)
+      ? ""
+      : edge.label;
     return {
       id: edge.edgeId,
       source: edge.fromNodeId,
       target: edge.toNodeId,
-      label: edge.label,
+      label: visibleLabel,
       semanticKind: edge.semanticKind,
       pathState: edge.pathState,
       labelAlwaysVisible: edge.labelAlwaysVisible,
@@ -130,6 +138,119 @@ export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
   });
 
   return { nodes, edges, width: outer.size.width, height: outer.size.height };
+}
+
+/**
+ * Serpentine presentation uses two deterministic narrative routes instead of
+ * exposing ELK gateway drift to users:
+ *  - cross-stage handoffs use one short bridge between the aligned cards;
+ *  - rerun feedback hugs the bottom of its stage rather than encircling the
+ *    whole stage graph.
+ * ELK still owns task order, stage positions and the space budget.
+ */
+function serpentineNarrativeRoute(
+  edge: WorkflowLayoutInput["edges"][number],
+  ctx: ComposerInput,
+): {
+  sections: WorkflowLayoutResult["edges"][number]["sections"];
+  labelBounds?: WorkflowLayoutResult["edges"][number]["labelBounds"];
+} | null {
+  if (ctx.layoutMode !== "serpentine") return null;
+  const sourceMeta = ctx.input.nodes.find((node) => node.nodeId === edge.fromNodeId);
+  const targetMeta = ctx.input.nodes.find((node) => node.nodeId === edge.toNodeId);
+  if (!sourceMeta || !targetMeta) return null;
+  const sourceLocal = ctx.localLayouts.get(sourceMeta.stageId);
+  const targetLocal = ctx.localLayouts.get(targetMeta.stageId);
+  const sourceStagePosition = ctx.outer.stagePositions.get(sourceMeta.stageId);
+  const targetStagePosition = ctx.outer.stagePositions.get(targetMeta.stageId);
+  const sourceTask = sourceLocal?.tasks.find((task) => task.id === edge.fromNodeId);
+  const targetTask = targetLocal?.tasks.find((task) => task.id === edge.toNodeId);
+  if (!sourceLocal || !targetLocal || !sourceStagePosition || !targetStagePosition || !sourceTask || !targetTask) {
+    return null;
+  }
+
+  const crossStage = sourceMeta.stageId !== targetMeta.stageId;
+  if (crossStage) {
+    const source = offset(
+      { x: sourceTask.x + sourceTask.width / 2, y: sourceTask.y + sourceTask.height },
+      sourceStagePosition,
+    );
+    const target = offset(
+      { x: targetTask.x + targetTask.width / 2, y: targetTask.y },
+      targetStagePosition,
+    );
+    const sourceBox = ctx.stageBoxes.get(sourceMeta.stageId);
+    const channelY = sourceBox
+      ? (sourceStagePosition.y + sourceBox.height + targetStagePosition.y) / 2
+      : (source.y + target.y) / 2;
+    const points = compactPoints([
+      source,
+      { x: source.x, y: channelY },
+      { x: target.x, y: channelY },
+      target,
+    ]);
+    return {
+      sections: sectionsFromPoints(edge.edgeId, points),
+      labelBounds: centeredLabelBounds(edge.label, (source.x + target.x) / 2, channelY),
+    };
+  }
+
+  if (edge.semanticKind !== "rerun") return null;
+  const stageBox = ctx.stageBoxes.get(sourceMeta.stageId);
+  if (!stageBox) return null;
+  const source = offset(
+    { x: sourceTask.x, y: sourceTask.y + sourceTask.height / 2 },
+    sourceStagePosition,
+  );
+  const target = offset(
+    { x: targetTask.x + targetTask.width, y: targetTask.y + targetTask.height / 2 },
+    targetStagePosition,
+  );
+  const railY = sourceStagePosition.y + stageBox.height - 18;
+  const points = compactPoints([
+    source,
+    { x: source.x - 16, y: source.y },
+    { x: source.x - 16, y: railY },
+    { x: target.x + 16, y: railY },
+    { x: target.x + 16, y: target.y },
+    target,
+  ]);
+  return {
+    sections: sectionsFromPoints(edge.edgeId, points),
+    labelBounds: centeredLabelBounds(edge.label, (source.x + target.x) / 2, railY),
+  };
+}
+
+function compactPoints(points: WorkflowLayoutPoint[]): WorkflowLayoutPoint[] {
+  return points.filter((point, index) => {
+    const previous = points[index - 1];
+    return !previous || Math.abs(previous.x - point.x) > 1e-3 || Math.abs(previous.y - point.y) > 1e-3;
+  });
+}
+
+function sectionsFromPoints(
+  edgeId: string,
+  points: WorkflowLayoutPoint[],
+): WorkflowLayoutResult["edges"][number]["sections"] {
+  const sections = points.slice(0, -1).map((point, index) =>
+    section(`${edgeId}_narrative_${index}`, point, points[index + 1]!),
+  );
+  return linkSections(sections);
+}
+
+function centeredLabelBounds(
+  label: string,
+  centerX: number,
+  centerY: number,
+): WorkflowLayoutResult["edges"][number]["labelBounds"] {
+  if (!label) return undefined;
+  const spec = resolveEdgeLabelSpec(label);
+  return {
+    x: centerX - spec.width / 2,
+    y: centerY - spec.height / 2,
+    width: spec.width,
+    height: spec.height,
+  };
 }
 
 /**
@@ -177,6 +298,16 @@ function withGatewayStubs(
   const tgtTask = tgtLocal.tasks.find((t) => t.id === edge.toNodeId);
   if (!srcTask || !tgtTask) {
     return sections;
+  }
+
+  if (ctx.layoutMode === "serpentine") {
+    return withVerticalGatewayStubs(edge, sections, {
+      sourceTask: srcTask,
+      targetTask: tgtTask,
+      sourceStagePosition: srcPos,
+      targetStagePosition: tgtPos,
+      sourceStageBox: srcBox,
+    });
   }
 
   const first = sections[0];
@@ -254,6 +385,75 @@ function withGatewayStubs(
     return next;
   });
   return [...srcStubs, ...updatedSections, ...tgtStubs];
+}
+
+function withVerticalGatewayStubs(
+  edge: WorkflowLayoutInput["edges"][number],
+  sections: WorkflowLayoutResult["edges"][number]["sections"],
+  geometry: {
+    sourceTask: StageLocalLayout["tasks"][number];
+    targetTask: StageLocalLayout["tasks"][number];
+    sourceStagePosition: { x: number; y: number };
+    targetStagePosition: { x: number; y: number };
+    sourceStageBox: Rect;
+  },
+): WorkflowLayoutResult["edges"][number]["sections"] {
+  const first = sections[0];
+  const last = sections[sections.length - 1];
+  if (!first || !last) return sections;
+
+  const srcAnchorX = geometry.sourceTask.x + geometry.sourceTask.width / 2;
+  const tgtAnchorX = geometry.targetTask.x + geometry.targetTask.width / 2;
+  const srcPort = offset(
+    { x: srcAnchorX, y: geometry.sourceTask.y + geometry.sourceTask.height },
+    geometry.sourceStagePosition,
+  );
+  const srcBorder = offset(
+    { x: srcAnchorX, y: geometry.sourceStageBox.height },
+    geometry.sourceStagePosition,
+  );
+  const tgtBorder = offset({ x: tgtAnchorX, y: 0 }, geometry.targetStagePosition);
+  const tgtPort = offset({ x: tgtAnchorX, y: geometry.targetTask.y }, geometry.targetStagePosition);
+
+  const srcStubs: WorkflowLayoutResult["edges"][number]["sections"] = [
+    section(`${edge.edgeId}_src_exit`, srcPort, srcBorder),
+  ];
+  if (Math.abs(srcBorder.x - first.start.x) > 1e-3) {
+    srcStubs.push(section(`${edge.edgeId}_src_shift`, srcBorder, { x: first.start.x, y: srcBorder.y }));
+  }
+
+  const tgtStubs: WorkflowLayoutResult["edges"][number]["sections"] = [];
+  if (Math.abs(tgtBorder.x - last.end.x) > 1e-3) {
+    tgtStubs.push(section(`${edge.edgeId}_tgt_shift`, { x: last.end.x, y: tgtBorder.y }, tgtBorder));
+  }
+  tgtStubs.push(section(`${edge.edgeId}_tgt_enter`, tgtBorder, tgtPort));
+
+  return linkSections([...srcStubs, ...sections, ...tgtStubs]);
+}
+
+function section(
+  id: string,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): WorkflowLayoutResult["edges"][number]["sections"][number] {
+  return {
+    id,
+    start,
+    end,
+    bendPoints: [],
+    incomingSectionIds: [],
+    outgoingSectionIds: [],
+  };
+}
+
+function linkSections(
+  sections: WorkflowLayoutResult["edges"][number]["sections"],
+): WorkflowLayoutResult["edges"][number]["sections"] {
+  return sections.map((item, index) => ({
+    ...item,
+    incomingSectionIds: index > 0 ? [sections[index - 1]!.id] : [],
+    outgoingSectionIds: index + 1 < sections.length ? [sections[index + 1]!.id] : [],
+  }));
 }
 
 /** Internal edge sections: local sections offset by the outer stage position. */

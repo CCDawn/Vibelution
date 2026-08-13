@@ -32,6 +32,8 @@ export function ResearchWorkflowCanvasPane(props: {
             onSelectNode={props.onSelectNode}
             height="100%"
             className={styles.canvas}
+            layoutMode="serpentine"
+            showMiniMap
           />
         ) : (
           <VStateSurface tone="loading" title="加载流程定义" fill className={styles.loading} />
