@@ -141,6 +141,35 @@ def _observe_workbench_for_close() -> dict[str, Any]:
         return observe_workbench()
 
 
+def _open_can_skip_browser_recovery(workbench: dict[str, Any]) -> bool:
+    return (
+        str(workbench.get("desiredState") or "closed").strip() == "closed"
+        and str(workbench.get("observedState") or "closed").strip() == "partial"
+        and str(workbench.get("phase") or "steady").strip() == "closing"
+        and str(workbench.get("externalWindowOwner") or "").strip().lower() == "electron"
+        and str(workbench.get("closePhase") or "").strip() == "window_close_authorized"
+        and not bool(workbench.get("backendPortOwnerResidual"))
+        and not bool(workbench.get("frontendOrphaned"))
+    )
+
+
+def _observe_workbench_for_open(workbench: dict[str, Any]) -> dict[str, Any]:
+    if not _open_can_skip_browser_recovery(workbench):
+        return observe_workbench()
+    try:
+        return observe_workbench(
+            recover_browser_window=False,
+            recover_browser_window_for_backend_observed=False,
+        )
+    except TypeError as exc:
+        if not any(
+            name in str(exc)
+            for name in ("recover_browser_window", "recover_browser_window_for_backend_observed")
+        ):
+            raise
+        return observe_workbench()
+
+
 def _start_background_thread(*, name: str, target: Any) -> threading.Thread:
     thread = threading.Thread(target=target, name=name, daemon=True)
     thread.start()
@@ -3101,6 +3130,7 @@ class RuntimeManagerDaemon:
         result_data: dict[str, Any] | None = None,
         reconcile: bool = True,
         reconcile_observation: dict[str, Any] | None = None,
+        reconcile_residual_processes: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         state = load_state()
         state.setdefault("command", {}).update(
@@ -3125,7 +3155,11 @@ class RuntimeManagerDaemon:
                 state.setdefault("workbench", {})["phase"] = "failed"
                 state["workbench"]["failureMessage"] = failure_message or message
         if reconcile:
-            state = self._reconcile_observation(state, observation=reconcile_observation)
+            state = self._reconcile_observation(
+                state,
+                observation=reconcile_observation,
+                residual_processes=reconcile_residual_processes,
+            )
         state = save_state(state)
         result = {
             "commandId": command_id,
@@ -3687,7 +3721,7 @@ class RuntimeManagerDaemon:
             # always refreshes static assets even when the workbench is already healthy.
             _preflight_frontend_build_for_restart(command_id, force=True)
         should_probe_before_launch = _open_should_probe_before_launch(workbench, no_browser=no_browser)
-        observation = observe_workbench() if should_probe_before_launch else {}
+        observation = _observe_workbench_for_open(workbench) if should_probe_before_launch else {}
         if (
             observation
             and _open_request_already_satisfied(observation, no_browser=no_browser)
@@ -4405,6 +4439,10 @@ class RuntimeManagerDaemon:
                 "closeRequest": request_fields,
             },
             reconcile_observation=verification,
+            reconcile_residual_processes={
+                "count": len(cleanup_result.get("remaining") or []),
+                "items": list(cleanup_result.get("remaining") or []),
+            },
         )
 
     def _handle_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
