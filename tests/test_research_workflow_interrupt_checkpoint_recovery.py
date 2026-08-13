@@ -128,6 +128,23 @@ def test_restart_persisted_interrupt_with_new_attempt_is_single_graph_update(
             "run-restart", "source_extraction", 4
         )
 
+        # A worker crash/requeue can persist another mismatched resume against
+        # the freshly restarted task.  The next user retry must create a new
+        # task instead of replaying that cached task error again.
+        with pytest.raises(ValueError, match="execution receipt identity mismatch"):
+            harness.coordinator.resume_action(
+                GraphDispatch(
+                    action_id=stale_receipt.action_id,
+                    run_id="run-restart",
+                    node_run_id=stale_receipt.node_run_id,
+                    node_id="source_extraction",
+                    attempt=4,
+                    dispatch_kind="resume_action",
+                    team_id="research-team",
+                    receipt=stale_receipt,
+                )
+            )
+
         restarted_again = harness.coordinator.restart_attempt(
             GraphDispatch(
                 action_id="act-driver-retry-again",
