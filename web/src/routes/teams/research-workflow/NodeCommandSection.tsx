@@ -4,7 +4,11 @@ import styles from "./NodeCommandSection.styles";
 
 function offerReason(offer: CommandOffer): string {
   if (offer.available) return "";
-  return offer.reasonCode || offer.blockerIds[0] || "command_unavailable";
+  const code = offer.reasonCode || offer.blockerIds[0] || "command_unavailable";
+  if (code === "retry_owns_recovery") return "当前节点已阻塞，请使用重试";
+  if (code === "node_in_flight") return "当前节点已在执行";
+  if (code === "node_already_succeeded") return "当前节点已完成";
+  return code;
 }
 
 export function NodeCommandSection(props: {

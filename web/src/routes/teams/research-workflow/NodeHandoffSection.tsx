@@ -5,6 +5,12 @@ function blockedReasonLabel(reason: string): string {
   if (reason === "budget_exceeded") {
     return "本阶段预算已用完，请提高预算后创建新运行。";
   }
+  if (reason === "retry_owns_recovery") {
+    return "当前节点已阻塞，请使用重试。";
+  }
+  if (reason === "checkpoint_node_mismatch") {
+    return "检查点仍停留在前驱节点，无法从当前节点恢复。";
+  }
   return reason;
 }
 

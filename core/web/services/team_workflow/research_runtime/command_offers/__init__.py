@@ -41,6 +41,7 @@ def build_command_offers(
             team_id=team_id,
             run=run,
             definition=definition,
+            attempts=attempts,
             evaluated_at_ms=evaluated_at_ms,
         )
     )

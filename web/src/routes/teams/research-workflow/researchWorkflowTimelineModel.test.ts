@@ -32,4 +32,48 @@ describe("researchWorkflowTimelineModel", () => {
     expect(groups[0].items[0].label).toBe("节点启动中");
     expect(groups[1].items[0].label).toBe("运行已创建");
   });
+
+  it("surfaces node_blocked reason in the timeline label", () => {
+    const groups = buildResearchTimelineGroups([
+      event({
+        eventId: "e-block",
+        sequence: 3,
+        type: "node_blocked",
+        payload: {
+          nodeId: "source_extraction",
+          attempt: 2,
+          reason: "检查点仍停留在前驱节点，无法从当前节点恢复。",
+        },
+      }),
+    ]);
+    expect(groups[0].title).toBe("资料提炼 · 第 2 次尝试");
+    expect(groups[0].items[0].label).toContain("节点已阻塞");
+    expect(groups[0].items[0].label).toContain("检查点仍停留在前驱节点");
+  });
+
+  it("projects a blocked node into the timeline when events omitted the failure", () => {
+    const groups = buildResearchTimelineGroups(
+      [
+        event({
+          eventId: "e-start",
+          sequence: 2,
+          type: "node_starting",
+          payload: { nodeId: "source_extraction", attempt: 2 },
+        }),
+      ],
+      {
+        nodeRuns: {
+          source_extraction: {
+            nodeId: "source_extraction",
+            status: "blocked",
+            attempt: 2,
+          },
+        },
+        blockedReason: "检查点仍停留在前驱节点，无法从当前节点恢复。",
+      },
+    );
+    const labels = groups.flatMap((group) => group.items.map((item) => item.label));
+    expect(labels.some((label) => label.includes("节点已阻塞"))).toBe(true);
+    expect(labels.some((label) => label.includes("检查点仍停留在前驱节点"))).toBe(true);
+  });
 });
