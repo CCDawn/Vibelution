@@ -2580,7 +2580,6 @@ def test_desktop_entry_bootstrap_repairs_managed_listener_pid_lost_from_shared_s
         "launcherBackendPid": 0,
         "launcherBackendLaunchPid": 0,
         "launcherAdapter": "python_headless",
-        "launcherControlPort": 8765,
         "runtimeProjectRoot": str(tmp_path),
         "sessionId": "launcher-session-1",
         "workspaceId": "workspace-1",
@@ -2617,6 +2616,8 @@ def test_desktop_entry_bootstrap_repairs_managed_listener_pid_lost_from_shared_s
     assert payload["launcherBackendPid"] == 35496
     assert saved_states[-1]["launcherBackendPid"] == 35496
     assert saved_states[-1]["launcherBackendLaunchPid"] == 35496
+    assert saved_states[-1]["launcherControlPort"] == 8765
+    assert saved_states[-1]["launcherControlUrl"] == "http://127.0.0.1:8765/launcher"
 
 
 def test_managed_launcher_process_snapshot_fails_closed_for_unrelated_listener(tmp_path):
