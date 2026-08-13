@@ -4,11 +4,19 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import { VButton, VCheckbox, VConfirmDialog, VTooltip } from "../components/vui";
+import type { LauncherOperation } from "../api/types";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
+  canStartInstance,
+  canStopInstance,
   cleanupRiskLabels,
+  formatBackendCell,
+  instanceHealth,
+  instanceHealthLabel,
+  instanceWindowOpen,
   isCleanupEligible,
   paginateItems,
+  type InstanceLiveOverlay,
 } from "./LauncherBranchInstancesPanel.model";
 import styles from "./LauncherBranchInstancesPanel.styles";
 
@@ -30,33 +38,10 @@ type LauncherBranchInstancesPanelProps = {
   items: LauncherBranchInstance[];
   selectedId: string;
   onSelect: (id: string) => void;
+  live?: InstanceLiveOverlay;
+  lifecyclePending?: boolean;
+  onLifecycle?: (instanceId: string, operation: Extract<LauncherOperation, "start" | "stop">) => void;
 };
-
-function kindLabel(item: LauncherBranchInstance, copy: LauncherBranchInstancesCopy): string {
-  if (item.kind === "main") {
-    return copy.currentInstance;
-  }
-  if (item.kind === "retired") {
-    return copy.retiredCheckout;
-  }
-  if (item.kind === "local_branch") {
-    return copy.notCheckedOut;
-  }
-  return item.legacy ? copy.legacyCheckout : item.kind;
-}
-
-function stateLabel(item: LauncherBranchInstance): string {
-  if (item.kind === "local_branch") {
-    return "not_checked_out";
-  }
-  if (item.alive) {
-    return item.observedState || "alive";
-  }
-  if (item.dirty) {
-    return "dirty";
-  }
-  return item.observedState || "idle";
-}
 
 function isZhCopy(copy: LauncherBranchInstancesCopy): boolean {
   return copy.branchInstances !== "Branch instances";
@@ -67,6 +52,9 @@ export function LauncherBranchInstancesPanel({
   items,
   selectedId,
   onSelect,
+  live,
+  lifecyclePending = false,
+  onLifecycle,
 }: LauncherBranchInstancesPanelProps) {
   const queryClient = useQueryClient();
   const zh = isZhCopy(copy);
@@ -80,6 +68,12 @@ export function LauncherBranchInstancesPanel({
         next: "下一页",
         selectPage: "选择本页可清理项",
         actions: "操作",
+        backend: "后端",
+        window: "窗口",
+        windowOpen: "开",
+        windowClosed: "关",
+        start: "启动",
+        stop: "停止",
         noRisk: "无额外风险提示",
         pending: "正在清理所选实例…",
         done: "清理完成",
@@ -94,6 +88,12 @@ export function LauncherBranchInstancesPanel({
         next: "Next",
         selectPage: "Select cleanable items on this page",
         actions: "Actions",
+        backend: "Backend",
+        window: "Window",
+        windowOpen: "On",
+        windowClosed: "Off",
+        start: "Start",
+        stop: "Stop",
         noRisk: "No extra risk listed",
         pending: "Cleaning selected instances…",
         done: "Cleanup finished",
@@ -226,9 +226,8 @@ export function LauncherBranchInstancesPanel({
           </span>
           <span role="columnheader">{copy.branchColumn}</span>
           <span role="columnheader">{copy.instanceState}</span>
-          <span role="columnheader">{copy.instanceKind}</span>
-          <span role="columnheader">HEAD</span>
-          <span role="columnheader">Port</span>
+          <span role="columnheader">{labels.backend}</span>
+          <span role="columnheader">{labels.window}</span>
           <span role="columnheader">{copy.instancePath}</span>
           <span role="columnheader">{labels.actions}</span>
         </div>
@@ -236,13 +235,15 @@ export function LauncherBranchInstancesPanel({
           const selected = item.id === selectedId;
           const eligible = isCleanupEligible(item);
           const checked = eligible && visibleSelected.includes(item.id);
+          const health = instanceHealth(item, live);
+          const windowOpen = instanceWindowOpen(item, live);
           return (
             <div
               key={item.id}
               className={styles.statusRow}
               role="row"
               tabIndex={0}
-              data-tone={item.alive ? "success" : item.kind === "retired" ? "warning" : "neutral"}
+              data-tone={health === "running" ? "success" : health === "dirty" ? "warning" : "neutral"}
               data-selected={selected ? "true" : "false"}
               aria-selected={selected}
               onClick={() => onSelect(item.id)}
@@ -266,21 +267,44 @@ export function LauncherBranchInstancesPanel({
                   <strong>{item.shortName || item.branch || item.id}</strong>
                 </VTooltip>
               </span>
-              <span role="cell">{stateLabel(item)}</span>
-              <span role="cell">{kindLabel(item, copy)}</span>
-              <span role="cell">{item.head || "-"}</span>
-              <span role="cell">{item.port > 0 ? String(item.port) : "-"}</span>
+              <span role="cell">{instanceHealthLabel(health, zh)}</span>
+              <span role="cell">{formatBackendCell(item, live)}</span>
+              <span role="cell">{windowOpen ? labels.windowOpen : labels.windowClosed}</span>
               <span role="cell">{item.displayPath || "-"}</span>
               <span role="cell" className={styles.actionCell} onClick={(event) => event.stopPropagation()}>
-                <VButton
-                  type="button"
-                  variant="danger"
-                  density="compact"
-                  isDisabled={!eligible || cleanupMutation.isPending}
-                  onPress={() => askCleanup([item.id])}
-                >
-                  {labels.cleanup}
-                </VButton>
+                {canStartInstance(item, live) ? (
+                  <VButton
+                    type="button"
+                    variant="primary"
+                    density="compact"
+                    isDisabled={lifecyclePending}
+                    onPress={() => onLifecycle?.(item.id, "start")}
+                  >
+                    {labels.start}
+                  </VButton>
+                ) : null}
+                {canStopInstance(item, live) ? (
+                  <VButton
+                    type="button"
+                    variant="secondary"
+                    density="compact"
+                    isDisabled={lifecyclePending}
+                    onPress={() => onLifecycle?.(item.id, "stop")}
+                  >
+                    {labels.stop}
+                  </VButton>
+                ) : null}
+                {eligible ? (
+                  <VButton
+                    type="button"
+                    variant="danger"
+                    density="compact"
+                    isDisabled={cleanupMutation.isPending}
+                    onPress={() => askCleanup([item.id])}
+                  >
+                    {labels.cleanup}
+                  </VButton>
+                ) : null}
               </span>
             </div>
           );
