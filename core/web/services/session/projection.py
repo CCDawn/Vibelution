@@ -141,6 +141,10 @@ def list_sessions(
             )
         )
         summary_projection_ms = s._elapsed_ms(summary_projection_started_at)
+        published_signature = (
+            s._session_list_source_signature(),
+            bool(include_hidden_internal),
+        )
         s._finish_session_list_cache_build(
             signature=signature,
             sessions=sessions,
@@ -148,6 +152,18 @@ def list_sessions(
             conversation_count=len(conversations),
             agent_count=len(agent_by_id),
         )
+        if published_signature != signature:
+            # A standalone SQLite compatibility read may create/retire its WAL
+            # after the initial signature was captured. Keep the original key
+            # for waiters already sharing this build, and also publish under
+            # the post-read key for the immediately following request.
+            s._set_session_list_cache(
+                sessions,
+                now=started_at,
+                signature=published_signature,
+                conversation_count=len(conversations),
+                agent_count=len(agent_by_id),
+            )
         s._record_session_list_loaded_event(
             session_count=len(sessions),
             conversation_count=len(conversations),

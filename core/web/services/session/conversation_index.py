@@ -847,6 +847,7 @@ def query_sessions(
     session_kind: str = "",
     state: str = "",
     sort: str = "updatedAt_desc",
+    agent_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return a paginated, filtered session summary payload."""
     s = _service()
@@ -909,6 +910,7 @@ def query_sessions(
             session_kind=normalized_session_kind,
             state=normalized_state,
             sort=normalized_sort,
+            agent_by_id=agent_by_id,
         )
     except Exception:
         directory_payload = None

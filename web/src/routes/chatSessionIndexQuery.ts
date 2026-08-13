@@ -236,6 +236,7 @@ export function useSessionIndexQuery({
       };
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+    staleTime: 5_000,
     refetchInterval,
     refetchIntervalInBackground,
   });

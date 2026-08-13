@@ -52,7 +52,7 @@
 | 事实 | canonical source | 派生面 |
 | --- | --- | --- |
 | session 目录/索引（创建、标题、归档、父子、recency、status、kind/visibility、有界 preview） | `workspace/chat/conversations.sqlite3`，通过 `ConversationStore` + `session/directory_runtime.py` | session list/`query_sessions`、taskSummary、lastActive。列表禁止扫描 `turn_journal.jsonl`。 |
-| session 热路径薄壳（submit/detail 仍读 conversation 行） | `workspace/chat/chat_state.json`，通过 `session_service` 双写 | running/error 壳、active session、submit 定位。不是目录 SSOT。 |
+| session 控制态与热路径薄壳（submit/detail 仍读 compatibility document） | `workspace/chat/conversations.sqlite3` 的 `workspace_chat_state` / `session_runtime_state`；大诊断快照单独存于 `session_debug_snapshots`，通过 `core/ui/chat_state.py` 兼容 API 访问 | running/error 壳、active session、submit 定位与 experiment binding overlay。正常运行不再读写 `chat_state.json`。 |
 | turn transcript/replay 事实 | `turn_journal.jsonl`，通过 `core/chat/turn_journal.py` | model-visible messages、`SessionDetail.messages`、native transcript/timeline 投影。 |
 | 运行中 assistant text/thought/tools | `SessionLiveOutputState` 和可选 live-output checkpoint | `assistant_delta` SSE、live overlay message、active-turn layer。 |
 | 最终 assistant 回复 | `turn_journal.jsonl` 里的 `assistant_item_committed` / final answer | 持久 `SessionDetail.messages.turnItems`；`content` 为兼容镜像；`codexTranscript` 由 items 单向派生。 |
@@ -61,6 +61,8 @@
 | UI cache | React Query cache 与 `activeTurnLayersBySession` | 临时显示状态；必须通过 backend detail/journal 校准。 |
 
 历史提案 `docs/archive/plans/2026-08/2026-08-11-agent-session-sqlite-migration.md` 曾计划把 Turn/Item 迁入 SQLite `ConversationStore`。该目标未落地，也不再执行；以本表为准。
+
+旧 `chat_state.json` 仅在 SQLite control root 尚不存在时读取一次：先保留时间戳备份，再事务导入；导入成功后的正常运行不 fallback、不双写。`turn_journal.jsonl` 继续独立承担 transcript/tool event 事实源。
 
 经验规则：
 

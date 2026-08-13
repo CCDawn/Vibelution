@@ -7,7 +7,6 @@ The store is the session-index control plane. Turn transcripts stay in
 from __future__ import annotations
 
 import logging
-import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +40,9 @@ class SessionDirectoryRuntimeStatus:
     discarded_legacy: bool = False
     discarded_session_count: int = 0
     imported_agent_count: int = 0
+    migrated_legacy: bool = False
+    migrated_session_count: int = 0
+    migration_backup_created: bool = False
     error_type: str = ""
 
 
@@ -120,7 +122,7 @@ def wait_for_directory_startup(*, timeout: float | None = None) -> str:
 def initialize_session_directory_runtime(
     *,
     project_root: Path,
-    discard_legacy_sessions: bool = True,
+    migrate_legacy_chat_state: bool = True,
 ) -> SessionDirectoryRuntimeStatus:
     """Open the production directory store for one project root.
 
@@ -135,42 +137,56 @@ def initialize_session_directory_runtime(
     begin_directory_startup()
     shutdown_session_directory_runtime(mark_stopped=False)
     store = ConversationStore(conversation_store_path(root))
-    discarded_legacy = False
-    discarded_session_count = 0
+    migrated_legacy = False
+    migrated_session_count = 0
+    migration_backup_created = False
     imported_agent_count = 0
     try:
         metadata = store.open()
         imported_agent_count = _import_agent_snapshots(store, root)
-        if discard_legacy_sessions:
-            discarded_legacy, discarded_session_count = _discard_legacy_sessions_once(
+        if migrate_legacy_chat_state:
+            (
+                migrated_legacy,
+                migrated_session_count,
+                migration_backup_created,
+            ) = _migrate_legacy_chat_state_once(
                 store,
                 root,
             )
+        # Publish the opened store before restore helpers call the compatibility
+        # load/save API. The status remains ``starting`` until every bootstrap
+        # step has completed.
+        with _RUNTIME_LOCK:
+            _STORE = store
+            _PROJECT_ROOT = root
         _restore_missing_personal_direct_sessions(root)
         status = SessionDirectoryRuntimeStatus(
             status="ready",
             schema_version=int(metadata.get("schemaVersion") or 0),
-            discarded_legacy=discarded_legacy,
-            discarded_session_count=discarded_session_count,
             imported_agent_count=imported_agent_count,
+            migrated_legacy=migrated_legacy,
+            migrated_session_count=migrated_session_count,
+            migration_backup_created=migration_backup_created,
         )
         _record(
             "session_directory.runtime.ready",
             outcome="started",
             fields={
                 "schemaVersion": status.schema_version,
-                "discardedLegacy": discarded_legacy,
-                "discardedSessionCount": discarded_session_count,
                 "importedAgentCount": imported_agent_count,
+                "migratedLegacy": migrated_legacy,
+                "migratedSessionCount": migrated_session_count,
+                "migrationBackupCreated": migration_backup_created,
             },
         )
     except Exception as exc:  # noqa: BLE001 - startup failure becomes bounded runtime status
         store.close()
         status = SessionDirectoryRuntimeStatus(
             status="failed",
-            discarded_legacy=discarded_legacy,
-            discarded_session_count=discarded_session_count,
             imported_agent_count=imported_agent_count,
+            migrated_legacy=migrated_legacy,
+            migrated_session_count=migrated_session_count,
+            migration_backup_created=migration_backup_created,
             error_type=type(exc).__name__,
         )
         logger.warning(
@@ -227,69 +243,50 @@ def _import_agent_snapshots(store: ConversationStore, project_root: Path) -> int
     )
 
 
-def _discard_legacy_sessions_once(
+def _migrate_legacy_chat_state_once(
     store: ConversationStore,
     project_root: Path,
-) -> tuple[bool, int]:
-    from core.chat.turn_journal import turn_journal_path
-    from core.ui.chat_state import load_chat_state, save_chat_state
+) -> tuple[bool, int, bool]:
+    """Import legacy JSON once without deleting sessions or turn journals."""
 
-    if store.repository.legacy_sessions_discarded_at_ms() is not None:
-        return False, 0
+    from core.chat.conversation_store import LegacyChatStateImporter
+    from core.ui.chat_state import chat_state_path, formal_chat_state_path
 
-    from core.web.services import session_service as session_svc
-
-    session_ids: list[str] = []
+    existing = store.repository.get_chat_state()
+    if existing:
+        return False, len(existing.get("conversations") or []), False
+    source_path = chat_state_path(project_root)
+    if not source_path.exists() and source_path != formal_chat_state_path(project_root):
+        source_path = formal_chat_state_path(project_root)
     _LEGACY_DISCARD_IN_PROGRESS.set()
     try:
-        with session_svc._CHAT_STATE_LOCK:
-            payload = load_chat_state(project_root)
-            conversations = payload.get("conversations")
-            if not isinstance(conversations, list):
-                conversations = []
-            session_ids = [
-                str(item.get("conversation_id") or item.get("id") or "").strip()
-                for item in conversations
-                if isinstance(item, dict)
-                and str(item.get("conversation_id") or item.get("id") or "").strip()
-            ]
-            payload["conversations"] = []
-            payload["active_conversation_id"] = ""
-            payload["version"] = int(payload.get("version") or session_svc.CHAT_STATE_VERSION)
-            payload["updated_at"] = session_svc._now_timestamp()
-            save_chat_state(project_root, payload)
-
-        for session_id in session_ids:
-            try:
-                session_svc._set_session_running(session_id, False)
-                session_svc._clear_session_turn_control(session_id)
-                session_svc._clear_session_live_output(session_id)
-                session_svc._invalidate_session_conversation_events_cache(session_id)
-                session_svc._invalidate_session_agent_runtime_cache(session_id)
-            except Exception as exc:  # noqa: BLE001 - one stale session must not block discard
-                logger.debug(
-                    "Session directory discard skipped runtime cleanup for one session (%s).",
-                    type(exc).__name__,
-                )
-            journal_path = turn_journal_path(project_root, session_id)
-            session_dir = journal_path.parent
-            try:
-                if session_dir.exists() and session_dir.is_dir():
-                    shutil.rmtree(session_dir, ignore_errors=True)
-            except OSError as exc:
-                logger.warning(
-                    "Session directory discard could not remove a journal workspace (%s).",
-                    type(exc).__name__,
-                )
-
-        store.repository.mark_legacy_sessions_discarded().result(timeout=5)
-        session_svc._invalidate_session_list_cache()
+        if source_path.exists():
+            result = LegacyChatStateImporter(store.repository).import_file(
+                source_path,
+                project_root=project_root,
+            )
+            count = int(result.get("conversationCount") or 0)
+            backup_created = bool(result.get("backupPath"))
+        else:
+            result = store.repository.replace_chat_state(
+                {
+                    "version": 1,
+                    "active_conversation_id": "",
+                    "updated_at": "",
+                    "conversations": [],
+                }
+            ).result(timeout=5)
+            count = int(result.get("conversationCount") or 0)
+            backup_created = False
         _record(
-            "session_directory.legacy.discarded",
+            "session_directory.legacy.migrated",
             outcome="completed",
-            fields={"discardedSessionCount": len(session_ids)},
+            fields={
+                "migratedSessionCount": count,
+                "backupCreated": backup_created,
+            },
         )
-        return True, len(session_ids)
+        return True, count, backup_created
     finally:
         _LEGACY_DISCARD_IN_PROGRESS.clear()
 

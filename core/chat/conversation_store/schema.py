@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -283,8 +283,49 @@ _SCHEMA_V3_STATEMENTS = (
 )
 
 
+# Version 4 moves the remaining ``chat_state.json`` control document into the
+# same SQLite control plane.  Session payloads and large diagnostic snapshots
+# are deliberately separated so directory reads never deserialize prompt or
+# provider traces.  Turn/message/tool history remains in turn_journal.jsonl.
+_SCHEMA_V4_STATEMENTS = (
+    """
+    CREATE TABLE workspace_chat_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      version INTEGER NOT NULL,
+      active_session_id TEXT NOT NULL DEFAULT '',
+      state_revision INTEGER NOT NULL DEFAULT 0 CHECK (state_revision >= 0),
+      updated_at TEXT NOT NULL DEFAULT '',
+      extras_json TEXT NOT NULL DEFAULT '{}',
+      imported_source_sha256 TEXT NOT NULL DEFAULT '',
+      imported_at_ms INTEGER
+    )
+    """,
+    """
+    CREATE TABLE session_runtime_state (
+      session_id TEXT PRIMARY KEY,
+      position INTEGER NOT NULL CHECK (position >= 0),
+      payload_json TEXT NOT NULL,
+      experiment_binding_json TEXT NOT NULL DEFAULT '{}',
+      updated_at_ms INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE session_debug_snapshots (
+      session_id TEXT PRIMARY KEY,
+      payload_json TEXT NOT NULL,
+      updated_at_ms INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX idx_session_runtime_state_updated
+    ON session_runtime_state(updated_at_ms DESC, session_id DESC)
+    """,
+)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, statements=_SCHEMA_V1_STATEMENTS),
     Migration(version=2, statements=_SCHEMA_V2_STATEMENTS),
     Migration(version=3, statements=_SCHEMA_V3_STATEMENTS),
+    Migration(version=4, statements=_SCHEMA_V4_STATEMENTS),
 )

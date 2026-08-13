@@ -229,6 +229,23 @@ def session_query(
     )
 
 
+@router.get("/sessions/bootstrap")
+def session_bootstrap(
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str = "",
+    q: str = "",
+) -> dict:
+    """Return the first-paint chat catalog from one shared projection pass."""
+
+    from core.web.services import conversation_service
+
+    return conversation_service.build_chat_workbench_bootstrap(
+        limit=limit,
+        cursor=cursor,
+        q=q,
+    )
+
+
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
 def session_create(
     request: Request,

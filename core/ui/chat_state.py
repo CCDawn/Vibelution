@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from core.infrastructure import developer_sandbox
-from core.infrastructure.atomic_io import atomic_write_text
 from core.chat.session_catalog import (
     CATALOG_GLOBAL_DIRTY_SESSION_ID,
     notify_session_catalog_dirty,
@@ -288,45 +287,43 @@ def normalize_chat_messages(items: Any) -> list[dict[str, Any]]:
 
 
 def load_chat_state(project_root: Path) -> dict[str, Any]:
+    """Load the canonical compatibility document from ConversationStore.
+
+    ``chat_state.json`` is consulted only when the SQLite root row does not
+    exist yet, in which case it is transactionally imported with a timestamped
+    backup. Normal runtime reads never parse the legacy JSON file.
+    """
+
     with chat_state_transaction(project_root):
-        path = chat_state_path(project_root)
-        if not path.exists() and path != formal_chat_state_path(project_root):
-            path = formal_chat_state_path(project_root)
-        if not path.exists():
-            return {}
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            _backup_corrupt_chat_state(path, exc)
-            return {}
-        if not isinstance(payload, dict):
-            return {}
-        cleaned, changed = _drop_legacy_chat_state_messages(payload, project_root=project_root)
-        if changed:
+        with _chat_state_repository(project_root) as repository:
+            payload = repository.get_chat_state()
+            if payload:
+                return payload
+            path = _legacy_chat_state_source_path(project_root)
+            if path is None:
+                return {}
             try:
-                revision = _next_state_revision(path)
-                cleaned["state_revision"] = revision
-                atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
-                notify_session_catalog_dirty(
-                    project_root,
-                    CATALOG_GLOBAL_DIRTY_SESSION_ID,
-                    f"state:{revision}",
+                from core.chat.conversation_store import LegacyChatStateImporter
+
+                LegacyChatStateImporter(repository).import_file(
+                    path,
+                    project_root=project_root,
                 )
-            except OSError as exc:
-                _debug_logger.warning(
-                    f"[ChatState] failed to clean legacy chat messages from {path}: {type(exc).__name__}: {exc}"
-                )
-        return cleaned
+            except Exception as exc:
+                if isinstance(exc, (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError)):
+                    _backup_corrupt_chat_state(path, exc)
+                    return {}
+                raise
+            return repository.get_chat_state()
 
 
 def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
     with chat_state_transaction(project_root):
-        path = chat_state_path(project_root)
-        path.parent.mkdir(parents=True, exist_ok=True)
         cleaned, _changed = _drop_legacy_chat_state_messages(state, project_root=project_root)
-        revision = _next_state_revision(path)
+        with _chat_state_repository(project_root) as repository:
+            result = repository.replace_chat_state(cleaned).result(timeout=5)
+        revision = int(result.get("stateRevision") or 0)
         cleaned["state_revision"] = revision
-        atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
         notify_session_catalog_dirty(
             project_root,
             CATALOG_GLOBAL_DIRTY_SESSION_ID,
@@ -334,19 +331,33 @@ def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
         )
 
 
-def _next_state_revision(path: Path) -> int:
-    """Advance only from the locked on-disk state, never caller-provided data."""
+@contextmanager
+def _chat_state_repository(project_root: Path):
+    """Yield the process store repository or a bounded standalone store."""
 
+    from core.web.services.session import directory_runtime
+
+    root = Path(project_root).resolve()
+    store = directory_runtime.get_open_directory_store()
+    if store is not None and directory_runtime.directory_store_project_root() == root:
+        yield store.repository
+        return
+
+    from core.chat.conversation_store import ConversationStore
+
+    standalone = ConversationStore(directory_runtime.conversation_store_path(root))
+    standalone.open()
     try:
-        current = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return 1
-    if not isinstance(current, dict):
-        return 1
-    try:
-        return max(0, int(current.get("state_revision") or 0)) + 1
-    except (TypeError, ValueError):
-        return 1
+        yield standalone.repository
+    finally:
+        standalone.close()
+
+
+def _legacy_chat_state_source_path(project_root: Path) -> Path | None:
+    path = chat_state_path(project_root)
+    if not path.exists() and path != formal_chat_state_path(project_root):
+        path = formal_chat_state_path(project_root)
+    return path if path.exists() else None
 
 
 def _drop_legacy_chat_state_messages(

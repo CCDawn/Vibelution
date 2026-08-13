@@ -15,12 +15,6 @@ def list_conversations() -> list[dict[str, Any]]:
 
     items: list[dict[str, Any]] = []
     sessions = session_service.list_sessions()
-    session_summaries = {
-        str(session.get("id") or "").strip(): session
-        for session in sessions
-        if isinstance(session, dict) and str(session.get("id") or "").strip()
-    }
-    archived_team_room_ids = _archived_team_room_ids()
     for session in sessions:
         items.append(
             {
@@ -53,8 +47,80 @@ def list_conversations() -> list[dict[str, Any]]:
                 "agentSourceRef": _optional_dict_payload(session.get("agentSourceRef")),
             }
         )
+    group_items, filtered_archived_team_room_count = _list_group_conversations_with_count(
+        sessions
+    )
+    items.extend(group_items)
+    items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    _record_conversation_index_loaded(
+        item_count=len(items),
+        session_count=len(sessions),
+        filtered_archived_team_room_count=filtered_archived_team_room_count,
+    )
+    return items
+
+
+def list_group_conversations(
+    sessions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project group rooms from an already loaded session page."""
+
+    items, _filtered_count = _list_group_conversations_with_count(sessions)
+    items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    return items
+
+
+def build_chat_workbench_bootstrap(
+    *,
+    limit: int = 50,
+    cursor: str = "",
+    q: str = "",
+) -> dict[str, Any]:
+    """Build the first-paint catalog with one agent and session projection pass."""
+
+    from core.web.services.agent_directory_service import list_agents
+    from core.web.services.session import directory_runtime
+
+    agents = list_agents(include_archived=False, detail="summary")
+    agent_by_id = {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in agents
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
+    session_page = session_service.query_sessions(
+        limit=limit,
+        cursor=cursor,
+        q=q,
+        agent_by_id=agent_by_id,
+    )
+    store = directory_runtime.get_open_directory_store()
+    active_session_id = ""
+    if store is not None:
+        active_session_id, _bindings = store.repository.get_chat_state_directory_overlay()
+    return {
+        "activeSessionId": str(active_session_id or "").strip(),
+        "sessionPage": session_page,
+        "agents": agents,
+        # Direct conversations are already represented by sessionPage. The
+        # unified index needs only group rooms as its additional first-paint input.
+        "conversations": list_group_conversations(list(session_page.get("items") or [])),
+    }
+
+
+def _list_group_conversations_with_count(
+    sessions: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    session_summaries = {
+        str(session.get("id") or "").strip(): session
+        for session in sessions
+        if isinstance(session, dict) and str(session.get("id") or "").strip()
+    }
+    archived_team_room_ids = _archived_team_room_ids()
+    items: list[dict[str, Any]] = []
     filtered_archived_team_room_count = 0
-    for room in chat_room_service.list_chat_rooms_for_conversation_index(session_summaries=session_summaries):
+    for room in chat_room_service.list_chat_rooms_for_conversation_index(
+        session_summaries=session_summaries
+    ):
         room_id = str(room.get("roomId") or "").strip()
         if room_id in archived_team_room_ids:
             filtered_archived_team_room_count += 1
@@ -80,13 +146,7 @@ def list_conversations() -> list[dict[str, Any]]:
                 "agentSourceRef": None,
             }
         )
-    items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
-    _record_conversation_index_loaded(
-        item_count=len(items),
-        session_count=len(sessions),
-        filtered_archived_team_room_count=filtered_archived_team_room_count,
-    )
-    return items
+    return items, filtered_archived_team_room_count
 
 
 def _archived_team_room_ids() -> set[str]:

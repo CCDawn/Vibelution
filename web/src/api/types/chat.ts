@@ -1,6 +1,6 @@
 import type { ProjectionEditContract, SourceAuthorityRef } from "./shared";
 import type { TeamCaseState } from "./teams";
-import type { AgentInboxMessage, AgentSupervisionDecision, AgentToolGovernanceRequest, GroupContextEvent, MemoryPolicy, ToolPolicy } from "./agents";
+import type { AgentInboxMessage, AgentInstance, AgentSupervisionDecision, AgentToolGovernanceRequest, GroupContextEvent, MemoryPolicy, ToolPolicy } from "./agents";
 
 export type SessionSummary = {
   id: string;
@@ -187,6 +187,13 @@ export type SessionQueryResponse = {
     limit: number;
     cursor: string;
   };
+};
+
+export type ChatWorkbenchBootstrap = {
+  activeSessionId: string;
+  sessionPage: SessionQueryResponse;
+  agents: AgentInstance[];
+  conversations: ConversationSummary[];
 };
 
 export type SessionChildHandoffContext = {

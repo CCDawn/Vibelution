@@ -2452,7 +2452,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionDetailQuery.isFetching");
     expect(routeSource).toContain("sessionDetailQuery.data.id !== activeSessionId");
     expect(routeSource).toContain("enabled: secondaryChatDataEnabled");
-    expect(chatWorkbenchCatalogQueriesSource).toContain("enabled: secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive");
+    expect(chatWorkbenchCatalogQueriesSource).toContain("bootstrapSettled &&");
+    expect(chatWorkbenchCatalogQueriesSource).toContain(
+      "(secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive)",
+    );
     expect(routeSource).not.toContain("enabled: groupComposerOpen || Boolean(activeSessionId)");
   });
 
@@ -3272,11 +3275,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId)");
   });
 
-  it("bootstraps the persisted active session before the full session index resolves", () => {
+  it("bootstraps the first-paint catalog once before fallback catalog queries", () => {
     expect(routeSource).toContain('queryKey: ["sessions", "active-bootstrap"]');
     expect(routeSource).toContain(
-      'fetchJson<{ activeSessionId: string }>("/api/sessions/active", { signal })',
+      'fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50", { signal })',
     );
+    expect(routeSource).toContain("queryClient.setQueryData(queryKeys.agents(), payload.agents)");
+    expect(routeSource).toContain("queryClient.setQueryData(queryKeys.conversations(), payload.conversations)");
+    expect(routeSource).toContain('queryKeys.sessionQuery("", 50)');
+    expect(routeSource).toContain(
+      "const bootstrapSettled = activeSessionBootstrapQuery.isFetched || activeSessionBootstrapQuery.isError",
+    );
+    expect(routeSource).toContain("enabled: secondaryChatDataEnabled && bootstrapSettled");
+    expect(routeSource).toContain("bootstrapSettled &&");
     const bootstrapQueryStart = routeSource.indexOf('queryKey: ["sessions", "active-bootstrap"]');
     const sessionIndexCallStart = routeSource.indexOf("const rawSessionsQuery = useSessionIndexQuery");
     expect(bootstrapQueryStart).toBeGreaterThan(0);
@@ -3547,8 +3558,9 @@ describe("ChatCodingRoute layout contract", () => {
   });
 });
 it("defers secondary direct-session queries until startup detail is ready", () => {
+  expect(chatWorkbenchCatalogQueriesSource).toContain("bootstrapSettled &&");
   expect(chatWorkbenchCatalogQueriesSource).toContain(
-    "enabled: secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive,",
+    "(secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive),",
   );
   expect(routeSource).toContain("enabled: secondaryChatDataEnabled && Boolean(activeSessionId),");
   expect(routeSource).toContain(

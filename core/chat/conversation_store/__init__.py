@@ -14,7 +14,12 @@ from .database import (
     SqliteWalRuntimeAssessment,
     assess_sqlite_wal_runtime,
 )
-from .importer import AgentConfigImportError, LegacyAgentConfigImporter
+from .importer import (
+    AgentConfigImportError,
+    ChatStateImportError,
+    LegacyAgentConfigImporter,
+    LegacyChatStateImporter,
+)
 from .repository import (
     AgentConfigRevisionConflictError,
     ConversationRepository,
@@ -32,6 +37,7 @@ from .writer import (
 __all__ = [
     "AgentConfigImportError",
     "AgentConfigRevisionConflictError",
+    "ChatStateImportError",
     "ConversationBackpressureError",
     "ConversationRepository",
     "ConversationStore",
@@ -45,6 +51,7 @@ __all__ = [
     "ConversationWriterClosedError",
     "LAST_PREVIEW_MAX_CHARS",
     "LegacyAgentConfigImporter",
+    "LegacyChatStateImporter",
     "SqliteWalRuntimeAssessment",
     "assess_sqlite_wal_runtime",
     "parse_directory_cursor",
