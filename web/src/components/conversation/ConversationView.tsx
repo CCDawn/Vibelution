@@ -2014,14 +2014,14 @@ export function ConversationView({
       if (!text || isNoFinalAnswerStatusContent(text) || isStreamingStatusPlaceholderContent(text)) {
         return null;
       }
-      // Commentary is process-trail "思考": same chronological lane as tools, capped body.
+      // Commentary is user-visible progress; reasoning_summary remains the thinking lane.
       if (cell.phase === "commentary") {
         return renderCodexThoughtScrollCell({
           cellId: cell.id,
           text,
           status: cell.status,
           tone: cell.tone,
-          title: lang === "zh" ? "思考" : "Thinking",
+          title: lang === "zh" ? "进展" : "Progress",
           phase: "commentary",
           channel: cell.channel,
         });

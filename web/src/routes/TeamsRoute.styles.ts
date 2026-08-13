@@ -249,7 +249,7 @@ const styles: Record<string, string> = {
   boardInspectorFloatingToggle:
     "boardInspectorFloatingToggle fixed bottom-4 right-4 z-[70]",
   boardInspectorOverlayBackdrop:
-    "boardInspectorOverlayBackdrop fixed inset-0 z-[70] bg-[color-mix(in_srgb,var(--vui-surface-base)_55%,transparent)] backdrop-blur-[1px]",
+    "boardInspectorOverlayBackdrop fixed inset-0 z-[70] bg-[color-mix(in_srgb,var(--vui-surface-glass)_55%,transparent)] backdrop-blur-[1px]",
   boardInspectorOverlayPanel:
     "boardInspectorOverlayPanel fixed top-[var(--shell-topbar-height,62px)] right-0 bottom-0 z-[71] flex w-[min(88vw,420px)] min-h-0 flex-col border-l border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-panel)]",
   boardInspectorOverlayHeader:

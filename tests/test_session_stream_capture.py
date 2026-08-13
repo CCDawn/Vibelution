@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from types import SimpleNamespace
 
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.web.services import session_service
@@ -27,6 +28,85 @@ def test_session_turn_capture_thought_and_content() -> None:
     assert capture.uncommitted_content_segment() == "assistant body"
     capture.mark_content_committed()
     assert capture.uncommitted_content_segment() == ""
+
+
+def test_reasoning_segments_commit_once_with_stable_identity_and_capture_order(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-order", turn_id="turn-order")
+    capture.note_thought("先检查日志。")
+    capture.note_tool_event("read_log", "done", call_id="call-read-log", result="ok")
+    capture.note_thought("再检查投影顺序。")
+
+    committed: list[dict] = []
+    monkeypatch.setattr(session_service, "load_conversation_events", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_append_session_conversation_event",
+        lambda *_args, **kwargs: committed.append(dict(kwargs.get("payload") or {})),
+    )
+    monkeypatch.setattr(session_service, "_invalidate_session_conversation_events_cache", lambda _session_id: None)
+
+    assert stream_capture._commit_session_capture_reasoning_segments(
+        "cap-order",
+        capture,
+        source="test_capture_order",
+    ) == 2
+    assert [item["text"] for item in committed] == ["先检查日志。", "再检查投影顺序。"]
+    assert [item["sequence"] for item in committed] == [1, 3]
+    assert committed[0]["itemId"].endswith("-reasoning-1")
+    assert committed[1]["itemId"].endswith("-reasoning-3")
+    assert all(item["status"] == "completed" for item in committed)
+
+    assert stream_capture._commit_session_capture_reasoning_segments(
+        "cap-order",
+        capture,
+        source="test_capture_order",
+    ) == 0
+    assert len(committed) == 2
+
+
+def test_llm_response_commits_reasoning_before_protocol_outcome(monkeypatch) -> None:
+    capture = stream_capture.SessionTurnCapture(session_id="cap-llm-order", turn_id="turn-llm-order")
+    calls: list[str] = []
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+    monkeypatch.setattr(session_service, "load_conversation_events", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        session_service,
+        "conversation_turn_items_from_events",
+        lambda _events, *, turn_id="": [],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_append_session_conversation_event",
+        lambda *_args, **_kwargs: calls.append("reasoning"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "append_conversation_turn_outcome",
+        lambda *_args, **_kwargs: calls.append("outcome"),
+    )
+    monkeypatch.setattr(session_service, "_invalidate_session_conversation_events_cache", lambda _session_id: None)
+    monkeypatch.setattr(session_service, "_set_session_live_output", lambda *_args, **_kwargs: None)
+
+    with stream_capture._capture_session_ui_stream("cap-llm-order", capture):
+        capture.note_thought("先形成推理片段。")
+        get_event_bus().publish(
+            EventNames.LLM_RESPONSE,
+            {"turn_outcome": SimpleNamespace(events=())},
+        )
+
+    assert calls[:2] == ["reasoning", "outcome"]
 
 
 def test_text_batcher_done_flushes_response(monkeypatch) -> None:

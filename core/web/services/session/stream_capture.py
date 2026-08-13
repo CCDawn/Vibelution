@@ -63,6 +63,7 @@ class SessionTurnCapture:
     _latest_thought_text: str = ""
     _last_recorded_thought_sequence: int = 0
     _last_recorded_thought_text: str = ""
+    _last_committed_thought_sequence: int = 0
     _pending_related_thought_sequence: int = 0
     _tool_loop_call_count: int = 0
     _tool_loop_failure_count: int = 0
@@ -101,6 +102,7 @@ class SessionTurnCapture:
                     {
                         "kind": "thought",
                         "status": "running",
+                        "revision": 0,
                         "summary": trim_lines(next_text, max_lines=2),
                         "resultPreview": next_text,
                     }
@@ -168,11 +170,62 @@ class SessionTurnCapture:
             ):
                 updated = dict(latest)
                 updated["status"] = "running"
+                updated["revision"] = s._coerce_nonnegative_int(latest.get("revision")) + 1
                 updated["summary"] = trim_lines(text, max_lines=2)
                 updated["resultPreview"] = text
                 updated["timestamp"] = s._now_timestamp()
                 self.feedback_events[index] = updated
                 return
+
+    def complete_latest_thought_segment(self) -> None:
+        """Close only the active reasoning segment without collapsing turn history."""
+
+        s = _service()
+        with self._lock:
+            if self._latest_thought_sequence <= 0:
+                return
+            for index in range(len(self.feedback_events) - 1, -1, -1):
+                latest = self.feedback_events[index]
+                if (
+                    latest.get("kind") == "thought"
+                    and s._coerce_nonnegative_int(latest.get("sequence")) == self._latest_thought_sequence
+                ):
+                    status = str(latest.get("status") or "").strip().lower()
+                    if status not in {"completed", "done", "success", "failed"}:
+                        updated = dict(latest)
+                        updated["status"] = "completed"
+                        updated["revision"] = s._coerce_nonnegative_int(latest.get("revision")) + 1
+                        updated["timestamp"] = s._now_timestamp()
+                        self.feedback_events[index] = updated
+                    return
+
+    def close_latest_thought_boundary(self) -> None:
+        """Complete the current segment and make the next delta allocate a new item."""
+
+        self.complete_latest_thought_segment()
+        with self._lock:
+            if self._latest_thought_sequence > 0:
+                self._pending_related_thought_sequence = self._latest_thought_sequence
+            self._latest_thought_sequence = 0
+            self._latest_thought_text = ""
+
+    def uncommitted_thought_events(self) -> list[dict[str, Any]]:
+        s = _service()
+        with self._lock:
+            return [
+                dict(event)
+                for event in self.feedback_events
+                if event.get("kind") == "thought"
+                and s._coerce_nonnegative_int(event.get("sequence")) > self._last_committed_thought_sequence
+            ]
+
+    def mark_thought_events_committed(self, sequence: int) -> None:
+        s = _service()
+        with self._lock:
+            self._last_committed_thought_sequence = max(
+                self._last_committed_thought_sequence,
+                s._coerce_nonnegative_int(sequence),
+            )
 
     def clear_thought(self) -> None:
         s = _service()
@@ -280,6 +333,7 @@ class SessionTurnCapture:
         tool_name = str(name or "").strip()
         if not tool_name:
             return
+        self.complete_latest_thought_segment()
         normalized_call_id = str(call_id or "").strip()
         entry = {
             "name": tool_name,
@@ -687,10 +741,17 @@ def _seed_capture_from_live_feedback_events(session_id: str, capture: SessionTur
     capture.feedback_events = events
     capture._next_feedback_sequence = max(s._coerce_nonnegative_int(item.get("sequence")) for item in events) + 1
     latest_thought = 0
+    latest_thought_text = ""
     for item in events:
         if item.get("kind") == "thought":
-            latest_thought = s._coerce_nonnegative_int(item.get("sequence"))
+            sequence = s._coerce_nonnegative_int(item.get("sequence"))
+            capture._last_recorded_thought_sequence = sequence
+            capture._last_recorded_thought_text = str(item.get("resultPreview") or item.get("summary") or "")
+            if str(item.get("status") or "").strip().lower() in {"running", "pending", "in_progress"}:
+                latest_thought = sequence
+                latest_thought_text = capture._last_recorded_thought_text
     capture._latest_thought_sequence = latest_thought
+    capture._latest_thought_text = latest_thought_text
 
 def _active_session_turn_capture(session_id: str, turn_id: str = "") -> SessionTurnCapture | None:
     s = _service()
@@ -779,8 +840,10 @@ def _append_session_reasoning_item_if_needed(
     *,
     source: str = "session_ui_capture",
     done: bool = True,
+    feedback_sequence: int = 0,
+    revision: int = 0,
 ) -> bool:
-    """Durable-commit a reasoning SessionTurnItem when journal only has final_answer.
+    """Durable-commit one reasoning segment under a stable capture identity.
 
     Wire protocol emits reasoning_delta but only item_completed for the answer, so
     reload/detail would otherwise lose thinking after package_cells takes over.
@@ -795,14 +858,18 @@ def _append_session_reasoning_item_if_needed(
         s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id),
         turn_id=normalized_turn_id,
     )
+    normalized_feedback_sequence = s._coerce_nonnegative_int(feedback_sequence)
+    reasoning_suffix = f"-{normalized_feedback_sequence}" if normalized_feedback_sequence > 0 else ""
+    reasoning_id = (
+        f"{s._session_turn_item_base_id(normalized_session_id, normalized_turn_id)}"
+        f"-reasoning{reasoning_suffix}"
+    )
     if any(
-        str(item.get("kind") or item.get("type") or "").strip().lower() in {"reasoning", "analysis"}
-        or str(item.get("phase") or "").strip().lower() == "reasoning"
+        str(item.get("itemId") or item.get("id") or "").split(":", 1)[0] == reasoning_id
         for item in existing
         if isinstance(item, dict)
     ):
         return False
-    reasoning_id = f"{s._session_turn_item_base_id(normalized_session_id, normalized_turn_id)}-reasoning"
     s._append_session_conversation_event(
         normalized_session_id,
         normalized_turn_id,
@@ -815,8 +882,8 @@ def _append_session_reasoning_item_if_needed(
             "invocationId": "",
             "iteration": 0,
             "itemId": reasoning_id,
-            "revision": 0,
-            "sequence": 0,
+            "revision": s._coerce_nonnegative_int(revision),
+            "sequence": normalized_feedback_sequence,
             "kind": "reasoning",
             "channel": "analysis",
             "phase": "reasoning",
@@ -827,7 +894,10 @@ def _append_session_reasoning_item_if_needed(
             "text": thought_text,
             "callId": "",
             "toolName": "",
-            "diagnosticSummary": {"reasoningSource": "session_ui_capture"},
+            "diagnosticSummary": {
+                "reasoningSource": "session_ui_capture",
+                "feedbackSequence": normalized_feedback_sequence,
+            },
         },
         source=source,
         visible_in_model=False,
@@ -836,6 +906,55 @@ def _append_session_reasoning_item_if_needed(
     )
     s._invalidate_session_conversation_events_cache(normalized_session_id)
     return True
+
+
+def _outcome_contains_reasoning_item(outcome: Any) -> bool:
+    return any(
+        str(getattr(event, "kind", "") or "").strip() == "item_completed"
+        and (
+            str(getattr(event, "channel", "") or "").strip().lower() in {"reasoning", "analysis"}
+            or str(getattr(event, "phase", "") or "").strip().lower() == "reasoning"
+        )
+        for event in tuple(getattr(outcome, "events", ()) or ())
+    )
+
+
+def _commit_session_capture_reasoning_segments(
+    session_id: str,
+    capture: SessionTurnCapture,
+    *,
+    source: str,
+    outcome: Any = None,
+) -> int:
+    """Commit newly completed reasoning segments before later protocol items."""
+
+    s = _service()
+    capture.close_latest_thought_boundary()
+    pending = capture.uncommitted_thought_events()
+    if not pending:
+        return 0
+    last_sequence = max(s._coerce_nonnegative_int(event.get("sequence")) for event in pending)
+    if outcome is not None and _outcome_contains_reasoning_item(outcome):
+        # Provider-native reasoning is already ordered inside the canonical outcome.
+        capture.mark_thought_events_committed(last_sequence)
+        return 0
+
+    committed = 0
+    for event in pending:
+        sequence = s._coerce_nonnegative_int(event.get("sequence"))
+        text = event.get("resultPreview") or event.get("summary") or ""
+        if _append_session_reasoning_item_if_needed(
+            session_id,
+            capture.turn_id,
+            str(text),
+            source=source,
+            done=True,
+            feedback_sequence=sequence,
+            revision=s._coerce_nonnegative_int(event.get("revision")),
+        ):
+            committed += 1
+    capture.mark_thought_events_committed(last_sequence)
+    return committed
 
 
 def _commit_session_capture_assistant_segment(
@@ -1149,18 +1268,19 @@ def _capture_session_ui_stream(
         outcome = data.get("turn_outcome")
         if outcome is None:
             return
+        _commit_session_capture_reasoning_segments(
+            session_id,
+            capture,
+            source="session_ui_capture_llm_response",
+            outcome=outcome,
+        )
+        s._set_session_live_output(
+            session_id,
+            turn_id=capture.turn_id,
+            feedback_events=capture.feedback_events,
+        )
         s.append_conversation_turn_outcome(s.PROJECT_ROOT, session_id, capture.turn_id, outcome)
         s._invalidate_session_conversation_events_cache(session_id)
-        # Final answer item_completed lands without a reasoning commit; durable-write
-        # capture.thought so reload/detail package_cells still show thinking.
-        if capture.thought:
-            _append_session_reasoning_item_if_needed(
-                session_id,
-                capture.turn_id,
-                capture.thought,
-                source="session_ui_capture_llm_response",
-                done=True,
-            )
         capture.mark_content_committed()
 
     for event_name in (s.EventNames.TOOL_START, s.EventNames.TOOL_SUCCESS, s.EventNames.TOOL_ERROR):
@@ -1202,6 +1322,11 @@ def _capture_session_ui_stream(
             batcher = context.get("textBatcher") if isinstance(context, dict) else None
             if isinstance(batcher, _SessionUiCaptureTextBatcher):
                 batcher.flush_all()
+            _commit_session_capture_reasoning_segments(
+                session_id,
+                capture,
+                source="session_ui_capture_close",
+            )
             _commit_session_capture_assistant_segment(
                 session_id,
                 capture,
@@ -1244,14 +1369,15 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
             if not isinstance(capture, SessionTurnCapture) or not session_id:
                 return
             cleaned = s._sanitize_thought_delta_text(text)
-            if cleaned and not done:
+            if cleaned:
                 batcher = context.get("textBatcher")
                 capture.note_thought(cleaned)
-                s._set_session_model_thinking_live_output(
-                    session_id,
-                    turn_id=capture.turn_id,
-                    thought_chars=len(cleaned),
-                )
+                if not done:
+                    s._set_session_model_thinking_live_output(
+                        session_id,
+                        turn_id=capture.turn_id,
+                        thought_chars=len(cleaned),
+                    )
                 if isinstance(batcher, _SessionUiCaptureTextBatcher):
                     batcher.note_thought(capture.thought, feedback_events=capture.feedback_events)
                 else:
@@ -1259,6 +1385,17 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                         session_id,
                         turn_id=capture.turn_id,
                         thought=capture.thought,
+                        feedback_events=capture.feedback_events,
+                    )
+            if done:
+                capture.close_latest_thought_boundary()
+                batcher = context.get("textBatcher")
+                if isinstance(batcher, _SessionUiCaptureTextBatcher):
+                    batcher.flush_thought(feedback_events=capture.feedback_events)
+                else:
+                    s._set_session_live_output(
+                        session_id,
+                        turn_id=capture.turn_id,
                         feedback_events=capture.feedback_events,
                     )
 
@@ -1291,6 +1428,7 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 return
             cleaned = s._sanitize_message_content("assistant", text)
             if cleaned:
+                capture.close_latest_thought_boundary()
                 previous = str(capture.content or "")
                 if done:
                     next_content = cleaned
