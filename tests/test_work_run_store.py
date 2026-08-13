@@ -1,4 +1,6 @@
 import json
+import os
+from datetime import datetime, timezone
 
 import pytest
 
@@ -237,6 +239,53 @@ def test_work_run_store_lists_recent_snapshots_from_index_without_full_scan(tmp_
 
     assert [item["runId"] for item in snapshots] == ["chat_4", "chat_3", "chat_2"]
     assert set(scanned) <= {"index.json", "chat_4.json", "chat_3.json", "chat_2.json"}
+
+
+def test_work_run_store_lists_lifecycle_candidates_without_loading_stale_history(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    runs_dir = store.runs_dir("chat_turn")
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    fresh_at = datetime.now(timezone.utc).isoformat()
+    snapshots = {
+        "active_old": {"runId": "active_old", "runKind": "chat_turn", "status": "running", "updatedAt": "2020-01-01T00:00:00Z"},
+        "recent_restored": {"runId": "recent_restored", "runKind": "chat_turn", "status": "running", "updatedAt": fresh_at},
+        "parallel_fresh": {"runId": "parallel_fresh", "runKind": "chat_turn", "status": "running", "updatedAt": fresh_at},
+        "history_stale": {"runId": "history_stale", "runKind": "chat_turn", "status": "running", "updatedAt": "2020-01-01T00:00:00Z"},
+    }
+    for run_id, payload in snapshots.items():
+        (runs_dir / f"{run_id}.json").write_text(json.dumps(payload), encoding="utf-8")
+    for run_id in ("active_old", "recent_restored", "history_stale"):
+        os.utime(runs_dir / f"{run_id}.json", (1, 1))
+    store.save_run_index(
+        "chat_turn",
+        active_run_id="active_old",
+        latest_run_id="recent_restored",
+        recent_run_ids=["recent_restored"],
+        emit_event=False,
+    )
+    loaded = []
+    original_load_json = work_run_store._load_json
+
+    def capture_load(path):
+        loaded.append(path.name)
+        return original_load_json(path)
+
+    monkeypatch.setattr(work_run_store, "_load_json", capture_load)
+
+    candidates = store.list_lifecycle_candidate_snapshots("chat_turn")
+
+    assert {item["runId"] for item in candidates} == {"active_old", "recent_restored", "parallel_fresh"}
+    assert loaded.count("active_old.json") == 1
+    assert "history_stale.json" not in loaded
+
+
+def test_work_run_store_lifecycle_candidate_scan_propagates_directory_errors(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    store.ensure_kind_dirs("chat_turn")
+    monkeypatch.setattr(work_run_store.os, "scandir", lambda _path: (_ for _ in ()).throw(PermissionError("locked")))
+
+    with pytest.raises(PermissionError, match="locked"):
+        store.list_lifecycle_candidate_snapshots("chat_turn")
 
 
 def test_work_run_store_repairs_recent_index_for_existing_identical_snapshot(tmp_path):

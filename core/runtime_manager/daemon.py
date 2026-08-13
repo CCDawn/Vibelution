@@ -391,7 +391,7 @@ def _persistent_active_work_run_snapshots() -> list[dict[str, Any]]:
             )
             active_run_id = ""
         try:
-            payloads = store.list_snapshots(kind)
+            payloads = store.list_lifecycle_candidate_snapshots(kind)
         except Exception as exc:
             _append_event(
                 "workbench.lifecycle.persistent_active_work_probe_failed",

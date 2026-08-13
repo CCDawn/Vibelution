@@ -622,6 +622,59 @@ class WorkRunStore:
             return snapshots
         return sorted(snapshots, key=_run_sort_key, reverse=True)[:bounded_limit]
 
+    def list_lifecycle_candidate_snapshots(self, run_kind: str) -> list[dict[str, Any]]:
+        """Load snapshots that can still block a destructive lifecycle action.
+
+        The active id and bounded recent index are always loaded for compatibility
+        with restored stores whose file mtimes may not reflect payload timestamps.
+        Other historical files are only parsed while their filesystem mtime is
+        inside the same grace window used by ``snapshot_is_stale``.
+        """
+
+        runs_dir = self.runs_dir(run_kind)
+        if not runs_dir.exists():
+            return []
+        index = self.load_run_index(run_kind)
+        active_run_id = str(index.get("activeRunId") or "").strip()
+        candidate_run_ids: list[str] = []
+        seen: set[str] = set()
+        for run_id in [active_run_id, *_bounded_recent_run_ids(index.get("recentRunIds"))]:
+            if run_id and run_id not in seen:
+                seen.add(run_id)
+                candidate_run_ids.append(run_id)
+        fresh_run_ids: list[str] = []
+        fresh_cutoff = time.time() - STALE_SNAPSHOT_GRACE.total_seconds()
+        with os.scandir(runs_dir) as entries:
+            for entry in entries:
+                if not entry.name.endswith(".json"):
+                    continue
+                try:
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                except OSError:
+                    pass
+                try:
+                    run_id = normalize_run_id(Path(entry.name).stem)
+                except ValueError:
+                    continue
+                if run_id in seen:
+                    continue
+                try:
+                    is_fresh = entry.stat(follow_symlinks=False).st_mtime >= fresh_cutoff
+                except OSError:
+                    is_fresh = True
+                if not is_fresh:
+                    continue
+                seen.add(run_id)
+                fresh_run_ids.append(run_id)
+
+        snapshots: list[dict[str, Any]] = []
+        for run_id in [*candidate_run_ids, *sorted(fresh_run_ids)]:
+            payload = self.load_snapshot(run_kind, run_id)
+            if payload:
+                snapshots.append(payload)
+        return snapshots
+
     def delete_snapshot(self, run_kind: str, run_id: str) -> dict[str, Any]:
         normalized = normalize_run_id(run_id)
         runs_dir = self.runs_dir(run_kind)
