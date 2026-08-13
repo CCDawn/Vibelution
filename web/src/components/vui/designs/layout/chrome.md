@@ -220,15 +220,17 @@ import { VStatusStrip } from "@/components/vui";
 ## VWorkbenchPowerMenu
 
 ### 功能
-工作台生命周期电源菜单：重启 / 停止 / 强制停止 的**唯一产品入口形态**。
+工作台生命周期电源菜单：重启 / 停止 / 强制停止 的 VUI 产品形态。桌面产品里，项目级开关的**唯一入口**是 Electron 托盘。
 
 ### 适用范围
-- **适用**：AppShell 顶栏电源；Launcher 运维条 lifecycle；与顶栏一致的 power 入口。
-- **不适用**：域内「停止任务」→ 域 `VButton`；非 lifecycle 更多菜单 → `VDropdownMenu`。
+- **适用**：仍需要页内电源菜单的预览/非桌面壳。
+- **不适用**：桌面 Launcher / AppShell 顶栏；分支实例启停 → 表格行按钮；域内「停止任务」→ 域 `VButton`；非 lifecycle 更多菜单 → `VDropdownMenu`。
 
 | 场景 | 选择 |
 | --- | --- |
-| 重启/停止工作台 | `VWorkbenchPowerMenu` |
+| 桌面项目启动/停止/重启 | Electron 托盘 |
+| 分支实例启停 | Launcher 分支表行按钮 |
+| 页内电源菜单（非桌面壳） | `VWorkbenchPowerMenu` |
 | 停止单任务 | 域按钮 |
 
 ### 使用方式
@@ -250,10 +252,10 @@ import { VWorkbenchPowerMenu } from "@/components/vui";
 | *Disabled / showForceStop | 分项 | force 为 danger |
 
 ### 非职责
-- 不实现 beforeunload / active-work 文案；不替代 start/refresh 主按钮。
+- 不实现 beforeunload / active-work 文案；不替代 Electron 托盘开关或分支表行内启停。
 
 ### 实现落点
 - `product/workbench-shell/VWorkbenchPowerMenu.tsx`
 
 ### 反冗余
-- 禁止 AppShell/Launcher 各写一套 power 菜单。
+- 禁止 AppShell / Launcher 页再挂电源菜单；项目开关只走 Electron 托盘。

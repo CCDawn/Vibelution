@@ -65,7 +65,8 @@ describe("LauncherRoute layout contract", () => {
     expect(diagnosticsPanelSource).not.toContain("LauncherRoute.styles");
     expect(projectMaintenancePanelSource).not.toContain("LauncherRoute.styles");
     expect(startupSettingsPanelSource).not.toContain("LauncherRoute.styles");
-    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toContain("<VButton");
+    expect(branchInstancesPanelSource).toContain("<VButton");
     expect(developerModePanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VNativeInput");
@@ -164,8 +165,6 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("const startDisabledReason = launcherStatusDisconnected");
     expect(routeSource).toContain("startDisabledReason");
     expect(routeSource).toContain("startDisabledBusy");
-    expect(routeSource).toContain("disabledReason={startDisabledReason}");
-    expect(routeSource).toContain("tooltip={copy.start}");
     expect(routeSource).toContain("const destructiveActionDisabled = selectedIsCurrent");
     expect(routeSource).toContain("lifecycleActionDisabledActiveWork");
     expect(routeSource).toContain("const stopDisabled = selectedIsCurrent");
@@ -178,11 +177,14 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("const forceStopDisabled = selectedIsCurrent");
     expect(routeSource).toContain("forceStopDisabledReason");
     expect(routeSource).toContain("forceStopDisabledInFlight");
-    // Unified power menu owns restart/stop/force-stop; no parallel status-bar tooltips for them.
-    expect(routeSource).toContain("VWorkbenchPowerMenu");
-    expect(routeSource).toContain("stopDisabled={stopDisabled}");
-    expect(routeSource).toContain("forceStopDisabled={forceStopDisabled}");
-    expect(routeSource).toContain("restartDisabled={destructiveActionDisabled}");
+    expect(routeSource).not.toContain("VWorkbenchPowerMenu");
+    expect(routeSource).not.toContain("disabledReason={startDisabledReason}");
+    expect(routeSource).not.toContain("tooltip={copy.start}");
+    expect(routeSource).not.toContain("stopDisabled={stopDisabled}");
+    expect(routeSource).not.toContain("forceStopDisabled={forceStopDisabled}");
+    expect(routeSource).not.toContain("restartDisabled={destructiveActionDisabled}");
+    expect(branchInstancesPanelSource).toContain("onLifecycle");
+    expect(branchInstancesPanelSource).toContain("labels.start");
   });
 
   it("renders a dense lifecycle console rather than a landing page", () => {
@@ -346,8 +348,9 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("keeps guidance terse while preserving detail in the shared hover surface", () => {
-    expect(routeSource).toContain("<VTooltip content={statusBarBlockerReason}");
-    expect(routeSource).toContain("className={styles.statusBarReason} data-tone={userGuideTone} tabIndex={0}");
+    expect(routeSource).toContain("<VTooltip content={notice.text}");
+    expect(routeSource).not.toContain("<VTooltip content={statusBarBlockerReason}");
+    expect(routeSource).not.toContain("className={styles.statusBarReason} data-tone={userGuideTone} tabIndex={0}");
     expect(routeSource).not.toContain('title={userGuideDetail}');
     expect(routeStylesSource).toContain("userGuide:");
     expect(routeStylesSource).toContain("overflow-wrap-anywhere");
@@ -556,58 +559,48 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("keeps lifecycle actions icon-backed and compact", () => {
-    expect(routeSource).toContain("<Play size={15} />");
-    expect(routeSource).toContain("<RefreshCw size={15} />");
-    expect(routeSource).toContain("<ExternalLink size={15} />");
-    expect(routeSource).toContain("VWorkbenchPowerMenu");
+    expect(routeSource).not.toContain("<Play size={15} />");
+    expect(routeSource).not.toContain("<RefreshCw size={15} />");
+    expect(routeSource).not.toContain("<ExternalLink size={15} />");
+    expect(routeSource).not.toContain("VWorkbenchPowerMenu");
     expect(routeSource).not.toContain("<Square size={15} />");
     expect(startupSettingsPanelSource).toContain("<Maximize2 size={14}");
     expect(startupSettingsPanelSource).toContain("<Minimize2 size={14}");
-    expect(routeSource).toContain('controlMutation.mutate("start")');
-    expect(routeSource).toContain('controlMutation.mutate("stop")');
-    expect(routeSource).toContain('controlMutation.mutate("force-stop")');
-    expect(routeSource).toContain('controlMutation.mutate("restart")');
+    expect(routeSource).not.toContain('controlMutation.mutate("start")');
+    expect(routeSource).not.toContain('controlMutation.mutate("stop")');
+    expect(routeSource).not.toContain('controlMutation.mutate("force-stop")');
+    expect(routeSource).not.toContain('controlMutation.mutate("restart")');
+    expect(routeSource).toContain("controlMutation.mutate({ operation, instanceId })");
     expect(startupSettingsPanelSource).toContain('id: "fullscreen"');
     expect(startupSettingsPanelSource).toContain('id: "windowed"');
     expect(startupSettingsPanelSource).toContain("saveWindowMode({ windowMode: value })");
     expect(routeSource).toContain("supervisorMutation.mutate()");
   });
 
-  it("collects normal lifecycle controls into the Launcher status bar", () => {
+  it("keeps project power off the Launcher page and puts branch instances first", () => {
     expect(styles.statusBar).toBeTypeOf("string");
     expect(styles.statusBarReason).toBeTypeOf("string");
     expect(styles.statusBarActions).toBeTypeOf("string");
     expect(styles.statusBarButton).toBeTypeOf("string");
     expect(styles.dangerActions).toBeTypeOf("string");
 
-    expect(routeSource).toContain("lifecycleControls");
-    expect(routeSource).toContain("const statusBarBlockerReason =");
-    expect(routeSource).toContain("const statusBarReasonText =");
-    expect(routeSource).toContain('<VTooltip content={statusBarBlockerReason}');
-
-    const statusBarStart = routeSource.indexOf('<div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>');
-    const statusBarEnd = routeSource.indexOf("<LauncherProcessMonitorPanel", statusBarStart);
-    expect(statusBarStart).toBeGreaterThanOrEqual(0);
-    expect(statusBarEnd).toBeGreaterThan(statusBarStart);
-    const statusBarActions = routeSource.slice(statusBarStart, statusBarEnd);
-    const refreshIndex = statusBarActions.indexOf("statusQuery.refetch()");
-    const startIndex = statusBarActions.indexOf('controlMutation.mutate("start")');
-    const powerMenuIndex = statusBarActions.indexOf("VWorkbenchPowerMenu");
-    expect(refreshIndex).toBeGreaterThanOrEqual(0);
-    expect(startIndex).toBeGreaterThan(refreshIndex);
-    expect(powerMenuIndex).toBeGreaterThan(startIndex);
-    // No parallel bare restart/stop/force buttons outside the unified menu.
-    expect(statusBarActions).not.toContain('onPress={() => controlMutation.mutate("restart")}');
-    expect(statusBarActions).not.toContain('onPress={() => controlMutation.mutate("stop")}');
-    expect(statusBarActions).not.toContain('onPress={() => controlMutation.mutate("force-stop")}');
-    expect(statusBarActions).toContain('variant="labeled"');
-    expect(statusBarActions).toContain("copy.powerMenu");
-
-    // Force-stop stays in VWorkbenchPowerMenu; it is not a first-screen banner.
+    expect(routeSource).not.toContain("statusBarActions");
+    expect(routeSource).not.toContain("VWorkbenchPowerMenu");
+    expect(routeSource).not.toContain("statusQuery.refetch()");
+    expect(routeSource).not.toContain('controlMutation.mutate("start")');
+    expect(routeSource).not.toContain("copy.powerMenu");
     expect(routeSource).not.toContain("styles.dangerZone");
     expect(routeSource).not.toContain("styles.dangerActions");
     expect(routeSource).toContain("forceStopHint:");
-    expect(routeSource).toContain("showForceStop");
+    expect(routeSource).not.toContain("showForceStop");
+
+    const pageStart = routeSource.indexOf("<VDenseOpsPage");
+    const branchIndex = routeSource.indexOf("<LauncherBranchInstancesPanel", pageStart);
+    const settingsIndex = routeSource.indexOf("<LauncherStartupSettingsPanel", branchIndex);
+    expect(pageStart).toBeGreaterThanOrEqual(0);
+    expect(branchIndex).toBeGreaterThan(pageStart);
+    expect(settingsIndex).toBeGreaterThan(branchIndex);
+    expect(routeSource.slice(pageStart, branchIndex)).not.toContain("actions=");
   });
 
   it("lets Launcher own startup settings without restarting immediately", () => {
