@@ -373,6 +373,17 @@ def _start_source_collection_agent_task(
             input_snapshot["sourceCollectionRunId"] = source_run_id
     if not source_run_id:
         raise RuntimeError("source collection adapter did not return a runId")
+    evidence_remediation_contract: dict[str, Any] = {}
+    if action.node_id == "source_extraction" and int(action.attempt) > 1:
+        from .agent_claim_evidence_materializer import (
+            build_formal_evidence_retry_contract,
+        )
+
+        evidence_remediation_contract = build_formal_evidence_retry_contract(
+            team_id=team_id,
+            workflow_run_id=action.run_id,
+            source_collection_run_id=source_run_id,
+        )
     return start_source_collection_stage_session_task(
         team_id,
         source_run_id,
@@ -382,6 +393,8 @@ def _start_source_collection_agent_task(
             "agentRole": role_key,
             "idempotencyKey": idempotency_key,
             "returnLabel": "科研工作流",
+            "formalRetry": bool(evidence_remediation_contract),
+            "evidenceRemediationContract": evidence_remediation_contract,
         },
     )
 
