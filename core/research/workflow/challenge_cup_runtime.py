@@ -16,7 +16,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
@@ -26,6 +26,25 @@ from core.research.workflow.definition import build_challenge_cup_workflow_defin
 from core.research.workflow.models import ActorKind
 
 
+def merge_node_attempts(
+    current: Mapping[str, int] | None,
+    incoming: Mapping[str, int] | None,
+) -> dict[str, int]:
+    """Merge attempt counters without allowing a checkpoint to move backwards.
+
+    LangGraph may replay the persisted interrupt write and the retry command in
+    the same superstep after a crash.  ``node_attempts`` is therefore an
+    aggregate channel rather than a last-value scalar.  Each node keeps the
+    highest durable attempt observed.
+    """
+
+    merged = {str(node_id): int(attempt) for node_id, attempt in (current or {}).items()}
+    for node_id, attempt in (incoming or {}).items():
+        key = str(node_id)
+        merged[key] = max(merged.get(key, 0), int(attempt))
+    return merged
+
+
 class ChallengeCupGraphState(TypedDict, total=False):
     run_id: str
     team_id: str
@@ -33,7 +52,7 @@ class ChallengeCupGraphState(TypedDict, total=False):
     input_snapshot_hash: str
     active_node_id: str
     active_attempt: int
-    node_attempts: dict[str, int]
+    node_attempts: Annotated[dict[str, int], merge_node_attempts]
     pending_action_id: str | None
     last_receipt_id: str | None
     branch_decision: str | None
@@ -399,6 +418,28 @@ class ChallengeCupGraphCoordinator:
         with a new attempt so the node interrupts with a fresh actionId."""
         graph, stack = self._compile()
         try:
+            config = self._config(dispatch.run_id)
+            state = graph.get_state(config)
+            failed_tasks = [task for task in state.tasks if task.error]
+            if failed_tasks:
+                interrupted_nodes = {
+                    str(item.value.get("nodeId") or "")
+                    for task in failed_tasks
+                    for item in task.interrupts
+                    if isinstance(item.value, Mapping)
+                }
+                if dispatch.node_id not in interrupted_nodes:
+                    raise RuntimeError(
+                        "failed checkpoint cannot be replayed for requested node: "
+                        f"expected {dispatch.node_id}, found {sorted(interrupted_nodes)}"
+                    )
+                # A failed LangGraph task retains task-scoped ``__resume__``
+                # pending writes.  Sending another resume directly makes the
+                # first interrupt consume that stale value again.  Replaying
+                # the exact checkpoint with ``None`` is LangGraph's supported
+                # time-travel path: it drops cached resume writes and re-emits
+                # the same side-effect-free interrupt on a clean descendant.
+                graph.invoke(None, state.config)
             result = graph.invoke(
                 Command(
                     resume={
@@ -407,7 +448,7 @@ class ChallengeCupGraphCoordinator:
                         "nodeId": dispatch.node_id,
                     }
                 ),
-                self._config(dispatch.run_id),
+                config,
             )
             return self._dispatch_result(dispatch, result, graph)
         finally:
