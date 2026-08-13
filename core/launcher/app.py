@@ -396,7 +396,11 @@ def launcher_ack_workbench_close_transaction_window_closed(
 @router.post("/api/launcher/desktop-actions/claim")
 def launcher_claim_desktop_action(request: Request, payload: DesktopActionClaimPayload) -> dict:
     _ensure_control_request(request)
-    return launcher_service.claim_desktop_action(payload.desktopSessionId, lease_seconds=payload.leaseSeconds)
+    return launcher_service.claim_desktop_action(
+        payload.desktopSessionId,
+        lease_seconds=payload.leaseSeconds,
+        wait_ms=payload.waitMs,
+    )
 
 
 @router.post("/api/launcher/desktop-actions/{action_id}/ack", status_code=202)

@@ -38,6 +38,9 @@ from ..types import (
 from .types import BuiltPayload
 
 
+STREAM_EXHAUSTED_WITHOUT_FINISH_REASON = "stream_exhausted_without_finish_reason"
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -319,7 +322,11 @@ class _ChatTurnAssembler:
     def finish(self) -> list[LLMProtocolEvent]:
         if self._terminal_seen:
             return []
-        return self._terminal("incomplete", provider_event_type="stream_exhausted_without_finish_reason")
+        return self._terminal(
+            "incomplete",
+            provider_event_type=STREAM_EXHAUSTED_WITHOUT_FINISH_REASON,
+            error=STREAM_EXHAUSTED_WITHOUT_FINISH_REASON,
+        )
 
     def _delta(self, choice_index: int, delta: Mapping[str, Any]) -> list[LLMProtocolEvent]:
         emitted: list[LLMProtocolEvent] = []
@@ -491,7 +498,13 @@ class _ChatTurnAssembler:
                 )
             emitted.extend(self._terminal("final_answer", provider_event_type="chat.finish.stop"))
         else:
-            emitted.extend(self._terminal("incomplete", provider_event_type=f"chat.finish.{finish_reason}"))
+            emitted.extend(
+                self._terminal(
+                    "incomplete",
+                    provider_event_type=f"chat.finish.{finish_reason}",
+                    error=finish_reason,
+                )
+            )
         return emitted
 
     def _flush_think_parser(self, choice_index: int) -> list[LLMProtocolEvent]:
