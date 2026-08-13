@@ -27,7 +27,7 @@ const styles = {
   gitMetricStrip: "vui-app-appshell gitMetricStrip min-w-0",
   gitOpenLink: `vui-app-appshell gitOpenLink min-w-0 shrink-0 ${vuiControlQuietChromeClass} !h-7 !min-h-7 !px-2 !text-[11px]`,
   gitPanelHeader:
-    "vui-app-appshell gitPanelHeader min-w-0 [&_h3]:text-[var(--vui-font-sm)] [&_h3]:font-semibold",
+    "vui-app-appshell gitPanelHeader min-w-0 [&_h3]:[font-size:var(--vui-font-sm)] [&_h3]:font-semibold",
   gitQuietState:
     "vui-app-appshell gitQuietState m-0 min-w-0 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   gitSection: "vui-app-appshell gitSection grid min-w-0 gap-1.5",
@@ -47,7 +47,7 @@ const styles = {
   utilityFileChildren: "vui-app-appshell utilityFileChildren min-w-0",
   utilityFileDir: "vui-app-appshell utilityFileDir min-w-0",
   utilityFileHeader:
-    "vui-app-appshell utilityFileHeader min-w-0 flex items-center [&_h3]:text-[var(--vui-font-sm)] [&_h3]:font-semibold",
+    "vui-app-appshell utilityFileHeader min-w-0 flex items-center [&_h3]:[font-size:var(--vui-font-sm)] [&_h3]:font-semibold",
   // VSurface owns card chrome; neutralize legacy shell double border/padding.
   utilityFilePanel:
     "vui-app-appshell utilityFilePanel grid min-w-0 gap-2 !border-0 !bg-transparent !p-0 !shadow-none",

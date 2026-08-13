@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 const designRoot = resolve(import.meta.dirname);
 const webRoot = resolve(import.meta.dirname, "../..");
-const docsRoot = resolve(import.meta.dirname, "../../../docs/superpowers/plans");
+const docsRoot = resolve(import.meta.dirname, "../../../docs/archive/superpowers/plans");
 
 const labCss = readFileSync(resolve(designRoot, "vui-reference-lab.css"), "utf8");
 const mapDoc = readFileSync(

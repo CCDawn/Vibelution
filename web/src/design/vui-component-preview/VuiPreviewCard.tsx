@@ -19,7 +19,7 @@ export function VuiPreviewCard({ name, children, className }: VuiPreviewCardProp
         className,
       ].filter(Boolean).join(" ")}
     >
-      <span className="font-mono text-[var(--vui-font-sm)] font-semibold tracking-[-0.01em] text-vui-fg-primary">
+      <span className="font-mono [font-size:var(--vui-font-sm)] font-semibold tracking-[-0.01em] text-vui-fg-primary">
         {name}
       </span>
       <div className="flex w-full min-w-0 max-w-full flex-wrap items-center justify-center gap-2">

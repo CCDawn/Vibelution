@@ -53,7 +53,7 @@ const chipCodeClass = `max-w-full overflow-hidden truncate whitespace-nowrap rou
 const refListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const evidenceRefListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const emptyInlineClass = "[font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
-const statusPillBaseClass = "!min-h-[22px] max-w-full truncate !px-[7px] !text-[var(--vui-font-xs)]";
+const statusPillBaseClass = "!min-h-[22px] max-w-full truncate !px-[7px] ![font-size:var(--vui-font-xs)]";
 const emptyStateClass = "grid min-h-16 content-start gap-1 break-words rounded-[var(--radius-control)] !border-0 bg-vui-surface-row p-2.5 shadow-none";
 const loadingRegionClass = "min-h-0 min-w-0 [&_[aria-hidden=true]>div]:!border-0";
 

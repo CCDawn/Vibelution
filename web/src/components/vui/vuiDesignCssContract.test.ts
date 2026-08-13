@@ -6,6 +6,7 @@ const designRoot = resolve(import.meta.dirname, "../../design");
 const isolatedReferenceArtifacts = new Set([
   "agent-management-governance-preview.css",
   "challenge-cup-platform-home-preview.css",
+  "chat-selection-persistence-preview.css",
   "research-overview-preview.css",
   "research-process-flow-preview.css",
   "vui-reference-lab.css",

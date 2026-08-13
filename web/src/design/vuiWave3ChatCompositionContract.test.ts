@@ -22,12 +22,13 @@ describe("Wave 3B Chat session workbench composition", () => {
   it("marks the Chat layout root as the session workbench recipe", () => {
     const routeSource = readFileSync(resolve(routesRoot, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
     const shellSource = readFileSync(resolve(routesRoot, "chat/ChatSessionWorkbenchShell.tsx"), "utf8");
+    const centerColumnSource = readFileSync(resolve(routesRoot, "chat/ChatWorkbenchCenterColumn.tsx"), "utf8");
     const recipeSource = readFileSync(
       resolve(routesRoot, "../components/vui/layout/VSessionWorkbenchPage.tsx"),
       "utf8",
     );
     expect(routeSource).toContain("ChatSessionWorkbenchShell");
-    expect(routeSource).toContain('data-vui-region="chat-conversation-center"');
+    expect(centerColumnSource).toContain('data-vui-region="chat-conversation-center"');
     expect(routeSource).toContain("PaneCollapseHandle");
     expect(routeSource).toContain("statusRail={");
     expect(routeSource).toContain("center={");
