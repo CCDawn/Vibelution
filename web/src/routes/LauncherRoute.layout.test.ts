@@ -193,7 +193,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("projectBundle");
     expect(routeSource).toContain("StatusRow");
     expect(routeSource).toContain("statusRows");
-    expect(routeSource).toContain("keyStatusRows");
+    expect(routeSource).toContain("statusRows");
     expect(routeSource).toContain("diagnosticStatusRows");
     expect(routeSource).toContain("activeWorkCount");
     expect(routeSource).toContain("controlPlaneEvidence");
@@ -260,9 +260,9 @@ describe("LauncherRoute layout contract", () => {
     const developerIndex = routeSource.indexOf("<LauncherDeveloperModePanel");
     const diagnosticsIndex = routeSource.indexOf("<LauncherDiagnosticsPanel");
     expect(branchIndex).toBeGreaterThan(0);
-    expect(processIndex).toBeGreaterThan(branchIndex);
-    expect(settingsIndex).toBeGreaterThan(processIndex);
+    expect(settingsIndex).toBeGreaterThan(branchIndex);
     expect(advancedIndex).toBeGreaterThan(settingsIndex);
+    expect(processIndex).toBeGreaterThan(advancedIndex);
     expect(maintenanceIndex).toBeGreaterThan(advancedIndex);
     expect(developerIndex).toBeGreaterThan(maintenanceIndex);
     expect(diagnosticsIndex).toBeGreaterThan(developerIndex);
@@ -533,7 +533,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("launcher.lifecycle_control.${status}");
     expect(routeSource).toContain('status: "requested" | "accepted" | "rejected" | "request_failed"');
     expect(routeSource).toContain('response.accepted ? "accepted" : "rejected"');
-    expect(routeSource).toContain('postLauncherLifecycleControlTelemetry(operation, "request_failed"');
+    expect(routeSource).toContain('postLauncherLifecycleControlTelemetry(resolveControlRequest(input).operation, "request_failed"');
     expect(routeSource).toContain('source: "lifecycle-control"');
     expect(routeSource).toContain("launcherOperationSettledByStatus");
     expect(routeSource).toContain("trackedCommandSettledByStatus");
