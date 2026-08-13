@@ -24,6 +24,8 @@ from typing import Iterator
 
 import tomllib
 
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
@@ -81,22 +83,11 @@ def _append_log(event: str, *, level: str = "info", **fields: object) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
 
 
-def _hidden_creation_flags() -> int:
+def _desktop_process_group_flag() -> int:
+    """Return CREATE_NEW_PROCESS_GROUP on Windows; shared helper adds CREATE_NO_WINDOW + hidden startup info."""
     if os.name != "nt":
         return 0
-    flags = 0
-    for name in ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
-        flags |= int(getattr(subprocess, name, 0))
-    return flags
-
-
-def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
-    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
-        return None
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
-    startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
-    return startupinfo
+    return int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
 
 
 def _select_no_console_python(executable: str) -> str:
@@ -749,8 +740,7 @@ def _open_launcher_window(url: str) -> int:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        creationflags=_hidden_creation_flags(),
-        startupinfo=_hidden_startup_info(),
+        **no_window_subprocess_kwargs(creationflags=_desktop_process_group_flag()),
     )
     app_identity = _apply_managed_browser_app_identity(int(process.pid), "launcher")
     return int(app_identity.get("windowPid") or process.pid)
@@ -776,8 +766,7 @@ def _start_launcher_backend(python_exe: str, port: int) -> int:
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=stderr,
-            creationflags=_hidden_creation_flags(),
-            startupinfo=_hidden_startup_info(),
+            **no_window_subprocess_kwargs(creationflags=_desktop_process_group_flag()),
         )
     finally:
         stdout.close()

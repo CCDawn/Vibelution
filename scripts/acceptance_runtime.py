@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
 
 SCHEMA_VERSION = 1
 MODE = "isolated-fixture"
@@ -327,20 +329,6 @@ def _child_environment(
     return env
 
 
-def _no_window_popen_kwargs() -> dict[str, Any]:
-    if os.name != "nt":
-        return {}
-    kwargs: dict[str, Any] = {
-        "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
-    }
-    if hasattr(subprocess, "STARTUPINFO"):
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
-        startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
-        kwargs["startupinfo"] = startupinfo
-    return kwargs
-
-
 def _spawn(
     command: list[str],
     *,
@@ -360,7 +348,7 @@ def _spawn(
             stdin=subprocess.DEVNULL,
             stdout=stdout_handle,
             stderr=stderr_handle,
-            **_no_window_popen_kwargs(),
+            **no_window_subprocess_kwargs(),
         )
     finally:
         stdout_handle.close()
