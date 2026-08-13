@@ -1219,6 +1219,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps group settings in the right status rail and member status in the left conversation index", () => {
     expect(chatCodingRouteWorkbenchSource).toContain("useChatWorkbenchCatalogQueries");
+    expect(chatWorkbenchCatalogQueriesSource).toContain("hasActiveSession: Boolean(activeSessionId)");
+    expect(chatCodingRouteWorkbenchSource).toContain("&& allVisibleSessions.length === 0");
     expect(routeSource).toContain("expandedGroupAgentSessionIds");
     expect(routeSource).toContain("useQueries");
     expect(routeSource).toContain("expandedGroupAgentDetailQueries");
@@ -2432,7 +2434,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionDetailQuery.isFetching");
     expect(routeSource).toContain("sessionDetailQuery.data.id !== activeSessionId");
     expect(routeSource).toContain("enabled: secondaryChatDataEnabled");
-    expect(routeSource).toContain("enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive");
+    expect(chatWorkbenchCatalogQueriesSource).toContain("enabled: secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive");
     expect(routeSource).not.toContain("enabled: groupComposerOpen || Boolean(activeSessionId)");
   });
 
@@ -3527,8 +3529,8 @@ describe("ChatCodingRoute layout contract", () => {
   });
 });
 it("defers secondary direct-session queries until startup detail is ready", () => {
-  expect(routeSource).toContain(
-    "enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive,",
+  expect(chatWorkbenchCatalogQueriesSource).toContain(
+    "enabled: secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive,",
   );
   expect(routeSource).toContain("enabled: secondaryChatDataEnabled && Boolean(activeSessionId),");
   expect(routeSource).toContain(

@@ -15,6 +15,16 @@ describe("chat session startup gate", () => {
     })).toBe(false);
   });
 
+  it("enables the session index when a session is already open", () => {
+    expect(shouldEnableSessionIndexQuery({
+      hasRouteTarget: false,
+      hasActiveSession: true,
+      bootstrapIsFetched: false,
+      bootstrapIsError: false,
+      bootstrapFetchStatus: "fetching",
+    })).toBe(true);
+  });
+
   it("recovers the session index after an aborted bootstrap returns to idle", () => {
     expect(shouldEnableSessionIndexQuery({
       hasRouteTarget: false,
@@ -80,5 +90,18 @@ describe("conversation index loading state", () => {
       sessionsHasData: true,
       sessionsIsLoading: true,
     })).toBe(false);
+  });
+
+  it("does not claim the directory is empty while visible sessions wait for Agent rows", () => {
+    expect(shouldShowConversationIndexLoading({
+      bootstrapIsLoading: false,
+      conversationsHasData: false,
+      conversationsIsLoading: false,
+      sessionsHasData: true,
+      sessionsIsLoading: false,
+      agentsHasData: false,
+      agentsIsLoading: true,
+      visibleSessionCount: 3,
+    })).toBe(true);
   });
 });

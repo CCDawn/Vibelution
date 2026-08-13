@@ -102,6 +102,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   // the canonical session index recover instead of leaving the directory gated.
   const sessionIndexQueryEnabled = shouldEnableSessionIndexQuery({
     hasRouteTarget: Boolean(input.requestedSessionId || input.requestedRoomId),
+    hasActiveSession: Boolean(activeSessionId),
     bootstrapIsFetched: activeSessionBootstrapQuery.isFetched,
     bootstrapIsError: activeSessionBootstrapQuery.isError,
     bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus,
@@ -156,14 +157,14 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     // Must load whenever the left-rail agent directory is active — not only when the
     // group-room picker is open. With teams=[], research/evolution members all dump into
     // 「特殊 Agent」and team rooms fall into 未归属.
-    enabled: secondaryChatDataEnabled,
+    enabled: secondaryChatDataEnabled || sessionIndexQueryEnabled,
     refetchInterval: chatSecondaryPollPolicy.teamsRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
-    enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive,
+    enabled: secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive,
   });
   const skillsQuery = useQuery({
     queryKey: queryKeys.skills(),
