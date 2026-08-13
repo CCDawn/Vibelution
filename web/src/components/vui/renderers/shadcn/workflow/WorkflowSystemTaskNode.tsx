@@ -14,6 +14,8 @@ export function WorkflowSystemTaskNode(props: NodeProps) {
   const portSides = props.data.portSides as
     | { source: Record<string, WorkflowPortSide>; target: Record<string, WorkflowPortSide> }
     | undefined;
+  const layoutMode = props.data.layoutMode === "serpentine" ? "serpentine" : "stage-columns";
+  const description = props.data.description ? String(props.data.description) : "";
   return (
     <WorkflowNodeChrome
       label={label}
@@ -22,10 +24,12 @@ export function WorkflowSystemTaskNode(props: NodeProps) {
       selected={Boolean(props.selected)}
       isRuntimeCurrent={Boolean(props.data.isRuntimeCurrent)}
       attempt={attempt}
-      subtitle="系统执行"
+      primaryRoleKey={props.data.primaryRoleKey ? String(props.data.primaryRoleKey) : undefined}
+      subtitle={layoutMode === "serpentine" ? description || "受控系统执行" : "系统执行"}
       portSides={portSides}
       title={workflowNodeTooltip({ label, status, attempt })}
       className="bg-[var(--vui-surface-row)]"
+      layoutMode={layoutMode}
     />
   );
 }
