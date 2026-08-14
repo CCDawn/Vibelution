@@ -158,6 +158,8 @@ export function createLauncherIpcHost(input: {
   orchestrateLifecycle?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedLifecycleResult>;
   orchestrateBranchInstance?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedBranchInstanceResult>;
   orchestrateLauncherApi?: (path: string, payload: LauncherIpcInvokePayload) => Promise<unknown>;
+  resolveLocalStatus?: () => unknown;
+  scheduleStatusRefresh?: () => void;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }) {
@@ -186,6 +188,13 @@ export function createLauncherIpcHost(input: {
             error instanceof Error ? error.message : String(error)
           );
         }
+      }
+      if (normalized.path === "status" && input.resolveLocalStatus) {
+        input.scheduleStatusRefresh?.();
+        return {
+          ok: true,
+          payload: overlayLauncherWindowTruth(normalized.path, input.resolveLocalStatus(), resolveWindowTruth())
+        };
       }
       if (BRANCH_INSTANCE_PATHS.has(normalized.path) && input.orchestrateBranchInstance) {
         try {

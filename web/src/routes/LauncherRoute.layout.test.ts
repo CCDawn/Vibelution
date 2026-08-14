@@ -759,13 +759,14 @@ describe("LauncherRoute layout contract", () => {
     );
     // The first-read surface shows a starting state instead of 未连接 with an empty dashboard.
     expect(sourceSlice(routeSource, "const launcherSummary =", "const controlSummary =")).toContain(
-      "launcherControlPlaneStarting ? copy.launcherMaintaining : copy.launcherOffline",
+      "launcherControlPlaneStarting || statusQuery.isPending ? copy.launcherMaintaining : copy.launcherOffline",
     );
     expect(sourceSlice(routeSource, "{statusQuery.isError && !launcherControlPlaneStarting ? (", "launcherControlPlaneStarting ? (")).toContain(
       "copy.loadFailed",
     );
     expect(routeSource).toContain("launcherControlPlaneStarting ? (");
     expect(routeSource).toContain('title={copy.lifecycleStarting}');
+    expect(routeSource).toContain("launcherReading={Boolean(");
     // The lifecycle display must expose a dedicated starting state while the host is not ready.
     expect(routeSource).toContain("starting: launcherControlPlaneStarting");
   });

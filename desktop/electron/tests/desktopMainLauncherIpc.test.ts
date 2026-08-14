@@ -43,5 +43,8 @@ describe("Electron main Launcher IPC facade", () => {
     const statusApi = hostSource.indexOf('"status"', hostSource.indexOf("const LAUNCHER_API_PATHS"));
     expect(statusApi).toBeGreaterThan(0);
     expect(statusApi).toBeLessThan(contextStart);
+    expect(mainSource).toContain("createLocalLauncherStatusSnapshot");
+    expect(mainSource).toContain("resolveLocalStatus");
+    expect(mainSource).toContain("scheduleStatusRefresh");
   });
 });

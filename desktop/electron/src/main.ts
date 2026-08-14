@@ -46,6 +46,7 @@ import {
   type OrchestratedBranchInstanceResult,
   type OrchestratedLifecycleResult
 } from "./protocol/launcherIpcHost.js";
+import { createLocalLauncherStatusSnapshot } from "./protocol/launcherStatusSnapshot.js";
 import {
   LAUNCHER_APP_PROTOCOL,
   launcherAppOriginFor,
@@ -161,6 +162,8 @@ let desktopSessionRevision = 0;
 let desktopControlRecoveryPromise: Promise<void> | null = null;
 let shutdownApproved = false;
 let launcherIpcHost: ReturnType<typeof createLauncherIpcHost> | null = null;
+let launcherStatusCliCache: unknown = null;
+let launcherStatusCliRefresh: Promise<void> | null = null;
 const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
 const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
 const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 30_000;
@@ -1754,6 +1757,26 @@ async function orchestrateLauncherApi(
   return parsed.payload;
 }
 
+function scheduleLauncherStatusCliRefresh(): void {
+  if (launcherStatusCliRefresh !== null || launcherBootstrap === null) {
+    return;
+  }
+  launcherStatusCliRefresh = orchestrateLauncherApi("status", {
+    schemaVersion: 1,
+    path: "status",
+    init: { method: "GET" }
+  })
+    .then((payload) => {
+      launcherStatusCliCache = payload;
+    })
+    .catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    })
+    .finally(() => {
+      launcherStatusCliRefresh = null;
+    });
+}
+
 function resolveLauncherIpcHost() {
   if (launcherIpcHost !== null) {
     return launcherIpcHost;
@@ -1785,7 +1808,9 @@ function resolveLauncherIpcHost() {
     },
     orchestrateLifecycle: orchestrateLauncherLifecycle,
     orchestrateBranchInstance: orchestrateBranchInstanceLifecycle,
-    orchestrateLauncherApi
+    orchestrateLauncherApi,
+    resolveLocalStatus: () => launcherStatusCliCache ?? createLocalLauncherStatusSnapshot(),
+    scheduleStatusRefresh: scheduleLauncherStatusCliRefresh
   });
   return launcherIpcHost;
 }
