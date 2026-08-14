@@ -593,11 +593,6 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queryClient.cancelQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true })");
     expect(routeSource).toContain("queryClient.removeQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true })");
 
-    const staleCleanupIndex = routeSource.indexOf("clearSessionTransientUiState(activeSessionId");
-    const staleRemoveIndex = routeSource.indexOf("removeSessionWorkspace(activeSessionId");
-    expect(staleCleanupIndex).toBeGreaterThan(0);
-    expect(staleCleanupIndex).toBeLessThan(staleRemoveIndex);
-
     const deleteCleanupIndex = routeAndLifecycleSource.indexOf("clearSessionTransientUiState(variables.sessionId");
     const deleteRemoveIndex = routeAndLifecycleSource.indexOf("removeSessionWorkspace(variables.sessionId");
     expect(deleteCleanupIndex).toBeGreaterThan(0);
@@ -627,10 +622,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("latestDirectSessionSelectionRef");
     expect(routeSource).toContain("selectDirectSessionMutation");
     expect(routeSource).toContain("useChatSessionSelection");
+    expect(routeSource).toContain("useChatRouteSelection");
     expect(routeAndSelectionSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
-    expect(routeAndActionsSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
-    expect(routeAndActionsSource).toContain("reselectDirectSessionRef.current(normalizedSessionId)");
-    expect(routeAndActionsSource).toContain("String(activeSessionId || \"\").trim() !== normalizedSessionId");
+    // The committed route is the only select input; clicks delegate to openSession.
+    expect(routeAndActionsSource).toContain("chatRoute.openSession(normalizedSessionId)");
+    expect(routeAndSelectionSource).toContain("routeSessionId");
     // Select is generation-guarded and short-debounced so rapid tab thrash collapses to one POST.
     expect(routeAndSelectionSource).toContain("selectDirectSessionMutation.mutate({ sessionId: latestSessionId, generation })");
     expect(routeAndSelectionSource).toContain("setTimeout");
@@ -639,13 +635,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("resolveStickySessionDetailPaint");
     expect(routeSource).toContain("transcriptPending: sessionTranscriptPending");
     expect(routeSource).not.toContain("isForeignSessionDetailQueryKey(query.queryKey, activeId)");
-    expect(routeAndSelectionSource).toContain("if (latestSessionId && latestSessionId !== nextDetail.id)");
     expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail)");
     expect(routeAndSelectionSource).toContain("chatWorkspaceCache.afterSessionSelected()");
     expect(routeAndSelectionSource).not.toContain("afterSessionChanged({\n        sessionId: nextDetail.id");
-    expect(routeAndActionsSource.indexOf("reselectDirectSessionRef.current(normalizedSessionId)")).toBeLessThan(
-      routeAndActionsSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`"),
-    );
+    // Late /select responses must never chase a newer pointer back.
+    expect(routeAndSelectionSource).toContain("// Late response for a session the user already left: cache only, never navigate.");
   });
 
   it("derives responsive layout from the workbench ResizeObserver without overwriting pane preferences", () => {
@@ -1921,7 +1915,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLifecycleSource).toContain('Prefer: "respond-async"');
     expect(routeAndLifecycleSource).toContain("mergeSessionDetailIntoSummaries");
     expect(routeAndLifecycleSource).toContain("createTempSessionId()");
-    expect(routeAndLifecycleSource).toContain("Seed real id cache BEFORE switching active id");
+    expect(routeAndLifecycleSource).toContain("Seed real id cache BEFORE the route swaps");
     expect(routeAndLifecycleSource).toContain("fetchSessionDetailWindow(nextId");
     expect(routeAndLifecycleSource).toContain("includeSecondary: false");
     expect(routeSource).toContain("resolveActiveSessionDetailForUi");
@@ -1945,8 +1939,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("activeGroupRoomId");
     expect(routeSource).toContain("handleOpenGroupRoom");
     expect(routeSource).toContain('new URLSearchParams(location.search).get("room")');
-    expect(routeAndSelectionSource).toContain("requestedRoomId && activeGroupRoomId !== requestedRoomId");
-    expect(routeAndActionsSource).toContain("navigate(`/chat?room=${encodeURIComponent(roomId)}`, { replace: false })");
+    expect(routeSource).toContain("chatRouteSelection.kind === \"room\" || chatRouteSelection.kind === \"project_bus\"");
+    expect(routeAndActionsSource).toContain("chatRoute.openRoom(roomId)");
     expect(routeAndSelectionSource).toContain("setRightPaneCollapsed(false)");
     expect(routeAndIndexRailSource).toContain("chatRoomModeLabel(mode, lang)");
     expect(routeAndIndexRailSource).toContain("chatRoomPurposeLabel(purpose, lang)");
@@ -2122,7 +2116,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("uses the group surface as a project Agent bus observation and @ guidance entry", () => {
     expect(routeSource).toContain("handleOpenProjectAgentBus");
-    expect(routeAndActionsSource).toContain("setActiveGroupRoomId(\"__project_agent_bus__\")");
+    expect(routeAndActionsSource).toContain("chatRoute.openProjectBus()");
+    expect(routeAndActionsSource).not.toContain("setActiveGroupRoomId");
     expect(routeSource).toContain("queryKeys.projectAgentBus()");
     expect(routeSource).toContain("queryFn: ({ signal }) => listProjectAgentBusTimeline(undefined, { signal })");
     expect(routeAndLifecycleSource).toContain("sendProjectAgentBusMessage({ content, interruptTargets })");
@@ -2406,17 +2401,19 @@ describe("ChatCodingRoute layout contract", () => {
     );
   });
 
-  it("updates active direct session before pushing the route", () => {
+  it("opens direct sessions through the sole route controller with prefetch first", () => {
     const openDirectSessionSource = routeAndActionsSource.slice(
       routeAndActionsSource.indexOf("const handleOpenDirectSession = useCallback"),
       routeAndActionsSource.indexOf("const handleOpenAgent = useCallback"),
     );
 
-    expect(openDirectSessionSource).toContain("setActiveSession(normalizedSessionId)");
-    expect(openDirectSessionSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true })");
-    expect(openDirectSessionSource.indexOf("setActiveSession(normalizedSessionId)")).toBeLessThan(
-      openDirectSessionSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true })"),
-    );
+    expect(openDirectSessionSource).toContain("prefetchSessionDetailWindow(queryClient, normalizedSessionId)");
+    expect(openDirectSessionSource).toContain("chatRoute.openSession(normalizedSessionId)");
+    expect(openDirectSessionSource).not.toContain("setActiveSession");
+    expect(openDirectSessionSource).not.toContain("navigate(`/chat?session=");
+    // Prefetch happens before the route transition.
+    expect(openDirectSessionSource.indexOf("prefetchSessionDetailWindow(queryClient, normalizedSessionId)"))
+      .toBeLessThan(openDirectSessionSource.indexOf("chatRoute.openSession(normalizedSessionId)"));
     expect(routeSource).toContain("resolveStickySessionDetailPaint");
     expect(routeSource).toContain("shouldShowStickyTranscriptPending");
   });
@@ -2473,7 +2470,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).toContain("styles.conversationAvatarGroup");
     expect(directSessionIndexItemSource).toContain("styles.directSessionItem");
     expect(groupSessionIndexItemsSource).toContain("styles.groupSessionItem");
-    expect(routeAndActionsSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true })");
+    expect(routeAndActionsSource).toContain("chatRoute.openSession(normalizedSessionId)");
     expect(directSessionIndexItemSource).not.toContain("styles.conversationKindBadgeDirect");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeChild");
     expect(groupSessionIndexItemsStyles.conversationKindBadgeGroup).toBeTypeOf("string");
@@ -2655,11 +2652,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("resolveAuthoritativeArchivedSessionIds");
     expect(routeSource).toContain("archiveSummary: agent.archiveSummary");
     expect(chatArchivedAgentRetirementSource).toContain("Removes an archived Agent's sessions from the normal Chat selection surface");
-    expect(chatArchivedAgentRetirementSource).toContain("useChatWorkbenchStore.getState().activeSessionId");
+    expect(chatArchivedAgentRetirementSource).toContain("replaceIfStillViewing");
     expect(chatArchivedAgentRetirementSource).not.toContain("if (!archivedSessionIds.length)");
     expect(routeSource).toContain("retiredDirectSessionIdsRef");
     expect(routeSource).toContain("updateSessionSummaryCaches(queryClient");
-    expect(routeSource).toContain("navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : \"\"}`, { replace: true })");
+    expect(chatArchivedAgentRetirementSource).toContain("resolveArchivedSessionRouteTransition");
     expect(routeSource).not.toContain("previousActiveSessionId");
     expect(routeSource).not.toContain("previousSelectedAgentId");
     expect(routeSource).toContain("onQueueDrained: async () => {");
@@ -3271,18 +3268,12 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("selects requested direct sessions without waiting for the session index", () => {
-    const requestedSessionBranchStart = routeAndSelectionSource.indexOf("requestedSessionId\n      && !requestedRoomId");
-    expect(requestedSessionBranchStart).toBeGreaterThan(0);
-    const requestedSessionBranch = routeAndSelectionSource.slice(
-      requestedSessionBranchStart,
-      routeAndSelectionSource.indexOf("if (!activeSessionId && sessions", requestedSessionBranchStart),
-    );
-    expect(requestedSessionBranch).toContain("activeSessionId !== requestedSessionId");
-    expect(requestedSessionBranch).toContain("setActiveGroupRoomId(\"\")");
-    expect(requestedSessionBranch).toContain("setActiveSession(requestedSessionId)");
-    expect(requestedSessionBranch).not.toContain("sessionsQuery.data?.some");
+    expect(routeSource).toContain("activeSessionIdFromRouteSelection(chatRouteSelection)");
     expect(routeSource).toContain("queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {");
     expect(routeSource).toContain("enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId)");
+    // The explicit URL target drives detail loading immediately; no list data is required.
+    expect(routeSource).not.toContain("setActiveSession(requestedSessionId)");
+    expect(routeSource).not.toContain("useChatWorkbenchStore((state) => state.activeSessionId)");
   });
 
   it("bootstraps the first-paint catalog once before fallback catalog queries", () => {
@@ -3306,19 +3297,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("shouldEnableSessionIndexQuery");
     expect(routeSource).toContain("bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus");
     expect(routeSource).toContain("enabled: sessionIndexQueryEnabled");
-    const bootstrapEffectStart = routeAndSelectionSource.indexOf(
-      "const bootstrapSessionId = String(bootstrapActiveSessionId ?? \"\").trim()",
+    // Bare route canonicalization is one-shot, gated on the authoritative directory.
+    const canonicalizeEffectStart = routeSource.indexOf(
+      "// Bare `/chat` canonicalizes once per location key",
     );
-    expect(bootstrapEffectStart).toBeGreaterThan(0);
-    const bootstrapEffect = routeAndSelectionSource.slice(
-      routeAndSelectionSource.lastIndexOf("useEffect(() => {", bootstrapEffectStart),
-      routeAndSelectionSource.indexOf("useEffect(() => {", bootstrapEffectStart + 1),
+    expect(canonicalizeEffectStart).toBeGreaterThan(0);
+    const canonicalizeEffect = routeSource.slice(
+      canonicalizeEffectStart,
+      routeSource.indexOf("}, [bareRouteBootstrapTarget, canonicalizeBareRoute", canonicalizeEffectStart) + 80,
     );
-    expect(bootstrapEffect).toContain("requestedSessionId || requestedRoomId || activeSessionId");
-    expect(bootstrapEffect).toContain("storedChatSelectionBlocksServerBootstrap(sessions)");
-    expect(bootstrapEffect).toContain('setActiveGroupRoomId("")');
-    expect(bootstrapEffect).toContain("setActiveSession(bootstrapSessionId)");
-    expect(bootstrapEffect).not.toContain("sessionsQuery.data");
+    expect(canonicalizeEffect).toContain("chatRouteSelection.kind !== \"bare\"");
+    expect(canonicalizeEffect).toContain("canonicalizeBareRoute(bareRouteBootstrapTarget)");
+    expect(canonicalizeEffect).toContain("if (!sessionsQuery.data)");
   });
 
   it("loads direct session details as a window and wires top-edge history paging", () => {
@@ -3356,7 +3346,7 @@ describe("ChatCodingRoute layout contract", () => {
       routeAndActionsSource.indexOf("deleteSessionMutation.mutate({ sessionId: session.id })"),
     );
     expect(routeAndActionsSource.indexOf("window.confirm(groupConfirmMessage)")).toBeLessThan(
-      routeAndActionsSource.indexOf("deleteGroupRoomMutation.mutate({ roomId: activeGroupRoomId })"),
+      routeAndActionsSource.indexOf("deleteGroupRoomMutation.mutate({ roomId: activeGroupRoom.roomId })"),
     );
   });
 
@@ -3374,8 +3364,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(clearMutationSource).toContain("resetToolPolicy: false");
     expect(clearMutationSource).toContain("resetMemoryPolicy: false");
     expect(clearMutationSource).toContain("resetRuntimePolicy: false");
-    expect(clearMutationSource).toContain("removeSessionWorkspace(previousDirectSessionId, replacementDirectSessionId)");
-    expect(clearMutationSource).toContain("setActiveSession(replacementDirectSessionId)");
+    expect(clearMutationSource).toContain("removeSessionWorkspace(previousDirectSessionId)");
+    expect(clearMutationSource).toContain("replaceIfStillViewing(");
+    expect(clearMutationSource).toContain("previousDirectSessionId");
+    expect(clearMutationSource).toContain("replacementDirectSessionId");
+    expect(clearMutationSource).not.toContain("setActiveSession");
     expect(clearMutationSource).toContain("cancelQueries({ queryKey: queryKeys.session(previousDirectSessionId) })");
     expect(clearMutationSource).toContain("queryKeys.sessionLlmOptions(previousDirectSessionId)");
     expect(clearMutationSource).toContain("afterSessionDeleted");
@@ -3407,7 +3400,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(deleteMutationSource).toContain("void queryClient.cancelQueries({ queryKey: queryKeys.sessions() })");
     expect(deleteMutationSource).not.toContain("await Promise.all([\n        queryClient.cancelQueries({ queryKey: queryKeys.sessions() })");
     expect(deleteMutationSource).toContain("optimisticNextActiveSessionId");
-    expect(deleteMutationSource).toContain("setActiveSession(optimisticNextActiveSessionId)");
+    expect(deleteMutationSource).toContain("replaceIfStillViewing(");
+    expect(deleteMutationSource).toContain("previousRouteSessionId === variables.sessionId");
+    expect(deleteMutationSource).not.toContain("setActiveSession");
     expect(deleteMutationSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
     expect(deleteMutationSource).toContain("previousConversations");
     expect(deleteMutationSource).toContain("previousAgents");
@@ -3422,25 +3417,28 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps the active direct session selected when the list is temporarily stale", () => {
     const selectionEffectSource = routeAndSelectionSource.slice(
-      routeAndSelectionSource.indexOf("if (requestedRoomId && activeGroupRoomId !== requestedRoomId)"),
+      routeAndSelectionSource.indexOf("const normalizedSessionId = String(routeSessionId || \"\").trim()"),
       routeAndSelectionSource.length,
     );
-    expect(selectionEffectSource).toContain("if (!activeSessionId && sessions && sessions.length > 0)");
+    expect(selectionEffectSource).toContain("if (!normalizedSessionId || isTempSessionId(normalizedSessionId))");
+    expect(selectionEffectSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
+    expect(selectionEffectSource).not.toContain("setActiveSession(");
     expect(selectionEffectSource).not.toContain("!sessionsQuery.data.some((session) => session.id === activeSessionId)");
     expect(selectionEffectSource).not.toContain("!sessions.some((session) => session.id === activeSessionId)");
   });
 
-  it("reconciles stale active sessions when reset removes their backend record", () => {
+  it("keeps explicit missing sessions on their URL with an unavailable surface instead of reconciling away", () => {
     expect(routeAndHelpersSource).toContain("function isSessionNotFoundError");
     expect(routeSource).toContain("sessionDetailQuery.isError");
-    expect(routeSource).toContain("isSessionNotFoundError(sessionDetailQuery.error)");
-    expect(routeSource).toContain("removeSessionWorkspace(activeSessionId, nextActiveSessionId || null)");
-    expect(routeSource).toContain("clearSessionTransientUiState(activeSessionId)");
-    expect(routeSource).toContain("sessions?.filter((session) => session.id !== activeSessionId)");
-    expect(routeSource).toContain("removeDeletedSessionFromConversations(conversations, activeSessionId)");
-    expect(routeSource).toContain("requestedSessionId === activeSessionId");
-    expect(routeSource).toContain("navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : \"\"}`, { replace: true })");
-    expect(routeSource).toContain("chatWorkspaceCache.refreshConversationIndex()");
+    expect(routeSource).toContain(
+      "// Explicit missing/archived session keeps its URL and renders the blocking",
+    );
+    expect(routeSource).toContain("unavailable surface");
+    expect(routeSource).not.toContain("isSessionNotFoundError(sessionDetailQuery.error)");
+    expect(routeSource).not.toContain("removeSessionWorkspace(activeSessionId, nextActiveSessionId || null)");
+    expect(routeSource).not.toContain("setActiveSession(nextActiveSessionId)");
+    expect(routeSource).not.toContain("navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : \"\"}`, { replace: true })");
+    expect(routeSource).toContain("hasBlockingError={sessionDetailErrorState.blockingError}");
   });
 
   it("keeps renamed direct session titles visible before conversation refetch finishes", () => {
