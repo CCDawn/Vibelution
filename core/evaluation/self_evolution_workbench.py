@@ -12,6 +12,7 @@ from typing import Any
 from config import get_config
 from core.gym import build_active_advisory_snapshot, summarize_active_advisory_baselines
 from core.infrastructure import developer_sandbox
+from vibelution_storage import resolve_project_workspace_home
 from tools.git_tools import (
     explain_current_worktree_tool,
     get_evolution_fitness_tool,
@@ -657,7 +658,7 @@ def _workspace_root(project_root: Path) -> Path:
     root = Path(project_root).resolve()
     if root == PROJECT_ROOT.resolve():
         return developer_sandbox.seeded_sandbox_workspace_path(root).resolve()
-    return root if root.name.lower() == "workspace" else root / "workspace"
+    return root if root.name.lower() == "workspace" else resolve_project_workspace_home(root)
 
 
 def _audit_log_path(project_root: Path) -> Path:

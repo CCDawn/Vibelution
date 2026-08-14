@@ -48,6 +48,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, List
 from contextlib import contextmanager
+
+from vibelution_storage import resolve_project_data_home
 from contextvars import ContextVar
 from datetime import datetime
 import locale
@@ -2028,26 +2030,26 @@ def backup_project(version_note: str = "") -> str:
     """创建项目备份"""
     import zipfile
 
-    PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-    BACKUP_DIR = PROJECT_ROOT / "backups"
-    BACKUP_DIR.mkdir(exist_ok=True)
+    project_root = PROJECT_ROOT.resolve()
+    backup_dir = resolve_project_data_home(project_root) / "backups" / "project-snapshots"
+    backup_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     backup_name = f"backup_{timestamp}.zip"
-    backup_path = BACKUP_DIR / backup_name
+    backup_path = backup_dir / backup_name
 
     try:
         with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             for pattern in ['*.py', '*.json', '*.toml', '*.md']:
-                for f in PROJECT_ROOT.glob(pattern):
+                for f in project_root.glob(pattern):
                     if 'backup' not in str(f) and '__pycache__' not in str(f):
-                        arcname = f.relative_to(PROJECT_ROOT)
+                        arcname = f.relative_to(project_root)
                         zf.write(f, arcname)
 
-            tools_dir = PROJECT_ROOT / 'tools'
+            tools_dir = project_root / 'tools'
             if tools_dir.exists():
                 for f in tools_dir.glob('*.py'):
-                    arcname = f.relative_to(PROJECT_ROOT)
+                    arcname = f.relative_to(project_root)
                     zf.write(f, arcname)
 
         size = backup_path.stat().st_size

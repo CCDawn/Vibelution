@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 from core.logging import debug as _debug_logger
+from vibelution_storage import resolve_project_logs_home
 
 
 # ============================================================================
@@ -582,7 +583,7 @@ def get_restart_log_path() -> Path:
     Returns:
         日志文件路径
     """
-    return PROJECT_ROOT / "logs" / "restart.log"
+    return resolve_project_logs_home(PROJECT_ROOT) / "restart.log"
 
 
 def write_restart_log(pid: int, reason: str, success: bool) -> None:

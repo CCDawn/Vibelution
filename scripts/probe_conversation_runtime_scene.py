@@ -24,6 +24,7 @@ from core.chat.turn_journal import (  # noqa: E402
     turn_journal_path,
 )
 from diagnose_session_turn import build_session_turn_diagnosis  # noqa: E402
+from vibelution_storage import resolve_project_logs_home  # noqa: E402
 
 
 PROBE_PACKAGE_NAME = "probe_conversation_runtime_scene"
@@ -138,8 +139,7 @@ def _write_probe_live_output(project_root: Path, session_id: str, turn_id: str) 
 
 def _write_probe_runtime_scene(project_root: Path, session_id: str, turn_id: str) -> Path:
     event_path = (
-        project_root
-        / "logs"
+        resolve_project_logs_home(project_root)
         / "runtime_scenes"
         / PROBE_PACKAGE_NAME
         / "events"

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.web.services.log_diagnostics import analyze_log_content
+from vibelution_storage import resolve_project_logs_home, resolve_project_workspace_home
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MAX_TREE_DEPTH = 6
@@ -297,9 +298,15 @@ def _format_mtime(value: float) -> str:
 
 
 def _resolve_log_root(root_id: str) -> Path:
-    for root in LOG_ROOTS:
-        if root["id"] == root_id:
-            return (PROJECT_ROOT / root["path"]).resolve()
+    logs_root = resolve_project_logs_home(PROJECT_ROOT).resolve()
+    resolved_roots = {
+        "runtime_scenes": logs_root / "runtime_scenes",
+        "runtime_logs": logs_root,
+        "workspace_logs": resolve_project_workspace_home(PROJECT_ROOT) / "logs",
+        "conversation_logs": logs_root / "conversations",
+    }
+    if root_id in resolved_roots:
+        return resolved_roots[root_id].resolve()
     raise ValueError(f"Unknown log root: {root_id}")
 
 

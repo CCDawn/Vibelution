@@ -45,9 +45,9 @@
 
 1. **先 BRT**（本 §3.0）：加载 `ccdawn-brt`，完成意图/分级/owner 选择。
 2. 非平凡任务按 [Agent 开发路由](docs/guides/README.md)：`route.md` 定 READ/EDIT/TEST → `ownership.md` 定落点 → `loop.md` 验证与完成块；细则只下钻 [规范索引](docs/standards/README.md) 相关条。
-3. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务读取 `.docs/project-memory/INDEX.md` 与 `profile.json`；仅在会改变答案时继续读取具体 lane/registry。
+3. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务先运行 `python scripts/migrate_project_storage.py inventory` 解析 `activePaths.memory`，再读取其中 `INDEX.md` 与 `profile.json`；`.docs/project-memory/` 仅作迁移前只读兼容，禁止新增写入。
 4. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。
-5. Bug、回归、卡住、运行不一致或异常命令先检查最新 `logs/runtime_scenes/`。
+5. Bug、回归、卡住、运行不一致或异常命令先从上述 inventory 的 `activePaths.logs/runtime_scenes/` 检查最新现场。
 6. 非平凡行为、状态、权限、迁移、Prompt、Agent 或运行时变更：BRT 对齐未闭合前不得实现。
 
 按任务读取：
@@ -69,7 +69,7 @@
 | 后端服务 ownership | [services 全量索引](core/web/services/README.md) · pack 域再读 `core/web/services/<domain>/README.md` |
 | 运行日志实现 | [日志说明](core/logging/README.md) |
 
-历史计划、报告、`docs/archive/`（含原 `docs/plans/` 与 `docs/superpowers/`）和 `.docs/project-memory/` 不得与现行规范竞争权威。
+历史计划、报告、`docs/archive/`（含原 `docs/plans/` 与 `docs/superpowers/`）和旧 `.docs/project-memory/` 不得与现行规范竞争权威。
 
 ## 4. Execution Baseline
 

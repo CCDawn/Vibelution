@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure.path_containment import PROJECT_ROOT
+from vibelution_storage import resolve_project_workspace_home
 
 from .atomic_fs import CorruptWorkflowStoreError, atomic_write_text
 from .human_gate_artifacts import canonical_sha256
@@ -43,7 +44,7 @@ def _path(team_id: str, kind: str) -> Path:
     kind_key = str(kind or "").strip()
     if not team or kind_key not in _SUPPORTED_KINDS:
         raise ValueError(f"unsupported workflow artifact kind/team: {kind_key}/{team}")
-    return _root() / "workspace" / "teams" / team / "workflow_artifacts" / f"{kind_key}.jsonl"
+    return resolve_project_workspace_home(_root()) / "teams" / team / "workflow_artifacts" / f"{kind_key}.jsonl"
 
 
 class WorkflowArtifactConflictError(RuntimeError):

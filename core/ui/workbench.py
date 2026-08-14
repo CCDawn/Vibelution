@@ -86,6 +86,7 @@ from core.evaluation.supervised_workbench import (
 from core.evaluation.supervised_dashboard import generate_supervised_dashboard
 from core.orchestration.turn_runner import run_existing_agent_single_turn
 from core.ui.cli_ui import get_ui
+from vibelution_storage import resolve_project_runtime_home
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -113,7 +114,7 @@ def _is_windows_platform() -> bool:
 
 
 CONFIG_PANEL_PORT = _default_workbench_port()
-CONFIG_PANEL_BROWSER_PROFILE_DIR = PROJECT_ROOT / ".runtime" / "config_panel_browser"
+CONFIG_PANEL_BROWSER_PROFILE_DIR = resolve_project_runtime_home(PROJECT_ROOT) / "config_panel_browser"
 
 
 def _preferred_python_executable() -> str:

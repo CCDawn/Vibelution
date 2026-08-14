@@ -11,9 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from vibelution_storage import resolve_project_logs_home
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-LOG_INFO_DIR = PROJECT_ROOT / "log_info"
+LOG_INFO_DIR = resolve_project_logs_home(PROJECT_ROOT) / "conversations"
 MAX_CANDIDATE_SCAN_LINES = 120
 MAX_RESULT_ITEMS = 40
 MAX_TOOL_SEQUENCE = 80
@@ -178,15 +180,24 @@ def _resolve_allowed_log_path(value: str) -> Path:
         raise ValueError("log_path is required when provided.")
     path = Path(raw)
     if not path.is_absolute():
-        path = (PROJECT_ROOT / path).resolve()
+        normalized = raw.replace("\\", "/").lstrip("./")
+        logs_root = resolve_project_logs_home(PROJECT_ROOT).resolve()
+        if normalized == "logs" or normalized.startswith("logs/"):
+            suffix = normalized.removeprefix("logs").lstrip("/")
+            path = (logs_root / suffix).resolve()
+        else:
+            path = (PROJECT_ROOT / path).resolve()
     else:
         path = path.resolve()
-    root = PROJECT_ROOT.resolve()
-    if root not in (path, *path.parents):
-        raise ValueError("conversation_log_inspect_tool only reads logs inside the project root.")
-    rel = path.relative_to(root).as_posix()
+    logs_root = resolve_project_logs_home(PROJECT_ROOT).resolve()
+    runtime_scenes_root = logs_root / "runtime_scenes"
+    conversation_roots = {
+        LOG_INFO_DIR.resolve(),
+        logs_root / "conversations",
+        PROJECT_ROOT.resolve() / "log_info",
+    }
     if path.is_dir():
-        if not rel.startswith("logs/runtime_scenes/"):
+        if not _path_is_within(path, runtime_scenes_root):
             raise ValueError(
                 "conversation_log_inspect_tool only reads log_info/ JSONL files or logs/runtime_scenes/ packages."
             )
@@ -195,11 +206,19 @@ def _resolve_allowed_log_path(value: str) -> Path:
         return path
     if path.suffix.lower() != ".jsonl":
         raise ValueError("conversation_log_inspect_tool only reads .jsonl logs or runtime scene packages.")
-    if not (rel.startswith("log_info/") or rel.startswith("logs/runtime_scenes/")):
+    if not any(_path_is_within(path, root) for root in (*conversation_roots, runtime_scenes_root)):
         raise ValueError("conversation_log_inspect_tool only reads log_info/ or logs/runtime_scenes/ JSONL files.")
     if not path.exists() or not path.is_file():
-        raise FileNotFoundError(f"Log file not found: {rel}")
+        raise FileNotFoundError(f"Log file not found: {_relative(path)}")
     return path
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return path.resolve() == root.resolve()
 
 
 def _inspect_target(
@@ -1194,6 +1213,11 @@ def _session_summary(event: dict[str, Any] | None) -> dict[str, Any]:
 def _relative(path: Path) -> str:
     try:
         return path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except Exception:
+        pass
+    try:
+        relative = path.resolve().relative_to(resolve_project_logs_home(PROJECT_ROOT).resolve())
+        return f"logs/{relative.as_posix()}"
     except Exception:
         return str(path)
 

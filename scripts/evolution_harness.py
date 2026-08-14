@@ -35,13 +35,14 @@ from core.orchestration.turn_runtime import (
     runtime_metadata_env,
 )
 from config.paths import ensure_global_config_initialized, resolve_config_path
+from vibelution_storage import resolve_project_logs_home
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CANDIDATE_RUNTIME_PROTOCOL_VERSION = 1
 CANDIDATE_RUNTIME_RESULT_PREFIX = "VIBELUTION_CANDIDATE_RUNTIME_RESULT="
 CANDIDATE_RUNTIME_INPUT_LIMIT = 120_000
-REPORT_DIR = PROJECT_ROOT / "log_info" / "harness_reports"
+REPORT_DIR = resolve_project_logs_home(PROJECT_ROOT) / "harness_reports"
 LIVE_CASE_TRANSCRIPT_LIMIT = 8
 LIVE_CASE_TEXT_LIMIT = 4000
 UNTRACKED_SNAPSHOT_EXCLUDED_PREFIXES = (
@@ -2737,8 +2738,8 @@ def preserve_harness_evidence(result: HarnessResult, report_path: Path) -> None:
             shutil.copy2(harness_config, config_target)
             copied.append("config.harness.toml")
         sources = [
-            ("log_info", worktree_path / "log_info"),
-            ("logs", worktree_path / "logs"),
+            ("log_info", resolve_project_logs_home(worktree_path) / "legacy-log_info"),
+            ("logs", resolve_project_logs_home(worktree_path)),
         ]
         for label, source_dir in sources:
             if not source_dir.exists() or not source_dir.is_dir():
@@ -2898,11 +2899,11 @@ def run_harness(
         config_path=str(harness_config) if harness_config else None,
     )
 
-    log_info_dir = worktree_path / "log_info"
-    logs_dir = worktree_path / "logs"
+    logs_dir = resolve_project_logs_home(worktree_path)
+    log_info_dir = logs_dir / "legacy-log_info"
     state_file = worktree_path / "agent_state.json"
-    log_info_dir.mkdir(exist_ok=True)
-    logs_dir.mkdir(exist_ok=True)
+    log_info_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
     before_conversation = {
         str(path.relative_to(log_info_dir))
         for path in log_info_dir.glob("conversation_*.jsonl")

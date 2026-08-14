@@ -14,7 +14,7 @@ This standard is written for every in-project Agent working on Vibelution. It de
 - `docs/agents/worktree-collaboration.md` is the detailed multi-Agent worktree protocol.
 - `docs/agents/domain.md` defines domain vocabulary. Use it for product and architecture language.
 - `docs/adr/` records major design decisions and why they exist.
-- `.docs/project-memory/` is the structured current-state memory and Agent territory registry.
+- External project `memory/` is the durable cross-session projection; resolve it with `python scripts/migrate_project_storage.py inventory`. Live Agent territory/claim state is under the Git common dir. Legacy `.docs/project-memory/` is read-only migration input.
 
 If a task worktree does not contain `AGENTS.md`, read this file directly before development. If these sources conflict, do not silently pick one. Stop, identify the conflict, and update the relevant source in the same governance round.
 
@@ -128,14 +128,14 @@ Validation anchor: user-visible or debugging-critical fallback behavior needs te
 
 For bugs, regressions, stalls, runtime mismatches, failed commands, unexpected behavior, bad delegation, repeated tool loops, or broken convergence, start from the newest relevant lifecycle log package under:
 
-`logs/runtime_scenes/`
+`<active-logs>/runtime_scenes/` (resolve `activePaths.logs` with the storage inventory command)
 
 Use the newest package matching the affected run or workbench lifecycle as the primary evidence unit. Start from its manifest or package index, then inspect:
 
 - `timeline.jsonl`;
 - `lifecycle.jsonl`;
 - child logs under `raw/`, `conversations/`, `agent/`, and `artifacts/`;
-- fallback evidence under `logs/`;
+- fallback evidence under `<active-logs>/`;
 - `log_info/conversation_*.jsonl`;
 - matching `log_info/debug_*.log`;
 - adjacent validation outputs.
@@ -177,7 +177,7 @@ Add or update runtime scene logging when a change affects:
 - Gym promotion;
 - error handling.
 
-New logs should normally write into the current lifecycle package under `logs/runtime_scenes/` through existing helpers.
+New logs should normally write into the current lifecycle package under `<active-logs>/runtime_scenes/` through existing helpers.
 
 Each new feature should add or update the smallest useful automated tests protecting the behavior and logging contract. Cover the primary success path and at least one important failure or boundary path.
 
@@ -233,17 +233,17 @@ git worktree add .worktrees/<task-slug> -b codex/<task-slug> main
 Before editing hot files, shared scopes, or any `STANDARD_TASK` / `HIGH_RISK` work in a multi-session project, use the project memory guard to inspect active work and, when needed, reserve a narrow write scope:
 
 ```powershell
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" status
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" check --lane "<lane-id>" --scope "<write-scope>" --scope "<second-write-scope>"
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" claim --lane "<lane-id>" --scope "<write-scope>" --agent "<agent-id>" --task "<task title>" --ttl-minutes 120 --note "<scope and validation note>"
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>"
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" status --json
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" preflight --agent-id "<agent-id>" --scope "<write-scope>" --scope "<second-write-scope>" --write-kind development --json
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" claim --lane "<lane-id>" --scope "<write-scope>" --agent-id "<agent-id>" --task "<task title>" --ttl-minutes 120 --note "<scope and validation note>" --json
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>" --json
 ```
 
 If a scope hits an active claim, coordinate with the owner, choose a non-overlapping slice, or make an explicit main-integration decision and record the reason. Hotspot status alone is not a stop sign, but it raises the review, validation, scoped staging, and reconciliation burden.
 
 One Agent should bind to one active task worktree at a time. Do not reuse an old task worktree for a new goal.
 
-The lightweight guard command vocabulary is `status`, `check`, `claim`, `activate`, `release`, and `prune`. Historical registry or merge-queue records may still use states such as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`; treat those as queue semantics, not guard subcommands.
+The lightweight guard command vocabulary includes `status`, `preflight`, `check`, `claim`, `activate`, `release`, and `prune`. Historical registry or merge-queue records may still use states such as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`; treat those as queue semantics, not guard subcommands.
 
 For `STANDARD_TASK` and `HIGH_RISK`, the Agent that implements a task owns the full local development loop by default: self-review the diff, run the scoped validation, commit the task branch, decide whether the merge gate is satisfied, and either merge the task into local `main` or explicitly hand off a ready/blocked queue state with the reason. Do not treat implementation as complete merely because a worktree commit exists.
 
@@ -255,8 +255,8 @@ Treat these as shared hot files. They may be edited, but require active-claim re
 
 - `AGENTS.md`;
 - `docs/standards/development-standard.md`;
-- `.docs/project-memory/**`;
-- `PROJECT_MEMORY.html`;
+- resolved external `<active-memory>/**`;
+- live Git common-dir coordination registry;
 - `agent.py`;
 - `core/web/app.py`;
 - `core/web/services/session_service.py`;
@@ -325,7 +325,7 @@ Required patterns:
 Diagnosis and closure:
 
 - Terminal-popup issues during startup are Launcher/runtime lifecycle bugs until proven otherwise.
-- Inspect parent/child command lines, visible window titles, `.runtime/launcher/state.json`, runtime-manager events, and short-lived terminal hosts in the product-owned tree—not global IDE/Codex process noise.
+- Inspect parent/child command lines, visible window titles, `<active-runtime>/launcher/state.json`, runtime-manager events, and short-lived terminal hosts in the product-owned tree—not global IDE/Codex process noise.
 - Closure requires live evidence that the user action no longer creates visible consoles, plus focused tests (source/AST locks for naked Git subprocesses, no-console helper behavior, or control-signature freshness).
 - Exception: user-explicit interactive surfaces only (Workbench CLI terminal panel, operator-opened shell). Those must not auto-resume stale terminals on page restore or Launcher startup.
 
@@ -650,7 +650,7 @@ Direct development on `main` is a policy violation even when the change is small
 When any gate fails, do not force the merge. `stale_main` and routine small conflicts inside the owning Agent's claimed scope return to the task worktree: merge the latest local `main` there, resolve conflicts, commit, and rerun `closeout`. Wait for a main integration session only for large conflicts, cross-lane conflicts, shared DTO/projection conflicts, hot-file conflicts with active claims, release/version conflicts, unclear semantic conflicts, or user-designated integration work. Close the lightweight guard claim as blocked, or create a separate ready/blocked queue handoff in the project memory lane if integration must happen later:
 
 ```powershell
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>"
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>" --json
 ```
 
 Self-merge may be followed by push, PR creation, `workflow_dispatch`, or publication when the remote sync gate passes, but remote push is not part of the default local closeout. Remote branch deletion, force/overwrite, and treating `origin/main` as authority to reset local `main` remain destructive choices and require explicit confirmation.
@@ -779,7 +779,7 @@ The shared registry records peer session identity, territory, work claims, confl
 
 Every session-level Agent must treat its `agentId` plus bound `sessionId` as runtime identity when an AgentDirectory binding exists.
 
-`.docs/project-memory/agent-registry.json` is the source for lane territories, registered Agents, active `workClaims`, handoff targets, and merge queue state.
+The live registry under `<git-common-dir>/briefbound/coordination/registry.json` is the source for lane territories, registered Agents, active claims, handoff targets, and merge queue state. Durable project memory is only a recovery projection.
 
 If a user asks an Agent to implement outside its management scope, state the mismatch, name the closest handoff target when available, and wait for explicit confirmation instead of silently taking over.
 
@@ -789,34 +789,34 @@ Handoff is gated on real user request and must not be triggered by system-inject
 
 ## 19. Project Memory
 
-Project memory is single-writer shared state.
+Project memory is single-writer shared state under the external project
+`memory/` root. Resolve the active path through
+`python scripts/migrate_project_storage.py inventory`; do not assume a repo path.
 
 Before `STANDARD_TASK`, `HIGH_RISK`, continuation work, cross-session decisions, or any task where memory can change the answer, read:
 
-- `.docs/project-memory/INDEX.md`;
-- `.docs/project-memory/memory.json`;
-- `.docs/project-memory/profile.json`;
-- `.docs/project-memory/agent-registry.json`;
-- relevant lane files under `.docs/project-memory/lanes/`.
+- `<active-memory>/INDEX.md`;
+- `<active-memory>/memory.json`;
+- `<active-memory>/profile.json`;
+- the live registry under the Git common dir;
+- relevant lane files under `<active-memory>/lanes/`.
 
 For `FAST_PATCH`, read project memory only when the patch touches governance, active claims, remembered decisions, hot files, or an existing memory fact. Do not read the full memory bundle for trivial read-only questions, tiny cosmetic edits, or docs wording where memory cannot affect the conclusion.
 
-Session-level Agents must not hand-edit `.docs/project-memory/**` or `PROJECT_MEMORY.html` while working in parallel unless they are the current memory-sync owner with an explicit claim. Parallel Agents should write append-only memory proposals or report exact lane/update payloads.
+Session-level Agents must not hand-edit `<active-memory>/**` while working in parallel unless they are the current memory-sync owner with an explicit claim. `.docs/project-memory/**` and `PROJECT_MEMORY.html` are legacy read-only artifacts. Parallel Agents should write append-only proposals or report exact lane/update payloads.
 
 After `STANDARD_TASK` or `HIGH_RISK` meaningful development, update or propose updates for:
 
-- current lane file under `.docs/project-memory/lanes/`;
-- `.docs/project-memory/memory.json` for shared metadata/global recent updates;
-- `.docs/project-memory/agent-registry.json` for Agent/claim/lane changes;
-- `.docs/project-memory/INDEX.md`;
-- `.docs/project-memory/overview.html`;
-- root `PROJECT_MEMORY.html`.
+- current lane file under `<active-memory>/lanes/`;
+- `<active-memory>/memory.json` for shared metadata/global recent updates;
+- live registry for Agent/claim changes;
+- `<active-memory>/INDEX.md` and `overview.html`.
 
 Preferred sync commands:
 
 ```powershell
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\sync_project_memory.py" "<project-root>" --lane "<stable-responsibility-id>" --focus "<current focus>" --update "<what changed>"
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\render_overview.py" "<project-root>"
+python scripts/migrate_project_storage.py inventory --project "<project-root>"
+# Use only project-memory tooling that accepts the resolved external memory root.
 ```
 
 Do not finish `STANDARD_TASK` or `HIGH_RISK` work with stale project memory or a stale active claim unless the user explicitly says to skip it. `FAST_PATCH` may report "project memory not affected" when it changes no durable project state, lane status, blocker, decision, or follow-up. If memory sync cannot be done safely in the task worktree, report the exact proposal for the main integration/memory-sync owner.
@@ -827,7 +827,7 @@ Historical specs/plans live under `docs/archive/` (including former `docs/superp
 
 When a task needs a new written plan or design:
 
-1. Prefer a short note in the task claim / project-memory lane, or a single dated file that will be archived on close.
+1. Prefer a short note in the task claim / external project-memory lane, or a single dated file that will be archived on close.
 2. Begin with compact status metadata: `Status`, `Owner`, `Claim`/branch/worktree, `Scope`, `Supersedes`, `Implementation link`, `Validation`, `Close condition`.
 3. Use status vocabulary: `draft`, `user-approved`, `active-plan`, `in-progress`, `implemented`, `superseded`, `blocked`, or `historical`.
 4. On close: set status to `implemented` / `superseded` / `historical` and **move the file into `docs/archive/`** (or delete only if the user explicitly wants no history).
@@ -1009,7 +1009,7 @@ Default rule: behavior that can fail, stall, branch, retry, or repair must leave
 
 Prefer:
 
-- existing runtime-scene services and package structure under `logs/runtime_scenes/`;
+- existing runtime-scene services and package structure under `<active-logs>/runtime_scenes/`;
 - structured fields for state transitions, identifiers, duration, result status, and failure class;
 - redacted summaries instead of raw prompts, secrets, large outputs, or unbounded diffs;
 - focused logging at the cause site rather than broad wrapper logs.
@@ -1052,7 +1052,7 @@ Default rule: transient, candidate, formal, and project-governance memory must s
 
 Prefer:
 
-- project-memory guard and sync scripts for `.docs/project-memory/**`;
+- project-memory guard and sync scripts that target the resolved external `memory/` root;
 - `memory_service`, `team_knowledge_service`, and existing knowledge promotion paths for runtime knowledge;
 - candidate knowledge or proposal records before formal memory when confidence, ownership, or source quality is uncertain;
 - generated views rebuilt by their owning scripts instead of hand-edited HTML snapshots.

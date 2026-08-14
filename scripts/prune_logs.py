@@ -26,6 +26,10 @@ from typing import Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from vibelution_storage import resolve_project_data_home, resolve_project_logs_home, resolve_project_runtime_home
 
 
 @dataclass(frozen=True)
@@ -46,9 +50,9 @@ class PruneTarget:
 
 DEFAULT_TARGETS: tuple[PruneTarget, ...] = (
     PruneTarget("log_info", REPO_ROOT / "log_info", keep=80, glob="debug_*.log"),
-    PruneTarget("logs", REPO_ROOT / "logs", keep=40),
-    PruneTarget(".runtime", REPO_ROOT / ".runtime", keep=40),
-    PruneTarget("backups", REPO_ROOT / "backups", keep=5, glob="backup_*.zip"),
+    PruneTarget("logs", resolve_project_logs_home(REPO_ROOT), keep=40),
+    PruneTarget("runtime", resolve_project_runtime_home(REPO_ROOT), keep=40),
+    PruneTarget("backups", resolve_project_data_home(REPO_ROOT) / "backups", keep=5, glob="backup_*.zip"),
 )
 
 

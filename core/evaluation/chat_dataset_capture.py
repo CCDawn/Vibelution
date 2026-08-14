@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
 from config import AppConfig, get_config
+from core.infrastructure.storage_paths import resolve_project_data_home
 
 from .chat_review_queue import append_review_decision, append_review_queue_candidate
 from .chat_segmenter import (
@@ -94,11 +95,13 @@ def resolve_chat_dataset_paths(
     cfg = config or get_config()
     capture = cfg.evolution.chat_dataset
 
+    data_home = resolve_project_data_home(project_root)
+
     def _resolve(raw: str) -> Path:
         path = Path(str(raw or "").strip())
         if path.is_absolute():
             return path.resolve()
-        return (project_root / path).resolve()
+        return (data_home / path).resolve()
 
     return ChatDatasetPaths(
         candidate_dir=_resolve(capture.candidate_dir),

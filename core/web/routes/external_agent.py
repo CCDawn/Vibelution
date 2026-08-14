@@ -17,6 +17,8 @@ from core.web.services.external_agent.service import (
     get_default_service,
 )
 from core.web.services.external_agent.store import ExternalAgentTaskStoreError
+from core.infrastructure import developer_sandbox
+from vibelution_storage import resolve_project_runtime_home
 
 router = APIRouter(tags=["external-agent"])
 
@@ -85,8 +87,8 @@ def _operator_capabilities() -> set[str]:
 
 def _runtime_revision() -> str:
     for path in (
-        PROJECT_ROOT / ".runtime" / "launcher" / "state.json",
-        PROJECT_ROOT / "workspace" / "ui_runtime_state.json",
+        resolve_project_runtime_home(PROJECT_ROOT) / "launcher" / "state.json",
+        developer_sandbox.formal_workspace_path(PROJECT_ROOT, "ui_runtime_state.json"),
     ):
         if not path.is_file():
             continue

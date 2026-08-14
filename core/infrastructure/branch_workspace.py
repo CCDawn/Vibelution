@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from core.infrastructure import git_process
+from vibelution_storage import resolve_project_runtime_home
 from core.infrastructure.instance_display_name import (
     assign_instance_display_names,
     current_instance_display,
@@ -566,8 +567,9 @@ def _worktree_is_dirty(path: Path) -> bool:
 
 
 def _runtime_observation(path: Path) -> dict[str, Any]:
-    launcher_state = _read_json(path / ".runtime" / "launcher" / "state.json")
-    manager_state = _read_json(path / ".runtime" / "runtime-manager" / "state.json")
+    runtime_root = resolve_project_runtime_home(path)
+    launcher_state = _read_json(runtime_root / "launcher" / "state.json")
+    manager_state = _read_json(runtime_root / "runtime-manager" / "state.json")
     workbench = launcher_state.get("workbench") if isinstance(launcher_state.get("workbench"), dict) else {}
     observed_state = str(
         workbench.get("observedState")

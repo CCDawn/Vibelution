@@ -99,6 +99,15 @@ def resolve_data_home(
     return default_data_home().resolve()
 
 
+def resolve_configured_data_home(
+    *,
+    config_path: str | os.PathLike[str] | None = None,
+) -> Path | None:
+    """Return only an explicit ``[storage].data_home`` operator override."""
+
+    return _configured_data_home(config_path=config_path)
+
+
 def resolve_workspace_home(
     data_home: str | os.PathLike[str] | None = None,
     *,
@@ -340,6 +349,7 @@ __all__ = [
     "resolve_config_meta_path",
     "resolve_model_catalog_state_path",
     "resolve_config_path",
+    "resolve_configured_data_home",
     "resolve_data_backup_dir",
     "resolve_data_home",
     "resolve_example_config_path",

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.infrastructure import developer_sandbox
+from vibelution_storage import resolve_project_logs_home
 
 from . import agent_directory_service, memory_service, rag_vector_index_service, team_knowledge_service
 from .runtime_scene_service import record_runtime_scene_event
@@ -298,7 +299,7 @@ def _paths_for_target(target: CleanupTarget) -> list[CleanupPath]:
         ]
     if target.target_type == "runtime_scene_logs":
         return [
-            CleanupPath(root / "logs" / "runtime_scenes", "directory", "delete", "Delete runtime scene diagnostic bundles."),
+            CleanupPath(resolve_project_logs_home(root) / "runtime_scenes", "directory", "delete", "Delete runtime scene diagnostic bundles."),
         ]
     if target.target_type == "team_archive_artifacts":
         teams_root = workspace_root / "teams"
@@ -830,7 +831,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _append_cleanup_audit(payload: dict[str, Any]) -> None:
-    audit_path = _project_root() / "logs" / "memory_cleanup" / "memory_cleanup_audit.jsonl"
+    audit_path = resolve_project_logs_home(_project_root()) / "memory_cleanup" / "memory_cleanup_audit.jsonl"
     audit_path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "schemaVersion": SCHEMA_VERSION,
@@ -903,13 +904,19 @@ def _assert_allowed_cleanup_path(path: Path, *, action: str) -> Path:
         workspace_root / "evaluation",
         workspace_root / "sessions",
         root / "log_info",
-        root / "logs" / "runtime_scenes",
+        resolve_project_logs_home(root) / "runtime_scenes",
     ]
     if not any(_same_or_child(base.resolve(), resolved) for base in allowed_roots):
         raise MemoryCleanupError(f"Cleanup path is outside the memory cleanup allow-list: {_relative_path(resolved)}")
     if ".docs" in resolved.parts:
         raise MemoryCleanupError("Project governance memory is protected from this cleanup tool.")
-    if action == "delete" and resolved in {workspace_root, workspace_root / "agents", workspace_root / "teams", workspace_root / "knowledge", root / "logs"}:
+    if action == "delete" and resolved in {
+        workspace_root,
+        workspace_root / "agents",
+        workspace_root / "teams",
+        workspace_root / "knowledge",
+        resolve_project_logs_home(root),
+    }:
         raise MemoryCleanupError(f"Refusing broad cleanup path: {_relative_path(resolved)}")
     return resolved
 
