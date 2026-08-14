@@ -1,0 +1,67 @@
+import { describe, expect, it } from "vitest";
+
+import type { LauncherBranchInstance } from "../api/launcher";
+import {
+  cleanupRecommendation,
+  gitStatusExplanation,
+  runtimeStatusExplanation,
+} from "./LauncherBranchStatusHelp.model";
+
+function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBranchInstance {
+  return {
+    id: "worktree:task",
+    kind: "worktree",
+    branch: "codex/task",
+    path: "C:/repo/.worktrees/task",
+    displayPath: ".worktrees/task",
+    head: "abc123",
+    current: false,
+    legacy: false,
+    dirty: false,
+    checkedOut: true,
+    alive: false,
+    observedState: "closed",
+    port: 0,
+    pids: { backend: 0, window: 0, manager: 0 },
+    promotable: true,
+    mergedToMain: true,
+    cleanupEligible: true,
+    runtime: {
+      lifecycleState: "closed",
+      desiredState: "closed",
+      observedState: "closed",
+      phase: "steady",
+      backend: { alive: false, healthy: false, listening: false, port: 0, portReserved: false, portConflict: false, pid: 0 },
+      frontend: { mode: "bundled_static_dist", ready: true },
+      window: { open: false, pid: 0, title: "task", titleObserved: true },
+    },
+    startable: true,
+    ...overrides,
+  };
+}
+
+describe("Launcher branch status help", () => {
+  it("recommends cleanup only for stopped, clean, merged instances", () => {
+    expect(cleanupRecommendation(instance(), "stopped", true)).toEqual({
+      level: "recommended",
+      label: "可以清理",
+      reason: "实例已停止、工作区干净且提交已合入 main。",
+    });
+    expect(cleanupRecommendation(instance({ dirty: true }), "stopped", true).level).toBe("avoid");
+    expect(cleanupRecommendation(instance({ mergedToMain: false }), "stopped", true).level).toBe("avoid");
+    expect(cleanupRecommendation(instance({ mergedToMain: undefined }), "stopped", true).level).toBe("review");
+    expect(cleanupRecommendation(instance({ alive: true }), "running", true).level).toBe("avoid");
+    expect(cleanupRecommendation(instance({ alive: true, dirty: true, mergedToMain: false }), "running", true).reason).toContain("；");
+  });
+
+  it("keeps main and the current worktree protected", () => {
+    expect(cleanupRecommendation(instance({ id: "main", kind: "main", branch: "main" }), "stopped", true).label).toBe("不可清理");
+    expect(cleanupRecommendation(instance({ current: true }), "stopped", true).label).toBe("不可清理");
+  });
+
+  it("explains runtime and Git labels in plain language", () => {
+    expect(runtimeStatusExplanation("partial", true)).toContain("部分运行组件");
+    expect(gitStatusExplanation(instance({ dirty: true }), true)).toContain("强制清理会丢弃");
+    expect(gitStatusExplanation(instance({ mergedToMain: false }), true)).toContain("尚未合入 main");
+  });
+});

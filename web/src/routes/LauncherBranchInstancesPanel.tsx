@@ -5,6 +5,7 @@ import { requestBranchInstanceCleanup, type LauncherBranchInstance } from "../ap
 import { queryKeys } from "../api/queryKeys";
 import { VButton, VCheckbox, VConfirmDialog, VDenseTable, VStatusChip, VTooltip } from "../components/vui";
 import type { LauncherOperation } from "../api/types";
+import { LauncherBranchStatusHelp } from "./LauncherBranchStatusHelp";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
   canRequestOpenInstance,
@@ -299,9 +300,11 @@ export function LauncherBranchInstancesPanel({
               render: (item) => {
                 const state = instanceRuntimeState(item, pendingOperation);
                 return (
-                  <VStatusChip tone={runtimeTone(state)}>
-                    {instanceRuntimeStateLabel(state, zh)}
-                  </VStatusChip>
+                  <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="runtime">
+                    <VStatusChip tone={runtimeTone(state)}>
+                      {instanceRuntimeStateLabel(state, zh)}
+                    </VStatusChip>
+                  </LauncherBranchStatusHelp>
                 );
               },
             },
@@ -332,7 +335,14 @@ export function LauncherBranchInstancesPanel({
               header: labels.git,
               width: 142,
               minWidth: 92,
-              render: (item) => formatGitStatus(item, zh),
+              render: (item) => {
+                const state = instanceRuntimeState(item, pendingOperation);
+                return (
+                  <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="git">
+                    <span>{formatGitStatus(item, zh)}</span>
+                  </LauncherBranchStatusHelp>
+                );
+              },
             },
             {
               id: "actions",
@@ -414,7 +424,11 @@ export function LauncherBranchInstancesPanel({
               header: labels.readiness,
               width: 112,
               minWidth: 92,
-              render: () => <VStatusChip tone="success">{labels.ready}</VStatusChip>,
+              render: (item) => (
+                <LauncherBranchStatusHelp item={item} state="stopped" isZh={zh} kind="runtime">
+                  <VStatusChip tone="success">{labels.ready}</VStatusChip>
+                </LauncherBranchStatusHelp>
+              ),
             },
             {
               id: "frontend",
@@ -428,7 +442,11 @@ export function LauncherBranchInstancesPanel({
               header: labels.git,
               width: 160,
               minWidth: 100,
-              render: (item) => formatGitStatus(item, zh),
+              render: (item) => (
+                <LauncherBranchStatusHelp item={item} state="stopped" isZh={zh} kind="git">
+                  <span>{formatGitStatus(item, zh)}</span>
+                </LauncherBranchStatusHelp>
+              ),
             },
             {
               id: "path",
@@ -541,9 +559,11 @@ export function LauncherBranchInstancesPanel({
                 render: (item) => {
                   const state = instanceRuntimeState(item, pendingOperation);
                   return (
-                    <VStatusChip tone={runtimeTone(state)}>
-                      {instanceRuntimeStateLabel(state, zh)}
-                    </VStatusChip>
+                    <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="runtime">
+                      <VStatusChip tone={runtimeTone(state)}>
+                        {instanceRuntimeStateLabel(state, zh)}
+                      </VStatusChip>
+                    </LauncherBranchStatusHelp>
                   );
                 },
               },
@@ -552,7 +572,14 @@ export function LauncherBranchInstancesPanel({
                 header: labels.git,
                 width: 180,
                 minWidth: 110,
-                render: (item) => formatGitStatus(item, zh),
+                render: (item) => {
+                  const state = instanceRuntimeState(item, pendingOperation);
+                  return (
+                    <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="git">
+                      <span>{formatGitStatus(item, zh)}</span>
+                    </LauncherBranchStatusHelp>
+                  );
+                },
               },
               {
                 id: "path",
