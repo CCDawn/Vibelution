@@ -58,6 +58,13 @@ describe("TeamResearchBoardPrimarySurface extraction contract", () => {
     expect(surfaceSource).toContain('data-fill="true"');
   });
 
+  it("keeps challenge workflow chrome singular and enables the shared VUI rail collapse", () => {
+    expect(boardPageSource).toContain("p.challengeCupResearchTeamSelected ? undefined : p.teamShellToolbar");
+    expect(boardPageSource).toContain("collapse:");
+    expect(boardPageSource).toContain("收起团队栏");
+    expect(boardPageSource).toContain("展开团队栏");
+  });
+
   it("surface progressive-fills overview shell; empty only when settled without workflow", () => {
     expect(surfaceSource).not.toContain("Loading research overview");
     expect(surfaceSource).not.toContain("正在读取科研总览");
