@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import { routeLocationKey, routerLocationDesyncRecoveryPlan, routerLocationDesyncTarget } from "./AppShell";
 import appShellSource from "./AppShell.tsx?raw";
 import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
-import utilityMenuStylesSource from "./AppShellUtilityMenu.styles.ts?raw";
 
 function isWindowHistoryExpression(node: ts.Expression): boolean {
   return ts.isPropertyAccessExpression(node)
@@ -188,18 +187,17 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).not.toContain('t("navChatRooms")');
   });
 
-  it("keeps file navigation inside the workbench utility menu", () => {
+  it("does not embed a file tree or chat shortcut in the workbench utility menu", () => {
     expect(appShellSource).toContain("LazyAppShellUtilityMenu");
     expect(appShellSource).not.toContain("filterUtilityFileTree");
     expect(appShellSource).not.toContain("renderUtilityFileTree");
     expect(utilityMenuSource).toContain('from "./AppShellUtilityMenu.styles"');
     expect(utilityMenuSource).not.toContain("AppShell.styles");
-    expect(utilityMenuStylesSource).toContain("utilityFileTree");
-    expect(utilityMenuSource).toContain("filterUtilityFileTree");
-    expect(utilityMenuSource).toContain("renderUtilityFileTree");
-    expect(utilityMenuSource).toContain("utility-file-navigator");
-    expect(utilityMenuSource).toContain("openPreviewTab(activeSessionId, path)");
-    expect(utilityMenuSource).toContain('navigate("/chat")');
+    expect(utilityMenuSource).not.toContain("filterUtilityFileTree");
+    expect(utilityMenuSource).not.toContain("renderUtilityFileTree");
+    expect(utilityMenuSource).not.toContain("utility-file-navigator");
+    expect(utilityMenuSource).not.toContain('to="/chat"');
+    expect(utilityMenuSource).not.toContain("{t(\"files\")}");
   });
 
   it("keeps Agent management top-level while memory is a separate primary surface", () => {

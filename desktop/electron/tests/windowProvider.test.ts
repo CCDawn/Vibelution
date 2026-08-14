@@ -597,6 +597,88 @@ describe("Electron window provider state", () => {
     expect(extra.isDestroyed()).toBe(true);
   });
 
+  it("adopts one existing workbench window and destroys extras", async () => {
+    const first = new FakeWindow(42, "http://127.0.0.1:8002/teams", 4242);
+    const extra = new FakeWindow(43, "http://127.0.0.1:8002/chat", 4343);
+    let created = 0;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: (url) => {
+        created += 1;
+        return new FakeWindow(44, url, 4444);
+      },
+      listWorkbenchWindows: () => [first, extra].filter((window) => !window.isDestroyed())
+    });
+
+    const state = await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(created).toBe(0);
+    expect(state.windowId).toBe(42);
+    expect(first.loadedUrls).toEqual(["http://127.0.0.1:8002/"]);
+    expect(extra.destroyCount).toBe(1);
+    expect(extra.isDestroyed()).toBe(true);
+    expect(provider.snapshot().workbench).toMatchObject({
+      open: true,
+      windowId: 42,
+      url: "http://127.0.0.1:8002/"
+    });
+  });
+
+  it("reports a leftover workbench window as open and closes it without creating another", async () => {
+    const leftover = new FakeWindow(42, "http://127.0.0.1:8002/teams", 4242);
+    const reports: Array<{ role: string; open: boolean; windowId?: number }> = [];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: (url) => new FakeWindow(99, url, 9999),
+      listWorkbenchWindows: () => (leftover.isDestroyed() ? [] : [leftover]),
+      reportState: (state) => reports.push({ role: state.role, open: state.open, windowId: state.windowId }),
+      hungCloseDestroyAfterMs: 0
+    });
+
+    await provider.openLauncher();
+    expect(provider.snapshot().workbench).toMatchObject({
+      open: true,
+      windowId: 42,
+      url: "http://127.0.0.1:8002/teams"
+    });
+    expect(reports).toEqual(
+      expect.arrayContaining([{ role: "workbench", open: true, windowId: 42 }])
+    );
+
+    await provider.approveWorkbenchCloseOnce();
+    expect(leftover.isDestroyed()).toBe(true);
+    expect(provider.snapshot().workbench.open).toBe(false);
+  });
+
+  it("does not destroy an isolated instance window while sweeping leftover workbench windows", async () => {
+    const leftover = new FakeWindow(42, "http://127.0.0.1:8002/teams", 4242);
+    const isolated = new FakeWindow(99, "http://127.0.0.1:8004/", 9999);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: (url, _paths, options) => {
+        if (String(url).includes(":8004")) {
+          if (options?.title) {
+            isolated.setTitle(options.title);
+          }
+          return isolated;
+        }
+        return leftover;
+      },
+      listWorkbenchWindows: () => [leftover, isolated].filter((window) => !window.isDestroyed())
+    });
+
+    await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/",
+      title: "branch+task 台"
+    });
+    const state = await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(state.windowId).toBe(42);
+    expect(isolated.isDestroyed()).toBe(false);
+    expect(provider.snapshot().workbench.windowId).toBe(42);
+  });
+
   it("closes only Workbench while Launcher remains available", async () => {
     const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
     const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
@@ -779,6 +861,22 @@ describe("Launcher new-window requests", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(workbenchWindows).toHaveLength(0);
     expect(provider.isWorkbenchFocused()).toBe(false);
+  });
+
+  it("denies workbench window.open and reuses the current window", async () => {
+    const workbenchWindow = new FakeWindow(42, "", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+    const focusCount = workbenchWindow.focusCount;
+
+    expect(workbenchWindow.windowOpenHandler).not.toBeNull();
+    expect(workbenchWindow.openRequest("http://127.0.0.1:8002/teams")).toEqual({ action: "deny" });
+    await vi.waitFor(() => expect(workbenchWindow.focusCount).toBeGreaterThan(focusCount));
+    expect(workbenchWindow.openRequest("https://example.com/open")).toEqual({ action: "deny" });
   });
 });
 

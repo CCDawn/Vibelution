@@ -46,13 +46,14 @@ def test_observe_trace_records_connect_tls_and_actual_proxy_route():
     assert timings.connect_host == "proxy.example.net"
     assert timings.via_proxy is True
     assert timings.proxy_host == "proxy.example.net"
+    assert timings.connect_started_ms is not None
     assert timings.connect_ms is not None
     assert timings.tls_ms is not None
     assert timings.request_body_sent_ms is not None
     assert timings.http_headers_ms is not None
     assert timings.http_status == 200
     assert timings.header_receive_count == 1
-    assert timings.connect_ms <= timings.tls_ms <= timings.http_headers_ms
+    assert timings.connect_started_ms <= timings.connect_ms <= timings.tls_ms <= timings.http_headers_ms
 
 
 def test_httpx_timing_splits_connect_and_delayed_headers():
@@ -85,14 +86,18 @@ def test_httpx_timing_splits_connect_and_delayed_headers():
             assert response.text == "ok"
     thread.join(timeout=2)
     assert seen and seen[0] is not None
+    assert timings.connect_started_ms is not None
     assert timings.connect_ms is not None
     assert timings.http_headers_ms is not None
     assert timings.http_headers_ms >= 200
-    assert timings.connect_ms < timings.http_headers_ms
+    assert timings.connect_started_ms <= timings.connect_ms < timings.http_headers_ms
     assert timings.request_body_sent_ms is not None
     assert timings.request_body_sent_ms <= timings.http_headers_ms
     assert timings.http_status == 200
     assert timings.origin_host == "127.0.0.1"
+    assert timings.headers_scene_fields()["connectStartedMs"] == timings.connect_started_ms
+    assert timings.summary_scene_fields()["connectStartedMs"] == timings.connect_started_ms
+    assert timings.first_chunk_scene_fields()["connectStartedMs"] == timings.connect_started_ms
 
 
 def test_httpx_timing_reports_no_proxy_when_no_proxy_bypasses_environment_proxy(monkeypatch):
