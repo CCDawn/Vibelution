@@ -272,6 +272,43 @@ def test_smoke_failure_keeps_human_task_pending(
         harness.close()
 
 
+def test_smoke_accept_fails_closed_without_release_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_smoke_gate(harness)
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_runtime."
+            "command_service.prepare_command_human_acceptance_artifact",
+            lambda **kwargs: None,
+        )
+
+        with pytest.raises(
+            WorkflowCommandError,
+            match="gate:smoke_gate accept requires a materialized artifact receipt",
+        ):
+            harness.service.submit(
+                harness.request(
+                    command=WorkflowCommandKind.RESOLVE_HUMAN_TASK,
+                    node_id="smoke_gate",
+                    expected_run_version=1,
+                    idempotency_key="ui:accept-missing-smoke-release",
+                    payload={"taskId": "ht-smoke", "decision": "accept"},
+                )
+            )
+
+        task = harness.store.read(lambda repo: repo.get_human_task("ht-smoke"))
+        assert task is not None and task[6] == "pending"
+        refs = harness.store.read(
+            lambda repo: repo.list_handoff_artifact_refs_for_run("run-test")
+        )
+        assert refs == []
+    finally:
+        harness.close()
+
+
 def test_controlled_retry_recovers_historical_smoke_release(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

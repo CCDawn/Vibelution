@@ -57,6 +57,14 @@ from .human_acceptance_artifact import (
 )
 from .ids import new_id
 
+_ARTIFACT_HUMAN_GATES = frozenset(
+    {
+        "gate:knowledge_handoff",
+        "gate:protocol_freeze",
+        "gate:smoke_gate",
+    }
+)
+
 
 class WorkflowCommandError(RuntimeError):
     """Base for typed command failures."""
@@ -546,6 +554,7 @@ class WorkflowCommandService:
         # 人工决策后通过正式 graph resume 推进（T5 契约：Human 节点可恢复）。
         attempt = uow.repository.get_attempt(str(row[2]))
         pending_action_id = attempt.pending_action_id if attempt else None
+        task_kind = str(row[4] or "")
         if decision == "revise":
             # revise：不把决策压成 failed receipt，而是 fork 新 Run
             # （spec 8.4 revision fork；父 Run 保持 lineage）。
@@ -567,7 +576,7 @@ class WorkflowCommandService:
                 command_id=command_id,
                 now_ms=now_ms,
             )
-        elif pending_action_id:
+        else:
             from core.research.workflow.contracts import ExecutionReceipt
 
             run = uow.repository.get_run(request.run_id)
@@ -579,19 +588,30 @@ class WorkflowCommandService:
                 prepared=prepared_artifact,
                 now_ms=now_ms,
             )
-            receipt = ExecutionReceipt(
-                action_id=pending_action_id,
-                node_run_id=str(row[2]),
-                outcome="succeeded" if decision == "accept" else "failed",
-                artifact_receipt_ids=artifact_receipt_ids,
-                execution_anchor_id=None,
-                budget_receipt_id=None,
-                problem=None,
-                completed_at_ms=now_ms,
-            )
-            uow.repository.insert_outbox(
-                _human_resume_dispatch(uow, request, str(row[2]), receipt, command_id, now_ms)
-            )
+            if (
+                decision == "accept"
+                and task_kind in _ARTIFACT_HUMAN_GATES
+                and not artifact_receipt_ids
+            ):
+                raise WorkflowCommandError(
+                    f"{task_kind} accept requires a materialized artifact receipt"
+                )
+            if pending_action_id:
+                receipt = ExecutionReceipt(
+                    action_id=pending_action_id,
+                    node_run_id=str(row[2]),
+                    outcome="succeeded" if decision == "accept" else "failed",
+                    artifact_receipt_ids=artifact_receipt_ids,
+                    execution_anchor_id=None,
+                    budget_receipt_id=None,
+                    problem=None,
+                    completed_at_ms=now_ms,
+                )
+                uow.repository.insert_outbox(
+                    _human_resume_dispatch(
+                        uow, request, str(row[2]), receipt, command_id, now_ms
+                    )
+                )
         uow.repository.insert_event(
             _event_record(
                 run_id=request.run_id,
@@ -1014,6 +1034,15 @@ def _command_record(
     )
 
 
+def _actor_kind_for_node(node_id: str) -> str:
+    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+
+    for node in build_challenge_cup_workflow_definition().nodes:
+        if node.nodeId == node_id:
+            return node.actorKind.value
+    raise WorkflowCommandError(f"unknown node {node_id}")
+
+
 def _attempt_record(
     *,
     node_run_id: str,
@@ -1026,6 +1055,7 @@ def _attempt_record(
     started_at_ms: int,
     retry_of_node_run_id: str | None = None,
     binding_snapshot_id: str | None = None,
+    actor_kind: str | None = None,
 ) -> Any:
     from core.research.workflow.ledger import NodeAttemptRecord
 
@@ -1034,7 +1064,7 @@ def _attempt_record(
         run_id=run_id,
         node_id=node_id,
         attempt=attempt,
-        actor_kind="agent",
+        actor_kind=actor_kind or _actor_kind_for_node(node_id),
         status=status,
         command_id=command_id,
         binding_snapshot_id=binding_snapshot_id,
@@ -1064,7 +1094,7 @@ def _node_attempt_for_dispatch(
         run_id=run_id,
         node_id=node_id,
         attempt=attempt,
-        actor_kind="agent",
+        actor_kind=_actor_kind_for_node(node_id),
         status="starting",
         command_id="",
         binding_snapshot_id=binding_snapshot_id,
