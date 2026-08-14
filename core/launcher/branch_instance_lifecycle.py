@@ -639,10 +639,21 @@ def _positive_int(value: Any) -> int:
 
 
 def _open_instance_window(item: dict[str, Any], *, backend_port: int) -> dict[str, Any]:
+    if _electron_main_orchestrates_windows():
+        # T6: the Electron main opens the isolated window after the backend is live.
+        return {
+            "windowPid": 0,
+            "title": str(item.get("workbenchTitle") or item.get("shortName") or item.get("branch") or ""),
+            "url": _loopback_url(backend_port),
+        }
     window_item = dict(item)
     window_item["port"] = int(backend_port)
     window_item["url"] = _loopback_url(backend_port)
     return open_isolated_workbench_window(window_item)
+
+
+def _electron_main_orchestrates_windows() -> bool:
+    return str(os.environ.get("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "")).strip() == "1"
 
 
 def _isolated_backend_alive(item: dict[str, Any]) -> bool:

@@ -53,12 +53,7 @@ import {
   resolveLauncherDistRoot
 } from "./protocol/launcherAppProtocol.js";
 import {
-  acknowledgeWorkbenchCloseWindowClosed,
-  fetchWorkbenchCloseTransaction,
-  isRecoverableWorkbenchCloseTransactionControlRejection,
-  retryRejectedWorkbenchCloseSubmitOnce,
-  submitWorkbenchCloseTransaction,
-  type WorkbenchCloseTransaction
+  isRecoverableWorkbenchCloseTransactionControlRejection
 } from "./protocol/workbenchCloseTransactionClient.js";
 import { findVibelutionDeepLinkArg, parsePublicVibelutionDeepLink } from "./protocol/deepLink.js";
 import {
@@ -128,6 +123,7 @@ import {
   resolveWorkbenchUrl
 } from "./windows/windowUrlResolver.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
+import { MainWorkbenchCloseTransactionStore } from "./lifecycle/workbenchCloseTransactionStore.js";
 
 installBrokenPipeGuards();
 
@@ -167,6 +163,8 @@ let desktopControlRecoveryPromise: Promise<void> | null = null;
 let shutdownApproved = false;
 let launcherIpcHost: ReturnType<typeof createLauncherIpcHost> | null = null;
 const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
+const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
+const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 30_000;
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
 const desktopSessionMutations = new DesktopSessionMutationQueue();
 let conversationNotificationService: ConversationNotificationService | null = null;
@@ -864,66 +862,65 @@ function desktopSessionCapabilities(bootstrap: LauncherBootstrapResult): string[
 async function requestTransactionalWorkbenchClose(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult | null,
-  desktopActionPayload: Record<string, unknown> = {}
+  _desktopActionPayload: Record<string, unknown> = {}
 ): Promise<void> {
   const provider = windowProvider;
   if (provider === null || bootstrap === null) {
     throw new Error("Electron Workbench close transaction requires an active Launcher bootstrap.");
   }
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
-    if (!desktopSessionRegistered) {
-      await reportManagedWindowState(paths, bootstrap, provider.snapshot().workbench);
+    const context = await resolveDesktopActionLoopContext(bootstrap);
+    let activeWork = false;
+    try {
+      const status = await withDesktopShellExitTimeout(
+        fetchLauncherActiveWorkStatus(context),
+        ACTIVE_WORK_STATUS_TIMEOUT_MS,
+        "resolve launcher active work status for workbench close"
+      );
+      activeWork = status.active;
+    } catch {
+      activeWork = false;
     }
-    if (!desktopSessionRegistered) {
-      throw new Error("Electron Workbench close transaction requires an active desktop session.");
-    }
-    let context = await resolveDesktopActionLoopContext(bootstrap);
-    const existingCloseId = closeTransactionIdFromDesktopAction(desktopActionPayload, context.desktopSessionId);
-    let transaction: WorkbenchCloseTransaction;
-    if (existingCloseId) {
-      transaction = await fetchWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
-        ...context,
-        closeId: existingCloseId
-      });
-    } else {
-      const normalIdempotencyKey = `electron-workbench-close:${context.desktopSessionId}:${randomUUID()}`;
-      transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
-        idempotencyKey: normalIdempotencyKey,
-        mode: "normal",
-        reason: "workbench_window_close"
-      });
-      if (transaction.phase === "confirmation_required") {
-        const confirmed = await confirmWorkbenchForceClose(provider);
-        if (!confirmed) {
-          await recordElectronSupervisorEvent(bootstrap, {
-            eventCode: "electron.workbench_close.cancelled_active_work",
-            message: "Workbench close was cancelled while active work was present.",
-            fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
-          });
-          return;
-        }
-        transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
-          idempotencyKey: `${normalIdempotencyKey}:force`,
-          mode: "force",
-          reason: "workbench_window_close",
-          confirmationCloseId: transaction.closeId
+    let transaction = mainWorkbenchCloseStore.submit({
+      mode: "normal",
+      reason: "workbench_window_close",
+      activeWork
+    });
+    if (transaction.phase === "confirmation_required") {
+      const confirmed = await confirmWorkbenchForceClose(provider);
+      if (!confirmed) {
+        await recordElectronSupervisorEvent(bootstrap, {
+          eventCode: "electron.workbench_close.cancelled_active_work",
+          message: "Workbench close was cancelled while active work was present.",
+          fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
         });
+        return;
       }
-    }
-    // A recovered submit replaces the cached control context. Refresh this
-    // local handle before polling and acknowledging the same close transaction.
-    context = await resolveDesktopActionLoopContext(bootstrap);
-    transaction = await awaitWorkbenchCloseAuthorization(context, transaction);
-    if (transaction.phase !== "window_close_authorized") {
-      throw new Error(workbenchCloseTransactionFailureMessage(transaction));
+      transaction = mainWorkbenchCloseStore.confirm(transaction.closeId);
     }
     pendingWorkbenchCloseAck = {
       closeId: transaction.closeId,
       desktopSessionId: context.desktopSessionId
     };
     await recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.workbench_close.backend_stopping",
+      message: "Electron is stopping the workbench backend through the Python lifecycle bridge.",
+      fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
+    });
+    await stopWorkbenchBackend(paths, bootstrap);
+    const backendStopped = await waitForWorkbenchBackendClosed(context, WORKBENCH_CLOSE_BACKEND_WAIT_MS);
+    if (!backendStopped) {
+      mainWorkbenchCloseStore.fail(
+        transaction.closeId,
+        "backend_stop_timeout",
+        "Workbench backend did not settle closed before window authorization."
+      );
+      throw new Error("Workbench backend did not settle closed before window authorization.");
+    }
+    transaction = mainWorkbenchCloseStore.backendStopped(transaction.closeId);
+    await recordElectronSupervisorEvent(bootstrap, {
       eventCode: "electron.workbench_close.window_authorized",
-      message: "Workbench backend close completed; Electron is requesting the final window close.",
+      message: "Workbench backend closed; Electron is requesting the final window close.",
       fields: {
         closeId: transaction.closeId,
         desktopSessionId: context.desktopSessionId,
@@ -934,54 +931,41 @@ async function requestTransactionalWorkbenchClose(
   });
 }
 
-function closeTransactionIdFromDesktopAction(
-  payload: Record<string, unknown>,
-  desktopSessionId: string
-): string {
-  const targetSessionId = String(payload.desktopSessionId || "").trim();
-  const closeId = String(payload.closeId || "").trim();
-  if (!closeId || targetSessionId !== desktopSessionId) {
-    return "";
+async function stopWorkbenchBackend(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult
+): Promise<void> {
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop the workbench backend");
   }
-  return closeId;
+  await runWorkbenchLifecycle({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      bootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: "stop"
+  });
 }
 
-async function submitWorkbenchCloseTransactionWithControlRecovery(
-  paths: DesktopPaths,
-  bootstrap: LauncherBootstrapResult,
-  provider: ElectronWindowProvider,
-  input: {
-    idempotencyKey: string;
-    mode: "normal" | "force";
-    reason: string;
-    confirmationCloseId?: string;
-  }
-): Promise<WorkbenchCloseTransaction> {
-  return await retryRejectedWorkbenchCloseSubmitOnce(
-    async () =>
-      await submitWorkbenchCloseTransaction({
-        ...(await resolveDesktopActionLoopContext(bootstrap)),
-        ...input
-      }),
-    async () => await recoverWorkbenchCloseControlContext(paths, bootstrap, provider)
-  );
-}
-
-async function fetchWorkbenchCloseTransactionWithControlRecovery(
-  paths: DesktopPaths,
-  bootstrap: LauncherBootstrapResult,
-  provider: ElectronWindowProvider,
-  input: DesktopActionLoopContext & { closeId: string }
-): Promise<WorkbenchCloseTransaction> {
-  try {
-    return await fetchWorkbenchCloseTransaction(input);
-  } catch (error: unknown) {
-    if (!isRecoverableWorkbenchCloseTransactionControlRejection(error, "fetch")) {
-      throw error;
+async function waitForWorkbenchBackendClosed(
+  context: DesktopActionLoopContext,
+  timeoutMs: number
+): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const summary = await fetchLauncherStatusSummary(context);
+      if (String(summary.observedState || "").trim().toLowerCase() === "closed") {
+        return true;
+      }
+    } catch {
+      // Treat control-plane read failures as not-yet-closed; the next poll retries.
     }
-    await recoverWorkbenchCloseControlContext(paths, bootstrap, provider);
-    return await fetchWorkbenchCloseTransaction({ ...(await resolveDesktopActionLoopContext(bootstrap)), closeId: input.closeId });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
+  return false;
 }
 
 function isRecoverableDesktopControlError(error: unknown): boolean {
@@ -1050,19 +1034,13 @@ async function acknowledgeTransactionalWorkbenchClose(
   if (pending === null || bootstrap === null) {
     return;
   }
-  const context = await resolveDesktopActionLoopContext(bootstrap);
-  if (context.desktopSessionId !== pending.desktopSessionId) {
-    throw new Error("Electron Workbench close acknowledgement desktop session changed before the window closed.");
-  }
-  const transaction = await acknowledgeWorkbenchCloseWindowClosed({
-    ...context,
-    closeId: pending.closeId,
-    desktopSessionRevision
-  });
-  if (transaction.phase !== "succeeded") {
-    throw new Error(workbenchCloseTransactionFailureMessage(transaction));
-  }
+  const transaction = mainWorkbenchCloseStore.get(pending.closeId);
   pendingWorkbenchCloseAck = null;
+  if (transaction === null) {
+    return;
+  }
+  mainWorkbenchCloseStore.windowClosed(transaction.closeId);
+  const context = await resolveDesktopActionLoopContext(bootstrap);
   writeWorkbenchCloseCanarySummary(paths, {
     closeId: transaction.closeId,
     desktopSessionId: context.desktopSessionId,
@@ -1071,7 +1049,7 @@ async function acknowledgeTransactionalWorkbenchClose(
   });
   await recordElectronSupervisorEvent(bootstrap, {
     eventCode: "electron.workbench_close.completed",
-    message: "Electron confirmed the Workbench closed after the backend close transaction completed.",
+    message: "Electron confirmed the Workbench closed after the backend stopped.",
     fields: {
       closeId: transaction.closeId,
       desktopSessionId: context.desktopSessionId,
@@ -1147,35 +1125,6 @@ async function handleTransactionalWorkbenchCloseFailure(
   }, 0);
 }
 
-async function awaitWorkbenchCloseAuthorization(
-  context: DesktopActionLoopContext,
-  initialTransaction: WorkbenchCloseTransaction
-): Promise<WorkbenchCloseTransaction> {
-  let transaction = initialTransaction;
-  const startedAt = Date.now();
-  while (transaction.phase === "backend_closing") {
-    if (Date.now() - startedAt >= WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS) {
-      throw new Error(
-        `Workbench backend close authorization timed out after ${WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS}ms`
-      );
-    }
-    const deadlineEpochMs = Date.parse(String(transaction.deadlineAt || ""));
-    if (Number.isFinite(deadlineEpochMs) && Date.now() >= deadlineEpochMs) {
-      throw new Error("Workbench backend close transaction reached its Launcher deadline before window authorization.");
-    }
-    if (!transaction.retryable) {
-      throw new Error("Workbench backend close transaction stopped being retryable before window authorization.");
-    }
-    const nextPollAfterMs = Number(transaction.nextPollAfterMs);
-    if (!Number.isFinite(nextPollAfterMs) || nextPollAfterMs <= 0) {
-      throw new Error("Workbench backend close transaction is missing a valid Launcher-directed retry interval.");
-    }
-    await waitForTransactionPoll(nextPollAfterMs);
-    transaction = await fetchWorkbenchCloseTransaction({ ...context, closeId: transaction.closeId });
-  }
-  return transaction;
-}
-
 async function confirmWorkbenchForceClose(provider: ElectronWindowProvider): Promise<boolean> {
   const options = {
     type: "warning" as const,
@@ -1206,14 +1155,6 @@ async function confirmWorkbenchCloseRetry(provider: ElectronWindowProvider, deta
   const parent = provider.workbenchDialogParent() as unknown as BrowserWindow | null;
   const response = parent === null ? await dialog.showMessageBox(options) : await dialog.showMessageBox(parent, options);
   return response.response === 0;
-}
-
-function waitForTransactionPoll(delayMs: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, Math.round(delayMs)));
-}
-
-function workbenchCloseTransactionFailureMessage(transaction: WorkbenchCloseTransaction): string {
-  return String(transaction.message || transaction.failureCode || `Unexpected close transaction phase: ${transaction.phase}`);
 }
 
 function stopDesktopActionLoop(): void {
@@ -1701,7 +1642,7 @@ async function orchestrateBranchInstanceLifecycle(
     throw new Error("branch instance id is required");
   }
   const paths = createDesktopPathsForApp();
-  return await runBranchInstanceBridge({
+  const result = await runBranchInstanceBridge({
     workspaceRoot: paths.workspaceRoot,
     pythonPath,
     operatorConfigPath:
@@ -1709,6 +1650,25 @@ async function orchestrateBranchInstanceLifecycle(
     operation: operation as BranchInstanceOperation,
     instanceId
   });
+  if (
+    result.accepted
+    && (operation === "start" || operation === "restart")
+    && result.port
+    && result.port > 0
+  ) {
+    const provider = windowProvider;
+    if (provider !== null) {
+      void provider
+        .openOrFocusInstanceWorkbench({
+          instanceId,
+          url: `http://127.0.0.1:${result.port}/`
+        })
+        .catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+    }
+  }
+  return result;
 }
 
 function resolveLauncherIpcHost() {
@@ -1931,7 +1891,9 @@ app.whenReady()
       await windowProvider.openOrFocusWorkbench();
       return;
     }
-    startDesktopActionLoop(paths, launcherBootstrap, windowProvider);
+    // T6: window actions are orchestrated by Electron main; the Python desktop
+    // action claim loop is no longer polled. startDesktopActionLoop stays
+    // available for shutdown bookkeeping but is not started here.
     if (!desktopCliArgs.openWorkbench && !desktopCliArgs.projectRoot) {
       scheduleTelemetryWithoutWaiting(() =>
         recordElectronStartupSummaryOnce(launcherBootstrap, {
