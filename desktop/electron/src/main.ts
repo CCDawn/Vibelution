@@ -42,7 +42,8 @@ import {
 } from "./protocol/launcherControlClient.js";
 import {
   createLauncherIpcHost,
-  type LauncherIpcInvokePayload
+  type LauncherIpcInvokePayload,
+  type OrchestratedLifecycleResult
 } from "./protocol/launcherIpcHost.js";
 import {
   LAUNCHER_APP_PROTOCOL,
@@ -71,6 +72,10 @@ import {
   stopPythonLauncherService,
   type LauncherServiceStopResult
 } from "./process/launcherServiceClient.js";
+import {
+  runWorkbenchLifecycle,
+  type WorkbenchLifecycleOperation
+} from "./process/workbenchLifecycle.js";
 import {
   completeBootstrapWithoutWaitingForTelemetry,
   drainTelemetryWithDeadline,
@@ -1551,6 +1556,16 @@ async function runTrayLauncherPost(
   }
 }
 
+async function runTrayLifecycle(operation: WorkbenchLifecycleOperation, label: string): Promise<void> {
+  try {
+    await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: operation });
+    notifyDesktopTray("Vibelution", `${label}请求已发送。`);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `${label}失败：${detail.slice(0, 300)}`, "warning");
+  }
+}
+
 async function runTrayLauncherStatus(): Promise<void> {
   try {
     const context = await resolveTrayLauncherControlContext();
@@ -1564,13 +1579,7 @@ async function runTrayLauncherStatus(): Promise<void> {
 
 async function runTrayStopAll(): Promise<void> {
   try {
-    const context = await resolveTrayLauncherControlContext();
-    await postLauncherControl({
-      launcherOrigin: context.launcherOrigin,
-      controlToken: context.controlToken,
-      path: "/api/launcher/force-stop",
-      trigger: "electron_tray_stop_all"
-    });
+    await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
     await new Promise((resolve) => setTimeout(resolve, 1500));
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -1633,6 +1642,39 @@ function launcherIpcTrustedOrigins(): string[] {
   return [launcherAppOriginFor(resolveLauncherWindowUrl(desktopEnv))];
 }
 
+async function orchestrateLauncherLifecycle(
+  operation: string,
+  _payload: LauncherIpcInvokePayload
+): Promise<OrchestratedLifecycleResult> {
+  if (launcherBootstrap === null) {
+    throw new Error("Launcher backend is not available.");
+  }
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to orchestrate the workbench lifecycle");
+  }
+  const paths = createDesktopPathsForApp();
+  const result = await runWorkbenchLifecycle({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: operation as WorkbenchLifecycleOperation
+  });
+  if (result.accepted && (operation === "start" || operation === "rebuild-and-start")) {
+    const provider = windowProvider;
+    if (provider !== null) {
+      void provider
+        .openOrFocusWorkbench(resolveWorkbenchUrl(desktopEnv, launcherBootstrap.workbenchUrl))
+        .catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+    }
+  }
+  return result;
+}
+
 function resolveLauncherIpcHost() {
   if (launcherIpcHost !== null) {
     return launcherIpcHost;
@@ -1657,7 +1699,8 @@ function resolveLauncherIpcHost() {
           : null,
         instances: provider ? provider.instanceWindowStates() : []
       };
-    }
+    },
+    orchestrateLifecycle: orchestrateLauncherLifecycle
   });
   return launcherIpcHost;
 }
@@ -1781,10 +1824,10 @@ app.whenReady()
         );
       },
       restartProject: () => {
-        void runTrayLauncherPost("/api/launcher/restart", DESKTOP_TRAY_MENU_LABELS.restartProject);
+        void runTrayLifecycle("restart", DESKTOP_TRAY_MENU_LABELS.restartProject);
       },
       rebuildAndStart: () => {
-        void runTrayLauncherPost("/api/launcher/rebuild-and-start", DESKTOP_TRAY_MENU_LABELS.rebuildAndStart);
+        void runTrayLifecycle("rebuild-and-start", DESKTOP_TRAY_MENU_LABELS.rebuildAndStart);
       },
       showStatus: () => {
         void runTrayLauncherStatus();

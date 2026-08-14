@@ -348,3 +348,93 @@ def test_bootstrap_workbench_url_falls_back_to_workbench_port(monkeypatch):
     )
 
     assert result["workbenchUrl"] == "http://127.0.0.1:8002"
+
+
+def test_lifecycle_bridge_parses_operations():
+    args = desktop_entry.parse_args(["--action", "lifecycle", "--lifecycle-operation", "restart"])
+    assert args.lifecycle_operation == "restart"
+
+def test_lifecycle_bridge_dispatches_start(monkeypatch):
+    entry = _load_desktop_entry_py()
+    calls = []
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+
+    class FakeService:
+        class LauncherActiveWorkBlocked(Exception):
+            def __init__(self, message, active_work_runs=None):
+                super().__init__(message)
+                self.message = message
+                self.active_work_runs = active_work_runs or []
+
+        @staticmethod
+        def request_launcher_start():
+            calls.append("start")
+            return {"accepted": True, "operation": "start", "commandId": "cmd-1"}
+
+        @staticmethod
+        def request_launcher_stop(request_audit=None):
+            calls.append("stop")
+            return {"accepted": True, "operation": "stop", "commandId": "cmd-2"}
+
+        @staticmethod
+        def request_launcher_force_stop(request_audit=None):
+            calls.append("force-stop")
+            return {"accepted": True, "operation": "force-stop", "commandId": "cmd-3"}
+
+        @staticmethod
+        def request_launcher_restart(**kwargs):
+            calls.append("restart")
+            return {"accepted": True, "operation": "restart", "commandId": "cmd-4"}
+
+        @staticmethod
+        def request_launcher_rebuild_and_start():
+            calls.append("rebuild-and-start")
+            return {"accepted": True, "operation": "rebuild-and-start", "commandId": "cmd-5"}
+
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    launcher_module = types.ModuleType("core.launcher.service")
+    launcher_module.LauncherActiveWorkBlocked = FakeService.LauncherActiveWorkBlocked
+    launcher_module.request_launcher_start = FakeService.request_launcher_start
+    launcher_module.request_launcher_stop = FakeService.request_launcher_stop
+    launcher_module.request_launcher_force_stop = FakeService.request_launcher_force_stop
+    launcher_module.request_launcher_restart = FakeService.request_launcher_restart
+    launcher_module.request_launcher_rebuild_and_start = FakeService.request_launcher_rebuild_and_start
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    for operation, expected_call in [
+        ("start", "start"),
+        ("stop", "stop"),
+        ("force-stop", "force-stop"),
+        ("restart", "restart"),
+        ("rebuild-and-start", "rebuild-and-start"),
+    ]:
+        payload = entry._run_lifecycle_bridge(argparse.Namespace(lifecycle_operation=operation))
+        assert payload["accepted"] is True
+        assert calls[-1] == expected_call
+        assert payload["schemaVersion"] == 1
+
+def test_lifecycle_bridge_returns_active_work_block(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+
+    class Blocked(Exception):
+        def __init__(self, message, active_work_runs=None):
+            super().__init__(message)
+            self.message = message
+            self.active_work_runs = active_work_runs or [{"kind": "agent_turn"}]
+
+    launcher_module = types.ModuleType("core.launcher.service")
+    launcher_module.LauncherActiveWorkBlocked = Blocked
+    launcher_module.request_launcher_stop = lambda request_audit=None: (_ for _ in ()).throw(Blocked("有进行中的任务"))
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    payload = entry._run_lifecycle_bridge(argparse.Namespace(lifecycle_operation="stop"))
+    assert payload["accepted"] is False
+    assert payload["code"] == "active_work_blocked"
+    assert payload["operation"] == "stop"
+
+def test_lifecycle_bridge_rejects_unknown_operation():
+    entry = _load_desktop_entry_py()
+    with pytest.raises(ValueError):
+        entry._run_lifecycle_bridge(argparse.Namespace(lifecycle_operation="taskkill"))
