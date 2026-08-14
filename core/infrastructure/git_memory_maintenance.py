@@ -131,9 +131,131 @@ def build_python_git_memory_maintenance_report(
                 "gitEntityChange": _table_stats(conn, "GitEntityChange", "is_worktree = 1"),
             },
             "pruneDryRun": _prune_dry_run(conn, normalized_keep_latest),
+            "gitFileChangeDuplicates": _preview_git_file_change_duplicates(conn),
             "elapsedMs": 0,
         }
     return report
+
+
+def preview_git_file_change_duplicates(db_path: str | Path) -> dict[str, Any]:
+    """Read-only duplicate diagnostics for the GitFileChange table."""
+    with sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True) as conn:
+        return _preview_git_file_change_duplicates(conn)
+
+
+def _preview_git_file_change_duplicates(conn: sqlite3.Connection) -> dict[str, Any]:
+    if not _table_exists(conn, "GitFileChange"):
+        return {
+            "duplicateGroups": 0,
+            "excessRows": 0,
+            "maxDuplicatesPerGroup": 0,
+            "rowsWithNullOldPath": 0,
+        }
+    rows_with_null = _count(
+        conn, "SELECT COUNT(*) FROM GitFileChange WHERE old_path IS NULL"
+    )
+    duplicate_groups = _count(
+        conn,
+        """
+        SELECT COUNT(*) FROM (
+            SELECT commit_sha, path, change_type, COALESCE(old_path, ''), is_worktree
+            FROM GitFileChange
+            GROUP BY commit_sha, path, change_type, COALESCE(old_path, ''), is_worktree
+            HAVING COUNT(*) > 1
+        )
+        """,
+    )
+    excess_rows = _count(
+        conn,
+        """
+        SELECT COALESCE(SUM(group_count - 1), 0) FROM (
+            SELECT COUNT(*) AS group_count
+            FROM GitFileChange
+            GROUP BY commit_sha, path, change_type, COALESCE(old_path, ''), is_worktree
+            HAVING COUNT(*) > 1
+        )
+        """,
+    )
+    max_duplicates = _count(
+        conn,
+        """
+        SELECT COALESCE(MAX(group_count), 0) FROM (
+            SELECT COUNT(*) AS group_count
+            FROM GitFileChange
+            GROUP BY commit_sha, path, change_type, COALESCE(old_path, ''), is_worktree
+            HAVING COUNT(*) > 1
+        )
+        """,
+    )
+    return {
+        "duplicateGroups": duplicate_groups,
+        "excessRows": excess_rows,
+        "maxDuplicatesPerGroup": max_duplicates,
+        "rowsWithNullOldPath": rows_with_null,
+    }
+
+
+def dedupe_git_file_changes(db_path: str | Path, *, dry_run: bool = True) -> dict[str, Any]:
+    """Idempotently collapse duplicate GitFileChange rows and normalize
+    old_path NULLs to ''. Must be triggered explicitly by the operator;
+    the preview stays automatic and read-only.
+
+    Applies as one transaction: either every duplicate is removed and every
+    NULL old_path normalized, or nothing changes.
+    """
+    normalized_db_path = Path(db_path)
+    with sqlite3.connect(str(normalized_db_path), isolation_level=None) as conn:
+        preview = _preview_git_file_change_duplicates(conn)
+        if dry_run:
+            return {
+                "dryRun": True,
+                "deletedRows": preview["excessRows"],
+                "normalizedNullOldPath": preview["rowsWithNullOldPath"],
+                **preview,
+            }
+        if not _table_exists(conn, "GitFileChange"):
+            return {
+                "dryRun": False,
+                "deletedRows": 0,
+                "normalizedNullOldPath": 0,
+                **preview,
+            }
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            deleted = _delete_duplicate_git_file_changes(conn)
+            normalized = _normalize_null_old_paths(conn)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    return {
+        "dryRun": False,
+        "deletedRows": deleted,
+        "normalizedNullOldPath": normalized,
+    }
+
+
+def _delete_duplicate_git_file_changes(conn: sqlite3.Connection) -> int:
+    """Delete duplicate rows keeping the lowest id per logical group."""
+    cursor = conn.execute(
+        """
+        DELETE FROM GitFileChange
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM GitFileChange
+            GROUP BY commit_sha, path, change_type, COALESCE(old_path, ''), is_worktree
+        )
+        """
+    )
+    return max(0, int(cursor.rowcount or 0))
+
+
+def _normalize_null_old_paths(conn: sqlite3.Connection) -> int:
+    cursor = conn.execute(
+        "UPDATE GitFileChange SET old_path = '' WHERE old_path IS NULL"
+    )
+    return max(0, int(cursor.rowcount or 0))
 
 
 def _table_stats(conn: sqlite3.Connection, table: str, worktree_where: str) -> dict[str, Any]:
