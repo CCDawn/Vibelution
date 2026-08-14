@@ -184,7 +184,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("forceStopDisabled={forceStopDisabled}");
     expect(routeSource).not.toContain("restartDisabled={destructiveActionDisabled}");
     expect(branchInstancesPanelSource).toContain("onLifecycle");
-    expect(branchInstancesPanelSource).toContain("labels.start");
+    expect(branchInstancesPanelSource).toContain("onStopMany");
+    expect(branchInstancesPanelSource).toContain("labels.startWorkbench");
   });
 
   it("renders a dense lifecycle console rather than a landing page", () => {
