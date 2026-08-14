@@ -59,6 +59,7 @@ import { VButton, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurfac
 import { memoryProposalStatusTone, memoryVisibilityTone } from "./memoryStatusTone";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
+import { canExecuteMemoryCleanup } from "./memory/memoryCleanupSafety";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
 import { useMemoryCoreQueries, useMemoryKnowledgeQueries } from "./memory/useMemoryWorkbenchQueries";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -3282,13 +3283,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     cleanupPreviewMutation.mutate(selectedCleanupTargets);
   };
   const executeCleanup = () => {
-    if (!selectedCleanupTargets.length) {
+    if (!selectedCleanupTargets.length || !cleanupPreview?.previewToken) {
       setCleanupFeedback({ tone: "error", text: copy.cleanupSelectTargets });
       return;
     }
     cleanupExecuteMutation.mutate({
       targets: selectedCleanupTargets,
       confirmationPhrase: cleanupConfirmationText,
+      previewToken: cleanupPreview.previewToken,
     });
   };
 
@@ -3981,7 +3983,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const createCleanupPanel = () => {
     const report = cleanupExecution ?? cleanupPreview;
-    const canExecute = selectedCleanupTargets.length > 0 && cleanupConfirmationText.trim() === (report?.confirmationPhrase || "硬删除记忆");
+    const canExecute = canExecuteMemoryCleanup(
+      cleanupPreview,
+      selectedCleanupTargets.length,
+      cleanupConfirmationText,
+    );
 
     return (
       <MemoryCleanupPanel

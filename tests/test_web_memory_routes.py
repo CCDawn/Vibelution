@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from core.infrastructure import developer_sandbox
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.routes import memory as memory_routes
 from core.web.services import (
     agent_directory_service,
     memory_cleanup_service,
@@ -1188,6 +1189,7 @@ def test_memory_cleanup_api_previews_and_requires_hard_delete_confirmation(tmp_p
     preview = preview_response.json()
     assert preview["hardDelete"] is True
     assert preview["confirmationPhrase"] == memory_cleanup_service.CONFIRMATION_PHRASE
+    assert preview["previewToken"]
     assert preview["totals"]["targetCount"] == 1
 
     rejected_response = client.post(
@@ -1195,6 +1197,7 @@ def test_memory_cleanup_api_previews_and_requires_hard_delete_confirmation(tmp_p
         json={
             "targets": [{"targetType": "global_runtime_memory"}],
             "confirmationPhrase": "delete",
+            "previewToken": preview["previewToken"],
         },
     )
 
@@ -1206,11 +1209,43 @@ def test_memory_cleanup_api_previews_and_requires_hard_delete_confirmation(tmp_p
         json={
             "targets": [{"targetType": "global_runtime_memory"}],
             "confirmationPhrase": memory_cleanup_service.CONFIRMATION_PHRASE,
+            "previewToken": preview["previewToken"],
         },
     )
 
     assert execute_response.status_code == 200
     assert not runtime_memory.exists()
+
+
+def test_memory_cleanup_api_returns_multi_status_for_partial_execution(monkeypatch):
+    monkeypatch.setattr(
+        memory_routes,
+        "execute_memory_cleanup",
+        lambda *_args, **_kwargs: {
+            "schemaVersion": 1,
+            "mode": "hard_delete_memory_cleanup_execute",
+            "hardDelete": True,
+            "confirmationPhrase": memory_cleanup_service.CONFIRMATION_PHRASE,
+            "targets": [],
+            "totals": {"targetCount": 2, "failedTargetCount": 1},
+            "operatingBoundary": {},
+            "generatedAt": "2026-08-14T00:00:00Z",
+            "elapsedMs": 1.0,
+            "outcome": "partial",
+        },
+    )
+
+    response = client.post(
+        "/api/memory/cleanup/execute",
+        json={
+            "targets": [{"targetType": "session_artifacts"}],
+            "confirmationPhrase": memory_cleanup_service.CONFIRMATION_PHRASE,
+            "previewToken": "preview-token",
+        },
+    )
+
+    assert response.status_code == 207
+    assert response.json()["outcome"] == "partial"
 
 
 def test_memory_overview_base_sections_reuse_recent_cache(tmp_path, monkeypatch):
