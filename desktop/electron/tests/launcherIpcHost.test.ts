@@ -230,4 +230,35 @@ describe("createLauncherIpcHost", () => {
       expect(result.error.message).toContain("active work blocks restart");
     }
   });
+
+  it("routes branch-instance lifecycle commands through the main orchestrator", async () => {
+    const fetchImpl = vi.fn();
+    const orchestrate = vi.fn().mockResolvedValue({
+      schemaVersion: 1,
+      accepted: true,
+      operation: "start",
+      instanceId: "worktree:task",
+      port: 8002,
+    });
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      orchestrateBranchInstance: orchestrate,
+      fetchImpl,
+    });
+    const result = await host.invoke(
+      validPayload({
+        path: "branch-instances/start",
+        init: { method: "POST", body: { instanceId: "worktree:task" } },
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload).toMatchObject({ accepted: true, instanceId: "worktree:task" });
+    }
+    expect(orchestrate).toHaveBeenCalledTimes(1);
+    expect(orchestrate.mock.calls[0][0]).toBe("start");
+    const payload = orchestrate.mock.calls[0][1] as LauncherIpcInvokePayload;
+    expect((payload.init?.body as Record<string, unknown>).instanceId).toBe("worktree:task");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });
