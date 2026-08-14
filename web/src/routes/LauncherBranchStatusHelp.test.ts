@@ -52,6 +52,13 @@ describe("Launcher branch status help", () => {
     expect(cleanupRecommendation(instance({ mergedToMain: undefined }), "stopped", true).level).toBe("review");
     expect(cleanupRecommendation(instance({ alive: true }), "running", true).level).toBe("avoid");
     expect(cleanupRecommendation(instance({ alive: true, dirty: true, mergedToMain: false }), "running", true).reason).toContain("；");
+    expect(cleanupRecommendation(instance({
+      runtime: {
+        ...instance().runtime,
+        window: { open: true, pid: 42, title: "task", titleObserved: true },
+      },
+    }), "stopped", true).level).toBe("avoid");
+    expect(cleanupRecommendation(instance({ cleanupRisks: ["stop_then_remove"] }), "stopped", true).level).toBe("avoid");
   });
 
   it("keeps main and the current worktree protected", () => {
@@ -63,5 +70,6 @@ describe("Launcher branch status help", () => {
     expect(runtimeStatusExplanation("partial", true)).toContain("部分运行组件");
     expect(gitStatusExplanation(instance({ dirty: true }), true)).toContain("强制清理会丢弃");
     expect(gitStatusExplanation(instance({ mergedToMain: false }), true)).toContain("尚未合入 main");
+    expect(gitStatusExplanation(instance({ cleanupRisks: ["delete_unmerged"] }), true)).toContain("尚未合入 main");
   });
 });
