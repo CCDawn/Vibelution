@@ -58,8 +58,8 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 | Overview primary CTA UI | `ResearchPrimaryActionBar.tsx` | mutations ownership |
 | Overview advanced disclosure shell | (removed with Task 9; advanced dumps live in NodeInspector artifact views) | evidence/path dumps in hero |
 | Design acceptance preview (static) | `web/research-overview-preview-standalone.html` + `design/research-overview-preview.*` | production routes |
-| Process-flow single-page workspace preview (static) | `web/research-process-flow-preview.html` + `design/research-process-flow-preview.*` | production multi-page stage routes as primary nav; board/canvas dual shell as primary IA |
-| Process-flow single-page workspace **PRD** | [`docs/prds/2026-08-07-research-process-flow-single-page-workspace.md`](../../../../docs/prds/2026-08-07-research-process-flow-single-page-workspace.md) | treating preview alone as implementation authority |
+| Process-flow single-page workspace preview (static) | 私密副本见桌面 `挑战杯/03-工程合同/` | production multi-page stage routes as primary nav; board/canvas dual shell as primary IA |
+| Process-flow single-page workspace **PRD** | 私密副本见桌面 `挑战杯/03-工程合同/` | treating preview alone as implementation authority |
 | Teams shell (left team list + board/canvas mode) | `teamShellModel.ts` + `TeamShellRail.tsx` + `TeamShellModeSwitch.tsx` + `TeamShellToolbar.tsx` + VUI `VBoardWorkbenchPage` / `VCanvasWorkbenchPage` | burying team pick in dense header only |
 | Organization canvas surface | `TeamOrganizationCanvasSurface.tsx` | inlining graph/drag chrome in TeamsRoute |
 | Canvas node binding inspector | `TeamNodeBindingPanel.tsx` | duplicating bind form in board/canvas |

@@ -2,7 +2,7 @@
 
 本目录实现挑战杯科研工作流**正式运行时**：命令受理 → LangGraph interrupt/resume →
 Adapter 执行 → Domain read-back → Receipt → Handoff → 下一节点 Readiness 的完整链路。
-权威规范：[2026-08-12-runtime-implementation-spec](../../../../docs/prds/2026-08-12-challenge-cup-research-workflow-runtime-implementation-spec.md)。
+挑战杯规划规范不进入 GitHub，本地副本见桌面 `挑战杯/03-工程合同/`；仓内实现合同以本 README、Workflow Ledger 代码与对应测试为准。
 
 ## 职责边界
 
