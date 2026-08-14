@@ -190,7 +190,7 @@ describe("AppShell layout contract", () => {
     expect(styles.statusGuidePopoverContent).toContain("w-[min(640px,calc(100vw-40px))]");
     // Utility git signal/count grids: 2×2 for readable Chinese labels in the popover.
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
-    expect(shellStyles).toContain("grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr))");
+    expect(shellStyles).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
     expect(shellStyles).toContain("grid-template-columns: 36px minmax(0, 1fr)");
     expect(shellStyles).toContain("@media (max-width: 640px)");
     expect(shellStyles).toContain("width: min(360px, calc(100vw - 20px))");
@@ -265,7 +265,7 @@ describe("AppShell layout contract", () => {
       styles.utilityFileButton,
       styles.utilityTrigger,
       utilityMenuStyles.utilityButton,
-      utilityMenuStyles.utilityFileButton,
+      utilityMenuStyles.gitSummaryRow,
     ];
 
     for (const value of shellControlStyles) {
@@ -392,7 +392,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('t("navMemory")');
   });
 
-  it("collapses logs git and files behind one click utility popover", () => {
+  it("collapses usage logs and git behind one click utility popover", () => {
     const primaryNav = shellSource.slice(
       shellSource.indexOf("<nav className={styles.nav}>"),
       shellSource.indexOf("</nav>"),
@@ -416,7 +416,8 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('cache: "no-store",\n        signal,');
     expect(utilityMenuSource).toContain("queryKeys.gitStatusSummary()");
     expect(utilityMenuSource).toContain('queryFn: ({ signal }) => fetchJson<GitStatusSummary>("/api/git/status", { signal })');
-    expect(utilityMenuSource).toContain('queryFn: ({ signal }) => fetchJson<FileTreeNode[]>("/api/files/tree", { signal })');
+    expect(utilityMenuSource).not.toContain("queryKeys.fileTree()");
+    expect(utilityMenuSource).not.toContain("/api/files/tree");
     expect(shellSource).not.toContain("queryKeys.fileTree()");
     expect(utilityMenuSource).toContain('from "./AppShellUtilityMenu.styles"');
     expect(utilityMenuSource).not.toContain("AppShell.styles");
@@ -424,13 +425,12 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('role="region"');
     expect(utilityMenuSource).not.toContain('role="menu"');
     expect(utilityMenuSource).not.toContain('role="menuitem"');
-    expect(utilityMenuSource).toContain("VMetricStrip");
-    expect(utilityMenuSource).toContain("VSurface");
-    expect(utilityMenuSource).toContain("VPanelHeader");
-    expect(utilityMenuSource).toContain("VChip");
-    expect(utilityMenuSource).toContain("<VNativeInput");
+    expect(utilityMenuSource).not.toContain("VMetricStrip");
+    expect(utilityMenuSource).not.toContain("VPanelHeader");
+    expect(utilityMenuSource).not.toContain("<VChip");
+    expect(utilityMenuSource).not.toContain("<VNativeInput");
+    expect(utilityMenuSource).toContain("VStatusChip");
     expect(utilityMenuSource).toContain("<VRouteLinkButton");
-    expect(utilityMenuSource).toContain("<VMetricStrip");
     expect(utilityMenuSource).not.toMatch(/<input\b/);
     expect(utilityMenuSource).not.toContain("<NavLink");
     expect(utilityMenuSource).not.toContain("hidden={!utilityOpen}");
@@ -439,8 +439,10 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('<VTooltip content={t("usageUtilityTitle")}>');
     expect(utilityMenuSource).toContain('<VTooltip content={t("topUtilityMenuHint")} width="wide">');
     expect(utilityMenuSource).toContain("gitHeroLabel");
-    expect(utilityMenuSource).toContain("gitMiniPanel");
-    expect(utilityMenuSource).toContain('tooltip={node.path}');
+    expect(utilityMenuSource).toContain("gitSummaryRow");
+    expect(utilityMenuSource).not.toContain('to="/chat"');
+    expect(utilityMenuSource).not.toContain("gitMiniPanel");
+    expect(utilityMenuSource).not.toContain("utility-file-navigator");
     expect(utilityMenuSource).not.toContain('title={t("usageUtilityTitle")}');
     expect(utilityMenuSource).not.toContain('title={gitTitle}');
     expect(utilityMenuSource).toContain("Activity");
@@ -464,31 +466,27 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("icon={<Settings size={16}");
     expect(utilityMenuSource).toContain("requiresAttention");
     expect(utilityMenuSource).toContain("gitStatusLevel");
-    // Git mini panel is VUI product composition (not hand-rolled signal grids).
     expect(utilityMenuSource).not.toContain("gitSignalGrid");
     expect(utilityMenuSource).not.toContain("gitCountGrid");
     expect(utilityMenuSource).not.toContain("gitMetaGrid");
     expect(utilityMenuSource).not.toContain("gitMiniHeader");
-    expect(utilityMenuSource).toContain("gitMetricStrip");
-    expect(utilityMenuSource).toContain("gitMetricStack");
-    expect(utilityMenuSource).toContain("gitDetails");
-    expect(utilityMenuSource.indexOf("className={styles.gitMiniPanel}")).toBeLessThan(utilityMenuSource.indexOf('id="utility-file-navigator"'));
-    expect(utilityMenuSource).toContain("gitStatus.localCommits.commits");
-    expect(utilityMenuSource).toContain("gitPendingWorktrees");
+    expect(utilityMenuSource).not.toContain("gitMetricStrip");
+    expect(utilityMenuSource).not.toContain("gitMetricStack");
+    expect(utilityMenuSource).not.toContain("gitDetails");
+    expect(utilityMenuSource).not.toContain("gitPendingWorktrees");
     expect(shellSource).toContain('data-browser-role="workbench"');
     expect(styles.utilityTrigger).toBeTypeOf("string");
     expect(styles.utilityClusterOpen).toBeTypeOf("string");
     expect(styles.utilityPopoverContent).toBeTypeOf("string");
     expect(utilityMenuStyles.utilityPanel).toBeTypeOf("string");
     expect(utilityMenuStyles.utilityButtonGrid).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitMetricStrip).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitMetricStack).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitMiniPanel).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitSectionHeader).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitCommitList).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitWorktreeList).toBeTypeOf("string");
-    expect(utilityMenuStylesSource).toContain("utilityFileButton");
-    expect(utilityMenuStylesSource).toContain("gitMetricStrip");
+    expect(utilityMenuStyles.gitSummaryRow).toBeTypeOf("string");
+    expect(utilityMenuStyles.gitSummaryBranch).toBeTypeOf("string");
+    expect(shellStyles).toContain("repeat(4, minmax(0, 1fr))");
+    expect(shellStyles).not.toContain("minmax(5.5rem, 1fr)");
+    expect(utilityMenuStylesSource).toContain("gitSummaryRow");
+    expect(utilityMenuStylesSource).not.toContain("utilityFileButton");
+    expect(utilityMenuStylesSource).not.toContain("gitMetricStrip");
     expect(utilityMenuStylesSource).not.toContain("gitSignalGrid");
   });
 
