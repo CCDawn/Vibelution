@@ -66,6 +66,7 @@
 | 组件 | 路径 |
 | --- | --- |
 | Launcher scripts | `scripts/vibelution_launcher.*` |
+| **Launcher 控制面 / 桌面壳** | `desktop/electron/`（目标 writer，[ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) · [迁移账本](../../desktop/electron/CONTROL_PLANE_MIGRATION.md)）；当前 HTTP 仍在 `core/launcher/` |
 | Runtime manager | `core/runtime_manager/` |
 | Workbench build | `web/`；open_workbench 含 `tsc -b` |
 

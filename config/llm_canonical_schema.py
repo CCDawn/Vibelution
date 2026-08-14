@@ -13,6 +13,7 @@ from .models import (
     LLMProfile,
     PinnedModelConfig,
     PinnedModelDefaults,
+    PromptCacheConfig,
     ProviderConfig,
     ProviderDeploymentConfig,
     ProviderDiscoverySettings,
@@ -91,7 +92,17 @@ def _validate_known_shape(payload: Mapping[str, Any]) -> list[CanonicalLLMSchema
                     model_path = f"{provider_path}.models.{model_key}"
                     issues.extend(_unknown_fields(raw_model, PinnedModelConfig, model_path))
                     if isinstance(raw_model, Mapping):
-                        issues.extend(_unknown_fields(raw_model.get("defaults", {}), PinnedModelDefaults, f"{model_path}.defaults"))
+                        defaults = raw_model.get("defaults", {})
+                        defaults_path = f"{model_path}.defaults"
+                        issues.extend(_unknown_fields(defaults, PinnedModelDefaults, defaults_path))
+                        if isinstance(defaults, Mapping):
+                            issues.extend(
+                                _unknown_fields(
+                                    defaults.get("prompt_cache", {}),
+                                    PromptCacheConfig,
+                                    f"{defaults_path}.prompt_cache",
+                                )
+                            )
     profiles = payload.get("profiles")
     if isinstance(profiles, Mapping):
         for profile_id, raw_profile in profiles.items():
