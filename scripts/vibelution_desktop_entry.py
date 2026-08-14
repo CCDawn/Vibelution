@@ -24,7 +24,20 @@ from typing import Iterator
 
 import tomllib
 
-from scripts.windowless_subprocess import no_window_subprocess_kwargs
+try:
+    from scripts.windowless_subprocess import no_window_subprocess_kwargs
+except ModuleNotFoundError:  # Direct execution sets sys.path[0] to scripts/.
+    import importlib.util
+
+    _windowless_spec = importlib.util.spec_from_file_location(
+        "vibelution_windowless_subprocess",
+        Path(__file__).with_name("windowless_subprocess.py"),
+    )
+    if _windowless_spec is None or _windowless_spec.loader is None:
+        raise RuntimeError("Unable to load the windowless subprocess policy.")
+    _windowless_module = importlib.util.module_from_spec(_windowless_spec)
+    _windowless_spec.loader.exec_module(_windowless_module)
+    no_window_subprocess_kwargs = _windowless_module.no_window_subprocess_kwargs
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"

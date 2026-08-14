@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import importlib.util
 import os
+import subprocess
 import sys
 import time
 import types
@@ -26,6 +27,20 @@ def _load_desktop_entry_py():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_desktop_entry_direct_execution_loads_local_windowless_helper(tmp_path):
+    result = subprocess.run(
+        [sys.executable, str(DESKTOP_ENTRY_PY), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Open the Vibelution Launcher without a console window." in result.stdout
 
 
 def test_desktop_entry_imports_safely_on_non_windows(monkeypatch):
