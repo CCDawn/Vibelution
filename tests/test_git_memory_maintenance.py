@@ -201,3 +201,143 @@ def test_rust_git_memory_cli_matches_python_dry_run_report(tmp_path):
     assert rust_report["integrityCheck"] == python_report["integrityCheck"]
     assert rust_report["tables"] == python_report["tables"]
     assert rust_report["pruneDryRun"] == python_report["pruneDryRun"]
+
+
+# ---------------------------------------------------------------------------
+# GitFileChange 重复数据预览与幂等迁移
+
+
+def _seed_duplicate_file_changes(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE GitFileChange(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                commit_sha TEXT NOT NULL,
+                path TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                old_path TEXT,
+                is_worktree INTEGER NOT NULL DEFAULT 0,
+                summary TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(commit_sha, path, change_type, old_path, is_worktree)
+            );
+            """
+        )
+        rows = [
+            # group A: 4 duplicates with NULL old_path (the real-world case)
+            ("commit-a", "src/a.py", "modified", None, 0),
+            ("commit-a", "src/a.py", "modified", None, 0),
+            ("commit-a", "src/a.py", "modified", None, 0),
+            ("commit-a", "src/a.py", "modified", None, 0),
+            # group B: 2 duplicates with NULL old_path
+            ("commit-a", "src/b.py", "added", None, 0),
+            ("commit-a", "src/b.py", "added", None, 0),
+            # group C: unique rename row with a real old_path
+            ("commit-a", "src/c.py", "renamed", "src/old_c.py", 0),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO GitFileChange(commit_sha, path, change_type, old_path, is_worktree, summary, created_at)
+            VALUES (?, ?, ?, ?, ?, '', '2026-01-01T00:00:00')
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def test_preview_reports_git_file_change_duplicates(tmp_path):
+    from core.infrastructure.git_memory_maintenance import (
+        build_python_git_memory_maintenance_report,
+        preview_git_file_change_duplicates,
+    )
+
+    db_path = tmp_path / "agent_brain.db"
+    _seed_duplicate_file_changes(db_path)
+
+    stats = preview_git_file_change_duplicates(db_path)
+    assert stats["duplicateGroups"] == 2
+    assert stats["excessRows"] == 4
+    assert stats["maxDuplicatesPerGroup"] == 4
+    assert stats["rowsWithNullOldPath"] == 6
+
+    report = build_python_git_memory_maintenance_report(db_path, keep_latest=2)
+    assert report["gitFileChangeDuplicates"]["duplicateGroups"] == 2
+    assert report["gitFileChangeDuplicates"]["excessRows"] == 4
+
+
+def test_dedupe_git_file_changes_keeps_one_row_per_group(tmp_path):
+    from core.infrastructure.git_memory_maintenance import dedupe_git_file_changes
+
+    db_path = tmp_path / "agent_brain.db"
+    _seed_duplicate_file_changes(db_path)
+
+    result = dedupe_git_file_changes(db_path, dry_run=False)
+
+    assert result["deletedRows"] == 4
+    assert result["normalizedNullOldPath"] == 2
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, commit_sha, path, change_type, old_path, is_worktree "
+            "FROM GitFileChange ORDER BY id"
+        ).fetchall()
+        assert len(rows) == 3
+        assert [row[2] for row in rows] == ["src/a.py", "src/b.py", "src/c.py"]
+        assert rows[0][4] == ""  # normalized old_path
+        assert rows[1][4] == ""
+        assert rows[2][4] == "src/old_c.py"
+        kept_ids = [row[0] for row in rows]
+        assert kept_ids == [1, 5, 7]
+
+
+def test_dedupe_git_file_changes_is_idempotent(tmp_path):
+    from core.infrastructure.git_memory_maintenance import dedupe_git_file_changes
+
+    db_path = tmp_path / "agent_brain.db"
+    _seed_duplicate_file_changes(db_path)
+    dedupe_git_file_changes(db_path, dry_run=False)
+
+    second = dedupe_git_file_changes(db_path, dry_run=False)
+
+    assert second["deletedRows"] == 0
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM GitFileChange").fetchone()[0] == 3
+
+
+def test_dedupe_dry_run_does_not_modify(tmp_path):
+    from core.infrastructure.git_memory_maintenance import dedupe_git_file_changes
+
+    db_path = tmp_path / "agent_brain.db"
+    _seed_duplicate_file_changes(db_path)
+
+    result = dedupe_git_file_changes(db_path, dry_run=True)
+
+    assert result["deletedRows"] == 4
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM GitFileChange").fetchone()[0] == 7
+        null_rows = conn.execute(
+            "SELECT COUNT(*) FROM GitFileChange WHERE old_path IS NULL"
+        ).fetchone()[0]
+        assert null_rows == 6
+
+
+def test_dedupe_failure_rolls_back_completely(tmp_path, monkeypatch):
+    from core.infrastructure import git_memory_maintenance
+
+    db_path = tmp_path / "agent_brain.db"
+    _seed_duplicate_file_changes(db_path)
+
+    def fail_normalize(conn):
+        raise sqlite3.OperationalError("injected migration failure")
+
+    monkeypatch.setattr(git_memory_maintenance, "_normalize_null_old_paths", fail_normalize)
+
+    with pytest.raises(sqlite3.OperationalError, match="injected migration failure"):
+        git_memory_maintenance.dedupe_git_file_changes(db_path, dry_run=False)
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM GitFileChange").fetchone()[0] == 7
+        null_rows = conn.execute(
+            "SELECT COUNT(*) FROM GitFileChange WHERE old_path IS NULL"
+        ).fetchone()[0]
+        assert null_rows == 6
