@@ -261,4 +261,42 @@ describe("createLauncherIpcHost", () => {
     expect((payload.init?.body as Record<string, unknown>).instanceId).toBe("worktree:task");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it("routes settings and maintenance calls through the launcher api orchestrator", async () => {
+    const fetchImpl = vi.fn();
+    const orchestrate = vi.fn().mockResolvedValue({ ok: true, mode: "windowed" });
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      orchestrateLauncherApi: orchestrate,
+      fetchImpl,
+    });
+    const result = await host.invoke(
+      validPayload({
+        path: "settings/workbench-window",
+        init: { method: "PUT", body: { mode: "windowed" } },
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload).toMatchObject({ ok: true, mode: "windowed" });
+    }
+    expect(orchestrate).toHaveBeenCalledTimes(1);
+    expect(orchestrate.mock.calls[0][0]).toBe("settings/workbench-window");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("surfaces launcher api orchestrator rejections", async () => {
+    const fetchImpl = vi.fn();
+    const orchestrate = vi.fn().mockRejectedValue(new Error("active work blocks reset"));
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      orchestrateLauncherApi: orchestrate,
+      fetchImpl,
+    });
+    const result = await host.invoke(validPayload({ path: "maintenance/reset/apply", init: { method: "POST" } }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain("active work blocks reset");
+    }
+  });
 });

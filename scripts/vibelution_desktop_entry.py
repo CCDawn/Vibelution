@@ -1326,6 +1326,70 @@ def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:
 _BRANCH_INSTANCE_OPERATIONS = {"start", "stop", "force-stop", "restart"}
 
 
+def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
+    """Serve settings/developer-mode/maintenance through a no-console JSON CLI."""
+    path = str(args.launcher_api_path or "").strip()
+    method = str(args.launcher_api_method or "GET").strip().upper()
+    body: dict[str, object] = {}
+    if args.launcher_api_body:
+        body = json.loads(args.launcher_api_body) if isinstance(args.launcher_api_body, str) else dict(args.launcher_api_body)
+    if not isinstance(body, dict):
+        body = {}
+    from core.launcher import service as launcher_service
+
+    _append_log("desktop_entry_python.launcher_api.started", method=method, path=path)
+    try:
+        if path == "settings/workbench-window" and method == "GET":
+            response = launcher_service.get_workbench_window_mode_setting()
+        elif path == "settings/workbench-window" and method == "PUT":
+            response = launcher_service.update_workbench_window_mode(
+                str(body.get("mode") or ""), base_hash=str(body.get("baseHash") or "")
+            )
+        elif path == "settings/startup" and method == "GET":
+            response = launcher_service.get_launcher_startup_settings()
+        elif path == "settings/startup" and method == "PUT":
+            response = launcher_service.update_launcher_startup_settings(body)
+        elif path == "developer-mode" and method == "GET":
+            response = launcher_service.get_launcher_developer_mode_setting()
+        elif path == "developer-mode" and method == "PUT":
+            response = launcher_service.update_launcher_developer_mode(
+                body.get("enabled"), base_hash=str(body.get("baseHash") or "")
+            )
+        elif path == "developer-mode/reset-sandbox" and method == "POST":
+            response = launcher_service.reset_launcher_developer_sandbox()
+        elif path == "developer-mode/noise-overview" and method == "GET":
+            response = launcher_service.get_launcher_developer_noise_overview()
+        elif path == "developer-mode/cleanup/preview" and method == "POST":
+            response = launcher_service.preview_launcher_developer_cleanup(str(body.get("action") or ""))
+        elif path == "developer-mode/cleanup/apply" and method == "POST":
+            response = launcher_service.apply_launcher_developer_cleanup(body)
+        elif path == "maintenance/reset/summary" and method == "GET":
+            response = launcher_service.get_launcher_maintenance_summary()
+        elif path == "maintenance/reset/preview" and method == "POST":
+            response = launcher_service.preview_launcher_maintenance_plan(body)
+        elif path == "maintenance/reset/apply" and method == "POST":
+            response = launcher_service.apply_launcher_maintenance_plan(body)
+        else:
+            raise RuntimeError(f"Unsupported launcher api path: {method} {path}")
+    except Exception as exc:
+        _append_log(
+            "desktop_entry_python.launcher_api.failed",
+            level="error",
+            method=method,
+            path=path,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        return {
+            "schemaVersion": 1,
+            "ok": False,
+            "code": "launcher_api_bridge_failed",
+            "message": str(exc),
+        }
+    _append_log("desktop_entry_python.launcher_api.succeeded", method=method, path=path)
+    return {"schemaVersion": 1, "ok": True, "payload": response}
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -1340,13 +1404,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lifecycle-operation", default="")
     parser.add_argument("--branch-instance-operation", default="")
     parser.add_argument("--instance-id", default="")
+    parser.add_argument("--launcher-api-path", default="")
+    parser.add_argument("--launcher-api-method", default="GET")
+    parser.add_argument("--launcher-api-body", default="")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     action = str(args.action or "launcher").strip().lower()
-    if action not in {"launcher", "bootstrap", "stop-launcher", "lifecycle", "branch-instance"}:
+    if action not in {"launcher", "bootstrap", "stop-launcher", "lifecycle", "branch-instance", "launcher-api"}:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     try:
         _append_log("desktop_entry_python.open.started", action=action, no_browser=bool(args.no_browser), run_id=args.run_id)
@@ -1374,6 +1441,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(f"Branch instance {payload.get('operation')} accepted={payload.get('accepted')}")
+        elif action == "launcher-api":
+            payload = _run_launcher_api_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Launcher api ok={payload.get('ok')}")
         else:
             _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)
