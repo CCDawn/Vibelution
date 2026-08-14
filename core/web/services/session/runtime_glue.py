@@ -1200,13 +1200,32 @@ def _is_protocol_only_assistant_message(content: Any) -> bool:
     )
 
 
+_STEER_GUIDANCE_KINDS = {"user_guidance", "user_interrupt_guidance"}
+
+
+def _is_steer_guidance_kind(kind: Any) -> bool:
+    return str(kind or "").strip() in _STEER_GUIDANCE_KINDS
+
+
+def _is_steer_guidance_message_entry(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if str(item.get("role") or "").strip().lower() != "user":
+        return False
+    return _is_steer_guidance_kind(_message_metadata_kind(item))
+
+
 def _is_real_user_message_entry(item: Any) -> bool:
     s = _service()
     if not isinstance(item, dict):
         return False
     if str(item.get("role") or "").strip().lower() != "user":
         return False
-    return not (s._is_agent_inbox_message_entry(item) or s._is_system_authored_user_message_entry(item))
+    return not (
+        s._is_agent_inbox_message_entry(item)
+        or s._is_system_authored_user_message_entry(item)
+        or _is_steer_guidance_message_entry(item)
+    )
 
 
 def _is_retriable_image_request_prompt(prompt: Any) -> bool:
@@ -1726,6 +1745,37 @@ def _recent_session_guidance_context_block(session_id: str, *, limit: int = 3) -
     return "\n".join(lines)
 
 
+def _recent_session_steer_guidance_texts(
+    session_id: str,
+    *,
+    turn_id: str = "",
+    limit: int = 3,
+) -> list[str]:
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return []
+    try:
+        events = s._load_session_conversation_events_cached(normalized_session_id)
+    except Exception:
+        return []
+    wanted_turn = str(turn_id or "").strip()
+    texts: list[str] = []
+    for event in events or []:
+        if str(getattr(event, "event_type", "") or "") != s.EVENT_USER_MESSAGE:
+            continue
+        if wanted_turn and str(getattr(event, "turn_id", "") or "").strip() != wanted_turn:
+            continue
+        payload = dict(getattr(event, "payload", None) or {})
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        if not _is_steer_guidance_kind(metadata.get("kind")):
+            continue
+        content = str(payload.get("content") or "").strip()
+        if content:
+            texts.append(content)
+    return texts[-max(0, int(limit or 0)) :]
+
+
 def _recent_session_guidance_summaries(
     session_id: str,
     *,
@@ -1733,6 +1783,11 @@ def _recent_session_guidance_summaries(
     limit: int = 3,
 ) -> list[str]:
     s = _service()
+    steer_texts = _recent_session_steer_guidance_texts(
+        session_id,
+        turn_id=turn_id,
+        limit=max(1, int(limit or 1)),
+    )
     try:
         signals = s.list_chat_next_state_signals(
             project_root=s.PROJECT_ROOT,
@@ -1741,16 +1796,21 @@ def _recent_session_guidance_summaries(
             limit=max(1, int(limit or 1)) * 3,
         )
     except Exception:
-        return []
-    summaries: list[str] = []
+        signals = []
+    summaries: list[str] = list(steer_texts)
     for signal in signals:
         kind = str(signal.get("kind") or "").strip()
-        if kind not in {"user_guidance", "user_interrupt_guidance", "cli_agent_result"}:
+        if kind == "cli_agent_result":
+            summary = s.trim_lines(signal.get("summary") or "", max_lines=2)
+            if summary:
+                summaries.append(summary)
+            continue
+        if steer_texts or not _is_steer_guidance_kind(kind):
             continue
         summary = s.trim_lines(signal.get("summary") or "", max_lines=2)
         if summary:
             summaries.append(summary)
-    return summaries[-max(0, int(limit or 0)):]
+    return summaries[-max(0, int(limit or 0)) :]
 
 
 def _replacement_active_chat_turn_id(*, exclude_turn_id: str = "") -> str:

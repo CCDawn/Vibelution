@@ -172,6 +172,7 @@ import {
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
+  isSteerGuidanceMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
 } from "./conversationMessagePredicates";
@@ -518,11 +519,6 @@ export function ConversationView({
     actionMode: resolvedActionMode,
     editModeActive: composerEditModeActive,
   });
-  // Edit/rerun is a labeled primary pill. Do not mix in round icon-only geometry
-  // (composerRoundButtonPrimary forces fixed square size + icon-only slots).
-  const primaryActionClassName = primaryActionIsEditSubmit
-    ? styles.composerEditSubmitButton
-    : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
   const {
     guidanceDraftReady,
     guidanceActionDisabled,
@@ -534,6 +530,19 @@ export function ConversationView({
     safeGuidancePending: composerSafeGuidancePending,
     interruptGuidancePending: composerInterruptGuidancePending,
   });
+  const primaryActionIsSteerSubmit = runningGuidanceActionsEnabled && showSafeGuidanceAction;
+  const resolvedSafeGuidanceLabel = safeGuidanceLabel ?? t("safeGuidance");
+  const resolvedSafeGuidancePendingLabel = safeGuidancePendingLabel ?? t("safeGuidancePending");
+  const resolvedComposerPlaceholder = composerPlaceholder.trim()
+    ? composerPlaceholder
+    : resolvedActionMode === "stop"
+      ? t("sessionBusyPlaceholder")
+      : composerPlaceholder;
+  // Edit/rerun and running-turn steer are labeled primary pills. Do not mix in
+  // round icon-only geometry (composerRoundButtonPrimary forces a square slot).
+  const primaryActionClassName = primaryActionIsEditSubmit || primaryActionIsSteerSubmit
+    ? styles.composerEditSubmitButton
+    : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
   const composerCanAcceptReferenceDrop = Boolean(onAddComposerReference) && !composerDisabled;
   const slashSuggestions = useMemo(
@@ -619,20 +628,32 @@ export function ConversationView({
     onAddComposerAttachments(files);
   }
 
-  const latestUserMessage = useMemo(
-    () =>
-      [...messages]
-        .reverse()
-        .find((message) => message.role === "user")?.content ?? "",
-    [messages],
-  );
-  const latestUserMessageId = useMemo(
-    () =>
-      [...messages]
-        .reverse()
-        .find((message) => message.role === "user")?.id ?? "",
-    [messages],
-  );
+  const latestUserMessage = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role !== "user") {
+        continue;
+      }
+      if (isAgentInboxMessage(message) || isSteerGuidanceMessage(message)) {
+        continue;
+      }
+      return message.content;
+    }
+    return "";
+  }, [messages]);
+  const latestUserMessageId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role !== "user") {
+        continue;
+      }
+      if (isAgentInboxMessage(message) || isSteerGuidanceMessage(message)) {
+        continue;
+      }
+      return message.id;
+    }
+    return "";
+  }, [messages]);
   const lastMessageTimestamp = useMemo(
     () => [...messages].reverse().find((message) => message.timestamp)?.timestamp ?? "",
     [messages],
@@ -3589,7 +3610,7 @@ export function ConversationView({
       {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
         <VButton
           className={primaryActionClassName}
-          isIconOnly={!primaryActionIsEditSubmit}
+          isIconOnly={!primaryActionIsEditSubmit && !primaryActionIsSteerSubmit}
           isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
           type="button"
           onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
@@ -3605,8 +3626,8 @@ export function ConversationView({
           title={
             runningGuidanceActionsEnabled
               ? composerSafeGuidancePending
-                ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
-                : (safeGuidanceLabel ?? t("safeGuidance"))
+                ? resolvedSafeGuidancePendingLabel
+                : resolvedSafeGuidanceLabel
               : composerPending
                 ? resolvedPendingLabel
                 : resolvedActionLabel
@@ -3614,8 +3635,8 @@ export function ConversationView({
           aria-label={
             runningGuidanceActionsEnabled
               ? composerSafeGuidancePending
-                ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
-                : (safeGuidanceLabel ?? t("safeGuidance"))
+                ? resolvedSafeGuidancePendingLabel
+                : resolvedSafeGuidanceLabel
               : composerPending
                 ? resolvedPendingLabel
                 : resolvedActionLabel
@@ -3623,6 +3644,8 @@ export function ConversationView({
         >
           {primaryActionIsEditSubmit
             ? (composerPending || composerSafeGuidancePending ? resolvedPendingLabel : resolvedActionLabel)
+            : primaryActionIsSteerSubmit
+              ? (composerSafeGuidancePending ? resolvedSafeGuidancePendingLabel : resolvedSafeGuidanceLabel)
             : (composerPending || composerSafeGuidancePending
               ? <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
               : <ArrowUp size={16} aria-hidden="true" />)}
@@ -3883,6 +3906,7 @@ export function ConversationView({
             });
             const timelineRendersAssistantText = false;
             const showUserContent = agentSections.hasUserContent;
+            const steerGuidanceMessage = isSteerGuidanceMessage(message);
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
               && showResponseBlock
@@ -4036,12 +4060,16 @@ export function ConversationView({
                 }
                 speakerLabel={speakerLabel}
                 identityAccessory={
-                  isEditingMessage ? <span className={styles.turnEditBadge}>{t("editMessage")}</span> : null
+                  isEditingMessage
+                    ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
+                    : steerGuidanceMessage
+                      ? <span className={styles.turnEditBadge}>{resolvedSafeGuidanceLabel}</span>
+                      : null
                 }
                 metaActions={
                   <>
                     {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
-                    {userAuthoredMessage && message.id === latestUserMessageId && onEditUserMessage ? (
+                    {userAuthoredMessage && !steerGuidanceMessage && message.id === latestUserMessageId && onEditUserMessage ? (
                       <VButton
                         type="button"
                         className={
@@ -4363,7 +4391,7 @@ export function ConversationView({
             className={composerVariant === "codex" ? styles.inputCodex : styles.input}
             value={composerValue}
             disabled={composerDisabled && resolvedActionMode !== "stop"}
-            placeholder={composerPlaceholder}
+            placeholder={resolvedComposerPlaceholder}
             aria-label={lang === "zh" ? "发送消息" : "Message"}
             aria-controls={showSlashSuggestions ? slashSuggestionListId : undefined}
             aria-expanded={showSlashSuggestions ? true : undefined}
@@ -4398,6 +4426,12 @@ export function ConversationView({
                   && (composerValue.trim() || hasComposerAttachments || hasComposerReferences)
                 ) {
                   handleSendAndFollowLatest();
+                } else if (
+                  primaryActionIsSteerSubmit
+                  && onSafeGuidance
+                  && !guidanceActionDisabled
+                ) {
+                  onSafeGuidance();
                 }
               }
             }}
