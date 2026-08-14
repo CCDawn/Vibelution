@@ -105,7 +105,10 @@ def test_formal_path_requires_local_app_data_but_developer_can_use_runtime_fallb
         project_root=tmp_path / "project",
     )
 
-    assert developer_path.is_relative_to(tmp_path / "project" / ".runtime" / "session-catalogs")
+    # The developer fallback follows the current storage resolver's cache home
+    # (vibelution_storage.resolve_project_cache_home), not the retired
+    # .runtime/session-catalogs path.
+    assert developer_path.is_relative_to(tmp_path / "project" / ".cache" / "session-catalogs")
 
 
 def test_initialize_creates_schema_v2_idempotently_and_records_checksum(tmp_path):
