@@ -15,7 +15,8 @@
 ## 2. Global Red Lines
 
 - 当前 Git checkout 是项目根；运行时解析路径，不假设固定 Windows 用户名。
-- 根 `main` 是只读的本地集成工作区。所有代码、测试、文档、规则、记忆、配置和 fast patch 变更都必须在任务 worktree 的 `codex/<task-slug>` 分支完成；`main` 只接受已提交分支的 `git merge --ff-only`、合入后验证和必要的同步操作。
+- 根 `main` 是只读的本地集成工作区。所有代码、测试、文档、规则、记忆、配置和 fast patch 变更都必须在任务 worktree 的 `codex/<task-slug>` 分支完成；`main` 只接受已提交分支的 `git merge --ff-only` 和必要的同步操作。
+- 所有审查、测试、质量门、mergeability 与验收证据必须在合入前完成。`git merge --ff-only` 成功即代表该分支任务已被本地 `main` 吸收，必须立即清理且不得等待合入后验证：只清理本任务明确创建的临时文件/目录、调试产物、后台进程或监听器，释放本任务 claim，移除本任务 junction、干净 worktree 和已合并本地分支，并执行安全的 `git worktree prune`。清理失败要报告 `cleanup pending`、精确残留和原因，但不改变“已合入”事实；禁止 force 清理、删除未合入/dirty/冲突/仍在使用或归属不明的资源，远端分支删除仍需用户单独明确授权。
 - 不覆盖、回滚、删除或重置无关的用户/Agent 改动；发现重叠先检查 claim 和 diff。
 - 远端 push、PR、发布需要用户明确授权和远端同步门；force、覆盖或远端删除需要破坏性确认。
 - **Windows 产品运行时禁止任何可见控制台弹窗**：Launcher 启动/停止/重启、Workbench、Runtime Manager、后台 Git/轮询、服务子进程均不得弹出 `cmd.exe`、`powershell.exe` 控制台、Windows Terminal、OpenConsole 或交互式 Git 编辑器。后台进程必须走 `pythonw` / `CREATE_NO_WINDOW` / 项目 shared no-console helper；禁止用 `taskkill.exe`、裸 `git` cmd wrapper、`npm`/`cmd` 脚本壳作为后台路径。用户明确打开的 CLI 终端面板除外。细则见 [development-standard.md](docs/standards/development-standard.md) §8.0。
@@ -74,7 +75,7 @@
 ## 4. Execution Baseline
 
 - 工作分级为 `FAST_PATCH / STANDARD_TASK / HIGH_RISK`，使用足以保护正确性、并发与证据的最轻流程。
-- 写入前定位 owning surface、现有测试、用户改动和 active claim；禁止在根 `main` 直接写入任何变更。所有 development、mechanical 和文档/规则写入都必须转到任务 worktree，根 `main` 仅用于分支合入与合入后验证。任务 worktree 默认落在 `<project-root>/.worktrees/<task-slug>`；旧兄弟目录 `Vibelution-worktrees` 只读兼容，细则见 [协作规范](docs/agents/worktree-collaboration.md)。
+- 写入前定位 owning surface、现有测试、用户改动和 active claim；禁止在根 `main` 直接写入任何变更。所有 development、mechanical 和文档/规则写入都必须转到任务 worktree，根 `main` 仅用于分支合入和必要同步；验证必须在合入前完成。任务 worktree 默认落在 `<project-root>/.worktrees/<task-slug>`；旧兄弟目录 `Vibelution-worktrees` 只读兼容，细则见 [协作规范](docs/agents/worktree-collaboration.md)。
 - 前端使用 TypeScript、Tailwind-first、VUI `V*` 产品 API 和 shadcn/Radix renderer；HeroUI 已移除。触及 UI 的写入前必须对齐 §2 前端红线；完成前跑相关 frontend contract（至少 `vuiShadcnRouteContract` 与触及的 route/layout 测试），不得以「先实现再迁 VUI」交付用户可见路径。
 - **`tsc -b` 不是「开发前默认闸」，是交付/重建闸（Agent 必须主动提前跑）**：
   - 仓库 **不会** 在打开项目、开始改代码或默认 pre-commit 时自动跑全量 `tsc -b`。`local_quality_gate.py commit` 以 staged 路径快检为主；pre-commit 额外校验 `web` 的 lock 一致性，**不**替你做 TypeScript 全量检查。
@@ -98,7 +99,7 @@
 - Launcher/runtime refresh：`not needed / recommended before user testing / required before release`（若 refresh=rebuild/restart 且改过前端：先确认 `tsc -b` 已绿）；
 - 若触及启动、停止、重启、轮询、Git、工具或服务子进程：说明如何保证无可见控制台（helper/`pythonw`/`CREATE_NO_WINDOW`/`windowsHide`）及验证证据；
 - project-memory 与 version impact 决策；
-- worktree、branch、claim 和 Git 状态；
+- worktree、branch、claim 和 Git 状态；若已合入，必须同时报告本任务临时内容、后台进程/监听器与本地 Git 资源的清理结果，失败项标记 `cleanup pending` 并给出精确残留；
 - 若包含 fallback、degraded、partial 或 compatibility 路径，明确原因、范围、可信部分和剩余修复信号。
 
 规则冲突、链接失效或本地事实与文档不一致时，不静默选择旧路径；先保留现场、定位唯一权威，再在同一治理轮修正文档与守卫。
