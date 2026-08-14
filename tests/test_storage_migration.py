@@ -62,6 +62,103 @@ def test_plan_maps_all_legacy_categories_without_writing(tmp_path, monkeypatch):
     assert not resolve_project_storage_paths(project).instance_home.exists()
 
 
+def test_plan_keeps_operator_data_canonical_and_archives_project_workspace_conflict(
+    tmp_path, monkeypatch
+):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    operator_source = data_home / "workspace" / "agents" / "agents.json"
+    operator_source.parent.mkdir(parents=True)
+    operator_source.write_text('{"agents":["operator"]}\n', encoding="utf-8")
+    project_source = project / "workspace" / "agents" / "agents.json"
+    project_source.parent.mkdir(parents=True)
+    project_source.write_text('{"agents":["project"]}\n', encoding="utf-8")
+    target = resolve_project_storage_paths(project)
+
+    plan = plan_storage_migration(project)
+
+    entries = {entry.category: entry for entry in plan.entries}
+    assert plan.archived_conflicts == 1
+    assert Path(entries["operator_data"].destination) == (
+        target.data / "workspace" / "agents" / "agents.json"
+    )
+    assert Path(entries["project_workspace_conflict_archive"].destination) == (
+        target.data
+        / "backups"
+        / "storage-source-conflicts"
+        / "project_workspace"
+        / "agents"
+        / "agents.json"
+    )
+    assert not target.instance_home.exists()
+
+
+def test_plan_reports_unreadable_legacy_source_without_raw_traceback(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agents" / "agents.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("{}\n", encoding="utf-8")
+
+    def deny_read(path):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(
+        "core.infrastructure.storage_migration._sha256_file",
+        deny_read,
+    )
+
+    with pytest.raises(StorageMigrationError, match=r"cannot read legacy source.*agents\.json"):
+        plan_storage_migration(project)
+
+
+def test_plan_skips_ephemeral_lock_files_and_reports_the_count(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    durable = data_home / "workspace" / "chat" / "chat_state.json"
+    durable.parent.mkdir(parents=True)
+    durable.write_text("{}\n", encoding="utf-8")
+    lock = durable.with_name(".chat_state.lock")
+    lock.write_text("", encoding="utf-8")
+
+    plan = plan_storage_migration(project)
+
+    assert plan.skipped_ephemeral_files == 1
+    assert [entry.relative_path for entry in plan.entries] == [
+        "workspace/chat/chat_state.json"
+    ]
+
+
+def test_apply_preserves_project_workspace_conflict_as_recoverable_archive(
+    tmp_path, monkeypatch
+):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    operator_source = data_home / "workspace" / "agents" / "agents.json"
+    operator_source.parent.mkdir(parents=True)
+    operator_source.write_text('{"agents":["operator"]}\n', encoding="utf-8")
+    project_source = project / "workspace" / "agents" / "agents.json"
+    project_source.parent.mkdir(parents=True)
+    project_source.write_text('{"agents":["project"]}\n', encoding="utf-8")
+    target = resolve_project_storage_paths(project)
+
+    result = apply_storage_migration(project)
+
+    canonical = target.data / "workspace" / "agents" / "agents.json"
+    archive = (
+        target.data
+        / "backups"
+        / "storage-source-conflicts"
+        / "project_workspace"
+        / "agents"
+        / "agents.json"
+    )
+    assert result["status"] == "completed"
+    assert result["archivedConflicts"] == 1
+    assert result["skippedEphemeralFiles"] == 0
+    assert canonical.read_text(encoding="utf-8") == '{"agents":["operator"]}\n'
+    assert archive.read_text(encoding="utf-8") == '{"agents":["project"]}\n'
+    assert operator_source.exists()
+    assert project_source.exists()
+    assert resolve_active_project_storage_paths(project) == target
+
+
 def test_apply_copies_verifies_switches_and_keeps_legacy_data(tmp_path, monkeypatch):
     project, _projects_home, data_home = _project(tmp_path, monkeypatch)
     source = data_home / "workspace" / "agent.json"
