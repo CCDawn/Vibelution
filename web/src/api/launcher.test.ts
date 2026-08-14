@@ -89,6 +89,50 @@ describe("launcher api helpers", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/launcher/branch-instances");
   });
 
+  it("normalizes stale flat branch-instance payloads before the Launcher renders them", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        schemaVersion: 1,
+        currentId: "main",
+        items: [{
+          id: "main",
+          kind: "main",
+          branch: "main",
+          path: "C:/repo",
+          displayPath: ".",
+          head: "abc123",
+          current: true,
+          legacy: false,
+          dirty: false,
+          checkedOut: true,
+          alive: true,
+          observedState: "open",
+          port: 8002,
+          pids: { backend: 1200, window: 0, manager: 1300 },
+          promotable: false,
+          workbenchTitle: "main 台",
+        }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await getLauncherBranchInstances();
+    const item = payload.items[0];
+
+    expect(item.runtime.lifecycleState).toBe("partial");
+    expect(item.runtime.backend).toMatchObject({ alive: true, healthy: false, listening: false, port: 8002, pid: 1200 });
+    expect(item.runtime.window).toMatchObject({ open: false, pid: 0, title: "main 台" });
+    expect(item.startable).toBe(false);
+    expect(item.startBlockReason).toBe("launcher_refresh_required");
+  });
+
   it("starts a selected branch instance through the guarded launcher endpoint", async () => {
     vi.stubGlobal("window", {
       location: {

@@ -203,7 +203,7 @@ export function formatGitStatus(item: LauncherBranchInstance, isZh: boolean): st
 }
 
 export function canRequestOpenInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
-  if (!isOperableInstance(item)) {
+  if (!isOperableInstance(item) || item.startBlockReason === "launcher_refresh_required") {
     return false;
   }
   return !["starting", "stopping", "restarting"].includes(instanceRuntimeState(item, pending));
@@ -217,6 +217,7 @@ export function canStartInstance(item: LauncherBranchInstance, pending?: Instanc
 export function canStopInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
   const backend = item.runtime.backend;
   return isOperableInstance(item)
+    && item.startBlockReason !== "launcher_refresh_required"
     && !["starting", "stopping", "restarting"].includes(instanceRuntimeState(item, pending))
     && Boolean(backend.alive || backend.listening || instanceWindowOpen(item));
 }
