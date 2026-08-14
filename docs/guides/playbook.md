@@ -8,8 +8,9 @@
 ## 1. 运行时拓扑
 
 ```text
-Launcher → Runtime Manager → FastAPI (core/web) + agent.py turn
-                          → React Workbench (web/)
+当前: Electron 壳 → Python Launcher :8765 → Runtime Manager → FastAPI 工作台 + agent.py turn
+目标 (ADR 0009): Electron main (TS 控制面 + IPC) → 子进程 Python 工作台（RM + FastAPI）
+Workbench UI: React (web/)；Launcher UI 与控制面同进程，禁止空仪表盘+未连接
 Config: Documents\Vibelution\config\config.toml   (ADR0003)
 State: %LOCALAPPDATA%\Vibelution\projects\<projectId>\instances\<instanceId>\
 Evidence: <active-state>\logs\runtime_scenes\

@@ -3,8 +3,9 @@
 **读者：coding Agent。**
 **目标：30 秒内定位生命周期、无控制台红线与主测；不要在 Web facade 里堆进程逻辑。**
 
-权威细则：`docs/standards/development-standard.md` §8.0 · 根 `AGENTS.md` §2。
+权威细则：`docs/standards/development-standard.md` §8.0 · 根 `AGENTS.md` §2 · [ADR 0009](../../../docs/adr/0009-launcher-control-plane-lives-in-electron-main.md)。
 Runtime scene pack：[`runtime_scene/README.md`](runtime_scene/README.md)。
+Electron 壳：[`desktop/electron/README.md`](../../../desktop/electron/README.md)。迁移账本（非规则）：[`CONTROL_PLANE_MIGRATION.md`](../../../desktop/electron/CONTROL_PLANE_MIGRATION.md)。
 
 ---
 
@@ -12,9 +13,11 @@ Runtime scene pack：[`runtime_scene/README.md`](runtime_scene/README.md)。
 
 | 你在改… | 先打开 | 禁止 |
 | --- | --- | --- |
-| start / stop / restart / active-work 拦截 | `core/launcher/service.py` | 在 `runtime_service.py` 再写一套 lifecycle |
+| start / stop / restart / active-work 拦截 | **当前** `core/launcher/service.py`；**目标** Electron main（ADR 0009） | 在 `runtime_service.py` 再写一套 lifecycle |
+| Launcher 窗口真相 / leftover adopt | `desktop/electron/src/windows/electronWindowProvider.ts` | Python overlay 把 live window 标成 closed |
+| Launcher UI 传输 | **当前** `web/src/api/launcher.ts` → `:8765`；**目标** preload IPC | 可操作仪表盘在 API 未就绪时画空表 + `未连接` |
 | Web 路由 import 稳定面 | `launcher_service.py`（re-export only） | 往 facade 加业务体 |
-| Force-stop / close transaction / desktop session | `core/launcher/`（`lifecycle_*` · `desktop_session_store` · `window_provider_dispatcher`） | 裸 `taskkill.exe`、直接杀 PID 当常态 |
+| Force-stop / close transaction / desktop session | **当前** `core/launcher/`（`lifecycle_*` · `desktop_session_store` · `window_provider_dispatcher`）；**目标** Electron main | 裸 `taskkill.exe`、直接杀 PID 当常态 |
 | Reset / maintenance | `core/launcher/maintenance_reset.py`（`reset_service.py` 仅 alias） | 平行 reset 实现 |
 | Runtime Manager daemon / work-run / 预检 | `core/runtime_manager/` | 用 PowerShell lifecycle 制造可见控制台 |
 | 轻量 RM 存活检查 | `runtime_manager_control_service.py` | 在此扩展完整 lifecycle |
@@ -27,25 +30,39 @@ Runtime scene pack：[`runtime_scene/README.md`](runtime_scene/README.md)。
 
 ## 生命周期（谁拥有什么）
 
+**当前（仍在跑）：**
+
 ```text
 Electron (product tray owner, globally unique desktop shell)
   → pin userData to %LOCALAPPDATA%\\Vibelution\\DesktopShell before requestSingleInstanceLock
   → second launch without --project/--open-workbench/deep-link focuses the existing Launcher window
   → claim .runtime/launcher/desktop_shell_owner.json
-  → Python launcher service (vibelution_desktop_entry.py bootstrap)
+  → Python launcher service (vibelution_desktop_entry.py bootstrap) :8765
   → Runtime Manager → FastAPI + Workbench
   → isolated worktree backends stay allowed; they do not spawn a second desktop shell
   → isolated start opens a named Workbench window (`{shortName} 台`) inside that existing Electron shell
 
 VibelutionLauncher.exe --project <root> launcher
-  → if Electron owner pid is alive: no NotifyIcon (thin shim / open console)
+  → if Electron owner pid is alive: no NotifyIcon (thin shim)
   → else native WinForms tray
-  → core/launcher (control plane)
+  → POST /api/launcher/* on :8765
 ```
 
-Web: core/web/routes/launcher.py · runtime.py · logs.py
-  → launcher_service / runtime_service / runtime_scene_service（薄委托）
+**目标（ADR 0009，迁移完成前不要当已经落地）：**
+
+```text
+Electron main (TS) = Launcher 控制面
+  → 控制窗口 renderer 只走 IPC（不 fetch :8765）
+  → 工作台 renderer 加载工作台 origin
+  → 子进程：Python Runtime Manager + FastAPI（工作台）
+  → isolated worktree backends 仍在同一 desktop shell 开 `{shortName} 台`
+
+VibelutionLauncher.exe = thin no-console shim
+  → Electron 已在：second-instance / 本地命令转发
+  → Electron 不在：启动桌面壳，不拉起 Python :8765 控制面
 ```
+
+Web: `core/web/routes/launcher.py` · `runtime.py` · `logs.py` → `launcher_service` / `runtime_service` / `runtime_scene_service`（薄委托）。
 
 - Operator config 真源：`%USERPROFILE%\Documents\Vibelution\config\config.toml`（ADR0003）。
 - active-work 挡 refresh：报告固定句（`AGENTS.md` §4），禁止强杀绕过。
@@ -109,5 +126,7 @@ node desktop\electron\node_modules\vitest\vitest.mjs run tests/windowProvider.te
 | --- | --- |
 | [`README.md`](README.md) | 全量 facade 表 |
 | [`runtime_scene/README.md`](runtime_scene/README.md) | scene pack 路由 |
+| [`docs/adr/0009-launcher-control-plane-lives-in-electron-main.md`](../../../docs/adr/0009-launcher-control-plane-lives-in-electron-main.md) | Launcher 控制面落 Electron main |
+| [`desktop/electron/README.md`](../../../desktop/electron/README.md) | 桌面壳 30 秒表 |
 | [`docs/guides/loop.md`](../../../docs/guides/loop.md) | 诊断三件套 + Launcher 命令 |
 | [`docs/ops/config/07-launcher-runtime-workbench.md`](../../../docs/ops/config/07-launcher-runtime-workbench.md) | 运维配置 |
