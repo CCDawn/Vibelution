@@ -89,7 +89,7 @@ export function ComposerContextRing({
                 cy="16"
                 r="10.4"
                 fill="none"
-                stroke="color-mix(in srgb, var(--vui-border-subtle) 90%, transparent)"
+                stroke="color-mix(in srgb, var(--accent-cool) 18%, transparent)"
                 strokeWidth="2.4"
               />
               <circle
