@@ -61,6 +61,37 @@ describe("createLauncherIpcHost", () => {
     }
   });
 
+  it("returns a local status snapshot without waiting for the CLI orchestrator", async () => {
+    const fetchImpl = vi.fn();
+    const orchestrate = vi.fn().mockImplementation(() => new Promise(() => undefined));
+    const refresh = vi.fn();
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
+      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
+      resolveLocalStatus: () => ({
+        launcher: { mode: "standalone_control_plane", controlPlane: { port: 8765, url: "http://127.0.0.1:8765/launcher" } },
+        projectBundle: {
+          observedState: "closed",
+          lifecycleConsistency: "",
+          browser: { managed: false, windowPid: 0, alive: false },
+          components: [],
+        },
+      }),
+      scheduleStatusRefresh: refresh,
+      orchestrateLauncherApi: orchestrate,
+      fetchImpl,
+    });
+    const result = await host.invoke(validPayload({ path: "status" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const bundle = (result.payload as Record<string, unknown>).projectBundle as Record<string, unknown>;
+      expect(bundle.observedState).toBe("open");
+    }
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(orchestrate).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("serves status through the local CLI orchestrator without fetching the workbench", async () => {
     const fetchImpl = vi.fn();
     const resolveContext = vi.fn().mockResolvedValue({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" });

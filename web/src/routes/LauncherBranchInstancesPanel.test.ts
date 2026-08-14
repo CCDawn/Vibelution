@@ -74,6 +74,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("<VNativeInput");
     expect(panelSource).toContain("<VToolbar");
     expect(panelSource).toContain("Launcher 控制窗口");
+    expect(panelSource).toContain("读取中");
     expect(panelSource).toContain("Workbench 窗口");
     expect(panelSource).toContain("启动工作台");
     expect(panelSource).toContain("<details");
@@ -83,7 +84,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("<VConfirmDialog");
     expect(panelSource).toContain("<VDenseTable");
     expect(panelSource.match(/<VStatusChip/g)?.length).toBeGreaterThanOrEqual(4);
-    expect(panelSource).toContain('tone={launcherOnline ? "success" : "warning"}');
+    expect(panelSource).toContain('tone={launcherOnline ? "success" : launcherReading ? "neutral" : "warning"}');
     expect(panelSource).toContain("tone={runtimeTone(state)}");
     expect(panelSource).toContain('<VStatusChip tone="success">{labels.ready}</VStatusChip>');
     expect(panelSource).toContain('variant="primary"');
