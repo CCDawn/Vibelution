@@ -72,6 +72,7 @@ function renderConversation(
       agentDisplayName?: string;
     }>;
     composerDisabled?: boolean;
+    composerPlaceholder?: string;
     composerActionMode?: "send" | "stop";
     composerActionDisabled?: boolean;
     submitLabel?: string;
@@ -123,7 +124,7 @@ function renderConversation(
         showComposer={options.showComposer}
         {...processDisplayProps}
         composerValue={options.composerValue ?? ""}
-        composerPlaceholder="Type"
+        composerPlaceholder={options.composerPlaceholder ?? "Type"}
         composerDisabled={options.composerDisabled ?? false}
         composerActionMode={options.composerActionMode}
         composerActionDisabled={options.composerActionDisabled}
@@ -172,6 +173,8 @@ describe("ConversationView VUI control contract", () => {
     expect(conversationViewSource).not.toMatch(/<input\b/);
     expect(conversationViewSource).not.toMatch(/<select\b/);
     expect(conversationViewSource).not.toMatch(/<textarea\b/);
+    expect(conversationViewSource).toContain("onSafeGuidance()");
+    expect(conversationViewSource).toContain("primaryActionIsSteerSubmit");
   });
 });
 
@@ -1133,7 +1136,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('src="/api/config/avatar-image/avatar-test.png"');
     expect(html).not.toContain(">C</div>");
   });
-  it("keeps the composer writable while a running turn shows guidance and keeps stop actions", () => {
+  it("keeps the composer writable while a running turn shows a labeled steer action and stop", () => {
     const html = renderConversation([], {
       composerValue: "下一句先写在这里",
       composerDisabled: true,
@@ -1147,29 +1150,30 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("下一句先写在这里");
     expect(html).toContain("当前轮仍在运行");
     expect(html).toContain("打断引导会先记录再请求停止当前轮");
-    expect(html).toContain('aria-label="安全引导"');
+    expect(html).toContain('aria-label="引导"');
+    expect(html).toContain(">引导</");
     expect(html).not.toContain('aria-label="打断引导"');
     expect(html).toContain('aria-label="终止"');
-    expect(html).toContain("composerRoundButtonPrimary");
+    expect(html).toContain("composerEditSubmitButton");
     expect(html).toContain("stopButton");
     const textarea = html.match(/<textarea[^>]*>/)?.[0] ?? "";
     expect(textarea).not.toMatch(/\sdisabled(?:[=>\s]|$)/);
   });
 
-  it("keeps the running composer stop-only until a draft exists while guidance remains visible", () => {
+  it("keeps the running composer stop-only until a draft exists", () => {
     const html = renderConversation([], {
       composerValue: "",
+      composerPlaceholder: "",
       composerDisabled: true,
       composerActionMode: "stop",
       composerActionDisabled: false,
-      composerGuidance: "当前轮仍在运行。安全引导会记录到会话上下文；打断引导会先记录再请求停止当前轮。",
       onSafeGuidance: () => undefined,
       onInterruptGuidance: () => undefined,
     });
 
-    expect(html).toContain("当前轮仍在运行");
-    expect(html).toContain("打断引导会先记录再请求停止当前轮");
-    expect(html).not.toContain('aria-label="安全引导"');
+    expect(html).toContain("输入后可引导当前轮");
+    expect(html).not.toContain('aria-label="引导"');
+    expect(html).not.toContain('aria-label="打断引导"');
     expect(html).toContain('aria-label="终止"');
     expect(html.match(/composerRoundButton/g)?.length).toBe(1);
   });
@@ -1199,6 +1203,35 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
     expect(html).toContain("Second prompt");
     expect(html).toContain("First prompt");
+  });
+
+  it("renders running-turn steer records without an edit control", () => {
+    const html = renderConversation([
+      {
+        id: "message-user-1",
+        role: "user",
+        content: "First prompt",
+        timestamp: "2026-05-22T00:00:00Z",
+      },
+      {
+        id: "message-assistant-1",
+        role: "assistant",
+        content: "First answer",
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+      {
+        id: "message-steer-1",
+        role: "user",
+        content: "这一轮先不要改代码，只汇报。",
+        timestamp: "2026-05-22T00:01:30Z",
+        metadata: { kind: "user_guidance", source: "steer" },
+      },
+    ]);
+
+    expect(html).toContain("这一轮先不要改代码，只汇报。");
+    expect(html).toContain("引导");
+    expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
+    expect(html).toContain("turnEditBadge");
   });  it("renders user image attachments and composer image chips", () => {
     const userMessage: ConversationMessage = {
       id: "message-user",

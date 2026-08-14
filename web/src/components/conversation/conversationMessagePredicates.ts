@@ -112,6 +112,16 @@ export function isAgentInboxMessage(message: ConversationMessage) {
   return assistantFinalAnswerText(message).startsWith("[Agent 私信");
 }
 
+const STEER_GUIDANCE_KINDS = new Set(["user_guidance", "user_interrupt_guidance"]);
+
+export function isSteerGuidanceMessage(message: Pick<ConversationMessage, "role" | "metadata">) {
+  if (message.role !== "user") {
+    return false;
+  }
+  const kind = String(message.metadata?.kind ?? "").trim();
+  return STEER_GUIDANCE_KINDS.has(kind);
+}
+
 export function isGroupRoomTranscriptMessage(message: ConversationMessage) {
   const kind = String(message.metadata?.kind ?? "").trim();
   if (kind === "group_room_transcript") {

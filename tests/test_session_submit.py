@@ -220,3 +220,22 @@ def test_submit_entrypoint_reuses_one_journal_backed_turn_in_development_mode(
     finally:
         _reset_seeded_session_runtime(session_id)
         admission.close_development_submission_admission_runtimes()
+
+
+def test_steer_guidance_stays_in_model_history_but_is_not_editable() -> None:
+    original = {
+        "role": "user",
+        "content": "do the work",
+        "metadata": {"kind": "journal_user_message"},
+    }
+    steer = {
+        "role": "user",
+        "content": "line1\nline2\nline3 keep me",
+        "metadata": {"kind": "user_guidance", "source": "steer"},
+    }
+    assert session_service._is_real_user_message_entry(original) is True
+    assert session_service._is_real_user_message_entry(steer) is False
+    assert session_service._is_steer_guidance_message_entry(steer) is True
+    assert session_service._should_omit_message_from_agent_history(steer) is False
+    messages = [original, {"role": "assistant", "content": "working"}, steer]
+    assert session_service._latest_user_message_index(messages) == 0

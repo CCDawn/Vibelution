@@ -210,6 +210,29 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
             running=running,
         )
 
+    guidance_kind = "user_interrupt_guidance" if normalized_mode == "interrupt" else "user_guidance"
+    if active_turn_id:
+        s._append_session_conversation_event(
+            conversation_id,
+            active_turn_id,
+            s.EVENT_USER_MESSAGE,
+            status="recorded",
+            payload={
+                "content": guidance_text,
+                "attachments": [],
+                "references": [],
+                "metadata": {
+                    "kind": guidance_kind,
+                    "source": "steer",
+                    "guidanceMode": normalized_mode,
+                    "turnId": active_turn_id,
+                },
+                "source": "steer",
+            },
+            source="submit_session_guidance",
+            visible_in_model=True,
+        )
+
     if normalized_mode == "interrupt" and running:
         return s.request_stop_session_turn(conversation_id)
 

@@ -37,4 +37,14 @@ describe("chat composer state", () => {
       ]),
     ).toBe("message-user-2");
   });
+
+  it("skips running-turn steer records when resolving the editable latest user message", () => {
+    expect(
+      latestUserMessageId([
+        { id: "message-user-2", role: "user" },
+        { id: "message-assistant-1", role: "assistant" },
+        { id: "message-steer-1", role: "user", metadata: { kind: "user_guidance" } },
+      ]),
+    ).toBe("message-user-2");
+  });
 });

@@ -7703,19 +7703,34 @@ def test_submit_session_safe_guidance_records_signal_without_stopping(tmp_path, 
         )
         assert submit_response.status_code == 202
 
+        guidance_text = "这一轮先不要改代码，只汇报安全引导链路。\n第二行必须进入模型。\n第三行也不能省略。"
         guidance_response = client.post(
             "/api/sessions/session-live/guidance",
-            json={"mode": "safe", "content": "这一轮先不要改代码，只汇报安全引导链路。"},
+            json={"mode": "safe", "content": guidance_text},
         )
 
         assert guidance_response.status_code == 202
         payload = guidance_response.json()
         assert payload["currentPhase"] == "running"
         assert payload["stopRequested"] is False
+        guidance_messages = [
+            item
+            for item in payload["messages"]
+            if isinstance(item, dict)
+            and str(((item.get("metadata") or {}).get("kind") or "")).strip() == "user_guidance"
+        ]
+        assert guidance_messages
+        assert guidance_messages[-1]["content"] == guidance_text
+        latest_index = session_service._latest_user_message_index(payload["messages"])
+        assert latest_index >= 0
+        latest_metadata = payload["messages"][latest_index].get("metadata") or {}
+        assert str(latest_metadata.get("kind") or "") != "user_guidance"
+        summaries = session_service._recent_session_guidance_summaries("session-live")
+        assert guidance_text in summaries
         signals = _read_next_state_signals(tmp_path, session_id="session-live")
         assert any(
             item["kind"] == "user_guidance"
-            and item["summary"] == "这一轮先不要改代码，只汇报安全引导链路。"
+            and "这一轮先不要改代码，只汇报安全引导链路。" in str(item.get("summary") or "")
             and item["turnId"]
             for item in signals
         )
@@ -7757,6 +7772,14 @@ def test_submit_session_interrupt_guidance_records_signal_and_stops(tmp_path, mo
             for item in signals
         )
         assert any(item["kind"] == "user_stops" for item in signals)
+        interrupt_messages = [
+            item
+            for item in payload["messages"]
+            if isinstance(item, dict)
+            and str(((item.get("metadata") or {}).get("kind") or "")).strip() == "user_interrupt_guidance"
+        ]
+        assert interrupt_messages
+        assert interrupt_messages[-1]["content"] == "停止当前思路，改为先审计数据流。"
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")

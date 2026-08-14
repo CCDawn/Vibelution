@@ -113,6 +113,8 @@ describe("ChatConversationComposerBridge", () => {
   it("uses concise dictionary placeholders for direct chat turns", () => {
     expect(dictionary.zh.messageInputPlaceholder).toBe("描述下一步要做什么...");
     expect(dictionary.en.messageInputPlaceholder).toBe("Describe the next step...");
+    expect(dictionary.zh.sessionBusyPlaceholder).toBe("输入后可引导当前轮");
+    expect(dictionary.en.sessionBusyPlaceholder).toBe("Type to steer the current turn");
     expect(dictionary.zh.messageInputPlaceholder).not.toContain("当前会话");
     expect(dictionary.en.messageInputPlaceholder).not.toContain("current session");
   });
