@@ -372,6 +372,7 @@ function resolveConversationNotificationService(): ConversationNotificationServi
       return notification;
     },
     createBadgeIcon: createConversationBadgeIcon,
+    notificationOpenedChannel: IPC_CHANNELS.conversationNotificationOpened,
     recordEvent: async (event) => {
       await recordElectronSupervisorEvent(launcherBootstrap, {
         ...event,

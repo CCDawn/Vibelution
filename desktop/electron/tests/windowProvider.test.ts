@@ -28,6 +28,7 @@ class FakeWindow implements ElectronWindowLike {
   loadedUrls: string[] = [];
   overlayCalls: Array<{ icon: unknown; description: string }> = [];
   flashCalls: boolean[] = [];
+  sentIpc: Array<{ channel: string; payload: unknown }> = [];
   title = "";
   private destroyed = false;
   private focused = false;
@@ -50,6 +51,9 @@ class FakeWindow implements ElectronWindowLike {
       },
       setWindowOpenHandler: (handler) => {
         this.windowOpenHandler = handler;
+      },
+      send: (channel, payload) => {
+        this.sentIpc.push({ channel, payload });
       }
     };
   }
@@ -634,6 +638,29 @@ describe("Electron window provider state", () => {
     expect(provider.isWorkbenchFocused()).toBe(false);
   });
 
+  it("sends notification click payloads to the workbench renderer", async () => {
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    expect(provider.sendToWorkbench("launcher:conversation-notification-opened", { sessionId: "session-1" })).toBe(false);
+
+    await provider.openOrFocusWorkbench();
+
+    expect(provider.sendToWorkbench("launcher:conversation-notification-opened", {
+      schemaVersion: 1,
+      sessionId: "session-1"
+    })).toBe(true);
+    expect(workbenchWindow.sentIpc).toEqual([
+      {
+        channel: "launcher:conversation-notification-opened",
+        payload: { schemaVersion: 1, sessionId: "session-1" }
+      }
+    ]);
+  });
+
   it("applies and clears workbench taskbar attention", async () => {
     const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
     const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
@@ -801,6 +828,7 @@ describe("resolveWorkbenchUrl", () => {
 describe("IPC channels", () => {
   it("keeps the bridge narrow", () => {
     expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
+      "conversationNotificationOpened",
       "focusWorkbenchWindow",
       "getDesktopShellSummary",
       "getVersion",

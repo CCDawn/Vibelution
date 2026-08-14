@@ -7,6 +7,8 @@ export type DesktopConversationCompletionNotification = {
   body: string;
   completedAt?: string;
   terminalStatus?: string;
+  sessionLabel?: string;
+  suppressWhenFocused?: boolean;
 };
 
 export type DesktopConversationNotificationStatus =
@@ -38,6 +40,7 @@ type NotificationFactoryInput = {
 type WindowProviderLike = {
   isWorkbenchFocused(): boolean;
   focusWorkbench(): Promise<unknown>;
+  sendToWorkbench(channel: string, payload: unknown): boolean;
   setWorkbenchAttention(options: {
     unreadCount: number;
     overlayIcon?: unknown;
@@ -51,6 +54,7 @@ export type ConversationNotificationServiceOptions = {
   notificationSupported: () => boolean;
   createNotification: (input: NotificationFactoryInput) => NotificationLike;
   createBadgeIcon: (count: number) => unknown;
+  notificationOpenedChannel: string;
   recordEvent?: (event: {
     eventCode: string;
     message: string;
@@ -64,8 +68,47 @@ export type ConversationNotificationService = {
   clearAttention(): void;
 };
 
-const SAFE_NOTIFICATION_TITLE = "对话已完成";
-const SAFE_NOTIFICATION_BODY = "Vibelution 已完成一轮回复。";
+const SUCCESS_TERMINAL_STATUSES = new Set(["ready", "completed", "done", "success"]);
+
+function normalizeText(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function sanitizeSessionLabel(raw: unknown, sessionId: string): string {
+  let text = normalizeText(raw);
+  text = text
+    .replace(/[A-Za-z]:\\[^\s]+/g, " ")
+    .replace(/\\\\[^\s]+/g, " ")
+    .replace(/(?:^|[\s(])\/(?:Users|home|tmp|var|etc|opt)[^\s]*/gi, " ")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length > 40) {
+    text = `${text.slice(0, 39)}…`;
+  }
+  if (text) {
+    return text;
+  }
+  const shortId = normalizeText(sessionId).replace(/^session-/, "").slice(0, 8);
+  return shortId ? `会话 ${shortId}` : "当前会话";
+}
+
+function buildConversationNotificationCopy(sessionLabel: string, terminalStatus: string): {
+  title: string;
+  body: string;
+} {
+  const label = sessionLabel || "当前会话";
+  if (SUCCESS_TERMINAL_STATUSES.has(terminalStatus) || !terminalStatus) {
+    return {
+      title: "对话已完成",
+      body: `「${label}」已完成一轮回复。`
+    };
+  }
+  return {
+    title: "对话已结束",
+    body: `「${label}」对话已结束。`
+  };
+}
 
 export function createConversationNotificationService(
   options: ConversationNotificationServiceOptions
@@ -121,7 +164,8 @@ export function createConversationNotificationService(
         terminalStatus: payload.terminalStatus ?? "",
         focused,
         unreadCount,
-        status
+        status,
+        suppressWhenFocused: payload.suppressWhenFocused !== false
       }
     });
   }
@@ -163,15 +207,21 @@ export function createConversationNotificationService(
         return createResult("invalid_payload", invalidPayload, focused);
       }
 
+      const terminalStatus = String(payload.terminalStatus || "").trim() || undefined;
+      const sessionLabel = sanitizeSessionLabel(payload.sessionLabel, sessionId);
+      const copy = buildConversationNotificationCopy(sessionLabel, terminalStatus || "completed");
+      const suppressWhenFocused = payload.suppressWhenFocused !== false;
       const normalizedPayload: DesktopConversationCompletionNotification = {
         schemaVersion: 1,
         notificationKey,
         sessionId,
         turnId: String(payload.turnId || "").trim() || undefined,
-        title: SAFE_NOTIFICATION_TITLE,
-        body: SAFE_NOTIFICATION_BODY,
+        title: copy.title,
+        body: copy.body,
         completedAt: String(payload.completedAt || "").trim() || undefined,
-        terminalStatus: String(payload.terminalStatus || "").trim() || undefined
+        terminalStatus,
+        sessionLabel,
+        suppressWhenFocused
       };
       const focused = options.windowProvider.isWorkbenchFocused();
 
@@ -186,9 +236,7 @@ export function createConversationNotificationService(
         return createResult("duplicate", normalizedPayload, focused);
       }
 
-      if (focused) {
-        unreadCount = 0;
-        options.windowProvider.setWorkbenchAttention({ unreadCount: 0 });
+      if (focused && suppressWhenFocused) {
         record(
           "electron.conversation_notification.suppressed",
           "Conversation completion notification was suppressed because workbench is focused.",
@@ -219,6 +267,10 @@ export function createConversationNotificationService(
           body: normalizedPayload.body,
           onClick: () => {
             void options.windowProvider.focusWorkbench();
+            options.windowProvider.sendToWorkbench(options.notificationOpenedChannel, {
+              schemaVersion: 1,
+              sessionId
+            });
           }
         });
         notification.show();

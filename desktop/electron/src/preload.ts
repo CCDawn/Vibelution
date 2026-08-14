@@ -7,5 +7,12 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
   focusWorkbenchWindow: () => ipcRenderer.invoke(IPC_CHANNELS.focusWorkbenchWindow),
   requestDesktopShellExit: () => ipcRenderer.invoke(IPC_CHANNELS.requestDesktopShellExit),
   notifyConversationCompleted: (payload: unknown) =>
-    ipcRenderer.invoke(IPC_CHANNELS.notifyConversationCompleted, payload)
+    ipcRenderer.invoke(IPC_CHANNELS.notifyConversationCompleted, payload),
+  onConversationNotificationOpened: (listener: (payload: unknown) => void) => {
+    const wrapped = (_event: unknown, payload: unknown) => listener(payload);
+    ipcRenderer.on(IPC_CHANNELS.conversationNotificationOpened, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.conversationNotificationOpened, wrapped);
+    };
+  }
 });

@@ -33,6 +33,7 @@ export type ElectronWindowLike = {
     getURL(): string;
     on(event: string, listener: ElectronWindowEventListener): unknown;
     setWindowOpenHandler?(handler: ElectronWindowOpenHandler): void;
+    send?(channel: string, payload: unknown): void;
   };
 };
 
@@ -314,6 +315,18 @@ export class ElectronWindowProvider {
     return Boolean(
       this.workbenchReadyUrl !== null && this.workbenchWindow && !this.workbenchWindow.isDestroyed() && this.workbenchWindow.isFocused()
     );
+  }
+
+  sendToWorkbench(channel: string, payload: unknown): boolean {
+    const window = this.workbenchWindow;
+    if (!window || window.isDestroyed() || this.workbenchReadyUrl === null) {
+      return false;
+    }
+    if (typeof window.webContents.send !== "function") {
+      return false;
+    }
+    window.webContents.send(channel, payload);
+    return true;
   }
 
   setWorkbenchAttention(options: WorkbenchAttentionOptions): void {
