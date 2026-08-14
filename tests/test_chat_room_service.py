@@ -352,7 +352,7 @@ def test_casual_group_topic_uses_chat_purpose_for_one_round():
     assert chat_room_service._resolve_round_purpose("讨论近期科研方向", "discussion") == "discussion"
 
 
-def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
+def test_create_chat_room_defaults_to_sessions_in_recent_activity_order(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -365,8 +365,8 @@ def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
     assert room["purpose"] == "discussion"
     assert room["availablePurposes"] == chat_room_service.list_chat_room_purposes()
     assert [item["sessionId"] for item in room["participants"]] == [
-        "session-alpha",
         "session-beta",
+        "session-alpha",
     ]
     assert room["rounds"] == []
 
@@ -441,7 +441,7 @@ def test_list_chat_rooms_compact_does_not_hydrate_sessions_or_agents(tmp_path, m
     rooms = chat_room_service.list_chat_rooms_compact()
 
     assert [item["roomId"] for item in rooms] == [room["roomId"]]
-    assert [item["sessionId"] for item in rooms[0]["participants"]] == ["session-alpha", "session-beta"]
+    assert [item["sessionId"] for item in rooms[0]["participants"]] == ["session-beta", "session-alpha"]
 
 
 def test_list_chat_rooms_for_conversation_index_does_not_repair_participants_by_default(tmp_path, monkeypatch):
