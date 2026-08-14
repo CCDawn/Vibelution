@@ -769,6 +769,11 @@ internal static class VibelutionLauncher
         bool noBrowser = HasArgument(forwardedArgs, "--no-browser", "-nobrowser", "-no-browser");
         if (action == "open")
         {
+            if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs))
+            {
+                WriteNativeEntryLog(projectDir, "native_action.electron_forwarded", "action=open");
+                return 0;
+            }
             RunPythonBridge(projectDir, noBrowser ? "bootstrap" : "launcher", noBrowser, noBrowser);
             WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=open");
             return 0;
@@ -780,6 +785,16 @@ internal static class VibelutionLauncher
             return 2;
         }
 
+        // T8: the packaged Electron shell owns lifecycle commands. When it exists,
+        // forward argv to the live instance (second-instance) or launch it; never
+        // bootstrap a Python :8765 control plane from this shim.
+        if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs))
+        {
+            WriteNativeEntryLog(projectDir, "native_action.electron_forwarded", "action=" + action);
+            return 0;
+        }
+
+        // No packaged Electron (development checkout): keep the legacy Python bridge path.
         RunPythonBridge(projectDir, "bootstrap", true, true);
         if (action == "status")
         {
@@ -798,6 +813,27 @@ internal static class VibelutionLauncher
         RequestLauncher(projectDir, "/api/launcher/" + effectiveAction, "POST");
         WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=" + action + ";effective_action=" + effectiveAction);
         return 0;
+    }
+
+    private static bool ForwardOrLaunchElectron(string projectDir, string action, List<string> forwardedArgs)
+    {
+        string electronExe = Path.Combine(projectDir, "dist", "desktop", "win-unpacked", "Vibelution.exe");
+        if (!File.Exists(electronExe))
+        {
+            return false;
+        }
+        var args = new List<string> { "--project", Quote(projectDir), action };
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = electronExe,
+            Arguments = string.Join(" ", args.ToArray()),
+            WorkingDirectory = projectDir,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        Process.Start(startInfo);
+        return true;
     }
 
     private static bool HasArgument(List<string> args, params string[] accepted)

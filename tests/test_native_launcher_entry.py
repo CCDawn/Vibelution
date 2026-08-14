@@ -26,9 +26,9 @@ def test_native_launcher_tray_menu_exposes_lifecycle_controls():
 
     for label in [
         "打开控制台",
-        "启动项目",
-        "停止项目",
-        "重启项目",
+        "启动",
+        "停止",
+        "重启当前 main",
         "重建并启动（最新）",
         "状态",
         "退出 Launcher",
@@ -36,8 +36,7 @@ def test_native_launcher_tray_menu_exposes_lifecycle_controls():
     ]:
         assert label in source
 
-    assert "\"/api/launcher/start\"" in source
-    assert "\"/api/launcher/stop\"" in source
+    assert "\"/api/launcher/branch-instances/\" + operation" in source
     assert "\"/api/launcher/restart\"" in source
     assert "\"/api/launcher/rebuild-and-start\"" in source
     assert "\"/api/launcher/force-stop\"" in source
@@ -60,12 +59,28 @@ def test_native_launcher_non_default_actions_use_console_free_control_api():
     assert "RunNativeAction(projectDir, parsed.ForwardedArgs)" in source
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
     assert '"/api/launcher/status"' in source
-    assert '"/api/launcher/start"' in source
-    assert '"/api/launcher/stop"' in source
+    assert '"/api/launcher/" + effectiveAction' in source
     assert '"/api/launcher/restart"' in source
     assert "vibelution_desktop_entry.vbs" not in source
     assert "wscript.exe" not in source
     assert "RunLegacyScriptAction" not in source
+
+
+def test_native_launcher_forwards_lifecycle_to_packaged_electron():
+    source = _source()
+
+    # The shim forwards argv to the packaged Electron shell and never builds a
+    # second Python :8765 control plane when the Electron binary exists.
+    assert "ForwardOrLaunchElectron(projectDir, action, forwardedArgs)" in source
+    assert 'Path.Combine(projectDir, "dist", "desktop", "win-unpacked", "Vibelution.exe")' in source
+    assert "native_action.electron_forwarded" in source
+    assert "CreateNoWindow = true" in source
+    # Legacy Python bridge remains only for development checkouts without the packaged Electron.
+    forward_index = source.index("private static bool ForwardOrLaunchElectron")
+    native_action_index = source.index("private static int RunNativeAction")
+    forward_block = source[native_action_index:forward_index]
+    assert "// T8:" in forward_block
+    assert "No packaged Electron (development checkout)" in forward_block
 
 
 def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
