@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -219,6 +220,20 @@ def _source_inbox_summary(sources: list[dict[str, Any]]) -> dict[str, Any]:
         "needsMoreContextSourceCount": status_counts.get("needs_more_context", 0),
         "statusCounts": status_counts,
     }
+
+
+def _extended_fs_path(path: Path) -> Path:
+    """Return a Windows extended-length path for filesystem-only copy/write."""
+
+    resolved = Path(path).resolve()
+    if os.name != "nt":
+        return resolved
+    value = str(resolved)
+    if value.startswith("\\\\?\\"):
+        return resolved
+    if value.startswith("\\\\"):
+        return Path(f"\\\\?\\UNC\\{value[2:]}")
+    return Path(f"\\\\?\\{value}")
 
 
 def _safe_source_filename(value: Any, *, default: str) -> str:
