@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from core.research.workflow.contracts import PendingAction
 from core.research.workflow.models import ActorKind
 from core.web.services import team_service, team_workflow_orchestration_service
+from core.web.services.team_workflow.research_runtime.experiment_stage_bootstrap import (
+    ExperimentStageBootstrapError,
+)
 from core.web.services.team_workflow.research_runtime.domain_ports import (
     BindingResolution,
 )
@@ -15,6 +20,13 @@ from core.web.services.team_workflow.research_runtime.task_adapter_registry impo
     resolve_agent_task_adapter,
 )
 from tests._support.team_workflow.helpers import _use_tmp_project_root
+
+
+def _accepted_package() -> dict[str, Any]:
+    return {
+        "accepted": True,
+        "knowledgeItems": [{"knowledgeItemId": "ki-1", "contentHash": "b" * 64}],
+    }
 
 
 def _hypothesis_action() -> PendingAction:
@@ -57,6 +69,24 @@ def test_bootstrap_ignores_nodes_outside_hypothesis_entry(monkeypatch) -> None:
     assert calls == []
 
 
+def test_bootstrap_blocks_hypothesis_without_accepted_package() -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        experiment_stage_bootstrap,
+    )
+
+    with pytest.raises(
+        ExperimentStageBootstrapError,
+        match="knowledge_package_not_materialized",
+    ):
+        experiment_stage_bootstrap.ensure_experiment_stage_round_for_agent_node(
+            node_id="hypothesis_design",
+            team_id="research-team",
+            project_id="challenge-sci-096",
+            input_snapshot={"researchObjectiveContract": {"question": "研究问题"}},
+            requested_by_agent="agent-hypothesis",
+        )
+
+
 def test_bootstrap_starts_idempotent_experiment_round_from_run_snapshot(
     monkeypatch,
 ) -> None:
@@ -86,6 +116,7 @@ def test_bootstrap_starts_idempotent_experiment_round_from_run_snapshot(
             }
         },
         requested_by_agent="agent-hypothesis",
+        accepted_knowledge_package=_accepted_package(),
     )
 
     assert result == {"created": True, "stageRound": {"stageRoundId": "stage-1"}}
@@ -125,6 +156,7 @@ def test_bootstrap_reuses_the_active_experiment_round(tmp_path, monkeypatch) -> 
             "researchObjectiveContract": {"question": "研究问题"}
         },
         "requested_by_agent": "agent-hypothesis",
+        "accepted_knowledge_package": _accepted_package(),
     }
 
     first = experiment_stage_bootstrap.ensure_experiment_stage_round_for_agent_node(

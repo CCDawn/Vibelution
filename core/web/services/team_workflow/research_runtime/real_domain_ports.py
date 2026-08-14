@@ -313,6 +313,8 @@ def _create_real_agent_task(
             project_id=project_id,
             input_snapshot=input_snapshot,
             requested_by_agent=binding.agent_id,
+            store=store,
+            run_id=action.run_id,
         )
         started = start_research_project_agent_task(
             team_id,

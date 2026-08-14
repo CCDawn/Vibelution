@@ -12,6 +12,7 @@ from core.research.workflow.ledger import RunRecord, WorkflowLedgerStore
 from .artifact_readback_registry import (
     build_canonical_ref,
     load_scoped_artifact_payload,
+    parse_canonical_ref,
 )
 from .human_gate_artifacts import canonical_sha256
 
@@ -130,6 +131,57 @@ def prepare_knowledge_handoff_artifact(
     )
 
 
+def load_accepted_knowledge_package_from_receipt(
+    store: WorkflowLedgerStore,
+    *,
+    team_id: str,
+    run_id: str,
+) -> dict[str, Any] | None:
+    """Read the accepted Knowledge Package via the bound handoff receipt only.
+
+    Ledger receipts are the handoff selector. Candidate inventory without a
+    bound receipt must not unlock experiment bootstrap, and a later inventory
+    item must not replace the accepted content hash.
+    """
+
+    normalized_team = str(team_id or "").strip()
+    normalized_run = str(run_id or "").strip()
+    if not normalized_team or not normalized_run:
+        return None
+    try:
+        bound = store.read(
+            lambda repo: _bound_knowledge_package_receipt(
+                repo,
+                run_id=normalized_run,
+            )
+        )
+    except KnowledgeAcceptanceArtifactError:
+        return None
+    if bound is None:
+        return None
+    canonical_ref, content_hash = bound
+    parsed = parse_canonical_ref(canonical_ref)
+    if parsed is None or parsed.get("kind") != "knowledge_package":
+        return None
+    if str(parsed.get("teamId") or "") != normalized_team:
+        return None
+    pinned_hash = str(parsed.get("contentHash") or content_hash or "").strip()
+    if len(pinned_hash) < 16:
+        return None
+    payload = load_scoped_artifact_payload(
+        "knowledge_package",
+        team_id=normalized_team,
+        authority_run_id=str(parsed.get("authorityRunId") or ""),
+        workflow_run_id=normalized_run,
+        content_hash=pinned_hash,
+    )
+    if not is_accepted_knowledge_package(payload):
+        return None
+    if canonical_sha256(payload) != pinned_hash:
+        return None
+    return payload
+
+
 def persist_prepared_human_acceptance_artifact(
     uow: Any,
     *,
@@ -226,6 +278,40 @@ def _json_object(raw: str) -> dict[str, Any]:
     except (TypeError, json.JSONDecodeError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _bound_knowledge_package_receipt(
+    repo: Any,
+    *,
+    run_id: str,
+) -> tuple[str, str] | None:
+    handoff = _find_knowledge_handoff(
+        repo,
+        run_id=run_id,
+        task_id="",
+        target_node_id="hypothesis_design",
+    )
+    if handoff is None:
+        return None
+    handoff_id, _node_run_id = handoff
+    for row in repo.list_handoff_artifact_refs_for_run(run_id):
+        if str(row[0]) != handoff_id or str(row[2]) != "knowledge_package":
+            continue
+        canonical_ref = ""
+        try:
+            payload = json.loads(row[3] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            payload = {}
+        if isinstance(payload, dict):
+            canonical_ref = str(payload.get("canonicalRef") or "").strip()
+        content_hash = str(row[5] or "").strip()
+        if canonical_ref and content_hash:
+            return canonical_ref, content_hash
+    return None
+
+
+def is_accepted_knowledge_package(payload: dict[str, Any] | None) -> bool:
+    return _is_accepted_package(payload)
 
 
 def _is_accepted_package(payload: dict[str, Any] | None) -> bool:
