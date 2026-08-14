@@ -1,4 +1,5 @@
 import { boundedDesktopControlFetch } from "./boundedFetch.js";
+import { overlayLauncherWindowTruth, type LauncherWindowTruth } from "../windows/launcherWindowTruthOverlay.js";
 
 export const LAUNCHER_IPC_HOST_NOT_READY = "LAUNCHER_IPC_HOST_NOT_READY";
 export const LAUNCHER_IPC_UNSUPPORTED_PATH = "LAUNCHER_IPC_UNSUPPORTED_PATH";
@@ -106,10 +107,12 @@ async function readFailureDetail(response: Response): Promise<string> {
 
 export function createLauncherIpcHost(input: {
   resolveContext: () => Promise<LauncherIpcHostContext | null>;
+  resolveWindowTruth?: () => LauncherWindowTruth;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }) {
   const fetchImpl = input.fetchImpl ?? fetch;
+  const resolveWindowTruth = input.resolveWindowTruth ?? (() => ({ workbench: null, instances: [] }));
 
   return {
     async invoke(payload: LauncherIpcInvokePayload): Promise<LauncherIpcInvokeResult> {
@@ -165,7 +168,11 @@ export function createLauncherIpcHost(input: {
         );
       }
       try {
-        return { ok: true, payload: (await response.json()) as unknown };
+        const payload = (await response.json()) as unknown;
+        return {
+          ok: true,
+          payload: overlayLauncherWindowTruth(normalized.path, payload, resolveWindowTruth())
+        };
       } catch (error: unknown) {
         return launcherIpcError(
           LAUNCHER_IPC_NETWORK_ERROR,
