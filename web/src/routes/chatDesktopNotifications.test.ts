@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionDetail, SessionStreamEvent } from "../api/types";
-import { browserDesktopNotificationBridge, createDesktopConversationNotifier } from "./chatDesktopNotifications";
+import {
+  browserDesktopNotificationBridge,
+  buildConversationNotificationCopy,
+  createDesktopConversationNotifier,
+  parseConversationNotificationOpenPayload,
+  sanitizeSessionLabel,
+  subscribeConversationNotificationOpened,
+} from "./chatDesktopNotifications";
 
 function assistantDelta(
   patch: Partial<Extract<SessionStreamEvent, { type: "assistant_delta" }>> = {},
@@ -30,10 +37,11 @@ function detail(patch: Partial<SessionDetail> = {}): SessionDetail {
       {
         id: "assistant-final",
         role: "assistant",
-        content: "final answer with local path C:\\secret.txt",
-        thought: "internal chain of thought",
+        turnId: "turn-1",
+        status: "completed",
         timestamp: "2026-07-05T07:00:00Z",
         metadata: { turnId: "turn-1" },
+        turnItems: [{ type: "agent_message", text: "final answer" }],
       },
     ],
     defaultFileContext: "",
@@ -49,7 +57,7 @@ function detail(patch: Partial<SessionDetail> = {}): SessionDetail {
 }
 
 describe("desktop conversation notifier", () => {
-  it("emits once for a completed assistant delta", () => {
+  it("emits once for a completed assistant delta and names the session", () => {
     const notify = vi.fn(async () => ({
       schemaVersion: 1,
       status: "notified",
@@ -63,8 +71,14 @@ describe("desktop conversation notifier", () => {
       postTelemetry: telemetry,
     });
 
-    notifier.handleAssistantDelta(assistantDelta(), { sessionTitle: "测试会话" });
-    notifier.handleAssistantDelta(assistantDelta(), { sessionTitle: "测试会话" });
+    notifier.handleAssistantDelta(assistantDelta(), {
+      sessionTitle: "测试会话",
+      viewedSessionId: "session-1",
+    });
+    notifier.handleAssistantDelta(assistantDelta(), {
+      sessionTitle: "测试会话",
+      viewedSessionId: "session-1",
+    });
 
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(
@@ -74,7 +88,9 @@ describe("desktop conversation notifier", () => {
         sessionId: "session-1",
         turnId: "turn-1",
         title: "对话已完成",
-        body: "Vibelution 已完成一轮回复。",
+        body: "「测试会话」已完成一轮回复。",
+        sessionLabel: "测试会话",
+        suppressWhenFocused: true,
         terminalStatus: "completed",
       }),
     );
@@ -95,7 +111,9 @@ describe("desktop conversation notifier", () => {
     notifier.handleAssistantDelta(assistantDelta({ done: false }), { sessionTitle: "测试会话" });
 
     expect(notify).not.toHaveBeenCalled();
-  });it("uses the last turn error id when a failed detail has no assistant message", () => {
+  });
+
+  it("uses the last turn error id when a failed detail has no assistant message", () => {
     const notify = vi.fn();
     const notifier = createDesktopConversationNotifier({
       bridge: { notifyConversationCompleted: notify },
@@ -104,6 +122,7 @@ describe("desktop conversation notifier", () => {
 
     notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running", messages: [] }), {
       sessionTitle: "测试会话",
+      viewedSessionId: "session-other",
     });
     notifier.handleSessionDetail(
       detail({
@@ -118,7 +137,7 @@ describe("desktop conversation notifier", () => {
           turnId: "turn-error-1",
         },
       }),
-      { sessionTitle: "测试会话" },
+      { sessionTitle: "测试会话", viewedSessionId: "session-other" },
     );
 
     expect(notify).toHaveBeenCalledTimes(1);
@@ -127,13 +146,16 @@ describe("desktop conversation notifier", () => {
         notificationKey: "session-1:turn-error-1:failed",
         turnId: "turn-error-1",
         terminalStatus: "failed",
-        title: "对话已完成",
-        body: "Vibelution 已完成一轮回复。",
+        title: "对话已结束",
+        body: "「测试会话」对话已结束。",
+        sessionLabel: "测试会话",
+        suppressWhenFocused: false,
       }),
     );
     expect(JSON.stringify(notify.mock.calls[0]?.[0])).not.toContain("provider failed");
     expect(JSON.stringify(notify.mock.calls[0]?.[0])).not.toContain("C:\\hidden.txt");
   });
+
   it("degrades to telemetry-only when the Electron bridge is missing", () => {
     const telemetry = vi.fn();
     const notifier = createDesktopConversationNotifier({
@@ -177,7 +199,7 @@ describe("desktop conversation notifier", () => {
     expect(JSON.stringify(telemetryPayload)).not.toContain("C:\\Users\\17533\\secret.txt");
   });
 
-  it("uses generic safe notification copy even when sessionTitle contains secrets or paths", () => {
+  it("sanitizes sessionTitle so secrets and paths never appear in notification copy or telemetry", () => {
     const notify = vi.fn();
     const telemetry = vi.fn();
     const notifier = createDesktopConversationNotifier({
@@ -193,12 +215,111 @@ describe("desktop conversation notifier", () => {
 
     expect(notifyPayload).toMatchObject({
       title: "对话已完成",
-      body: "Vibelution 已完成一轮回复。",
+      body: "「from」已完成一轮回复。",
+      sessionLabel: "from",
     });
     expect(JSON.stringify(notifyPayload)).not.toContain("sk-live-secret");
     expect(JSON.stringify(notifyPayload)).not.toContain("C:\\Users\\17533\\Desktop\\prompt.txt");
     expect(JSON.stringify(telemetryPayload)).not.toContain("sk-live-secret");
     expect(JSON.stringify(telemetryPayload)).not.toContain("C:\\Users\\17533\\Desktop\\prompt.txt");
+  });
+
+  it("notifies background session index busy-to-idle without duplicating the live stream", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleSessionSummaries(
+      [
+        { id: "session-bg", title: "后台会话", status: "running", currentPhase: "running", updatedAt: "t1" },
+        { id: "session-1", title: "当前会话", status: "ready", currentPhase: "ready", updatedAt: "t0" },
+      ],
+      { viewedSessionId: "session-1" },
+    );
+    notifier.handleSessionSummaries(
+      [
+        { id: "session-bg", title: "后台会话", status: "ready", currentPhase: "ready", updatedAt: "t2" },
+        { id: "session-1", title: "当前会话", status: "ready", currentPhase: "ready", updatedAt: "t0" },
+      ],
+      { viewedSessionId: "session-1" },
+    );
+    notifier.handleSessionDetail(detail({ id: "session-1", currentPhase: "running", status: "running" }), {
+      viewedSessionId: "session-1",
+    });
+    notifier.handleSessionDetail(detail({ id: "session-1", currentPhase: "ready", status: "ready" }), {
+      viewedSessionId: "session-1",
+    });
+    notifier.handleSessionSummaries(
+      [
+        { id: "session-bg", title: "后台会话", status: "ready", currentPhase: "ready", updatedAt: "t2" },
+        { id: "session-1", title: "当前会话", status: "ready", currentPhase: "ready", updatedAt: "t3" },
+      ],
+      { viewedSessionId: "session-1" },
+    );
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        sessionId: "session-bg",
+        body: "「后台会话」已完成一轮回复。",
+        suppressWhenFocused: false,
+      }),
+    );
+    expect(notify).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sessionId: "session-1",
+        notificationKey: "session-1:turn-1:completed",
+        suppressWhenFocused: true,
+      }),
+    );
+  });
+
+  it("emits only once when live stream and session index both observe the viewed session finish", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleSessionSummaries(
+      [{ id: "session-1", title: "当前会话", status: "running", currentPhase: "running", updatedAt: "t1" }],
+      { viewedSessionId: "session-1", sessionTitle: "当前会话" },
+    );
+    notifier.handleAssistantDelta(assistantDelta(), {
+      viewedSessionId: "session-1",
+      sessionTitle: "当前会话",
+    });
+    notifier.handleSessionSummaries(
+      [{ id: "session-1", title: "当前会话", status: "ready", currentPhase: "ready", updatedAt: "t2" }],
+      { viewedSessionId: "session-1", sessionTitle: "当前会话" },
+    );
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        notificationKey: "session-1:turn-1:completed",
+      }),
+    );
+  });
+
+  it("does not notify idle sessions observed for the first time", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleSessionSummaries(
+      [{ id: "session-idle", title: "旧会话", status: "ready", currentPhase: "ready", updatedAt: "t0" }],
+      { viewedSessionId: "session-1" },
+    );
+
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("returns no bridge when the launcher API is unavailable", () => {
@@ -215,6 +336,42 @@ describe("desktop conversation notifier", () => {
       }),
     ).toEqual({
       notifyConversationCompleted,
+      onConversationNotificationOpened: undefined,
+    });
+  });
+
+  it("subscribes to notification click payloads and ignores unsafe session ids", () => {
+    const opened: string[] = [];
+    const listeners: Array<(payload: unknown) => void> = [];
+    const unsubscribe = subscribeConversationNotificationOpened(
+      {
+        onConversationNotificationOpened: (listener) => {
+          listeners.push(listener);
+          return () => undefined;
+        },
+      },
+      (sessionId) => opened.push(sessionId),
+    );
+
+    listeners[0]?.({ schemaVersion: 1, sessionId: "session-safe" });
+    listeners[0]?.({ schemaVersion: 1, sessionId: "../etc/passwd" });
+    listeners[0]?.({ schemaVersion: 1, sessionId: "https://evil.example" });
+    unsubscribe();
+
+    expect(opened).toEqual(["session-safe"]);
+    expect(parseConversationNotificationOpenPayload({ schemaVersion: 1, sessionId: "session-safe" })).toEqual({
+      schemaVersion: 1,
+      sessionId: "session-safe",
+    });
+  });
+});
+
+describe("session notification copy", () => {
+  it("falls back to a short session id when the title sanitizes away", () => {
+    expect(sanitizeSessionLabel("C:\\Users\\17533\\secret.txt", "session-abcd1234")).toBe("会话 abcd1234");
+    expect(buildConversationNotificationCopy({ sessionLabel: "科研助手", terminalStatus: "completed" })).toEqual({
+      title: "对话已完成",
+      body: "「科研助手」已完成一轮回复。",
     });
   });
 });

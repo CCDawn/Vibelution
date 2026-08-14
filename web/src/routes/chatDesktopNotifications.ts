@@ -1,7 +1,7 @@
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 import type { BrowserTelemetryEventInput } from "../app/browserTelemetry";
 
-type DesktopConversationCompletionNotification = {
+export type DesktopConversationCompletionNotification = {
   schemaVersion: 1;
   notificationKey: string;
   sessionId: string;
@@ -10,10 +10,18 @@ type DesktopConversationCompletionNotification = {
   body: string;
   completedAt?: string;
   terminalStatus?: string;
+  sessionLabel?: string;
+  suppressWhenFocused?: boolean;
+};
+
+export type ConversationNotificationOpenPayload = {
+  schemaVersion: 1;
+  sessionId: string;
 };
 
 type DesktopBridge = {
   notifyConversationCompleted?: (payload: DesktopConversationCompletionNotification) => Promise<unknown>;
+  onConversationNotificationOpened?: (listener: (payload: unknown) => void) => () => void;
 };
 
 type DesktopConversationNotifierOptions = {
@@ -22,12 +30,23 @@ type DesktopConversationNotifierOptions = {
   maxSeenKeys?: number;
 };
 
-type NotificationContext = {
+export type NotificationContext = {
   sessionTitle?: string;
+  viewedSessionId?: string;
 };
 
-const SAFE_NOTIFICATION_TITLE = "对话已完成";
-const SAFE_NOTIFICATION_BODY = "Vibelution 已完成一轮回复。";
+export type SessionCompletionSummary = {
+  id?: string;
+  title?: string;
+  agentDisplayName?: string;
+  status?: string;
+  currentPhase?: string;
+  lastTurnStatus?: string;
+  updatedAt?: string;
+  lastActive?: string;
+};
+
+const SUCCESS_TERMINAL_STATUSES = new Set(["ready", "completed", "done", "success"]);
 
 export type DesktopConversationNotifier = {
   handleAssistantDelta(
@@ -35,6 +54,7 @@ export type DesktopConversationNotifier = {
     context?: NotificationContext,
   ): void;
   handleSessionDetail(detail: SessionDetail, context?: NotificationContext): void;
+  handleSessionSummaries(sessions: SessionCompletionSummary[], context?: NotificationContext): void;
 };
 
 const BUSY_PHASES = new Set([
@@ -70,21 +90,81 @@ const TERMINAL_PHASES = new Set([
   "needs_continue",
 ]);
 
-function normalizeText(value: unknown): string {
+export function normalizeNotificationText(value: unknown): string {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
 function isBusyPhase(value: unknown): boolean {
-  return BUSY_PHASES.has(normalizeText(value).toLowerCase());
+  return BUSY_PHASES.has(normalizeNotificationText(value).toLowerCase());
 }
 
-function terminalPhaseForDetail(detail: SessionDetail): string {
-  const phase = normalizeText(detail.currentPhase || detail.status).toLowerCase();
-  return TERMINAL_PHASES.has(phase) ? phase : "";
+function terminalPhaseForValue(...values: unknown[]): string {
+  for (const value of values) {
+    const phase = normalizeNotificationText(value).toLowerCase();
+    if (TERMINAL_PHASES.has(phase)) {
+      return phase;
+    }
+  }
+  return "";
 }
 
 function notificationStatusForTerminalPhase(phase: string): string {
-  return ["ready", "completed", "done", "success"].includes(phase) ? "completed" : phase;
+  return SUCCESS_TERMINAL_STATUSES.has(phase) ? "completed" : phase;
+}
+
+export function sanitizeSessionLabel(raw: unknown, sessionId: string): string {
+  let text = normalizeNotificationText(raw);
+  text = text
+    .replace(/[A-Za-z]:\\[^\s]+/g, " ")
+    .replace(/\\\\[^\s]+/g, " ")
+    .replace(/(?:^|[\s(])\/(?:Users|home|tmp|var|etc|opt)[^\s]*/gi, " ")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length > 40) {
+    text = `${text.slice(0, 39)}…`;
+  }
+  if (text) {
+    return text;
+  }
+  const shortId = normalizeNotificationText(sessionId).replace(/^session-/, "").slice(0, 8);
+  return shortId ? `会话 ${shortId}` : "当前会话";
+}
+
+export function buildConversationNotificationCopy(options: {
+  sessionLabel: string;
+  terminalStatus: string;
+}): { title: string; body: string } {
+  const label = options.sessionLabel || "当前会话";
+  if (SUCCESS_TERMINAL_STATUSES.has(options.terminalStatus)) {
+    return {
+      title: "对话已完成",
+      body: `「${label}」已完成一轮回复。`,
+    };
+  }
+  return {
+    title: "对话已结束",
+    body: `「${label}」对话已结束。`,
+  };
+}
+
+function sessionLabelFromContext(
+  sessionId: string,
+  context: NotificationContext | undefined,
+  ...candidates: unknown[]
+): string {
+  return sanitizeSessionLabel(
+    candidates.find((value) => normalizeNotificationText(value)) || context?.sessionTitle || sessionId,
+    sessionId,
+  );
+}
+
+function shouldSuppressWhenFocused(sessionId: string, context?: NotificationContext): boolean {
+  const viewedSessionId = normalizeNotificationText(context?.viewedSessionId);
+  if (!viewedSessionId) {
+    return true;
+  }
+  return viewedSessionId === sessionId;
 }
 
 function latestAssistantTurnMessage(detail: SessionDetail): ConversationMessage | undefined {
@@ -92,27 +172,42 @@ function latestAssistantTurnMessage(detail: SessionDetail): ConversationMessage 
     if (message.role !== "assistant") {
       return false;
     }
-    const kind = normalizeText(message.metadata?.kind);
+    const kind = normalizeNotificationText(message.metadata?.kind);
     if (kind === "session_active_turn_layer" || kind === "session_live_overlay") {
       return false;
     }
-    return message.turnItems.some((item) => (
+    return message.turnItems?.some((item) => (
       (item.type === "agent_message" || item.type === "reasoning")
-      && Boolean(normalizeText(item.text))
+      && Boolean(normalizeNotificationText(item.text))
     ));
   });
 }
 
 function messageTurnId(message: ConversationMessage | undefined): string {
   if (message?.role === "assistant") {
-    return normalizeText(message.turnId);
+    return normalizeNotificationText(message.turnId);
   }
-  const raw = normalizeText(message?.metadata?.turnId);
+  const raw = normalizeNotificationText(message?.metadata?.turnId);
   return raw.startsWith("live:") ? raw.slice("live:".length) : raw;
 }
 
 function detailTurnId(detail: SessionDetail, latest: ConversationMessage | undefined): string {
-  return messageTurnId(latest) || normalizeText(latest?.id) || normalizeText(detail.lastTurnError?.turnId);
+  return messageTurnId(latest) || normalizeNotificationText(latest?.id) || normalizeNotificationText(detail.lastTurnError?.turnId);
+}
+
+export function parseConversationNotificationOpenPayload(raw: unknown): ConversationNotificationOpenPayload | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const payload = raw as { schemaVersion?: unknown; sessionId?: unknown };
+  if (payload.schemaVersion !== 1) {
+    return null;
+  }
+  const sessionId = normalizeNotificationText(payload.sessionId);
+  if (!sessionId || !/^[A-Za-z0-9._:-]{1,128}$/.test(sessionId)) {
+    return null;
+  }
+  return { schemaVersion: 1, sessionId };
 }
 
 export function browserDesktopNotificationBridge(globalLike: unknown = globalThis): DesktopBridge | undefined {
@@ -121,7 +216,30 @@ export function browserDesktopNotificationBridge(globalLike: unknown = globalThi
     return undefined;
   }
   const candidate = bridge as DesktopBridge;
-  return typeof candidate.notifyConversationCompleted === "function" ? candidate : undefined;
+  const hasNotify = typeof candidate.notifyConversationCompleted === "function";
+  const hasOpen = typeof candidate.onConversationNotificationOpened === "function";
+  if (!hasNotify && !hasOpen) {
+    return undefined;
+  }
+  return {
+    notifyConversationCompleted: hasNotify ? candidate.notifyConversationCompleted : undefined,
+    onConversationNotificationOpened: hasOpen ? candidate.onConversationNotificationOpened : undefined,
+  };
+}
+
+export function subscribeConversationNotificationOpened(
+  bridge: DesktopBridge | undefined,
+  onOpen: (sessionId: string) => void,
+): () => void {
+  if (typeof bridge?.onConversationNotificationOpened !== "function") {
+    return () => undefined;
+  }
+  return bridge.onConversationNotificationOpened((raw) => {
+    const parsed = parseConversationNotificationOpenPayload(raw);
+    if (parsed) {
+      onOpen(parsed.sessionId);
+    }
+  });
 }
 
 export function createDesktopConversationNotifier(
@@ -185,62 +303,125 @@ export function createDesktopConversationNotifier(
     });
   }
 
+  function emitSessionCompletion(input: {
+    sessionId: string;
+    turnId: string;
+    terminalStatus: string;
+    completedAt?: string;
+    sessionLabel: string;
+    suppressWhenFocused: boolean;
+  }): void {
+    const copy = buildConversationNotificationCopy({
+      sessionLabel: input.sessionLabel,
+      terminalStatus: input.terminalStatus,
+    });
+    emit({
+      schemaVersion: 1,
+      notificationKey: `${input.sessionId}:${input.turnId}:${input.terminalStatus}`,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      title: copy.title,
+      body: copy.body,
+      completedAt: input.completedAt,
+      terminalStatus: input.terminalStatus,
+      sessionLabel: input.sessionLabel,
+      suppressWhenFocused: input.suppressWhenFocused,
+    });
+  }
+
+  function observeSessionPhase(
+    sessionId: string,
+    busy: boolean,
+    terminalPhase: string,
+    onTerminal: () => void,
+  ): void {
+    const seen = lastBusyBySession.has(sessionId);
+    const wasBusy = lastBusyBySession.get(sessionId) ?? false;
+    lastBusyBySession.set(sessionId, busy);
+    if (!seen || busy || !wasBusy || !terminalPhase) {
+      return;
+    }
+    onTerminal();
+  }
+
   return {
     handleAssistantDelta(payload, context) {
       if (!payload.done) {
         return;
       }
 
-      const sessionId = normalizeText(payload.sessionId);
-      const turnId = normalizeText(payload.turnId);
+      const sessionId = normalizeNotificationText(payload.sessionId);
+      const turnId = normalizeNotificationText(payload.turnId);
       if (!sessionId || !turnId) {
         return;
       }
-
-      emit({
-        schemaVersion: 1,
-        notificationKey: `${sessionId}:${turnId}:completed`,
+      const sessionLabel = sessionLabelFromContext(sessionId, context);
+      emitSessionCompletion({
         sessionId,
         turnId,
-        title: SAFE_NOTIFICATION_TITLE,
-        body: SAFE_NOTIFICATION_BODY,
-        completedAt: normalizeText(payload.updatedAt) || undefined,
         terminalStatus: "completed",
+        completedAt: normalizeNotificationText(payload.updatedAt) || undefined,
+        sessionLabel,
+        suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
       });
+      // Stream owns the viewed session. Mark idle so the index poll cannot
+      // emit a second native notification with a recency-based key.
+      lastBusyBySession.set(sessionId, false);
     },
 
     handleSessionDetail(detail, context) {
-      const sessionId = normalizeText(detail.id);
+      const sessionId = normalizeNotificationText(detail.id);
       if (!sessionId) {
         return;
       }
 
-      const phase = normalizeText(detail.currentPhase || detail.status);
+      const phase = normalizeNotificationText(detail.currentPhase || detail.status);
       const busy = isBusyPhase(phase);
-      const terminalPhase = terminalPhaseForDetail(detail);
-      const wasBusy = lastBusyBySession.get(sessionId) ?? false;
-      lastBusyBySession.set(sessionId, busy);
-      if (busy || !wasBusy || !terminalPhase) {
-        return;
-      }
-      const terminalStatus = notificationStatusForTerminalPhase(terminalPhase);
-
-      const latest = latestAssistantTurnMessage(detail);
-      const turnId = detailTurnId(detail, latest);
-      if (!turnId) {
-        return;
-      }
-
-      emit({
-        schemaVersion: 1,
-        notificationKey: `${sessionId}:${turnId}:${terminalStatus}`,
-        sessionId,
-        turnId,
-        title: SAFE_NOTIFICATION_TITLE,
-        body: SAFE_NOTIFICATION_BODY,
-        completedAt: normalizeText(latest?.timestamp) || undefined,
-        terminalStatus,
+      const terminalPhase = terminalPhaseForValue(detail.currentPhase, detail.status);
+      observeSessionPhase(sessionId, busy, terminalPhase, () => {
+        const latest = latestAssistantTurnMessage(detail);
+        const turnId = detailTurnId(detail, latest);
+        if (!turnId) {
+          return;
+        }
+        emitSessionCompletion({
+          sessionId,
+          turnId,
+          terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
+          completedAt: normalizeNotificationText(latest?.timestamp) || undefined,
+          sessionLabel: sessionLabelFromContext(sessionId, context, detail.title, detail.agentDisplayName),
+          suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
+        });
       });
+    },
+
+    handleSessionSummaries(sessions, context) {
+      for (const session of sessions) {
+        const sessionId = normalizeNotificationText(session.id);
+        if (!sessionId) {
+          continue;
+        }
+        if (sessionId === normalizeNotificationText(context?.viewedSessionId)) {
+          continue;
+        }
+        const busy = isBusyPhase(session.currentPhase || session.status);
+        const terminalPhase = terminalPhaseForValue(session.currentPhase, session.status, session.lastTurnStatus);
+        observeSessionPhase(sessionId, busy, terminalPhase, () => {
+          const turnId = (
+            normalizeNotificationText(session.updatedAt)
+            || normalizeNotificationText(session.lastActive)
+            || "index"
+          );
+          emitSessionCompletion({
+            sessionId,
+            turnId,
+            terminalStatus: notificationStatusForTerminalPhase(terminalPhase),
+            completedAt: normalizeNotificationText(session.updatedAt || session.lastActive) || undefined,
+            sessionLabel: sessionLabelFromContext(sessionId, context, session.title, session.agentDisplayName),
+            suppressWhenFocused: shouldSuppressWhenFocused(sessionId, context),
+          });
+        });
+      }
     },
   };
 }
