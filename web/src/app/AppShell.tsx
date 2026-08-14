@@ -340,40 +340,11 @@ export function routeLocationKey(location: RouteLocationLike): string {
   return `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`;
 }
 
-export function routerLocationDesyncTarget(
-  browserLocation: RouteLocationLike,
-  routerLocation: RouteLocationLike,
-): string | null {
-  const browserTarget = routeLocationKey(browserLocation);
-  const routerTarget = routeLocationKey(routerLocation);
-  return browserTarget === routerTarget ? null : browserTarget;
-}
-
-export type RouterLocationDesyncRecoveryPlan = {
-  target: string;
-  restoreTarget: string;
-};
-
-export function routerLocationDesyncRecoveryPlan(
-  browserLocation: RouteLocationLike,
-  routerLocation: RouteLocationLike,
-): RouterLocationDesyncRecoveryPlan | null {
-  const browserTarget = routeLocationKey(browserLocation);
-  const routerTarget = routeLocationKey(routerLocation);
-  return browserTarget === routerTarget
-    ? null
-    : {
-        target: browserTarget,
-        restoreTarget: routerTarget,
-      };
-}
-
 const API_FAILURE_TELEMETRY_THROTTLE_MS = 15_000;
 const API_FAILURE_BACKGROUND_METHODS = new Set(["GET", "HEAD"]);
 const APP_VERSION = packageJson.version;
 const BROWSER_MEMORY_SAMPLE_INTERVAL_MS = 30_000;
 const PAGEHIDE_NETWORK_FAILURE_SUPPRESSION_MS = 2_500;
-const ROUTER_LOCATION_DESYNC_RECOVERY_DELAY_MS = 50;
 const RETURN_NAVIGATION_STACK_STORAGE_KEY = "vibelution:return-navigation-stack";
 
 function readStoredReturnNavigationStack(): ReturnNavigationEntry[] {
@@ -740,7 +711,6 @@ export function AppShell() {
   const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(getPageInstanceId());
-  const lastRouterLocationDesyncTargetRef = useRef<string | null>(null);
   const startupWarmupTelemetryStateRef = useRef<"active" | "inactive" | null>(null);
   const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
   const pagehideAtMsRef = useRef(0);
@@ -1042,54 +1012,10 @@ export function AppShell() {
     );
   }, []);
 
-  // Keep the latest router location for desync recovery without stale closures on delayed timers.
+  // Keep the latest router location for primary-nav telemetry and no-op click
+  // detection without stale closures.
   const routerLocationRef = useRef(location);
   routerLocationRef.current = location;
-
-  const recoverRouterLocationDesync = useCallback((trigger: string) => {
-    const routerLocation = routerLocationRef.current;
-    const recovery = routerLocationDesyncRecoveryPlan(window.location, routerLocation);
-    if (!recovery) {
-      lastRouterLocationDesyncTargetRef.current = null;
-      return;
-    }
-
-    const { target } = recovery;
-    const duplicateTarget = lastRouterLocationDesyncTargetRef.current === target;
-    lastRouterLocationDesyncTargetRef.current = target;
-    const recoveryFields = {
-      trigger,
-      target,
-      duplicateTarget,
-      browserPathnameBefore: window.location.pathname,
-      browserSearchBefore: window.location.search,
-      browserHashBefore: window.location.hash,
-      routerPathnameBefore: routerLocation.pathname,
-      routerSearchBefore: routerLocation.search,
-      routerHashBefore: routerLocation.hash,
-      restoreTarget: recovery.restoreTarget,
-    };
-    try {
-      window.history.replaceState(window.history.state, "", recovery.restoreTarget);
-    } catch {
-      // Keep the recovery best-effort; navigate still attempts to bring the router to the browser target.
-    }
-    navigate(target, { replace: true });
-    const emitRecoveredTelemetry = () => {
-      emitBrowserTelemetry({
-        phase: "navigation",
-        eventCode: "browser.router_location_desync.recovered",
-        message: `Recovered browser/router route desync to ${target}`,
-        level: duplicateTarget ? "info" : "warning",
-        fields: recoveryFields,
-      });
-    };
-    if (typeof window.requestAnimationFrame === "function") {
-      window.requestAnimationFrame(() => window.setTimeout(emitRecoveredTelemetry, 0));
-    } else {
-      window.setTimeout(emitRecoveredTelemetry, 0);
-    }
-  }, [emitBrowserTelemetry, navigate]);
 
   const navigatePrimaryNav = useCallback((to: string) => {
     emitBrowserTelemetry({
@@ -1778,20 +1704,6 @@ export function AppShell() {
   }, [emitBrowserTelemetry]);
 
   useEffect(() => {
-    let recoveryTimer: number | null = null;
-    const scheduleRecovery = (trigger: string) => {
-      if (recoveryTimer !== null) {
-        window.clearTimeout(recoveryTimer);
-      }
-      recoveryTimer = window.setTimeout(() => {
-        recoveryTimer = null;
-        recoverRouterLocationDesync(trigger);
-      }, ROUTER_LOCATION_DESYNC_RECOVERY_DELAY_MS);
-    };
-
-    const handleFocus = () => scheduleRecovery("window_focus");
-    const handlePageShow = () => scheduleRecovery("pageshow");
-    const handlePopState = () => scheduleRecovery("popstate");
     const handleDocumentClick = (event: MouseEvent) => {
       const navLink = shellNavAnchorFromEventTarget(event.target);
       if (navLink && !isModifiedPrimaryNavClick(event)) {
@@ -1802,46 +1714,14 @@ export function AppShell() {
           event.preventDefault();
           navigatePrimaryNav(to);
         }
-        return;
-      }
-      const target = event.target;
-      // Never fight intentional SPA navigation or shell controls — capture-phase
-      // desync recovery used to race NavLink clicks and snap the route back.
-      if (target instanceof Element) {
-        if (
-          target.closest(
-            '[data-shell-group="navigation"], [data-shell-group="mobile-navigation"], a[href], button, [role="link"], [role="button"]',
-          )
-        ) {
-          return;
-        }
-      }
-      scheduleRecovery("document_click");
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        scheduleRecovery("visibility_visible");
       }
     };
 
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("pageshow", handlePageShow);
-    window.addEventListener("popstate", handlePopState);
     window.addEventListener("click", handleDocumentClick, true);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    scheduleRecovery("app_shell_mounted");
-
     return () => {
-      if (recoveryTimer !== null) {
-        window.clearTimeout(recoveryTimer);
-      }
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("pageshow", handlePageShow);
-      window.removeEventListener("popstate", handlePopState);
       window.removeEventListener("click", handleDocumentClick, true);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [navigatePrimaryNav, recoverRouterLocationDesync]);
+  }, [navigatePrimaryNav]);
 
   useEffect(() => {
     const snapshotTimer = window.setTimeout(() => {

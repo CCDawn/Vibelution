@@ -200,10 +200,12 @@ import {
 import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useChatSessionSelection } from "./useChatSessionSelection";
+import { useChatRouteSelection } from "./useChatRouteSelection";
 import {
-  resolveAuthoritativeArchivedSessionIds,
-  shouldKeepExplicitSessionRouteOnNotFound,
-} from "./chatSessionRouteSync";
+  activeGroupRoomIdFromRouteSelection,
+  activeSessionIdFromRouteSelection,
+} from "./chatSelectionProjection";
+import { resolveAuthoritativeArchivedSessionIds } from "./chatSessionRouteSync";
 import {
   remainingAgentsAfterConfirmedArchive,
   restoreOptimisticallyArchivedAgent,
@@ -262,7 +264,6 @@ import {
   SESSION_DETAIL_INITIAL_MESSAGE_LIMIT,
   SESSION_DETAIL_HISTORY_PAGE_SIZE,
   fetchSessionDetailWindow,
-  isSessionNotFoundError,
   isSessionDetailHardLoading,
   latestVisibleTurnErrorMessage,
   prefetchSessionDetailWindow,
@@ -383,9 +384,20 @@ export function ChatCodingRoute() {
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const location = useLocation();
-  const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
+  // Committed React Router URL is the single authority for the current Chat selection.
+  const {
+    selection: chatRouteSelection,
+    openSession,
+    openRoom,
+    openProjectBus,
+    canonicalizeBareRoute,
+    replaceIfStillViewing,
+  } = useChatRouteSelection();
+  const activeSessionId = activeSessionIdFromRouteSelection(chatRouteSelection) || null;
+  const activeGroupRoomId = activeGroupRoomIdFromRouteSelection(chatRouteSelection);
+  const routeSelectionRef = useRef(chatRouteSelection);
+  routeSelectionRef.current = chatRouteSelection;
   const sessionWorkspaces = useChatWorkbenchStore((state) => state.sessionWorkspaces);
-  const setActiveSession = useChatWorkbenchStore((state) => state.setActiveSession);
   const hydrateSession = useChatWorkbenchStore((state) => state.hydrateSession);
   const removeSessionWorkspace = useChatWorkbenchStore((state) => state.removeSession);
   const closePreviewTab = useChatWorkbenchStore((state) => state.closePreviewTab);
@@ -393,7 +405,6 @@ export function ChatCodingRoute() {
   const latestDirectSessionSelectionAtRef = useRef(0);
   const directSessionSelectionGenerationRef = useRef(0);
   const retiredDirectSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
-  const reselectDirectSessionRef = useRef<(sessionId: string) => void>(() => undefined);
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
@@ -438,7 +449,6 @@ export function ChatCodingRoute() {
   const [rightIndexPanel, setRightIndexPanel] = useState<RightIndexPanel>("conversations");
   const [agentCreateWizardOpen, setAgentCreateWizardOpen] = useState(false);
   const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const [activeGroupRoomId, setActiveGroupRoomId] = useState("");
   const [expandedGroupAgentSessionIds, setExpandedGroupAgentSessionIds] = useState<string[]>([]);
   const [expandedGroupMessageIds, setExpandedGroupMessageIds] = useState<string[]>([]);
   const [groupTopicDraft, setGroupTopicDraft] = useState("");
@@ -584,7 +594,7 @@ export function ChatCodingRoute() {
   const [startupDetailSettledSessionId, setStartupDetailSettledSessionId] = useState("");
   const chatStartupWarmupActive = useStartupWarmup(chatStartupDataReady);
   const chatPollingVisible = pageVisible || chatStartupWarmupActive;
-  const projectBusActive = activeGroupRoomId === "__project_agent_bus__";
+  const projectBusActive = chatRouteSelection.kind === "project_bus";
   const groupPanelActive = Boolean(activeGroupRoomId);
   const standardGroupRoomActive = groupPanelActive && !projectBusActive;
   const {
@@ -622,6 +632,15 @@ export function ChatCodingRoute() {
     groupPanelActive,
     requestedSessionId,
   });
+
+  // Room / project-bus route commits sync panel chrome only (never navigation).
+  useEffect(() => {
+    if (chatRouteSelection.kind === "room" || chatRouteSelection.kind === "project_bus") {
+      setRightIndexPanel("members");
+      setRightPaneCollapsed(false);
+      setGroupRoomActionError("");
+    }
+  }, [chatRouteSelection.kind, setGroupRoomActionError, setRightIndexPanel, setRightPaneCollapsed]);
 
   useEffect(() => {
     if (!sessionContextMenu && !agentContextMenu) {
@@ -891,22 +910,10 @@ export function ChatCodingRoute() {
     describeError,
     syncSessionDetail,
     setSessionComposerErrors,
+    routeSessionId: activeSessionIdFromRouteSelection(chatRouteSelection),
     latestDirectSessionSelectionRef,
     latestDirectSessionSelectionAtRef,
     directSessionSelectionGenerationRef,
-    retiredDirectSessionIdsRef,
-    reselectDirectSessionRef,
-    activeSessionId,
-    setActiveSession,
-    activeGroupRoomId,
-    setActiveGroupRoomId,
-    requestedSessionId,
-    requestedRoomId,
-    bootstrapActiveSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
-    sessions: sessionsQuery.data,
-    setRightIndexPanel,
-    setRightPaneCollapsed,
-    setGroupRoomActionError,
   });
   const directSessionActiveSummary = useMemo(
     () => (activeSessionId ? sessionsQuery.data?.find((session) => session.id === activeSessionId) : undefined),
@@ -919,18 +926,20 @@ export function ChatCodingRoute() {
     ));
   }, [activeGroupRoomQuery.data?.status, standardGroupRoomActive]);
 
+  // Pending self-evolution handoff payloads only fill a draft for the explicit
+  // route target; they never select matchedSession || active || first.
   useEffect(() => {
     const pendingHandoff = loadPendingSelfEvolutionHandoff();
     if (!pendingHandoff || !sessionsQuery.data || sessionsQuery.data.length === 0) {
       return;
     }
     const matchedSession = sessionsQuery.data.find((item) => item.id === pendingHandoff.sessionId);
-    const targetSessionId = matchedSession?.id || activeSessionId || sessionsQuery.data[0]?.id || "";
+    const targetSessionId = matchedSession?.id || "";
     if (!targetSessionId) {
       return;
     }
     if (activeSessionId !== targetSessionId) {
-      setActiveSession(targetSessionId);
+      return;
     }
     setSessionDrafts((current) => ({
       ...current,
@@ -941,7 +950,7 @@ export function ChatCodingRoute() {
       [targetSessionId]: "",
     }));
     clearPendingSelfEvolutionHandoff();
-  }, [activeSessionId, sessionsQuery.data, setActiveSession]);
+  }, [activeSessionId, sessionsQuery.data]);
 
   // Do not cancel foreign session detail queries on switch — that aborts in-flight
   // loads for recently visited tabs and forces empty provisional shells on return.
@@ -1008,74 +1017,9 @@ export function ChatCodingRoute() {
     ),
     staleTime: 30_000,
   });
-  useEffect(() => {
-    if (
-      !activeSessionId
-      || !sessionsQuery.data
-      || !sessionDetailQuery.isError
-      || !isSessionNotFoundError(sessionDetailQuery.error)
-    ) {
-      return;
-    }
-    if (shouldKeepExplicitSessionRouteOnNotFound({
-      requestedSessionId,
-      activeSessionId,
-    })) {
-      // A workflow handoff is an exact audit anchor. Preserve its URL and the
-      // existing blocking error rather than making the user inspect another
-      // session after an authority failure.
-      return;
-    }
-    const nextActiveSessionId = sessionsQuery.data.find((session) => session.id !== activeSessionId)?.id || "";
-    clearSessionTransientUiState(activeSessionId);
-    forgetSessionDetailPaint(activeSessionId);
-    removeSessionWorkspace(activeSessionId, nextActiveSessionId || null);
-    if (nextActiveSessionId) {
-      setActiveSession(nextActiveSessionId);
-    }
-    if (nextActiveSessionId) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [nextActiveSessionId]: "",
-      }));
-    }
-    updateSessionSummaryCaches(queryClient, (sessions) =>
-      sessions?.filter((session) => session.id !== activeSessionId),
-    );
-    queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-      removeDeletedSessionFromConversations(conversations, activeSessionId),
-    );
-    setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== activeSessionId));
-    if (requestedSessionId === activeSessionId) {
-      const nextSearchParams = new URLSearchParams(location.search);
-      if (nextActiveSessionId) {
-        nextSearchParams.set("session", nextActiveSessionId);
-      } else {
-        nextSearchParams.delete("session");
-      }
-      const nextSearch = nextSearchParams.toString();
-      navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
-    }
-    if (nextActiveSessionId) {
-      void chatWorkspaceCache.refreshSessionRuntime(nextActiveSessionId);
-    } else {
-      void chatWorkspaceCache.refreshConversationIndex();
-    }
-  }, [
-    activeSessionId,
-    chatWorkspaceCache,
-    clearSessionTransientUiState,
-    queryClient,
-    location.pathname,
-    location.search,
-    navigate,
-    removeSessionWorkspace,
-    requestedSessionId,
-    sessionDetailQuery.error,
-    sessionDetailQuery.isError,
-    sessionsQuery.data,
-    setActiveSession,
-  ]);
+  // Explicit missing/archived session keeps its URL and renders the blocking
+  // unavailable surface. Background misses must never fall back to another
+  // session and must never navigate.
   const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary);
   const childSessionLiveQueryPolicy = resolveChatLiveQueryPolicy({
     ...chatLiveQueryPolicyInput,
@@ -1190,9 +1134,12 @@ export function ChatCodingRoute() {
     syncChatRoomDetail,
     clearSessionTransientUiState,
     removeSessionWorkspace,
-    setActiveSession,
-    activeGroupRoomId,
-    setActiveGroupRoomId,
+    routeSelectionRef,
+    chatRoute: {
+      openSession,
+      openRoom,
+      replaceIfStillViewing,
+    },
     setRightIndexPanel,
     setSelectedAgentId,
     setSessionFilter,
@@ -1251,22 +1198,16 @@ export function ChatCodingRoute() {
   });
 
   const retireArchivedAgentSessions = useChatArchivedAgentRetirement({
-    activeSessionId,
     clearSessionTransientUiState,
     directSessionSelectionGenerationRef,
     forgetSessionDetailPaint,
-    latestDirectSessionSelectionAtRef,
-    latestDirectSessionSelectionRef,
-    pathname: location.pathname,
-    navigate,
     queryClient,
     removeSessionWorkspace,
     requestedSessionId,
     retiredDirectSessionIdsRef,
-    setActiveSession,
     setSelectedAgentId,
     setSessionComposerErrors,
-    search: location.search,
+    chatRoute: { replaceIfStillViewing },
   });
 
   const {
@@ -2544,17 +2485,28 @@ export function ChatCodingRoute() {
       || "",
     ).trim();
   }, [activeSessionId, directSessionActiveSummary?.agentId, sessionDetailQuery.data?.agentId, sessionsById]);
-  useChatSelectionPersistence({
-    requestedSessionId,
-    requestedRoomId,
-    activeSessionId,
+  const { bareRouteBootstrapTarget } = useChatSelectionPersistence({
+    selection: chatRouteSelection,
+    serverSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
     activeSessionAgentId,
     selectedAgentId,
     sessions: sessionsQuery.data,
-    setActiveSession,
-    setSelectedAgentId,
-    reselectDirectSession: (sessionId) => reselectDirectSessionRef.current(sessionId),
   });
+
+  // Bare `/chat` canonicalizes once per location key, only after the session
+  // directory is authoritative. Explicit routes always skip bootstrap.
+  useEffect(() => {
+    if (!sessionsQuery.data) {
+      return;
+    }
+    if (chatRouteSelection.kind !== "bare") {
+      return;
+    }
+    if (!bareRouteBootstrapTarget) {
+      return;
+    }
+    canonicalizeBareRoute(bareRouteBootstrapTarget);
+  }, [bareRouteBootstrapTarget, canonicalizeBareRoute, chatRouteSelection.kind, sessionsQuery.data]);
   const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
   const selectedAgentSessionsQuery = useQuery({
     queryKey: ["sessions", "agent", selectedChatAgentId],
@@ -2749,16 +2701,13 @@ export function ChatCodingRoute() {
   } = useChatWorkspaceActions({
     lang,
     t,
-    navigate,
+    chatRoute: {
+      openSession,
+      openRoom,
+      openProjectBus,
+    },
     queryClient,
     chatWorkspaceCache,
-    latestDirectSessionSelectionRef,
-    latestDirectSessionSelectionAtRef,
-    reselectDirectSessionRef,
-    activeSessionId,
-    setActiveSession,
-    activeGroupRoomId,
-    setActiveGroupRoomId,
     setRightIndexPanel,
     setRightPaneCollapsed,
     setSelectedAgentId,

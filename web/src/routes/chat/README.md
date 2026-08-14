@@ -13,6 +13,31 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 ChatCodingRoute.tsx → re-export ChatCodingRouteWorkbench
 ```
 
+## Route selection authority (ADR 0009)
+
+The committed React Router URL is the **single authority** for the current
+Chat surface. Rules:
+
+- Only `useChatRouteSelection.ts` writes Chat routes:
+  `openSession` / `openRoom` / `openProjectBus` / `canonicalizeBareRoute` /
+  `replaceIfStillViewing`. No other module may build `/chat?session=` or
+  `/chat?room=` navigation, call `window.history.pushState/replaceState`, or
+  store an active session in Zustand/local state.
+- `chatSelectionProjection.ts` owns the `ChatRouteSelection` discriminated
+  union (`session` / `room` / `project_bus` / `bare` / `invalid`) and the pure
+  serialize/compare helpers; `activeSessionId` / `activeGroupRoomId` are
+  derived locally from the route only.
+- Async lifecycle results (create temp→real, delete, archive, clear history,
+  group create/delete, late `/select`) must compare-and-swap via
+  `replaceIfStillViewing`; a user who already navigated away keeps their page
+  and only caches are updated.
+- Explicit missing/archived session URLs stay put and render the unavailable
+  surface; bare `/chat` canonicalizes once per `location.key` from
+  localStorage → server pointer → first visible session.
+- `chatWorkbenchStore` keeps per-session workspaces only (tabs, draft). Machine
+  gates: `chatRouteWriteBoundary.test.ts`, `useChatRouteSelection.test.tsx`,
+  `useChatSessionSelection.test.tsx`, `AppShellNavigationTelemetry.test.ts`.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |
@@ -30,8 +55,7 @@ ChatCodingRoute.tsx → re-export ChatCodingRouteWorkbench
 | Desktop conversation completion notifications | `../chatDesktopNotifications.ts` + `useDesktopConversationAttention.ts` | second EventSource, backend Windows APIs |
 | Group room SSE (sole EventSource) | `useGroupRoomStream.ts` | second group EventSource, session stream |
 | Catalog / secondary queries (runtime·pet·index·teams·skills·rooms) | `useChatWorkbenchCatalogQueries.ts` | session detail SSE, composer submit |
-| Session select / URL / bootstrap | `useChatSessionSelection.ts` | EventSource ownership |
-| Session detail window / ledger / conversation merge | `chatSessionDetailHelpers.ts` | stream EventSource |
+| Session select / URL / bootstrap | `useChatSessionSelection.ts` (committed-route preference sync) | EventSource ownership || Session detail window / ledger / conversation merge | `chatSessionDetailHelpers.ts` | stream EventSource |
 | Labels / avatar / group message presentation | `chatRoutePresentation.tsx` | mutations / stream |
 | Session/group lifecycle mutations | `useChatWorkspaceLifecycle.ts` | EventSource, composer submit |
 | Session detail mutations (reasoning/history/tool/pet) | `useChatSessionDetailMutations.ts` | EventSource, lifecycle |

@@ -1,5 +1,4 @@
-import { useEffect, useRef } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import type { SessionSummary } from "../../api/types";
 import { isVisibleDirectSession } from "../conversationIndexModel";
@@ -7,17 +6,18 @@ import {
   chatSelectionStorageKey,
   normalizeChatSelection,
   readStoredChatSelection,
-  resolveChatSelection,
   writeStoredChatSelection,
   type ChatSelectionProjection,
   type ChatSelectionStorage,
+  type ChatRouteSelection,
 } from "./chatSelectionProjection";
 
 /**
  * The desktop workbench is a single-operator project. Keep this namespace
- * stable across restarts so a tab switch survives a reload without coupling
- * the projection to a transient in-memory route instance. Browser storage is
- * still origin-scoped; cross-origin sync belongs to the server preference lane.
+ * stable across restarts so the last-viewed session survives a reload without
+ * coupling the projection to a transient in-memory route instance. Browser
+ * storage is still origin-scoped; cross-origin sync belongs to the server
+ * preference lane.
  */
 export const CHAT_SELECTION_STORAGE_KEY = chatSelectionStorageKey("vibelution", "operator");
 
@@ -29,15 +29,20 @@ type DirectSelectionAvailability = {
 };
 
 type UseChatSelectionPersistenceOptions = {
-  requestedSessionId: string;
-  requestedRoomId: string;
-  activeSessionId?: string | null;
+  /** Committed Chat route selection (single authority). */
+  selection: ChatRouteSelection;
+  /** Backend last-viewed session (bare bootstrap hint only). */
+  serverSessionId: string | null | undefined;
   activeSessionAgentId: string;
   selectedAgentId: string;
   sessions: SessionSummary[] | undefined;
-  setActiveSession: (sessionId: string) => void;
-  setSelectedAgentId: Dispatch<SetStateAction<string>>;
-  reselectDirectSession?: (sessionId: string) => void;
+};
+
+type UseChatSelectionPersistenceResult = {
+  /** Stored last-viewed preference (read once; never a navigation input). */
+  storedSelection: Partial<ChatSelectionProjection> | null;
+  /** Bare-route bootstrap candidate, valid only after the session directory is authoritative. */
+  bareRouteBootstrapTarget: ChatRouteSelection | null;
 };
 
 function availabilityFromSessions(sessions: SessionSummary[]): DirectSelectionAvailability {
@@ -76,7 +81,7 @@ function chatSelectionStorage(): Storage | undefined {
 
 /**
  * Server `active_conversation_id` must not paint before a still-valid local
- * viewing pointer can restore. Running recency on the server must not win.
+ * last-viewed pointer can restore. Running recency on the server must not win.
  */
 export function storedChatSelectionBlocksServerBootstrap(
   sessions: SessionSummary[] | undefined,
@@ -109,34 +114,73 @@ export function resolveStoredDirectChatSelection(
   ) {
     return null;
   }
-  const resolved = resolveChatSelection({
-    local: stored,
-    availability: availabilityFromSessions(sessions),
-  });
-  return resolved.source === "local" && resolved.selection.sessionId === requestedSessionId
-    ? normalizeChatSelection(resolved.selection)
-    : null;
+  const availability = availabilityFromSessions(sessions);
+  const agentId = cleanAgentForSession(requestedSessionId, stored?.agentId, availability);
+  return normalizeChatSelection({ sessionId: requestedSessionId, agentId });
+}
+
+function cleanAgentForSession(
+  sessionId: string,
+  candidateAgentId: string | null | undefined,
+  availability: DirectSelectionAvailability,
+): string {
+  const canonicalAgentId = availability.sessionsById.get(sessionId) ?? "";
+  const candidate = String(candidateAgentId || "").trim();
+  if (canonicalAgentId) {
+    return canonicalAgentId;
+  }
+  return availability.agentIds.has(candidate) ? candidate : "";
 }
 
 /**
- * Restores the last valid direct Agent/session only when the canonical session
- * index is available. Explicit URL targets always win and no stale local id is
- * ever sent to the session selection endpoint.
+ * Bare `/chat` bootstrap priority (one-shot, only after the session directory
+ * is authoritative):
+ *
+ * 1. valid localStorage last-viewed session
+ * 2. valid backend last-viewed session
+ * 3. first visible direct session
+ * 4. no candidate — keep the bare route and show the empty surface
+ */
+export function resolveBareRouteBootstrapTarget(options: {
+  stored: Partial<ChatSelectionProjection> | null | undefined;
+  serverSessionId: string | null | undefined;
+  sessions: SessionSummary[] | undefined;
+}): ChatRouteSelection | null {
+  const sessions = options.sessions;
+  if (!sessions) {
+    return null;
+  }
+  const visibility = availabilityFromSessions(sessions);
+  const storedTarget = resolveStoredDirectChatSelection(options.stored ?? null, sessions);
+  if (storedTarget?.sessionId) {
+    return { kind: "session", sessionId: storedTarget.sessionId };
+  }
+  const serverSessionId = String(options.serverSessionId || "").trim();
+  if (serverSessionId && visibility.sessionsById.has(serverSessionId)) {
+    return { kind: "session", sessionId: serverSessionId };
+  }
+  const firstSessionId = String(visibility.firstSessionId || "").trim();
+  if (firstSessionId) {
+    return { kind: "session", sessionId: firstSessionId };
+  }
+  return null;
+}
+
+/**
+ * localStorage is a last-viewed preference only:
+ *
+ * - bare route: provide the bootstrap candidate (explicit routes always skip it);
+ * - committed session route: passively write the preference back;
+ * - room / project bus / invalid routes: no read that can drive navigation.
  */
 export function useChatSelectionPersistence({
-  requestedSessionId,
-  requestedRoomId,
-  activeSessionId,
+  selection,
+  serverSessionId,
   activeSessionAgentId,
   selectedAgentId,
   sessions,
-  setActiveSession,
-  setSelectedAgentId,
-  reselectDirectSession,
-}: UseChatSelectionPersistenceOptions): void {
+}: UseChatSelectionPersistenceOptions): UseChatSelectionPersistenceResult {
   const storedSelectionRef = useRef<Partial<ChatSelectionProjection> | null | undefined>(undefined);
-  const restoreSettledRef = useRef(false);
-  const skipPersistOnceRef = useRef(false);
 
   useEffect(() => {
     if (storedSelectionRef.current !== undefined) {
@@ -145,60 +189,37 @@ export function useChatSelectionPersistence({
     storedSelectionRef.current = readStoredChatSelection(chatSelectionStorage(), CHAT_SELECTION_STORAGE_KEY);
   }, []);
 
-  useEffect(() => {
-    if (restoreSettledRef.current) {
-      return;
+  const bareRouteBootstrapTarget = useMemo(() => {
+    if (selection.kind !== "bare") {
+      return null;
     }
-    if (requestedSessionId || requestedRoomId) {
-      restoreSettledRef.current = true;
-      return;
-    }
-    if (!sessions) {
-      return;
-    }
+    return resolveBareRouteBootstrapTarget({
+      stored: storedSelectionRef.current ?? null,
+      serverSessionId,
+      sessions,
+    });
+  }, [selection.kind, serverSessionId, sessions]);
 
-    const storedSelection = resolveStoredDirectChatSelection(storedSelectionRef.current ?? null, sessions);
-    restoreSettledRef.current = true;
-    if (!storedSelection?.sessionId) {
-      return;
-    }
-    setSelectedAgentId(storedSelection.agentId || "");
-    if (storedSelection.sessionId !== String(activeSessionId || "").trim()) {
-      skipPersistOnceRef.current = true;
-      setActiveSession(storedSelection.sessionId);
-      reselectDirectSession?.(storedSelection.sessionId);
-    }
-  }, [
-    activeSessionId,
-    requestedRoomId,
-    requestedSessionId,
-    sessions,
-    reselectDirectSession,
-    setActiveSession,
-    setSelectedAgentId,
-  ]);
-
+  // Passively persist the committed direct session (never reads back into navigation).
+  const committedSessionId = selection.kind === "session" ? selection.sessionId : "";
   useEffect(() => {
-    if (!restoreSettledRef.current) {
-      return;
-    }
-    if (skipPersistOnceRef.current) {
-      skipPersistOnceRef.current = false;
-      return;
-    }
-    const sessionId = String(activeSessionId || "").trim();
-    if (!sessionId) {
+    if (!committedSessionId) {
       return;
     }
     const knownSession = sessions?.some(
-      (session) => String(session.id || "").trim() === sessionId && isVisibleDirectSession(session),
+      (session) => String(session.id || "").trim() === committedSessionId && isVisibleDirectSession(session),
     );
     if (sessions && !knownSession) {
       return;
     }
     writeStoredChatSelection(chatSelectionStorage(), CHAT_SELECTION_STORAGE_KEY, normalizeChatSelection({
       agentId: activeSessionAgentId || selectedAgentId,
-      sessionId,
+      sessionId: committedSessionId,
     }));
-  }, [activeSessionAgentId, activeSessionId, selectedAgentId, sessions]);
+  }, [activeSessionAgentId, committedSessionId, selectedAgentId, sessions]);
+
+  return {
+    storedSelection: storedSelectionRef.current ?? null,
+    bareRouteBootstrapTarget,
+  };
 }

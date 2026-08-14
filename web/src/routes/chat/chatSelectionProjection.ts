@@ -7,7 +7,107 @@ export type ChatSelectionProjection = {
   tabId: string | null;
 };
 
-export type ChatSelectionSource = "url" | "local" | "server" | "default";
+/**
+ * Route-only active selection (single authority).
+ *
+ * The committed React Router URL is the only source of the current Chat
+ * surface. `session` / `room` / `project_bus` are mutually exclusive route
+ * targets; `bare` is the uncapped `/chat` entry; `invalid` is an explicit URL
+ * that cannot be interpreted and must render an unavailable surface instead of
+ * silently selecting another session.
+ */
+export type ChatRouteSelection =
+  | { kind: "session"; sessionId: string }
+  | { kind: "room"; roomId: string }
+  | { kind: "project_bus" }
+  | { kind: "bare" }
+  | { kind: "invalid"; reason: string };
+
+/** Explicit Project Agent Bus route target (not a local sentinel). */
+export const PROJECT_AGENT_BUS_ROOM_ID = "__project_agent_bus__";
+
+export function parseChatRouteSelection(search: string): ChatRouteSelection {
+  const params = new URLSearchParams(search);
+  const sessionId = cleanId(params.get("session"));
+  const roomId = cleanId(params.get("room"));
+  if (sessionId && roomId) {
+    return { kind: "invalid", reason: "conflicting_session_and_room" };
+  }
+  if (roomId === PROJECT_AGENT_BUS_ROOM_ID) {
+    return { kind: "project_bus" };
+  }
+  if (roomId) {
+    return { kind: "room", roomId };
+  }
+  if (sessionId) {
+    return { kind: "session", sessionId };
+  }
+  return { kind: "bare" };
+}
+
+/**
+ * Serialize a chat route target while preserving unrelated query params
+ * (focusTask / focusTurn / returnTo / returnLabel / filter …). Only the
+ * session/room selection keys are owned by the Chat route domain.
+ */
+export function serializeChatRouteSelection(search: string, selection: ChatRouteSelection): string {
+  const params = new URLSearchParams(search);
+  params.delete("session");
+  params.delete("room");
+  if (selection.kind === "session") {
+    params.set("session", selection.sessionId);
+  } else if (selection.kind === "room") {
+    params.set("room", selection.roomId);
+  } else if (selection.kind === "project_bus") {
+    params.set("room", PROJECT_AGENT_BUS_ROOM_ID);
+  }
+  const encoded = params.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
+/** Comparable route identity for compare-and-swap transitions. */
+export function chatRouteSelectionKey(selection: ChatRouteSelection): string {
+  switch (selection.kind) {
+    case "session":
+      return `session:${selection.sessionId}`;
+    case "room":
+      return `room:${selection.roomId}`;
+    case "project_bus":
+      return "room:__project_agent_bus__";
+    case "bare":
+      return "bare";
+    case "invalid":
+      return `invalid:${selection.reason}`;
+  }
+}
+
+export function chatRouteSelectionsEqual(
+  current: ChatRouteSelection,
+  expected: ChatRouteSelection,
+): boolean {
+  if (current.kind !== expected.kind) {
+    return false;
+  }
+  switch (current.kind) {
+    case "session":
+      return expected.kind === "session" && current.sessionId === expected.sessionId;
+    case "room":
+      return expected.kind === "room" && current.roomId === expected.roomId;
+    default:
+      return true;
+  }
+}
+
+export function activeSessionIdFromRouteSelection(selection: ChatRouteSelection): string {
+  return selection.kind === "session" ? selection.sessionId : "";
+}
+
+export function activeGroupRoomIdFromRouteSelection(selection: ChatRouteSelection): string {
+  if (selection.kind === "project_bus") {
+    return PROJECT_AGENT_BUS_ROOM_ID;
+  }
+  return selection.kind === "room" ? selection.roomId : "";
+}
 
 export type ChatSelectionAvailability = {
   agentIds?: ReadonlySet<string>;
@@ -15,6 +115,8 @@ export type ChatSelectionAvailability = {
   firstAgentId?: string | null;
   firstSessionId?: string | null;
 };
+
+export type ChatSelectionSource = "url" | "local" | "server" | "default";
 
 export type ChatSelectionStorage = Pick<Storage, "getItem" | "setItem">;
 
