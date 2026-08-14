@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionSummary } from "../../api/types";
-import { resolveStoredDirectChatSelection } from "./useChatSelectionPersistence";
+import {
+  resolveStoredDirectChatSelection,
+  storedChatSelectionBlocksServerBootstrap,
+} from "./useChatSelectionPersistence";
 
 const sessions: SessionSummary[] = [
   {
@@ -69,5 +72,22 @@ describe("useChatSelectionPersistence", () => {
       agentId: "agent-luna",
       sessionId: "session-luna-1",
     }, [archived, sessions[1]])).toBeNull();
+  });
+
+  it("blocks server bootstrap while a stored viewing session can still restore", () => {
+    const storage = {
+      getItem: () => JSON.stringify({ sessionId: "session-luna-1", agentId: "agent-luna" }),
+      setItem: () => undefined,
+    };
+    expect(storedChatSelectionBlocksServerBootstrap(undefined, storage)).toBe(true);
+    expect(storedChatSelectionBlocksServerBootstrap(sessions, storage)).toBe(true);
+    expect(storedChatSelectionBlocksServerBootstrap(sessions, {
+      getItem: () => JSON.stringify({ sessionId: "session-removed" }),
+      setItem: () => undefined,
+    })).toBe(false);
+    expect(storedChatSelectionBlocksServerBootstrap(sessions, {
+      getItem: () => null,
+      setItem: () => undefined,
+    })).toBe(false);
   });
 });

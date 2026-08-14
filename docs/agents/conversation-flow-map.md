@@ -51,10 +51,13 @@
 
 | 事实 | canonical source | 派生面 |
 | --- | --- | --- |
-| session 目录/索引（创建、标题、归档、父子、recency、status、kind/visibility、有界 preview） | `workspace/chat/conversations.sqlite3`，通过 `ConversationStore` + `session/directory_runtime.py` | session list/`query_sessions`、taskSummary、lastActive。列表禁止扫描 `turn_journal.jsonl`。 |
+| session 目录/索引（创建、标题、归档、父子、recency、status、kind/visibility、有界 preview） | `workspace/chat/conversations.sqlite3`，通过 `ConversationStore` + `session/directory_runtime.py` | session list/`query_sessions`、taskSummary、lastActive、`createdAt`。列表禁止扫描 `turn_journal.jsonl`。列表按 recency 排序，**不得把 `active_conversation_id` pin 到第一位**。 |
+| 操作者正在看的会话（viewing pointer） | `active_conversation_id`；只由 `POST /api/sessions/{id}/select`、用户创建并激活（`activate=true`）、删除后的 fallback 写入 | submit / edit-resubmit / CLI wake / `ensure_agent_direct_session` 修复 / 子会话默认 `switch_to_child=false` **不得**改写。前端选中态以 local 恢复与 `/select` 为准，不被 running recency 覆盖。 |
+| Agent 顶栏 Tab 顺序 | 会话 `createdAt` 升序，缺省再 `id`（前端 `compareAgentSessionTabOrder`） | `updatedAt` / `lastActive` 只表示活动/绿圈，不决定 Tab 顺序。 |
 | session 控制态与热路径薄壳（submit/detail 仍读 compatibility document） | `workspace/chat/conversations.sqlite3` 的 `workspace_chat_state` / `session_runtime_state`；大诊断快照单独存于 `session_debug_snapshots`，通过 `core/ui/chat_state.py` 兼容 API 访问 | running/error 壳、active session、submit 定位与 experiment binding overlay。正常运行不再读写 `chat_state.json`。 |
 | turn transcript/replay 事实 | `turn_journal.jsonl`，通过 `core/chat/turn_journal.py` | model-visible messages、`SessionDetail.messages`、native transcript/timeline 投影。 |
 | 运行中 assistant text/thought/tools | `SessionLiveOutputState` 和可选 live-output checkpoint | `assistant_delta` SSE、live overlay message、active-turn layer。 |
+| 多会话 live work-run | 内存 `_RUNNING_SESSION_IDS` → `workRuns.activeItems.chat_turn`（顺序稳定） | 绿圈 / tool-approval busy。`workRuns.active.chat_turn` 是单槽遗留，不得当选中态或唯一 running。runtime summary 轮询不得为 live status 抢 `chat_state` 锁。 |
 | 最终 assistant 回复 | `turn_journal.jsonl` 里的 `assistant_item_committed` / final answer | 持久 `SessionDetail.messages.turnItems`；`content` 为兼容镜像；`codexTranscript` 由 items 单向派生。 |
 | transport 顺序保护 | session ledger sequence 生成的 `ledgerSeq` | 前端 stale-event rejection 与 active-turn settlement。 |
 | runtime 调试证据 | `logs/runtime_scenes/**`、`log_info/**`、work-run records | 诊断包；不能替代 journal。 |

@@ -1109,29 +1109,17 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
 
 
 def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
-    s = _service()
-    if not session_ids:
-        return {}
-    session_id_set = set(session_ids)
-    statuses: dict[str, str] = {}
-    try:
-        with s._CHAT_STATE_LOCK:
-            payload = s.load_chat_state(s.PROJECT_ROOT)
-            conversations = payload.get("conversations") if isinstance(payload, dict) else []
-            for conversation in conversations if isinstance(conversations, list) else []:
-                if not isinstance(conversation, dict):
-                    continue
-                session_id = str(conversation.get("conversation_id") or "").strip()
-                if session_id not in session_id_set:
-                    continue
-                status = str(
-                    conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or ""
-                ).strip().lower()
-                if status in {"queued", "running", "stopping"}:
-                    statuses[session_id] = status
-    except Exception:
-        return {}
-    return statuses
+    """Map live session ids to a work-run status without touching chat_state.
+
+    Runtime summary polls this on the hot path while submit/select hold
+    ``_CHAT_STATE_LOCK``. The in-memory running set already selected
+    ``session_ids``; queued/stopping can stay ``running`` for lease/UI dots.
+    """
+    return {
+        session_id: "running"
+        for session_id in session_ids
+        if str(session_id or "").strip()
+    }
 
 
 def load_chat_turn_work_run_summary() -> dict[str, Any]:

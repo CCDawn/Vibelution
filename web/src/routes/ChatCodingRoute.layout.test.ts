@@ -402,7 +402,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.sessionToolApprovals");
     expect(routeSource).toContain("listPendingSessionToolApprovals");
     expect(chatApiSource).toContain("/tool-approvals?status=pending");
-    expect(routeSource).toContain("runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId");
+    expect(routeSource).toContain("runtimeHasChatTurnForSession(runtime, activeSessionId)");
     expect(routeSource).toContain("sessionToolApprovalRuntimeActive");
     expect(routeSource).toContain("resolveToolApprovalMutation");
     expect(routeAndDetailMutationsSource).toContain("resolveSessionToolApprovalDecision");
@@ -2437,6 +2437,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("chatRouteLongTaskCountRef.current >= 8");
     expect(routeSource).toContain("runtimeReady: Boolean(runtimeQuery.data)");
     expect(routeSource).toContain("sessionDetailReady: Boolean(activeSessionId ? sessionDetailQuery.data : true)");
+    expect(chatWorkbenchCatalogQueriesSource).toContain("shareRuntimeSummaryIfOnlyVolatileChanged");
+    expect(chatWorkbenchCatalogQueriesSource).toContain("structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged");
   });
 
   it("does not block chat startup readiness on secondary dashboard data", () => {
@@ -2755,8 +2757,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const selectedAgentVisibleSessions = useMemo");
     expect(routeSource).toContain("const agentSessionTabs = useMemo");
     expect(routeSource).toContain("sessions: [...(selectedAgentSessionsQuery.data?.items ?? []), ...selectedAgentVisibleSessions]");
-    expect(routeAndSessionSurfaceSource).toContain('String(right.updatedAt || right.lastActive || "")');
-    expect(routeAndSessionSurfaceSource).toContain(".localeCompare(String(left.updatedAt || left.lastActive || \"\"))");
+    expect(routeAndSessionSurfaceSource).toContain("compareAgentSessionTabOrder");
+    expect(routeAndSessionSurfaceSource).toContain("leftCreated.localeCompare(rightCreated)");
+    expect(routeAndSessionSurfaceSource).not.toContain('String(right.updatedAt || right.lastActive || "")');
     expect(routeAndSessionSurfaceSource).not.toContain("isChildSession(left) ? 2 : 1");
     expect(routeSource).toContain("buildAgentSessionTabs");
     expect(conversationIndexModelSource).toContain("mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions)");
@@ -3305,6 +3308,7 @@ describe("ChatCodingRoute layout contract", () => {
       routeAndSelectionSource.indexOf("useEffect(() => {", bootstrapEffectStart + 1),
     );
     expect(bootstrapEffect).toContain("requestedSessionId || requestedRoomId || activeSessionId");
+    expect(bootstrapEffect).toContain("storedChatSelectionBlocksServerBootstrap(sessions)");
     expect(bootstrapEffect).toContain('setActiveGroupRoomId("")');
     expect(bootstrapEffect).toContain("setActiveSession(bootstrapSessionId)");
     expect(bootstrapEffect).not.toContain("sessionsQuery.data");

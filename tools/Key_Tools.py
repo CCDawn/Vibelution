@@ -1465,7 +1465,7 @@ def _build_key_tools() -> List[BaseTool]:
         constraints: str = "",
         excluded_context_summary: str = "",
         auto_start: bool = True,
-        switch_to_child: bool = True,
+        switch_to_child: bool = False,
         parent_session_id: str = "",
     ) -> str:
         """

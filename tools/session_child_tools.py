@@ -58,7 +58,7 @@ def create_child_session_tool(
     constraints: Any = "",
     excluded_context_summary: str = "",
     auto_start: bool = True,
-    switch_to_child: bool = True,
+    switch_to_child: bool = False,
     parent_session_id: str = "",
 ) -> str:
     """Create a child session under the current chat session and optionally start it."""

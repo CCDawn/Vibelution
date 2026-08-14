@@ -269,6 +269,22 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("data-session-tab-status-slot");
   });
 
+  it("hides completed light on the open session even when a file tab is selected", () => {
+    const done = session({
+      id: "session-done",
+      status: "completed",
+      taskSummary: "done report",
+      updatedAt: "2026-06-11T00:00:00.000Z",
+    });
+    const markup = renderStrip({
+      activeSessionId: done.id,
+      workspaceActiveTab: "src/foo.ts",
+      sessions: [done],
+    });
+    expect(markup).not.toContain("agentSessionTabStatusCompleted");
+    expect(markup).toContain("data-session-tab-status-slot");
+  });
+
   it("renders the rename input for the edited session", () => {
     const markup = renderStrip({
       editingSessionId: "session-child",

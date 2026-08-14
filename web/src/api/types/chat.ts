@@ -31,6 +31,8 @@ export type SessionSummary = {
   taskSummary: string;
   lastActive: string;
   updatedAt: string;
+  /** Stable create timestamp for tab order; must not change with running activity. */
+  createdAt?: string;
   currentPhase: string;
   /** Session is retained in storage but intentionally absent from normal chat navigation. */
   hiddenFromIndex?: boolean;

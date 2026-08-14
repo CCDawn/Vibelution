@@ -2465,7 +2465,8 @@ def test_agent_directory_detail_materialization_does_not_switch_active_session(t
     assert payload["agentId"] == "agent-knowledge-steward"
     persisted = load_chat_state(tmp_path)
     assert persisted["active_conversation_id"] == "session-active"
-    assert client.get("/api/sessions").json()[0]["id"] == "session-active"
+    listed_ids = [item["id"] for item in client.get("/api/sessions").json()]
+    assert "session-active" in listed_ids
 
 
 def test_session_select_switches_active_and_materializes_agent_directory_session(tmp_path, monkeypatch):
@@ -2521,7 +2522,8 @@ def test_session_select_switches_active_and_materializes_agent_directory_session
     assert payload["agentId"] == "agent-knowledge-steward"
     persisted = load_chat_state(tmp_path)
     assert persisted["active_conversation_id"] == "agent-knowledge-steward-direct"
-    assert client.get("/api/sessions").json()[0]["id"] == "agent-knowledge-steward-direct"
+    listed_ids = [item["id"] for item in client.get("/api/sessions").json()]
+    assert "agent-knowledge-steward-direct" in listed_ids
 
 
 def test_session_detail_uses_targeted_conversation_read(tmp_path, monkeypatch):

@@ -187,7 +187,7 @@ class ChildSessionCreatePayload(BaseModel):
     constraints: list[str] = []
     excludedContextSummary: str = ""
     autoStart: bool = True
-    switchToChild: bool = True
+    switchToChild: bool = False
     source: str = "agent_auto_split"
 
 

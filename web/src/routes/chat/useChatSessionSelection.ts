@@ -9,6 +9,7 @@ import {
   shouldCanonicalizeUrlSessionSelection,
   shouldDeferUrlSessionSync,
 } from "./chatSessionRouteSync";
+import { storedChatSelectionBlocksServerBootstrap } from "./useChatSelectionPersistence";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
@@ -170,6 +171,9 @@ export function useChatSessionSelection({
     if (requestedSessionId || requestedRoomId || activeSessionId) {
       return;
     }
+    if (storedChatSelectionBlocksServerBootstrap(sessions)) {
+      return;
+    }
     const bootstrapSessionId = String(bootstrapActiveSessionId ?? "").trim();
     if (!bootstrapSessionId) {
       return;
@@ -181,6 +185,7 @@ export function useChatSessionSelection({
     bootstrapActiveSessionId,
     requestedRoomId,
     requestedSessionId,
+    sessions,
     setActiveGroupRoomId,
     setActiveSession,
   ]);
@@ -249,6 +254,9 @@ export function useChatSessionSelection({
       return;
     }
     if (!activeSessionId && sessions && sessions.length > 0) {
+      if (storedChatSelectionBlocksServerBootstrap(sessions)) {
+        return;
+      }
       setActiveSession(sessions[0].id);
       return;
     }
