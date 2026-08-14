@@ -1288,6 +1288,38 @@ class ConversationRepository:
             force_flush=True,
         )
 
+    def archive_session_and_replace_chat_state(
+        self,
+        *,
+        session_id: str,
+        state: Mapping[str, Any],
+        imported_source_sha256: str = "",
+        imported_at_ms: int | None = None,
+    ) -> Future[dict[str, Any]]:
+        """Delete one session in a single transaction.
+
+        Replaces the workspace chat state document and archives the matching
+        directory session row in the same commit. Either both effects land or
+        neither does; callers never observe a half-deleted session.
+        """
+
+        frozen = dict(state)
+        normalized_session_id = str(session_id or "").strip()
+
+        def mutation(unit_of_work: ConversationUnitOfWork) -> dict[str, Any]:
+            chat_state_result = unit_of_work.chat_state.replace(
+                frozen,
+                imported_source_sha256=imported_source_sha256,
+                imported_at_ms=imported_at_ms,
+            )
+            archive_result = unit_of_work.sessions.archive(normalized_session_id)
+            return {
+                "archive": archive_result,
+                "chatState": chat_state_result,
+            }
+
+        return self._writer.submit(mutation, force_flush=True)
+
 
 def _canonical_json(value: Mapping[str, Any]) -> str:
     return json.dumps(

@@ -1,4 +1,4 @@
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 import queue
 import threading
@@ -334,32 +334,88 @@ def test_delete_session_restores_direct_agent_binding_when_chat_save_fails(tmp_p
     assert {item["conversation_id"] for item in persisted_state["conversations"]} == {"session-live"}
 
 
-def test_delete_session_lightweight_dispatches_directory_archive_without_waiting(tmp_path, monkeypatch):
+def test_delete_session_commits_chat_state_and_directory_archive_before_returning(tmp_path, monkeypatch):
+    from core.chat.conversation_store import ConversationStore
+    from core.web.services.session import directory_runtime
+
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    archive_calls = []
-    monkeypatch.setattr(
-        directory_bridge,
-        "archive_directory_session_safe",
-        lambda session_id, *, wait=True: archive_calls.append((session_id, wait)),
-    )
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    store = ConversationStore(directory_runtime.conversation_store_path(tmp_path))
+    store.open()
+    try:
+        revision = str(
+            store.repository.create_agent(
+                agent_id="agent-live",
+                display_name="Live Agent",
+                kind="assistant",
+                config={},
+                source="test",
+            )
+            .result(timeout=3)["configRevisionId"]
+        )
+        store.repository.upsert_directory_session(
+            session_id="session-live",
+            agent_id="agent-live",
+            agent_config_revision_id=revision,
+            title="真实会话",
+        ).result(timeout=3)
+    finally:
+        store.close()
 
     result = session_service.delete_chat_session_lightweight("session-live")
 
     assert result["deleted"] is True
-    assert archive_calls == [("session-live", False)]
+    assert result["deletedSessionId"] == "session-live"
+    store = ConversationStore(directory_runtime.conversation_store_path(tmp_path))
+    store.open()
+    try:
+        restored = store.repository.get_chat_state()
+        assert "session-live" not in {
+            str(item.get("conversation_id") or "") for item in restored["conversations"]
+        }
+        page = store.repository.list_directory_page(limit=50)
+        assert "session-live" not in {
+            str(item.get("sessionId") or "") for item in page["rows"]
+        }
+    finally:
+        store.close()
 
 
-def test_delete_session_records_deferred_directory_archive_failure(tmp_path, monkeypatch):
+def test_delete_session_archive_failure_rolls_back_chat_state(tmp_path, monkeypatch):
+    from core.chat.conversation_store import ConversationStore
+    from core.chat.conversation_store.repository import SessionDao
+    from core.web.services.session import directory_runtime
+
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    failed_archive = Future()
-    failed_archive.set_exception(OSError("simulated directory archive failure"))
-    monkeypatch.setattr(
-        directory_bridge,
-        "archive_directory_session_safe",
-        lambda _session_id, *, wait=True: failed_archive,
-    )
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    store = ConversationStore(directory_runtime.conversation_store_path(tmp_path))
+    store.open()
+    try:
+        revision = str(
+            store.repository.create_agent(
+                agent_id="agent-live",
+                display_name="Live Agent",
+                kind="assistant",
+                config={},
+                source="test",
+            )
+            .result(timeout=3)["configRevisionId"]
+        )
+        store.repository.upsert_directory_session(
+            session_id="session-live",
+            agent_id="agent-live",
+            agent_config_revision_id=revision,
+            title="真实会话",
+        ).result(timeout=3)
+    finally:
+        store.close()
+
+    def fail_archive(self, session_id):
+        raise RuntimeError("simulated directory archive failure")
+
+    monkeypatch.setattr(SessionDao, "archive", fail_archive)
     events = []
     monkeypatch.setattr(
         session_service,
@@ -367,13 +423,23 @@ def test_delete_session_records_deferred_directory_archive_failure(tmp_path, mon
         lambda phase, **kwargs: events.append((phase, kwargs)),
     )
 
-    result = session_service.delete_chat_session_lightweight("session-live")
+    with pytest.raises(RuntimeError, match="simulated directory archive failure"):
+        session_service.delete_chat_session_lightweight("session-live")
 
-    assert result["deleted"] is True
-    failure_events = [event for event in events if event[0] == "directory_archive_failed"]
-    assert len(failure_events) == 1
-    assert failure_events[0][1]["outcome"] == "degraded"
-    assert failure_events[0][1]["fields"]["reason"] == "OSError"
+    store = ConversationStore(directory_runtime.conversation_store_path(tmp_path))
+    store.open()
+    try:
+        restored = store.repository.get_chat_state()
+        assert "session-live" in {
+            str(item.get("conversation_id") or "") for item in restored["conversations"]
+        }
+        page = store.repository.list_directory_page(limit=50)
+        assert "session-live" in {
+            str(item.get("sessionId") or "") for item in page["rows"]
+        }
+    finally:
+        store.close()
+    assert all(event[0] != "deleted" for event in events)
 
 
 def test_session_stream_coalescing_preserves_assistant_delta_events():

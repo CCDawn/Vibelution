@@ -317,11 +317,24 @@ def load_chat_state(project_root: Path) -> dict[str, Any]:
             return repository.get_chat_state()
 
 
-def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
+def save_chat_state(
+    project_root: Path,
+    state: dict[str, Any],
+    *,
+    archive_session_id: str = "",
+) -> None:
     with chat_state_transaction(project_root):
         cleaned, _changed = _drop_legacy_chat_state_messages(state, project_root=project_root)
+        normalized_archive_session_id = str(archive_session_id or "").strip()
         with _chat_state_repository(project_root) as repository:
-            result = repository.replace_chat_state(cleaned).result(timeout=5)
+            if normalized_archive_session_id:
+                combined = repository.archive_session_and_replace_chat_state(
+                    session_id=normalized_archive_session_id,
+                    state=cleaned,
+                ).result(timeout=5)
+                result = dict(combined.get("chatState") or {})
+            else:
+                result = repository.replace_chat_state(cleaned).result(timeout=5)
         revision = int(result.get("stateRevision") or 0)
         cleaned["state_revision"] = revision
         notify_session_catalog_dirty(
