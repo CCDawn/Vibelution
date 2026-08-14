@@ -32,12 +32,13 @@ export function runtimeStatusExplanation(state: InstanceRuntimeState, isZh: bool
 }
 
 export function gitStatusExplanation(item: LauncherBranchInstance, isZh: boolean): string {
-  if (item.dirty) {
+  const risks = new Set(item.cleanupRisks || []);
+  if (item.dirty || risks.has("discard_dirty")) {
     return isZh
       ? "工作区有尚未提交的文件；强制清理会丢弃这些改动。"
       : "The worktree has uncommitted files; force cleanup will discard them.";
   }
-  if (item.mergedToMain === false) {
+  if (item.mergedToMain === false || risks.has("delete_unmerged")) {
     return isZh
       ? "工作区干净，但当前提交尚未合入 main；强制清理会删除这些本地提交。"
       : "The worktree is clean, but its commits are not merged into main; force cleanup will delete them.";
@@ -69,14 +70,21 @@ export function cleanupRecommendation(
       reason: isZh ? "main 和当前工作区受保护。" : "main and the current worktree are protected.",
     };
   }
+  const risks = new Set(item.cleanupRisks || []);
+  const hasLiveRuntime = state !== "stopped"
+    || item.alive
+    || item.runtime.backend.alive
+    || item.runtime.backend.listening
+    || item.runtime.window.open
+    || risks.has("stop_then_remove");
   const blockingReasons: string[] = [];
-  if (state !== "stopped" || item.alive) {
+  if (hasLiveRuntime) {
     blockingReasons.push(isZh ? "先停止实例并等待状态变为“已停止”" : "stop the instance and wait until its status is Stopped");
   }
-  if (item.dirty) {
+  if (item.dirty || risks.has("discard_dirty")) {
     blockingReasons.push(isZh ? "先提交、暂存或备份未提交改动" : "commit, stash, or back up the uncommitted changes");
   }
-  if (item.mergedToMain === false) {
+  if (item.mergedToMain === false || risks.has("delete_unmerged")) {
     blockingReasons.push(isZh ? "先确认本地提交无需保留，或将它们合入 main" : "confirm the local commits are disposable or merge them into main");
   }
   if (blockingReasons.length > 0) {
