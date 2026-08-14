@@ -89,10 +89,7 @@ function markdownComponents(
     blockquote({ children }: ComponentPropsWithoutRef<"blockquote">) {
       return <blockquote className={classNames.markdownBlockquote}>{children}</blockquote>;
     },
-    code({ className, children }: ComponentPropsWithoutRef<"code">) {
-      if (className) {
-        return <code className={className}>{formattedCodeBlockChildren(children, languageFromCodeClassName(className))}</code>;
-      }
+    code({ children }: ComponentPropsWithoutRef<"code">) {
       return <code className={classNames.inlineCode}>{children}</code>;
     },
     h1({ children }: ComponentPropsWithoutRef<"h1">) {
@@ -124,7 +121,7 @@ function markdownComponents(
       return <p className={classNames.messageBody}>{children}</p>;
     },
     pre({ children }: ComponentPropsWithoutRef<"pre">) {
-      return <pre className={classNames.responseSegmentPre}>{children}</pre>;
+      return <pre className={classNames.responseSegmentPre}>{markdownCodeBlockChildren(children)}</pre>;
     },
     strong({ children }: ComponentPropsWithoutRef<"strong">) {
       return <strong className={classNames.inlineStrong}>{children}</strong>;
@@ -151,4 +148,19 @@ function languageFromCodeClassName(className: string) {
 
 function formattedCodeBlockChildren(children: React.ReactNode, language?: string) {
   return formattedCodeBlockContent(React.Children.toArray(children).join(""), language);
+}
+
+function markdownCodeBlockChildren(children: React.ReactNode) {
+  const childNodes = React.Children.toArray(children);
+  if (childNodes.length !== 1 || !React.isValidElement<ComponentPropsWithoutRef<"code">>(childNodes[0])) {
+    return children;
+  }
+
+  const codeElement = childNodes[0];
+  const className = codeElement.props.className ?? "";
+  return (
+    <code className={className || undefined}>
+      {formattedCodeBlockChildren(codeElement.props.children, languageFromCodeClassName(className))}
+    </code>
+  );
 }

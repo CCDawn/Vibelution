@@ -93,6 +93,45 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).toMatch(/<ol[^>]*list-decimal/);
   });
 
+  it("preserves unlabeled fenced directory trees as block code", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={[
+          "```",
+          "项目根",
+          "├─ agent.py                   216 KB",
+          "└─ core/",
+          "   └─ web/",
+          "```",
+        ].join("\n")}
+        classNames={styles}
+      />,
+    );
+
+    const blockStart = html.indexOf("<pre");
+    const blockEnd = html.indexOf("</pre>", blockStart);
+    const blockHtml = html.slice(blockStart, blockEnd);
+    expect(blockStart).toBeGreaterThanOrEqual(0);
+    expect(blockHtml).toContain("responseSegmentPre");
+    expect(blockHtml).toContain("项目根\n├─ agent.py                   216 KB");
+    expect(blockHtml).not.toContain("inlineCode");
+  });
+
+  it("keeps labeled fenced code formatting in the block renderer", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={["```json", '{"status":"ok"}', "```"].join("\n")}
+        classNames={styles}
+      />,
+    );
+
+    expect(html).toContain('class="language-json"');
+    expect(html).toContain("{\n  &quot;status&quot;: &quot;ok&quot;\n}");
+    expect(html).not.toContain("inlineCode");
+  });
+
   it("keeps unsafe markdown inert while allowing safe links", async () => {
     const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
