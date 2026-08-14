@@ -48,6 +48,8 @@ class StorageMigrationPlan:
     total_files: int
     total_bytes: int
     aggregate_sha256: str
+    archived_conflicts: int = 0
+    skipped_ephemeral_files: int = 0
 
     def to_dict(self, *, include_entries: bool = True) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -59,6 +61,8 @@ class StorageMigrationPlan:
             "totalFiles": self.total_files,
             "totalBytes": self.total_bytes,
             "aggregateSha256": self.aggregate_sha256,
+            "archivedConflicts": self.archived_conflicts,
+            "skippedEphemeralFiles": self.skipped_ephemeral_files,
         }
         if include_entries:
             payload["entries"] = [asdict(entry) for entry in self.entries]
@@ -83,29 +87,65 @@ def plan_storage_migration(
         ("project_backups", target.project_root / "backups", target.data / "backups" / "legacy-project-root"),
     )
     entries_by_destination: dict[str, StorageMigrationEntry] = {}
+    archived_conflicts = 0
+    skipped_ephemeral_files = 0
     for category, source_root, destination_root in mappings:
         if _same_path(source_root, destination_root) or not source_root.exists():
             continue
         for source in _iter_source_files(source_root):
             relative = source.relative_to(source_root)
+            if _is_ephemeral_source_file(relative):
+                skipped_ephemeral_files += 1
+                continue
             destination = (destination_root / relative).resolve()
+            try:
+                size = source.stat().st_size
+                sha256 = _sha256_file(source)
+            except OSError as exc:
+                raise StorageMigrationError(
+                    f"cannot read legacy source during migration inventory: {source}"
+                ) from exc
             entry = StorageMigrationEntry(
                 source=str(source.resolve()),
                 destination=str(destination),
                 category=category,
                 relative_path=relative.as_posix(),
-                size=source.stat().st_size,
-                sha256=_sha256_file(source),
+                size=size,
+                sha256=sha256,
             )
             key = os.path.normcase(str(destination))
             existing = entries_by_destination.get(key)
             if existing is not None and (
                 existing.size != entry.size or existing.sha256 != entry.sha256
             ):
-                raise StorageMigrationError(
-                    "legacy sources map different content to the same destination: "
-                    f"{existing.source} and {entry.source} -> {entry.destination}"
-                )
+                if existing.category == "operator_data" and category == "project_workspace":
+                    destination = (
+                        target.data
+                        / "backups"
+                        / "storage-source-conflicts"
+                        / "project_workspace"
+                        / relative
+                    ).resolve()
+                    entry = StorageMigrationEntry(
+                        source=entry.source,
+                        destination=str(destination),
+                        category="project_workspace_conflict_archive",
+                        relative_path=entry.relative_path,
+                        size=entry.size,
+                        sha256=entry.sha256,
+                    )
+                    key = os.path.normcase(str(destination))
+                    if key in entries_by_destination:
+                        raise StorageMigrationError(
+                            "legacy conflict archive destination is not unique: "
+                            f"{entry.source} -> {entry.destination}"
+                        )
+                    archived_conflicts += 1
+                else:
+                    raise StorageMigrationError(
+                        "legacy sources map different content to the same destination: "
+                        f"{existing.source} and {entry.source} -> {entry.destination}"
+                    )
             entries_by_destination.setdefault(key, entry)
     entries = tuple(sorted(entries_by_destination.values(), key=lambda item: item.destination.lower()))
     return StorageMigrationPlan(
@@ -117,6 +157,8 @@ def plan_storage_migration(
         total_files=len(entries),
         total_bytes=sum(entry.size for entry in entries),
         aggregate_sha256=_aggregate_digest(entries),
+        archived_conflicts=archived_conflicts,
+        skipped_ephemeral_files=skipped_ephemeral_files,
     )
 
 
@@ -183,6 +225,8 @@ def apply_storage_migration(
         "totalFiles": plan.total_files,
         "totalBytes": plan.total_bytes,
         "aggregateSha256": plan.aggregate_sha256,
+        "archivedConflicts": plan.archived_conflicts,
+        "skippedEphemeralFiles": plan.skipped_ephemeral_files,
         "manifestPath": str(manifest_path),
         "legacyDeleteAllowed": False,
     }
@@ -403,6 +447,10 @@ def _iter_source_files(root: Path) -> Iterable[Path]:
                 raise StorageMigrationError(f"symlinked file is not migrated: {candidate}")
             if candidate.is_file():
                 yield candidate.resolve()
+
+
+def _is_ephemeral_source_file(relative_path: Path) -> bool:
+    return relative_path.name.lower().endswith(".lock")
 
 
 def _destination_conflicts(entries: Iterable[StorageMigrationEntry]) -> list[str]:
