@@ -281,6 +281,29 @@ def test_transcript_writer_marks_queue_items_done(tmp_path):
     assert "flush me" in logger._get_transcript_file().read_text(encoding="utf-8")
 
 
+def test_transcript_llm_response_preserves_fenced_markdown_once(tmp_path):
+    TranscriptLogger._instance = None
+    logger = TranscriptLogger()
+    logger._logs_dir = tmp_path
+    logger.start_session()
+    fence = "`" * 3
+    content = "\n".join([
+        fence,
+        "项目根",
+        "├─ agent.py                   216 KB",
+        "└─ core/",
+        fence,
+    ])
+
+    logger.write_llm_response(content)
+    logger._flush_pending_writes()
+
+    transcript = logger._get_transcript_file().read_text(encoding="utf-8")
+    assert transcript.count(fence) == 2
+    assert f"{fence}\n项目根" in transcript
+    assert f"{fence}python" not in transcript
+
+
 def test_transcript_logger_uses_external_workspace_home(tmp_path, monkeypatch):
     data_home = tmp_path / "operator-data"
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
