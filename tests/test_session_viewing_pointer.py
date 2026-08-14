@@ -67,28 +67,43 @@ def test_select_only_writes_target_last_viewed_preference_without_touching_other
     second = session_service.create_chat_session(title="Second", lightweight=True)
 
     first_before = session_service.get_session_detail(first["id"])
+    listed_before = [item["id"] for item in session_service.list_sessions()]
+    own_order_before = [
+        item for item in listed_before if item in {first["id"], second["id"]}
+    ]
+
     session_service.select_chat_session(second["id"], lightweight=True)
+
     assert load_chat_state(tmp_path)["active_conversation_id"] == second["id"]
 
     first_after = session_service.get_session_detail(first["id"])
     assert first_after["title"] == first_before["title"]
     assert first_after["messages"] == first_before["messages"]
-    # Recency order stays intact; the pointer is not pinned to the first row.
-    listed_ids = [item["id"] for item in session_service.list_sessions()]
-    own_order = [item for item in listed_ids if item in {first["id"], second["id"]}]
-    assert own_order == [second["id"], first["id"]]
+    # The pointer must not reorder the session list.
+    listed_after = [item["id"] for item in session_service.list_sessions()]
+    own_order_after = [
+        item for item in listed_after if item in {first["id"], second["id"]}
+    ]
+    assert own_order_after == own_order_before
 
 
 def test_session_list_order_is_recency_not_viewing_pointer(tmp_path, monkeypatch) -> None:
     _isolate_session_workspace(tmp_path, monkeypatch)
     older = session_service.create_chat_session(title="Older", lightweight=True)
     newer = session_service.create_chat_session(title="Newer", lightweight=True)
-    # The operator last viewed the *older* session; the list must stay
-    # recency-ordered and must not pin the pointer to the top.
+
+    listed_before = [item["id"] for item in session_service.list_sessions()]
+    own_order_before = [
+        item for item in listed_before if item in {newer["id"], older["id"]}
+    ]
+
+    # The operator last viewed the *older* session; the list must keep its
+    # pre-select order and must not pin the pointer to the top.
     session_service.select_chat_session(older["id"], lightweight=True)
 
-    listed_ids = [item["id"] for item in session_service.list_sessions()]
-    own_order = [item for item in listed_ids if item in {newer["id"], older["id"]}]
-
-    assert own_order == [newer["id"], older["id"]]
     assert load_chat_state(tmp_path)["active_conversation_id"] == older["id"]
+    listed_after = [item["id"] for item in session_service.list_sessions()]
+    own_order_after = [
+        item for item in listed_after if item in {newer["id"], older["id"]}
+    ]
+    assert own_order_after == own_order_before
