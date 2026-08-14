@@ -403,6 +403,22 @@ export class ElectronWindowProvider {
     return this.workbenchCloseInFlight;
   }
 
+  instanceWindowStates(): Array<{ instanceId: string; open: boolean; rendererProcessId: number }> {
+    const states: Array<{ instanceId: string; open: boolean; rendererProcessId: number }> = [];
+    for (const [instanceId, entry] of this.instanceWindows) {
+      const window = entry.window;
+      if (!window || window.isDestroyed() || !entry.readyUrl) {
+        continue;
+      }
+      states.push({
+        instanceId,
+        open: true,
+        rendererProcessId: window.webContents.getOSProcessId()
+      });
+    }
+    return states;
+  }
+
   workbenchDialogParent(): ElectronWindowLike | null {
     if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
       return null;

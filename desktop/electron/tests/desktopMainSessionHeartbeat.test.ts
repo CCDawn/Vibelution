@@ -5,13 +5,14 @@ import { describe, expect, it } from "vitest";
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
 describe("Electron main desktop session heartbeat", () => {
-  it("reuses the shared desktopSessionClient heartbeat without a second session protocol", () => {
+  it("owns session revisions in-process with a best-effort Python mirror", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain("heartbeatDesktopSession,");
     expect(source).toContain('from "./windows/desktopSessionClient.js"');
+    expect(source).toContain('from "./windows/desktopSessionStore.js"');
     expect(source).toContain('desktopSessionMutations.enqueue("heartbeat", async () => {');
-    expect(source).toContain("...(await resolveDesktopActionLoopContext(currentBootstrap))");
+    expect(source).toContain("inProcessDesktopSessionStore.heartbeat(");
     expect(source).toContain("revision: desktopSessionRevision");
   });
 
@@ -30,7 +31,7 @@ describe("Electron main desktop session heartbeat", () => {
 
   it("swallows heartbeat failures instead of quitting Electron", () => {
     const source = readFileSync(mainSourcePath, "utf8");
-    const heartbeatStart = source.indexOf("await heartbeatDesktopSession(");
+    const heartbeatStart = source.indexOf("void heartbeatDesktopSession(");
     const heartbeatEnd = source.indexOf("desktopSessionHeartbeatRunning = false;", heartbeatStart);
     const heartbeatBlock = source.slice(heartbeatStart, heartbeatEnd);
 

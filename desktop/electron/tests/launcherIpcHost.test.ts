@@ -135,4 +135,51 @@ describe("createLauncherIpcHost", () => {
       expect(result.error.code).toBe("LAUNCHER_IPC_NETWORK_ERROR");
     }
   });
+
+  it("overlays the Electron window truth on the status snapshot", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        projectBundle: {
+          observedState: "closed",
+          lifecycleConsistency: "",
+          browser: { managed: false, windowPid: 0, alive: false },
+          components: [],
+        },
+      }),
+    );
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
+      fetchImpl,
+    });
+    const result = await host.invoke(validPayload({ path: "status" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const bundle = (result.payload as Record<string, unknown>).projectBundle as Record<string, unknown>;
+      expect(bundle.observedState).toBe("open");
+      expect(bundle.browser).toMatchObject({ alive: true, windowPid: 7070 });
+    }
+  });
+
+  it("overlays the Electron window truth on branch instances", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        items: [
+          { id: "main", current: true, alive: false, startable: true, runtime: { window: { open: false, pid: 0 } } },
+        ],
+      }),
+    );
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
+      fetchImpl,
+    });
+    const result = await host.invoke(validPayload({ path: "branch-instances" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const item = ((result.payload as Record<string, unknown>).items as Record<string, unknown>[])[0];
+      expect(item.startable).toBe(false);
+      expect((item.runtime as Record<string, unknown>).window).toMatchObject({ open: true, pid: 7070 });
+    }
+  });
 });
