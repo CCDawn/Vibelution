@@ -930,6 +930,7 @@ describe("IPC channels", () => {
       "focusWorkbenchWindow",
       "getDesktopShellSummary",
       "getVersion",
+      "launcherInvoke",
       "notifyConversationCompleted",
       "requestDesktopShellExit"
     ]);

@@ -27,6 +27,100 @@ import type {
 
 export const LAUNCHER_ENDPOINT = "/api/launcher";
 export const DEFAULT_LAUNCHER_CONTROL_PORT = 8765;
+export const LAUNCHER_IPC_HOST_NOT_READY = "LAUNCHER_IPC_HOST_NOT_READY";
+
+export class LauncherControlPlaneNotReadyError extends Error {
+  readonly code = LAUNCHER_IPC_HOST_NOT_READY;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "LauncherControlPlaneNotReadyError";
+  }
+}
+
+export function isLauncherControlPlaneNotReady(error: unknown) {
+  return error instanceof LauncherControlPlaneNotReadyError;
+}
+
+type LauncherIpcInvokeResult =
+  | { ok: true; payload: unknown }
+  | { ok: false; error: { code: string; message: string } };
+
+type LauncherIpcInvokePayload = {
+  schemaVersion: 1;
+  path: string;
+  init?: {
+    method?: "GET" | "POST" | "PUT" | "DELETE";
+    headers?: Record<string, string>;
+    body?: unknown;
+  };
+};
+
+type LauncherIpcBridge = {
+  launcherInvoke: (payload: LauncherIpcInvokePayload) => Promise<LauncherIpcInvokeResult>;
+};
+
+function launcherIpcBridge(): LauncherIpcBridge | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const globalLike = globalThis as { vibelutionLauncher?: unknown };
+  const bridge = globalLike.vibelutionLauncher;
+  if (typeof bridge !== "object" || bridge === null) {
+    return null;
+  }
+  const launcherInvoke = (bridge as Partial<LauncherIpcBridge>).launcherInvoke;
+  if (typeof launcherInvoke !== "function") {
+    return null;
+  }
+  return { launcherInvoke };
+}
+
+export function hasLauncherIpcBridge() {
+  return launcherIpcBridge() !== null;
+}
+
+function ipcInitForRequest(init?: RequestInit): LauncherIpcInvokePayload["init"] | undefined {
+  if (!init) {
+    return undefined;
+  }
+  const method = String(init.method ?? "GET").toUpperCase() as "GET" | "POST" | "PUT" | "DELETE";
+  if (!["GET", "POST", "PUT", "DELETE"].includes(method)) {
+    return undefined;
+  }
+  const headers: Record<string, string> = {};
+  if (init.headers) {
+    const source = new Headers(init.headers);
+    source.forEach((value, key) => {
+      headers[key] = value;
+    });
+  }
+  return {
+    method,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(init.body !== undefined && init.body !== null ? { body: JSON.parse(String(init.body)) } : {}),
+  };
+}
+
+async function invokeLauncherJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const bridge = launcherIpcBridge();
+  if (bridge === null) {
+    throw new Error("Launcher IPC bridge is not available.");
+  }
+  const result = await bridge.launcherInvoke({
+    schemaVersion: 1,
+    path,
+    ...(ipcInitForRequest(init) ? { init: ipcInitForRequest(init) } : {}),
+  });
+  if (result.ok) {
+    rememberLauncherControlOrigin(result.payload);
+    return result.payload as T;
+  }
+  if (result.error.code === LAUNCHER_IPC_HOST_NOT_READY) {
+    throw new LauncherControlPlaneNotReadyError(result.error.message);
+  }
+  throw new Error(result.error.message || `Launcher IPC request failed: ${result.error.code}`);
+}
 
 type WorkbenchWindowSizeOption = {
   size: string;
@@ -287,6 +381,9 @@ function relativeLauncherEndpoint(path = "") {
 }
 
 async function fetchLauncherJson<T>(path: string, init?: RequestInit): Promise<T> {
+  if (launcherIpcBridge() !== null) {
+    return invokeLauncherJson<T>(path, init);
+  }
   const endpoint = launcherEndpoint(path);
   try {
     const payload = await fetchJson<T>(endpoint, init);

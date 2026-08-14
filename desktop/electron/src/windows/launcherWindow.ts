@@ -17,7 +17,8 @@ export function createLauncherWindow(url: string, paths: DesktopPaths): BrowserW
       preload: resolvePreloadPath(paths),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      additionalArguments: ["--vibelution-window-role=launcher-control"]
     }
   });
   void window.loadURL(url);
