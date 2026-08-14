@@ -8,6 +8,7 @@ import {
   gitStatusExplanation,
   runtimeStatusExplanation,
 } from "./LauncherBranchStatusHelp.model";
+import styles from "./LauncherBranchStatusHelp.styles";
 
 type LauncherBranchStatusHelpProps = {
   children: ReactNode;
@@ -37,10 +38,7 @@ export function LauncherBranchStatusHelp({
 
   return (
     <VTooltip content={content} tone={tone} width="wide">
-      <span
-        className="inline-flex cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-        tabIndex={0}
-      >
+      <span className={styles.trigger} tabIndex={0}>
         {children}
       </span>
     </VTooltip>

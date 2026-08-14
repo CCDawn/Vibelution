@@ -16,6 +16,7 @@ import {
   VStateSurface,
   VStatusChip,
   VSurface,
+  VTooltip,
   type VStatusTone,
 } from "../components/vui";
 import type {
@@ -83,6 +84,7 @@ export type ConfigProviderRegistryPanelProps = {
   onTestModel: (modelRef: string) => void;
   onProbeImageInput: (modelRef: string) => void;
   onDeleteProvider: (providerId: string) => void;
+  onAddConnection?: () => void;
 };
 
 const TABS: Array<{ id: ConfigProviderRegistryTab; label: string }> = [
@@ -135,7 +137,8 @@ function ProviderAssetRow({
       <VButton
         className={styles.providerButton}
         contentLayout="plain"
-        variant={selected ? "primary" : "ghost"}
+        variant="ghost"
+        aria-pressed={selected}
         title={`${row.label || row.providerId}\n${row.providerId}`}
         onPress={onSelect}
       >
@@ -153,7 +156,7 @@ function ProviderAssetRow({
       <VButton
         className={styles.providerEditButton}
         density="compact"
-        variant={inspecting ? "primary" : "secondary"}
+        variant="secondary"
         icon={<Pencil size={14} />}
         data-provider-action="edit-asset"
         aria-label={`编辑 ${row.label || row.providerId}`}
@@ -225,20 +228,24 @@ function CapabilityList({ model }: { model: ConfigCatalogModel }) {
   return (
     <div className={styles.capabilityList}>
       {reasoningRows.map((row) => (
-        <span key={row.key} className={styles.providerIdentity} data-capability="reasoning_effort">
-          <VStatusChip tone={row.tone}>{row.label}</VStatusChip>
-          <small className={styles.muted} title={row.detail}>{row.detail}</small>
-        </span>
+        <VTooltip key={row.key} content={row.detail} width="wide">
+          <span className={styles.providerIdentity} data-capability="reasoning_effort">
+            <VStatusChip tone={row.tone}>{row.label}</VStatusChip>
+          </span>
+        </VTooltip>
       ))}
       {capabilities.map(([name, observation]) => (
-        <span key={name} className={styles.providerIdentity}>
-          <VStatusChip tone={capabilityTone(observation)}>
-            {name}: {observation.value === "unknown" ? "unknown（未知）" : observation.value === "unsupported" ? "unsupported（不支持）" : "supported"}
-          </VStatusChip>
-          <small className={styles.muted}>
-            {observation.source} · {observation.confidence || "confidence unknown"} · {observation.checked_at || "未记录时间"}
-          </small>
-        </span>
+        <VTooltip
+          key={name}
+          content={`${observation.source} · ${observation.confidence || "confidence unknown"} · ${observation.checked_at || "未记录时间"}`}
+          width="wide"
+        >
+          <span className={styles.providerIdentity}>
+            <VStatusChip tone={capabilityTone(observation)}>
+              {name}: {observation.value === "unknown" ? "unknown（未知）" : observation.value === "unsupported" ? "unsupported（不支持）" : "supported"}
+            </VStatusChip>
+          </span>
+        </VTooltip>
       ))}
     </div>
   );
@@ -309,20 +316,14 @@ function ConnectionTab({
   const keyReady = provider.credentialState === "configured" || provider.credentialState === "not_required";
   return (
     <div className={styles.connectionWorkspace}>
-      <div className={styles.connectionLead} role="note">
-        <strong>一个中转站 / Provider = 一把 API Key</strong>
-        <span>
-          下方 Key 对该 Provider 下<strong>全部固定模型共用</strong>，不必按模型重复填写。
-          上下文窗口也是 Provider 级兜底（token 数）；未填时依赖发现结果，缺失会导致 Agent 启动失败。
-        </span>
-      </div>
-
       <section className={styles.connectionCard} aria-label="API Key">
         <VPanelHeader
           className={styles.connectionCardHeader}
           headingLevel={3}
           eyebrow="1 · API Key"
           title="全站共用凭据"
+          tooltip="一个中转站 / Provider = 一把 API Key。下方 Key 对该 Provider 下全部固定模型共用，不必按模型重复填写。"
+          tooltipLabel="API Key 说明"
           actions={(
             <VStatusChip tone={keyReady ? "success" : "warning"}>
               {provider.credentialState === "not_required"
@@ -336,9 +337,6 @@ function ConnectionTab({
         {needsKey ? (
           credentialActive ? (
             <div className={styles.inlineCredential}>
-              <p className={styles.muted}>
-                写入草稿后，点页面右上角「保存到外部配置」才会落到环境变量；不会写进 config.toml 明文。
-              </p>
               <label className={styles.inlineCredentialField}>
                 <span>API Key</span>
                 <VInput
@@ -355,20 +353,25 @@ function ConnectionTab({
                 <VButton
                   variant="primary"
                   isDisabled={disabled || !credentialValue.trim()}
+                  tooltip="保存后会立即写入 operator config 的环境变量引用；不会把 Key 明文写进 config.toml。"
                   onPress={onSaveCredential}
                 >
-                  保存 Key 到草稿
+                  保存 Key
                 </VButton>
               </VActionGroup>
             </div>
           ) : (
             <div className={styles.connectionCardBody}>
-              <p className={styles.muted}>
-                {provider.credentialState === "configured"
-                  ? "已有 Key。需要轮换时点下方按钮更新（仍是这一把，覆盖全站模型）。"
-                  : "还没有 Key。中转站通常只发一把 Key，配一次即可调用该站所有固定模型。"}
-              </p>
-              <VButton variant="primary" isDisabled={disabled} onPress={onEditCredential}>
+              <VButton
+                variant="primary"
+                isDisabled={disabled}
+                tooltip={
+                  provider.credentialState === "configured"
+                    ? "已有 Key。需要轮换时点此更新（仍是这一把，覆盖全站模型）。"
+                    : "还没有 Key。中转站通常只发一把 Key，配一次即可调用该站所有固定模型。"
+                }
+                onPress={onEditCredential}
+              >
                 {provider.credentialState === "configured" ? "更新 API Key" : "填写 API Key"}
               </VButton>
             </div>
@@ -384,6 +387,8 @@ function ConnectionTab({
           headingLevel={3}
           eyebrow="2 · 上下文窗口"
           title="context_window（token）"
+          tooltip="上下文窗口是 Provider 级兜底（token 数）。填中转站/模型真实上限，例如 32000、128000。未填时依赖发现结果，缺失会导致 Agent 启动失败。保存后立即写入配置。"
+          tooltipLabel="上下文窗口说明"
           actions={(
             <VStatusChip tone={provider.contextWindow ? "success" : "warning"}>
               {provider.contextWindow ? `${provider.contextWindow}` : "未配置"}
@@ -391,9 +396,6 @@ function ConnectionTab({
           )}
         />
         <div className={styles.connectionCardBody}>
-          <p className={styles.muted}>
-            填中转站/模型真实上限，例如 32000、128000。一个 Provider 共用此兜底值；保存草稿后记得顶部「保存到外部配置」。
-          </p>
           <label className={styles.inlineCredentialField}>
             <span>上下文窗口</span>
             <VInput
@@ -407,7 +409,7 @@ function ConnectionTab({
             />
           </label>
           <VButton variant="primary" isDisabled={disabled} onPress={onSaveContextWindow}>
-            保存上下文窗口到草稿
+            保存上下文窗口
           </VButton>
         </div>
       </section>
@@ -495,6 +497,7 @@ export function ProviderModelsTab({
 
   return (
     <div className={styles.modelsWorkspace}>
+      <div className={styles.modelChrome}>
       <div className={styles.modelToolbar}>
         <VInput
           aria-label="搜索模型"
@@ -519,23 +522,20 @@ export function ProviderModelsTab({
       </div>
       {pinnableModels.length > 0 ? (
         <div className={styles.pinBanner} role="region" aria-label="批量固定模型">
-          <div className={styles.pinBannerCopy}>
-            <strong>发现 {pinnableModels.length} 个可固定模型</strong>
-            <span>
-              「发现」不等于已入库。点「固定全部已发现」一次写入模型库；保存配置后即可在 Agent 里选用。也可在表格里逐个点「固定到配置」。
-            </span>
-          </div>
           <VActionGroup ariaLabel="批量固定操作" className={styles.pinBannerActions}>
             <VButton
               variant="primary"
               data-model-action="pin-all"
               isDisabled={disabled || pinBusy}
-              title={
+              tooltip={
                 pinBusy
                   ? "正在固定模型…"
-                  : provider.refreshDue
-                    ? `目录可能已过期，仍可固定当前列表中的 ${pinnableModels.length} 个已发现模型；建议稍后点「发现模型」刷新`
-                    : `固定全部 ${pinnableModels.length} 个已发现模型`
+                  : [
+                      "「发现」不等于已入库。点「固定全部已发现」一次写入模型库；保存配置后即可在 Agent 里选用。也可在表格里逐个点「固定到配置」。",
+                      provider.refreshDue
+                        ? `目录可能已过期，仍可固定当前列表中的 ${pinnableModels.length} 个已发现模型；建议稍后点「发现模型」刷新。`
+                        : "",
+                    ].filter(Boolean).join(" ")
               }
               onPress={() => onPin(provider.providerId, pinnableModels)}
             >
@@ -545,6 +545,7 @@ export function ProviderModelsTab({
               <VButton
                 density="compact"
                 variant="ghost"
+                tooltip="只显示已发现、尚未固定的模型"
                 onPress={() => onFilterChange("discovered")}
               >
                 只看已发现
@@ -553,20 +554,7 @@ export function ProviderModelsTab({
           </VActionGroup>
         </div>
       ) : null}
-      {modelFilter === "pinned" && summary.pinned === 0 && summary.discovered > 0 ? (
-        <p className={styles.modelFilterHint} role="status">
-          还没有已固定模型。推荐直接点「固定全部已发现」，不必一个个勾选。
-          <VButton
-            density="compact"
-            variant="primary"
-            className={styles.modelFilterHintAction}
-            isDisabled={disabled || pinBusy}
-            onPress={() => onPin(provider.providerId, pinnableModels)}
-          >
-            {pinBusy ? "正在固定…" : `固定全部（${pinnableModels.length}）`}
-          </VButton>
-        </p>
-      ) : null}
+      </div>
       <div className={styles.tableScroll}>
         <VDenseTable
           ariaLabel={`${provider.label} 模型目录`}
@@ -619,12 +607,15 @@ export function ProviderModelsTab({
                 model.verificationCheckedAt || (verificationStatus === "unverified" ? "未测试" : ""),
               ].filter(Boolean).join(" · ");
               return (
-                <span className={styles.providerIdentity}>
-                  <VStatusChip tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "warning"}>
-                    {verificationStatus === "verified" ? "verified · 可调用" : verificationStatus === "failed" ? "failed · 调用失败" : "unverified · 未测试"}
-                  </VStatusChip>
-                  <small className={styles.muted} title={detail || undefined}>{detail || "—"}</small>
-                </span>
+                <VTooltip content={detail || "未测试"} width="wide">
+                  <span className={styles.capabilityHover}>
+                    <VStatusChip
+                      tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "warning"}
+                    >
+                      {verificationStatus === "verified" ? "verified · 可调用" : verificationStatus === "failed" ? "failed · 调用失败" : "unverified · 未测试"}
+                    </VStatusChip>
+                  </span>
+                </VTooltip>
               );
             },
           },
@@ -852,6 +843,7 @@ export function ConfigProviderRegistryPanel({
   onTestModel,
   onProbeImageInput,
   onDeleteProvider,
+  onAddConnection,
 }: ConfigProviderRegistryPanelProps) {
   const orderedRows = useMemo(() => sortProviderRegistryRows(rows), [rows]);
   // Asset home: credential-ready only; primary list hides auth/discovery failures.
@@ -1087,26 +1079,25 @@ export function ConfigProviderRegistryPanel({
         className={styles.header}
         eyebrow="模型资产"
         title="已配置的连接与模型"
+        tooltip="左栏默认只显示可用服务（已配 Key 且连接正常）。异常服务收在下方折叠区；新厂商请用「添加连接」。"
+        tooltipLabel="模型连接列表说明"
         actions={(
           <VStatusChip tone={hasPendingApply ? "warning" : disabled ? "warning" : "success"}>
             {disabled ? "只读 / 忙碌" : hasPendingApply ? "有未保存修改" : "已与草稿同步"}
           </VStatusChip>
         )}
       />
-      <p className={styles.workspaceLead} role="note">
-        左栏默认只显示<strong>可用服务</strong>（已配 Key 且连接正常）。异常服务收在下方折叠区；新厂商请用「② 添加连接」。
-      </p>
       {hasPendingApply ? (
         <div className={styles.savePrompt} role="status" data-save-prompt="pending" aria-live="polite">
           <div className={styles.savePromptCopy}>
             <strong>有未保存的模型配置</strong>
-            <span>固定模型 / API Key / 上下文窗口仍在草稿。必须点「保存到外部配置」才会写入 operator config.toml 并被 Agent 使用。</span>
           </div>
           <VButton
             variant="primary"
             data-save-prompt-action="apply"
             icon={<Save size={14} />}
             isDisabled={!canSaveConfig || disabled || saveBusy}
+            tooltip="路由替换等高级改动仍在草稿。必须点「保存到外部配置」或完成 preview 确认后才会写入 operator config.toml。"
             onPress={() => onSaveExternal?.()}
           >
             {saveBusy ? "保存中…" : "保存到外部配置"}
@@ -1137,8 +1128,8 @@ export function ConfigProviderRegistryPanel({
                 empty={(
                   <VStateSurface tone="empty" title="暂无可用服务">
                     {abnormalRows.length
-                      ? "当前仅有异常服务。可展开下方「异常服务」处理，或点「② 添加连接」。"
-                      : "请点上方「② 添加连接」接入中转站并保存 Key。"}
+                      ? "当前仅有异常服务。可展开下方「异常服务」处理，或点「添加连接」。"
+                      : "请点「添加连接」接入中转站并保存 Key。"}
                   </VStateSurface>
                 )}
                 renderItem={(row) => (
@@ -1162,12 +1153,10 @@ export function ConfigProviderRegistryPanel({
                   contentLayout="plain"
                   aria-expanded={showAbnormalAssets}
                   data-abnormal-expanded={showAbnormalAssets ? "true" : "false"}
+                  tooltip="认证失败 / 发现失败等，默认折叠"
                   onPress={() => setShowAbnormalAssets((open) => !open)}
                 >
-                  <span>
-                    异常服务 · {abnormalRows.length}
-                    <small>认证失败 / 发现失败等，默认折叠</small>
-                  </span>
+                  <span>异常服务 · {abnormalRows.length}</span>
                   <span>{showAbnormalAssets ? "收起" : "展开"}</span>
                 </VButton>
                 {showAbnormalAssets ? (

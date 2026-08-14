@@ -4,8 +4,13 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
-  sidebar: `vui-routes-configsettingsnavigation sidebar grid h-full min-h-0 w-full min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-4 overflow-hidden border border-vui-border-subtle ${vuiRailFillClass} p-4 max-[720px]:h-auto max-[720px]:w-full max-[720px]:[grid-template-rows:auto_auto] max-[720px]:overflow-visible`,
+  sidebar: `vui-routes-configsettingsnavigation sidebar grid h-full min-h-0 w-full min-w-0 [grid-template-rows:auto_auto_auto_minmax(0,1fr)] gap-4 overflow-hidden border border-vui-border-subtle ${vuiRailFillClass} p-4 max-[720px]:h-auto max-[720px]:w-full max-[720px]:[grid-template-rows:auto_auto_auto] max-[720px]:overflow-visible`,
   sidebarHeader: "vui-routes-configsettingsnavigation sidebarHeader grid min-w-0 gap-1",
+  searchStack: "vui-routes-configsettingsnavigation searchStack grid min-w-0 gap-2",
+  searchField: "vui-routes-configsettingsnavigation searchField grid min-w-0 gap-1",
+  searchLabel: "vui-routes-configsettingsnavigation searchLabel m-0 [font-size:var(--vui-font-xs)] font-bold text-vui-fg-tertiary",
+  searchResults: "vui-routes-configsettingsnavigation searchResults grid min-w-0 content-start gap-1",
+  searchHit: "vui-routes-configsettingsnavigation searchHit !grid min-h-10 !w-full !grid-cols-[minmax(0,1fr)] !justify-stretch rounded-md px-3 text-left [font-size:var(--vui-font-sm)] font-semibold [&_small]:block [&_small]:[font-size:var(--vui-font-xs)] [&_small]:font-medium [&_small]:text-vui-fg-tertiary",
   eyebrow:
     "vui-routes-configsettingsnavigation eyebrow m-0 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary",
   title: "vui-routes-configsettingsnavigation title m-0 text-lg font-extrabold text-vui-fg-primary",

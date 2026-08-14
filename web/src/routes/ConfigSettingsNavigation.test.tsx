@@ -50,6 +50,14 @@ describe("ConfigSettingsNavigation", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
 
     expect(groups).toHaveLength(6);
+    expect(groups.map((group) => group.id)).toEqual([
+      "models-profiles",
+      "workbench-interface",
+      "avatar-pet",
+      "runtime-context",
+      "tooling-diagnostics",
+      "overview-apply",
+    ]);
     expect(groups.find((group) => group.id === "overview-apply")?.pages).toEqual([
       expect.objectContaining({ id: "overview-save", memberSectionIds: ["overview", "diagnostics"] }),
     ]);
@@ -130,6 +138,14 @@ describe("ConfigSettingsNavigation", () => {
     expect(selection.page?.id).toBe("model-connection");
   });
 
+  it("defaults an empty selection to model connections", () => {
+    const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
+    const selection = resolveConfigSettingsSelection(groups, "", "");
+
+    expect(selection.group?.id).toBe("models-profiles");
+    expect(selection.page?.id).toBe("model-connection");
+  });
+
   it("renders large group buttons and an accessible current page", () => {
     const groups = buildConfigSettingsGroups(sections, groupCopy, "zh");
     const activeGroup = groups.find((group) => group.id === "tooling-diagnostics") ?? null;
@@ -156,6 +172,7 @@ describe("ConfigSettingsNavigation", () => {
 
     expect(sidebarMarkup).toContain("总览与保存");
     expect(sidebarMarkup).toContain("工具与诊断");
+    expect(sidebarMarkup).toContain("搜索设置");
     expect(sidebarMarkup).toContain('data-vui="contextual-hint"');
     expect(sidebarMarkup).not.toContain('title="配置按使用场景分组，修改后统一保存"');
     // VButton loads its tooltip renderer lazily, so SSR correctly renders the

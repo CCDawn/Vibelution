@@ -100,6 +100,7 @@ import { useConfigWorkspaceQueries } from "./config/useConfigWorkspaceQueries";
 import {
   buildConfigApplyRequestPayload,
   isConfigBaselineStaleErrorMessage,
+  shouldImmediateApplyConfigPath,
   type ConfigApplyDraftOverride,
 } from "./config/configApplyModel";
 import { useConfigProviderDraftActions } from "./config/useConfigProviderDraftActions";
@@ -114,10 +115,12 @@ import {
   buildConfigSettingsGroups,
   ConfigSettingsPageTabs,
   ConfigSettingsSidebar,
+  DEFAULT_CONFIG_SETTINGS_GROUP_ID,
   resolveConfigSettingsSelection,
   type ConfigSettingsGroupCopy,
   type ConfigSettingsGroupId,
 } from "./ConfigSettingsNavigation";
+import { buildConfigSettingsSearchIndex } from "./configSettingsSearch";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
 
 /** Heavy settings sections — keep off Config shell first paint (R2). */
@@ -168,7 +171,6 @@ const CONFIG_SETTINGS_SIDEBAR_RESIZE = {
 
 export type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";
-type ProviderWorkspaceMode = "quick" | "manage" | "advanced";
 type ProviderDiscoveryFailureDetail = {
   providerId: string;
   reasonCode: string;
@@ -2242,8 +2244,8 @@ export function ConfigRoute() {
   const [selectedProviderVendorId, setSelectedProviderVendorId] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [selectedProviderTab, setSelectedProviderTab] = useState<ConfigProviderRegistryTab>("connection");
-  // Default to asset home (configured providers + pinned models), not empty quick-setup form.
-  const [providerWorkspaceMode, setProviderWorkspaceMode] = useState<ProviderWorkspaceMode>("manage");
+  const [providerConnecting, setProviderConnecting] = useState(false);
+  const [providerShowMore, setProviderShowMore] = useState(false);
   const [providerQuickSetupState, dispatchProviderQuickSetup] = useReducer(
     providerQuickSetupReducer,
     undefined,
@@ -2337,6 +2339,14 @@ export function ConfigRoute() {
   const settingsGroups = useMemo(
     () => buildConfigSettingsGroups(workspaceSections, groupCopy, currentLanguage),
     [currentLanguage, groupCopy, workspaceSections],
+  );
+  const settingsSearchDocuments = useMemo(
+    () => buildConfigSettingsSearchIndex({
+      groups: settingsGroups,
+      editorSections: workspace?.editorSections ?? [],
+      editorMeta: workspace?.editorMeta ?? {},
+    }),
+    [settingsGroups, workspace?.editorMeta, workspace?.editorSections],
   );
   const { group: activeGroup, page: activePage } = useMemo(
     () => resolveConfigSettingsSelection(settingsGroups, activeGroupId, activePageId),
@@ -2438,7 +2448,9 @@ export function ConfigRoute() {
       setActivePageId(requestedGroup.pages[0]?.id ?? "");
       return;
     }
-    const currentGroup = settingsGroups.find((group) => group.id === activeGroupId) ?? settingsGroups[0];
+    const currentGroup = settingsGroups.find((group) => group.id === activeGroupId)
+      ?? settingsGroups.find((group) => group.id === DEFAULT_CONFIG_SETTINGS_GROUP_ID)
+      ?? settingsGroups[0];
     if (currentGroup.id !== activeGroupId) {
       setActiveGroupId(currentGroup.id);
     }
@@ -2503,6 +2515,12 @@ export function ConfigRoute() {
     contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function handleNavigateSettings(groupId: ConfigSettingsGroupId, pageId: string) {
+    setActiveGroupId(groupId);
+    setActivePageId(pageId);
+    contentViewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   function handleSelectPage(pageId: string) {
     setActivePageId(pageId);
     const page = activeGroup?.pages.find((candidate) => candidate.id === pageId);
@@ -2517,7 +2535,8 @@ export function ConfigRoute() {
 
     setActiveGroupId("models-profiles");
     setActivePageId("model-connection");
-    setProviderWorkspaceMode("manage");
+    setProviderConnecting(false);
+    setProviderShowMore(false);
     setSelectedProviderId(providerId);
     setSelectedProviderTab("connection");
     setProviderCredentialEditId(providerId);
@@ -2635,13 +2654,22 @@ export function ConfigRoute() {
     readableErrorMessage,
   });
 
+  useEffect(() => {
+    if (providerQuickSetupState.phase === "success") {
+      setProviderConnecting(false);
+    }
+  }, [providerQuickSetupState.phase]);
+
   async function handleUnpinProviderModel(modelRef: string) {
-    await unpinProviderModel(modelRef, (ref) => {
+    const unpinned = await unpinProviderModel(modelRef, (ref) => {
       const separator = ref.indexOf("/");
       if (separator <= 0) return "";
       const providerId = ref.slice(0, separator);
       return providerRows.find((row) => row.providerId === providerId)?.models.find((item) => item.modelRef === ref)?.upstreamId ?? "";
     });
+    if (unpinned) {
+      await persistImmediateDraft(copy.applying);
+    }
   }
 
   async function handleTestProviderModel(modelRef: string) {
@@ -2696,15 +2724,35 @@ export function ConfigRoute() {
     }
   }
 
+  function snapshotDraftOverride(): ConfigApplyDraftOverride | undefined {
+    const snapshot = providerDraftRequestRef.current;
+    if (!snapshot) return undefined;
+    return {
+      publicConfig: snapshot.publicConfig,
+      draftMeta: snapshot.draftMeta,
+      baseHash: snapshot.baseHash,
+    };
+  }
+
+  async function persistImmediateDraft(pendingLabel: string): Promise<boolean> {
+    return handleApply(pendingLabel, snapshotDraftOverride());
+  }
+
   async function handleUpdateProviderCredential(providerId: string) {
     if (structuredActionsDisabled || !providerCredentialValue.trim()) return;
     if (!credentialProvider || credentialProvider.providerId !== providerId || credentialProvider.credentialState === "not_required") return;
-    await updateProviderCredential(providerId, providerCredentialValue);
+    const updated = await updateProviderCredential(providerId, providerCredentialValue);
+    if (updated) {
+      await persistImmediateDraft(copy.applying);
+    }
   }
 
   async function handleUpdateProviderContextWindow(providerId: string, contextWindow: number | null) {
     if (structuredActionsDisabled) return;
-    await updateProviderContextWindow(providerId, contextWindow);
+    const updated = await updateProviderContextWindow(providerId, contextWindow);
+    if (updated) {
+      await persistImmediateDraft(copy.applying);
+    }
   }
 
   async function handleApplyProviderRoutePreview() {
@@ -2896,7 +2944,12 @@ export function ConfigRoute() {
   async function saveConfigSection(path: string, nextValue: unknown) {
     try {
       const updated = setValueAtConfigPath(requireDraft(), path, nextValue);
-      return await previewDraft(updated, draftMeta, copy.sectionSavePending);
+      const previewed = await previewDraft(updated, draftMeta, copy.sectionSavePending);
+      if (!previewed) return false;
+      if (shouldImmediateApplyConfigPath(path)) {
+        return persistImmediateDraft(copy.applying);
+      }
+      return true;
     } catch (error) {
       markError(error);
       return false;
@@ -3350,6 +3403,8 @@ export function ConfigRoute() {
             groups={settingsGroups}
             activeGroupId={activeGroup?.id ?? ""}
             onSelectGroup={handleSelectGroup}
+            onNavigate={handleNavigateSettings}
+            searchDocuments={settingsSearchDocuments}
             headerAction={returnToPath ? (
               <VRouteLinkButton
                 to={returnToPath}
@@ -3480,18 +3535,65 @@ export function ConfigRoute() {
               <>
                 <VSection
                   title="模型连接"
-                  eyebrow="默认：已配置资产 · 需要新建时再点「添加连接」"
-                  tooltip="本页默认展示已连接服务与已固定模型。点服务旁「编辑」在右侧改 API Key 与上下文窗口。仅在接入新中转站时用「添加连接」。"
+                  eyebrow="已配置的服务与模型"
+                  tooltip="本页默认展示已连接服务与已固定模型。点服务旁「编辑」在右侧改 API Key 与上下文窗口。添加连接会直接写入 operator config；改路由仍需 preview 确认。"
                   tooltipLabel="模型连接工作台说明"
                   actions={(
-                    <VActionGroup ariaLabel="Provider 工作区模式">
-                      <VButton tooltip="查看已连接服务、已固定模型；点编辑打开右侧配置栏。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>① 模型资产</VButton>
-                      <VButton tooltip="新建中转站/服务商：选模板 → Key → 检测 → 固定模型。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>② 添加连接</VButton>
-                      <VButton tooltip="模板、路由与底层参数（进阶）。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "advanced"} variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>③ 高级设置</VButton>
+                    <VActionGroup ariaLabel="模型连接操作">
+                      <VButton
+                        tooltip="选模板 → Key → 检测 → 固定模型，完成后写回配置。"
+                        className={styles.providerModeButton}
+                        aria-pressed={providerConnecting}
+                        variant={providerConnecting ? "primary" : "secondary"}
+                        onPress={() => setProviderConnecting(true)}
+                      >
+                        添加连接
+                      </VButton>
+                      <VButton
+                        tooltip="模板向导、迁移与底层参数。"
+                        className={styles.providerModeButton}
+                        aria-pressed={providerShowMore}
+                        variant={providerShowMore ? "primary" : "ghost"}
+                        onPress={() => setProviderShowMore((open) => !open)}
+                      >
+                        {providerShowMore ? "收起更多" : "更多"}
+                      </VButton>
                     </VActionGroup>
                   )}
                 />
-                {providerWorkspaceMode === "manage" ? (
+                {providerConnecting ? (
+                  <>
+                    <VButton
+                      className={styles.providerModeButton}
+                      variant="ghost"
+                      onPress={() => setProviderConnecting(false)}
+                    >
+                      返回已配置服务
+                    </VButton>
+                    <ConfigQuickSetupPanel
+                      state={providerQuickSetupState}
+                      templates={providerPresetOptions}
+                      credentialValue={providerQuickCredential}
+                      disabled={structuredActionsDisabled || Boolean(busyAction)}
+                      onCredentialChange={setProviderQuickCredential}
+                      onProviderChange={(provider) => {
+                        setProviderQuickCredential("");
+                        dispatchProviderQuickSetup({ type: "set_provider", provider });
+                      }}
+                      onDetect={(input) => {
+                        void handlePrepareProviderQuickSetup(input);
+                      }}
+                      onModelChange={(modelRef) => dispatchProviderQuickSetup({ type: "select_model", modelRef })}
+                      onConfirm={() => {
+                        void handleConfirmProviderQuickSetup();
+                      }}
+                      onReset={() => {
+                        setProviderQuickCredential("");
+                        dispatchProviderQuickSetup({ type: "reset" });
+                      }}
+                    />
+                  </>
+                ) : (
                   <>
                 <ConfigProviderRegistryPanel
                   rows={providerRows}
@@ -3510,6 +3612,7 @@ export function ConfigRoute() {
                   onSaveExternal={() => {
                     void handleApply();
                   }}
+                  onAddConnection={() => setProviderConnecting(true)}
                   onSelectProvider={(providerId) => {
                     setProviderCredentialEditId("");
                     setProviderCredentialValue("");
@@ -3550,7 +3653,11 @@ export function ConfigRoute() {
                     handleBeginProviderRouteEdit(providerId);
                   }}
                   onPin={(providerId, models) => {
-                    void handlePinProviderModels(providerId, models);
+                    void handlePinProviderModels(providerId, models).then((pinned) => {
+                      if (pinned) {
+                        void persistImmediateDraft(copy.applying);
+                      }
+                    });
                   }}
                   onUnpin={(modelRef) => {
                     void handleUnpinProviderModel(modelRef);
@@ -3672,32 +3779,8 @@ export function ConfigRoute() {
                   </VStateSurface>
                 ) : null}
                   </>
-                ) : null}
-                {providerWorkspaceMode === "quick" ? (
-                  <ConfigQuickSetupPanel
-                    state={providerQuickSetupState}
-                    templates={providerPresetOptions}
-                    credentialValue={providerQuickCredential}
-                    disabled={structuredActionsDisabled || Boolean(busyAction)}
-                    onCredentialChange={setProviderQuickCredential}
-                    onProviderChange={(provider) => {
-                      setProviderQuickCredential("");
-                      dispatchProviderQuickSetup({ type: "set_provider", provider });
-                    }}
-                    onDetect={(input) => {
-                      void handlePrepareProviderQuickSetup(input);
-                    }}
-                    onModelChange={(modelRef) => dispatchProviderQuickSetup({ type: "select_model", modelRef })}
-                    onConfirm={() => {
-                      void handleConfirmProviderQuickSetup();
-                    }}
-                    onReset={() => {
-                      setProviderQuickCredential("");
-                      dispatchProviderQuickSetup({ type: "reset" });
-                    }}
-                  />
-                ) : null}
-                {providerWorkspaceMode === "advanced" ? (
+                )}
+                {providerShowMore ? (
                   <>
                 <ConfigProviderWizard
                   state={providerWizardState}
@@ -3708,7 +3791,12 @@ export function ConfigRoute() {
                   onSuggestProviderId={handleSuggestProviderId}
                   onCreateProvider={handleCreateProvider}
                   onDiscover={handleDiscoverProvider}
-                  onPin={handlePinProviderModels}
+                  onPin={async (providerId, models) => {
+                    const pinned = await handlePinProviderModels(providerId, models);
+                    if (pinned) {
+                      await persistImmediateDraft(copy.applying);
+                    }
+                  }}
                 />
                 <ConfigModelMigrationPanel
                   schemaVersion={2}
