@@ -644,9 +644,18 @@ Task 9 AG-UI adapter（独立 UI 需求批准后）依赖稳定事件权威
 
 ### 实施阶段
 
+2026-08-14 代码级进度：
+
+- 新增 immutable `ProtocolAdapterDefinition`、`AgentProtocolBinding`、`EndpointObservation`、`EffectiveAgentGraph`、`ResolvedAgentRoute` 与稳定 fingerprint。
+- 有效能力按 `Agent 声明 ∩ binding ∩ adapter ∩ 当前 observation ∩ operator policy ∩ caller grant` 处理；过期 observation 不再提供能力。
+- 新增 principal / tenant / binding / operation / policy version 绑定的 fail-closed admission decision；外部 identity 使用 binding/principal/tenant-scoped opaque ref。
+- 现有 managed MCP gateway 只投影成 compatibility adapter/binding，`external_agent.service` 继续是唯一 task lifecycle authority，没有新增第二 store。
+- A2A 与 AG-UI 本轮仅落 adapter interface、family/operation contracts 与 graph tests，没有注册 listener、endpoint 或真实运行连接。
+- Agent/LLM/MCP/迁移相关聚焦验证合计 291 passed；真实 Host、A2A、AG-UI 和 active Agent 数据均未运行验收。
+
 - [ ] `EffectiveAgentGraph` 成为 runtime/doctor/API/UI 的唯一 Agent route 解析源。
-- [ ] 现有 MCP 网关通过 compatibility adapter 无回归迁移。
-- [ ] 权限、外部 ID 映射、版本/能力协商均有负向测试。
+- [x] 现有 MCP 网关通过只读 compatibility projection 接入，原五工具/生命周期回归保持全绿。
+- [x] 权限交集、过期 observation、外部 ID scope、binding mismatch 与未认证 principal 有负向测试。
 - [ ] 经授权的真实 Host/runtime 验收完成，且证据与模拟测试分开记录。
 - [ ] 稳定规则提升到 owning docs/ADR，旧临时路径有删除或保留理由。
 

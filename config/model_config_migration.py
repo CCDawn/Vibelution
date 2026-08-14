@@ -58,6 +58,8 @@ class ModelConfigMigrationPreview:
     reference_impact: dict[str, Any]
     conflicts: tuple[dict[str, Any], ...]
     proposed_public_config: dict[str, Any] = field(repr=False)
+    migration_summary: dict[str, Any]
+    rollback_plan_id: str
 
 
 @dataclass(frozen=True)
@@ -152,13 +154,21 @@ def _model_payload(entry: dict[str, Any], upstream_id: str) -> dict[str, Any]:
     ):
         if source in entry:
             defaults[target] = copy.deepcopy(entry[source])
+    legacy_protocol = str(entry.get("protocol") or "").strip().lower()
+    interaction_contracts = {"basic_chat", "tool_chat", "reasoning_chat", "responses_agent"}
+    interaction_contract = (
+        legacy_protocol
+        if legacy_protocol in interaction_contracts
+        else str(entry.get("contract") or "tool_chat")
+    )
+    model_protocol = "" if legacy_protocol in interaction_contracts else legacy_protocol
     payload: dict[str, Any] = {
         "upstream_id": upstream_id,
         "label": str(entry.get("label") or upstream_id),
         "enabled": True,
         "wire_protocol": str(entry.get("transport") or "chat_completions"),
-        "interaction_contract": str(entry.get("contract") or "tool_chat"),
-        "model_protocol": str(entry.get("protocol") or ""),
+        "interaction_contract": interaction_contract,
+        "model_protocol": model_protocol,
         "compatibility": copy.deepcopy(entry.get("compat") or {}),
         "defaults": defaults,
     }
@@ -285,6 +295,26 @@ def preview_v1_to_v2(
     )
 
     conflicts: list[dict[str, Any]] = []
+    typo_fields = {"protcols", "wire_protcol", "overides", "service_clas"}
+    for model_id, raw_entry in library.items():
+        if not isinstance(raw_entry, dict):
+            continue
+        for field_name in sorted(set(raw_entry).intersection(typo_fields)):
+            conflicts.append(
+                {
+                    "code": "unknown_legacy_field",
+                    "path": f"llm.model_library.{model_id}.{field_name}",
+                }
+            )
+        raw_provider = raw_entry.get("provider")
+        if isinstance(raw_provider, dict):
+            for field_name in sorted(set(raw_provider).intersection(typo_fields)):
+                conflicts.append(
+                    {
+                        "code": "unknown_legacy_field",
+                        "path": f"llm.model_library.{model_id}.provider.{field_name}",
+                    }
+                )
     grouped: dict[
         tuple[str, str],
         list[tuple[str, dict[str, Any], dict[str, Any], str, str, str, str]],
@@ -505,6 +535,19 @@ def preview_v1_to_v2(
     )
     preview_id = "preview-" + hashlib.sha256(stable_payload.encode("utf-8")).hexdigest()[:24]
     blocking = [item for item in conflicts if item.get("severity") != "suggestion"]
+    before_summary = {
+        "providers": len(library),
+        "models": len(library),
+        "profiles": len(llm.get("profiles") or {}) if isinstance(llm.get("profiles"), dict) else 0,
+    }
+    after_summary = {
+        "providers": len(provider_registry),
+        "models": sum(len(provider.get("models") or {}) for provider in provider_registry.values()),
+        "profiles": len(proposed_llm.get("profiles") or {}) if isinstance(proposed_llm.get("profiles"), dict) else 0,
+    }
+    rollback_plan_id = "rollback-plan-" + hashlib.sha256(
+        f"{preview_id}\0{base_hash}".encode("utf-8")
+    ).hexdigest()[:24]
     preview = ModelConfigMigrationPreview(
         preview_id=preview_id,
         base_hash=base_hash,
@@ -514,6 +557,12 @@ def preview_v1_to_v2(
         reference_impact=_reference_impact(model_ref_map, source, Path(project_root)),
         conflicts=tuple(conflicts),
         proposed_public_config=proposed,
+        migration_summary={
+            "before": before_summary,
+            "after": after_summary,
+            "blockingIssueCount": len(blocking),
+        },
+        rollback_plan_id=rollback_plan_id,
     )
     now = time.monotonic()
     _purge_expired_previews(now)

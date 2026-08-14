@@ -9,7 +9,7 @@
 > **Scope**: 模型配置 schema、有效配置投影、Profile/Agent 绑定、协议解析、配置诊断投影、错误分类、恢复与 fallback；不在本方案阶段修改 operator config、Agent 数据或运行时。
 > **Related design**: 多 Agent 配置、A2A/MCP/AG-UI 适配和 Agent 协议绑定见 [`2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md`](2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md)。
 > **Supersedes**: 不覆盖现行 [`docs/ops/config/`](ops/config/INDEX.md)、[`core/llm/PROTOCOL.md`](../core/llm/PROTOCOL.md)、ADR 或开发标准；历史 LLM 方案仅作背景证据，不再作为实施权威。
-> **Implementation link**: 待实施分支/提交产生后补充。
+> **Implementation link**: `codex/runtime-protocol-routing-implementation`（本地任务分支；完成 closeout 后补充最终提交）。
 > **Validation**: 本文需通过链接、格式、Git diff 和计划契约检查；业务实现按第 11 节验证矩阵验收。
 > **Close condition**: Critical Path 全部实现、静态与授权后的运行时验收完成、持久规则已提升到 owning docs/ADR，本文状态改为 `implemented` 并移入 `docs/archive/`。
 
@@ -792,12 +792,24 @@ Launcher/runtime：
 
 ## 14. 实施检查表
 
+### 2026-08-14 实施快照
+
+已完成代码级实现：
+
+- `config/llm_canonical_schema.py`：canonical v2 strict ingress，未知字段给出精确 path，LLM wire / model protocol / interaction contract 分层校验，拒绝 inline secret。
+- `config/effective_llm_graph.py`：Provider、Model、Profile、Alias 的确定性图解析；official / relay / local、wire、adapter、backend、endpoint 进入稳定 fingerprint；Alias 循环/悬空与同身份 fallback fail-closed。
+- Anthropic 拆分为 `anthropic_messages_native` 与 `anthropic_messages_litellm_compat`；native 使用 `/v1/messages` body、独立 HTTP backend 和 SSE decoder，不静默回退 compat。
+- migration preview 将误放在 `model_protocol` 的 `tool_chat` 等 interaction contract 迁回正确层，并输出 before/after/blocking 摘要与 rollback plan id；已知 legacy typo 输出 path 化 blocking issue。
+- 代码级聚焦验证 291 passed；未调用真实厂商、中转站或本地模型。
+
+仍被外部状态阻断：当前 storage inventory 发现两份内容不同的 legacy `agents.json` 指向同一 active destination；解决权威冲突前不得 apply Agent 数据迁移，也不能宣称 active Agent snapshot 已验收。
+
 ### 契约冻结
 
-- [ ] 三类协议字段和继承规则写入测试。
-- [ ] migration input 与 canonical schema 边界明确。
-- [ ] `ResolvedLLMRoute`/fingerprint 契约冻结。
-- [ ] graph diagnostic error code 列表冻结。
+- [x] 三类协议字段和继承规则写入测试。
+- [x] migration input 与 canonical schema 边界明确。
+- [x] `EffectiveLLMRoute`/fingerprint 契约冻结。
+- [x] graph diagnostic error code 列表冻结。
 
 ### 核心实现
 
@@ -805,7 +817,7 @@ Launcher/runtime：
 - [ ] 60 模型/10 Profile/Agent binding 全图校验。
 - [ ] config UI/doctor/runtime 同源。
 - [ ] semantic recovery 实际应用 tools/stream 变更。
-- [ ] fallback distinct route guard。
+- [x] fallback distinct route guard。
 - [ ] Provider error mapper 修复 balance 分类。
 
 ### 数据迁移
@@ -815,16 +827,16 @@ Launcher/runtime：
 - [ ] 5 个失效 Agent 绑定完成 Alias + canonical rewrite。
 - [ ] 非 dialogue/test/重复模型治理。
 - [ ] `local` Profile 名实一致。
-- [ ] migration preview/apply/rollback 幂等。
+- [x] migration preview/apply/rollback 的既有 50 项回归保持全绿；真实 Agent 数据 apply 仍受 storage authority 冲突阻断。
 
 ### 验收与收口
 
-- [ ] 所有相关静态测试通过。
+- [x] 本轮相关静态测试 291 passed。
 - [ ] frontend typecheck/VUI contract 通过（若触及 `web/`）。
 - [ ] operator config 离线全图零 blocking。
 - [ ] 经授权的 runtime smoke 通过。
 - [ ] Launcher/runtime refresh 决策有证据。
-- [ ] 现行配置文档与 PROTOCOL 更新。
+- [x] `core/llm/PROTOCOL.md` 已更新 native/compat 身份；operator recipe 未改动。
 - [ ] 项目记忆仅由同步 owner 更新。
 - [ ] 本文状态设为 `implemented` 并移入 `docs/archive/`。
 
