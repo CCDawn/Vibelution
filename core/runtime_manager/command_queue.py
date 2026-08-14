@@ -164,7 +164,7 @@ def submit_command(
     if str(command.get("type") or "").strip() in {"open_workbench", "restart_workbench"}:
         superseded_commands.extend(_supersede_pending_close_commands_for_open(command))
     active_interrupt = request_active_lifecycle_interrupt_for_close(command)
-    joined_command_id = _joinable_lifecycle_command_id(command)
+    joined_command_id, joined_command_type = _joinable_lifecycle_command(command)
     if joined_command_id:
         command["commandId"] = joined_command_id
         command_type = str(command.get("type") or "")
@@ -178,6 +178,7 @@ def submit_command(
             {
                 "commandId": joined_command_id,
                 "type": command_type,
+                "joinedCommandType": joined_command_type,
                 "requestedBy": str(command.get("requestedBy") or ""),
                 "noBrowser": bool((command.get("args") or {}).get("noBrowser")),
                 "stopManager": bool((command.get("args") or {}).get("stopManager")),
@@ -1025,39 +1026,43 @@ def _shutdown_in_progress_state() -> dict[str, Any] | None:
     return state
 
 
-def _joinable_lifecycle_command_id(command: dict[str, Any]) -> str:
+def _joinable_lifecycle_command(command: dict[str, Any]) -> tuple[str, str]:
     command_type = str(command.get("type") or "").strip()
     if command_type == "open_workbench":
-        return _joinable_open_command_id(command)
+        return _joinable_open_command(command)
     if command_type == "restart_workbench":
-        return _joinable_restart_command_id(command)
+        command_id = _joinable_restart_command_id(command)
+        return command_id, "restart_workbench" if command_id else ""
     if command_type == "close_workbench":
-        return _joinable_close_command_id(command)
+        command_id = _joinable_close_command_id(command)
+        return command_id, "close_workbench" if command_id else ""
     if command_type == "force_close_workbench":
-        return _joinable_force_close_command_id(command)
-    return ""
+        command_id = _joinable_force_close_command_id(command)
+        return command_id, "force_close_workbench" if command_id else ""
+    return "", ""
 
 
-def _joinable_open_command_id(command: dict[str, Any]) -> str:
+def _joinable_open_command(command: dict[str, Any]) -> tuple[str, str]:
     command_type = str(command.get("type") or "").strip()
     if command_type != "open_workbench":
-        return ""
+        return "", ""
     manager_pid = load_pid()
     if not _process_is_alive(manager_pid):
-        return ""
+        return "", ""
     state = load_state()
     if not isinstance(state, dict) or not _state_belongs_to_current_manager(state, manager_pid):
-        return ""
+        return "", ""
     requested_args = command.get("args") if isinstance(command.get("args"), dict) else {}
     requested_no_browser = bool(requested_args.get("noBrowser"))
     active = state.get("command") if isinstance(state.get("command"), dict) else {}
     active_command_id = str(active.get("activeCommandId") or "").strip()
+    active_type = str(active.get("activeType") or "").strip()
     if (
         active_command_id
-        and str(active.get("activeType") or "").strip() == "open_workbench"
+        and active_type in {"open_workbench", "restart_workbench"}
         and _open_requests_are_compatible(existing_no_browser=bool(active.get("noBrowser")), requested_no_browser=requested_no_browser)
     ):
-        return active_command_id
+        return active_command_id, active_type
     for path in sorted(INBOX_DIR.glob("*.json")):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -1065,7 +1070,8 @@ def _joinable_open_command_id(command: dict[str, Any]) -> str:
             continue
         if not isinstance(payload, dict):
             continue
-        if str(payload.get("type") or "").strip() != "open_workbench":
+        pending_type = str(payload.get("type") or "").strip()
+        if pending_type not in {"open_workbench", "restart_workbench"}:
             continue
         existing_args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
         if not _open_requests_are_compatible(
@@ -1073,8 +1079,8 @@ def _joinable_open_command_id(command: dict[str, Any]) -> str:
             requested_no_browser=requested_no_browser,
         ):
             continue
-        return str(payload.get("commandId") or path.stem).strip() or path.stem
-    return ""
+        return str(payload.get("commandId") or path.stem).strip() or path.stem, pending_type
+    return "", ""
 
 
 def _joinable_restart_command_id(command: dict[str, Any]) -> str:

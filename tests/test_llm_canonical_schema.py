@@ -61,6 +61,12 @@ def _payload() -> dict:
             lambda p: p["profiles"]["primary"].__setitem__("unknown_runtime_field", True),
             "profiles.primary.unknown_runtime_field",
         ),
+        (
+            lambda p: p["providers"]["relay"]["models"]["gpt"].__setitem__(
+                "defaults", {"prompt_cache": {"mod": "automatic"}}
+            ),
+            "providers.relay.models.gpt.defaults.prompt_cache.mod",
+        ),
     ],
 )
 def test_strict_canonical_schema_rejects_unknown_fields_with_exact_path(mutate, path) -> None:
@@ -105,3 +111,16 @@ def test_valid_payload_preserves_explicit_three_layer_protocol_fields() -> None:
     assert model.interaction_contract == "responses_agent"
     assert model.model_protocol == "openai_responses"
     assert model.wire_protocol == "responses"
+
+
+def test_valid_payload_preserves_model_context_window_and_prompt_cache_defaults() -> None:
+    payload = _payload()
+    model = payload["providers"]["relay"]["models"]["gpt"]
+    model["context_window"] = 128000
+    model["defaults"] = {"prompt_cache": {"mode": "automatic"}}
+
+    config = validate_canonical_llm_payload(payload)
+
+    pinned = config.providers["relay"].models["gpt"]
+    assert pinned.context_window == 128000
+    assert pinned.defaults.prompt_cache.mode == "automatic"
