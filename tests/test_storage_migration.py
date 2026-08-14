@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 from core.infrastructure.storage_migration import (
+    StorageMigrationEntry,
     StorageMigrationError,
     apply_storage_migration,
     plan_storage_migration,
     rollback_storage_switch,
 )
+from core.infrastructure import storage_migration as storage_migration_module
 from vibelution_storage import (
     project_memory_migration_state_path,
     resolve_active_project_storage_paths,
@@ -124,6 +127,32 @@ def test_plan_skips_ephemeral_lock_files_and_reports_the_count(tmp_path, monkeyp
     assert [entry.relative_path for entry in plan.entries] == [
         "workspace/chat/chat_state.json"
     ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length path contract")
+def test_copy_and_verify_supports_windows_extended_length_destination(tmp_path):
+    source = tmp_path / "source.json"
+    source.write_text("long-path\n", encoding="utf-8")
+    destination = tmp_path / "target"
+    for index in range(5):
+        destination /= f"segment-{index}-" + ("x" * 48)
+    destination /= "destination.json"
+    assert len(str(destination)) > 260
+    entry = StorageMigrationEntry(
+        source=str(source),
+        destination=str(destination),
+        category="project_backups",
+        relative_path="destination.json",
+        size=source.stat().st_size,
+        sha256=storage_migration_module._sha256_file(source),
+    )
+
+    copied, reused = storage_migration_module._copy_and_verify_entries((entry,))
+
+    assert (copied, reused) == (1, 0)
+    assert storage_migration_module._io_path(destination).read_text(encoding="utf-8") == (
+        "long-path\n"
+    )
 
 
 def test_apply_preserves_project_workspace_conflict_as_recoverable_archive(

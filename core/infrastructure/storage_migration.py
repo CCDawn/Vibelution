@@ -99,7 +99,7 @@ def plan_storage_migration(
                 continue
             destination = (destination_root / relative).resolve()
             try:
-                size = source.stat().st_size
+                size = _io_path(source).stat().st_size
                 sha256 = _sha256_file(source)
             except OSError as exc:
                 raise StorageMigrationError(
@@ -293,11 +293,19 @@ def _copy_and_verify_entries(entries: Iterable[StorageMigrationEntry]) -> tuple[
     for entry in entries:
         source = Path(entry.source)
         destination = Path(entry.destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.exists():
+        source_io = _io_path(source)
+        destination_io = _io_path(destination)
+        destination_io.parent.mkdir(parents=True, exist_ok=True)
+        if destination_io.exists():
             reused += 1
         else:
-            shutil.copy2(source, destination)
+            try:
+                shutil.copy2(source_io, destination_io)
+            except OSError as exc:
+                raise StorageMigrationError(
+                    "failed to copy legacy source during storage migration: "
+                    f"{source} -> {destination}"
+                ) from exc
             copied += 1
         _verify_entry(entry)
     return copied, reused
@@ -457,12 +465,13 @@ def _destination_conflicts(entries: Iterable[StorageMigrationEntry]) -> list[str
     conflicts: list[str] = []
     for entry in entries:
         destination = Path(entry.destination)
-        if not destination.exists():
+        destination_io = _io_path(destination)
+        if not destination_io.exists():
             continue
-        if not destination.is_file():
+        if not destination_io.is_file():
             conflicts.append(f"not a file: {destination}")
             continue
-        if destination.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256:
+        if destination_io.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256:
             conflicts.append(f"different content: {destination}")
     return conflicts
 
@@ -470,11 +479,13 @@ def _destination_conflicts(entries: Iterable[StorageMigrationEntry]) -> list[str
 def _verify_entry(entry: StorageMigrationEntry) -> None:
     source = Path(entry.source)
     destination = Path(entry.destination)
-    if not source.is_file() or not destination.is_file():
+    source_io = _io_path(source)
+    destination_io = _io_path(destination)
+    if not source_io.is_file() or not destination_io.is_file():
         raise StorageMigrationError(f"migration file disappeared: {entry.relative_path}")
-    if source.stat().st_size != entry.size or _sha256_file(source) != entry.sha256:
+    if source_io.stat().st_size != entry.size or _sha256_file(source) != entry.sha256:
         raise StorageMigrationError(f"legacy source changed during copy: {source}")
-    if destination.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256:
+    if destination_io.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256:
         raise StorageMigrationError(f"destination verification failed: {destination}")
 
 
@@ -516,10 +527,22 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
+    with _io_path(path).open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _io_path(path: Path) -> Path:
+    resolved = path.resolve()
+    if os.name != "nt":
+        return resolved
+    text = str(resolved)
+    if text.startswith("\\\\?\\"):
+        return resolved
+    if text.startswith("\\\\"):
+        return Path(f"\\\\?\\UNC\\{text[2:]}")
+    return Path(f"\\\\?\\{text}")
 
 
 def _aggregate_digest(entries: Iterable[StorageMigrationEntry]) -> str:
