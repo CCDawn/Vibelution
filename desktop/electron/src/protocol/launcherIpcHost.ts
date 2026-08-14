@@ -9,12 +9,30 @@ export const LAUNCHER_IPC_NETWORK_ERROR = "LAUNCHER_IPC_NETWORK_ERROR";
 export const LAUNCHER_IPC_LIFECYCLE_ERROR = "LAUNCHER_IPC_LIFECYCLE_ERROR";
 
 const LIFECYCLE_PATHS = new Set(["start", "stop", "force-stop", "restart", "rebuild-and-start"]);
+const BRANCH_INSTANCE_PATHS = new Set([
+  "branch-instances/start",
+  "branch-instances/stop",
+  "branch-instances/force-stop",
+  "branch-instances/restart"
+]);
 
 export type OrchestratedLifecycleResult = {
   schemaVersion: 1;
   accepted: boolean;
   operation: string;
   commandId?: string;
+  message?: string;
+  code?: string;
+  activeWorkRuns?: unknown[];
+};
+
+export type OrchestratedBranchInstanceResult = {
+  schemaVersion: 1;
+  accepted: boolean;
+  operation: string;
+  instanceId?: string;
+  port?: number;
+  controlPort?: number;
   message?: string;
   code?: string;
   activeWorkRuns?: unknown[];
@@ -122,6 +140,7 @@ export function createLauncherIpcHost(input: {
   resolveContext: () => Promise<LauncherIpcHostContext | null>;
   resolveWindowTruth?: () => LauncherWindowTruth;
   orchestrateLifecycle?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedLifecycleResult>;
+  orchestrateBranchInstance?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedBranchInstanceResult>;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }) {
@@ -150,6 +169,18 @@ export function createLauncherIpcHost(input: {
       if (LIFECYCLE_PATHS.has(normalized.path) && input.orchestrateLifecycle) {
         try {
           const result = await input.orchestrateLifecycle(normalized.path, normalized);
+          return { ok: true, payload: result };
+        } catch (error: unknown) {
+          return launcherIpcError(
+            LAUNCHER_IPC_LIFECYCLE_ERROR,
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      }
+      if (BRANCH_INSTANCE_PATHS.has(normalized.path) && input.orchestrateBranchInstance) {
+        try {
+          const operation = normalized.path.split("/")[1];
+          const result = await input.orchestrateBranchInstance(operation, normalized);
           return { ok: true, payload: result };
         } catch (error: unknown) {
           return launcherIpcError(
