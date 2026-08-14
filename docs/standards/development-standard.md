@@ -205,7 +205,7 @@ The root workspace:
 
 `<project-root>`
 
-is the local `main` integration workspace. It is for syncing, fast-forward merging, final validation, reviewed publication, and remote sync. Every source, test, documentation, rule, memory, configuration, and `FAST_PATCH` write belongs in a task worktree. Direct writes and commits on `main` are forbidden; `main` must remain clean except for the transient state of an explicit merge operation.
+is the local `main` integration workspace. It is for syncing, fast-forward merging, merge-result inspection, reviewed publication, and remote sync. All validation must finish before merge. Every source, test, documentation, rule, memory, configuration, and `FAST_PATCH` write belongs in a task worktree. Direct writes and commits on `main` are forbidden; `main` must remain clean except for the transient state of an explicit merge operation.
 
 This root path is the durable local development-main checkout and must stay checked out on branch `main`. Do not leave `<project-root>` on a task branch, unresolved merge, or long-lived dirty experiment. If root is found on a non-main branch, first preserve or migrate that branch's dirty work into `<project-root>\.worktrees\<task-slug>` or a named stash, then restore root to `main` before continuing normal development or integration. A separate `main` worktree may be used only as a short-lived recovery exception while root is blocked, and it should be retired once root has been restored.
 
@@ -643,7 +643,7 @@ After implementation and validation in a task worktree, the owning Agent should 
 - the user did not ask to stop before merge, keep work isolated, or hand off only;
 - any post-merge remote sync uses the remote sync gate in section 14.
 
-When the gates pass, merge one task at a time into root local `main` with `git merge --ff-only <task-branch>`, run the smallest useful post-merge validation or state why docs-only/rule-only/`FAST_PATCH` validation is sufficient, then close only that task's claim and remove only that task's junction (when present), worktree, and branch. The gate supplies evidence for this sequence but does not execute merge, release, or cleanup.
+When the gates pass, merge one task at a time into root local `main` with `git merge --ff-only <task-branch>`. All review, testing, quality gates, mergeability checks, and acceptance evidence must already be complete before this command. A successful fast-forward merge immediately triggers bounded task cleanup: remove only provably task-owned temporary content and background processes/listeners, close only that task's claim, and remove only that task's junction (when present), clean worktree, and merged local branch. Do not run or wait for post-merge validation before cleanup. The gate supplies pre-merge evidence but does not execute merge, release, or cleanup.
 
 Direct development on `main` is a policy violation even when the change is small or reversible. If `main` becomes dirty outside an active merge, stop and identify the owner; do not continue editing, commit directly, or bypass the pre-commit guard. Move the change into a task worktree, then return to `main` only for the serialized fast-forward merge.
 
@@ -725,13 +725,13 @@ Task handoff must include version bump recommendation, capability domain, user-v
 
 ## 16. Mainline Integration
 
-Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; run the staged-path-driven light gate and claim-bound `closeout`; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; run minimal post-merge verification; then release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
+Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; complete all review, validation, staged-path light gates, claim-bound `closeout`, and acceptance evidence; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; then immediately release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
 
 - keeping local `main` clean before each merge;
 - reviewing claim status and write scopes;
 - merging only `ready_for_merge` claims when the owning Agent cannot safely self-merge;
 - merging one task at a time;
-- running targeted validation after each merge;
+- confirming each fast-forward merge succeeded and the target contains the task tip, without treating that inspection as product validation;
 - handling conflicts or returning them to the owning worktree;
 - closing lightweight guard claims with `release`;
 - cleaning successfully merged worktrees;
@@ -740,7 +740,9 @@ Task-owning Agents should self-review and self-merge by default when the merge g
 
 If a branch cannot merge cleanly, leave it in its own worktree and mark it blocked with the conflicting files and next action.
 
-The quality gate does not merge, release claims, or delete resources. Cleanup is task-owned and bounded (`只清理本任务`): release only the current task claim; remove only its junction if one was created; remove only its clean worktree; then delete only its merged task branch. Never delete or reuse another unfinished task's branch, worktree, junction, or claim. As each task closes itself, the worktree inventory naturally converges to the durable root `main` only; do not achieve that appearance by deleting unfinished work.
+The quality gate does not merge, release claims, or delete resources. Cleanup is immediate after a successful local merge, task-owned, and bounded (`只清理本任务`): remove only provably task-owned disposable files/directories, debug output, scratch artifacts, and background processes/listeners; release only the current task claim; remove only its junction if one was created; remove only its clean worktree; then delete only its merged task branch and safely prune stale worktree metadata. Never delay this sequence for post-merge validation. Never delete or reuse another unfinished task's branch, worktree, junction, claim, process, or content. As each task closes itself, the worktree inventory naturally converges to the durable root `main` only; do not achieve that appearance by deleting unfinished work.
+
+Cleanup uses exact paths and proven ownership, never broad scans, `git clean -fdx`, force deletion, or guesses. If cleanup cannot finish safely, report `cleanup pending` with the exact residue and reason; retain unclear, dirty, conflicted, unmerged, or active resources without changing the fact that a successful merge was already absorbed.
 
 Do not keep conflict markers, staged partial resolutions, or an in-progress merge in the main integration workspace.
 
@@ -914,6 +916,7 @@ A development round is not done until its tier-specific checklist is satisfied:
 - relevant lightweight checks ran, or the final report explains why no executable check is useful;
 - Git status and the current-task diff were reviewed;
 - any guard claim created for a hot file was released;
+- if the task was merged, its task-owned temporary content, background processes/listeners, claim, junction, clean worktree, and merged local branch were cleaned immediately, or exact `cleanup pending` residue was reported;
 - final report states remaining risk and next action.
 
 `STANDARD_TASK` and `HIGH_RISK`:
@@ -933,6 +936,7 @@ A development round is not done until its tier-specific checklist is satisfied:
 - changes are committed or explicitly marked not ready;
 - merge gates were evaluated;
 - lightweight guard claim was released as `completed`, `blocked`, or `released`, or the handoff queue state is explicitly recorded as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`;
+- if the task was merged, cleanup ran immediately without waiting for post-merge validation and the final report records removed resources or exact `cleanup pending` residue;
 - project memory was updated, explicitly not affected, or an exact update proposal was handed off;
 - version impact was judged;
 - final report states remaining risk and next action.
