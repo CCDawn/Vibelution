@@ -371,6 +371,7 @@ def _result_from_knowledge_item(item: dict[str, Any], *, rank: int, backend: str
         "knowledgeItemId": knowledge_item_id,
         "sourceArtifactIds": [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()],
         "centralSourceIds": [str(value or "").strip() for value in list(item.get("centralSourceIds") or []) if str(value or "").strip()],
+        "localCopies": [copy for copy in list(item.get("localCopies") or []) if isinstance(copy, dict)][:16],
         "searchBackend": backend,
         "matchReason": str(item.get("matchReason") or "").strip(),
         "metadata": {
@@ -405,6 +406,7 @@ def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str,
         "knowledgeItemId": knowledge_item_id,
         "sourceArtifactIds": [str(value or "").strip() for value in list(source.get("sourceArtifactIds") or []) if str(value or "").strip()],
         "centralSourceIds": [str(value or "").strip() for value in list(source.get("centralSourceIds") or []) if str(value or "").strip()],
+        "localCopies": [copy for copy in list(source.get("localCopies") or context.get("localCopies") or []) if isinstance(copy, dict)][:16],
         "searchBackend": "local_rag",
         "matchReason": str(context.get("matchReason") or "").strip(),
         "metadata": {
