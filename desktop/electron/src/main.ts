@@ -23,7 +23,6 @@ import {
   type DesktopCloseReason
 } from "./lifecycle/desktopLifecycleCoordinator.js";
 import { DesktopSessionMirrorQueue } from "./lifecycle/desktopSessionMirrorQueue.js";
-import { waitForWorkbenchLifecycleReady } from "./lifecycle/workbenchReadiness.js";
 import { isWorkbenchCloseControlFetchFailure } from "./lifecycle/workbenchCloseFailOpen.js";
 import {
   createConversationNotificationService,
@@ -124,6 +123,7 @@ import {
     resolveLauncherWindowUrl,
   resolveWorkbenchUrl
 } from "./windows/windowUrlResolver.js";
+import { waitForWorkbenchHttp, workbenchLoopbackUrl } from "./windows/workbenchHttpReady.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
 import { MainWorkbenchCloseTransactionStore } from "./lifecycle/workbenchCloseTransactionStore.js";
 
@@ -1676,23 +1676,30 @@ function isCurrentCheckoutInstance(instanceId: string): boolean {
 }
 
 function resolveOrchestratedWorkbenchUrl(port?: number): string {
-  const desktopEnv = desktopEnvironment();
   if (typeof port === "number" && Number.isFinite(port) && port > 0) {
-    return `http://127.0.0.1:${Math.trunc(port)}/`;
+    return workbenchLoopbackUrl(port);
   }
-  return resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl);
+  try {
+    return resolveWorkbenchUrl(desktopEnvironment(), launcherBootstrap?.workbenchUrl);
+  } catch {
+    return workbenchLoopbackUrl();
+  }
 }
 
 function openOrchestratedWorkbenchWindow(instanceId: string, port?: number): void {
-  const provider = windowProvider;
-  if (provider === null) {
-    return;
-  }
-  const url = resolveOrchestratedWorkbenchUrl(port);
-  const opened = isCurrentCheckoutInstance(instanceId)
-    ? provider.openOrFocusWorkbench(url)
-    : provider.openOrFocusInstanceWorkbench({ instanceId, url });
-  void opened.catch((error: unknown) => {
+  void (async () => {
+    const provider = windowProvider;
+    if (provider === null) {
+      return;
+    }
+    const url = resolveOrchestratedWorkbenchUrl(port);
+    await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS });
+    if (isCurrentCheckoutInstance(instanceId)) {
+      await provider.openOrFocusWorkbench(url);
+      return;
+    }
+    await provider.openOrFocusInstanceWorkbench({ instanceId, url });
+  })().catch((error: unknown) => {
     console.warn(error instanceof Error ? error.message : String(error));
   });
 }
@@ -1714,18 +1721,12 @@ async function openWorkbenchAfterLifecycleReady(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
   provider: ElectronWindowProvider,
-  commandId: string,
+  _commandId: string,
   timeoutMs: number
 ): Promise<void> {
-  await waitForWorkbenchLifecycleReady({
-    commandId,
-    timeoutMs,
-    readStatus: async () => {
-      const context = await resolveDesktopActionLoopContext(bootstrap);
-      return await fetchLauncherStatusSummary(context);
-    }
-  });
-  await openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider);
+  const url = resolveOrchestratedWorkbenchUrl();
+  await waitForWorkbenchHttp({ url, timeoutMs });
+  await openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, { workbenchUrl: url });
 }
 
 async function orchestrateBranchInstanceLifecycle(
@@ -1902,7 +1903,9 @@ async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
   }
   pendingOpenWorkbenchRequest = false;
   markWorkbenchOpenRequested();
-  await provider.openOrFocusWorkbench();
+  const url = resolveOrchestratedWorkbenchUrl();
+  await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS });
+  await provider.openOrFocusWorkbench(url);
 }
 
 async function applyPendingProjectSlot(projectRoot: string): Promise<void> {

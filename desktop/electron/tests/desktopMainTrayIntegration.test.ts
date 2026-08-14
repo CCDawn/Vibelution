@@ -16,7 +16,8 @@ describe("Electron main tray integration", () => {
     expect(mainSource).toContain('runTrayLifecycle("restart"');
     expect(mainSource).toContain('runTrayLifecycle("rebuild-and-start"');
     expect(mainSource).toContain("openWorkbenchAfterLifecycleReady(");
-    expect(mainSource).toContain("waitForWorkbenchLifecycleReady({");
+    expect(mainSource).toContain("waitForWorkbenchHttp({");
+    expect(mainSource).not.toContain("waitForWorkbenchLifecycleReady({");
     expect(mainSource).not.toContain("void provider\n        .openOrFocusWorkbench(resolveWorkbenchUrl(desktopEnv, launcherBootstrap.workbenchUrl))");
     expect(mainSource).toContain("runTrayLauncherStatus()");
     expect(mainSource).toContain('orchestrateLauncherLifecycle("force-stop"');
