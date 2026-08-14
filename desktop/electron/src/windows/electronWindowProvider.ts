@@ -1,4 +1,5 @@
 import type { DesktopPaths } from "../paths.js";
+import { isLauncherAppUrl, launcherAppOriginFor } from "../protocol/launcherAppProtocol.js";
 import { assertLocalHttpUrl } from "../security/urlPolicy.js";
 import { closedWindowState, type ElectronWindowRole, type ManagedWindowState } from "./windowProviderTypes.js";
 
@@ -175,8 +176,8 @@ export class ElectronWindowProvider {
   }
 
   private async presentLauncher(): Promise<ManagedWindowState> {
-    const launcherOrigin = new URL(this.launcherUrl).origin;
-    const safeUrl = assertLocalHttpUrl(this.launcherUrl, launcherOrigin);
+    const launcherOrigin = launcherAppOriginFor(this.launcherUrl);
+    const safeUrl = launcherWindowUrl(this.launcherUrl);
     const existing = this.listLauncherWindows(launcherOrigin).filter((window) => !window.isDestroyed());
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
       this.discardExtraLauncherWindows(existing, this.launcherWindow);
@@ -770,6 +771,14 @@ function isManagedWorkbenchUrl(requestUrl: string, workbenchOrigin: string): boo
 }
 
 function localWorkbenchUrl(value: string): string {
+  const origin = new URL(value).origin;
+  return assertLocalHttpUrl(value, origin);
+}
+
+function launcherWindowUrl(value: string): string {
+  if (isLauncherAppUrl(value)) {
+    return value;
+  }
   const origin = new URL(value).origin;
   return assertLocalHttpUrl(value, origin);
 }

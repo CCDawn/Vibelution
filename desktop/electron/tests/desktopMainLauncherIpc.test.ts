@@ -25,7 +25,7 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("launcherIpcTrustedOrigins()");
     const trustedStart = mainSource.indexOf("function launcherIpcTrustedOrigins");
     const trustedEnd = mainSource.indexOf("}", trustedStart);
-    expect(mainSource.slice(trustedStart, trustedEnd)).toContain("resolveLauncherUrl");
+    expect(mainSource.slice(trustedStart, trustedEnd)).toContain("resolveLauncherWindowUrl");
   });
 
   it("keeps the workbench sender away from Launcher control IPC", () => {
