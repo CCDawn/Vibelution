@@ -1973,6 +1973,18 @@ app.on("second-instance", (_event, argv) => {
     projectRoot: secondCli.projectRoot,
     openWorkbench: secondCli.openWorkbench
   });
+  if (secondCli.lifecycleCommand === "open") {
+    void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    });
+    return;
+  }
+  if (secondCli.lifecycleCommand && secondCli.lifecycleCommand !== "open") {
+    void handleSecondInstanceLifecycleCommand(secondCli.lifecycleCommand).catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    });
+    return;
+  }
   if (intent.action === "handle_deep_link") {
     void handlePublicDeepLinkUrl(intent.rawUrl, "second_instance");
     return;
@@ -1991,6 +2003,37 @@ app.on("second-instance", (_event, argv) => {
     focusExistingDesktopShell();
   }
 });
+
+async function handleSecondInstanceLifecycleCommand(command: string): Promise<void> {
+  if (command === "status") {
+    focusExistingDesktopShell();
+    return;
+  }
+  if (command === "toggle") {
+    if (launcherBootstrap === null) {
+      return;
+    }
+    try {
+      const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+      const summary = await fetchLauncherStatusSummary(context);
+      const observed = String(summary.observedState || "").trim().toLowerCase();
+      await orchestrateLauncherLifecycle(
+        observed === "open" || observed === "running" || observed === "starting" ? "stop" : "start",
+        { schemaVersion: 1, path: "toggle" }
+      );
+    } catch (error: unknown) {
+      notifyDesktopTray("Vibelution", `切换失败：${error instanceof Error ? error.message.slice(0, 220) : String(error)}`, "warning");
+    }
+    return;
+  }
+  const operation = command === "rebuild-and-start" ? "rebuild-and-start" : command;
+  try {
+    await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: command });
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `Launcher 命令失败：${detail.slice(0, 300)}`, "warning");
+  }
+}
 
 app.on("open-url", (event, rawUrl) => {
   event.preventDefault();
