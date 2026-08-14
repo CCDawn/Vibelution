@@ -24,7 +24,8 @@ export async function runPythonJsonBridge(input: {
   const child = spawnImpl(input.pythonPath, input.args, {
     cwd: input.cwd,
     windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS: "1" }
   });
   return await new Promise((resolveOutput, reject) => {
     const chunks: Buffer[] = [];

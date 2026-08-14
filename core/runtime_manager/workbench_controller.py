@@ -1410,26 +1410,29 @@ def _bootstrap_packaged_electron_workbench(
         current_timing_key = "desktopActionSubmitMs"
         startup_telemetry["failureStage"] = current_stage
         stage_started = time.monotonic()
-        intent = _submit_electron_window_action(
-            action="open_workbench",
-            reason=f"{action}:electron_first_start",
-            session=session,
-        )
-        if str(intent.get("status") or "") != "accepted":
-            raise RuntimeError(
-                "Electron first-start Workbench action was not accepted by the Launcher: "
-                f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+        if not _electron_main_orchestrates_windows():
+            intent = _submit_electron_window_action(
+                action="open_workbench",
+                reason=f"{action}:electron_first_start",
+                session=session,
             )
-        timings[current_timing_key] = _startup_elapsed_ms(stage_started)
+            if str(intent.get("status") or "") != "accepted":
+                raise RuntimeError(
+                    "Electron first-start Workbench action was not accepted by the Launcher: "
+                    f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+                )
+            timings[current_timing_key] = _startup_elapsed_ms(stage_started)
 
-        current_stage = "workbench_window_open"
-        current_timing_key = "workbenchWindowOpenMs"
-        startup_telemetry["failureStage"] = current_stage
-        stage_started = time.monotonic()
-        opened_session = _await_electron_workbench_open(
-            process,
-            desktop_session_id=str(session.get("desktopSessionId") or ""),
-        )
+            current_stage = "workbench_window_open"
+            current_timing_key = "workbenchWindowOpenMs"
+            startup_telemetry["failureStage"] = current_stage
+            stage_started = time.monotonic()
+            opened_session = _await_electron_workbench_open(
+                process,
+                desktop_session_id=str(session.get("desktopSessionId") or ""),
+            )
+        else:
+            opened_session = session
         timings[current_timing_key] = _startup_elapsed_ms(stage_started)
         timings["electronFirstStartTotalMs"] = _startup_elapsed_ms(total_started)
         startup_telemetry["workbenchOpen"] = True
@@ -1446,6 +1449,11 @@ def _bootstrap_packaged_electron_workbench(
         if process is not None:
             _terminate_packaged_electron_after_failed_bootstrap(process)
         raise
+
+
+def _electron_main_orchestrates_windows() -> bool:
+    """T6: Electron main owns window actions; Python only reports backend state."""
+    return str(os.environ.get("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "")).strip() == "1"
 
 
 def _electron_window_action_for_launcher_action(action: str) -> str:
@@ -1723,7 +1731,7 @@ def run_launcher_action(
         startup_telemetry["timingsMs"]["launcherControlPlaneBackendReadyMs"] = _startup_elapsed_ms(
             control_plane_started
         )
-        if completed.returncode == 0 and electron_window_action:
+        if completed.returncode == 0 and electron_window_action and not _electron_main_orchestrates_windows():
             if electron_session:
                 startup_telemetry["failureStage"] = "desktop_action_submit"
                 desktop_action_started = time.monotonic()

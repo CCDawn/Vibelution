@@ -65,7 +65,8 @@ export async function runWorkbenchLifecycle(input: {
   const child = spawnImpl(input.pythonPath, args, {
     cwd: input.workspaceRoot,
     windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS: "1" }
   });
   const stdout = await readBoundedLifecycleStdout(child, 64_000);
   return parseWorkbenchLifecycleResult(stdout);
