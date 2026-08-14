@@ -52,6 +52,8 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("openOrchestratedWorkbenchWindow");
     expect(mainSource).toContain("isCurrentCheckoutInstance(instanceId)");
     expect(mainSource).toContain("provider.openOrFocusWorkbench(url)");
+    expect(mainSource).toContain("await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS })");
+    expect(mainSource).toContain("return workbenchLoopbackUrl();");
     const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
     const branchBody = mainSource.slice(branchStart, branchStart + 1800);
     expect(branchBody).toContain('operation === "start" || operation === "restart"');
