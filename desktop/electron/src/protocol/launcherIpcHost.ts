@@ -6,6 +6,19 @@ export const LAUNCHER_IPC_UNSUPPORTED_PATH = "LAUNCHER_IPC_UNSUPPORTED_PATH";
 export const LAUNCHER_IPC_INVALID_PAYLOAD = "LAUNCHER_IPC_INVALID_PAYLOAD";
 export const LAUNCHER_IPC_HTTP_ERROR_PREFIX = "LAUNCHER_IPC_HTTP_";
 export const LAUNCHER_IPC_NETWORK_ERROR = "LAUNCHER_IPC_NETWORK_ERROR";
+export const LAUNCHER_IPC_LIFECYCLE_ERROR = "LAUNCHER_IPC_LIFECYCLE_ERROR";
+
+const LIFECYCLE_PATHS = new Set(["start", "stop", "force-stop", "restart", "rebuild-and-start"]);
+
+export type OrchestratedLifecycleResult = {
+  schemaVersion: 1;
+  accepted: boolean;
+  operation: string;
+  commandId?: string;
+  message?: string;
+  code?: string;
+  activeWorkRuns?: unknown[];
+};
 
 export type LauncherIpcInvokePayload = {
   schemaVersion: 1;
@@ -108,6 +121,7 @@ async function readFailureDetail(response: Response): Promise<string> {
 export function createLauncherIpcHost(input: {
   resolveContext: () => Promise<LauncherIpcHostContext | null>;
   resolveWindowTruth?: () => LauncherWindowTruth;
+  orchestrateLifecycle?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedLifecycleResult>;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }) {
@@ -132,6 +146,17 @@ export function createLauncherIpcHost(input: {
           LAUNCHER_IPC_HOST_NOT_READY,
           "Launcher IPC control plane host is not ready.",
         );
+      }
+      if (LIFECYCLE_PATHS.has(normalized.path) && input.orchestrateLifecycle) {
+        try {
+          const result = await input.orchestrateLifecycle(normalized.path, normalized);
+          return { ok: true, payload: result };
+        } catch (error: unknown) {
+          return launcherIpcError(
+            LAUNCHER_IPC_LIFECYCLE_ERROR,
+            error instanceof Error ? error.message : String(error)
+          );
+        }
       }
       const init = normalized.init ?? { method: "GET" };
       const method = init.method ?? "GET";
