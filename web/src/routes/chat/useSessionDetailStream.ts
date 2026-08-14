@@ -32,11 +32,11 @@ import {
 type DesktopConversationNotifier = {
   handleSessionDetail: (
     detail: SessionDetail,
-    options: { sessionTitle: string },
+    options: { sessionTitle: string; viewedSessionId?: string },
   ) => void;
   handleAssistantDelta: (
     payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
-    options: { sessionTitle: string },
+    options: { sessionTitle: string; viewedSessionId?: string },
   ) => void;
 };
 
@@ -52,6 +52,7 @@ export type UseSessionDetailStreamOptions = {
   desktopConversationNotifierRef: MutableRefObject<DesktopConversationNotifier>;
   /** Live title for desktop notifications (detail title or summary title). */
   sessionTitleForNotifications: string;
+  viewedSessionId?: string;
 };
 
 /**
@@ -69,6 +70,7 @@ export function useSessionDetailStream({
   sessionStreamDecisionSnapshotRef,
   desktopConversationNotifierRef,
   sessionTitleForNotifications,
+  viewedSessionId,
 }: UseSessionDetailStreamOptions): { sessionStreamConnected: boolean } {
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
   const [streamReconnectTick, setStreamReconnectTick] = useState(0);
@@ -77,6 +79,8 @@ export function useSessionDetailStream({
   const sessionStreamApplyStatsRef = useRef<Record<string, SessionStreamApplyStats>>({});
   const sessionTitleForNotificationsRef = useRef(sessionTitleForNotifications);
   sessionTitleForNotificationsRef.current = sessionTitleForNotifications;
+  const viewedSessionIdRef = useRef(viewedSessionId || activeSessionId || "");
+  viewedSessionIdRef.current = viewedSessionId || activeSessionId || "";
 
   // Perf root cause: sessionStreamShouldConnect flaps while the route settles.
   // Keeping it out of the stream effect's dependency list stops close/reopen
@@ -282,7 +286,8 @@ export function useSessionDetailStream({
       }
       syncSessionDetail(detail);
       desktopConversationNotifierRef.current.handleSessionDetail(detail, {
-        sessionTitle: detail.title || detail.id,
+        sessionTitle: detail.title || detail.agentDisplayName || detail.id,
+        viewedSessionId: viewedSessionIdRef.current,
       });
       if (decision.clearActiveLayer) {
         committedAssistantDeltaLayer = undefined;
@@ -542,6 +547,7 @@ export function useSessionDetailStream({
       setSessionStreamConnected(true);
       desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {
         sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId,
+        viewedSessionId: viewedSessionIdRef.current,
       });
       queueAssistantDelta(routed.payload, routed.trace);
     }

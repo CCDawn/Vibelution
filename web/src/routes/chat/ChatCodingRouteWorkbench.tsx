@@ -214,6 +214,7 @@ import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
+import { useDesktopConversationAttention } from "./useDesktopConversationAttention";
 import { eventInsideContextMenuSurface } from "./chatContextMenuDismiss";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
 import {
@@ -743,8 +744,10 @@ export function ChatCodingRoute() {
     [queryClient],
   );
   const sessionStreamAvailable = typeof EventSource !== "undefined";
+  const activeSessionDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId || "none"));
   const sessionTitleForNotifications = (
-    queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId || "none"))?.title
+    activeSessionDetail?.title
+    || activeSessionDetail?.agentDisplayName
     || activeSessionId
     || ""
   );
@@ -759,6 +762,7 @@ export function ChatCodingRoute() {
     sessionStreamDecisionSnapshotRef,
     desktopConversationNotifierRef,
     sessionTitleForNotifications,
+    viewedSessionId: activeSessionId || "",
   });
   const chatLiveQueryPolicyInput = {
     chatPollingVisible,
@@ -2801,6 +2805,13 @@ export function ChatCodingRoute() {
     clearSessionHistoryMutation,
     addSessionToReviewMutation,
     petActionMutation,
+  });
+
+  useDesktopConversationAttention({
+    sessions: allVisibleSessions,
+    viewedSessionId: activeSessionId || "",
+    notifierRef: desktopConversationNotifierRef,
+    onOpenSession: handleOpenDirectSession,
   });
 
   const {

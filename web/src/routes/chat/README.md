@@ -27,6 +27,7 @@ ChatCodingRoute.tsx → re-export ChatCodingRouteWorkbench
 | Composer turn mutations + submit actions | `useChatComposerSubmit.ts` | session EventSource ownership |
 | Session stream connect/grace pure helpers | `chatSessionStreamConnect.ts` | opening EventSource |
 | Direct session detail SSE (sole EventSource) | `useSessionDetailStream.ts` | second session EventSource, group stream |
+| Desktop conversation completion notifications | `../chatDesktopNotifications.ts` + `useDesktopConversationAttention.ts` | second EventSource, backend Windows APIs |
 | Group room SSE (sole EventSource) | `useGroupRoomStream.ts` | second group EventSource, session stream |
 | Catalog / secondary queries (runtime·pet·index·teams·skills·rooms) | `useChatWorkbenchCatalogQueries.ts` | session detail SSE, composer submit |
 | Session select / URL / bootstrap | `useChatSessionSelection.ts` | EventSource ownership |

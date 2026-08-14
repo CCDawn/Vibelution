@@ -2262,6 +2262,8 @@ describe("ChatCodingRoute layout contract", () => {
       "expectedType: \"assistant_delta\"",
       "if (!routed.accepted) {",
       "desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {",
+      "sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId",
+      "viewedSessionId: viewedSessionIdRef.current",
       "queueAssistantDelta(routed.payload, routed.trace);",
     ]);
 
@@ -2273,7 +2275,11 @@ describe("ChatCodingRoute layout contract", () => {
     expectOrderedFragments(applyPendingDetailSection, [
       "syncSessionDetail(detail);",
       "desktopConversationNotifierRef.current.handleSessionDetail(detail, {",
+      "viewedSessionId: viewedSessionIdRef.current",
     ]);
+    expect(routeSource).toContain("useDesktopConversationAttention({");
+    expect(routeSource).toContain("sessions: allVisibleSessions");
+    expect(routeSource).toContain("onOpenSession: handleOpenDirectSession");
   });
 
   it("records stream render-frame telemetry after ConversationView commits live text", () => {
@@ -2943,6 +2949,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cliAgentRunModelSource).toContain("function isCliAgentRunActiveForClose");
     expect(routeAndCliTerminalSource).toContain('from "./cliAgentRunModel"');
     expect(routeSource).toContain('from "./useChatCliAgentTerminal"');
+    expect(routeSource).toContain('from "./useDesktopConversationAttention"');
     expect(routeAndCliTerminalSource).toContain("closeCliAgentRun");
     expect(routeAndCliTerminalSource).toContain("/api/cli-agents/terminal-sessions/");
     expect(routeAndCliTerminalSource).toContain("const [closedCliAgentRunTokensBySession");
