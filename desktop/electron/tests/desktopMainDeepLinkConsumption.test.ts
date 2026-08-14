@@ -46,11 +46,16 @@ describe("Electron main public deep-link consumption", () => {
       'recoverDesktopControlContext(paths, bootstrap, provider, "second_instance_open_workbench")',
       helperIndex
     );
-    const openIndex = source.indexOf("await provider.openOrFocusWorkbench()", helperIndex);
+    const waitIndex = source.indexOf(
+      "await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS })",
+      helperIndex
+    );
+    const openIndex = source.indexOf("await provider.openOrFocusWorkbench(url)", helperIndex);
 
     expect(helperIndex).toBeGreaterThan(0);
     expect(recoveryIndex).toBeGreaterThan(helperIndex);
-    expect(openIndex).toBeGreaterThan(recoveryIndex);
+    expect(waitIndex).toBeGreaterThan(recoveryIndex);
+    expect(openIndex).toBeGreaterThan(waitIndex);
     expect(source).toContain("void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {");
   });
 

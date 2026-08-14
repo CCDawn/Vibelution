@@ -43,6 +43,16 @@ class FakeEventSource {
     this.listeners.get(type)?.delete(callback);
   }
 
+  emit(type: string, data: string) {
+    const listeners = this.listeners.get(type);
+    if (!listeners) {
+      return;
+    }
+    for (const listener of listeners) {
+      listener({ data });
+    }
+  }
+
   close() {
     this.closed = true;
     this.readyState = 2;
@@ -117,6 +127,54 @@ type SessionStreamDecisionSnapshotShape = {
   routeSwitchGraceActive: boolean;
   routeSwitchGraceMsRemaining: number;
 };
+
+function sessionDetailEvent(overrides: { id?: string; ledgerSeq?: number; currentPhase?: string } = {}) {
+  const id = overrides.id ?? "s1";
+  const ledgerSeq = overrides.ledgerSeq ?? 1;
+  return JSON.stringify({
+    type: "session_detail",
+    sessionId: id,
+    ledgerSeq,
+    detail: {
+      id,
+      ledgerSeq,
+      currentPhase: overrides.currentPhase ?? "running",
+      title: "Session 1",
+      messages: [],
+    },
+  });
+}
+
+function assistantTurnItem(patch: Record<string, unknown> = {}) {
+  return {
+    id: "answer-r1",
+    itemId: "answer",
+    version: 3,
+    sessionId: "s1",
+    turnId: "turn-1",
+    type: "agent_message",
+    phase: "final_answer",
+    text: "完成。",
+    status: "running",
+    revision: 1,
+    sequence: 1,
+    ...patch,
+  };
+}
+
+function assistantDeltaEvent(overrides: { done?: boolean; ledgerSeq?: number } = {}) {
+  const done = overrides.done ?? false;
+  return JSON.stringify({
+    type: "assistant_delta",
+    sessionId: "s1",
+    turnId: "turn-1",
+    ledgerSeq: overrides.ledgerSeq ?? 1,
+    stage: "responding",
+    updatedAt: "2026-08-09T00:00:00Z",
+    done,
+    turnItems: [assistantTurnItem(done ? { status: "completed" } : {})],
+  });
+}
 
 function mount(options: UseSessionDetailStreamOptions): Root {
   const container = document.createElement("div");
@@ -236,6 +294,120 @@ describe("useSessionDetailStream stream lifecycle stability", () => {
     });
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: queryKeys.session("s2") }),
+    );
+    unmount(root);
+  });
+
+  it("closes the old stream synchronously on route switch and reuses grace only for the same session", () => {
+    vi.useFakeTimers();
+    const { options } = baseOptions({});
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+
+    // Route switch to a different session must close the old EventSource
+    // immediately — without waiting for SESSION_STREAM_ROUTE_SWITCH_GRACE_MS.
+    rerender(root, { ...options, activeSessionId: "s2" } as UseSessionDetailStreamOptions);
+    expect(FakeEventSource.instances[0].closed).toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[1].closed).toBe(false);
+    unmount(root);
+  });
+
+  it("discards a queued session detail snapshot after a route switch cleanup", () => {
+    vi.useFakeTimers();
+    const { options } = baseOptions({});
+    const syncSessionDetailSpy = options.syncSessionDetail as ReturnType<typeof vi.fn>;
+    const handleSessionDetailNotifierSpy =
+      options.desktopConversationNotifierRef.current.handleSessionDetail as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+
+    // First running snapshot is applied through the coalesce timer and stamps lastAppliedAt.
+    act(() => {
+      FakeEventSource.instances[0].emit("session_detail", sessionDetailEvent({ ledgerSeq: 1 }));
+      vi.advanceTimersByTime(0);
+    });
+    expect(syncSessionDetailSpy).toHaveBeenCalledTimes(1);
+
+    // Second running snapshot stays queued inside the 350ms coalesce window.
+    act(() => {
+      FakeEventSource.instances[0].emit("session_detail", sessionDetailEvent({ ledgerSeq: 2 }));
+    });
+    expect(syncSessionDetailSpy).toHaveBeenCalledTimes(1);
+
+    // Route switch cleanup must discard the pending snapshot, not apply it.
+    rerender(root, { ...options, activeSessionId: "s2" } as UseSessionDetailStreamOptions);
+    expect(FakeEventSource.instances[0].closed).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(100_000);
+    });
+    expect(syncSessionDetailSpy).toHaveBeenCalledTimes(1);
+    expect(handleSessionDetailNotifierSpy).toHaveBeenCalledTimes(1);
+    unmount(root);
+  });
+
+  it("discards pending assistant delta frames after a route switch cleanup", () => {
+    vi.useFakeTimers();
+    const { options } = baseOptions({});
+    const setActiveTurnLayersBySessionSpy = options.setActiveTurnLayersBySession as ReturnType<typeof vi.fn>;
+    const handleAssistantDeltaNotifierSpy =
+      options.desktopConversationNotifierRef.current.handleAssistantDelta as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+
+    // Streaming delta schedules an animation frame; nothing is committed yet.
+    act(() => {
+      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 1 }));
+    });
+    expect(setActiveTurnLayersBySessionSpy).not.toHaveBeenCalled();
+    expect(handleAssistantDeltaNotifierSpy).toHaveBeenCalledTimes(1);
+
+    // Switch before the frame runs: the old stream closes and the frame is cancelled.
+    rerender(root, { ...options, activeSessionId: "s2" } as UseSessionDetailStreamOptions);
+    expect(FakeEventSource.instances[0].closed).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(64);
+    });
+    expect(setActiveTurnLayersBySessionSpy).not.toHaveBeenCalled();
+    expect(handleAssistantDeltaNotifierSpy).toHaveBeenCalledTimes(1);
+    unmount(root);
+  });
+
+  it("applies the current session final assistant delta and final session detail immediately", () => {
+    const committedLayers: unknown[] = [];
+    const setActiveTurnLayersBySession = vi.fn((updater) => {
+      const next = (updater as (current: Record<string, unknown>) => Record<string, unknown>)({});
+      committedLayers.push(next["s1"]);
+    });
+    const { options } = baseOptions({
+      setActiveTurnLayersBySession: setActiveTurnLayersBySession as never,
+    });
+    const syncSessionDetailSpy = options.syncSessionDetail as ReturnType<typeof vi.fn>;
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+
+    act(() => {
+      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ done: true, ledgerSeq: 2 }));
+      FakeEventSource.instances[0].emit(
+        "session_detail",
+        sessionDetailEvent({ ledgerSeq: 3, currentPhase: "completed" }),
+      );
+    });
+
+    // done assistant_delta commits the completed active-turn layer synchronously.
+    expect(setActiveTurnLayersBySession).toHaveBeenCalledTimes(1);
+    expect(committedLayers[0]).toMatchObject({ sessionId: "s1", turnId: "turn-1", status: "completed" });
+    // final (non-busy) session_detail is applied immediately to the UI cache.
+    expect(syncSessionDetailSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s1", ledgerSeq: 3, currentPhase: "completed" }),
     );
     unmount(root);
   });
