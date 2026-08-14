@@ -237,6 +237,129 @@ def test_owner_inbox_promotes_source_to_central_registry_and_formal_artifact(kno
     assert applied["item"]["centralSourceIds"] == [central_source["centralSourceId"]]
 
 
+def test_inbox_local_file_copies_promote_to_central_source_and_trace(knowledge_env, tmp_path):
+    paper = tmp_path / "papers" / "challenge-note.pdf"
+    paper.parent.mkdir()
+    paper.write_bytes(b"%PDF-1.4\nchallenge local paper body\n")
+    missing = tmp_path / "papers" / "missing.pdf"
+
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="pdf_refinement",
+        source_ref={"filePath": str(paper), "agentId": knowledge_env["member"]["agentId"]},
+        original_content="Steward pack snapshot for a local PDF.",
+        original_filename="steward-pack-cand.json",
+        title="Local PDF steward pack",
+        summary="Pack plus a copyable local paper.",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        local_file_paths=[
+            {"candidateId": "cand-paper-1", "path": str(paper), "title": "Challenge paper"},
+            {"candidateId": "cand-missing", "path": str(missing), "title": "Missing paper"},
+            {"candidateId": "cand-url", "path": "https://doi.org/10.0000/remote-only", "title": "Remote DOI"},
+        ],
+    )
+
+    assert len(inbox_source["localCopies"]) == 1
+    inbox_copy = tmp_path / inbox_source["localCopies"][0]["inboxPath"]
+    assert inbox_copy.exists()
+    assert inbox_copy.read_bytes().startswith(b"%PDF-1.4")
+    assert inbox_source["localCopies"][0]["candidateId"] == "cand-paper-1"
+
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        knowledge_env["team"]["teamId"],
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+        resolution_note="Keep the local paper copy in the central source store.",
+    )
+    central_source = reviewed["centralSource"]
+    central_copies = list(central_source.get("localCopies") or [])
+    assert len(central_copies) == 1
+    central_copy = tmp_path / central_copies[0]["centralPath"]
+    assert central_copy.exists()
+    assert central_copy.read_bytes() == paper.read_bytes()
+    assert str(central_copies[0]["centralPath"]).startswith("workspace/")
+
+    source_artifact = team_knowledge_service.create_source_artifact_from_central_source(
+        knowledge_env["base"]["knowledgeBaseId"],
+        central_source["centralSourceId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        title="Local PDF steward pack",
+    )
+    artifact_copies = list((source_artifact.get("sourceRef") or {}).get("localCopies") or [])
+    assert artifact_copies
+    assert artifact_copies[0]["sha256"] == central_copies[0]["sha256"]
+
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source_artifact["sourceArtifactId"]],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Traceable local paper knowledge",
+        content="Agents should follow localCopies.centralPath to the copied PDF.",
+    )
+    applied = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+    trace = team_knowledge_service.get_knowledge_trace(
+        knowledge_env["base"]["knowledgeBaseId"],
+        applied["item"]["knowledgeItemId"],
+        agent_id=knowledge_env["member"]["agentId"],
+    )
+    file_copies = [item for item in trace["localCopies"] if item.get("kind") == "local_file"]
+    pack_copies = [item for item in trace["localCopies"] if item.get("kind") == "source_pack"]
+    assert trace["summary"]["localCopyCount"] >= 2
+    assert file_copies and (tmp_path / file_copies[0]["centralPath"]).exists()
+    assert pack_copies and (tmp_path / pack_copies[0]["centralPath"]).exists()
+
+    search = team_knowledge_service.search_knowledge_items(
+        agent_id=knowledge_env["member"]["agentId"],
+        knowledge_base_id=knowledge_env["base"]["knowledgeBaseId"],
+        query="Traceable local paper",
+        search_mode="exact",
+    )
+    assert search["summary"]["resultCount"] == 1
+    assert any(item.get("kind") == "local_file" for item in search["results"][0]["localCopies"])
+
+
+def test_steward_pack_collects_existing_candidate_source_paths(tmp_path, monkeypatch):
+    from core.web.services.team_workflow import knowledge as knowledge_mod
+
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF-1.4\n")
+
+    class _FakeService:
+        team_knowledge_service = type("T", (), {"MAX_LOCAL_SOURCE_COPIES": 16})()
+
+        def _normalize_text_list(self, value, max_items=32, max_length=160):
+            return [str(item)[:max_length] for item in list(value or [])[:max_items] if str(item or "").strip()]
+
+        def _load_candidate_store(self, team_id):
+            return {
+                "candidates": [
+                    {"candidateId": "cand-1", "title": "Paper", "sourcePath": str(paper)},
+                    {"candidateId": "cand-2", "title": "Missing", "sourcePath": str(tmp_path / "gone.pdf")},
+                ]
+            }
+
+        def _source_manifest_path(self, item):
+            return str(item.get("sourcePath") or "")
+
+        def _source_manifest_label(self, item):
+            return str(item.get("title") or "source")
+
+    monkeypatch.setattr(knowledge_mod, "_service", lambda: _FakeService())
+    paths = knowledge_mod._steward_pack_local_file_paths("team-1", {"candidateIds": ["cand-1", "cand-2"]})
+    assert paths == [
+        {"candidateId": "cand-1", "path": str(paper), "title": "Paper"},
+        {"candidateId": "cand-2", "path": str(tmp_path / "gone.pdf"), "title": "Missing"},
+    ]
+
+
 def test_owner_source_review_directly_ingests_accepted_source_into_formal_knowledge(knowledge_env):
     inbox_source = team_knowledge_service.collect_source_to_inbox(
         "team",
