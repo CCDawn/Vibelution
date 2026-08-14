@@ -1,4 +1,4 @@
-import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -44,6 +44,12 @@ import {
   createLauncherIpcHost,
   type LauncherIpcInvokePayload
 } from "./protocol/launcherIpcHost.js";
+import {
+  LAUNCHER_APP_PROTOCOL,
+  launcherAppOriginFor,
+  registerLauncherAppProtocolHandle,
+  resolveLauncherDistRoot
+} from "./protocol/launcherAppProtocol.js";
 import {
   acknowledgeWorkbenchCloseWindowClosed,
   fetchWorkbenchCloseTransaction,
@@ -105,10 +111,21 @@ import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
-import { resolveLauncherUrl, resolveWorkbenchUrl } from "./windows/windowUrlResolver.js";
+import {
+  resolveLauncherControlPlaneUrl,
+  resolveLauncherWindowUrl,
+  resolveWorkbenchUrl
+} from "./windows/windowUrlResolver.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
 
 installBrokenPipeGuards();
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: LAUNCHER_APP_PROTOCOL,
+    privileges: { standard: true, secure: true, supportFetchAPI: true }
+  }
+]);
 
 const DESKTOP_ACTION_POLL_MS = 2000;
 const DESKTOP_ACTION_WAIT_MS = 1750;
@@ -280,7 +297,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
   conversationNotificationService = null;
   return new ElectronWindowProvider(
     paths,
-    resolveLauncherUrl(desktopEnv, bootstrap?.launcherUrl),
+    resolveLauncherWindowUrl(desktopEnv),
     resolveWorkbenchUrl(desktopEnv, bootstrap?.workbenchUrl),
     {
       createLauncherWindow,
@@ -288,7 +305,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       listLauncherWindows: (launcherOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
-            return new URL(window.webContents.getURL()).origin === launcherOrigin;
+            return launcherAppOriginFor(window.webContents.getURL()) === launcherOrigin;
           } catch {
             return false;
           }
@@ -706,7 +723,7 @@ async function resolveDesktopActionLoopContext(
     return desktopActionContext;
   }
   const desktopEnv = desktopEnvironment();
-  const launcherOrigin = resolveLauncherUrl(desktopEnv, bootstrap.launcherUrl);
+  const launcherOrigin = resolveLauncherControlPlaneUrl(desktopEnv, bootstrap.launcherUrl);
   const envToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "").trim();
   const controlToken = options.forceControlTokenRefresh
     ? await fetchLauncherControlToken({ launcherOrigin })
@@ -1337,7 +1354,7 @@ function trustedIpcOrigins(): string[] {
   const workbenchUrl = currentWorkbenchUrl || resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl);
   return Array.from(
     new Set([
-      new URL(resolveLauncherUrl(desktopEnv, launcherBootstrap?.launcherUrl)).origin,
+      launcherAppOriginFor(resolveLauncherWindowUrl(desktopEnv)),
       new URL(workbenchUrl).origin
     ])
   );
@@ -1583,7 +1600,7 @@ ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: 
 
 function launcherIpcTrustedOrigins(): string[] {
   const desktopEnv = desktopEnvironment();
-  return [new URL(resolveLauncherUrl(desktopEnv, launcherBootstrap?.launcherUrl)).origin];
+  return [launcherAppOriginFor(resolveLauncherWindowUrl(desktopEnv))];
 }
 
 function resolveLauncherIpcHost() {
@@ -1669,6 +1686,14 @@ async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
 app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
+    registerLauncherAppProtocolHandle({
+      distRoot: resolveLauncherDistRoot({
+        resourcesRoot: paths.resourcesRoot,
+        workspaceRoot: paths.workspaceRoot,
+        packaged: app.isPackaged,
+        env: desktopEnvironment()
+      })
+    });
     if (desktopCliArgs.smoke) {
       await runSmokeAndQuit(paths);
       return;

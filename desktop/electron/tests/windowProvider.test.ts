@@ -3,7 +3,7 @@ import type { IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../src/ipc.js";
 import { assertLocalHttpUrl } from "../src/security/urlPolicy.js";
 import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
-import { resolveLauncherUrl, resolveWorkbenchUrl } from "../src/windows/windowUrlResolver.js";
+import { resolveLauncherControlPlaneUrl, resolveLauncherWindowUrl, resolveWorkbenchUrl } from "../src/windows/windowUrlResolver.js";
 import {
   ElectronWindowProvider,
   shouldCancelWorkbenchInPageNavigation,
@@ -895,16 +895,30 @@ describe("Electron URL policy", () => {
   });
 });
 
-describe("resolveLauncherUrl", () => {
-  it("does not silently hard-code a production port", () => {
-    expect(() => resolveLauncherUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
-      "Launcher URL is not resolved"
+describe("resolveLauncherWindowUrl", () => {
+  it("defaults the launcher window to the packaged app protocol", () => {
+    expect(resolveLauncherWindowUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toBe(
+      "vibelution-launcher://launcher/launcher"
     );
   });
 
   it("accepts an explicit development override", () => {
-    expect(resolveLauncherUrl({ VIBELUTION_LAUNCHER_URL: "http://127.0.0.1:9000/launcher" } as NodeJS.ProcessEnv)).toBe(
+    expect(resolveLauncherWindowUrl({ VIBELUTION_LAUNCHER_URL: "http://127.0.0.1:9000/launcher" } as NodeJS.ProcessEnv)).toBe(
       "http://127.0.0.1:9000/launcher"
+    );
+  });
+});
+
+describe("resolveLauncherControlPlaneUrl", () => {
+  it("prefers a live status URL over the development default", () => {
+    expect(
+      resolveLauncherControlPlaneUrl({ NODE_ENV: "development" } as NodeJS.ProcessEnv, "http://127.0.0.1:8765/launcher")
+    ).toBe("http://127.0.0.1:8765/launcher");
+  });
+
+  it("does not silently hard-code a production port", () => {
+    expect(() => resolveLauncherControlPlaneUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
+      "Launcher control plane URL is not resolved"
     );
   });
 });
