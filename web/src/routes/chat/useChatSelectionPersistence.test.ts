@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionSummary } from "../../api/types";
 import {
+  resolveBareRouteBootstrapTarget,
   resolveStoredDirectChatSelection,
   storedChatSelectionBlocksServerBootstrap,
 } from "./useChatSelectionPersistence";
@@ -89,5 +90,52 @@ describe("useChatSelectionPersistence", () => {
       getItem: () => null,
       setItem: () => undefined,
     })).toBe(false);
+  });
+});
+
+describe("resolveBareRouteBootstrapTarget", () => {
+  it("prefers a valid stored last-viewed session over the server pointer", () => {
+    expect(resolveBareRouteBootstrapTarget({
+      stored: { sessionId: "session-luna-1", agentId: "agent-luna" },
+      serverSessionId: "session-gpt-1",
+      sessions,
+    })).toEqual({ kind: "session", sessionId: "session-luna-1" });
+  });
+
+  it("falls back to a valid server pointer when no stored session exists", () => {
+    expect(resolveBareRouteBootstrapTarget({
+      stored: null,
+      serverSessionId: "session-gpt-1",
+      sessions,
+    })).toEqual({ kind: "session", sessionId: "session-gpt-1" });
+  });
+
+  it("ignores a stale stored session and a stale server pointer", () => {
+    expect(resolveBareRouteBootstrapTarget({
+      stored: { sessionId: "session-removed" },
+      serverSessionId: "session-removed-too",
+      sessions,
+    })).toEqual({ kind: "session", sessionId: "session-luna-1" });
+  });
+
+  it("falls back to the first visible session when no preference is valid", () => {
+    expect(resolveBareRouteBootstrapTarget({
+      stored: null,
+      serverSessionId: "",
+      sessions,
+    })).toEqual({ kind: "session", sessionId: "session-luna-1" });
+  });
+
+  it("keeps the bare route when the directory is not authoritative or empty", () => {
+    expect(resolveBareRouteBootstrapTarget({
+      stored: { sessionId: "session-luna-1" },
+      serverSessionId: "session-gpt-1",
+      sessions: undefined,
+    })).toBeNull();
+    expect(resolveBareRouteBootstrapTarget({
+      stored: null,
+      serverSessionId: null,
+      sessions: [],
+    })).toBeNull();
   });
 });

@@ -1,30 +1,27 @@
 import { type QueryClient } from "@tanstack/react-query";
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import type { NavigateFunction } from "react-router-dom";
 
 import { queryKeys } from "../../api/queryKeys";
 import type { AgentInstance, ConversationSummary, SessionSummary } from "../../api/types";
-import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
 import { updateSessionSummaryCaches } from "../chatSessionIndexQuery";
 import { isVisibleDirectSession } from "../conversationIndexModel";
 import { removeDeletedSessionFromConversations } from "./chatSessionDetailHelpers";
 import { resolveArchivedSessionRouteTransition } from "./chatSessionRouteSync";
+import type { ChatRouteSelection } from "./chatSelectionProjection";
+
+type ChatRouteRetirementActions = {
+  replaceIfStillViewing: (expected: ChatRouteSelection, next: ChatRouteSelection) => boolean;
+};
 
 type UseChatArchivedAgentRetirementOptions = {
-  activeSessionId: string | null | undefined;
   requestedSessionId: string | null | undefined;
-  pathname: string;
-  search: string;
-  navigate: NavigateFunction;
   queryClient: QueryClient;
   clearSessionTransientUiState: (sessionId: string) => void;
   forgetSessionDetailPaint: (sessionId: string) => void;
-  removeSessionWorkspace: (sessionId: string, nextActiveSessionId?: string | null) => void;
+  removeSessionWorkspace: (sessionId: string) => void;
   setSelectedAgentId: Dispatch<SetStateAction<string>>;
-  setActiveSession: (sessionId: string) => void;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
-  latestDirectSessionSelectionRef: MutableRefObject<string>;
-  latestDirectSessionSelectionAtRef: MutableRefObject<number>;
+  chatRoute: ChatRouteRetirementActions;
   directSessionSelectionGenerationRef: MutableRefObject<number>;
   retiredDirectSessionIdsRef: MutableRefObject<ReadonlySet<string>>;
 };
@@ -40,22 +37,20 @@ type RetireArchivedAgentSessionsOptions = {
  * Removes an archived Agent's sessions from the normal Chat selection surface.
  * This is deliberately Chat-only: the retained archive remains available in
  * Agent Management, while Chat must not keep a sealed session selected.
+ *
+ * The explicit route target may be retired after a user-confirmed archive;
+ * the transition is compare-and-swap, so a user who already navigated away
+ * keeps their page.
  */
 export function useChatArchivedAgentRetirement({
-  activeSessionId,
   requestedSessionId,
-  pathname,
-  search,
-  navigate,
   queryClient,
   clearSessionTransientUiState,
   forgetSessionDetailPaint,
   removeSessionWorkspace,
   setSelectedAgentId,
-  setActiveSession,
   setSessionComposerErrors,
-  latestDirectSessionSelectionRef,
-  latestDirectSessionSelectionAtRef,
+  chatRoute,
   directSessionSelectionGenerationRef,
   retiredDirectSessionIdsRef,
 }: UseChatArchivedAgentRetirementOptions) {
@@ -65,16 +60,17 @@ export function useChatArchivedAgentRetirement({
     )];
     const archivedSessionIdSet = new Set(archivedSessionIds);
     const remainingAgentIds = new Set(options.remainingAgents.map((agent) => agent.agentId));
-    const currentActiveSessionId = String(
-      useChatWorkbenchStore.getState().activeSessionId || activeSessionId || "",
-    ).trim();
-    const currentActiveSession = options.sessions.find((session) => session.id === currentActiveSessionId);
+    const requestedId = String(requestedSessionId || "").trim();
+    const requestedSession = requestedId
+      ? options.sessions.find((session) => session.id === requestedId)
+      : undefined;
     const fallbackSession = (
-      currentActiveSession
-      && remainingAgentIds.has(String(currentActiveSession.agentId || "").trim())
-      && isVisibleDirectSession(currentActiveSession)
+      requestedSession
+      && !archivedSessionIdSet.has(requestedSession.id)
+      && remainingAgentIds.has(String(requestedSession.agentId || "").trim())
+      && isVisibleDirectSession(requestedSession)
     )
-      ? currentActiveSession
+      ? requestedSession
       : options.sessions.find(
         (session) => (
           !archivedSessionIdSet.has(session.id)
@@ -89,12 +85,11 @@ export function useChatArchivedAgentRetirement({
     ).trim();
     const archiveRouteTransition = resolveArchivedSessionRouteTransition({
       archivedSessionIds,
-      activeSessionId: currentActiveSessionId,
       requestedSessionId,
       fallbackSessionId: fallbackSession?.id,
     });
-    const latestIntentArchived = archivedSessionIdSet.has(latestDirectSessionSelectionRef.current);
-    if (archiveRouteTransition.shouldRetireSelection || latestIntentArchived) {
+    const routeRetired = archivedSessionIdSet.has(requestedId);
+    if (routeRetired) {
       const retiredSessionIds = new Set(retiredDirectSessionIdsRef.current);
       archivedSessionIds.forEach((sessionId) => retiredSessionIds.add(sessionId));
       while (retiredSessionIds.size > 64) {
@@ -105,9 +100,8 @@ export function useChatArchivedAgentRetirement({
         retiredSessionIds.delete(oldestSessionId);
       }
       retiredDirectSessionIdsRef.current = retiredSessionIds;
+      // Invalidate any in-flight select for a retired id (network dedup only).
       directSessionSelectionGenerationRef.current += 1;
-      latestDirectSessionSelectionRef.current = fallbackSession?.id || "";
-      latestDirectSessionSelectionAtRef.current = Date.now();
     }
 
     updateSessionSummaryCaches(queryClient, (sessions) =>
@@ -122,21 +116,20 @@ export function useChatArchivedAgentRetirement({
     archivedSessionIds.forEach((sessionId) => {
       clearSessionTransientUiState(sessionId);
       forgetSessionDetailPaint(sessionId);
-      removeSessionWorkspace(sessionId, fallbackSession?.id || null);
+      removeSessionWorkspace(sessionId);
     });
     setSelectedAgentId((current) => current === options.agentId ? fallbackAgentId : current);
-    if (archiveRouteTransition.nextActiveSessionId !== currentActiveSessionId) {
-      setActiveSession(archiveRouteTransition.nextActiveSessionId);
-    }
-    if (archiveRouteTransition.nextRequestedSessionId !== requestedSessionId) {
-      const nextSearchParams = new URLSearchParams(search);
-      if (archiveRouteTransition.nextRequestedSessionId) {
-        nextSearchParams.set("session", archiveRouteTransition.nextRequestedSessionId);
-      } else {
-        nextSearchParams.delete("session");
+    if (archiveRouteTransition.shouldRetireRoute) {
+      const nextRequestedSessionId = archiveRouteTransition.nextRequestedSessionId;
+      if (nextRequestedSessionId !== requestedId) {
+        // Compare-and-swap: only replace while the route still targets the archived session.
+        chatRoute.replaceIfStillViewing(
+          requestedId ? { kind: "session", sessionId: requestedId } : { kind: "bare" },
+          nextRequestedSessionId
+            ? { kind: "session", sessionId: nextRequestedSessionId }
+            : { kind: "bare" },
+        );
       }
-      const nextSearch = nextSearchParams.toString();
-      navigate(`${pathname}${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
     }
     setSessionComposerErrors((current) => {
       const next: Record<string, string> = { ...current, __sessions__: "" };
@@ -144,20 +137,14 @@ export function useChatArchivedAgentRetirement({
       return next;
     });
   }, [
-    activeSessionId,
+    chatRoute,
     clearSessionTransientUiState,
     directSessionSelectionGenerationRef,
     forgetSessionDetailPaint,
-    latestDirectSessionSelectionAtRef,
-    latestDirectSessionSelectionRef,
-    navigate,
-    pathname,
     queryClient,
     removeSessionWorkspace,
     requestedSessionId,
     retiredDirectSessionIdsRef,
-    search,
-    setActiveSession,
     setSelectedAgentId,
     setSessionComposerErrors,
   ]);
