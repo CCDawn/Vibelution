@@ -35,6 +35,11 @@ from .responses_websocket import (
     ResponsesWebSocketBackend,
 )
 from .schema import sanitize_tool_schema
+from .stream_http_timing import (
+    capture_stream_http_timings,
+    classify_raw_stream_event,
+    current_stream_http_timings,
+)
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .semantic_messages import SemanticGenerationSettings
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
@@ -313,6 +318,31 @@ def _record_llm_scene_event(
         )
     except Exception:
         return
+
+
+def _record_stream_http_headers_event(timings: Any, *, identity: Dict[str, Any]) -> None:
+    _record_llm_scene_event(
+        "stream",
+        "llm.stream.http_headers",
+        message="LLM stream received HTTP response headers.",
+        outcome="observed",
+        fields={**identity, **timings.headers_scene_fields()},
+        lifecycle=False,
+    )
+
+
+def _record_stream_http_timing_summary(timings: Any, *, identity: Dict[str, Any]) -> None:
+    if timings is None or getattr(timings, "summary_emitted", False):
+        return
+    timings.summary_emitted = True
+    _record_llm_scene_event(
+        "stream",
+        "llm.stream.http_timing",
+        message="LLM stream HTTP timing summary.",
+        outcome="observed",
+        fields={**identity, **timings.summary_scene_fields()},
+        lifecycle=False,
+    )
 
 
 @contextmanager
@@ -2832,6 +2862,7 @@ class LLMClient:
         metadata: Optional[Dict[str, Any]] = None,
         invocation_scope: Any = None,
         protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
+        scene_identity: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Iterator[StreamChunk], Callable[[], bool], Callable[[], Optional[TurnOutcome]]]:
         _raise_if_llm_cancelled()
         emitted = False
@@ -2865,6 +2896,25 @@ class LLMClient:
                         nonlocal provider_usage
                         for raw_event in iterator:
                             raw_dict = self._provider_object_to_dict(raw_event) or {}
+                            http_timings = current_stream_http_timings()
+                            if http_timings is not None and http_timings.first_raw_event_ms is None:
+                                event_kind = classify_raw_stream_event(raw_dict)
+                                http_timings.mark_first_raw_event(event_kind)
+                                _record_llm_scene_event(
+                                    "stream",
+                                    "llm.stream.first_raw_event",
+                                    message="LLM stream received its first provider wire event.",
+                                    outcome="observed",
+                                    fields={
+                                        **dict(scene_identity or {}),
+                                        "elapsedMs": http_timings.first_raw_event_ms,
+                                        "eventKind": event_kind,
+                                        "httpHeadersMs": http_timings.http_headers_ms,
+                                        "requestBodySentMs": http_timings.request_body_sent_ms,
+                                        "connectMs": http_timings.connect_ms,
+                                    },
+                                    lifecycle=False,
+                                )
                             response_dict = self._provider_object_to_dict(raw_dict.get("response")) or {}
                             raw_usage = raw_dict.get("usage") or response_dict.get("usage")
                             if raw_usage is not None:
@@ -2966,7 +3016,23 @@ class LLMClient:
                         close()
                     raise
 
-        return events(), lambda: emitted, lambda: turn_outcome
+        def timed_events() -> Iterator[StreamChunk]:
+            identity = dict(scene_identity or {})
+            origin_host = urlparse(str(payload.get("base_url") or "")).hostname or ""
+
+            def on_http_headers(http_timings: Any) -> None:
+                _record_stream_http_headers_event(http_timings, identity=identity)
+
+            with capture_stream_http_timings(
+                on_http_headers=on_http_headers,
+                origin_host=origin_host,
+            ) as timings:
+                try:
+                    yield from events()
+                finally:
+                    _record_stream_http_timing_summary(timings, identity=identity)
+
+        return timed_events(), lambda: emitted, lambda: turn_outcome
 
     def stream_events(
         self,
@@ -3132,6 +3198,16 @@ class LLMClient:
                         metadata=metadata,
                         invocation_scope=invocation_scope,
                         protocol_event_sink=protocol_event_sink,
+                        scene_identity={
+                            "role": self.role,
+                            "profileId": self.profile_id,
+                            "provider": self.provider.kind,
+                            "model": self.profile.model,
+                            "sessionId": event_metadata.get("sessionId", ""),
+                            "turnId": event_metadata.get("turnId", ""),
+                            "invocationId": event_metadata.get("invocationId", ""),
+                            "attempt": attempt,
+                        },
                     )
                     for event in events:
                         _raise_if_llm_cancelled()
@@ -3139,6 +3215,9 @@ class LLMClient:
                         elapsed_ms = int((now - start) * 1000)
                         if first_chunk_ms is None:
                             first_chunk_ms = elapsed_ms
+                            http_timings = current_stream_http_timings()
+                            if http_timings is not None:
+                                http_timings.mark_first_projected_chunk()
                             _record_llm_scene_event(
                                 "stream",
                                 "llm.stream.first_chunk",
@@ -3156,6 +3235,11 @@ class LLMClient:
                                     "elapsedMs": elapsed_ms,
                                     "chunkType": event.type,
                                     "attempt": attempt,
+                                    **(
+                                        http_timings.first_chunk_scene_fields()
+                                        if http_timings is not None
+                                        else {}
+                                    ),
                                 },
                                 lifecycle=False,
                             )
