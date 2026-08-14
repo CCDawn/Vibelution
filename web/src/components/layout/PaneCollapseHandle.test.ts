@@ -12,6 +12,7 @@ describe("PaneCollapseHandle", () => {
     expect(source).toContain("event.stopPropagation()");
     expect(source).toContain("onToggle()");
     expect(source).toContain('data-vui-layout-handle="collapse-resize"');
+    expect(source).not.toContain("aria-disabled={collapsed");
   });
 
   it("switches labels and chevron direction for collapsed panes", () => {

@@ -14,6 +14,11 @@ describe("Team shell chrome selection + board layout", () => {
     expect(toolbarSource).toContain("teamName");
   });
 
+  it("keeps the team rail free of instructional footer copy", () => {
+    expect(railSource).not.toContain("左侧选团队，右侧展示整队内容");
+    expect(railSource).not.toContain("Drag the separator to resize");
+  });
+
   it("rail selected team is muted row + inset edge, not full ink fill", () => {
     expect(railSource).toContain("not full ink fill");
     expect(railSource).toContain("!bg-[var(--vui-surface-row)]");

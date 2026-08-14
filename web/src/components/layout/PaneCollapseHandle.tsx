@@ -80,7 +80,6 @@ export function PaneCollapseHandle({
       aria-valuenow={hasValueContract ? Math.round(valueNow) : undefined}
       aria-valuemin={hasValueContract ? Math.round(valueMin) : undefined}
       aria-valuemax={hasValueContract ? Math.round(valueMax) : undefined}
-      aria-disabled={collapsed || undefined}
       data-vui-layout-handle="collapse-resize"
       data-side={side}
       data-active={active ? "true" : "false"}

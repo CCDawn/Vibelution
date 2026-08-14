@@ -26,5 +26,6 @@ describe("DefinitionNodeAgentSection", () => {
     expect(markup).toContain("已绑定 · 团队/工作流默认");
     expect(markup).toContain("pane=config");
     expect(markup).toContain("agent=agent-extractor");
+    expect(markup).toContain('data-layout="stacked"');
   });
 });

@@ -1,5 +1,6 @@
-import { type ComponentPropsWithoutRef, type ReactNode, useMemo } from "react";
+import { type ComponentPropsWithoutRef, type ReactNode, useMemo, useState } from "react";
 
+import { PaneCollapseHandle } from "../../layout/PaneCollapseHandle";
 import { PaneResizeHandle } from "../../layout/PaneResizeHandle";
 import { usePersistedPaneResize, type UsePersistedPaneResizeResult } from "../../layout/usePersistedPaneResize";
 import type { PaneSpec } from "../../layout/paneLayoutPersistence";
@@ -23,6 +24,19 @@ export type VSplitWorkspaceResizeConfig = {
   layoutId: string;
   sidebar?: Partial<PaneSpec>;
   aside?: Partial<PaneSpec>;
+  /** Optional collapse controls. Width memory remains owned by layoutId. */
+  collapse?: {
+    sidebar?: {
+      separatorLabel: string;
+      collapseLabel: string;
+      expandLabel: string;
+    };
+    aside?: {
+      separatorLabel: string;
+      collapseLabel: string;
+      expandLabel: string;
+    };
+  };
   /** Set false to keep fixed CSS columns (legacy). Default true when layoutId is set. */
   enabled?: boolean;
 };
@@ -85,6 +99,7 @@ function ResizableSplitWorkspace({
 }: VSplitWorkspaceProps & { resize: VSplitWorkspaceResizeConfig }) {
   const hasSidebar = Boolean(sidebar);
   const hasAside = Boolean(aside);
+  const [collapsedPaneIds, setCollapsedPaneIds] = useState<Set<string>>(() => new Set());
   const panes = useMemo(() => {
     const list: PaneSpec[] = [];
     if (hasSidebar) {
@@ -112,6 +127,19 @@ function ResizableSplitWorkspace({
   const asideSpec = panes.find((pane) => pane.id === (resize.aside?.id || "aside"));
   const sidebarWidth = sidebarSpec ? widths[sidebarSpec.id] ?? sidebarSpec.defaultWidth : 0;
   const asideWidth = asideSpec ? widths[asideSpec.id] ?? asideSpec.defaultWidth : 0;
+  const sidebarCollapsed = Boolean(sidebarSpec && collapsedPaneIds.has(sidebarSpec.id));
+  const asideCollapsed = Boolean(asideSpec && collapsedPaneIds.has(asideSpec.id));
+  const togglePane = (paneId: string) => {
+    setCollapsedPaneIds((current) => {
+      const next = new Set(current);
+      if (next.has(paneId)) {
+        next.delete(paneId);
+      } else {
+        next.add(paneId);
+      }
+      return next;
+    });
+  };
 
   return (
     <div
@@ -119,6 +147,7 @@ function ResizableSplitWorkspace({
       ref={layoutRef}
       data-vui="split-workspace"
       data-vui-resizable="true"
+      data-vui-collapsible={resize.collapse ? "true" : undefined}
       data-vui-layout-id={resize.layoutId}
       className={[
         "flex h-full min-h-0 min-w-0 items-stretch gap-0 overflow-hidden",
@@ -131,6 +160,8 @@ function ResizableSplitWorkspace({
         <>
           <aside
             data-vui="split-sidebar"
+            data-collapsed={sidebarCollapsed ? "true" : "false"}
+            hidden={sidebarCollapsed}
             className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
             style={{
               width: sidebarWidth,
@@ -141,15 +172,32 @@ function ResizableSplitWorkspace({
           >
             {sidebar}
           </aside>
-          <PaneResizeHandle
-            label="调整左侧栏宽度"
-            valueNow={sidebarWidth}
-            valueMin={sidebarSpec.minWidth}
-            valueMax={sidebarSpec.maxWidth}
-            active={draggingPaneId === sidebarSpec.id}
-            onPointerDown={(event) => startResize(sidebarSpec.id, event, { direction: 1 })}
-            onKeyDown={(event) => onResizeKeyDown(sidebarSpec.id, event, { direction: 1 })}
-          />
+          {resize.collapse?.sidebar ? (
+            <PaneCollapseHandle
+              side="left"
+              collapsed={sidebarCollapsed}
+              separatorLabel={resize.collapse.sidebar.separatorLabel}
+              collapseLabel={resize.collapse.sidebar.collapseLabel}
+              expandLabel={resize.collapse.sidebar.expandLabel}
+              valueNow={sidebarWidth}
+              valueMin={sidebarSpec.minWidth}
+              valueMax={sidebarSpec.maxWidth}
+              active={draggingPaneId === sidebarSpec.id}
+              onToggle={() => togglePane(sidebarSpec.id)}
+              onPointerDown={sidebarCollapsed ? undefined : (event) => startResize(sidebarSpec.id, event, { direction: 1 })}
+              onKeyDown={sidebarCollapsed ? undefined : (event) => onResizeKeyDown(sidebarSpec.id, event, { direction: 1 })}
+            />
+          ) : (
+            <PaneResizeHandle
+              label="调整左侧栏宽度"
+              valueNow={sidebarWidth}
+              valueMin={sidebarSpec.minWidth}
+              valueMax={sidebarSpec.maxWidth}
+              active={draggingPaneId === sidebarSpec.id}
+              onPointerDown={(event) => startResize(sidebarSpec.id, event, { direction: 1 })}
+              onKeyDown={(event) => onResizeKeyDown(sidebarSpec.id, event, { direction: 1 })}
+            />
+          )}
         </>
       ) : null}
       <main
@@ -160,17 +208,36 @@ function ResizableSplitWorkspace({
       </main>
       {aside && asideSpec ? (
         <>
-          <PaneResizeHandle
-            label="调整右侧栏宽度"
-            valueNow={asideWidth}
-            valueMin={asideSpec.minWidth}
-            valueMax={asideSpec.maxWidth}
-            active={draggingPaneId === asideSpec.id}
-            onPointerDown={(event) => startResize(asideSpec.id, event, { direction: -1 })}
-            onKeyDown={(event) => onResizeKeyDown(asideSpec.id, event, { direction: -1 })}
-          />
+          {resize.collapse?.aside ? (
+            <PaneCollapseHandle
+              side="right"
+              collapsed={asideCollapsed}
+              separatorLabel={resize.collapse.aside.separatorLabel}
+              collapseLabel={resize.collapse.aside.collapseLabel}
+              expandLabel={resize.collapse.aside.expandLabel}
+              valueNow={asideWidth}
+              valueMin={asideSpec.minWidth}
+              valueMax={asideSpec.maxWidth}
+              active={draggingPaneId === asideSpec.id}
+              onToggle={() => togglePane(asideSpec.id)}
+              onPointerDown={asideCollapsed ? undefined : (event) => startResize(asideSpec.id, event, { direction: -1 })}
+              onKeyDown={asideCollapsed ? undefined : (event) => onResizeKeyDown(asideSpec.id, event, { direction: -1 })}
+            />
+          ) : (
+            <PaneResizeHandle
+              label="调整右侧栏宽度"
+              valueNow={asideWidth}
+              valueMin={asideSpec.minWidth}
+              valueMax={asideSpec.maxWidth}
+              active={draggingPaneId === asideSpec.id}
+              onPointerDown={(event) => startResize(asideSpec.id, event, { direction: -1 })}
+              onKeyDown={(event) => onResizeKeyDown(asideSpec.id, event, { direction: -1 })}
+            />
+          )}
           <aside
             data-vui="split-aside"
+            data-collapsed={asideCollapsed ? "true" : "false"}
+            hidden={asideCollapsed}
             className="flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden"
             style={{
               width: asideWidth,

@@ -46,13 +46,22 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
         hideHeader
         domainRecipe="teams-organization-workbench"
         layoutId={TEAMS_LAYOUT_ID}
-        resize={p.teamsRailResize}
+        resize={{
+          ...p.teamsRailResize,
+          collapse: {
+            sidebar: {
+              separatorLabel: p.lang === "zh" ? "调整团队栏宽度" : "Resize team rail",
+              collapseLabel: p.lang === "zh" ? "收起团队栏" : "Collapse team rail",
+              expandLabel: p.lang === "zh" ? "展开团队栏" : "Expand team rail",
+            },
+          },
+        }}
         shellTestId="team-shell-workspace"
         shellMode="board"
         ariaLabel={p.selectedTeamContextTitle}
         title={p.lang === "zh" ? "团队工作台" : "Team workbench"}
         rail={p.teamShellRail}
-        toolbar={p.teamShellToolbar}
+        toolbar={p.challengeCupResearchTeamSelected ? undefined : p.teamShellToolbar}
         // Process / challenge board: pure fill host (no pad/scroll/content-start floor).
         // Absolute children (ResearchProcessWorkspace) pin to this cell.
         boardClassName={
