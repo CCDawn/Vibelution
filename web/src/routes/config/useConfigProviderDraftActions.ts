@@ -230,7 +230,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     syncWorkspace,
   ]);
 
-  const handlePinProviderModels = useCallback(async (providerId: string, models: ConfigCatalogModel[]): Promise<void> => {
+  const handlePinProviderModels = useCallback(async (providerId: string, models: ConfigCatalogModel[]): Promise<boolean> => {
     const report = (phase: "busy" | "success" | "error", message: string) => {
       setProviderActionFeedback({ kind: "pin", providerId, phase, message });
       setNotice({
@@ -246,7 +246,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
 
     if (!models.length) {
       report("error", "没有可固定的模型。请先点「发现模型」，确认列表里有「已发现」状态的行。");
-      return;
+      return false;
     }
 
     const pinBusy = formatProviderPinBusyMessage({
@@ -284,7 +284,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       setSelectedProviderId(providerId);
       setSelectedProviderTab("models");
       report("success", "所选模型均已固定。已切换到「已固定」列表。");
-      return;
+      return true;
     }
 
     let pinnedCount = 0;
@@ -350,6 +350,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
         "success",
         formatProviderPinSuccessMessage({ pinnedCount, skippedTotal }),
       );
+      return true;
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
       markError(error);
@@ -357,6 +358,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
         "error",
         formatProviderPinErrorMessage({ pinnedCount, errorMessage: message }),
       );
+      return false;
     } finally {
       setBusyAction("");
     }
@@ -382,7 +384,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
 
   const handleUnpinProviderModel = useCallback(async (modelRef: string, resolveUpstreamId: (modelRef: string) => string) => {
     const separator = modelRef.indexOf("/");
-    if (separator <= 0) return;
+    if (separator <= 0) return false;
     const providerId = modelRef.slice(0, separator);
     const modelKey = modelRef.slice(separator + 1);
     setBusyAction("正在取消固定模型…");
@@ -393,9 +395,11 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
         "DELETE",
       );
       syncWorkspace(response, "success", { resetBase: false });
+      return true;
     } catch (error) {
       setProviderActionError(readableErrorMessage(error).slice(0, 480));
       markError(error);
+      return false;
     } finally {
       setBusyAction("");
     }
@@ -441,7 +445,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
   ]);
 
   const handleUpdateProviderCredential = useCallback(async (providerId: string, credentialValue: string) => {
-    if (!credentialValue.trim()) return;
+    if (!credentialValue.trim()) return false;
     setBusyAction("正在更新 Provider API Key 草稿…");
     setProviderActionError("");
     setProviderActionFeedback({ kind: "credential", providerId, phase: "busy", message: "正在保存 API Key…" });
@@ -455,11 +459,13 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       syncWorkspace(response, "success", { resetBase: false });
       setProviderCredentialEditId("");
       setProviderCredentialValue("");
-      setProviderActionFeedback({ kind: "credential", providerId, phase: "success", message: "API Key 已更新到草稿" });
+      setProviderActionFeedback({ kind: "credential", providerId, phase: "success", message: "API Key 已写入 operator config" });
+      return true;
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
       setProviderActionFeedback({ kind: "credential", providerId, phase: "error", message });
       markError(error);
+      return false;
     } finally {
       setBusyAction("");
     }
@@ -504,14 +510,16 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
         providerId,
         phase: "success",
         message: contextWindow && contextWindow > 0
-          ? `上下文窗口已设为 ${contextWindow}（草稿）；请点右上角保存到外部配置`
-          : "已清除 Provider 上下文窗口草稿；请点右上角保存到外部配置",
+          ? `上下文窗口已设为 ${contextWindow}`
+          : "已清除 Provider 上下文窗口",
       });
+      return true;
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
       setProviderActionFeedback({ kind: "credential", providerId, phase: "error", message });
       setProviderActionError(message);
       markError(error);
+      return false;
     } finally {
       setBusyAction("");
     }

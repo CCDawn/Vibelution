@@ -32,7 +32,7 @@ export type UseConfigProviderQuickSetupActionsOptions = {
   handleSuggestProviderId: (provider: Record<string, unknown>) => Promise<string>;
   handleCreateProvider: (state: ProviderWizardState, credentialValue: string) => Promise<void>;
   handleDiscoverProvider: (providerId: string, credentialValue?: string) => Promise<ConfigCatalogModel[]>;
-  handlePinProviderModels: (providerId: string, models: ConfigCatalogModel[]) => Promise<void>;
+  handlePinProviderModels: (providerId: string, models: ConfigCatalogModel[]) => Promise<boolean | void>;
   handleApply: (pendingLabel?: string, draftOverride?: ConfigApplyDraftOverride) => Promise<boolean>;
   readableErrorMessage: (error: unknown) => string;
 };

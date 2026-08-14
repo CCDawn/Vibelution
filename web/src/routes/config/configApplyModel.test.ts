@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildConfigApplyRequestPayload,
   isConfigBaselineStaleErrorMessage,
+  shouldImmediateApplyConfigPath,
 } from "./configApplyModel";
 
 describe("configApplyModel", () => {
@@ -10,6 +11,14 @@ describe("configApplyModel", () => {
     expect(isConfigBaselineStaleErrorMessage("配置基线已过期，请刷新后重试")).toBe(true);
     expect(isConfigBaselineStaleErrorMessage("edit baseline is stale")).toBe(true);
     expect(isConfigBaselineStaleErrorMessage("network failed")).toBe(false);
+  });
+
+  it("immediately applies appearance paths and leaves tooling for explicit save", () => {
+    expect(shouldImmediateApplyConfigPath("ui")).toBe(true);
+    expect(shouldImmediateApplyConfigPath("ui.theme")).toBe(true);
+    expect(shouldImmediateApplyConfigPath("pet.name")).toBe(true);
+    expect(shouldImmediateApplyConfigPath("security")).toBe(false);
+    expect(shouldImmediateApplyConfigPath("context_compression")).toBe(false);
   });
 
   it("prefers frozen baseline hash when applying a draft override", () => {

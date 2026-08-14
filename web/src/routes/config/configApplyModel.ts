@@ -28,6 +28,14 @@ export function isConfigBaselineStaleErrorMessage(message: string): boolean {
   return /配置基线已过期|edit baseline is stale/i.test(String(message || ""));
 }
 
+const IMMEDIATE_APPLY_ROOTS = new Set(["ui", "user_profile", "avatar", "pet"]);
+
+/** Appearance/profile section paths persist on save; routing and tooling still wait for explicit apply. */
+export function shouldImmediateApplyConfigPath(path: string): boolean {
+  const root = String(path || "").split(".")[0]?.trim();
+  return Boolean(root) && IMMEDIATE_APPLY_ROOTS.has(root);
+}
+
 /**
  * Build the PUT /api/config/apply body from draft editor state or an explicit override.
  * Prefer frozen baseline hash/baseConfig from editBaseline; never invent a hash.

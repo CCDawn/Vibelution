@@ -6,6 +6,8 @@ import {
   gitStatusExplanation,
   runtimeStatusExplanation,
 } from "./LauncherBranchStatusHelp.model";
+import helpSource from "./LauncherBranchStatusHelp.tsx?raw";
+import helpStyles from "./LauncherBranchStatusHelp.styles";
 
 function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBranchInstance {
   return {
@@ -85,5 +87,12 @@ describe("Launcher branch status help", () => {
     expect(gitStatusExplanation(instance({ dirty: true }), true)).toContain("强制清理会丢弃");
     expect(gitStatusExplanation(instance({ mergedToMain: false }), true)).toContain("尚未合入 main");
     expect(gitStatusExplanation(instance({ cleanupRisks: ["delete_unmerged"] }), true)).toContain("尚未合入 main");
+  });
+
+  it("keeps the tooltip trigger on a local style map", () => {
+    expect(helpSource).toContain("styles.trigger");
+    expect(helpSource).not.toContain('className="inline-flex');
+    expect(helpStyles.trigger).toContain("cursor-help");
+    expect(helpStyles.trigger).toContain("focus-visible:shadow-[var(--vui-shadow-focus)]");
   });
 });
