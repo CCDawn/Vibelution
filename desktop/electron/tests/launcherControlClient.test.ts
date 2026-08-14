@@ -125,6 +125,22 @@ describe("tray branch instance classification", () => {
     ]);
   });
 
+  it("marks failed leftover instances stoppable even when the backend is down", () => {
+    const items = classifyTrayBranchInstances({
+      items: [
+        {
+          id: "worktree:failed",
+          shortName: "failed",
+          kind: "worktree",
+          checkedOut: true,
+          alive: false,
+          runtime: { lifecycleState: "error", backend: { alive: false, listening: false }, window: { open: false } }
+        }
+      ]
+    });
+    expect(items).toEqual([{ id: "worktree:failed", label: "failed", startable: false, stoppable: true }]);
+  });
+
   it("fetches and classifies launcher branch instances", async () => {
     const items = await fetchLauncherBranchInstances({
       launcherOrigin: "http://127.0.0.1:8765/launcher",

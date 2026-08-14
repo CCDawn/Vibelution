@@ -50,24 +50,46 @@ export type InstanceRuntimeState = "starting" | "running" | "partial" | "stoppin
 
 export type InstancePendingOperation = {
   instanceId: string;
+  instanceIds?: string[];
   operation: "start" | "stop" | "restart";
 };
 
 export type BranchInstanceGroups = {
   running: LauncherBranchInstance[];
+  attention: LauncherBranchInstance[];
   startable: LauncherBranchInstance[];
   maintenance: LauncherBranchInstance[];
+};
+
+export type InstanceListFilters = {
+  dirty?: boolean;
+  unmerged?: boolean;
 };
 
 export function instanceWindowOpen(item: LauncherBranchInstance): boolean {
   return Boolean(item.runtime.window.open);
 }
 
+export function instanceHasLiveRuntime(item: LauncherBranchInstance): boolean {
+  const backend = item.runtime.backend;
+  return Boolean(backend.alive || backend.listening || instanceWindowOpen(item));
+}
+
+function pendingAppliesTo(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+  if (!pending) {
+    return false;
+  }
+  if (pending.instanceIds && pending.instanceIds.length > 0) {
+    return pending.instanceIds.includes(item.id);
+  }
+  return pending.instanceId === item.id;
+}
+
 export function instanceRuntimeState(
   item: LauncherBranchInstance,
   pending?: InstancePendingOperation,
 ): InstanceRuntimeState {
-  if (pending?.instanceId === item.id) {
+  if (pendingAppliesTo(item, pending) && pending) {
     if (pending.operation === "stop") {
       return "stopping";
     }
@@ -116,6 +138,51 @@ export function isStartableInstance(item: LauncherBranchInstance, pending?: Inst
   return Boolean(item.startable && isOperableInstance(item) && instanceRuntimeState(item, pending) === "stopped");
 }
 
+export function isAttentionInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+  const state = instanceRuntimeState(item, pending);
+  if (["starting", "stopping", "restarting"].includes(state)) {
+    return false;
+  }
+  if (state === "failed") {
+    return true;
+  }
+  return state === "partial" && !instanceHasLiveRuntime(item);
+}
+
+export function instanceStopLabel(item: LauncherBranchInstance, isZh: boolean, pending?: InstancePendingOperation): string {
+  if (isAttentionInstance(item, pending) && !instanceHasLiveRuntime(item)) {
+    return isZh ? "关闭" : "Close";
+  }
+  return isZh ? "停止" : "Stop";
+}
+
+export function instanceErrorMessage(item: LauncherBranchInstance): string {
+  return String(item.runtime.error?.message || "").trim();
+}
+
+export function formatAttentionReason(item: LauncherBranchInstance, isZh: boolean): string {
+  const error = instanceErrorMessage(item);
+  if (error) {
+    return error;
+  }
+  const bits: string[] = [];
+  const backend = item.runtime.backend;
+  if (!backend.alive && !backend.listening) {
+    bits.push(isZh ? "后端未运行" : "Backend not running");
+  }
+  if (backend.portConflict) {
+    bits.push(isZh ? "端口冲突" : "Port conflict");
+  }
+  const frontend = item.runtime.frontend;
+  if (!String(frontend.mode).includes("dev") && !frontend.ready) {
+    bits.push(isZh ? "前端未构建" : "Frontend not built");
+  }
+  if (!instanceWindowOpen(item)) {
+    bits.push(isZh ? "窗口未打开" : "Window closed");
+  }
+  return bits.join(" · ") || (isZh ? "运行状态异常" : "Runtime needs attention");
+}
+
 function compareInstances(a: LauncherBranchInstance, b: LauncherBranchInstance): number {
   if (a.current !== b.current) {
     return a.current ? -1 : 1;
@@ -130,20 +197,58 @@ export function groupBranchInstances(
   items: readonly LauncherBranchInstance[],
   pending?: InstancePendingOperation,
 ): BranchInstanceGroups {
-  const groups: BranchInstanceGroups = { running: [], startable: [], maintenance: [] };
+  const groups: BranchInstanceGroups = { running: [], attention: [], startable: [], maintenance: [] };
   items.forEach((item) => {
-    if (instanceRuntimeState(item, pending) !== "stopped") {
-      groups.running.push(item);
-    } else if (isStartableInstance(item, pending)) {
-      groups.startable.push(item);
-    } else {
-      groups.maintenance.push(item);
+    const state = instanceRuntimeState(item, pending);
+    if (state === "stopped") {
+      if (isStartableInstance(item, pending)) {
+        groups.startable.push(item);
+      } else {
+        groups.maintenance.push(item);
+      }
+      return;
     }
+    if (isAttentionInstance(item, pending)) {
+      groups.attention.push(item);
+      return;
+    }
+    groups.running.push(item);
   });
   groups.running.sort(compareInstances);
+  groups.attention.sort(compareInstances);
   groups.startable.sort(compareInstances);
   groups.maintenance.sort(compareInstances);
   return groups;
+}
+
+export function instanceMatchesQuery(item: LauncherBranchInstance, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return true;
+  }
+  const haystack = [item.id, item.branch, item.shortName, item.path, item.displayPath]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(needle);
+}
+
+export function instanceMatchesFilters(item: LauncherBranchInstance, filters: InstanceListFilters): boolean {
+  if (filters.dirty && !item.dirty) {
+    return false;
+  }
+  if (filters.unmerged && item.mergedToMain !== false) {
+    return false;
+  }
+  return true;
+}
+
+export function filterBranchInstances(
+  items: readonly LauncherBranchInstance[],
+  query: string,
+  filters: InstanceListFilters = {},
+): LauncherBranchInstance[] {
+  return items.filter((item) => instanceMatchesQuery(item, query) && instanceMatchesFilters(item, filters));
 }
 
 function withPort(label: string, port: number): string {
@@ -176,14 +281,12 @@ export function formatFrontendStatus(item: LauncherBranchInstance, isZh: boolean
       ? (isZh ? "Dev Server 就绪" : "Dev server ready")
       : (isZh ? "Dev Server 异常" : "Dev server unavailable");
   }
-  if (stopped) {
-    return frontend.ready
-      ? (isZh ? "内置模式 · 已构建" : "Bundled · Built")
-      : (isZh ? "内置模式 · 启动时构建" : "Bundled · Build on start");
+  if (frontend.ready) {
+    return isZh ? "前端已构建" : "Frontend built";
   }
-  return frontend.ready
-    ? (isZh ? "内置资源就绪" : "Bundled assets ready")
-    : (isZh ? "内置资源缺失" : "Bundled assets missing");
+  return stopped
+    ? (isZh ? "内置模式 · 启动时构建" : "Bundled · Build on start")
+    : (isZh ? "前端未构建 · 启动时构建" : "Frontend unbuilt · builds on start");
 }
 
 export function formatWorkbenchStatus(item: LauncherBranchInstance, isZh: boolean): string {
@@ -215,11 +318,12 @@ export function canStartInstance(item: LauncherBranchInstance, pending?: Instanc
 }
 
 export function canStopInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
-  const backend = item.runtime.backend;
-  return isOperableInstance(item)
+  const state = instanceRuntimeState(item, pending);
+  const failedLeftover = (state === "failed" || state === "partial") && !instanceHasLiveRuntime(item);
+  return (isOperableInstance(item) || failedLeftover)
     && item.startBlockReason !== "launcher_refresh_required"
-    && !["starting", "stopping", "restarting"].includes(instanceRuntimeState(item, pending))
-    && Boolean(backend.alive || backend.listening || instanceWindowOpen(item));
+    && !["starting", "stopping", "restarting"].includes(state)
+    && (instanceHasLiveRuntime(item) || state === "failed" || state === "partial");
 }
 
 export function paginateItems<T>(items: readonly T[], page: number, pageSize = BRANCH_INSTANCE_PAGE_SIZE) {

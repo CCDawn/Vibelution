@@ -164,12 +164,24 @@ export function classifyTrayBranchInstances(payload: unknown): TrayBranchInstanc
     const kind = typeof raw.kind === "string" ? raw.kind.trim() : "";
     const checkedOut = raw.checkedOut === true;
     const alive = raw.alive === true;
-    const startable = checkedOut && !alive && kind !== "retired" && kind !== "local_branch";
+    const operable = checkedOut && kind !== "retired" && kind !== "local_branch";
+    const runtime = isRecord(raw.runtime) ? raw.runtime : null;
+    const lifecycleState = typeof runtime?.lifecycleState === "string" ? runtime.lifecycleState.trim() : "";
+    const backend = isRecord(runtime?.backend) ? runtime.backend : null;
+    const windowInfo = isRecord(runtime?.window) ? runtime.window : null;
+    const live = alive
+      || backend?.alive === true
+      || backend?.listening === true
+      || windowInfo?.open === true;
+    const attention = lifecycleState === "error" || (lifecycleState === "partial" && !live);
+    const transitional = lifecycleState === "starting" || lifecycleState === "stopping" || lifecycleState === "restarting";
+    const stoppable = operable && !transitional && (live || attention);
+    const startable = operable && !live && !attention && lifecycleState !== "starting";
     items.push({
       id,
       label: shortName || branch || id,
       startable,
-      stoppable: alive
+      stoppable
     });
   }
   return items;
