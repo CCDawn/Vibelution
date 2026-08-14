@@ -66,6 +66,20 @@ describe("Launcher branch status help", () => {
     expect(cleanupRecommendation(instance({ current: true }), "stopped", true).label).toBe("不可清理");
   });
 
+  it("does not treat a failed leftover as a live instance that must be stopped before cleanup", () => {
+    const failed = instance({
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "error",
+      },
+    });
+    const recommendation = cleanupRecommendation(failed, "failed", true);
+    expect(recommendation.level).toBe("avoid");
+    expect(recommendation.reason).toContain("关闭失败记录");
+    expect(recommendation.reason).not.toContain("先停止实例");
+    expect(runtimeStatusExplanation("failed", true)).toContain("不必重启");
+  });
+
   it("explains runtime and Git labels in plain language", () => {
     expect(runtimeStatusExplanation("partial", true)).toContain("部分运行组件");
     expect(gitStatusExplanation(instance({ dirty: true }), true)).toContain("强制清理会丢弃");
