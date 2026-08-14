@@ -1649,7 +1649,7 @@ async function orchestrateLauncherLifecycle(
       launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
     operation: operation as WorkbenchLifecycleOperation
   });
-  if (result.accepted && (operation === "start" || operation === "rebuild-and-start")) {
+  if (result.accepted && (operation === "start" || operation === "restart" || operation === "rebuild-and-start")) {
     const provider = windowProvider;
     if (provider !== null) {
       void provider
@@ -1659,7 +1659,54 @@ async function orchestrateLauncherLifecycle(
         });
     }
   }
+  if (result.accepted && (operation === "stop" || operation === "force-stop")) {
+    const provider = windowProvider;
+    if (provider !== null) {
+      void provider.approveWorkbenchCloseOnce().catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      });
+    }
+  }
   return result;
+}
+
+function isCurrentCheckoutInstance(instanceId: string): boolean {
+  return instanceId === "main";
+}
+
+function resolveOrchestratedWorkbenchUrl(port?: number): string {
+  const desktopEnv = desktopEnvironment();
+  if (typeof port === "number" && Number.isFinite(port) && port > 0) {
+    return `http://127.0.0.1:${Math.trunc(port)}/`;
+  }
+  return resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl);
+}
+
+function openOrchestratedWorkbenchWindow(instanceId: string, port?: number): void {
+  const provider = windowProvider;
+  if (provider === null) {
+    return;
+  }
+  const url = resolveOrchestratedWorkbenchUrl(port);
+  const opened = isCurrentCheckoutInstance(instanceId)
+    ? provider.openOrFocusWorkbench(url)
+    : provider.openOrFocusInstanceWorkbench({ instanceId, url });
+  void opened.catch((error: unknown) => {
+    console.warn(error instanceof Error ? error.message : String(error));
+  });
+}
+
+function closeOrchestratedWorkbenchWindow(instanceId: string): void {
+  const provider = windowProvider;
+  if (provider === null) {
+    return;
+  }
+  const closed = isCurrentCheckoutInstance(instanceId)
+    ? provider.approveWorkbenchCloseOnce()
+    : provider.closeInstanceWorkbench(instanceId);
+  void closed.catch((error: unknown) => {
+    console.warn(error instanceof Error ? error.message : String(error));
+  });
 }
 
 async function orchestrateBranchInstanceLifecycle(
@@ -1691,23 +1738,13 @@ async function orchestrateBranchInstanceLifecycle(
     operation: operation as BranchInstanceOperation,
     instanceId
   });
-  if (
-    result.accepted
-    && (operation === "start" || operation === "restart")
-    && result.port
-    && result.port > 0
-  ) {
-    const provider = windowProvider;
-    if (provider !== null) {
-      void provider
-        .openOrFocusInstanceWorkbench({
-          instanceId,
-          url: `http://127.0.0.1:${result.port}/`
-        })
-        .catch((error: unknown) => {
-          console.warn(error instanceof Error ? error.message : String(error));
-        });
+  if (result.accepted && (operation === "start" || operation === "restart")) {
+    if (isCurrentCheckoutInstance(instanceId) || (result.port && result.port > 0)) {
+      openOrchestratedWorkbenchWindow(instanceId, result.port);
     }
+  }
+  if (result.accepted && (operation === "stop" || operation === "force-stop")) {
+    closeOrchestratedWorkbenchWindow(instanceId);
   }
   return result;
 }
