@@ -54,6 +54,18 @@ from .models import (
     resolve_api_key,
 )
 from .llm_projection import project_v2_llm_for_runtime
+from .effective_llm_graph import (
+    EffectiveLLMGraph,
+    EffectiveLLMGraphBuilder,
+    EffectiveLLMRoute,
+    LLMGraphError,
+    LLMGraphIssue,
+)
+from .llm_canonical_schema import (
+    CanonicalLLMConfigError,
+    CanonicalLLMSchemaIssue,
+    validate_canonical_llm_payload,
+)
 from .llm_provider_registry import (
     add_llm_provider,
     delete_llm_provider,
@@ -98,15 +110,22 @@ __all__ = [
     "ConfigLoader",
     "ContextCompressionConfig",
     "DebugConfig",
+    "CanonicalLLMConfigError",
+    "CanonicalLLMSchemaIssue",
     "DiaryConfig",
     "DreamConfig",
     "EvolutionConfig",
+    "EffectiveLLMGraph",
+    "EffectiveLLMGraphBuilder",
+    "EffectiveLLMRoute",
     "GeneConfig",
     "HeartConfig",
     "HungerConfig",
     "LLMConfig",
     "LLMDiscoveryConfig",
     "LLMProfile",
+    "LLMGraphError",
+    "LLMGraphIssue",
     "LogConfig",
     "LogThirdPartyConfig",
     "MemoryConfig",
@@ -161,4 +180,5 @@ __all__ = [
     "unpin_llm_model",
     "update_llm_provider",
     "validate_provider_registry",
+    "validate_canonical_llm_payload",
 ]

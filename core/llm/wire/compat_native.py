@@ -15,11 +15,14 @@ from ..protocols import WireProtocol
 from .chat_completions import ChatCompletionsWireAdapter
 
 
-class AnthropicMessagesWireAdapter(ChatCompletionsWireAdapter):
-    """Anthropic native wire id + OpenAI-shaped body for LiteLLM anthropic/."""
+class AnthropicMessagesLiteLLMCompatWireAdapter(ChatCompletionsWireAdapter):
+    """Anthropic wire semantics through LiteLLM compatibility input."""
 
-    adapter_id = "anthropic_messages"
+    adapter_id = "anthropic_messages_litellm_compat"
     wire_protocol = WireProtocol.ANTHROPIC_MESSAGES
+
+
+AnthropicMessagesWireAdapter = AnthropicMessagesLiteLLMCompatWireAdapter
 
 
 class GeminiGenerateContentWireAdapter(ChatCompletionsWireAdapter):
@@ -31,5 +34,6 @@ class GeminiGenerateContentWireAdapter(ChatCompletionsWireAdapter):
 
 __all__ = [
     "AnthropicMessagesWireAdapter",
+    "AnthropicMessagesLiteLLMCompatWireAdapter",
     "GeminiGenerateContentWireAdapter",
 ]

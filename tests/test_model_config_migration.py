@@ -634,6 +634,38 @@ def test_preview_moves_profile_fields_to_overrides(tmp_path) -> None:
     assert "temperature" not in profile
 
 
+def test_preview_moves_tool_chat_from_model_protocol_to_interaction_contract(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("relay_a", "https://relay.example/v1", "RELAY_KEY", "gpt-a")
+    )
+    legacy_model = legacy["llm"]["model_library"]["relay_a"]
+    legacy_model["protocol"] = "tool_chat"
+    legacy_model["contract"] = "basic_chat"
+
+    preview = preview_v1_to_v2(legacy, project_root=tmp_path)
+    provider = next(iter(preview.proposed_public_config["llm"]["providers"].values()))
+    model = next(iter(provider["models"].values()))
+
+    assert model["interaction_contract"] == "tool_chat"
+    assert model["model_protocol"] == ""
+    assert preview.migration_summary["before"]["models"] == 1
+    assert preview.migration_summary["after"]["models"] == 1
+    assert preview.rollback_plan_id.startswith("rollback-plan-")
+
+
+def test_preview_reports_known_legacy_typo_with_path_without_writing(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("relay_a", "https://relay.example/v1", "RELAY_KEY", "gpt-a")
+    )
+    legacy["llm"]["model_library"]["relay_a"]["wire_protcol"] = "responses"
+
+    preview = preview_v1_to_v2(legacy, project_root=tmp_path)
+
+    issue = next(item for item in preview.conflicts if item["code"] == "unknown_legacy_field")
+    assert issue["path"] == "llm.model_library.relay_a.wire_protcol"
+    assert preview.status == "NEEDS_REVIEW"
+
+
 def test_preview_reports_behavioral_defaults_conflict_without_values(tmp_path) -> None:
     legacy = legacy_config_with_models(
         ("relay_a", "https://relay.example/v1", "RELAY_KEY", "gpt-a"),

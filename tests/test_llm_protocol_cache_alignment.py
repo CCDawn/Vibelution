@@ -16,13 +16,17 @@ from tests.helpers.isolated_config import isolated_settings_config
 
 def test_wire_registry_covers_all_declared_wire_protocols():
     registry = build_default_wire_adapter_registry()
+    adapter_ids = {
+        WireProtocol.ANTHROPIC_MESSAGES: "anthropic_messages_litellm_compat",
+    }
     for wire in WireProtocol:
+        adapter_id = adapter_ids.get(wire, wire.value)
         adapter = registry.resolve(
             type(
                 "R",
                 (),
                 {
-                    "adapter_id": wire.value,
+                    "adapter_id": adapter_id,
                     "wire_protocol": wire,
                     "provider_id": "p",
                     "runtime_endpoint": "https://example.test",
@@ -31,7 +35,7 @@ def test_wire_registry_covers_all_declared_wire_protocols():
             )()
         )
         assert adapter.wire_protocol == wire
-        assert adapter.adapter_id == wire.value
+        assert adapter.adapter_id == adapter_id
 
 
 def test_anthropic_automatic_strategy_is_top_level_cache_control():

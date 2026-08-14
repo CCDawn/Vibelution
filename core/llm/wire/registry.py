@@ -66,13 +66,14 @@ class WireAdapterRegistry:
 def build_default_wire_adapter_registry() -> WireAdapterRegistry:
     """Return the canonical adapters supported by the normalized runtime."""
     from .chat_completions import ChatCompletionsWireAdapter
-    from .compat_native import AnthropicMessagesWireAdapter, GeminiGenerateContentWireAdapter
+    from .anthropic_messages import AnthropicMessagesNativeWireAdapter
+    from .compat_native import AnthropicMessagesLiteLLMCompatWireAdapter, GeminiGenerateContentWireAdapter
     from .responses import ResponsesWireAdapter
 
     registry = WireAdapterRegistry()
     registry.register(ResponsesWireAdapter())
     registry.register(ChatCompletionsWireAdapter())
-    # Native provider wire ids (OpenAI-shaped body via LiteLLM; clears unsupported_wire_protocol debt).
-    registry.register(AnthropicMessagesWireAdapter())
+    registry.register(AnthropicMessagesNativeWireAdapter())
+    registry.register(AnthropicMessagesLiteLLMCompatWireAdapter())
     registry.register(GeminiGenerateContentWireAdapter())
     return registry

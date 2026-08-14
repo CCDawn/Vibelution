@@ -1463,6 +1463,92 @@ def _default_responses_backend(payload: Dict[str, Any]) -> Any:
     return responses(**request_payload)
 
 
+def _default_anthropic_native_backend(payload: Dict[str, Any]) -> Any:
+    """Call an explicit Anthropic Messages endpoint without LiteLLM shape conversion."""
+
+    _raise_if_llm_cancelled()
+    try:
+        import httpx
+    except Exception as exc:  # pragma: no cover
+        raise LLMError(
+            "configuration_error",
+            "httpx 未安装，无法执行 Anthropic Messages native 请求",
+            retryable=False,
+        ) from exc
+    request_payload = dict(payload)
+    endpoint = str(request_payload.pop("base_url", "") or "").strip()
+    api_key = str(request_payload.pop("api_key", "") or "").strip()
+    timeout = request_payload.pop("timeout", None)
+    ssl_verify = request_payload.pop("ssl_verify", True)
+    extra_headers = request_payload.pop("extra_headers", {})
+    if not endpoint or not api_key:
+        raise LLMError(
+            "configuration_error",
+            "Anthropic Messages native route requires endpoint and credential",
+            retryable=False,
+        )
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    if isinstance(extra_headers, dict):
+        headers.update({str(key): str(value) for key, value in extra_headers.items()})
+
+    def check_response(response: Any) -> None:
+        if int(getattr(response, "status_code", 0) or 0) < 400:
+            return
+        status = int(response.status_code)
+        category = {
+            400: "invalid_request_error",
+            401: "authentication_error",
+            403: "permission_error",
+            404: "not_found_error",
+            429: "rate_limit_error",
+            529: "overloaded_error",
+        }.get(status, "provider_error")
+        raise LLMError(
+            category,
+            f"Anthropic Messages request failed with HTTP {status}",
+            retryable=status == 429 or status >= 500,
+            provider="anthropic",
+            details={"statusCode": status, "errorSource": "anthropic_messages_native"},
+        )
+
+    if not bool(request_payload.get("stream")):
+        with httpx.Client(timeout=timeout, verify=ssl_verify, follow_redirects=False) as client:
+            response = client.post(endpoint, headers=headers, json=request_payload)
+            check_response(response)
+            return response.json()
+
+    def iter_sse():
+        with httpx.Client(timeout=timeout, verify=ssl_verify, follow_redirects=False) as client:
+            with client.stream("POST", endpoint, headers=headers, json=request_payload) as response:
+                check_response(response)
+                for line in response.iter_lines():
+                    _raise_if_llm_cancelled()
+                    normalized = str(line or "").strip()
+                    if not normalized.startswith("data:"):
+                        continue
+                    data = normalized.removeprefix("data:").strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError as exc:
+                        raise LLMError(
+                            "protocol_error",
+                            "Anthropic Messages SSE contains invalid JSON",
+                            retryable=False,
+                            provider="anthropic",
+                            details={"errorSource": "anthropic_messages_native"},
+                        ) from exc
+                    if isinstance(event, dict):
+                        yield event
+
+    return iter_sse()
+
+
 _default_responses_backend._vibelution_default_responses_backend = True
 
 
@@ -1637,6 +1723,7 @@ class LLMClient:
         bound_tools: Optional[List[Any]] = None,
         backend: Any = None,
         responses_backend: Any = None,
+        anthropic_backend: Any = None,
     ) -> None:
         self.config = config or get_config()
         self.role = role
@@ -1646,6 +1733,7 @@ class LLMClient:
         self.bound_tools = list(bound_tools or [])
         self._backend = backend or _default_completion_backend
         self._responses_backend = responses_backend or backend or _default_responses_backend
+        self._anthropic_backend = anthropic_backend or backend or _default_anthropic_native_backend
         self._cancellable_responses_http_handler: Any = None
         self._cancellable_responses_http_handler_lock = threading.Lock()
         self._cancellable_responses_stream_lock = threading.Lock()
@@ -2577,6 +2665,8 @@ class LLMClient:
             return self._backend_for_payload(payload)(payload)
 
     def _backend_for_payload(self, payload: Dict[str, Any]):
+        if self.protocol_route.adapter_id == "anthropic_messages_native":
+            return self._anthropic_backend
         if _payload_uses_responses(payload) and self._responses_websocket_backend is not None:
             return self._responses_websocket_backend
         return self._responses_backend if _payload_uses_responses(payload) else self._backend

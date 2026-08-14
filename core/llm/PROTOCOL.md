@@ -22,7 +22,8 @@ Agent/session turn orchestration is shared. **Outbound model I/O is protocol-rou
 | --- | --- | --- | --- |
 | `chat_completions` | `ChatCompletionsWireAdapter` | OpenAI chat | Default path |
 | `responses` | `ResponsesWireAdapter` | OpenAI Responses | OpenAI / relay |
-| `anthropic_messages` | `AnthropicMessagesWireAdapter` | OpenAI-shaped via LiteLLM | Not raw REST `/v1/messages` reimplementation |
+| `anthropic_messages` | `AnthropicMessagesNativeWireAdapter` | Anthropic `/v1/messages` | Official `driver=anthropic` + `service_class=official_api` + `compat_mode=native` |
+| `anthropic_messages` | `AnthropicMessagesLiteLLMCompatWireAdapter` | OpenAI-shaped via LiteLLM | Relay/self-hosted/legacy compatibility; distinct adapter identity |
 | `gemini_generate_content` | `GeminiGenerateContentWireAdapter` | OpenAI-shaped via LiteLLM | Not raw generateContent REST |
 
 ## Cache strategies (`profile.prompt_cache.mode`)
@@ -39,15 +40,17 @@ Agent/session turn orchestration is shared. **Outbound model I/O is protocol-rou
 2. **Turn Status Bar** is rewritten every iteration and must stay at **message list tail** (see `turn_status_bar.py`) so DeepSeek automatic prefix can grow with pure-append tool trails.
 3. Tool **results** are never part of static agent partition by design; they only join automatic prefix if the entire prior message bytes are unchanged.
 
-## Cleared debt (this pass)
+## Cleared debt
 
-- Missing wire adapters for anthropic/gemini → LiteLLM-compat adapters registered.
+- Anthropic native and LiteLLM compatibility routes now have distinct adapter/backend identities; native request, response and SSE projections are registered.
+- Missing Gemini wire adapter remains covered by an explicit LiteLLM compatibility adapter.
 - Anthropic cache strategy name without injection → automatic top-level + explicit block markers.
 - Explicit marker path only applied Qwen branch → `_apply_explicit_prompt_cache_markers` dispatcher.
 
 ## Residual debt (intentional / follow-up)
 
-- Full native Anthropic Messages REST + tool `cache_control` on tools array (not only message blocks) if bypassing LiteLLM.
+- Real credential/provider smoke for Anthropic native remains authorization-gated; code-level tests do not prove production connectivity or billing behavior.
+- Anthropic native tool-definition `cache_control` is not yet projected; message/system cache blocks remain supported.
 - Full native Gemini `generateContent` body (currently OpenAI-shaped via LiteLLM).
 - `ProtocolPolicy.transport` remains dialogue-family (`chat_completions`/`responses`); do not conflate with `WireProtocol`.
 - Other `insert_volatile_context_before_current_user` call sites can still sever prefix if content mutates mid-turn.
