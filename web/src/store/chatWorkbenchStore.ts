@@ -5,27 +5,23 @@ type SessionWorkspace = {
   activeTab: string;
 };
 
+/**
+ * Per-session workspace memory only (open tabs, active inner tab). The active
+ * session is NOT stored here: the committed React Router URL is the single
+ * authority for the current Chat selection.
+ */
 type ChatWorkbenchState = {
-  activeSessionId: string | null;
   sessionWorkspaces: Record<string, SessionWorkspace>;
-  setActiveSession: (sessionId: string) => void;
   hydrateSession: (sessionId: string, previewTabs: string[], activePreviewPath?: string) => void;
-  removeSession: (sessionId: string, nextActiveSessionId?: string | null) => void;
-  resetSessions: (nextActiveSessionId?: string | null) => void;
+  removeSession: (sessionId: string) => void;
+  resetSessions: () => void;
   openPreviewTab: (sessionId: string, path: string) => void;
   closePreviewTab: (sessionId: string, path: string) => void;
   setActiveTab: (sessionId: string, tabId: string) => void;
 };
 
 export const useChatWorkbenchStore = create<ChatWorkbenchState>((set) => ({
-  activeSessionId: null,
   sessionWorkspaces: {},
-  setActiveSession: (activeSessionId) =>
-    set((state) => (
-      state.activeSessionId === activeSessionId
-        ? state
-        : { activeSessionId }
-    )),
   hydrateSession: (sessionId) =>
     set((state) => {
       const existing = state.sessionWorkspaces[sessionId];
@@ -42,20 +38,16 @@ export const useChatWorkbenchStore = create<ChatWorkbenchState>((set) => ({
         },
       };
     }),
-  removeSession: (sessionId, nextActiveSessionId) =>
+  removeSession: (sessionId) =>
     set((state) => {
+      if (!(sessionId in state.sessionWorkspaces)) {
+        return state;
+      }
       const { [sessionId]: _removed, ...sessionWorkspaces } = state.sessionWorkspaces;
-      return {
-        activeSessionId:
-          state.activeSessionId === sessionId
-            ? nextActiveSessionId ?? null
-            : state.activeSessionId,
-        sessionWorkspaces,
-      };
+      return { sessionWorkspaces };
     }),
-  resetSessions: (nextActiveSessionId = null) =>
+  resetSessions: () =>
     set({
-      activeSessionId: nextActiveSessionId ?? null,
       sessionWorkspaces: {},
     }),
   openPreviewTab: (sessionId, path) =>
