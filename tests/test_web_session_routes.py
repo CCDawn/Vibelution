@@ -2283,7 +2283,7 @@ def test_self_observation_message_source_does_not_route_recent_image_reference(t
     assert "resolvedRecentImageReference" not in (latest_user.get("metadata") or {})
 
 
-def test_session_query_keeps_active_session_on_default_first_page(tmp_path, monkeypatch):
+def test_session_query_does_not_pin_active_session_on_default_first_page(tmp_path, monkeypatch):
     conversations = []
     for index in range(60):
         session_id = f"session-{index:02d}"
@@ -2318,8 +2318,12 @@ def test_session_query_keeps_active_session_on_default_first_page(tmp_path, monk
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["items"][0]["id"] == "session-active"
+    item_ids = [item["id"] for item in payload["items"]]
+    assert item_ids[0] == "session-59"
+    assert "session-active" not in item_ids
     assert payload["nextCursor"] == "10"
+
+
 def test_session_summary_exposes_dialogue_model_id(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
