@@ -58,6 +58,7 @@ def build_session_query_summaries(count: int) -> list[dict[str, Any]]:
                 "conversationIndexVisibility": "user_visible",
                 "updatedAt": updated_at.isoformat(),
                 "lastActive": updated_at.isoformat(),
+                "createdAt": "",
             }
         )
 

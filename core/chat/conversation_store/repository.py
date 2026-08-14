@@ -907,6 +907,7 @@ class WorkspaceChatStateDao:
         imported_source_sha256: str = "",
         imported_at_ms: int | None = None,
         expected_state_revision: int | None = None,
+        imported_legacy_state_revision: int | None = None,
     ) -> dict[str, Any]:
         frozen = dict(state)
         raw_conversations = frozen.get("conversations")
@@ -952,6 +953,12 @@ class WorkspaceChatStateDao:
             raise ChatStateRevisionConflictError(
                 expected=int(expected_state_revision),
                 current=current_revision,
+            )
+        if existing is None and imported_legacy_state_revision is not None:
+            # One-time import: continue the legacy document's revision
+            # sequence so CAS callers and catalog freshness stay coherent.
+            current_revision = max(
+                current_revision, max(0, int(imported_legacy_state_revision))
             )
         revision = current_revision + 1
         now_ms = _now_ms()
@@ -1305,6 +1312,7 @@ class ConversationRepository:
         imported_source_sha256: str = "",
         imported_at_ms: int | None = None,
         expected_state_revision: int | None = None,
+        imported_legacy_state_revision: int | None = None,
     ) -> Future[dict[str, Any]]:
         frozen = dict(state)
         return self._writer.submit(
@@ -1313,6 +1321,7 @@ class ConversationRepository:
                 imported_source_sha256=imported_source_sha256,
                 imported_at_ms=imported_at_ms,
                 expected_state_revision=expected_state_revision,
+                imported_legacy_state_revision=imported_legacy_state_revision,
             ),
             force_flush=True,
         )
