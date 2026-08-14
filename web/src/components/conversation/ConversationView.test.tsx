@@ -587,6 +587,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(ringStyles.trigger).toContain("!border-0");
     expect(ringStyles.ring).toContain("overflow-visible");
     expect(ringStyles.ring).not.toContain("overflow-hidden");
+    expect(ringStyles.ring.split(/\s+/)).not.toContain("ring");
     expect(conversationViewSource).toContain("composerContextRing");
     expect(conversationViewSource).toContain('composerVariant === "codex" ? composerActions : null');
     expect(conversationViewSource).toContain('composerVariant === "compact" ? composerActions : null');
