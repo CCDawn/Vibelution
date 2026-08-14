@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.evaluation.supervised_evidence_integrity import assert_supervised_evidence_write_allowed
 from core.infrastructure import developer_sandbox
 from core.infrastructure.workspace_manager import get_workspace
+from vibelution_storage import resolve_project_workspace_home
 from core.evaluation.dataset_environment import preflight_environment_contract
 from core.evaluation.selection_policy import execute_supervised_policy
 from core.evaluation.supervised_intake import (
@@ -119,7 +120,7 @@ def _safe_report_file_stem(value: str) -> str:
 
 
 def _workspace_bundle_path(root: Path, bundle_name: str) -> Path:
-    workspace_root = root if root.name.lower() == "workspace" else root / "workspace"
+    workspace_root = root if root.name.lower() == "workspace" else resolve_project_workspace_home(root)
     return workspace_root / "evaluation" / "bundles" / f"{bundle_name}.json"
 
 

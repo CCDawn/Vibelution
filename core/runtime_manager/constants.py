@@ -5,10 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port
+from vibelution_storage import resolve_active_project_storage_paths
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_MANAGER_DIR = PROJECT_ROOT / ".runtime" / "runtime-manager"
+PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
+RUNTIME_ROOT = PROJECT_STORAGE.runtime
+LOG_ROOT = PROJECT_STORAGE.logs
+RUNTIME_MANAGER_DIR = RUNTIME_ROOT / "runtime-manager"
 INBOX_DIR = RUNTIME_MANAGER_DIR / "inbox"
 PROCESSING_DIR = RUNTIME_MANAGER_DIR / "processing"
 RESULTS_DIR = RUNTIME_MANAGER_DIR / "results"
@@ -25,7 +29,7 @@ DAEMON_LOG_BACKUP_COUNT = 3
 
 LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
 PYTHON_LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
-LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
+LAUNCHER_STATE_PATH = RUNTIME_ROOT / "launcher" / "state.json"
 
 DEFAULT_HOST = DEFAULT_WORKBENCH_HOST
 DEFAULT_PORT = configured_backend_port()

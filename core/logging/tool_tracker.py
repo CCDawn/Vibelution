@@ -736,12 +736,13 @@ _tool_tracker: Optional[ToolTracker] = None
 
 def _workspace_root(project_root: Path) -> Path:
     from core.infrastructure.workspace_manager import get_workspace
+    from vibelution_storage import resolve_project_workspace_home
 
     root = Path(project_root).resolve()
     workspace = get_workspace()
     if root == workspace.project_root.resolve():
         return workspace.root.resolve()
-    return root if root.name.lower() == "workspace" else root / "workspace"
+    return root if root.name.lower() == "workspace" else resolve_project_workspace_home(root)
 
 
 def get_tool_tracker(project_root: Optional[str] = None) -> ToolTracker:

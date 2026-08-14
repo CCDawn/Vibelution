@@ -696,7 +696,7 @@ def _runtime_scene_prompt_index_signature(scene_summaries: list[dict[str, Any]])
             continue
         scene_id = str(summary.get("runtimeSceneId") or "").strip()
         directory_name = str(summary.get("directoryName") or scene_id).strip()
-        package_dir = s.PROJECT_ROOT / "logs" / "runtime_scenes" / directory_name
+        package_dir = s._runtime_scene_root() / directory_name
         package_index_path = package_dir / s.PACKAGE_INDEX_PATH
         summary_path = package_dir / s.SUMMARY_PATH
         try:

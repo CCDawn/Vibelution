@@ -15,6 +15,7 @@ from typing import Any
 
 from core.infrastructure import developer_sandbox
 from core.infrastructure.atomic_io import atomic_write_text
+from vibelution_storage import resolve_project_runtime_home, resolve_project_workspace_home
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -371,7 +372,7 @@ def _scan_chat_room_refs(refs: list[dict[str, Any]], model_id: str, project_root
 
 
 def _indexed_supervised_snapshot(project_root: Path) -> tuple[Path, dict[str, Any]] | None:
-    index_path = project_root / ".runtime" / "runtime-manager" / "work_runs" / "supervised" / "index.json"
+    index_path = resolve_project_runtime_home(project_root) / "runtime-manager" / "work_runs" / "supervised" / "index.json"
     index = _load_json(index_path)
     active_run_id = _normalized_model_id(index.get("activeRunId")) if isinstance(index, dict) else ""
     if not active_run_id:
@@ -1129,7 +1130,7 @@ def rebind_model_references(
 def _workspace_path(project_root: Path, surface: str, *parts: str) -> Path:
     if project_root.resolve() != PROJECT_ROOT.resolve():
         routed_parts = parts or (("teams",) if surface == "teams" else (surface,))
-        return project_root.joinpath("workspace", *routed_parts)
+        return resolve_project_workspace_home(project_root).joinpath(*routed_parts)
     return developer_sandbox.route_workspace_path(
         project_root,
         surface,

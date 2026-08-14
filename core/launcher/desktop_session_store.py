@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from core.runtime_manager.constants import PROJECT_ROOT
+from core.runtime_manager.constants import RUNTIME_ROOT
 
 
-DESKTOP_SESSION_DB_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "desktop_sessions.sqlite3"
+DESKTOP_SESSION_DB_PATH = RUNTIME_ROOT / "launcher" / "desktop_sessions.sqlite3"
 DESKTOP_SESSION_HEARTBEAT_LEASE_SECONDS = 45
 WINDOW_ROLES = {"launcher", "workbench"}
 

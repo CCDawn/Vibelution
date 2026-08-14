@@ -725,6 +725,36 @@ def test_build_agent_context_auto_initializes_project_agent_registry_without_mem
     assert "conversation-ui" in packet.context_block
 
 
+def test_build_agent_context_initializes_registry_outside_identified_checkout(tmp_path, monkeypatch):
+    identity_path = tmp_path / ".vibelution" / "project.json"
+    identity_path.parent.mkdir(parents=True)
+    identity_path.write_text(
+        json.dumps({"schemaVersion": 1, "projectId": "test-vibelution"}) + "\n",
+        encoding="utf-8",
+    )
+    projects_home = tmp_path / "external" / "projects"
+    monkeypatch.setenv("VIBELUTION_PROJECTS_HOME", str(projects_home))
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="外部记忆 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-external-memory",
+        metadata={"includeProjectAgentRegistryContext": True},
+    )
+
+    packet = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-external-memory",
+        run_id="turn-1",
+    )
+
+    registry_path = projects_home / "test-vibelution" / "memory" / "agent-registry.json"
+    assert registry_path.exists()
+    assert not (tmp_path / ".docs" / "project-memory" / "agent-registry.json").exists()
+    assert "active external project memory/agent-registry.json" in packet.context_block
+
+
 def test_build_agent_context_keeps_invalid_project_agent_registry_file(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     registry_path = tmp_path / ".docs" / "project-memory" / "agent-registry.json"

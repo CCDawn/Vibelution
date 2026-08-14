@@ -16,7 +16,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config.paths import resolve_workspace_home
+from config.paths import resolve_workspace_home as resolve_operator_workspace_home
+from core.infrastructure.storage_paths import (
+    ProjectIdentityError,
+    load_project_identity,
+    resolve_active_project_storage_paths,
+    resolve_project_workspace_home,
+)
+
+# Compatibility seam retained for existing embeddings and focused tests. A
+# checkout carrying the tracked identity bypasses it and uses project storage.
+resolve_workspace_home = resolve_operator_workspace_home
 from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
 
 
@@ -24,7 +34,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SANDBOX_SCHEMA_VERSION = 1
 CONFIG_SECTION = "launcher"
 CONFIG_KEY = "developer_mode"
-RUNTIME_DIR = ".runtime/developer-mode"
 SANDBOXES_DIR = "sandboxes"
 ACTIVE_STATE_NAME = "active.json"
 DEBUG_RECORD_KIND = "debug"
@@ -236,12 +245,12 @@ def route_runtime_path(
                 _policy_token(surface, default="runtime"),
                 _policy_token(intent, default="state"),
             )
-        return root.joinpath(".runtime", *parts)
+        return _formal_runtime_root(root).joinpath(*parts)
     if policy in {WRITE_POLICY_SANDBOXED, WRITE_POLICY_OVERLAY, WRITE_POLICY_DEBUG_ONLY} and is_developer_mode_enabled():
         active_root = sandbox_root(root, ensure=True)
         if active_root is not None:
             return active_root.joinpath(".runtime", *parts)
-    return root.joinpath(".runtime", *parts)
+    return _formal_runtime_root(root).joinpath(*parts)
 
 
 def update_developer_mode_status(
@@ -314,8 +323,12 @@ def sandbox_workspace_path(project_root: Path, *parts: str) -> Path | None:
 
 
 def formal_workspace_path(project_root: Path, *parts: str) -> Path:
-    _ = _project_root(project_root)
-    return resolve_workspace_home().joinpath(*parts)
+    root = _project_root(project_root)
+    try:
+        load_project_identity(root)
+    except ProjectIdentityError:
+        return resolve_workspace_home().joinpath(*parts)
+    return resolve_project_workspace_home(root).joinpath(*parts)
 
 
 def sandboxed_workspace_path(project_root: Path, *parts: str) -> Path:
@@ -420,8 +433,15 @@ def _project_root(project_root: Path | None) -> Path:
     return root.parent if root.name.lower() == "workspace" else root
 
 
+def _formal_runtime_root(project_root: Path) -> Path:
+    try:
+        return resolve_active_project_storage_paths(project_root).runtime
+    except ProjectIdentityError:
+        return project_root / ".runtime"
+
+
 def _runtime_root(project_root: Path) -> Path:
-    return project_root / RUNTIME_DIR
+    return _formal_runtime_root(project_root) / "developer-mode"
 
 
 def _sandboxes_root(project_root: Path) -> Path:

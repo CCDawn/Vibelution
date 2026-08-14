@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from core.infrastructure import developer_sandbox
+from vibelution_storage import resolve_project_runtime_home
 
 _DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROJECT_ROOT = _DEFAULT_PROJECT_ROOT
@@ -48,7 +49,7 @@ DEFAULT_TIMEOUT_SECONDS = 180
 RESUMING_STALE_SECONDS = 300
 MAX_ACTION_TEXT_CHARS = 2000
 BRIDGE_TOKEN_HEADER = "X-Vibelution-Computer-Use-Token"
-BRIDGE_TOKEN_PATH = PROJECT_ROOT / ".runtime" / "computer-use" / "bridge.token"
+BRIDGE_TOKEN_PATH = resolve_project_runtime_home(PROJECT_ROOT) / "computer-use" / "bridge.token"
 _SAFE_TOKEN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 

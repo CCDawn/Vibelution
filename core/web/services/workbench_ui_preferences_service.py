@@ -1,8 +1,8 @@
-"""Project-local durable Workbench UI preferences (layout, shell chrome).
+"""Instance-local durable Workbench UI preferences (layout, shell chrome).
 
-Stored under ``.runtime/workbench/ui-preferences.json`` so pane widths and shell
-chrome survive browser profile wipes and origin/port changes that reset
-``localStorage``.
+Stored under external project runtime state so pane widths and shell chrome
+survive browser profile wipes and origin/port changes without dirtying a
+checkout.
 """
 
 from __future__ import annotations
@@ -13,8 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from vibelution_storage import resolve_project_runtime_home
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-PREFERENCES_PATH = PROJECT_ROOT / ".runtime" / "workbench" / "ui-preferences.json"
+PREFERENCES_PATH = resolve_project_runtime_home(PROJECT_ROOT) / "workbench" / "ui-preferences.json"
 SCHEMA_VERSION = 1
 
 _LOCK = threading.RLock()

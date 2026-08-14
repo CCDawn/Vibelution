@@ -43,13 +43,24 @@ Outcome = Literal[
 
 FATAL_RUFF_RULES = "E9,F63,F7,F82"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-GUARD_SCRIPT = (
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vibelution_storage import resolve_project_cache_home
+
+GUARD_SCRIPT_CANDIDATES = (
+    Path.home()
+    / ".codex"
+    / "skills"
+    / "briefbound-project-memory"
+    / "scripts"
+    / "agent_coordination.py",
     Path.home()
     / ".codex"
     / "skills"
     / "ccdawn-dawn-agent-html-memory"
     / "scripts"
-    / "agent_work_guard.py"
+    / "agent_work_guard.py",
 )
 MANIFEST_SCHEMA_VERSION = 1
 PROJECT_PYTHON_NAME = Path(".venv") / "Scripts" / "python.exe"
@@ -404,9 +415,19 @@ def main_worktree(root: Path, base: str) -> Path:
     return root.resolve()
 
 
+def resolve_guard_script(candidates: Sequence[Path] | None = None) -> Path:
+    checked = tuple(candidates or GUARD_SCRIPT_CANDIDATES)
+    for candidate in checked:
+        if candidate.is_file():
+            return candidate
+    locations = ", ".join(str(candidate) for candidate in checked)
+    raise RuntimeError(f"project coordination guard not found; checked: {locations}")
+
+
 def read_guard_status(project_root: Path) -> dict[str, object]:
+    guard_script = resolve_guard_script()
     completed = run_process(
-        [sys.executable, str(GUARD_SCRIPT), str(project_root), "status", "--json"],
+        [sys.executable, str(guard_script), str(project_root), "status", "--json"],
         project_root,
     )
     if completed.returncode != 0:
@@ -520,7 +541,19 @@ def manifest_payload(
 
 
 def write_manifest(root: Path, task_id: str, payload: dict[str, object]) -> Path:
-    directory = root / ".runtime" / "quality_gates"
+    cache_home = resolve_project_cache_home(root).resolve()
+    try:
+        cache_home.relative_to(root.resolve())
+    except ValueError:
+        manifest_home = cache_home
+    else:
+        completed = run_process(["git", "rev-parse", "--git-common-dir"], root)
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr.strip() or "unable to resolve Git common dir")
+        raw_common_dir = Path(completed.stdout.strip())
+        common_dir = raw_common_dir if raw_common_dir.is_absolute() else root / raw_common_dir
+        manifest_home = common_dir.resolve() / "vibelution-cache"
+    directory = manifest_home / "quality_gates"
     directory.mkdir(parents=True, exist_ok=True)
     safe_task_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", task_id).strip("-") or "task"
     path = directory / f"{safe_task_id}.json"
