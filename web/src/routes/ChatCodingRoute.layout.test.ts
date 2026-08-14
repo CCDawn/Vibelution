@@ -3401,6 +3401,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(deleteMutationSource).not.toContain("await Promise.all([\n        queryClient.cancelQueries({ queryKey: queryKeys.sessions() })");
     expect(deleteMutationSource).toContain("optimisticNextActiveSessionId");
     expect(deleteMutationSource).toContain("replaceIfStillViewing(");
+    expect(deleteMutationSource).toContain("requestSessionComposerFocus(optimisticNextActiveSessionId)");
+    expect(deleteMutationSource).toContain("requestSessionComposerFocus(nextActiveSessionId)");
     expect(deleteMutationSource).toContain("previousRouteSessionId === variables.sessionId");
     expect(deleteMutationSource).not.toContain("setActiveSession");
     expect(deleteMutationSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
@@ -3413,6 +3415,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(deleteMutationSource).toContain("chatWorkspaceCache.afterSessionDeleted({");
     expect(deleteMutationSource).not.toContain("void chatWorkspaceCache.afterChatRoomsChanged()");
     expect(deleteMutationSource).not.toContain("void chatWorkspaceCache.afterSessionChanged()");
+    expect(chatCodingRouteWorkbenchSource).toContain("composerFocusRequest");
+    expect(chatCodingRouteWorkbenchSource).toContain("composerFocusSignal:");
+    expect(chatCodingRouteWorkbenchSource).toContain("onComposerFocusRequestSettled:");
+    expect(conversationViewSource).toContain("window.requestAnimationFrame");
+    expect(conversationViewSource).toContain("hasCompetingFocus");
   });
 
   it("keeps the active direct session selected when the list is temporarily stale", () => {

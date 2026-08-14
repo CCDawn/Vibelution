@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from types import SimpleNamespace
 import queue
 import threading
@@ -18,7 +18,7 @@ from core.chat.conversation_ledger import (
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import session_service
 from core.web.services import agent_directory_service
-from core.web.services.session import journal_bridge
+from core.web.services.session import directory_bridge, journal_bridge
 from tests.helpers.web_chat_state import _seed_chat_state
 from tests.session_catalog_fixtures import QUERY_SEARCH_FIELDS, build_session_query_summaries
 
@@ -332,6 +332,48 @@ def test_delete_session_restores_direct_agent_binding_when_chat_save_fails(tmp_p
     assert restored_agent["directSessionId"] == "session-live"
     persisted_state = load_chat_state(tmp_path)
     assert {item["conversation_id"] for item in persisted_state["conversations"]} == {"session-live"}
+
+
+def test_delete_session_lightweight_dispatches_directory_archive_without_waiting(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    archive_calls = []
+    monkeypatch.setattr(
+        directory_bridge,
+        "archive_directory_session_safe",
+        lambda session_id, *, wait=True: archive_calls.append((session_id, wait)),
+    )
+
+    result = session_service.delete_chat_session_lightweight("session-live")
+
+    assert result["deleted"] is True
+    assert archive_calls == [("session-live", False)]
+
+
+def test_delete_session_records_deferred_directory_archive_failure(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    failed_archive = Future()
+    failed_archive.set_exception(OSError("simulated directory archive failure"))
+    monkeypatch.setattr(
+        directory_bridge,
+        "archive_directory_session_safe",
+        lambda _session_id, *, wait=True: failed_archive,
+    )
+    events = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_delete_event",
+        lambda phase, **kwargs: events.append((phase, kwargs)),
+    )
+
+    result = session_service.delete_chat_session_lightweight("session-live")
+
+    assert result["deleted"] is True
+    failure_events = [event for event in events if event[0] == "directory_archive_failed"]
+    assert len(failure_events) == 1
+    assert failure_events[0][1]["outcome"] == "degraded"
+    assert failure_events[0][1]["fields"]["reason"] == "OSError"
 
 
 def test_session_stream_coalescing_preserves_assistant_delta_events():

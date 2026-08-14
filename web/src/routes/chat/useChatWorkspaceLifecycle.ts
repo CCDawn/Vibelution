@@ -104,6 +104,7 @@ export type UseChatWorkspaceLifecycleOptions = {
   syncChatRoomDetail: (room: ChatRoomDetail) => void;
   clearSessionTransientUiState: (sessionId: string) => void;
   removeSessionWorkspace: (sessionId: string) => void;
+  requestSessionComposerFocus: (sessionId: string) => void;
   /** Always-current committed route selection (snapshot at request start). */
   routeSelectionRef: MutableRefObject<ChatRouteSelection>;
   /** Sole Chat route writer (compare-and-swap transitions only). */
@@ -217,6 +218,7 @@ export function useChatWorkspaceLifecycle({
   syncChatRoomDetail,
   clearSessionTransientUiState,
   removeSessionWorkspace,
+  requestSessionComposerFocus,
   routeSelectionRef,
   chatRoute,
   setRightIndexPanel,
@@ -701,13 +703,16 @@ export function useChatWorkspaceLifecycle({
       clearSessionTransientUiState(variables.sessionId);
       removeSessionWorkspace(variables.sessionId);
       if (previousRouteSessionId === variables.sessionId) {
-        chatRoute.replaceIfStillViewing(
+        const routeReplaced = chatRoute.replaceIfStillViewing(
           { kind: "session", sessionId: variables.sessionId },
           optimisticNextActiveSessionId
             ? { kind: "session", sessionId: optimisticNextActiveSessionId }
             : { kind: "bare" },
         );
         if (optimisticNextActiveSessionId) {
+          if (routeReplaced) {
+            requestSessionComposerFocus(optimisticNextActiveSessionId);
+          }
           setSessionComposerErrors((current) => ({
             ...current,
             [variables.sessionId]: "",
@@ -743,10 +748,13 @@ export function useChatWorkspaceLifecycle({
       // Keep the user's post-delete selection if they already switched tabs.
       // Only apply server next-active while the route still sits on the deleted id.
       if (nextActiveSessionId && nextActiveSessionId !== variables.sessionId) {
-        chatRoute.replaceIfStillViewing(
+        const routeReplaced = chatRoute.replaceIfStillViewing(
           { kind: "session", sessionId: variables.sessionId },
           { kind: "session", sessionId: nextActiveSessionId },
         );
+        if (routeReplaced) {
+          requestSessionComposerFocus(nextActiveSessionId);
+        }
         setSessionComposerErrors((current) => ({
           ...current,
           [nextActiveSessionId]: "",
@@ -754,7 +762,6 @@ export function useChatWorkspaceLifecycle({
       }
       void chatWorkspaceCache.afterSessionDeleted({
         deletedSessionId: variables.sessionId,
-        nextSessionId: nextActiveSessionId,
         roomId: routeSelectionRef.current.kind === "room" ? routeSelectionRef.current.roomId : "",
       });
     },
@@ -844,7 +851,6 @@ export function useChatWorkspaceLifecycle({
       // Prefer targeted cache update over a full sessions remove+invalidate thrash.
       void chatWorkspaceCache.afterSessionDeleted({
         deletedSessionId: previousDirectSessionId || variables.sessionId,
-        nextSessionId: replacementDirectSessionId,
       });
     },
     onError: (error, variables) => {
