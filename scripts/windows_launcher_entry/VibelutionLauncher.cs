@@ -158,7 +158,7 @@ internal static class VibelutionLauncher
                         EnsureLauncherBackend();
                         PostLauncher(
                             "/api/launcher/branch-instances/" + operation,
-                            "{"instanceId":" + Quote(instanceId) + "}"
+                            "{\"instanceId\":" + Quote(instanceId) + "}"
                         );
                         ShowInfo(actionLabel + "请求已发送。");
                     }
@@ -196,7 +196,7 @@ internal static class VibelutionLauncher
             {
                 return items;
             }
-            foreach (Match match in Regex.Matches(json, "(?:\{|,)\s*"id"\s*:\s*"(?<id>[^"]+)""))
+            foreach (Match match in Regex.Matches(json, "(?:\\{|,)\\s*\"id\"\\s*:\\s*\"(?<id>[^\"]+)\""))
             {
                 int start = Math.Max(0, match.Index - 8);
                 int length = Math.Min(json.Length - start, 1200);
@@ -224,7 +224,7 @@ internal static class VibelutionLauncher
 
         private static bool ExtractJsonBool(string json, string key)
         {
-            var match = Regex.Match(json, """ + Regex.Escape(key) + ""\s*:\s*(true|false)", RegexOptions.IgnoreCase);
+            var match = Regex.Match(json, "\"" + Regex.Escape(key) + "\"\\s*:\\s*(true|false)", RegexOptions.IgnoreCase);
             return match.Success && match.Groups[1].Value.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -779,7 +779,7 @@ internal static class VibelutionLauncher
             return 0;
         }
 
-        if (action != "toggle" && action != "start" && action != "stop" && action != "close" && action != "restart" && action != "status")
+        if (action != "toggle" && action != "start" && action != "stop" && action != "force-stop" && action != "close" && action != "restart" && action != "rebuild-and-start" && action != "status")
         {
             WriteNativeEntryLog(projectDir, "native_action.rejected", "action=" + ShortMessage(action));
             return 2;
