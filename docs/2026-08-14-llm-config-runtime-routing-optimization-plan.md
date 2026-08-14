@@ -3,10 +3,11 @@
 > **Status**: `active-plan`
 > **Owner**: `codex-llm-routing-plan`
 > **Date**: 2026-08-14
-> **Claim**: `claim-41a330ce53b5`
-> **Branch**: `codex/llm-routing-optimization-plan`
-> **Worktree**: `.worktrees/llm-routing-optimization-plan`
+> **Claim**: `claim-13cbcda6ee33`
+> **Branch**: `codex/multi-agent-protocol-config-design`
+> **Worktree**: `.worktrees/multi-agent-protocol-config-design`
 > **Scope**: 模型配置 schema、有效配置投影、Profile/Agent 绑定、协议解析、配置诊断投影、错误分类、恢复与 fallback；不在本方案阶段修改 operator config、Agent 数据或运行时。
+> **Related design**: 多 Agent 配置、A2A/MCP/AG-UI 适配和 Agent 协议绑定见 [`2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md`](2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md)。
 > **Supersedes**: 不覆盖现行 [`docs/ops/config/`](ops/config/INDEX.md)、[`core/llm/PROTOCOL.md`](../core/llm/PROTOCOL.md)、ADR 或开发标准；历史 LLM 方案仅作背景证据，不再作为实施权威。
 > **Implementation link**: 待实施分支/提交产生后补充。
 > **Validation**: 本文需通过链接、格式、Git diff 和计划契约检查；业务实现按第 11 节验证矩阵验收。
@@ -91,6 +92,7 @@
 - 自动删除历史模型、Provider、Profile 或 Agent。
 - 在没有用户授权时调用付费/远端模型。
 - 在方案落地前直接修改 operator config。
+- 把 A2A、MCP、AG-UI 的 Agent/工具/UI 协议字段并入模型协议枚举。
 - 把历史 `docs/archive/` 方案重新升格为现行规范。
 
 ### 2.5 当前存储权威阻塞
@@ -174,6 +176,17 @@ flowchart LR
 3. **严格写入**：任何新建或编辑后的 schema v2 配置必须通过 strict validation。
 
 不得立即对所有现存旧配置启用硬拒绝，否则当前已知 10 个非法协议和 5 个失效 Agent 引用会被一次性转化为启动/保存阻塞。
+
+### 4.4 与多 Agent 协议路由的边界
+
+本方案中的 `protocol` 只描述 Agent 到 LLM provider 的语义与 wire 请求，不描述 Agent 间、工具或前端事件协议。多 Agent 配置与协议适配由独立的 [`EffectiveAgentGraph` 设计](2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md)负责：
+
+- `EffectiveAgentGraph` 可以引用已解析的 `model_route_ref` / `model_route_fingerprint`；`EffectiveLLMGraph` 不反向理解 Agent binding。
+- `AgentProtocolBinding`、A2A、MCP、AG-UI、endpoint、transport、远端 task/session ref 不进入 `Provider`、`PinnedModel`、`Profile` 或 `ResolvedLLMRoute`。
+- `responses`、`chat_completions` 等 model wire 值必须被 Agent protocol schema 拒绝；`a2a`、`mcp`、`ag_ui` 必须被 LLM protocol schema 拒绝。
+- 现有 `[external_agent_gateway]` 是 managed-Agent MCP compatibility 配置，不是模型协议配置。
+
+这条边界通过双向负向 contract tests 固化，避免本次模型字段治理完成后，在 Agent 配置层重新产生同类混义。
 
 ---
 
@@ -545,6 +558,7 @@ Task 3 与 Task 4 可在 Task 2 的 graph/DTO 契约冻结后分支实施，但 
 - **Deliverable**:
   - 静态/模拟/运行时证据包。
   - owning docs/ADR 更新。
+  - 与多 Agent 配置方案的边界 contract test 和双向文档链接。
   - 本文状态关闭并归档。
 - **Verification/Stop**:
   - 第 11 节所有静态门通过。
