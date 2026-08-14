@@ -1763,11 +1763,15 @@ function resolveLauncherIpcHost() {
       if (launcherBootstrap === null) {
         return null;
       }
-      const context = await resolveDesktopActionLoopContext(launcherBootstrap);
-      return {
-        launcherOrigin: context.launcherOrigin,
-        controlToken: context.controlToken
-      };
+      try {
+        const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+        return {
+          launcherOrigin: context.launcherOrigin,
+          controlToken: context.controlToken
+        };
+      } catch {
+        return null;
+      }
     },
     resolveWindowTruth: () => {
       const provider = windowProvider;

@@ -148,3 +148,34 @@ describe("launcher branch-instances window truth overlay", () => {
     expect(items[1].startable).toBe(true);
   });
 });
+
+describe("retired launcher control port overlay", () => {
+  it("clears leftover :8765 fields on a status snapshot", () => {
+    const overlaid = overlayLauncherWindowTruth(
+      "status",
+      {
+        launcher: {
+          mode: "standalone_control_plane",
+          controlPlane: { port: 8765, url: "http://127.0.0.1:8765/launcher", adapter: "runtime_manager", pid: 12 },
+        },
+        settings: { startup: { launcher: { controlPort: 8765, effectiveControlPort: 8765 } } },
+        projectBundle: { observedState: "closed", browser: {}, components: [] },
+      },
+      truth()
+    ) as Record<string, unknown>;
+    const launcher = overlaid.launcher as Record<string, unknown>;
+    expect(launcher.controlPlane).toMatchObject({ port: 0, url: "", adapter: "electron_main", pid: 0 });
+    const settings = overlaid.settings as Record<string, unknown>;
+    const startup = settings.startup as Record<string, unknown>;
+    expect(startup.launcher).toMatchObject({ controlPort: 0, effectiveControlPort: 0 });
+  });
+
+  it("clears leftover :8765 fields on startup settings", () => {
+    const overlaid = overlayLauncherWindowTruth(
+      "settings/startup",
+      { launcher: { controlPort: 8765, effectiveControlPort: 8765 } },
+      truth()
+    ) as Record<string, unknown>;
+    expect(overlaid.launcher).toMatchObject({ controlPort: 0, effectiveControlPort: 0 });
+  });
+});
