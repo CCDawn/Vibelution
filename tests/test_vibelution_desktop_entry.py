@@ -438,3 +438,69 @@ def test_lifecycle_bridge_rejects_unknown_operation():
     entry = _load_desktop_entry_py()
     with pytest.raises(ValueError):
         entry._run_lifecycle_bridge(argparse.Namespace(lifecycle_operation="taskkill"))
+
+
+def test_branch_instance_bridge_parses_operations():
+    args = desktop_entry.parse_args(
+        ["--action", "branch-instance", "--branch-instance-operation", "start", "--instance-id", "worktree:task"]
+    )
+    assert args.branch_instance_operation == "start"
+    assert args.instance_id == "worktree:task"
+
+
+def test_branch_instance_bridge_dispatches_to_service(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    calls = []
+
+    launcher_module = types.ModuleType("core.launcher.service")
+    launcher_module.LauncherActiveWorkBlocked = type("LauncherActiveWorkBlocked", (Exception,), {})
+    launcher_module.request_branch_instance_operation = lambda instance_id, operation, request_audit=None: calls.append(
+        (instance_id, operation)
+    ) or {
+        "accepted": True,
+        "operation": operation,
+        "instanceId": instance_id,
+        "port": 8002,
+        "message": "ok",
+    }
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    payload = entry._run_branch_instance_bridge(
+        argparse.Namespace(branch_instance_operation="start", instance_id="worktree:task", trigger="")
+    )
+    assert payload["accepted"] is True
+    assert payload["schemaVersion"] == 1
+    assert calls == [("worktree:task", "start")]
+
+
+def test_branch_instance_bridge_surfaces_operability_errors(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+
+    class NotOperable(Exception):
+        pass
+
+    launcher_module = types.ModuleType("core.launcher.service")
+    launcher_module.LauncherActiveWorkBlocked = type("LauncherActiveWorkBlocked", (Exception,), {})
+    launcher_module.request_branch_instance_operation = lambda instance_id, operation, request_audit=None: (_ for _ in ()).throw(
+        NotOperable("instance not operable")
+    )
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    payload = entry._run_branch_instance_bridge(
+        argparse.Namespace(branch_instance_operation="start", instance_id="worktree:task", trigger="")
+    )
+    assert payload["accepted"] is False
+    assert payload["code"] == "branch_instance_operation_failed"
+    assert payload["message"] == "instance not operable"
+
+
+def test_branch_instance_bridge_rejects_unknown_operation():
+    entry = _load_desktop_entry_py()
+    with pytest.raises(ValueError):
+        entry._run_branch_instance_bridge(
+            argparse.Namespace(branch_instance_operation="explode", instance_id="x", trigger="")
+        )

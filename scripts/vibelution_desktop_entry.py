@@ -1268,6 +1268,64 @@ def _run_lifecycle_bridge(args: argparse.Namespace) -> dict[str, object]:
 _LIFECYCLE_OPERATIONS = {"start", "stop", "force-stop", "restart", "rebuild-and-start"}
 
 
+def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:
+    """Run a branch-instance lifecycle operation in-process on behalf of Electron main."""
+    operation = str(args.branch_instance_operation or "").strip().lower()
+    instance_id = str(args.instance_id or "").strip()
+    if operation not in _BRANCH_INSTANCE_OPERATIONS:
+        raise ValueError(f"Unsupported branch instance operation: {operation}")
+    if not instance_id:
+        raise ValueError("branch instance id is required")
+    from core.launcher import service as launcher_service
+
+    _append_log("desktop_entry_python.branch_instance.started", operation=operation, instance_id=instance_id)
+    try:
+        response = launcher_service.request_branch_instance_operation(instance_id, operation)
+    except launcher_service.LauncherActiveWorkBlocked as exc:
+        _append_log(
+            "desktop_entry_python.branch_instance.blocked",
+            level="warning",
+            operation=operation,
+            instance_id=instance_id,
+            message=exc.message,
+        )
+        return {
+            "schemaVersion": 1,
+            "accepted": False,
+            "code": "active_work_blocked",
+            "operation": operation,
+            "instanceId": instance_id,
+            "message": str(exc.message),
+            "activeWorkRuns": list(getattr(exc, "active_work_runs", []) or []),
+        }
+    except Exception as exc:
+        _append_log(
+            "desktop_entry_python.branch_instance.failed",
+            level="error",
+            operation=operation,
+            instance_id=instance_id,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        return {
+            "schemaVersion": 1,
+            "accepted": False,
+            "code": "branch_instance_operation_failed",
+            "operation": operation,
+            "instanceId": instance_id,
+            "message": str(exc),
+        }
+    _append_log(
+        "desktop_entry_python.branch_instance.succeeded",
+        operation=operation,
+        instance_id=instance_id,
+    )
+    return {"schemaVersion": 1, **response}
+
+
+_BRANCH_INSTANCE_OPERATIONS = {"start", "stop", "force-stop", "restart"}
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -1280,13 +1338,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--owned-backend-pid", type=int, default=0)
     parser.add_argument("--attach-healthy-launcher", action="store_true")
     parser.add_argument("--lifecycle-operation", default="")
+    parser.add_argument("--branch-instance-operation", default="")
+    parser.add_argument("--instance-id", default="")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     action = str(args.action or "launcher").strip().lower()
-    if action not in {"launcher", "bootstrap", "stop-launcher", "lifecycle"}:
+    if action not in {"launcher", "bootstrap", "stop-launcher", "lifecycle", "branch-instance"}:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     try:
         _append_log("desktop_entry_python.open.started", action=action, no_browser=bool(args.no_browser), run_id=args.run_id)
@@ -1308,6 +1368,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(f"Lifecycle {payload.get('operation')} accepted={payload.get('accepted')}")
+        elif action == "branch-instance":
+            payload = _run_branch_instance_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Branch instance {payload.get('operation')} accepted={payload.get('accepted')}")
         else:
             _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)
