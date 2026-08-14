@@ -43,6 +43,7 @@ import {
 import {
   createLauncherIpcHost,
   type LauncherIpcInvokePayload,
+  type OrchestratedBranchInstanceResult,
   type OrchestratedLifecycleResult
 } from "./protocol/launcherIpcHost.js";
 import {
@@ -76,6 +77,10 @@ import {
   runWorkbenchLifecycle,
   type WorkbenchLifecycleOperation
 } from "./process/workbenchLifecycle.js";
+import {
+  runBranchInstanceBridge,
+  type BranchInstanceOperation
+} from "./process/branchInstanceBridge.js";
 import {
   completeBootstrapWithoutWaitingForTelemetry,
   drainTelemetryWithDeadline,
@@ -1675,6 +1680,37 @@ async function orchestrateLauncherLifecycle(
   return result;
 }
 
+async function orchestrateBranchInstanceLifecycle(
+  operation: string,
+  payload: LauncherIpcInvokePayload
+): Promise<OrchestratedBranchInstanceResult> {
+  if (launcherBootstrap === null) {
+    throw new Error("Launcher backend is not available.");
+  }
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to orchestrate branch instances");
+  }
+  const body = payload.init?.body;
+  const instanceId =
+    typeof body === "object" && body !== null
+      ? String((body as Record<string, unknown>).instanceId ?? "").trim()
+      : "";
+  if (!instanceId) {
+    throw new Error("branch instance id is required");
+  }
+  const paths = createDesktopPathsForApp();
+  return await runBranchInstanceBridge({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: operation as BranchInstanceOperation,
+    instanceId
+  });
+}
+
 function resolveLauncherIpcHost() {
   if (launcherIpcHost !== null) {
     return launcherIpcHost;
@@ -1700,7 +1736,8 @@ function resolveLauncherIpcHost() {
         instances: provider ? provider.instanceWindowStates() : []
       };
     },
-    orchestrateLifecycle: orchestrateLauncherLifecycle
+    orchestrateLifecycle: orchestrateLauncherLifecycle,
+    orchestrateBranchInstance: orchestrateBranchInstanceLifecycle
   });
   return launcherIpcHost;
 }
