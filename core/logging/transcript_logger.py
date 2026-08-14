@@ -131,53 +131,10 @@ session: {self._session_id}
 """
 
     def _escape_markdown(self, text: str) -> str:
-        """转义 Markdown 特殊字符（但不转义代码块内的内容）"""
+        """保留模型输出的 Markdown 结构，供 transcript 原样渲染。"""
         if not text:
             return ""
-
-        # 分割代码块和普通文本，分别处理
-        parts = []
-        in_code_block = False
-
-        for line in text.split('\n'):
-            if line.startswith('```'):
-                in_code_block = not in_code_block
-                parts.append(line)
-            elif not in_code_block:
-                # 只转义真正需要转义的字符（列表中的符号）
-                # 不转义反斜杠本身
-                pass  # 保持原样，让渲染器自己处理
-            parts.append(line)
-
-        return '\n'.join(parts)
-
-    def _detect_language(self, code: str) -> str:
-        """智能检测代码语言"""
-        if code.startswith('```'):
-            # 提取语言标签
-            lang = code.split('\n')[0][3:].strip().lower()
-            if lang:
-                return lang
-        return "python"  # 默认语言
-
-    def _format_code_block(self, code: str) -> str:
-        """格式化代码块，确保有语言标签"""
-        if not code:
-            return ""
-
-        lines = code.split('\n')
-        if not lines:
-            return ""
-
-        # 如果已经有语言标签，直接返回（确保末尾有结束标签）
-        if lines[0].startswith('```') and lines[-1].strip() == '```':
-            return code
-
-        # 检测语言
-        lang = self._detect_language(code)
-
-        # 构建带语言标签的代码块
-        return f"```{lang}\n{code}\n```"
+        return str(text)
 
     def _truncate_text(self, text: str, max_length: int = 500, suffix: str = "...") -> str:
         """截断文本并添加后缀"""
@@ -282,22 +239,6 @@ session: {self._session_id}
 
         # 转义并处理回复内容
         escaped_content = self._escape_markdown(content)
-
-        # 确保代码块有语言标签
-        lines = escaped_content.split('\n')
-        formatted_lines = []
-        in_code_block = False
-
-        for line in lines:
-            if line.startswith('```') and not in_code_block:
-                in_code_block = True
-                if not line.strip().endswith('```') and len(line.strip()) == 3:
-                    line = line + "python"
-            elif line.startswith('```'):
-                in_code_block = False
-            formatted_lines.append(line)
-
-        escaped_content = '\n'.join(formatted_lines)
 
         content_md = f"""{thinking_section}### 🤖 模型回复
 
