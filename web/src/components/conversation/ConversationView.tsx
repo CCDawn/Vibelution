@@ -256,6 +256,7 @@ import {
 } from "./conversationSpecialMessagePresentation";
 import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
+import { shouldApplyComposerFocusRequest } from "./conversationComposerFocus";
 import {
   resolveMessageTurnAvatar,
   userAvatarSymbol,
@@ -392,6 +393,8 @@ export function ConversationView({
   composerValue,
   composerPlaceholder,
   composerDisabled,
+  composerFocusSignal = "",
+  onComposerFocusRequestSettled,
   composerActionDisabled,
   composerActionMode,
   composerPending,
@@ -457,6 +460,7 @@ export function ConversationView({
   const autoScrollToLatestRef = useRef(autoScrollToLatest);
   autoScrollToLatestRef.current = autoScrollToLatest;
   const lastComposerFocusSignalRef = useRef("");
+  const lastComposerRestoreSignalRef = useRef("");
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
   const [sectionExpansion, setSectionExpansion] = useState<Record<string, Record<string, boolean>>>({});
@@ -1375,6 +1379,46 @@ export function ConversationView({
     const cursorPosition = input.value.length;
     input.setSelectionRange(cursorPosition, cursorPosition);
   }, [composerDisabled, editingMessageId]);
+
+  useEffect(() => {
+    const focusSignal = String(composerFocusSignal || "").trim();
+    if (!focusSignal || composerDisabled) {
+      return;
+    }
+    const focusFrameId = window.requestAnimationFrame(() => {
+      const input = composerInputRef.current;
+      if (!input) {
+        return;
+      }
+      const activeElement = document.activeElement;
+      const hasCompetingFocus = Boolean(
+        activeElement
+        && activeElement !== document.body
+        && activeElement !== document.documentElement
+        && activeElement !== input
+        && activeElement.isConnected,
+      );
+      if (hasCompetingFocus) {
+        lastComposerRestoreSignalRef.current = focusSignal;
+        onComposerFocusRequestSettled?.(focusSignal);
+        return;
+      }
+      if (!shouldApplyComposerFocusRequest({
+        composerDisabled,
+        focusSignal,
+        hasCompetingFocus,
+        lastAppliedFocusSignal: lastComposerRestoreSignalRef.current,
+      })) {
+        return;
+      }
+      lastComposerRestoreSignalRef.current = focusSignal;
+      input.focus();
+      const cursorPosition = input.value.length;
+      input.setSelectionRange(cursorPosition, cursorPosition);
+      onComposerFocusRequestSettled?.(focusSignal);
+    });
+    return () => window.cancelAnimationFrame(focusFrameId);
+  }, [composerDisabled, composerFocusSignal, onComposerFocusRequestSettled]);
 
   useEffect(() => {
     setVisibleMessageLimit(INITIAL_VISIBLE_MESSAGE_COUNT);

@@ -6,9 +6,10 @@ Callers must not wait on SQLite futures while holding ``_CHAT_STATE_LOCK``.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
+from concurrent.futures import Future
 from datetime import datetime
+import logging
 from typing import Any
 
 from core.chat.conversation_store import parse_directory_cursor
@@ -344,22 +345,43 @@ def touch_directory_session_safe(
         )
 
 
-def archive_directory_session_safe(session_id: str, *, wait: bool = True) -> None:
+def archive_directory_session_safe(
+    session_id: str,
+    *,
+    wait: bool = True,
+) -> Future[dict[str, Any] | None] | None:
     store = directory_runtime.get_open_directory_store()
     if store is None:
         return
     normalized = str(session_id or "").strip()
     if not normalized:
         return
+    future: Future[dict[str, Any] | None] | None = None
     try:
         future = store.repository.archive_directory_session(normalized)
         if wait:
             future.result(timeout=_SYNC_TIMEOUT_SECONDS)
+        else:
+
+            def log_deferred_failure(completed: Future[dict[str, Any] | None]) -> None:
+                try:
+                    completed.result()
+                except Exception as exc:
+                    logger.warning(
+                        "Deferred session directory archive failed (%s).",
+                        type(exc).__name__,
+                    )
+
+            future.add_done_callback(log_deferred_failure)
     except Exception as exc:
         logger.warning(
             "Session directory archive failed (%s).",
             type(exc).__name__,
         )
+        if future is None and not wait:
+            future = Future()
+            future.set_exception(exc)
+    return future
 
 
 def _ensure_agent_revision(store: Any, agent_id: str) -> str:

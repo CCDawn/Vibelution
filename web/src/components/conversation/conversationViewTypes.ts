@@ -97,6 +97,9 @@ export type ConversationViewProps = {
   composerValue: string;
   composerPlaceholder: string;
   composerDisabled: boolean;
+  /** Explicit one-shot request used by destructive route handoffs. */
+  composerFocusSignal?: string;
+  onComposerFocusRequestSettled?: (focusSignal: string) => void;
   composerActionDisabled?: boolean;
   composerActionMode?: "send" | "stop";
   composerPending: boolean;

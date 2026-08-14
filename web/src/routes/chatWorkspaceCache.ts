@@ -76,7 +76,6 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
     },
     afterSessionDeleted(options: {
       deletedSessionId: string;
-      nextSessionId?: string;
       roomId?: string;
     }) {
       const deletedSessionId = String(options.deletedSessionId || "").trim();
@@ -86,14 +85,12 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
         queryClient.removeQueries?.({ queryKey: queryKeys.session(deletedSessionId), exact: true });
         queryClient.removeQueries?.({ queryKey: queryKeys.sessionLlmOptions(deletedSessionId), exact: true });
       }
-      // Keep this recipe narrow so delete does not thrash the whole workbench
-      // (agentConfigWorkspace + all chat rooms were freezing tab switches).
+      // Idle-session delete changes indexes, not runtime summary or the already
+      // prefetched replacement detail. Keep both warm across the handoff.
       return invalidateAll(queryClient, [
         queryKeys.sessions(),
         queryKeys.conversations(),
         queryKeys.agents(),
-        queryKeys.runtimeSummary(),
-        ...(options.nextSessionId ? [queryKeys.session(options.nextSessionId)] : []),
         ...(options.roomId ? [queryKeys.chatRooms(), queryKeys.chatRoom(options.roomId)] : []),
       ]);
     },

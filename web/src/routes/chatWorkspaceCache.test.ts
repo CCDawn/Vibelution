@@ -91,7 +91,6 @@ describe("createChatWorkspaceCache", () => {
 
     await cache.afterSessionDeleted({
       deletedSessionId: "session-a",
-      nextSessionId: "session-b",
       roomId: "room-a",
     });
 
@@ -99,11 +98,11 @@ describe("createChatWorkspaceCache", () => {
       queryKeys.sessions(),
       queryKeys.conversations(),
       queryKeys.agents(),
-      queryKeys.runtimeSummary(),
-      queryKeys.session("session-b"),
       queryKeys.chatRooms(),
       queryKeys.chatRoom("room-a"),
     ]);
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.runtimeSummary());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.session("session-b"));
   });
 
   it("refreshes Agent directory and config surfaces after a model-backed config save", async () => {

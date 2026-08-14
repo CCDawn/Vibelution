@@ -410,6 +410,26 @@ export function ChatCodingRoute() {
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
+  const composerFocusSequenceRef = useRef(0);
+  const [composerFocusRequest, setComposerFocusRequest] = useState({ sessionId: "", signal: "" });
+  const requestSessionComposerFocus = useCallback((sessionId: string) => {
+    const normalizedSessionId = String(sessionId || "").trim();
+    if (!normalizedSessionId) {
+      return;
+    }
+    composerFocusSequenceRef.current += 1;
+    setComposerFocusRequest({
+      sessionId: normalizedSessionId,
+      signal: `delete:${normalizedSessionId}:${composerFocusSequenceRef.current}`,
+    });
+  }, []);
+  const settleSessionComposerFocusRequest = useCallback((focusSignal: string) => {
+    setComposerFocusRequest((current) => (
+      current.signal === focusSignal
+        ? { sessionId: "", signal: "" }
+        : current
+    ));
+  }, []);
   const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({});
   const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>({});
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
@@ -1134,6 +1154,7 @@ export function ChatCodingRoute() {
     syncChatRoomDetail,
     clearSessionTransientUiState,
     removeSessionWorkspace,
+    requestSessionComposerFocus,
     routeSelectionRef,
     chatRoute: {
       openSession,
@@ -3345,6 +3366,11 @@ export function ChatCodingRoute() {
                 showSessionOverview: false,
                 // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
                 showMentalSnapshots: true,
+                composerFocusSignal:
+                  composerFocusRequest.sessionId === activeSessionId
+                    ? composerFocusRequest.signal
+                    : "",
+                onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
                 composer: conversationComposer,
                 permissionControl: activeSessionAgent ? {
                   value: activeSessionAgent.permissionPreset || "request_approval",
