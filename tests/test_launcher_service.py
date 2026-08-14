@@ -3615,6 +3615,51 @@ def test_ensure_runtime_manager_daemon_alive_recovers_queue_and_restarts(monkeyp
     assert "launcher.daemon.watchdog.restarted" in events
 
 
+def test_status_watchdog_recovers_stuck_restart_when_daemon_is_offline(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        launcher_service,
+        "_recent_command_files",
+        lambda path, *, limit: [
+            {
+                "commandId": "cmd-stuck-restart",
+                "type": "restart_workbench",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "ensure_runtime_manager_daemon_alive",
+        lambda: calls.append("watchdog") or {"action": "restarted", "ensured": True},
+    )
+
+    recovered = launcher_service._recover_stale_open_command_when_manager_offline(
+        {"daemonRunning": False}
+    )
+
+    assert recovered is True
+    assert calls == ["watchdog"]
+
+
+def test_status_watchdog_does_not_start_daemon_without_stuck_open_command(monkeypatch):
+    monkeypatch.setattr(
+        launcher_service,
+        "_recent_command_files",
+        lambda path, *, limit: [{"commandId": "cmd-stop", "type": "close_workbench"}],
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "ensure_runtime_manager_daemon_alive",
+        lambda: (_ for _ in ()).throw(AssertionError("watchdog must not run")),
+    )
+
+    recovered = launcher_service._recover_stale_open_command_when_manager_offline(
+        {"daemonRunning": False}
+    )
+
+    assert recovered is False
+
+
 def test_ensure_runtime_manager_daemon_alive_records_recovery_failure_but_still_restarts(monkeypatch):
     calls = []
 
