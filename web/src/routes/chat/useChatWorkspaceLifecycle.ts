@@ -40,17 +40,23 @@ import {
   removeDeletedSessionFromConversations,
   renameSessionInConversations,
 } from "./chatSessionDetailHelpers";
-import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
 import { clearSessionDeleteTombstone, markSessionDeleteTombstone } from "../sessionDeleteTombstone";
-import { createTempSessionId, isTempSessionId } from "../sessionOptimisticIds";
+import { createTempSessionId } from "../sessionOptimisticIds";
 import {
   chatAgentSessionStorage,
   rememberAgentLastSession,
 } from "./chatAgentSessionMemory";
 import { defaultNewSessionTitle } from "./useChatSessionRenameMenu";
+import type { ChatRouteSelection } from "./chatSelectionProjection";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
+
+type ChatRouteLifecycleActions = {
+  openSession: (sessionId: string) => void;
+  openRoom: (roomId: string) => void;
+  replaceIfStillViewing: (expected: ChatRouteSelection, next: ChatRouteSelection) => boolean;
+};
 
 function pickOptimisticNextActiveSessionId(
   remainingSessions: SessionSummary[] | undefined,
@@ -97,10 +103,11 @@ export type UseChatWorkspaceLifecycleOptions = {
   syncSessionDetail: (detail: SessionDetail) => void;
   syncChatRoomDetail: (room: ChatRoomDetail) => void;
   clearSessionTransientUiState: (sessionId: string) => void;
-  removeSessionWorkspace: (sessionId: string, nextActiveSessionId: string | null) => void;
-  setActiveSession: (sessionId: string) => void;
-  activeGroupRoomId: string;
-  setActiveGroupRoomId: Dispatch<SetStateAction<string>>;
+  removeSessionWorkspace: (sessionId: string) => void;
+  /** Always-current committed route selection (snapshot at request start). */
+  routeSelectionRef: MutableRefObject<ChatRouteSelection>;
+  /** Sole Chat route writer (compare-and-swap transitions only). */
+  chatRoute: ChatRouteLifecycleActions;
   setRightIndexPanel: Dispatch<SetStateAction<RightIndexPanel>>;
   setSelectedAgentId: Dispatch<SetStateAction<string>>;
   setSessionFilter: Dispatch<SetStateAction<string>>;
@@ -130,7 +137,7 @@ export type UseChatWorkspaceLifecycleResult = {
     ChatRoomDetail,
     Error,
     { title: string; agentIds: string[]; mode: string; purpose: string },
-    unknown
+    { routeSelectionAtRequest: ChatRouteSelection }
   >;
   startGroupRoundMutation: UseMutationResult<
     ChatRoomRoundAcceptedResponse,
@@ -210,9 +217,8 @@ export function useChatWorkspaceLifecycle({
   syncChatRoomDetail,
   clearSessionTransientUiState,
   removeSessionWorkspace,
-  setActiveSession,
-  activeGroupRoomId,
-  setActiveGroupRoomId,
+  routeSelectionRef,
+  chatRoute,
   setRightIndexPanel,
   setSelectedAgentId,
   setSessionFilter,
@@ -248,7 +254,6 @@ export function useChatWorkspaceLifecycle({
       // T0: mint a local temp tab + empty transcript immediately (ChatGPT-style).
       // Real id arrives on success; UI must stay interactive while POST is in flight.
       const tempSessionId = createTempSessionId();
-      const previousActiveSessionId = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
       const normalizedAgentId = String(agentId || "").trim();
       const nowIso = new Date().toISOString();
       const agents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
@@ -294,14 +299,14 @@ export function useChatWorkspaceLifecycle({
         __sessions__: "",
         [tempSessionId]: "",
       }));
-      setActiveGroupRoomId("");
       setRightIndexPanel("conversations");
-      // Cache first, then switch active — center panel reads cache when query is disabled for temp ids.
+      // Cache first, then switch route — center panel reads cache when query is disabled for temp ids.
       queryClient.setQueryData(queryKeys.session(tempSessionId), optimisticDetail);
       updateSessionSummaryCaches(queryClient, (sessions) =>
         mergeSessionDetailIntoSummaries(sessions, optimisticDetail),
       );
-      setActiveSession(tempSessionId);
+      // The temp id enters the URL immediately; the route is the single authority.
+      chatRoute.openSession(tempSessionId);
       setSelectedAgentId(normalizedAgentId);
       if (normalizedAgentId) {
         rememberAgentLastSession(
@@ -315,7 +320,7 @@ export function useChatWorkspaceLifecycle({
       setEditingSessionId(tempSessionId);
       setEditingSessionTitle(title);
       syncSessionDetail(optimisticDetail);
-      return { tempSessionId, previousActiveSessionId, agentId: normalizedAgentId };
+      return { tempSessionId, agentId: normalizedAgentId };
     },
     onSuccess: (nextDetail, variables, context) => {
       const nextId = String(nextDetail.id || "").trim();
@@ -341,17 +346,23 @@ export function useChatWorkspaceLifecycle({
         agentId,
         messages: Array.isArray(nextDetail.messages) ? nextDetail.messages : [],
       };
-      // Seed real id cache BEFORE switching active id so the UI never paints a hard loading shell.
+      // Seed real id cache BEFORE the route swaps so the UI never paints a hard loading shell.
       queryClient.setQueryData(queryKeys.session(nextId), seededDetail);
       updateSessionSummaryCaches(queryClient, (sessions) =>
         mergeSessionDetailIntoSummaries(sessions, seededDetail),
       );
-      const currentActive = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
-      const keepFocusOnCreated = !currentActive || currentActive === tempSessionId || isTempSessionId(currentActive);
+      // Compare-and-swap: only replace temp → real when the user is still on the
+      // temp route. A user who already left keeps their page; cache updates only.
+      const stillOnTemp = tempSessionId
+        ? chatRoute.replaceIfStillViewing(
+            { kind: "session", sessionId: tempSessionId },
+            { kind: "session", sessionId: nextId },
+          )
+        : false;
+      const keepFocusOnCreated = !tempSessionId || stillOnTemp;
       if (keepFocusOnCreated) {
         // Extend blur suppress through remount so rename field stays open for typing.
         suppressRenameBlurUntilRef.current = Date.now() + 2500;
-        setActiveSession(nextId);
         editingSessionIdRef.current = nextId;
         setEditingSessionId(nextId);
         setEditingSessionTitle(title);
@@ -363,7 +374,7 @@ export function useChatWorkspaceLifecycle({
           (sessions ?? []).filter((session) => session.id !== tempSessionId),
         );
         queryClient.removeQueries({ queryKey: queryKeys.session(tempSessionId), exact: true });
-        removeSessionWorkspace(tempSessionId, keepFocusOnCreated ? nextId : currentActive || nextId);
+        removeSessionWorkspace(tempSessionId);
       }
       setSelectedAgentId(agentId);
       if (agentId && keepFocusOnCreated) {
@@ -406,24 +417,21 @@ export function useChatWorkspaceLifecycle({
     },
     onError: (error, _variables, context) => {
       const tempSessionId = String(context?.tempSessionId || "").trim();
-      const previousActiveSessionId = String(context?.previousActiveSessionId || "").trim();
+      const failureMessage = describeError(error, t("createSessionFailed"));
       if (tempSessionId) {
-        updateSessionSummaryCaches(queryClient, (sessions) =>
-          (sessions ?? []).filter((session) => session.id !== tempSessionId),
-        );
-        queryClient.removeQueries({ queryKey: queryKeys.session(tempSessionId), exact: true });
-        const currentActive = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
-        if (currentActive === tempSessionId) {
-          removeSessionWorkspace(tempSessionId, previousActiveSessionId || null);
-          setActiveSession(previousActiveSessionId);
-        } else {
-          removeSessionWorkspace(tempSessionId, currentActive || null);
-        }
+        // Keep the temp failure surface on its route. Never auto-restore a
+        // previous session; the user retries create or selects another tab.
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [tempSessionId]: failureMessage,
+          __sessions__: failureMessage,
+        }));
+      } else {
+        setSessionComposerErrors((current) => ({
+          ...current,
+          __sessions__: failureMessage,
+        }));
       }
-      setSessionComposerErrors((current) => ({
-        ...current,
-        __sessions__: describeError(error, t("createSessionFailed")),
-      }));
       void chatWorkspaceCache.refreshConversationIndex();
     },
   });
@@ -439,7 +447,10 @@ export function useChatWorkspaceLifecycle({
         },
         body: JSON.stringify({ title, agentIds, mode, purpose }),
       }),
-    onSuccess: (room) => {
+    onMutate: () => ({
+      routeSelectionAtRequest: routeSelectionRef.current,
+    }),
+    onSuccess: (room, _variables, context) => {
       setGroupComposerOpen(false);
       setGroupTitleDraft("");
       setGroupModeDraft("round_robin");
@@ -450,9 +461,13 @@ export function useChatWorkspaceLifecycle({
         ...current,
         __sessions__: "",
       }));
-      setActiveGroupRoomId(room.roomId);
       setRightIndexPanel("members");
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      // Enter the new room only while the user still views the request-start route.
+      chatRoute.replaceIfStillViewing(
+        context?.routeSelectionAtRequest ?? { kind: "bare" },
+        { kind: "room", roomId: room.roomId },
+      );
       void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
     },
     onError: (error) => {
@@ -479,7 +494,6 @@ export function useChatWorkspaceLifecycle({
         body: JSON.stringify({ topic, mode, purpose }),
       }),
     onSuccess: (accepted) => {
-      setActiveGroupRoomId(accepted.roomId);
       setRightIndexPanel("members");
       setGroupTopicDraft("");
       setGroupRoomActionError("");
@@ -487,9 +501,7 @@ export function useChatWorkspaceLifecycle({
     },
     onError: (error) => {
       setGroupRoomActionError(describeError(error, lang === "zh" ? "启动群聊讨论失败" : "Run group discussion failed"));
-      if (activeGroupRoomId) {
-        void chatWorkspaceCache.afterChatRoomChanged(activeGroupRoomId);
-      }
+      void chatWorkspaceCache.afterChatRoomChanged(routeSelectionRef.current.kind === "room" ? routeSelectionRef.current.roomId : "");
     },
   });
 
@@ -499,7 +511,6 @@ export function useChatWorkspaceLifecycle({
         method: "POST",
       }),
     onSuccess: (room) => {
-      setActiveGroupRoomId(room.roomId);
       setRightIndexPanel("members");
       setGroupRoomActionError("");
       syncChatRoomDetail(room);
@@ -572,7 +583,6 @@ export function useChatWorkspaceLifecycle({
         }),
       }),
     onSuccess: (room) => {
-      setActiveGroupRoomId(room.roomId);
       setRightIndexPanel("members");
       setGroupManageTitleDraft(room.title || "");
       setGroupManageSessionIds(room.participants.map((participant) => participant.sessionId));
@@ -584,8 +594,8 @@ export function useChatWorkspaceLifecycle({
     },
     onError: (error) => {
       setGroupRoomActionError(describeError(error, lang === "zh" ? "更新群聊失败" : "Update group failed"));
-      if (activeGroupRoomId) {
-        void chatWorkspaceCache.afterChatRoomChanged(activeGroupRoomId);
+      if (routeSelectionRef.current.kind === "room") {
+        void chatWorkspaceCache.afterChatRoomChanged(routeSelectionRef.current.roomId);
       }
     },
   });
@@ -596,7 +606,6 @@ export function useChatWorkspaceLifecycle({
         method: "DELETE",
       }),
     onSuccess: (_payload, variables) => {
-      setActiveGroupRoomId("");
       setRightIndexPanel("conversations");
       setGroupTopicDraft("");
       setGroupRoomActionError("");
@@ -604,6 +613,11 @@ export function useChatWorkspaceLifecycle({
       setGroupManageSessionIds([]);
       setGroupManageModeDraft("round_robin");
       queryClient.removeQueries({ queryKey: queryKeys.chatRoom(variables.roomId), exact: true });
+      // Only leave the deleted room while the user is still on its route.
+      chatRoute.replaceIfStillViewing(
+        { kind: "room", roomId: variables.roomId },
+        { kind: "bare" },
+      );
       void chatWorkspaceCache.afterChatRoomChanged(variables.roomId);
     },
     onError: (error) => {
@@ -617,7 +631,6 @@ export function useChatWorkspaceLifecycle({
         method: "POST",
       }),
     onSuccess: (room) => {
-      setActiveGroupRoomId(room.roomId);
       setRightIndexPanel("members");
       setGroupRoomActionError("");
       syncChatRoomDetail(room);
@@ -625,8 +638,8 @@ export function useChatWorkspaceLifecycle({
     },
     onError: (error) => {
       setGroupRoomActionError(describeError(error, lang === "zh" ? "重置群聊失败" : "Reset group failed"));
-      if (activeGroupRoomId) {
-        void chatWorkspaceCache.afterChatRoomChanged(activeGroupRoomId);
+      if (routeSelectionRef.current.kind === "room") {
+        void chatWorkspaceCache.afterChatRoomChanged(routeSelectionRef.current.roomId);
       }
     },
   });
@@ -653,7 +666,9 @@ export function useChatWorkspaceLifecycle({
       const previousAgentSessionCaches = captureAgentSessionCacheSnapshots(queryClient);
       const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
-      const previousActiveSessionId = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
+      const previousRouteSessionId = routeSelectionRef.current.kind === "session"
+        ? routeSelectionRef.current.sessionId
+        : "";
       const deletedAgentId = String(
         (previousSessions ?? []).find((session) => session.id === variables.sessionId)?.agentId || "",
       ).trim();
@@ -677,15 +692,21 @@ export function useChatWorkspaceLifecycle({
       const optimisticNextActiveSessionId = pickOptimisticNextActiveSessionId(
         remainingSessions,
         variables.sessionId,
-        previousActiveSessionId,
+        previousRouteSessionId,
         deletedAgentId,
       );
 
-      // Instant handoff: remove workspace and leave the deleted tab before DELETE returns.
+      // Instant handoff: remove workspace and leave the deleted tab before DELETE
+      // returns. Compare-and-swap keeps the user's page when they already left.
       clearSessionTransientUiState(variables.sessionId);
-      removeSessionWorkspace(variables.sessionId, optimisticNextActiveSessionId || null);
-      if (previousActiveSessionId === variables.sessionId) {
-        setActiveSession(optimisticNextActiveSessionId);
+      removeSessionWorkspace(variables.sessionId);
+      if (previousRouteSessionId === variables.sessionId) {
+        chatRoute.replaceIfStillViewing(
+          { kind: "session", sessionId: variables.sessionId },
+          optimisticNextActiveSessionId
+            ? { kind: "session", sessionId: optimisticNextActiveSessionId }
+            : { kind: "bare" },
+        );
         if (optimisticNextActiveSessionId) {
           setSessionComposerErrors((current) => ({
             ...current,
@@ -710,7 +731,7 @@ export function useChatWorkspaceLifecycle({
         previousAgentSessionCaches,
         previousConversations,
         previousAgents,
-        previousActiveSessionId,
+        previousRouteSessionId,
         optimisticNextActiveSessionId,
       };
     },
@@ -718,23 +739,14 @@ export function useChatWorkspaceLifecycle({
       const serverNextActiveSessionId = String(deleteResult.nextActiveSessionId || "").trim();
       const optimisticNextActiveSessionId = String(context?.optimisticNextActiveSessionId || "").trim();
       const nextActiveSessionId = serverNextActiveSessionId || optimisticNextActiveSessionId;
-      const currentActiveSessionId = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
 
       // Keep the user's post-delete selection if they already switched tabs.
-      // Only apply server next-active when we still sit on empty/deleted focus.
-      if (
-        nextActiveSessionId
-        && (
-          !currentActiveSessionId
-          || currentActiveSessionId === variables.sessionId
-          || currentActiveSessionId === optimisticNextActiveSessionId
-        )
-        && currentActiveSessionId !== nextActiveSessionId
-      ) {
-        removeSessionWorkspace(variables.sessionId, nextActiveSessionId);
-        setActiveSession(nextActiveSessionId);
-      }
-      if (nextActiveSessionId) {
+      // Only apply server next-active while the route still sits on the deleted id.
+      if (nextActiveSessionId && nextActiveSessionId !== variables.sessionId) {
+        chatRoute.replaceIfStillViewing(
+          { kind: "session", sessionId: variables.sessionId },
+          { kind: "session", sessionId: nextActiveSessionId },
+        );
         setSessionComposerErrors((current) => ({
           ...current,
           [nextActiveSessionId]: "",
@@ -743,7 +755,7 @@ export function useChatWorkspaceLifecycle({
       void chatWorkspaceCache.afterSessionDeleted({
         deletedSessionId: variables.sessionId,
         nextSessionId: nextActiveSessionId,
-        roomId: activeGroupRoomId,
+        roomId: routeSelectionRef.current.kind === "room" ? routeSelectionRef.current.roomId : "",
       });
     },
     onError: (error, variables, context) => {
@@ -760,10 +772,7 @@ export function useChatWorkspaceLifecycle({
       if (context?.previousAgents !== undefined) {
         queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
       }
-      const previousActiveSessionId = String(context?.previousActiveSessionId || "").trim();
-      if (previousActiveSessionId) {
-        setActiveSession(previousActiveSessionId);
-      }
+      // Failed delete keeps the current route; never roll back navigation.
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("deleteSessionFailed")),
@@ -809,7 +818,7 @@ export function useChatWorkspaceLifecycle({
         clearSessionTransientUiState(previousDirectSessionId);
         queryClient.removeQueries({ queryKey: queryKeys.session(previousDirectSessionId), exact: true });
         queryClient.removeQueries({ queryKey: queryKeys.sessionLlmOptions(previousDirectSessionId), exact: true });
-        removeSessionWorkspace(previousDirectSessionId, replacementDirectSessionId);
+        removeSessionWorkspace(previousDirectSessionId);
         // Optimistically drop the old row from list caches so UI does not flash a duplicate.
         updateSessionSummaryCaches(queryClient, (sessions) =>
           (sessions ?? []).filter((session) => session.id !== previousDirectSessionId),
@@ -821,7 +830,11 @@ export function useChatWorkspaceLifecycle({
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
         agents?.map((agent) => (agent.agentId === result.agent.agentId ? result.agent : agent)),
       );
-      setActiveSession(replacementDirectSessionId);
+      // Compare-and-swap: old id → replacement only while the user still views it.
+      chatRoute.replaceIfStillViewing(
+        { kind: "session", sessionId: previousDirectSessionId },
+        { kind: "session", sessionId: replacementDirectSessionId },
+      );
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: "",

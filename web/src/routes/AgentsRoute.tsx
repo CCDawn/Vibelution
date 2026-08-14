@@ -372,11 +372,11 @@ const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
 function reconcileResetDirectSession(summary: AgentResetSummary) {
   const plan = planAgentResetDirectSession(summary);
   if (plan.kind === "remove") {
-    useChatWorkbenchStore.getState().removeSession(plan.previousDirectSessionId, plan.replacementDirectSessionId);
+    useChatWorkbenchStore.getState().removeSession(plan.previousDirectSessionId);
     return;
   }
   if (plan.kind === "reset") {
-    useChatWorkbenchStore.getState().resetSessions(plan.replacementDirectSessionId);
+    useChatWorkbenchStore.getState().resetSessions();
   }
 }
 
