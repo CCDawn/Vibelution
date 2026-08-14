@@ -1,7 +1,7 @@
 import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
   pinSharedDesktopShellUserData,
@@ -76,6 +76,7 @@ import {
   runBranchInstanceBridge,
   type BranchInstanceOperation
 } from "./process/branchInstanceBridge.js";
+import { runPythonJsonBridge } from "./process/pythonJsonBridge.js";
 import {
   completeBootstrapWithoutWaitingForTelemetry,
   drainTelemetryWithDeadline,
@@ -1671,6 +1672,51 @@ async function orchestrateBranchInstanceLifecycle(
   return result;
 }
 
+async function orchestrateLauncherApi(
+  path: string,
+  payload: LauncherIpcInvokePayload
+): Promise<unknown> {
+  if (launcherBootstrap === null) {
+    throw new Error("Launcher backend is not available.");
+  }
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required for the launcher API bridge");
+  }
+  const paths = createDesktopPathsForApp();
+  const method = String(payload.init?.method ?? "GET").toUpperCase();
+  const body = payload.init?.body;
+  const args = [
+    resolve(paths.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
+    "--action",
+    "launcher-api",
+    "--launcher-api-path",
+    path,
+    "--launcher-api-method",
+    method,
+    ...(body !== undefined ? ["--launcher-api-body", JSON.stringify(body)] : []),
+    "--output",
+    "json",
+    "--workspace",
+    paths.workspaceRoot,
+    "--config",
+    launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    "--no-browser"
+  ];
+  const raw = await runPythonJsonBridge({
+    pythonPath,
+    args,
+    cwd: paths.workspaceRoot,
+    failureLabel: "launcher api bridge"
+  });
+  const parsed = JSON.parse(raw) as { ok?: boolean; payload?: unknown; message?: string };
+  if (parsed.ok !== true) {
+    throw new Error(parsed.message || "launcher api bridge failed");
+  }
+  return parsed.payload;
+}
+
 function resolveLauncherIpcHost() {
   if (launcherIpcHost !== null) {
     return launcherIpcHost;
@@ -1697,7 +1743,8 @@ function resolveLauncherIpcHost() {
       };
     },
     orchestrateLifecycle: orchestrateLauncherLifecycle,
-    orchestrateBranchInstance: orchestrateBranchInstanceLifecycle
+    orchestrateBranchInstance: orchestrateBranchInstanceLifecycle,
+    orchestrateLauncherApi
   });
   return launcherIpcHost;
 }

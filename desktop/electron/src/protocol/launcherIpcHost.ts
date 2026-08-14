@@ -15,6 +15,18 @@ const BRANCH_INSTANCE_PATHS = new Set([
   "branch-instances/force-stop",
   "branch-instances/restart"
 ]);
+const LAUNCHER_API_PATHS = new Set([
+  "settings/workbench-window",
+  "settings/startup",
+  "developer-mode",
+  "developer-mode/reset-sandbox",
+  "developer-mode/noise-overview",
+  "developer-mode/cleanup/preview",
+  "developer-mode/cleanup/apply",
+  "maintenance/reset/summary",
+  "maintenance/reset/preview",
+  "maintenance/reset/apply"
+]);
 
 export type OrchestratedLifecycleResult = {
   schemaVersion: 1;
@@ -141,6 +153,7 @@ export function createLauncherIpcHost(input: {
   resolveWindowTruth?: () => LauncherWindowTruth;
   orchestrateLifecycle?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedLifecycleResult>;
   orchestrateBranchInstance?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedBranchInstanceResult>;
+  orchestrateLauncherApi?: (path: string, payload: LauncherIpcInvokePayload) => Promise<unknown>;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }) {
@@ -181,6 +194,17 @@ export function createLauncherIpcHost(input: {
         try {
           const operation = normalized.path.split("/")[1];
           const result = await input.orchestrateBranchInstance(operation, normalized);
+          return { ok: true, payload: result };
+        } catch (error: unknown) {
+          return launcherIpcError(
+            LAUNCHER_IPC_LIFECYCLE_ERROR,
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      }
+      if (LAUNCHER_API_PATHS.has(normalized.path) && input.orchestrateLauncherApi) {
+        try {
+          const result = await input.orchestrateLauncherApi(normalized.path, normalized);
           return { ok: true, payload: result };
         } catch (error: unknown) {
           return launcherIpcError(
