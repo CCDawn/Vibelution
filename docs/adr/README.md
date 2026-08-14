@@ -10,6 +10,7 @@
 | [0004](0004-product-ui-uses-vui-shadcn-only.md) | 产品 UI 强制 VUI + shadcn/Radix，禁止并行设计系统 | Accepted |
 | [0005](0005-docs-authority-and-archive-policy.md) | 文档权威层与 archive 策略 | Accepted |
 | [0008](0008-project-mutable-state-lives-outside-source-tree.md) | 项目可变状态统一放到源码树外，并以双层身份隔离 | Accepted |
+| [0009](0009-launcher-control-plane-lives-in-electron-main.md) | Launcher 控制面落在 Electron 主进程（TS + IPC），工作台仍为 Python | Accepted |
 
 0006 / 0007 为挑战杯私密规划文档，不进入 GitHub。本地副本见桌面 `挑战杯/03-工程合同/`。
 

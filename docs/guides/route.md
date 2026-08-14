@@ -20,7 +20,7 @@
 | **Operator 配置字段** | `docs/ops/config/INDEX.md`；ADR0003 | Documents `config.toml` 语义 + `config/models.py` | `test_llm_config*` / config 相关 | 密钥入库；只改 UI 不改 schema |
 | **Teams/SC/研究流** | `web/src/routes/teams/README.md`；`team_workflow/README.md` | controller/composition/pack；`team_workflows/` routes 包 | teams `*.contract.test.ts`；`test_team_workflow_*` | 胀 `TeamsRoute`；绕 panels registry |
 | **Agent 目录/工具权** | `docs/agents/tool-authorization-entrypoints.md`；`agent_directory/README.md` | `tools/*`；governance/policy packs | tool/governance pytest；工具变更按 tests README prompt 要求 | 扩权无门；日志打满 payload |
-| **Launcher/Runtime/进程** | §8.0；§12；§23.4 | `core/runtime_manager/`；launcher service/scripts | `test_launcher_*`；`test_runtime_*` | 可见控制台路径；`taskkill` 绕 guard |
+| **Launcher/Runtime/进程** | §8.0；§12；§23.4；[ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)；`desktop/electron/README.md` | **目标** `desktop/electron/`；遗留 `core/launcher/` · `scripts/vibelution_desktop_entry.py`；RM 仍 `core/runtime_manager/` | `desktop/electron` vitest；`test_launcher_*`；`test_runtime_*` | 可见控制台路径；`taskkill` 绕 guard；控制窗口 `fetch :8765` 当产品路径 |
 | **协作发送/inbox** | ADR0002 | session 落 history；inbox 仅索引字段 | 相关 collab/session 测试 | body 双写 session+inbox |
 | **Gym/进化** | ADR0001；`docs/prds/README.md` | `core/gym/`；`core/evaluation/`；evolution services | evolution/gym 相关测试 | v1 自动改 baseline |
 | **Worktree/claim/合并** | `docs/agents/worktree-collaboration.md` | 任务 worktree；claim 状态机 | preflight/merge 相关 | 脏 main 强并；覆盖他人 diff |
