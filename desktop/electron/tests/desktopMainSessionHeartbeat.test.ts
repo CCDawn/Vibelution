@@ -14,6 +14,20 @@ describe("Electron main desktop session heartbeat", () => {
     expect(source).toContain('desktopSessionMutations.enqueue("heartbeat", async () => {');
     expect(source).toContain("inProcessDesktopSessionStore.heartbeat(");
     expect(source).toContain("revision: desktopSessionRevision");
+    expect(source).toContain("desktopSessionMirror.mutate(\"heartbeat\"");
+    expect(source).toContain("revision: mirrorRevision");
+    expect(source).not.toContain("heartbeatDesktopSession({\n          ...context,\n          revision: desktopSessionRevision");
+  });
+
+  it("keeps local and Python mirror revisions separate for register, window, and close", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+
+    expect(source).toContain("desktopSessionMirror.register(");
+    expect(source).toContain("desktopSessionMirror.mutate(\"window\"");
+    expect(source).toContain("desktopSessionMirror.mutate(\"close\"");
+    expect(source).toContain("revision: mirrorRevision");
+    expect(source).not.toContain("reportDesktopWindowState({\n        ...context,\n        role: state.role,\n        revision: desktopSessionRevision");
+    expect(source).not.toContain("closeDesktopSession({\n        ...context,\n        revision: desktopSessionRevision");
   });
 
   it("starts the heartbeat only after registration when the launcher declares the capability", () => {
@@ -31,15 +45,15 @@ describe("Electron main desktop session heartbeat", () => {
 
   it("swallows heartbeat failures instead of quitting Electron", () => {
     const source = readFileSync(mainSourcePath, "utf8");
-    const heartbeatStart = source.indexOf("void heartbeatDesktopSession(");
+    const heartbeatStart = source.indexOf('desktopSessionMirror.mutate("heartbeat"');
     const heartbeatEnd = source.indexOf("desktopSessionHeartbeatRunning = false;", heartbeatStart);
     const heartbeatBlock = source.slice(heartbeatStart, heartbeatEnd);
 
     expect(heartbeatStart).toBeGreaterThan(-1);
     expect(heartbeatEnd).toBeGreaterThan(heartbeatStart);
-    expect(heartbeatBlock).toContain("catch (error: unknown)");
-    expect(heartbeatBlock).toContain("console.warn");
     expect(heartbeatBlock).not.toContain("app.quit");
+    expect(source).toContain("new DesktopSessionMirrorQueue((error: unknown) => {");
+    expect(source).toContain("console.warn(error instanceof Error ? error.message : String(error));");
     expect(source).toContain('from "./runtime/brokenPipeGuard.js"');
     expect(source).toContain("installBrokenPipeGuards()");
   });

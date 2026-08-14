@@ -22,6 +22,8 @@ import {
   DesktopSessionMutationQueue,
   type DesktopCloseReason
 } from "./lifecycle/desktopLifecycleCoordinator.js";
+import { DesktopSessionMirrorQueue } from "./lifecycle/desktopSessionMirrorQueue.js";
+import { waitForWorkbenchLifecycleReady } from "./lifecycle/workbenchReadiness.js";
 import { isWorkbenchCloseControlFetchFailure } from "./lifecycle/workbenchCloseFailOpen.js";
 import {
   createConversationNotificationService,
@@ -167,8 +169,13 @@ let launcherStatusCliRefresh: Promise<void> | null = null;
 const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
 const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
 const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 30_000;
+const WORKBENCH_START_READY_WAIT_MS = 90_000;
+const WORKBENCH_REBUILD_READY_WAIT_MS = 300_000;
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
 const desktopSessionMutations = new DesktopSessionMutationQueue();
+const desktopSessionMirror = new DesktopSessionMirrorQueue((error: unknown) => {
+  console.warn(error instanceof Error ? error.message : String(error));
+});
 let conversationNotificationService: ConversationNotificationService | null = null;
 const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
 let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench;
@@ -663,13 +670,11 @@ async function persistManagedWindowState(
       });
       desktopSessionRevision = registration.revision;
       desktopSessionRegistered = true;
-      void registerDesktopSession({
+      void desktopSessionMirror.register(() => registerDesktopSession({
         ...context,
         workspaceRoot: paths.workspaceRoot,
         capabilities: desktopSessionCapabilities(bootstrap)
-      }).catch((error: unknown) => {
-        console.warn(error instanceof Error ? error.message : String(error));
-      });
+      }));
       startDesktopSessionHeartbeatIfNeeded(paths, bootstrap);
       const registrationEvent = {
         eventCode: "electron.startup.desktop_session_registered",
@@ -689,14 +694,12 @@ async function persistManagedWindowState(
       state
     });
     desktopSessionRevision = result.revision;
-    void reportDesktopWindowState({
+    void desktopSessionMirror.mutate("window", (mirrorRevision) => reportDesktopWindowState({
       ...context,
       role: state.role,
-      revision: desktopSessionRevision,
+      revision: mirrorRevision,
       state
-    }).catch((error: unknown) => {
-      console.warn(error instanceof Error ? error.message : String(error));
-    });
+    }));
     if (state.role === "workbench" && state.open && !electronStartupSummaryRecorded) {
       electronStartupStage = "workbench_window_ready";
       const stageStartedAtMs = workbenchOpenRequestedAtMs ?? ELECTRON_PROCESS_STARTED_AT_MS;
@@ -759,12 +762,10 @@ function startDesktopSessionHeartbeatIfNeeded(paths: DesktopPaths, bootstrap: La
           revision: desktopSessionRevision
         });
         desktopSessionRevision = result.revision;
-        void heartbeatDesktopSession({
+        void desktopSessionMirror.mutate("heartbeat", (mirrorRevision) => heartbeatDesktopSession({
           ...context,
-          revision: desktopSessionRevision
-        }).catch((error: unknown) => {
-          console.warn(error instanceof Error ? error.message : String(error));
-        });
+          revision: mirrorRevision
+        }));
       });
     } catch (error: unknown) {
       if (isRecoverableDesktopControlError(error) && windowProvider !== null) {
@@ -1222,12 +1223,10 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
       });
       desktopSessionRevision = result.revision;
       desktopSessionRegistered = false;
-      void closeDesktopSession({
+      await desktopSessionMirror.mutate("close", (mirrorRevision) => closeDesktopSession({
         ...context,
-        revision: desktopSessionRevision
-      }).catch((error: unknown) => {
-        console.warn(error instanceof Error ? error.message : String(error));
-      });
+        revision: mirrorRevision
+      }));
     });
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
@@ -1651,9 +1650,11 @@ async function orchestrateLauncherLifecycle(
   });
   if (result.accepted && (operation === "start" || operation === "restart" || operation === "rebuild-and-start")) {
     const provider = windowProvider;
-    if (provider !== null) {
-      void provider
-        .openOrFocusWorkbench(resolveWorkbenchUrl(desktopEnv, launcherBootstrap.workbenchUrl))
+    if (provider !== null && result.commandId) {
+      const readyWaitMs = operation === "rebuild-and-start"
+        ? WORKBENCH_REBUILD_READY_WAIT_MS
+        : WORKBENCH_START_READY_WAIT_MS;
+      void openWorkbenchAfterLifecycleReady(paths, launcherBootstrap, provider, result.commandId, readyWaitMs)
         .catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
         });
@@ -1707,6 +1708,24 @@ function closeOrchestratedWorkbenchWindow(instanceId: string): void {
   void closed.catch((error: unknown) => {
     console.warn(error instanceof Error ? error.message : String(error));
   });
+}
+
+async function openWorkbenchAfterLifecycleReady(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider,
+  commandId: string,
+  timeoutMs: number
+): Promise<void> {
+  await waitForWorkbenchLifecycleReady({
+    commandId,
+    timeoutMs,
+    readStatus: async () => {
+      const context = await resolveDesktopActionLoopContext(bootstrap);
+      return await fetchLauncherStatusSummary(context);
+    }
+  });
+  await openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider);
 }
 
 async function orchestrateBranchInstanceLifecycle(
