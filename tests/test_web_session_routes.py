@@ -113,6 +113,49 @@ def test_active_session_route_returns_empty_id_without_persisted_selection(monke
     assert response.json() == {"activeSessionId": ""}
 
 
+def test_session_select_route_keeps_last_viewed_preference_contract(monkeypatch):
+    """POST /select stays a last-viewed preference write (ADR 0009).
+
+    It must return the target session detail for cache seeding and must only
+    write the target preference. The frontend never treats the response as a
+    window navigation authority.
+    """
+    observed: list[tuple[str, str]] = []
+    expected_detail = {"id": "session-active", "title": "target", "messages": []}
+    monkeypatch.setattr(
+        session_routes,
+        "select_chat_session",
+        lambda session_id, *, lightweight=False: (
+            observed.append((session_id, "respond-async" if lightweight else ""))
+            or expected_detail
+        ),
+    )
+
+    response = client.post(
+        "/api/sessions/session-active/select",
+        headers={"Prefer": "respond-async"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == expected_detail
+    assert observed == [("session-active", "respond-async")]
+
+
+def test_session_select_route_rejects_missing_target_without_fallback(monkeypatch):
+    monkeypatch.setattr(
+        session_routes,
+        "select_chat_session",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            session_routes.SessionNotFoundError("missing")
+        ),
+    )
+
+    response = client.post("/api/sessions/session-missing/select")
+
+    assert response.status_code == 404
+    assert "missing" in response.json()["detail"]
+
+
 def test_session_bootstrap_route_delegates_to_one_service_boundary(monkeypatch):
     calls: list[dict] = []
     expected = {
