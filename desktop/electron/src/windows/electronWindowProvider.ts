@@ -1,4 +1,5 @@
 import type { DesktopPaths } from "../paths.js";
+import { isLauncherAppUrl, launcherAppOriginFor } from "../protocol/launcherAppProtocol.js";
 import { assertLocalHttpUrl } from "../security/urlPolicy.js";
 import { closedWindowState, type ElectronWindowRole, type ManagedWindowState } from "./windowProviderTypes.js";
 
@@ -175,8 +176,8 @@ export class ElectronWindowProvider {
   }
 
   private async presentLauncher(): Promise<ManagedWindowState> {
-    const launcherOrigin = new URL(this.launcherUrl).origin;
-    const safeUrl = assertLocalHttpUrl(this.launcherUrl, launcherOrigin);
+    const launcherOrigin = launcherAppOriginFor(this.launcherUrl);
+    const safeUrl = launcherWindowUrl(this.launcherUrl);
     const existing = this.listLauncherWindows(launcherOrigin).filter((window) => !window.isDestroyed());
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
       this.discardExtraLauncherWindows(existing, this.launcherWindow);
@@ -400,6 +401,22 @@ export class ElectronWindowProvider {
 
   isWorkbenchCloseInFlight(): boolean {
     return this.workbenchCloseInFlight;
+  }
+
+  instanceWindowStates(): Array<{ instanceId: string; open: boolean; rendererProcessId: number }> {
+    const states: Array<{ instanceId: string; open: boolean; rendererProcessId: number }> = [];
+    for (const [instanceId, entry] of this.instanceWindows) {
+      const window = entry.window;
+      if (!window || window.isDestroyed() || !entry.readyUrl) {
+        continue;
+      }
+      states.push({
+        instanceId,
+        open: true,
+        rendererProcessId: window.webContents.getOSProcessId()
+      });
+    }
+    return states;
   }
 
   workbenchDialogParent(): ElectronWindowLike | null {
@@ -770,6 +787,14 @@ function isManagedWorkbenchUrl(requestUrl: string, workbenchOrigin: string): boo
 }
 
 function localWorkbenchUrl(value: string): string {
+  const origin = new URL(value).origin;
+  return assertLocalHttpUrl(value, origin);
+}
+
+function launcherWindowUrl(value: string): string {
+  if (isLauncherAppUrl(value)) {
+    return value;
+  }
   const origin = new URL(value).origin;
   return assertLocalHttpUrl(value, origin);
 }

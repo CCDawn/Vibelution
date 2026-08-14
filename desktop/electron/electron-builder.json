@@ -13,6 +13,12 @@
   "asarUnpack": [
     "package-provenance.json"
   ],
+  "extraResources": [
+    {
+      "from": "../../web/dist",
+      "to": "web-dist"
+    }
+  ],
   "win": {
     "icon": "../../assets/icons/vibelution.ico",
     "target": [

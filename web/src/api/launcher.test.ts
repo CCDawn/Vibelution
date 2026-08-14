@@ -9,8 +9,10 @@ import {
   requestBranchInstanceLifecycle,
   getLauncherStatus,
   getRuntimeSummary,
+  isLauncherControlPlaneNotReady,
   launcherEndpoint,
   launcherRestartEndpoint,
+  LauncherControlPlaneNotReadyError,
   reattachLauncherSupervisor,
   resetLauncherControlOriginForTests,
   restartLauncherBundle,
@@ -20,6 +22,16 @@ import {
   stopLauncherBundle,
   updateLauncherStartupSettings,
 } from "./launcher";
+
+type LauncherIpcInvokeResult =
+  | { ok: true; payload: unknown }
+  | { ok: false; error: { code: string; message: string } };
+
+function stubLauncherIpcBridge(invoke: (payload: unknown) => Promise<LauncherIpcInvokeResult>) {
+  vi.stubGlobal("vibelutionLauncher", {
+    launcherInvoke: invoke,
+  });
+}
 
 describe("launcher api helpers", () => {
   afterEach(() => {
@@ -652,5 +664,128 @@ describe("launcher api helpers", () => {
       operation: "restart",
       source: "app_shell",
     });
+  });
+});
+
+describe("launcher api IPC transport", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    resetControlTokenForTests();
+    resetLauncherControlOriginForTests();
+  });
+
+  it("reads launcher status over the preload bridge without touching HTTP", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { launcher: { mode: "standalone_control_plane" } },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    const payload = await getLauncherStatus();
+
+    expect(payload.launcher.mode).toBe("standalone_control_plane");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    const request = invoke.mock.calls[0][0] as { schemaVersion: number; path: string };
+    expect(request.schemaVersion).toBe(1);
+    expect(request.path).toBe("status");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends lifecycle commands over the preload bridge with headers and body", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "start", commandId: "cmd-ipc" },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    const payload = await requestBranchInstanceLifecycle("worktree:task", "start", "launcher_route_panel");
+
+    expect(payload.commandId).toBe("cmd-ipc");
+    const request = invoke.mock.calls[0][0] as {
+      schemaVersion: number;
+      path: string;
+      init: { method: string; headers: Record<string, string>; body: unknown };
+    };
+    expect(request.path).toBe("branch-instances/start");
+    expect(request.init.method).toBe("POST");
+    expect(request.init.headers["x-vibelution-launcher-trigger"]).toBe("launcher_route_panel");
+    expect(request.init.body).toEqual({ instanceId: "worktree:task" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces host-not-ready as a control plane starting error, not a disconnect", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: "LAUNCHER_IPC_HOST_NOT_READY", message: "Launcher IPC control plane host is not ready." },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    await expect(getLauncherStatus()).rejects.toBeInstanceOf(LauncherControlPlaneNotReadyError);
+    const error = await getLauncherStatus().catch((caught: unknown) => caught);
+    expect(isLauncherControlPlaneNotReady(error)).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces launcher proxy rejections from the bridge", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: "LAUNCHER_IPC_HTTP_409", message: "active work blocks restart" },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    await expect(restartLauncherBundle()).rejects.toThrow("active work blocks restart");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the HTTP path when the preload bridge is absent", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ launcher: { mode: "workbench_adapter" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await getLauncherStatus();
+
+    expect(payload.launcher.mode).toBe("workbench_adapter");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/launcher/status");
   });
 });

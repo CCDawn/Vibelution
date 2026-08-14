@@ -273,6 +273,7 @@ class PinnedModelDefaults(BaseModel):
     default_reasoning_effort: str = ""
     reasoning_effort_adapter: Literal["", "reasoning_object", "reasoning_effort", "thinking_toggle", "none"] = ""
     reasoning_effort_map: Dict[str, str] = Field(default_factory=dict)
+    prompt_cache: PromptCacheConfig = Field(default_factory=PromptCacheConfig)
 
     @model_validator(mode="after")
     def validate_reasoning_contract(self) -> "PinnedModelDefaults":
@@ -288,6 +289,7 @@ class PinnedModelConfig(BaseModel):
     wire_protocol: str = ""
     interaction_contract: str = "tool_chat"
     model_protocol: str = ""
+    context_window: Optional[int] = Field(default=None, gt=0)
     defaults: PinnedModelDefaults = Field(default_factory=PinnedModelDefaults)
     compatibility: Dict[str, Any] = Field(default_factory=dict)
     capabilities: Dict[str, Any] = Field(default_factory=dict)

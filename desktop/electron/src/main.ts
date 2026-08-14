@@ -1,4 +1,4 @@
-import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -40,6 +40,16 @@ import {
   postLauncherControl,
   type LauncherControlPostPath
 } from "./protocol/launcherControlClient.js";
+import {
+  createLauncherIpcHost,
+  type LauncherIpcInvokePayload
+} from "./protocol/launcherIpcHost.js";
+import {
+  LAUNCHER_APP_PROTOCOL,
+  launcherAppOriginFor,
+  registerLauncherAppProtocolHandle,
+  resolveLauncherDistRoot
+} from "./protocol/launcherAppProtocol.js";
 import {
   acknowledgeWorkbenchCloseWindowClosed,
   fetchWorkbenchCloseTransaction,
@@ -97,14 +107,26 @@ import {
   registerDesktopSession,
   reportDesktopWindowState
 } from "./windows/desktopSessionClient.js";
+import { InProcessDesktopSessionStore } from "./windows/desktopSessionStore.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
-import { resolveLauncherUrl, resolveWorkbenchUrl } from "./windows/windowUrlResolver.js";
+import {
+  resolveLauncherControlPlaneUrl,
+  resolveLauncherWindowUrl,
+  resolveWorkbenchUrl
+} from "./windows/windowUrlResolver.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
 
 installBrokenPipeGuards();
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: LAUNCHER_APP_PROTOCOL,
+    privileges: { standard: true, secure: true, supportFetchAPI: true }
+  }
+]);
 
 const DESKTOP_ACTION_POLL_MS = 2000;
 const DESKTOP_ACTION_WAIT_MS = 1750;
@@ -133,6 +155,8 @@ let desktopSessionRegistered = false;
 let desktopSessionRevision = 0;
 let desktopControlRecoveryPromise: Promise<void> | null = null;
 let shutdownApproved = false;
+let launcherIpcHost: ReturnType<typeof createLauncherIpcHost> | null = null;
+const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
 const desktopSessionMutations = new DesktopSessionMutationQueue();
 let conversationNotificationService: ConversationNotificationService | null = null;
@@ -275,7 +299,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
   conversationNotificationService = null;
   return new ElectronWindowProvider(
     paths,
-    resolveLauncherUrl(desktopEnv, bootstrap?.launcherUrl),
+    resolveLauncherWindowUrl(desktopEnv),
     resolveWorkbenchUrl(desktopEnv, bootstrap?.workbenchUrl),
     {
       createLauncherWindow,
@@ -283,7 +307,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       listLauncherWindows: (launcherOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
-            return new URL(window.webContents.getURL()).origin === launcherOrigin;
+            return launcherAppOriginFor(window.webContents.getURL()) === launcherOrigin;
           } catch {
             return false;
           }
@@ -584,17 +608,23 @@ async function persistManagedWindowState(
     if (!desktopSessionRegistered) {
       electronStartupStage = "desktop_session_registration";
       const stageStartedAtMs = performance.now();
-      const registration = await registerDesktopSession({
-        ...context,
-        workspaceRoot: paths.workspaceRoot,
+      const registration = inProcessDesktopSessionStore.register({
+        desktopSessionId: context.desktopSessionId,
         capabilities: desktopSessionCapabilities(bootstrap)
       });
       desktopSessionRevision = registration.revision;
       desktopSessionRegistered = true;
+      void registerDesktopSession({
+        ...context,
+        workspaceRoot: paths.workspaceRoot,
+        capabilities: desktopSessionCapabilities(bootstrap)
+      }).catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      });
       startDesktopSessionHeartbeatIfNeeded(paths, bootstrap);
       const registrationEvent = {
         eventCode: "electron.startup.desktop_session_registered",
-        message: "Electron registered its scoped desktop session.",
+        message: "Electron registered its in-process desktop session.",
         fields: electronStartupFields({
           stage: "desktop_session_registration",
           stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
@@ -603,13 +633,21 @@ async function persistManagedWindowState(
       };
       scheduleTelemetryWithoutWaiting(() => recordElectronSupervisorEvent(bootstrap, registrationEvent));
     }
-    const result = await reportDesktopWindowState({
-      ...context,
+    const result = inProcessDesktopSessionStore.reportWindow({
+      desktopSessionId: context.desktopSessionId,
       role: state.role,
       revision: desktopSessionRevision,
       state
     });
     desktopSessionRevision = result.revision;
+    void reportDesktopWindowState({
+      ...context,
+      role: state.role,
+      revision: desktopSessionRevision,
+      state
+    }).catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    });
     if (state.role === "workbench" && state.open && !electronStartupSummaryRecorded) {
       electronStartupStage = "workbench_window_ready";
       const stageStartedAtMs = workbenchOpenRequestedAtMs ?? ELECTRON_PROCESS_STARTED_AT_MS;
@@ -666,11 +704,18 @@ function startDesktopSessionHeartbeatIfNeeded(paths: DesktopPaths, bootstrap: La
     desktopSessionHeartbeatRunning = true;
     try {
       await desktopSessionMutations.enqueue("heartbeat", async () => {
-        const result = await heartbeatDesktopSession({
-          ...(await resolveDesktopActionLoopContext(currentBootstrap)),
+        const context = await resolveDesktopActionLoopContext(currentBootstrap);
+        const result = inProcessDesktopSessionStore.heartbeat({
+          desktopSessionId: context.desktopSessionId,
           revision: desktopSessionRevision
         });
         desktopSessionRevision = result.revision;
+        void heartbeatDesktopSession({
+          ...context,
+          revision: desktopSessionRevision
+        }).catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
       });
     } catch (error: unknown) {
       if (isRecoverableDesktopControlError(error) && windowProvider !== null) {
@@ -701,7 +746,7 @@ async function resolveDesktopActionLoopContext(
     return desktopActionContext;
   }
   const desktopEnv = desktopEnvironment();
-  const launcherOrigin = resolveLauncherUrl(desktopEnv, bootstrap.launcherUrl);
+  const launcherOrigin = resolveLauncherControlPlaneUrl(desktopEnv, bootstrap.launcherUrl);
   const envToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "").trim();
   const controlToken = options.forceControlTokenRefresh
     ? await fetchLauncherControlToken({ launcherOrigin })
@@ -1178,12 +1223,19 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
   stopDesktopSessionHeartbeat();
   try {
     await desktopSessionMutations.enqueue("close", async () => {
-      const result = await closeDesktopSession({
-        ...(await resolveDesktopActionLoopContext(bootstrap)),
+      const context = await resolveDesktopActionLoopContext(bootstrap);
+      const result = inProcessDesktopSessionStore.close({
+        desktopSessionId: context.desktopSessionId,
         revision: desktopSessionRevision
       });
       desktopSessionRevision = result.revision;
       desktopSessionRegistered = false;
+      void closeDesktopSession({
+        ...context,
+        revision: desktopSessionRevision
+      }).catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      });
     });
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
@@ -1332,7 +1384,7 @@ function trustedIpcOrigins(): string[] {
   const workbenchUrl = currentWorkbenchUrl || resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl);
   return Array.from(
     new Set([
-      new URL(resolveLauncherUrl(desktopEnv, launcherBootstrap?.launcherUrl)).origin,
+      launcherAppOriginFor(resolveLauncherWindowUrl(desktopEnv)),
       new URL(workbenchUrl).origin
     ])
   );
@@ -1576,6 +1628,45 @@ ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: 
   return await service.notify(payload);
 });
 
+function launcherIpcTrustedOrigins(): string[] {
+  const desktopEnv = desktopEnvironment();
+  return [launcherAppOriginFor(resolveLauncherWindowUrl(desktopEnv))];
+}
+
+function resolveLauncherIpcHost() {
+  if (launcherIpcHost !== null) {
+    return launcherIpcHost;
+  }
+  launcherIpcHost = createLauncherIpcHost({
+    resolveContext: async () => {
+      if (launcherBootstrap === null) {
+        return null;
+      }
+      const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+      return {
+        launcherOrigin: context.launcherOrigin,
+        controlToken: context.controlToken
+      };
+    },
+    resolveWindowTruth: () => {
+      const provider = windowProvider;
+      const snapshot = provider?.snapshot();
+      return {
+        workbench: snapshot?.workbench.open
+          ? { open: true, rendererProcessId: snapshot.workbench.rendererProcessId }
+          : null,
+        instances: provider ? provider.instanceWindowStates() : []
+      };
+    }
+  });
+  return launcherIpcHost;
+}
+
+ipcMain.handle(IPC_CHANNELS.launcherInvoke, async (event, payload: LauncherIpcInvokePayload) => {
+  assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
+  return await resolveLauncherIpcHost().invoke(payload);
+});
+
 function requestOpenWorkbench(): void {
   const provider = windowProvider;
   if (provider === null) {
@@ -1635,6 +1726,14 @@ async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
 app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
+    registerLauncherAppProtocolHandle({
+      distRoot: resolveLauncherDistRoot({
+        resourcesRoot: paths.resourcesRoot,
+        workspaceRoot: paths.workspaceRoot,
+        packaged: app.isPackaged,
+        env: desktopEnvironment()
+      })
+    });
     if (desktopCliArgs.smoke) {
       await runSmokeAndQuit(paths);
       return;

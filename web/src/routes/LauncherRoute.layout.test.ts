@@ -162,7 +162,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("const busy = controlBusy || supervisorMutation.isPending");
     expect(routeSource).toContain("const projectSummary = selectedIsCurrent");
     expect(routeSource).toContain("const startDisabled = selectedIsCurrent");
-    expect(routeSource).toContain("const startDisabledReason = launcherStatusDisconnected");
+    expect(routeSource).toContain("const startDisabledReason = launcherControlPlaneStarting");
     expect(routeSource).toContain("startDisabledReason");
     expect(routeSource).toContain("startDisabledBusy");
     expect(routeSource).toContain("const destructiveActionDisabled = selectedIsCurrent");
@@ -713,7 +713,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("launcherStatusDisconnected");
     expect(routeSource).toContain("lastControlOperation");
     expect(routeSource).toContain('setLastControlOperation((operation === "stop" || operation === "force-stop") && response.accepted ? operation : null)');
-    expect(routeSource).toContain('statusQuery.isError && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected)');
+    expect(routeSource).toContain('statusQuery.isError && !launcherControlPlaneStarting && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected)');
     expect(routeSource).toContain("expectedStopDisconnect ? copy.stoppedStatusUnavailable");
     expect(routeSource).toContain('tone={expectedStopDisconnect ? "info" : launcherControlLimited ? "unavailable" : "error"}');
     expect(routeSource).toContain("工作台已关闭，Launcher 后端连接已断开。重新启动后会恢复状态。");
@@ -741,5 +741,32 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toMatch(
       /addEventListener\("beforeunload"[\s\S]*?\}, \[launcherCloseGuardArmed/,
     );
+  });
+
+  it("gates the control window on IPC host readiness instead of painting a disconnected empty dashboard", () => {
+    expect(routeSource).toContain("isLauncherControlPlaneNotReady");
+    expect(routeSource).toContain("launcherControlPlaneStarting");
+    expect(routeSource).toContain("!launcherControlPlaneStarting");
+    expect(routeSource).toContain("launcherStatusDisconnected = statusQuery.isError");
+    // Not-ready must not be classified as a network disconnect idle surface.
+    expect(routeSource).not.toMatch(/launcherStatusDisconnected = statusQuery\.isError && isLauncherStatusNetworkDisconnect\(statusQuery\.error\);\s*\n/);
+    // Start stays disabled while the control plane host is still starting.
+    expect(sourceSlice(routeSource, "const startDisabled =", "const startDisabledReason =")).toContain(
+      "launcherControlPlaneStarting",
+    );
+    expect(sourceSlice(routeSource, "const startDisabledReason =", "const projectSummary =")).toContain(
+      "launcherControlPlaneStarting",
+    );
+    // The first-read surface shows a starting state instead of 未连接 with an empty dashboard.
+    expect(sourceSlice(routeSource, "const launcherSummary =", "const controlSummary =")).toContain(
+      "launcherControlPlaneStarting ? copy.launcherMaintaining : copy.launcherOffline",
+    );
+    expect(sourceSlice(routeSource, "{statusQuery.isError && !launcherControlPlaneStarting ? (", "launcherControlPlaneStarting ? (")).toContain(
+      "copy.loadFailed",
+    );
+    expect(routeSource).toContain("launcherControlPlaneStarting ? (");
+    expect(routeSource).toContain('title={copy.lifecycleStarting}');
+    // The lifecycle display must expose a dedicated starting state while the host is not ready.
+    expect(routeSource).toContain("starting: launcherControlPlaneStarting");
   });
 });

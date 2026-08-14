@@ -11,6 +11,7 @@ import {
   getLauncherMaintenanceSummary,
   applyLauncherDeveloperCleanup,
   applyLauncherMaintenancePlan,
+  isLauncherControlPlaneNotReady,
   previewLauncherDeveloperCleanup,
   previewLauncherMaintenancePlan,
   reattachLauncherSupervisor,
@@ -661,8 +662,16 @@ function summarizeLauncherMessage(value: string | undefined, copy: LauncherCopy,
 function resolveLifecycleDisplay(
   status: LauncherStatusWithGuardian | undefined,
   copy: LauncherCopy,
-  options: { disconnected: boolean; controlLimited: boolean },
+  options: { disconnected: boolean; controlLimited: boolean; starting: boolean },
 ): LifecycleDisplay {
+  if (options.starting) {
+    return {
+      state: "starting",
+      label: copy.lifecycleStarting,
+      detail: copy.lifecycleStartingDetail,
+      tone: "warning",
+    };
+  }
   if (options.disconnected) {
     return {
       state: "closed",
@@ -1778,8 +1787,13 @@ export function LauncherRoute() {
   const uiLang = lang === "zh" ? "zh" : "en";
   const bundleDesired = String(bundle?.desiredState || "").toLowerCase();
   const bundleObserved = String(bundle?.observedState || "").toLowerCase();
-  const launcherStatusDisconnected = statusQuery.isError && isLauncherStatusNetworkDisconnect(statusQuery.error);
-  const launcherControlLimited = statusQuery.isError && isControlTokenError(statusQuery.error);
+  const launcherControlPlaneStarting = statusQuery.isError && isLauncherControlPlaneNotReady(statusQuery.error);
+  const launcherStatusDisconnected = statusQuery.isError
+    && !launcherControlPlaneStarting
+    && isLauncherStatusNetworkDisconnect(statusQuery.error);
+  const launcherControlLimited = statusQuery.isError
+    && !launcherControlPlaneStarting
+    && isControlTokenError(statusQuery.error);
   const pendingBranchOperation = controlMutation.isPending && controlMutation.variables
     ? (() => {
         const request = resolveControlRequest(controlMutation.variables);
@@ -1790,7 +1804,7 @@ export function LauncherRoute() {
         } as const;
       })()
     : undefined;
-  const lifecycleDisplay = resolveLifecycleDisplay(status, copy, { disconnected: launcherStatusDisconnected, controlLimited: launcherControlLimited });
+  const lifecycleDisplay = resolveLifecycleDisplay(status, copy, { disconnected: launcherStatusDisconnected, controlLimited: launcherControlLimited, starting: launcherControlPlaneStarting });
   const projectIsOpen = lifecycleDisplay.state === "running";
   const projectIsPartial = lifecycleDisplay.state === "partial";
   const projectIsClosed = lifecycleDisplay.state === "closed";
@@ -1800,11 +1814,13 @@ export function LauncherRoute() {
   const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled);
   const busy = controlBusy || supervisorMutation.isPending;
   const startDisabled = selectedIsCurrent
-    ? launcherStatusDisconnected || busy || !controlPlaneIdle || projectIsOpen || projectIsChanging
-    : launcherStatusDisconnected || controlMutation.isPending || !selectedStartable || selectedAlive;
-  const startDisabledReason = launcherStatusDisconnected
-    ? copy.loadFailed
-    : selectedIsCurrent
+    ? launcherControlPlaneStarting || launcherStatusDisconnected || busy || !controlPlaneIdle || projectIsOpen || projectIsChanging
+    : launcherControlPlaneStarting || launcherStatusDisconnected || controlMutation.isPending || !selectedStartable || selectedAlive;
+  const startDisabledReason = launcherControlPlaneStarting
+    ? copy.lifecycleStartingDetail
+    : launcherStatusDisconnected
+      ? copy.loadFailed
+      : selectedIsCurrent
       ? busy || !controlPlaneIdle
         ? copy.startDisabledBusy
         : projectIsOpen
@@ -1823,7 +1839,7 @@ export function LauncherRoute() {
       ? copy.lifecycleRunning
       : copy.lifecycleClosed;
   const launcherSummary = !status
-    ? copy.launcherOffline
+    ? launcherControlPlaneStarting ? copy.launcherMaintaining : copy.launcherOffline
     : copy.launcherMaintaining;
   const controlSummary = launcherControlLimited ? copy.controlLimited : copy.controlReady;
   const controlDetail = launcherControlLimited ? copy.controlLimitedDetail : copy.controlReadyDetail;
@@ -2215,7 +2231,7 @@ export function LauncherRoute() {
     { label: copy.stdout, value: guardian?.supervisor?.stdoutPath || "-" },
     { label: copy.stderr, value: guardian?.supervisor?.stderrPath || "-" },
   ];
-  const expectedStopDisconnect = statusQuery.isError && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected);
+  const expectedStopDisconnect = statusQuery.isError && !launcherControlPlaneStarting && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected);
   const trackedResult = trackedCommand
     ? (evidence?.results.recent ?? []).find((item) => item.commandId === trackedCommand.commandId)
     : undefined;
@@ -2364,11 +2380,19 @@ export function LauncherRoute() {
         />
       </Suspense>
 
-      {statusQuery.isError ? (
+      {statusQuery.isError && !launcherControlPlaneStarting ? (
         <VStateSurface
           className={styles.notice}
           tone={expectedStopDisconnect ? "info" : launcherControlLimited ? "unavailable" : "error"}
           title={expectedStopDisconnect ? copy.stoppedStatusUnavailable : launcherControlLimited ? copy.controlLimitedDetail : copy.loadFailed}
+        />
+      ) : null}
+      {launcherControlPlaneStarting ? (
+        <VStateSurface
+          className={styles.notice}
+          tone="loading"
+          title={copy.lifecycleStarting}
+          skeletonLines={2}
         />
       ) : null}
       {notice.text ? (
