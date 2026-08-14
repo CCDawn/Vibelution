@@ -535,10 +535,10 @@ describe("VUI batch migration", () => {
   });
 
   it("app/AppShellUtilityMenu.styles.ts keeps VUI list button grid on internal slots", () => {
-    expect(utilityMenuStyles.utilityFileButton).toContain("[&_[data-slot=vui-button-content]]:w-full");
-    expect(utilityMenuStyles.utilityFileButton).toContain("[&_[data-slot=vui-button-label]]:grid");
-    expect(utilityMenuStyles.utilityFileButton).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(utilityMenuStyles.utilityFileButtonActive).toContain("[&_[data-slot=vui-button-label]]:grid");
+    expect(utilityMenuStyles.gitSummaryRow).toContain("[&_[data-slot=vui-button-content]]:w-full");
+    expect(utilityMenuStyles.gitSummaryRow).toContain("[&_[data-slot=vui-button-label]]:inline-flex");
+    expect(utilityMenuStyles.utilityButton).toContain("[&_[data-slot=vui-button-content]]:w-full");
+    expect(utilityMenuStyles.utilityButton).toContain("[&_[data-slot=vui-button-label]]:inline-flex");
   });
 
   it("routes/SkillsRoute.tsx keeps multiline VUI list buttons on a natural-height root grid", () => {
