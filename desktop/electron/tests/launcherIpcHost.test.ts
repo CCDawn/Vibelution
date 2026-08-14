@@ -182,4 +182,52 @@ describe("createLauncherIpcHost", () => {
       expect((item.runtime as Record<string, unknown>).window).toMatchObject({ open: true, pid: 7070 });
     }
   });
+
+  it("routes lifecycle commands through the main orchestrator instead of the Python proxy", async () => {
+    const fetchImpl = vi.fn();
+    const orchestrate = vi.fn().mockResolvedValue({
+      schemaVersion: 1,
+      accepted: true,
+      operation: "start",
+      commandId: "cmd-orch",
+      message: "ok",
+    });
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      orchestrateLifecycle: orchestrate,
+      fetchImpl,
+    });
+    const result = await host.invoke(
+      validPayload({
+        path: "start",
+        init: {
+          method: "POST",
+          headers: { "x-vibelution-launcher-trigger": "launcher_route_start_button" },
+        },
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload).toMatchObject({ accepted: true, commandId: "cmd-orch" });
+    }
+    expect(orchestrate).toHaveBeenCalledTimes(1);
+    expect(orchestrate.mock.calls[0][0]).toBe("start");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("surfaces orchestrator rejections as structured lifecycle errors", async () => {
+    const fetchImpl = vi.fn();
+    const orchestrate = vi.fn().mockRejectedValue(new Error("active work blocks restart"));
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      orchestrateLifecycle: orchestrate,
+      fetchImpl,
+    });
+    const result = await host.invoke(validPayload({ path: "restart", init: { method: "POST" } }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("LAUNCHER_IPC_LIFECYCLE_ERROR");
+      expect(result.error.message).toContain("active work blocks restart");
+    }
+  });
 });
