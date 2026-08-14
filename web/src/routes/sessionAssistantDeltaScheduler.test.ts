@@ -53,4 +53,35 @@ describe("sessionAssistantDeltaScheduler canonical payload", () => {
     expect(result.telemetry.contentDeltaLength).toBe(0);
     expect(result.telemetry.thoughtDeltaLength).toBe(0);
   });
+
+  it("throttles streaming deltas to one per smooth frame drain", () => {
+    const scheduler = createSessionAssistantDeltaScheduler({ nowMs: () => 100 });
+    scheduler.enqueue(delta(), 10);
+    scheduler.enqueue(delta(), 10);
+
+    const first = scheduler.drain("frame", { frameScheduledAtMs: 90 });
+    expect(first.mode).toBe("smooth");
+    expect(first.entries).toHaveLength(1);
+    expect(first.shouldContinue).toBe(true);
+    expect(scheduler.pendingCount).toBe(1);
+
+    const second = scheduler.drain("frame", { frameScheduledAtMs: 110 });
+    expect(second.entries).toHaveLength(1);
+    expect(second.shouldContinue).toBe(false);
+    expect(scheduler.pendingCount).toBe(0);
+  });
+
+  it("cancel discards pending deltas so cleanup stops further applies", () => {
+    const scheduler = createSessionAssistantDeltaScheduler({ nowMs: () => 100 });
+    scheduler.enqueue(delta(), 10);
+    scheduler.enqueue(delta(), 10);
+    expect(scheduler.pendingCount).toBe(2);
+
+    scheduler.cancel();
+
+    expect(scheduler.pendingCount).toBe(0);
+    const afterCancel = scheduler.drain("final");
+    expect(afterCancel.entries).toHaveLength(0);
+    expect(afterCancel.pendingBefore).toBe(0);
+  });
 });
