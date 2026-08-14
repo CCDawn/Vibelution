@@ -51,6 +51,17 @@ from .wire.chat_completions import STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
 from .wire.responses import STREAM_EXHAUSTED_WITHOUT_TERMINAL
 
 
+_LITELLM_LOCAL_MODEL_COST_MAP_ENV = "LITELLM_LOCAL_MODEL_COST_MAP"
+
+
+def _configure_litellm_import_environment() -> None:
+    """Keep LiteLLM import off the provider request network path by default."""
+
+    os.environ.setdefault(_LITELLM_LOCAL_MODEL_COST_MAP_ENV, "True")
+
+
+_configure_litellm_import_environment()
+
 _LLM_STATUS_CONTEXT: ContextVar[Dict[str, str]] = ContextVar(
     "vibelution_llm_status_context",
     default={},

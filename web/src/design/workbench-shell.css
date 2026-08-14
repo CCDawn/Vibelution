@@ -702,9 +702,14 @@
 
 :where(.vui-app-appshell).utilityButtonGrid {
   display: grid;
-  /* Five shortcuts fit one row in the 520px popover; wrap cleanly on narrower viewports. */
-  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+
+@media (max-width: 420px) {
+  :where(.vui-app-appshell).utilityButtonGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 :where(.vui-app-appshell).utilityButtonGrid > * {

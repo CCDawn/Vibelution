@@ -10,6 +10,7 @@ from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
 from core.llm.client import (
     LLMClient,
+    _configure_litellm_import_environment,
     _default_completion_backend,
     _default_responses_backend,
     _llm_provider_proxy_env,
@@ -36,6 +37,19 @@ def make_config(**kwargs):
     kwargs.setdefault("llm.profiles.primary.tool_calling_mode", "auto")
     kwargs.setdefault("llm.profiles.primary.transport", "chat_completions")
     return isolated_settings_config(**kwargs)
+
+
+def test_litellm_cost_map_defaults_to_local_without_overriding_operator_env(monkeypatch) -> None:
+    monkeypatch.delenv("LITELLM_LOCAL_MODEL_COST_MAP", raising=False)
+
+    _configure_litellm_import_environment()
+
+    assert os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"
+
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "False")
+    _configure_litellm_import_environment()
+
+    assert os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] == "False"
 
 
 def test_compression_role_disables_provider_retry_amplification() -> None:

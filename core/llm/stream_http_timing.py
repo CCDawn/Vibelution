@@ -77,6 +77,7 @@ def classify_raw_stream_event(raw: Any) -> str:
 @dataclass
 class StreamHttpTimings:
     started_at: float = field(default_factory=time.perf_counter)
+    connect_started_ms: int | None = None
     connect_ms: int | None = None
     tls_ms: int | None = None
     request_headers_sent_ms: int | None = None
@@ -113,6 +114,8 @@ class StreamHttpTimings:
         payload = info if isinstance(info, dict) else {}
         now = self.elapsed_ms()
         if event_name.endswith("connect_tcp.started"):
+            if self.connect_started_ms is None:
+                self.connect_started_ms = now
             connect_host = _normalize_host(payload.get("host"))
             if connect_host:
                 self.connect_host = connect_host
@@ -170,6 +173,7 @@ class StreamHttpTimings:
 
     def headers_scene_fields(self) -> dict[str, Any]:
         return {
+            "connectStartedMs": self.connect_started_ms,
             "connectMs": self.connect_ms,
             "tlsMs": self.tls_ms,
             "requestBodySentMs": self.request_body_sent_ms,
@@ -191,6 +195,7 @@ class StreamHttpTimings:
 
     def first_chunk_scene_fields(self) -> dict[str, Any]:
         return {
+            "connectStartedMs": self.connect_started_ms,
             "connectMs": self.connect_ms,
             "tlsMs": self.tls_ms,
             "requestBodySentMs": self.request_body_sent_ms,
