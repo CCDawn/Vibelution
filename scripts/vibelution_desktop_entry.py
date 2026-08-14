@@ -1390,6 +1390,20 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
     return {"schemaVersion": 1, "ok": True, "payload": response}
 
 
+def _resolve_workbench_bridge(_args: argparse.Namespace) -> dict[str, object]:
+    """Resolve the managed workbench URL without a Python Launcher control plane."""
+    port = _workbench_port()
+    url = str(_read_state().get("url") or "").strip()
+    if not url.startswith("http://127.0.0.1:") and not url.startswith("http://localhost:"):
+        url = f"http://{DEFAULT_HOST}:{port}/"
+    _append_log("desktop_entry_python.resolve_workbench.succeeded", backend_port=port, url=url)
+    return {
+        "schemaVersion": 1,
+        "workbenchUrl": url,
+        "backendPort": port,
+    }
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -1413,7 +1427,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     action = str(args.action or "launcher").strip().lower()
-    if action not in {"launcher", "bootstrap", "stop-launcher", "lifecycle", "branch-instance", "launcher-api"}:
+    if action not in {"launcher", "bootstrap", "stop-launcher", "lifecycle", "branch-instance", "launcher-api", "resolve-workbench"}:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     try:
         _append_log("desktop_entry_python.open.started", action=action, no_browser=bool(args.no_browser), run_id=args.run_id)
@@ -1447,6 +1461,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(f"Launcher api ok={payload.get('ok')}")
+        elif action == "resolve-workbench":
+            payload = _resolve_workbench_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Workbench {payload.get('workbenchUrl')}")
         else:
             _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)

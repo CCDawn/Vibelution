@@ -51,8 +51,8 @@ type LauncherStartupSettingsPanelProps = {
 function defaultStartupSettings(windowMode: WorkbenchWindowMode = "fullscreen"): LauncherStartupSettings {
   return {
     launcher: {
-      controlPort: 8765,
-      effectiveControlPort: 8765,
+      controlPort: 0,
+      effectiveControlPort: 0,
       controlPortEnvOverride: 0,
     },
     runtime: {

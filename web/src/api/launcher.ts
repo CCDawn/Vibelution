@@ -26,7 +26,6 @@ import type {
 } from "./types";
 
 export const LAUNCHER_ENDPOINT = "/api/launcher";
-export const DEFAULT_LAUNCHER_CONTROL_PORT = 8765;
 export const LAUNCHER_IPC_HOST_NOT_READY = "LAUNCHER_IPC_HOST_NOT_READY";
 
 export class LauncherControlPlaneNotReadyError extends Error {
@@ -113,7 +112,6 @@ async function invokeLauncherJson<T>(path: string, init?: RequestInit): Promise<
     ...(ipcInitForRequest(init) ? { init: ipcInitForRequest(init) } : {}),
   });
   if (result.ok) {
-    rememberLauncherControlOrigin(result.payload);
     return result.payload as T;
   }
   if (result.error.code === LAUNCHER_IPC_HOST_NOT_READY) {
@@ -342,37 +340,8 @@ function normalizeLauncherBranchInstances(payload: LauncherBranchInstancesPayloa
   };
 }
 
-let cachedLauncherControlOrigin = "";
-
-function isLoopbackHost(hostname: string) {
-  const host = String(hostname || "").trim().toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
-}
-
-function launcherControlOrigin() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-  try {
-    const current = new URL(window.location.href);
-    if (!isLoopbackHost(current.hostname)) {
-      return "";
-    }
-    const currentPort = current.port || (current.protocol === "https:" ? "443" : "80");
-    if (currentPort === String(DEFAULT_LAUNCHER_CONTROL_PORT)) {
-      return "";
-    }
-    if (cachedLauncherControlOrigin && cachedLauncherControlOrigin !== current.origin) {
-      return cachedLauncherControlOrigin;
-    }
-    return `${current.protocol}//127.0.0.1:${DEFAULT_LAUNCHER_CONTROL_PORT}`;
-  } catch {
-    return "";
-  }
-}
-
 export function launcherEndpoint(path = "") {
-  return `${launcherControlOrigin()}${relativeLauncherEndpoint(path)}`;
+  return relativeLauncherEndpoint(path);
 }
 
 function relativeLauncherEndpoint(path = "") {
@@ -384,19 +353,7 @@ async function fetchLauncherJson<T>(path: string, init?: RequestInit): Promise<T
   if (launcherIpcBridge() !== null) {
     return invokeLauncherJson<T>(path, init);
   }
-  const endpoint = launcherEndpoint(path);
-  try {
-    const payload = await fetchJson<T>(endpoint, init);
-    rememberLauncherControlOrigin(payload);
-    return payload;
-  } catch (error) {
-    if (!endpoint.startsWith("http") || !isLauncherControlConnectionError(error)) {
-      throw error;
-    }
-    const payload = await fetchJson<T>(relativeLauncherEndpoint(path), init);
-    rememberLauncherControlOrigin(payload);
-    return payload;
-  }
+  return fetchJson<T>(relativeLauncherEndpoint(path), init);
 }
 
 function isLauncherControlConnectionError(error: unknown) {
@@ -405,33 +362,6 @@ function isLauncherControlConnectionError(error: unknown) {
   }
   const message = error instanceof Error ? error.message : String(error || "");
   return /failed to fetch|networkerror|load failed|cors/i.test(message);
-}
-
-function rememberLauncherControlOrigin(payload: unknown) {
-  if (!payload || typeof payload !== "object") {
-    return;
-  }
-  const status = payload as LauncherStatus;
-  const url = status.launcher?.controlPlane?.url;
-  if (typeof url !== "string" || !url.trim()) {
-    return;
-  }
-  try {
-    const parsed = new URL(url);
-    if (isLoopbackHost(parsed.hostname)) {
-      cachedLauncherControlOrigin = parsed.origin;
-    }
-  } catch {
-    return;
-  }
-}
-
-export function resetLauncherControlOriginForTests() {
-  cachedLauncherControlOrigin = "";
-}
-
-export function launcherRestartEndpoint() {
-  return launcherEndpoint("restart");
 }
 
 export function getLauncherStatus() {

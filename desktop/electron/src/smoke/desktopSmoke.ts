@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { launcherAppOriginFor } from "../protocol/launcherAppProtocol.js";
 
 export type DesktopSmokeSummaryInput = {
   workspaceRoot: string;
@@ -39,7 +40,7 @@ export function desktopSmokeSummary(input: DesktopSmokeSummaryInput) {
     workspaceRoot: input.workspaceRoot,
     operatorConfigPath: input.configPath,
     packaged: input.packaged,
-    launcherOrigin: input.launcherUrl ? new URL(input.launcherUrl).origin : "",
+    launcherOrigin: input.launcherUrl ? launcherAppOriginFor(input.launcherUrl) : "",
     workbenchOrigin: input.workbenchUrl ? new URL(input.workbenchUrl).origin : "",
     controlTokenPresent: Boolean(input.controlToken),
     bootstrap: input.bootstrap ?? emptyDesktopSmokeBootstrapSummary(),

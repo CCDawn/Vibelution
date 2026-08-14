@@ -4,7 +4,7 @@
 **目标：30 秒定位 Launcher 控制面、窗口、托盘与无控制台 spawn；不要在 Python `:8765` 再写一套产品控制面。**
 
 权威决策：[ADR 0009](../../docs/adr/0009-launcher-control-plane-lives-in-electron-main.md)。
-迁移步骤与关闭条件：[CONTROL_PLANE_MIGRATION.md](CONTROL_PLANE_MIGRATION.md)。
+迁移账本（已关闭，归档）：[CONTROL_PLANE_MIGRATION.md](../../docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)。
 现行 Python 遗留面：[`core/web/services/launcher_runtime.md`](../../core/web/services/launcher_runtime.md)。
 
 ---

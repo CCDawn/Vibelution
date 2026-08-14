@@ -2,7 +2,7 @@
 
 ## `[launcher]`
 
-Launcher 控制面 **当前** 默认 `http://127.0.0.1:8765`（Python FastAPI）。**目标** 是 Electron 主进程 IPC（[ADR 0009](../../adr/0009-launcher-control-plane-lives-in-electron-main.md)）；迁移完成前不要把 `:8765` 从运维清单里删掉。
+Launcher 控制面为 **Electron 主进程 IPC**（[ADR 0009](../../adr/0009-launcher-control-plane-lives-in-electron-main.md)），控制窗口不再走 `http://127.0.0.1:8765`；Python `:8765` 控制面已退役。工作台仍为 Python FastAPI + Runtime Manager（常见 `:8000`）。
 
 生命周期命令以开发标准为准：
 
@@ -10,7 +10,9 @@ Launcher 控制面 **当前** 默认 `http://127.0.0.1:8765`（Python FastAPI）
 %LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<root>" start|stop|restart
 ```
 
-或 `scripts/vibelution_launcher.ps1` / `vibelution_launcher.py`。
+C# shim 在 packaged Electron 存在时把命令转发给 Electron（second-instance）；仅开发 checkout（无 `dist\desktop\win-unpacked\Vibelution.exe`）保留 legacy Python 路径与 WinForms 托盘。
+
+或 `scripts/vibelution_launcher.ps1` / `vibelution_launcher.py`（legacy/开发）。
 
 ### 注意
 
@@ -41,7 +43,7 @@ window_position = "0,0"
 | `window_size` | `WxH`；过小尺寸可能被 Launcher 拒绝 |
 | `window_position` | `x,y`；屏外坐标可能被拒绝 |
 
-Workbench HTTP 与 Launcher 控制面分离（工作台常见 `:8000`；控制面当前 `:8765`，目标为 Electron IPC，以实际配置与 ADR 0009 为准）。
+Workbench HTTP（常见 `:8000`）与 Electron 控制窗口（`vibelution-launcher://` app protocol）分离；控制面偏好字段（`[launcher].control_port`）保留兼容但产品路径不再使用。
 
 ## Agent 清单
 
