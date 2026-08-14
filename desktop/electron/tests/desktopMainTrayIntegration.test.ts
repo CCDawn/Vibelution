@@ -13,10 +13,10 @@ describe("Electron main tray integration", () => {
     expect(mainSource).not.toContain("electron.launcher.window.opened");
     expect(mainSource).toContain('"/api/launcher/branch-instances/start"');
     expect(mainSource).toContain('"/api/launcher/branch-instances/stop"');
-    expect(mainSource).toContain('runTrayLauncherPost("/api/launcher/restart"');
-    expect(mainSource).toContain('runTrayLauncherPost("/api/launcher/rebuild-and-start"');
+    expect(mainSource).toContain('runTrayLifecycle("restart"');
+    expect(mainSource).toContain('runTrayLifecycle("rebuild-and-start"');
     expect(mainSource).toContain("runTrayLauncherStatus()");
-    expect(mainSource).toContain('path: "/api/launcher/force-stop"');
+    expect(mainSource).toContain('orchestrateLauncherLifecycle("force-stop"');
     expect(mainSource).toContain("requestDesktopShellExit()");
     expect(mainSource).toContain("electronStartupStage = \"tray_ready\"");
     expect(mainSource).toContain("Keep the lightweight tray app running");

@@ -1221,6 +1221,53 @@ def _stop_owned_launcher(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _run_lifecycle_bridge(args: argparse.Namespace) -> dict[str, object]:
+    """Run a managed workbench lifecycle operation in-process on behalf of Electron main."""
+    operation = str(args.lifecycle_operation or "").strip().lower()
+    if operation not in _LIFECYCLE_OPERATIONS:
+        raise ValueError(f"Unsupported lifecycle operation: {operation}")
+    from core.launcher import service as launcher_service
+
+    _append_log("desktop_entry_python.lifecycle.started", operation=operation)
+    try:
+        if operation == "start":
+            response = launcher_service.request_launcher_start()
+        elif operation == "stop":
+            response = launcher_service.request_launcher_stop()
+        elif operation == "force-stop":
+            response = launcher_service.request_launcher_force_stop()
+        elif operation == "restart":
+            response = launcher_service.request_launcher_restart(
+                reason="electron_main_restart", source="electron_main"
+            )
+        else:
+            response = launcher_service.request_launcher_rebuild_and_start()
+    except launcher_service.LauncherActiveWorkBlocked as exc:
+        _append_log(
+            "desktop_entry_python.lifecycle.blocked",
+            level="warning",
+            operation=operation,
+            message=exc.message,
+        )
+        return {
+            "schemaVersion": 1,
+            "accepted": False,
+            "code": "active_work_blocked",
+            "operation": operation,
+            "message": str(exc.message),
+            "activeWorkRuns": list(getattr(exc, "active_work_runs", []) or []),
+        }
+    _append_log(
+        "desktop_entry_python.lifecycle.succeeded",
+        operation=operation,
+        command_id=str(response.get("commandId") or ""),
+    )
+    return {"schemaVersion": 1, **response}
+
+
+_LIFECYCLE_OPERATIONS = {"start", "stop", "force-stop", "restart", "rebuild-and-start"}
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -1232,13 +1279,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-id", default="")
     parser.add_argument("--owned-backend-pid", type=int, default=0)
     parser.add_argument("--attach-healthy-launcher", action="store_true")
+    parser.add_argument("--lifecycle-operation", default="")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     action = str(args.action or "launcher").strip().lower()
-    if action not in {"launcher", "bootstrap", "stop-launcher"}:
+    if action not in {"launcher", "bootstrap", "stop-launcher", "lifecycle"}:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     try:
         _append_log("desktop_entry_python.open.started", action=action, no_browser=bool(args.no_browser), run_id=args.run_id)
@@ -1254,6 +1302,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(f"Launcher stop {payload['status']}")
+        elif action == "lifecycle":
+            payload = _run_lifecycle_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Lifecycle {payload.get('operation')} accepted={payload.get('accepted')}")
         else:
             _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)
