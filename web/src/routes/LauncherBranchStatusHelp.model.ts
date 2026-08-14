@@ -1,5 +1,5 @@
 import type { LauncherBranchInstance } from "../api/launcher";
-import type { InstanceRuntimeState } from "./LauncherBranchInstancesPanel.model";
+import { instanceHasLiveRuntime, type InstanceRuntimeState } from "./LauncherBranchInstancesPanel.model";
 
 export type CleanupRecommendationLevel = "recommended" | "review" | "avoid";
 
@@ -16,7 +16,7 @@ export function runtimeStatusExplanation(state: InstanceRuntimeState, isZh: bool
     partial: "该实例只有部分运行组件就绪，需要先检查运行状态。",
     stopping: "Launcher 正在停止该实例，请等待操作结束。",
     restarting: "Launcher 正在重启该实例，请等待操作结束。",
-    failed: "该实例启动或运行失败，需要先处理异常状态。",
+    failed: "该实例启动失败，当前通常没有运行中的进程；关闭失败记录即可回到可启动，不必重启。",
     stopped: "该实例当前没有运行中的组件。",
   };
   const en: Record<InstanceRuntimeState, string> = {
@@ -25,7 +25,7 @@ export function runtimeStatusExplanation(state: InstanceRuntimeState, isZh: bool
     partial: "Only some runtime components are ready; inspect the runtime state first.",
     stopping: "Launcher is stopping this instance. Wait for the operation to finish.",
     restarting: "Launcher is restarting this instance. Wait for the operation to finish.",
-    failed: "This instance failed to start or run and needs attention first.",
+    failed: "This instance failed to start and usually has no live process. Close the failed record to return it to Ready to start; a restart is not required.",
     stopped: "This instance currently has no running components.",
   };
   return (isZh ? zh : en)[state];
@@ -71,15 +71,14 @@ export function cleanupRecommendation(
     };
   }
   const risks = new Set(item.cleanupRisks || []);
-  const hasLiveRuntime = state !== "stopped"
-    || item.alive
-    || item.runtime.backend.alive
-    || item.runtime.backend.listening
-    || item.runtime.window.open
+  const hasLiveRuntime = instanceHasLiveRuntime(item)
+    || Boolean(item.alive)
     || risks.has("stop_then_remove");
   const blockingReasons: string[] = [];
   if (hasLiveRuntime) {
     blockingReasons.push(isZh ? "先停止实例并等待状态变为“已停止”" : "stop the instance and wait until its status is Stopped");
+  } else if (state === "failed" || state === "partial") {
+    blockingReasons.push(isZh ? "先关闭失败记录，不要用清理代替关闭" : "close the failed record first; do not use cleanup as a substitute");
   }
   if (item.dirty || risks.has("discard_dirty")) {
     blockingReasons.push(isZh ? "先提交、暂存或备份未提交改动" : "commit, stash, or back up the uncommitted changes");

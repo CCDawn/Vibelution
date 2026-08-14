@@ -1512,16 +1512,37 @@ export function LauncherRoute() {
     }
     return requestLifecycle(operation);
   };
-  const resolveControlRequest = (input: LauncherOperation | { operation: LauncherOperation; instanceId?: string }) => {
+  type LauncherControlRequest = LauncherOperation | {
+    operation: LauncherOperation;
+    instanceId?: string;
+    instanceIds?: string[];
+  };
+  const resolveControlRequest = (input: LauncherControlRequest) => {
     if (typeof input === "string") {
-      return { operation: input, instanceId: selectedBranchId };
+      return { operation: input, instanceId: selectedBranchId, instanceIds: undefined as string[] | undefined };
     }
-    return { operation: input.operation, instanceId: input.instanceId || selectedBranchId };
+    const instanceIds = (input.instanceIds || []).map((id) => String(id || "").trim()).filter(Boolean);
+    return {
+      operation: input.operation,
+      instanceId: input.instanceId || instanceIds[0] || selectedBranchId,
+      instanceIds: instanceIds.length > 0 ? instanceIds : undefined,
+    };
   };
   const controlMutation = useMutation({
-    mutationFn: async (input: LauncherOperation | { operation: LauncherOperation; instanceId?: string }) => {
+    mutationFn: async (input: LauncherControlRequest) => {
       const request = resolveControlRequest(input);
-      return runInstanceLifecycle(request.instanceId, request.operation);
+      const ids = request.instanceIds && request.instanceIds.length > 0
+        ? request.instanceIds
+        : [request.instanceId];
+      const firstId = ids[0];
+      if (!firstId) {
+        throw new Error("missing instance id");
+      }
+      let last = await runInstanceLifecycle(firstId, request.operation);
+      for (const instanceId of ids.slice(1)) {
+        last = await runInstanceLifecycle(instanceId, request.operation);
+      }
+      return last;
     },
     onMutate: (input) => {
       const operation = resolveControlRequest(input).operation;
@@ -1764,6 +1785,7 @@ export function LauncherRoute() {
         const request = resolveControlRequest(controlMutation.variables);
         return {
           instanceId: request.instanceId,
+          instanceIds: request.instanceIds,
           operation: request.operation === "force-stop" ? "stop" : request.operation,
         } as const;
       })()
@@ -2316,6 +2338,12 @@ export function LauncherRoute() {
         onLifecycle={(instanceId, operation) => {
           setSelectedInstanceId(instanceId);
           controlMutation.mutate({ operation, instanceId });
+        }}
+        onStopMany={(instanceIds) => {
+          if (instanceIds[0]) {
+            setSelectedInstanceId(instanceIds[0]);
+          }
+          controlMutation.mutate({ operation: "stop", instanceIds });
         }}
       />
       <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>

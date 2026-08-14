@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -178,6 +179,73 @@ def test_isolated_stop_reuses_reserved_ports(registry_path, tmp_path):
     assert response["accepted"] is True
     assert calls == [("stop", 8004, 8769)]
     assert registry.get_instance("worktree:task")["status"] == "closed"
+
+
+def test_isolated_stop_clears_failed_registry_when_spawn_fails(registry_path, tmp_path):
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    state_path = worktree / ".runtime" / "launcher" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"workbench": {"desiredState": "open", "observedState": "closed", "phase": "failed", "failureMessage": "上次启动失败"}}',
+        encoding="utf-8",
+    )
+    registry.upsert_instance(
+        "worktree:task",
+        port=8004,
+        controlPort=8769,
+        projectRoot=str(worktree),
+        status="failed",
+    )
+
+    def boom(*args, **kwargs):
+        raise lifecycle.BranchInstanceLifecycleError("instance_lifecycle_failed", "stop failed")
+
+    response = lifecycle.run_isolated_operation(
+        _item(path=str(worktree), port=8004, controlPort=8769, alive=False),
+        "stop",
+        runner=boom,
+    )
+
+    assert response["accepted"] is True
+    assert registry.get_instance("worktree:task")["status"] == "closed"
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["workbench"]["desiredState"] == "closed"
+    assert payload["workbench"]["observedState"] == "closed"
+    assert payload["workbench"]["phase"] == "steady"
+    assert payload["workbench"]["failureMessage"] == ""
+
+
+def test_isolated_stop_clears_failed_registry_for_retired_leftover(registry_path, tmp_path):
+    missing = tmp_path / "gone-task"
+    registry.upsert_instance(
+        "worktree:task",
+        port=8004,
+        controlPort=8769,
+        projectRoot=str(missing),
+        status="failed",
+    )
+
+    response = lifecycle.run_isolated_operation(
+        _item(
+            id="retired:task",
+            kind="retired",
+            path=str(missing),
+            checkedOut=False,
+            alive=False,
+            runtime={
+                "lifecycleState": "error",
+                "backend": {"alive": False, "healthy": False, "listening": False},
+                "window": {"open": False},
+            },
+        ),
+        "stop",
+    )
+
+    assert response["accepted"] is True
+    assert response["instanceId"] == "worktree:task"
+    assert registry.get_instance("worktree:task")["status"] == "closed"
+    assert registry.get_instance("retired:task") == {}
 
 
 def test_spawn_uses_pythonw_and_hidden_console(tmp_path, monkeypatch):
