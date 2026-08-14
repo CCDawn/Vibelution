@@ -58,6 +58,7 @@ export type ElectronWindowProviderOptions = {
   createLauncherWindow?: ElectronWindowFactory;
   createWorkbenchWindow?: ElectronWindowFactory;
   listLauncherWindows?: (launcherOrigin: string) => ElectronWindowLike[];
+  listWorkbenchWindows?: (workbenchOrigin: string) => ElectronWindowLike[];
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
   shouldInterceptLauncherClose?: () => boolean;
   shouldInterceptWorkbenchClose?: () => boolean;
@@ -131,6 +132,7 @@ export class ElectronWindowProvider {
   private launcherOpen: Promise<ManagedWindowState> | null = null;
   private readonly attachedWindows = new Set<ElectronWindowLike>();
   private readonly listLauncherWindows: (launcherOrigin: string) => ElectronWindowLike[];
+  private readonly listWorkbenchWindows: (workbenchOrigin: string) => ElectronWindowLike[];
   private readonly hungCloseDestroyAfterMs: number;
 
   constructor(
@@ -143,6 +145,7 @@ export class ElectronWindowProvider {
     this.createLauncherWindow = options.createLauncherWindow ?? missingWindowFactory("launcher");
     this.createWorkbenchWindow = options.createWorkbenchWindow ?? missingWindowFactory("workbench");
     this.listLauncherWindows = options.listLauncherWindows ?? (() => []);
+    this.listWorkbenchWindows = options.listWorkbenchWindows ?? (() => []);
     this.reportState = options.reportState ?? (() => undefined);
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
     this.shouldInterceptWorkbenchClose = options.shouldInterceptWorkbenchClose ?? (() => false);
@@ -178,6 +181,7 @@ export class ElectronWindowProvider {
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
       this.discardExtraLauncherWindows(existing, this.launcherWindow);
       presentElectronWindow(this.launcherWindow);
+      this.reportLeftoverWorkbenchIfPresent();
       return this.reportAndReturn(this.stateFor("launcher"));
     }
     const adopted = existing[0] ?? null;
@@ -186,11 +190,13 @@ export class ElectronWindowProvider {
       this.attachWindowEvents("launcher", adopted);
       this.discardExtraLauncherWindows(existing, adopted);
       presentElectronWindow(adopted);
+      this.reportLeftoverWorkbenchIfPresent();
       return this.reportAndReturn(this.stateFor("launcher"));
     }
     this.launcherWindow = this.createLauncherWindow(safeUrl, this.paths);
     this.attachWindowEvents("launcher", this.launcherWindow);
     presentElectronWindow(this.launcherWindow);
+    this.reportLeftoverWorkbenchIfPresent();
     return this.reportAndReturn(this.stateFor("launcher"));
   }
 
@@ -304,6 +310,7 @@ export class ElectronWindowProvider {
   }
 
   async focusWorkbench(): Promise<ManagedWindowState> {
+    this.reconcileCurrentWorkbenchWindow();
     if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
       return this.reportAndReturn(closedWindowState("workbench"));
     }
@@ -350,8 +357,10 @@ export class ElectronWindowProvider {
   }
 
   async closeWorkbench(): Promise<ManagedWindowState> {
+    this.reconcileCurrentWorkbenchWindow();
     const workbenchWindow = this.workbenchWindow;
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
+      this.discardExtraWorkbenchWindows(this.listLiveWorkbenchWindows(), null);
       return this.reportAndReturn(closedWindowState("workbench"));
     }
     if (this.shouldInterceptWorkbenchClose() && !this.workbenchCloseAuthorized) {
@@ -363,8 +372,10 @@ export class ElectronWindowProvider {
   }
 
   async approveWorkbenchCloseOnce(): Promise<ManagedWindowState> {
+    this.reconcileCurrentWorkbenchWindow();
     const workbenchWindow = this.workbenchWindow;
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
+      this.discardExtraWorkbenchWindows(this.listLiveWorkbenchWindows(), null);
       return this.reportAndReturn(closedWindowState("workbench"));
     }
     this.workbenchCloseAuthorized = true;
@@ -383,6 +394,7 @@ export class ElectronWindowProvider {
       this.workbenchCloseAuthorized = false;
       this.workbenchCloseInFlight = false;
     }
+    this.discardExtraWorkbenchWindows(this.listLiveWorkbenchWindows(), this.workbenchWindow);
     return this.stateFor("workbench");
   }
 
@@ -398,6 +410,7 @@ export class ElectronWindowProvider {
   }
 
   snapshot(): { launcher: ManagedWindowState; workbench: ManagedWindowState } {
+    this.reconcileCurrentWorkbenchWindow();
     return {
       launcher: this.stateFor("launcher"),
       workbench: this.stateFor("workbench")
@@ -483,6 +496,7 @@ export class ElectronWindowProvider {
       });
     }
     if (role === "workbench") {
+      this.interceptWorkbenchWindowOpenRequests(window);
       window.on("close", (event) => {
         if (this.workbenchCloseAuthorized || !this.shouldInterceptWorkbenchClose()) {
           return;
@@ -493,17 +507,22 @@ export class ElectronWindowProvider {
     }
     window.on("closed", () => {
       this.attachedWindows.delete(window);
-      if (role === "launcher" && this.launcherWindow === window) {
+      const wasLauncher = role === "launcher" && this.launcherWindow === window;
+      const wasWorkbench = role === "workbench" && this.workbenchWindow === window;
+      if (wasLauncher) {
         this.launcherWindow = null;
       }
-      if (role === "workbench" && this.workbenchWindow === window) {
+      if (wasWorkbench) {
         this.workbenchWindow = null;
         this.workbenchReadyUrl = null;
         this.workbenchCloseAuthorized = false;
         this.workbenchCloseInFlight = false;
       }
+      if (!wasLauncher && !wasWorkbench) {
+        return;
+      }
       const report = this.reportState(closedWindowState(role));
-      if (role === "workbench") {
+      if (wasWorkbench) {
         void Promise.resolve(report)
           .catch(() => undefined)
           .then(() => this.onWorkbenchClosed())
@@ -538,13 +557,14 @@ export class ElectronWindowProvider {
   }
 
   private async navigateWorkbench(safeUrl: string): Promise<ManagedWindowState> {
-    let workbenchWindow = this.workbenchWindow;
+    let workbenchWindow = this.reconcileCurrentWorkbenchWindow();
     if (!workbenchWindow || workbenchWindow.isDestroyed()) {
       workbenchWindow = this.createWorkbenchWindow(safeUrl, this.paths);
       this.workbenchWindow = workbenchWindow;
       this.workbenchReadyUrl = null;
       this.attachWindowEvents("workbench", workbenchWindow);
     }
+    this.discardExtraWorkbenchWindows(this.listLiveWorkbenchWindows(), workbenchWindow);
 
     if (this.workbenchReadyUrl !== safeUrl) {
       this.workbenchReadyUrl = null;
@@ -606,12 +626,94 @@ export class ElectronWindowProvider {
     });
   }
 
+  private interceptWorkbenchWindowOpenRequests(window: ElectronWindowLike): void {
+    if (typeof window.webContents.setWindowOpenHandler !== "function") {
+      return;
+    }
+    const workbenchOrigin = new URL(this.workbenchUrl).origin;
+    window.webContents.setWindowOpenHandler((details) => {
+      if (isManagedWorkbenchUrl(details.url, workbenchOrigin)) {
+        void this.openOrFocusWorkbench().catch(() => undefined);
+      }
+      return { action: "deny" };
+    });
+  }
+
+  private reportLeftoverWorkbenchIfPresent(): void {
+    this.reconcileCurrentWorkbenchWindow();
+    const workbench = this.stateFor("workbench");
+    if (workbench.open) {
+      void this.reportState(workbench);
+    }
+  }
+
+  private reconcileCurrentWorkbenchWindow(): ElectronWindowLike | null {
+    if (this.workbenchWindow && !this.workbenchWindow.isDestroyed()) {
+      return this.workbenchWindow;
+    }
+    this.workbenchWindow = null;
+    const adopted = this.listLiveWorkbenchWindows()[0] ?? null;
+    if (!adopted) {
+      this.workbenchReadyUrl = null;
+      return null;
+    }
+    this.workbenchWindow = adopted;
+    this.attachWindowEvents("workbench", adopted);
+    const currentUrl = adopted.webContents.getURL().trim();
+    this.workbenchReadyUrl = currentUrl || null;
+    return adopted;
+  }
+
+  private listLiveWorkbenchWindows(): ElectronWindowLike[] {
+    let origin = "";
+    try {
+      origin = new URL(this.workbenchUrl).origin;
+    } catch {
+      return [];
+    }
+    const ownedInstances = new Set(
+      [...this.instanceWindows.values()].map((entry) => entry.window)
+    );
+    return this.listWorkbenchWindows(origin).filter((window) => {
+      if (!window || window.isDestroyed()) {
+        return false;
+      }
+      if (window === this.launcherWindow) {
+        return false;
+      }
+      return !ownedInstances.has(window);
+    });
+  }
+
+  private discardExtraWorkbenchWindows(windows: ElectronWindowLike[], keep: ElectronWindowLike | null): void {
+    for (const window of windows) {
+      if (window === keep || window === this.launcherWindow || window.isDestroyed()) {
+        continue;
+      }
+      let ownedInstance = false;
+      for (const entry of this.instanceWindows.values()) {
+        if (entry.window === window) {
+          ownedInstance = true;
+          break;
+        }
+      }
+      if (ownedInstance) {
+        continue;
+      }
+      try {
+        window.destroy();
+      } catch {
+        // An extra Workbench window is disposable; keep presenting the owned one.
+      }
+    }
+  }
+
   private stateFor(role: ElectronWindowRole): ManagedWindowState {
     const window = role === "launcher" ? this.launcherWindow : this.workbenchWindow;
     if (!window || window.isDestroyed()) {
       return closedWindowState(role);
     }
-    if (role === "workbench" && this.workbenchReadyUrl === null) {
+    if (role === "workbench" && this.workbenchReadyUrl === null && !window.webContents.getURL().trim()) {
       return closedWindowState(role);
     }
     return {

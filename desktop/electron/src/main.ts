@@ -288,6 +288,14 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
             return false;
           }
         }),
+      listWorkbenchWindows: (workbenchOrigin) =>
+        BrowserWindow.getAllWindows().filter((window) => {
+          try {
+            return new URL(window.webContents.getURL()).origin === workbenchOrigin;
+          } catch {
+            return false;
+          }
+        }),
       reportState: (state) => reportManagedWindowState(paths, bootstrap, state),
       shouldInterceptLauncherClose: () => !shutdownApproved,
       shouldInterceptWorkbenchClose: () => !shutdownApproved,
