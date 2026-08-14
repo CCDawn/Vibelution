@@ -2499,3 +2499,166 @@ def test_session_query_benchmark_isolates_large_cold_samples_by_process(
     assert result["p95Ms"] == 40.0
     assert result["processIsolation"] == "one_process_per_cold_sample"
     assert result["allocationProbe"] == "skipped_process_isolated_cold"
+
+
+# ---------------------------------------------------------------------------
+# Chat state revision CAS：并发更新不被覆盖
+
+
+def test_restore_active_session_keeps_concurrent_conversation(tmp_path, monkeypatch):
+    from core.web.services import supervised_agent_service
+
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    state = load_chat_state(tmp_path)
+    conversations = list(state.get("conversations") or [])
+    conversations.append({"conversation_id": "session-concurrent", "title": "并发会话"})
+    state["conversations"] = conversations
+    save_chat_state(tmp_path, state)
+
+    stale_snapshot = {
+        "version": 1,
+        "active_conversation_id": "session-live",
+        "updated_at": "2026-05-18T12:00:00",
+        "conversations": [
+            {
+                "conversation_id": "session-live",
+                "title": "真实会话",
+                "updated_at": "2026-05-18T12:00:00",
+                "last_turn_status": "ready",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "load_chat_state",
+        lambda *_args, **_kwargs: dict(stale_snapshot),
+    )
+
+    supervised_agent_service._restore_active_session(tmp_path, "session-live")
+
+    persisted = load_chat_state(tmp_path)
+    assert persisted["active_conversation_id"] == "session-live"
+    ids = {item["conversation_id"] for item in persisted["conversations"]}
+    assert ids == {"session-live", "session-concurrent"}
+
+
+def test_workbench_save_keeps_concurrent_conversation(tmp_path, monkeypatch):
+    from core.ui import workbench
+    from core.ui.workbench import AgentWorkbenchShell, WorkbenchChatSession
+
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(workbench, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    state = load_chat_state(tmp_path)
+    conversations = list(state.get("conversations") or [])
+    conversations.append({"conversation_id": "session-concurrent", "title": "并发会话"})
+    state["conversations"] = conversations
+    save_chat_state(tmp_path, state)
+
+    stale_snapshot = {
+        "version": 1,
+        "active_conversation_id": "session-live",
+        "updated_at": "2026-05-18T12:00:00",
+        "conversations": [
+            {
+                "conversation_id": "session-live",
+                "title": "旧标题",
+                "updated_at": "2026-05-18T12:00:00",
+                "last_turn_status": "ready",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        workbench,
+        "load_chat_state",
+        lambda *_args, **_kwargs: dict(stale_snapshot),
+    )
+
+    session = WorkbenchChatSession(
+        conversation_id="session-live",
+        title="新标题",
+        messages=[],
+        updated_at="2026-05-18T13:00:00",
+    )
+    AgentWorkbenchShell._save_workbench_chat_session(None, session)
+
+    persisted = load_chat_state(tmp_path)
+    ids = {item["conversation_id"]: item for item in persisted["conversations"]}
+    assert ids["session-live"]["title"] == "新标题"
+    assert "session-concurrent" in ids
+
+
+def test_repair_conversation_index_records_replays_on_conflict(tmp_path, monkeypatch):
+    from core.chat.conversation_store import ChatStateRevisionConflictError
+    from core.web.services import team_service
+
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-repaired",
+                "title": "真实会话",
+                "agent_id": "agent-repaired",
+                "agentId": "agent-repaired",
+                "session_kind": "main",
+                "updated_at": "2026-05-18T12:00:00",
+                "messages": [],
+            },
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-repaired",
+                    "agentCode": "A002",
+                    "displayName": "周南栀",
+                    "status": "active",
+                    "directSessionId": "session-repaired",
+                    "primaryMode": "chat",
+                    "roleKey": "",
+                    "promptTemplateId": "prompt-chat-default",
+                    "createdBy": "session_repair",
+                    "metadata": {"directSessionVisibility": "active_session"},
+                },
+            ]
+        }
+    )
+
+    real_save = session_service.save_chat_state
+    calls = []
+
+    def conflicting_save(project_root, payload, **kwargs):
+        calls.append((project_root, kwargs))
+        if len(calls) == 1:
+            state = load_chat_state(tmp_path)
+            conversations = list(state.get("conversations") or [])
+            conversations.append(
+                {"conversation_id": "session-concurrent", "title": "并发会话"}
+            )
+            state["conversations"] = conversations
+            real_save(project_root, state)
+            raise ChatStateRevisionConflictError(expected=0, current=1)
+        real_save(project_root, payload, **kwargs)
+
+    monkeypatch.setattr(session_service, "save_chat_state", conflicting_save)
+
+    result = session_service.repair_conversation_index_records()
+
+    assert result["changed"] is True
+    assert result["conversationCount"] == 1
+    persisted = load_chat_state(tmp_path)
+    by_id = {item["conversation_id"]: item for item in persisted["conversations"]}
+    assert by_id["session-repaired"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    )
+    assert "session-concurrent" in by_id
+    assert len(calls) == 2
+    assert calls[1][1]["expected_state_revision"] == 2

@@ -40,7 +40,7 @@ from core.ui.chat_state import (
     DEFAULT_CHAT_CONVERSATION_TITLE,
     get_active_chat_conversation,
     load_chat_state,
-    save_chat_state,
+    mutate_chat_state,
 )
 from core.evaluation.self_evolution_workbench import (
     DEFAULT_SELF_EVOLUTION_GOAL,
@@ -413,36 +413,39 @@ class AgentWorkbenchShell:
         )
 
     def _save_workbench_chat_session(self, session: WorkbenchChatSession) -> None:
-        payload = load_chat_state(PROJECT_ROOT)
-        conversations = list(payload.get("conversations") or [])
         conversation_id = str(session.conversation_id or DEFAULT_CHAT_CONVERSATION_ID).strip()
         timestamp = str(session.updated_at or _now_timestamp()).strip()
-        matched = False
-        for conversation in conversations:
-            if not isinstance(conversation, dict):
-                continue
-            if str(conversation.get("conversation_id") or "").strip() != conversation_id:
-                continue
-            conversation["title"] = session.title or DEFAULT_CHAT_CONVERSATION_TITLE
-            conversation["updated_at"] = timestamp
-            conversation["active_task"] = None
-            conversation.pop("messages", None)
-            matched = True
-            break
-        if not matched:
-            conversations.append(
-                {
-                    "conversation_id": conversation_id,
-                    "title": session.title or DEFAULT_CHAT_CONVERSATION_TITLE,
-                    "updated_at": timestamp,
-                    "last_turn_status": "ready",
-                    "active_task": None,
-                }
-            )
-        payload["active_conversation_id"] = conversation_id
-        payload["conversations"] = conversations
-        payload["updated_at"] = timestamp
-        save_chat_state(PROJECT_ROOT, payload)
+        title = session.title or DEFAULT_CHAT_CONVERSATION_TITLE
+
+        def update_session(payload: dict[str, Any]) -> None:
+            conversations = list(payload.get("conversations") or [])
+            matched = False
+            for conversation in conversations:
+                if not isinstance(conversation, dict):
+                    continue
+                if str(conversation.get("conversation_id") or "").strip() != conversation_id:
+                    continue
+                conversation["title"] = title
+                conversation["updated_at"] = timestamp
+                conversation["active_task"] = None
+                conversation.pop("messages", None)
+                matched = True
+                break
+            if not matched:
+                conversations.append(
+                    {
+                        "conversation_id": conversation_id,
+                        "title": title,
+                        "updated_at": timestamp,
+                        "last_turn_status": "ready",
+                        "active_task": None,
+                    }
+                )
+            payload["active_conversation_id"] = conversation_id
+            payload["conversations"] = conversations
+            payload["updated_at"] = timestamp
+
+        mutate_chat_state(PROJECT_ROOT, update_session)
 
     def _set_chat_task_snapshot(self, snapshot: dict[str, Any] | None) -> None:
         setter = getattr(self.ui, "set_chat_task_snapshot", None)

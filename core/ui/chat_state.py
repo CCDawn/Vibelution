@@ -11,7 +11,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable
 
 from core.infrastructure import developer_sandbox
 from core.chat.session_catalog import (
@@ -322,6 +322,7 @@ def save_chat_state(
     state: dict[str, Any],
     *,
     archive_session_id: str = "",
+    expected_state_revision: int | None = None,
 ) -> None:
     with chat_state_transaction(project_root):
         cleaned, _changed = _drop_legacy_chat_state_messages(state, project_root=project_root)
@@ -331,10 +332,14 @@ def save_chat_state(
                 combined = repository.archive_session_and_replace_chat_state(
                     session_id=normalized_archive_session_id,
                     state=cleaned,
+                    expected_state_revision=expected_state_revision,
                 ).result(timeout=5)
                 result = dict(combined.get("chatState") or {})
             else:
-                result = repository.replace_chat_state(cleaned).result(timeout=5)
+                result = repository.replace_chat_state(
+                    cleaned,
+                    expected_state_revision=expected_state_revision,
+                ).result(timeout=5)
         revision = int(result.get("stateRevision") or 0)
         cleaned["state_revision"] = revision
         notify_session_catalog_dirty(
@@ -342,6 +347,35 @@ def save_chat_state(
             CATALOG_GLOBAL_DIRTY_SESSION_ID,
             f"state:{revision}",
         )
+
+
+def mutate_chat_state(
+    project_root: Path,
+    mutate: Callable[[dict[str, Any]], Any],
+    *,
+    expected_state_revision: int | None = None,
+) -> dict[str, Any]:
+    """Atomically read-modify-write the chat state inside one store transaction.
+
+    ``mutate`` receives the current document and runs on the writer thread;
+    it must be deterministic, must not submit other store work, and must not
+    block for a long time. Concurrent updates are never overwritten because
+    every mutation reads the freshest revision inside the transaction.
+    """
+
+    with chat_state_transaction(project_root):
+        with _chat_state_repository(project_root) as repository:
+            result = repository.update_chat_state(
+                mutate,
+                expected_state_revision=expected_state_revision,
+            ).result(timeout=5)
+        revision = int(result.get("stateRevision") or 0)
+        notify_session_catalog_dirty(
+            project_root,
+            CATALOG_GLOBAL_DIRTY_SESSION_ID,
+            f"state:{revision}",
+        )
+        return result
 
 
 @contextmanager

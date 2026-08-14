@@ -1189,3 +1189,145 @@ def test_archive_session_and_replace_chat_state_is_idempotent(tmp_path: Path):
         assert rows == 1
     finally:
         connection.close()
+
+# ---------------------------------------------------------------------------
+# Chat state revision CAS
+
+
+def _seed_state_payload(conversation_id: str) -> dict:
+    return {
+        "version": 1,
+        "active_conversation_id": conversation_id,
+        "updated_at": "2026-08-14T01:02:03Z",
+        "conversations": [{"conversation_id": conversation_id, "title": conversation_id}],
+    }
+
+
+def test_replace_chat_state_cas_rejects_stale_revision(tmp_path: Path):
+    from core.chat.conversation_store.repository import ChatStateRevisionConflictError
+
+    store = _open_store(tmp_path)
+    try:
+        first = store.repository.replace_chat_state(
+            _seed_state_payload("session-a")
+        ).result(timeout=3)
+        assert first["stateRevision"] == 1
+
+        winner = store.repository.replace_chat_state(
+            _seed_state_payload("session-b"),
+            expected_state_revision=1,
+        ).result(timeout=3)
+        assert winner["stateRevision"] == 2
+
+        with pytest.raises(ChatStateRevisionConflictError):
+            store.repository.replace_chat_state(
+                _seed_state_payload("session-c"),
+                expected_state_revision=1,
+            ).result(timeout=3)
+
+        restored = store.repository.get_chat_state()
+        assert restored["active_conversation_id"] == "session-b"
+        assert int(restored["state_revision"]) == 2
+    finally:
+        store.close()
+
+
+def test_cas_conflict_across_two_store_instances(tmp_path: Path):
+    from core.chat.conversation_store.repository import ChatStateRevisionConflictError
+
+    database_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+    store_a = ConversationStore(database_path)
+    store_b = ConversationStore(database_path)
+    store_a.open()
+    store_b.open()
+    try:
+        store_a.repository.replace_chat_state(
+            _seed_state_payload("session-a")
+        ).result(timeout=3)
+        assert int(store_b.repository.get_chat_state()["state_revision"]) == 1
+
+        store_a.repository.replace_chat_state(
+            _seed_state_payload("session-b"),
+            expected_state_revision=1,
+        ).result(timeout=3)
+
+        with pytest.raises(ChatStateRevisionConflictError):
+            store_b.repository.replace_chat_state(
+                _seed_state_payload("session-c"),
+                expected_state_revision=1,
+            ).result(timeout=3)
+
+        assert store_b.repository.get_chat_state()["active_conversation_id"] == "session-b"
+    finally:
+        store_a.close()
+        store_b.close()
+
+
+def test_update_chat_state_applies_mutation_atomically(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state(
+            _seed_state_payload("session-a")
+        ).result(timeout=3)
+
+        def add_session(state):
+            conversations = list(state.get("conversations") or [])
+            conversations.append({"conversation_id": "session-added", "title": "added"})
+            state["conversations"] = conversations
+            state["active_conversation_id"] = "session-added"
+
+        result = store.repository.update_chat_state(add_session).result(timeout=3)
+        assert result["stateRevision"] == 2
+        restored = store.repository.get_chat_state()
+        assert [item["conversation_id"] for item in restored["conversations"]] == [
+            "session-a",
+            "session-added",
+        ]
+    finally:
+        store.close()
+
+
+def test_update_chat_state_preserves_concurrent_mutations(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state(
+            _seed_state_payload("session-seed")
+        ).result(timeout=3)
+
+        def add_session(session_id: str):
+            def mutate(state):
+                conversations = list(state.get("conversations") or [])
+                conversations.append(
+                    {"conversation_id": session_id, "title": session_id}
+                )
+                state["conversations"] = conversations
+
+            return mutate
+
+        errors: list[BaseException] = []
+
+        def worker(prefix: str) -> None:
+            try:
+                for index in range(10):
+                    store.repository.update_chat_state(
+                        add_session(f"{prefix}-{index}")
+                    ).result(timeout=5)
+            except BaseException as exc:  # noqa: BLE001 - test collects all failures
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=worker, args=(prefix,))
+            for prefix in ("a", "b", "c")
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert errors == []
+        restored = store.repository.get_chat_state()
+        ids = [item["conversation_id"] for item in restored["conversations"]]
+        assert len(ids) == 31
+        assert len(set(ids)) == 31
+    finally:
+        store.close()
