@@ -158,11 +158,95 @@ export type LauncherBranchInstances = {
   items: LauncherBranchInstance[];
 };
 
+type LauncherBranchInstancePayload = Omit<LauncherBranchInstance, "runtime" | "startable"> & {
+  runtime?: LauncherBranchInstanceRuntime;
+  startable?: boolean;
+};
+
+type LauncherBranchInstancesPayload = Omit<LauncherBranchInstances, "items"> & {
+  items: LauncherBranchInstancePayload[];
+};
+
 export type LauncherStartupSettingsUpdateResponse = {
   ok: boolean;
   setting: LauncherStartupSettings;
   message: string;
 };
+
+function legacyBranchInstanceRuntime(item: LauncherBranchInstancePayload): LauncherBranchInstanceRuntime {
+  const observedState = String(item.observedState || "closed").trim().toLowerCase();
+  const backendPid = Math.max(0, Number(item.pids?.backend || 0));
+  const windowPid = Math.max(0, Number(item.pids?.window || 0));
+  const backendAlive = Boolean(item.alive || backendPid > 0);
+  const windowOpen = windowPid > 0;
+  let lifecycleState: LauncherBranchInstanceRuntime["lifecycleState"] = "closed";
+  if (["opening", "starting"].includes(observedState)) {
+    lifecycleState = "starting";
+  } else if (["restarting", "restart"].includes(observedState)) {
+    lifecycleState = "restarting";
+  } else if (["closing", "stopping", "force_stopping"].includes(observedState)) {
+    lifecycleState = "stopping";
+  } else if (["failed", "error"].includes(observedState)) {
+    lifecycleState = "error";
+  } else if (backendAlive || windowOpen || ["open", "running", "healthy", "partial"].includes(observedState)) {
+    // The flat contract cannot prove health, listening, or frontend readiness.
+    lifecycleState = "partial";
+  }
+
+  const runtime: LauncherBranchInstanceRuntime = {
+    lifecycleState,
+    desiredState: lifecycleState === "closed" ? "closed" : "open",
+    observedState,
+    phase: "steady",
+    backend: {
+      alive: backendAlive,
+      healthy: false,
+      listening: false,
+      port: Math.max(0, Number(item.port || 0)),
+      portReserved: Number(item.port || 0) > 0 && !backendAlive,
+      portConflict: false,
+      pid: backendPid,
+    },
+    frontend: {
+      mode: "bundled_static_dist",
+      ready: false,
+    },
+    window: {
+      open: windowOpen,
+      pid: windowPid,
+      title: String(item.workbenchTitle || item.shortName || item.branch || item.id || ""),
+      titleObserved: false,
+    },
+  };
+  if (lifecycleState === "error") {
+    runtime.error = {
+      code: "legacy_runtime_error",
+      message: "The stale Launcher runtime reported a failed branch instance.",
+    };
+  }
+  return runtime;
+}
+
+function normalizeLauncherBranchInstances(payload: LauncherBranchInstancesPayload): LauncherBranchInstances {
+  return {
+    ...payload,
+    items: (payload.items || []).map((item) => {
+      if (item.runtime) {
+        return {
+          ...item,
+          runtime: item.runtime,
+          startable: Boolean(item.startable),
+        };
+      }
+      return {
+        ...item,
+        runtime: legacyBranchInstanceRuntime(item),
+        startable: false,
+        startBlockReason: "launcher_refresh_required",
+      };
+    }),
+  };
+}
 
 let cachedLauncherControlOrigin = "";
 
@@ -258,11 +342,13 @@ export function getLauncherStatus() {
 }
 
 export function getLauncherBranchInstances() {
-  return fetchLauncherJson<LauncherBranchInstances>("branch-instances");
+  return fetchLauncherJson<LauncherBranchInstancesPayload>("branch-instances")
+    .then(normalizeLauncherBranchInstances);
 }
 
 export function getLocalBranchInstances() {
-  return fetchJson<LauncherBranchInstances>("/api/launcher/branch-instances");
+  return fetchJson<LauncherBranchInstancesPayload>("/api/launcher/branch-instances")
+    .then(normalizeLauncherBranchInstances);
 }
 
 export function requestBranchInstanceLifecycle(

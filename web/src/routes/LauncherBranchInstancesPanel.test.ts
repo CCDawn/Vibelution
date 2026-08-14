@@ -200,6 +200,27 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStopInstance(dirty)).toBe(true);
   });
 
+  it("keeps lifecycle controls fail-closed for a stale Launcher runtime contract", () => {
+    const stale = instance({
+      alive: true,
+      startable: false,
+      startBlockReason: "launcher_refresh_required",
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "partial",
+        backend: {
+          ...instance().runtime.backend,
+          alive: true,
+          port: 8002,
+          pid: 1200,
+        },
+      },
+    });
+
+    expect(canStartInstance(stale)).toBe(false);
+    expect(canStopInstance(stale)).toBe(false);
+  });
+
   it("pages startable or maintenance lists at 8 rows", () => {
     const items = Array.from({ length: 11 }, (_, index) => instance({ id: `worktree:${index + 1}` }));
     expect(paginateItems(items, 1).items).toHaveLength(8);
