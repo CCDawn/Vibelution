@@ -24,6 +24,7 @@ import type {
   TeamListPayload,
 } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
+import { shareRuntimeSummaryIfOnlyVolatileChanged } from "../../app/runtimeSummaryQueryShare";
 import {
   ACTIVE_BACKGROUND_SYNC_POLL_MS,
   type ChatLiveQueryPolicy,
@@ -80,6 +81,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     enabled: secondaryChatDataEnabled,
     refetchInterval: chatSecondaryPollPolicy.runtimeRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
+    structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged,
   });
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),

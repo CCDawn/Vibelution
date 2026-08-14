@@ -45,7 +45,9 @@ export function agentSessionStatusTone(
       | "currentPhase"
       | "status"
       | "lastTurnStatus"
+      | "terminalReason"
       | "sessionKind"
+      | "taskSummary"
       | "updatedAt"
       | "lastActive"
       | "agentInboxPendingCount"
@@ -269,7 +271,8 @@ export function AgentSessionTabStrip({
           needsApproval,
           isRuntimeRunning,
           session,
-          isActive: tabActive,
+          // Blue/unread clears for the open conversation, even if a file tab is in front.
+          isActive: activeSessionId === session.id,
         });
         const statusShortLabel = agentSessionStatusShortLabel(statusTone, lang);
         const sessionTitle =

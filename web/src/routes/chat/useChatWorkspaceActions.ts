@@ -14,6 +14,13 @@ import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import { prefetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
+import {
+  chatAgentSessionStorage,
+  lastSessionForAgent,
+  readAgentLastSessionMap,
+  rememberAgentLastSession,
+  resolveAgentOpenSessionId,
+} from "./chatAgentSessionMemory";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
@@ -61,6 +68,7 @@ export type UseChatWorkspaceActionsOptions = {
   groupManageModeDraft: string;
   groupManagePurposeDraft: string;
   selectedChatAgentId: string;
+  sessionsById?: ReadonlyMap<string, Pick<SessionSummary, "id" | "agentId">>;
   standardGroupRoomActive: boolean;
   activeGroupTeamOwned: boolean;
   groupRoundActive: boolean;
@@ -92,7 +100,7 @@ export type UseChatWorkspaceActionsResult = {
   handleCreateSession: () => void;
   handleOpenProjectAgentBus: () => void;
   handleOpenDirectSession: (sessionId: string) => void;
-  handleOpenAgent: (agent: AgentInstance) => void;
+  handleOpenAgent: (agent: AgentInstance) => boolean;
   handleOpenMentionTarget: (target: ChatMentionTarget) => void;
   handleOpenGroupRoom: (roomId: string) => void;
   handleToggleGroupManageSession: (sessionId: string) => void;
@@ -151,6 +159,7 @@ export function useChatWorkspaceActions({
   groupManageModeDraft,
   groupManagePurposeDraft,
   selectedChatAgentId,
+  sessionsById,
   standardGroupRoomActive,
   activeGroupTeamOwned,
   groupRoundActive,
@@ -230,6 +239,15 @@ export function useChatWorkspaceActions({
       void prefetchSessionDetailWindow(queryClient, normalizedSessionId);
     }
     setActiveSession(normalizedSessionId);
+    const sessionAgentId = String(sessionsById?.get(normalizedSessionId)?.agentId || "").trim();
+    if (sessionAgentId) {
+      setSelectedAgentId(sessionAgentId);
+      rememberAgentLastSession(
+        sessionAgentId,
+        normalizedSessionId,
+        chatAgentSessionStorage(),
+      );
+    }
     setActiveGroupRoomId("");
     setRightIndexPanel("conversations");
     setGroupRoomActionError("");
@@ -254,23 +272,48 @@ export function useChatWorkspaceActions({
     navigate,
     queryClient,
     reselectDirectSessionRef,
+    sessionsById,
     setActiveGroupRoomId,
     setActiveSession,
     setGroupRoomActionError,
     setRightIndexPanel,
+    setSelectedAgentId,
     setSessionComposerErrors,
     setSessionContextMenu,
   ]);
 
   const handleOpenAgent = useCallback((agent: AgentInstance) => {
     const agentId = String(agent.agentId || "").trim();
-    const primarySessionId = String(agent.directSessionId || "").trim();
-    if (!agentId || !primarySessionId) {
-      return;
+    if (!agentId) {
+      return false;
     }
     setSelectedAgentId(agentId);
-    handleOpenDirectSession(primarySessionId);
-  }, [handleOpenDirectSession, setSelectedAgentId]);
+    const knownSessionIds: string[] = [];
+    if (sessionsById) {
+      for (const session of sessionsById.values()) {
+        if (String(session.agentId || "").trim() === agentId) {
+          const sessionId = String(session.id || "").trim();
+          if (sessionId) {
+            knownSessionIds.push(sessionId);
+          }
+        }
+      }
+    }
+    const targetSessionId = resolveAgentOpenSessionId({
+      lastSessionId: lastSessionForAgent(
+        agentId,
+        readAgentLastSessionMap(chatAgentSessionStorage()),
+      ),
+      knownSessionIds,
+      latestSessionId: "",
+      directSessionId: agent.directSessionId,
+    });
+    if (!targetSessionId) {
+      return false;
+    }
+    handleOpenDirectSession(targetSessionId);
+    return true;
+  }, [handleOpenDirectSession, sessionsById, setSelectedAgentId]);
 
   const handleOpenMentionTarget = useCallback((target: ChatMentionTarget) => {
     setRightPaneCollapsed(false);

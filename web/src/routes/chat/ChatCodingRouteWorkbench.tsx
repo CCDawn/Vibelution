@@ -121,10 +121,7 @@ import {
   AgentConversationDirectory,
   visibleDirectoryAgents,
 } from "../AgentConversationDirectory";
-import {
-  markSessionActivitySeen,
-  sessionActivityStamp,
-} from "../sessionActivityIndicator";
+import { markSessionActivitySnapshotsSeen } from "../sessionActivityIndicator";
 import type { AgentContextMenuState } from "../AgentContextMenu";
 import { ConversationIndexTree } from "../ConversationIndexTree";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
@@ -230,6 +227,10 @@ import { buildComposerContextRingModel } from "./composerContextModel";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { useChatWorkbenchCatalogQueries } from "./useChatWorkbenchCatalogQueries";
+import {
+  chatTurnSessionIdsFromRuntime,
+  runtimeHasChatTurnForSession,
+} from "./chatRuntimeWorkRuns";
 import { buildChatTokenStatusViewModel } from "./chatTokenStatusModel";
 import {
   buildAgentSessionTabs,
@@ -1518,6 +1519,14 @@ export function ChatCodingRoute() {
   } = useChatLocaleFormatters(lang);
 
   const runtime = runtimeQuery.data;
+  const runtimeChatTurnSessionIds = useMemo(
+    () => chatTurnSessionIdsFromRuntime(runtime),
+    [runtime],
+  );
+  const runtimeActiveChatTurnSessionIds = useMemo(
+    () => new Set(runtimeChatTurnSessionIds),
+    [runtimeChatTurnSessionIds],
+  );
   const pet = petQuery.data;
   // Prefer live query data, but always re-read RQ cache for optimistic temp shells
   // (disabled queries often omit data even after setQueryData).
@@ -1534,10 +1543,7 @@ export function ChatCodingRoute() {
     activeSessionId,
     detail: rawSessionDetail,
   });
-  const sessionToolApprovalRuntimeActive = Boolean(
-    activeSessionId
-    && runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId,
-  );
+  const sessionToolApprovalRuntimeActive = runtimeHasChatTurnForSession(runtime, activeSessionId);
   const sessionToolApprovalsQuery = useQuery<SessionToolApprovalRequest[]>({
     queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId && directSessionPanelActive && !isTempSessionId(activeSessionId)),
@@ -1758,20 +1764,12 @@ export function ChatCodingRoute() {
     isFetching: sessionDetailQuery.isFetching,
     isTempSession: isTempSessionId(activeSessionId),
   });
-  const runtimeActiveChatTurnSessionIds = new Set(
-    [
-      ...(runtime?.workRuns?.activeItems?.chat_turn ?? []),
-      runtime?.workRuns?.active?.chat_turn,
-    ]
-      .map((run) => String(run?.sessionId ?? "").trim())
-      .filter(Boolean),
-  );
   const runtimeMatchesSelectedSession = runtimeMatchesSelectedChatSession({
     selectedSessionId: activeSessionId,
     activeRuntimeSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
     activeWorkSessionIds: runtimeActiveChatTurnSessionIds,
   });
-  const runtimeActiveChatTurnSessionId = runtimeActiveChatTurnSessionIds.values().next().value ?? "";
+  const runtimeActiveChatTurnSessionId = runtimeChatTurnSessionIds[0] ?? "";
   const runtimeActiveSessionLabel = runtimeActiveChatTurnSessionId
     ? sessionsQuery.data?.find((session) => session.id === runtimeActiveChatTurnSessionId)?.title
       || runtime?.sessionTitle
@@ -1987,19 +1985,14 @@ export function ChatCodingRoute() {
     [activeSessionId, pendingSessionToolApproval, pendingToolGovernanceApproval],
   );
   const runtimeRunningSessionIds = useMemo(() => {
-    const runningSessionIds = new Set([
-      ...(runtime?.workRuns?.activeItems?.chat_turn ?? []),
-      runtime?.workRuns?.active?.chat_turn,
-    ]
-      .map((run) => String(run?.sessionId ?? "").trim())
-      .filter(Boolean));
+    const runningSessionIds = new Set(runtimeChatTurnSessionIds);
     Object.entries(activeTurnLayersBySession).forEach(([sessionId, layer]) => {
       if (layer.status === "pending" || layer.status === "running") {
         runningSessionIds.add(sessionId);
       }
     });
     return [...runningSessionIds];
-  }, [activeTurnLayersBySession, runtime?.workRuns?.active?.chat_turn, runtime?.workRuns?.activeItems?.chat_turn]);
+  }, [activeTurnLayersBySession, runtimeChatTurnSessionIds]);
   const pendingToolApprovalLabels = useMemo(
     () => pendingSessionToolApproval
       ? [{
@@ -2511,29 +2504,24 @@ export function ChatCodingRoute() {
     return new Map(allVisibleSessions.map((session) => [session.id, session]));
   }, [allVisibleSessions]);
 
+  const [, setSessionActivitySeenEpoch] = useState(0);
+
   // Mark completed/unread activity as seen when the operator opens the session.
-  // Blue dots clear after read; a later stamp (new turn) can show them again.
+  // Blue dots clear after read; a later preview/turn identity can show them again.
   useEffect(() => {
     if (!activeSessionId) {
       return;
     }
-    const session =
-      sessionsById.get(activeSessionId)
-      || directSessionActiveSummary
-      || (detail?.id === activeSessionId ? detail : undefined);
-    if (!session) {
-      return;
+    const directorySession = sessionsById.get(activeSessionId);
+    const detailSession = detail?.id === activeSessionId ? detail : undefined;
+    const wrote = markSessionActivitySnapshotsSeen(activeSessionId, [
+      directorySession,
+      directSessionActiveSummary?.id === activeSessionId ? directSessionActiveSummary : undefined,
+      detailSession,
+    ]);
+    if (wrote) {
+      setSessionActivitySeenEpoch((current) => current + 1);
     }
-    const stamp = sessionActivityStamp({
-      id: activeSessionId,
-      updatedAt: session.updatedAt,
-      lastActive: session.lastActive,
-      lastTurnStatus: session.lastTurnStatus,
-    });
-    if (!stamp) {
-      return;
-    }
-    markSessionActivitySeen(activeSessionId, stamp);
   }, [
     activeSessionId,
     detail,
@@ -2552,14 +2540,6 @@ export function ChatCodingRoute() {
       || "",
     ).trim();
   }, [activeSessionId, directSessionActiveSummary?.agentId, sessionDetailQuery.data?.agentId, sessionsById]);
-  useEffect(() => {
-    if (!activeSessionAgentId) {
-      return;
-    }
-    setSelectedAgentId((current) => (
-      current === activeSessionAgentId ? current : activeSessionAgentId
-    ));
-  }, [activeSessionAgentId]);
   useChatSelectionPersistence({
     requestedSessionId,
     requestedRoomId,
@@ -2607,6 +2587,16 @@ export function ChatCodingRoute() {
     }),
     [agentsById, selectedAgentSessionsQuery.data?.items, selectedAgentVisibleSessions, selectedChatAgentId],
   );
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    const tabSession = agentSessionTabs.find((session) => session.id === activeSessionId);
+    if (markSessionActivitySnapshotsSeen(activeSessionId, [tabSession])) {
+      setSessionActivitySeenEpoch((current) => current + 1);
+    }
+  }, [activeSessionId, agentSessionTabs]);
 
   const groupCandidateAgents = useMemo(() => {
     return archiveVisibleAgents.filter((agent) => {
@@ -2788,6 +2778,7 @@ export function ChatCodingRoute() {
     groupManageModeDraft,
     groupManagePurposeDraft,
     selectedChatAgentId,
+    sessionsById,
     standardGroupRoomActive,
     activeGroupTeamOwned,
     groupRoundActive,
@@ -2942,20 +2933,10 @@ export function ChatCodingRoute() {
             statusLabel={statusLabel}
             teams={teams}
             onContextMenu={openAgentContextMenu}
-            onOpenAgent={(agent, latestSession) => {
-              const agentId = String(agent.agentId || "").trim();
-              if (agentId) {
-                setSelectedAgentId(agentId);
+            onOpenAgent={(agent) => {
+              if (!handleOpenAgent(agent)) {
+                handleCreateAgentSession(agent);
               }
-              if (latestSession?.id) {
-                handleOpenDirectSession(latestSession.id);
-                return;
-              }
-              if (agent.directSessionId) {
-                handleOpenAgent(agent);
-                return;
-              }
-              handleCreateAgentSession(agent);
             }}
             onOpenGroupRoom={handleOpenGroupRoom}
           />

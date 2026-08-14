@@ -486,18 +486,6 @@ def submit_session_message(
         conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = user_entry["timestamp"]
-        conversation_metadata = (
-            conversation.get("metadata")
-            if isinstance(conversation.get("metadata"), dict)
-            else {}
-        )
-        trusted_external_task = (
-            normalized_message_source == "external_agent_task"
-            and str(conversation_metadata.get("source") or "").strip()
-            == "external_agent_task"
-        )
-        if not trusted_external_task:
-            payload["active_conversation_id"] = conversation_id
         payload["updated_at"] = user_entry["timestamp"]
         s.save_chat_state(s.PROJECT_ROOT, payload)
         s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
@@ -994,7 +982,6 @@ def edit_and_resubmit_session_message(
         conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = user_entry["timestamp"]
-        payload["active_conversation_id"] = conversation_id
         payload["updated_at"] = user_entry["timestamp"]
         s.save_chat_state(s.PROJECT_ROOT, payload)
         s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)

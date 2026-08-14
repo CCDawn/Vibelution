@@ -503,6 +503,7 @@ def _catalog_query_item(row: Mapping[str, Any]) -> dict[str, Any]:
         "conversationIndexVisibility": str(row.get("visibility") or ""),
         "updatedAt": str(row.get("updated_at") or ""),
         "lastActive": str(row.get("last_active_at") or ""),
+        "createdAt": str(row.get("created_at") or ""),
     }
 
 

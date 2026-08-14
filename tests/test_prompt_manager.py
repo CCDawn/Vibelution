@@ -1123,6 +1123,7 @@ class TestLoadFunctions:
         assert "`create_child_session_tool`" in content
         assert "`list_child_sessions_tool`" in content
         assert "auto_start=true" in content
+        assert "switch_to_child=false" in content
         assert "子对话只做一层" in content
 
     def test_spec_digest_section_compute(self):

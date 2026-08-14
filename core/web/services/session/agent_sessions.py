@@ -1027,7 +1027,7 @@ def create_child_session(
     constraints: list[str] | None = None,
     excluded_context_summary: str = "",
     auto_start: bool = True,
-    switch_to_child: bool = True,
+    switch_to_child: bool = False,
     source: str = "agent_auto_split",
 ) -> dict[str, Any]:
     s = _service()
@@ -3010,7 +3010,6 @@ def _wake_agent_for_cli_agent_task_result(
         turn_control = s._create_session_turn_control(session_id)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = s._now_timestamp()
-        payload["active_conversation_id"] = session_id
         payload["updated_at"] = conversation["updated_at"]
         s.save_chat_state(s.PROJECT_ROOT, payload)
         s._set_session_running(session_id, True, turn_id=turn_control.turn_id, leases=requested_leases)

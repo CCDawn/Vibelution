@@ -10,6 +10,7 @@ import {
   resolveChatSelection,
   writeStoredChatSelection,
   type ChatSelectionProjection,
+  type ChatSelectionStorage,
 } from "./chatSelectionProjection";
 
 /**
@@ -71,6 +72,28 @@ function chatSelectionStorage(): Storage | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Server `active_conversation_id` must not paint before a still-valid local
+ * viewing pointer can restore. Running recency on the server must not win.
+ */
+export function storedChatSelectionBlocksServerBootstrap(
+  sessions: SessionSummary[] | undefined,
+  storage?: ChatSelectionStorage,
+): boolean {
+  const storedSessionId = String(
+    readStoredChatSelection(storage ?? chatSelectionStorage(), CHAT_SELECTION_STORAGE_KEY)?.sessionId || "",
+  ).trim();
+  if (!storedSessionId) {
+    return false;
+  }
+  if (!sessions) {
+    return true;
+  }
+  return sessions.some(
+    (session) => String(session.id || "").trim() === storedSessionId && isVisibleDirectSession(session),
+  );
 }
 
 export function resolveStoredDirectChatSelection(

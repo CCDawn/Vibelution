@@ -1442,7 +1442,6 @@ def ensure_agent_direct_session(
         )
         conversations.append(conversation)
         payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-        payload["active_conversation_id"] = session_id
         payload["updated_at"] = now
         payload["conversations"] = conversations
         s.save_chat_state(s.PROJECT_ROOT, payload)

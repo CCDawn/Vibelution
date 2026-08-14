@@ -86,7 +86,7 @@ def query_session_summaries(
     include_hidden = bool(normalized_agent_id)
     before = parse_directory_cursor(cursor)
     started_at_head = before is None
-    _active_id, experiment_bindings = _chat_state_directory_overlay()
+    _, experiment_bindings = _chat_state_directory_overlay()
     if normalized_sort != "updatedAt_desc":
         page = store.repository.list_directory_page(
             agent_id=normalized_agent_id,
@@ -214,7 +214,7 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
         before = parse_directory_cursor(next_cursor)
         if before is None:
             break
-    active_id, experiment_bindings = _chat_state_directory_overlay()
+    _, experiment_bindings = _chat_state_directory_overlay()
     summaries = [
         _summary_from_directory_row(
             row,
@@ -234,7 +234,6 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
     )
     summaries.sort(
         key=lambda item: (
-            0 if str(item.get("id") or "").strip() == active_id else 1,
             -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
         )
     )
@@ -664,6 +663,7 @@ def _summary_from_directory_row(
         "taskSummary": preview,
         "lastActive": updated_at,
         "updatedAt": updated_at,
+        "createdAt": _iso_from_ms(row.get("createdAtMs")),
         "currentPhase": status,
         "sessionKind": session_kind,
         "hiddenFromIndex": bool(row.get("hiddenFromIndex")),

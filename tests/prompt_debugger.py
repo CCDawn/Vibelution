@@ -372,7 +372,7 @@ TOOL_TEST_SUITES: Dict[str, Dict] = {
             "split_reason": "拆分原因",
             "inherited_facts": "需要携带的有效事实",
             "auto_start": True,
-            "switch_to_child": True,
+            "switch_to_child": False,
         },
         "scenarios": [
             {

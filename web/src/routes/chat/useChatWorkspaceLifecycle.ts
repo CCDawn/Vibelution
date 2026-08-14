@@ -43,6 +43,10 @@ import {
 import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
 import { clearSessionDeleteTombstone, markSessionDeleteTombstone } from "../sessionDeleteTombstone";
 import { createTempSessionId, isTempSessionId } from "../sessionOptimisticIds";
+import {
+  chatAgentSessionStorage,
+  rememberAgentLastSession,
+} from "./chatAgentSessionMemory";
 import { defaultNewSessionTitle } from "./useChatSessionRenameMenu";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -264,6 +268,7 @@ export function useChatWorkspaceLifecycle({
         taskSummary: "",
         lastActive: nowIso,
         updatedAt: nowIso,
+        createdAt: nowIso,
         messages: [],
         defaultFileContext: "",
         previewTabs: [],
@@ -298,6 +303,13 @@ export function useChatWorkspaceLifecycle({
       );
       setActiveSession(tempSessionId);
       setSelectedAgentId(normalizedAgentId);
+      if (normalizedAgentId) {
+        rememberAgentLastSession(
+          normalizedAgentId,
+          tempSessionId,
+          chatAgentSessionStorage(),
+        );
+      }
       setSessionFilter("");
       editingSessionIdRef.current = tempSessionId;
       setEditingSessionId(tempSessionId);
@@ -354,6 +366,9 @@ export function useChatWorkspaceLifecycle({
         removeSessionWorkspace(tempSessionId, keepFocusOnCreated ? nextId : currentActive || nextId);
       }
       setSelectedAgentId(agentId);
+      if (agentId && keepFocusOnCreated) {
+        rememberAgentLastSession(agentId, nextId, chatAgentSessionStorage());
+      }
       setSessionComposerErrors((current) => {
         const next = { ...current, [nextId]: "", __sessions__: "" };
         if (tempSessionId) {

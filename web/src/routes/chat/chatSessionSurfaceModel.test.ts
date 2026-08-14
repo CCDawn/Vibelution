@@ -142,15 +142,34 @@ describe("chatSessionSurfaceModel", () => {
     expect(model.sessionCompactRows[0]?.value).toBe("src/app.ts");
   });
 
-  it("sorts every Agent session by activity without direct or child priority", () => {
+  it("keeps Agent session tab order stable when activity timestamps change", () => {
     const tabs = buildAgentSessionTabs({
       sessions: [
-        { id: "child", sessionKind: "child", updatedAt: "2026-01-02" } as never,
-        { id: "primary", sessionKind: "direct", updatedAt: "2026-01-01" } as never,
-        { id: "other", sessionKind: "direct", updatedAt: "2026-01-03" } as never,
+        { id: "child", sessionKind: "child", createdAt: "2026-01-02", updatedAt: "2026-08-14T12:00:00Z" } as never,
+        { id: "primary", sessionKind: "direct", createdAt: "2026-01-01", updatedAt: "2026-08-14T12:00:02Z" } as never,
+        { id: "other", sessionKind: "direct", createdAt: "2026-01-03", updatedAt: "2026-08-14T12:00:01Z" } as never,
       ],
       selectedChatAgentDirectSessionId: "primary",
     });
-    expect(tabs.map((item) => item.id)).toEqual(["other", "child", "primary"]);
+    expect(tabs.map((item) => item.id)).toEqual(["primary", "child", "other"]);
+  });
+
+  it("does not reshuffle tabs when a background session becomes more recent", () => {
+    const first = buildAgentSessionTabs({
+      sessions: [
+        { id: "alpha", createdAt: "2026-01-01", updatedAt: "2026-08-14T10:00:00Z" } as never,
+        { id: "beta", createdAt: "2026-01-02", updatedAt: "2026-08-14T10:00:01Z" } as never,
+      ],
+      selectedChatAgentDirectSessionId: "alpha",
+    });
+    const afterBackgroundActivity = buildAgentSessionTabs({
+      sessions: [
+        { id: "alpha", createdAt: "2026-01-01", updatedAt: "2026-08-14T10:00:01Z" } as never,
+        { id: "beta", createdAt: "2026-01-02", updatedAt: "2026-08-14T10:00:09Z" } as never,
+      ],
+      selectedChatAgentDirectSessionId: "alpha",
+    });
+    expect(first.map((item) => item.id)).toEqual(["alpha", "beta"]);
+    expect(afterBackgroundActivity.map((item) => item.id)).toEqual(["alpha", "beta"]);
   });
 });

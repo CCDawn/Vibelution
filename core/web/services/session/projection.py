@@ -99,7 +99,7 @@ def list_sessions(
         load_phase_timings: dict[str, int] = {
             "agentDirectoryMs": s._elapsed_ms(agent_directory_started_at),
         }
-        active_id, conversations = s._load_conversations(
+        _, conversations = s._load_conversations(
             repair=False,
             agent_by_id=agent_by_id,
             hidden_team_member_agent_ids=hidden_team_member_agent_ids,
@@ -136,7 +136,6 @@ def list_sessions(
         s._record_session_agent_missing_index_batch_event(hidden_summaries, source="list_sessions")
         sessions.sort(
             key=lambda item: (
-                0 if item["id"] == active_id else 1,
                 -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
             )
         )
@@ -666,6 +665,7 @@ def _build_session_summary(
         "taskSummary": summary,
         "lastActive": updated_at,
         "updatedAt": updated_at,
+        "createdAt": str(conversation.get("createdAt") or conversation.get("created_at") or "").strip(),
         "currentPhase": status,
         "sessionKind": session_kind,
         "hiddenFromIndex": bool(conversation.get("hiddenFromIndex") or conversation.get("hidden_from_index")),
