@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import { VButton, VCheckbox, VConfirmDialog, VDenseTable, VTooltip } from "../components/vui";
+import { VButton, VCheckbox, VConfirmDialog, VDenseTable, VStatusChip, VTooltip } from "../components/vui";
 import type { LauncherOperation } from "../api/types";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
@@ -253,9 +253,9 @@ export function LauncherBranchInstancesPanel({
         <p className={styles.controlWindow} role="status">
           <span>{labels.controlWindow}</span>
           <strong>{launcherTitle || "-"}</strong>
-          <span className={launcherOnline ? styles.statusOnline : styles.statusOffline}>
+          <VStatusChip tone={launcherOnline ? "success" : "warning"}>
             {launcherOnline ? labels.online : labels.offline}
-          </span>
+          </VStatusChip>
         </p>
       </div>
 
@@ -296,7 +296,14 @@ export function LauncherBranchInstancesPanel({
               header: copy.instanceState,
               width: 104,
               minWidth: 88,
-              render: (item) => instanceRuntimeStateLabel(instanceRuntimeState(item, pendingOperation), zh),
+              render: (item) => {
+                const state = instanceRuntimeState(item, pendingOperation);
+                return (
+                  <VStatusChip tone={runtimeTone(state)}>
+                    {instanceRuntimeStateLabel(state, zh)}
+                  </VStatusChip>
+                );
+              },
             },
             {
               id: "backend",
@@ -407,7 +414,7 @@ export function LauncherBranchInstancesPanel({
               header: labels.readiness,
               width: 112,
               minWidth: 92,
-              render: () => labels.ready,
+              render: () => <VStatusChip tone="success">{labels.ready}</VStatusChip>,
             },
             {
               id: "frontend",
@@ -531,7 +538,14 @@ export function LauncherBranchInstancesPanel({
                 header: copy.instanceState,
                 width: 138,
                 minWidth: 100,
-                render: (item) => instanceRuntimeStateLabel(instanceRuntimeState(item, pendingOperation), zh),
+                render: (item) => {
+                  const state = instanceRuntimeState(item, pendingOperation);
+                  return (
+                    <VStatusChip tone={runtimeTone(state)}>
+                      {instanceRuntimeStateLabel(state, zh)}
+                    </VStatusChip>
+                  );
+                },
               },
               {
                 id: "git",

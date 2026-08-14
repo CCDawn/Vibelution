@@ -73,6 +73,12 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("<VCheckbox");
     expect(panelSource).toContain("<VConfirmDialog");
     expect(panelSource).toContain("<VDenseTable");
+    expect(panelSource.match(/<VStatusChip/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(panelSource).toContain('tone={launcherOnline ? "success" : "warning"}');
+    expect(panelSource).toContain("tone={runtimeTone(state)}");
+    expect(panelSource).toContain('<VStatusChip tone="success">{labels.ready}</VStatusChip>');
+    expect(panelSource).toContain('variant="primary"');
+    expect(panelSource).toContain('variant="danger"');
     expect(panelSource).toContain("resizable");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);

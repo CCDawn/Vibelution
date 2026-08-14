@@ -574,9 +574,14 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("<ComposerContextRing");
     expect(ringSource).toContain('data-chrome="bare"');
     expect(ringSource).toContain("isIconOnly");
+    expect(ringSource).not.toContain("ContourArcs");
+    expect(ringSource).not.toContain('r="12.2"');
+    expect(ringSource).not.toContain("strokeDasharray={`0 ${start}");
     expect(ringStyles.trigger).toContain("!overflow-hidden");
     expect(ringStyles.trigger).toContain("!rounded-full");
     expect(ringStyles.trigger).toContain("!border-0");
+    expect(ringStyles.ring).toContain("overflow-visible");
+    expect(ringStyles.ring).not.toContain("overflow-hidden");
     expect(conversationViewSource).toContain("composerContextRing");
     expect(conversationViewSource).toContain('composerVariant === "codex" ? composerActions : null');
     expect(conversationViewSource).toContain('composerVariant === "compact" ? composerActions : null');

@@ -100,7 +100,7 @@ import { VContextualHint } from "@/components/vui";
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| 触发器 + 内容 | 与 header 配对 | 文案可稍长于 tooltip |
+| 触发器 + 内容 | 与 header 配对 | 文案可稍长于 tooltip；触发器只用轻描边问号，不加第二层圆框 |
 
 ### 非职责
 - 不做通用 tooltip 替代一切 hover。
