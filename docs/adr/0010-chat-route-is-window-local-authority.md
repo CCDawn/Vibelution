@@ -1,8 +1,11 @@
-# ADR 0009 · Chat Route Is The Window-Local Active Authority
+# ADR 0010 · Chat Route Is The Window-Local Active Authority
 
 ## Status
 
 Accepted (2026-08-14).
+
+> 编号说明：最初规划为 ADR 0009，落地时 0009 已被 Launcher Electron 控制面
+> ADR 占用，本决策改编号为 0010，内容与语义不变。
 
 ## Context
 
