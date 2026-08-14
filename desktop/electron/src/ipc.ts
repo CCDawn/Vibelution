@@ -4,7 +4,8 @@ export const IPC_CHANNELS = {
   focusWorkbenchWindow: "launcher:focus-workbench-window",
   requestDesktopShellExit: "launcher:request-desktop-shell-exit",
   notifyConversationCompleted: "launcher:notify-conversation-completed",
-  conversationNotificationOpened: "launcher:conversation-notification-opened"
+  conversationNotificationOpened: "launcher:conversation-notification-opened",
+  launcherInvoke: "launcher:invoke"
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

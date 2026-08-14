@@ -41,6 +41,10 @@ import {
   type LauncherControlPostPath
 } from "./protocol/launcherControlClient.js";
 import {
+  createLauncherIpcHost,
+  type LauncherIpcInvokePayload
+} from "./protocol/launcherIpcHost.js";
+import {
   acknowledgeWorkbenchCloseWindowClosed,
   fetchWorkbenchCloseTransaction,
   isRecoverableWorkbenchCloseTransactionControlRejection,
@@ -133,6 +137,7 @@ let desktopSessionRegistered = false;
 let desktopSessionRevision = 0;
 let desktopControlRecoveryPromise: Promise<void> | null = null;
 let shutdownApproved = false;
+let launcherIpcHost: ReturnType<typeof createLauncherIpcHost> | null = null;
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
 const desktopSessionMutations = new DesktopSessionMutationQueue();
 let conversationNotificationService: ConversationNotificationService | null = null;
@@ -1574,6 +1579,35 @@ ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: 
     return failedConversationNotificationResult(payload);
   }
   return await service.notify(payload);
+});
+
+function launcherIpcTrustedOrigins(): string[] {
+  const desktopEnv = desktopEnvironment();
+  return [new URL(resolveLauncherUrl(desktopEnv, launcherBootstrap?.launcherUrl)).origin];
+}
+
+function resolveLauncherIpcHost() {
+  if (launcherIpcHost !== null) {
+    return launcherIpcHost;
+  }
+  launcherIpcHost = createLauncherIpcHost({
+    resolveContext: async () => {
+      if (launcherBootstrap === null) {
+        return null;
+      }
+      const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+      return {
+        launcherOrigin: context.launcherOrigin,
+        controlToken: context.controlToken
+      };
+    }
+  });
+  return launcherIpcHost;
+}
+
+ipcMain.handle(IPC_CHANNELS.launcherInvoke, async (event, payload: LauncherIpcInvokePayload) => {
+  assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
+  return await resolveLauncherIpcHost().invoke(payload);
 });
 
 function requestOpenWorkbench(): void {

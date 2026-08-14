@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS } from "./ipc.js";
 
+const isLauncherControlWindow = process.argv.includes("--vibelution-window-role=launcher-control");
+
 contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion),
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
@@ -14,5 +16,10 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.conversationNotificationOpened, wrapped);
     };
-  }
+  },
+  ...(isLauncherControlWindow
+    ? {
+        launcherInvoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.launcherInvoke, payload)
+      }
+    : {})
 });
