@@ -440,3 +440,5 @@ def test_spawn_sets_instance_short_name(tmp_path, monkeypatch):
     monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)
     lifecycle.spawn_worktree_launcher(worktree, "start", 8002, 8767, short_name="branch+task")
     assert captured["env"]["VIBELUTION_INSTANCE_SHORT_NAME"] == "branch+task"
+    assert captured["env"]["VIBELUTION_ALLOW_DIRTY_LAUNCH"] == "1"
+    assert captured["env"]["VIBELUTION_ALLOW_NON_MAIN_LAUNCH"] == "1"

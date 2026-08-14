@@ -510,6 +510,11 @@ def spawn_worktree_launcher(
     name = str(short_name or "").strip()
     if name:
         env["VIBELUTION_INSTANCE_SHORT_NAME"] = name
+    if action in {"start", "restart"}:
+        # Isolated worktrees are expected to have uncommitted task work; the
+        # integration-root dirty/main guards must not block their launcher.
+        env["VIBELUTION_ALLOW_DIRTY_LAUNCH"] = "1"
+        env["VIBELUTION_ALLOW_NON_MAIN_LAUNCH"] = "1"
     if timeout is None:
         if action == "start":
             timeout = _ISOLATED_START_TIMEOUT_SECONDS
