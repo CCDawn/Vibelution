@@ -3,9 +3,9 @@
 > **Status**: `active-plan`
 > **Owner**: `codex-llm-routing-plan`
 > **Date**: 2026-08-14
-> **Claim**: `claim-13cbcda6ee33`
-> **Branch**: `codex/multi-agent-protocol-config-design`
-> **Worktree**: `.worktrees/multi-agent-protocol-config-design`
+> **Claim**: `claim-ec638374bf4f`
+> **Branch**: `codex/document-llm-wire-compatibility`
+> **Worktree**: `.worktrees/document-llm-wire-compatibility`
 > **Scope**: 模型配置 schema、有效配置投影、Profile/Agent 绑定、协议解析、配置诊断投影、错误分类、恢复与 fallback；不在本方案阶段修改 operator config、Agent 数据或运行时。
 > **Related design**: 多 Agent 配置、A2A/MCP/AG-UI 适配和 Agent 协议绑定见 [`2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md`](2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md)。
 > **Supersedes**: 不覆盖现行 [`docs/ops/config/`](ops/config/INDEX.md)、[`core/llm/PROTOCOL.md`](../core/llm/PROTOCOL.md)、ADR 或开发标准；历史 LLM 方案仅作背景证据，不再作为实施权威。
@@ -29,6 +29,8 @@
 - semantic recovery 会生成 `disable_streaming` / `disable_tools` 决策，但当前调用循环没有真正应用这些标志。
 - 当前 Profile 拓扑缺少不同有效路由身份的 provider-level fallback。
 - `Insufficient Balance` 会被错误归类为 `provider_protocol_error`。
+- 当前 `WireProtocol` 已登记 `chat_completions`、`responses`、`anthropic_messages` 和 `gemini_generate_content`；Chat Completions 与 Responses 使用独立 wire adapter，Anthropic/Gemini 当前使用带正确 wire identity 的 LiteLLM compatibility adapter，并非项目自实现的原生 REST wire。
+- 2026-08-14 在 `main@889c162af` 复核协议解析、Chat/Responses wire、出站桥接与会话链，聚焦结果为 70 passed；这是代码级与模拟证据，不代表真实 OpenAI/Anthropic/中转站调用已经验收。
 - 聚焦验证基线为：配置核心 312 passed；配置面板/Web route 202 passed；LLM/协议/恢复扩展套件 504 passed、2 项已归因隔离。
 
 本方案采用以下主路径：
@@ -187,6 +189,38 @@ flowchart LR
 - 现有 `[external_agent_gateway]` 是 managed-Agent MCP compatibility 配置，不是模型协议配置。
 
 这条边界通过双向负向 contract tests 固化，避免本次模型字段治理完成后，在 Agent 配置层重新产生同类混义。
+
+### 4.5 当前对话 wire 兼容基线与目标
+
+当前对话链路可以解析并运行三类主要 wire，但成熟度不同：
+
+| Wire | 当前实现 | 当前可信范围 | 本方案目标 |
+| --- | --- | --- | --- |
+| `chat_completions` | 独立 `ChatCompletionsWireAdapter`；大多数 OpenAI-compatible、relay 和本地模型共用 | 独立 encode/decode/stream contract 已有回归；具体 endpoint 的 tools/vision/streaming 仍以能力观测为准 | 保持一等 wire，禁止用“OpenAI-compatible”自动抬升能力 |
+| `responses` | 独立 `ResponsesWireAdapter` 与 backend；包含流式事件、continuation、取消和可选 WebSocket | 独立 wire 回归已覆盖；`responses_agent` 尚未启用，`reasoning_chat` 当前只允许 Chat Completions | 保持一等 wire，显式校验 provider、contract、continuation 和 WebSocket 能力 |
+| `anthropic_messages` | `AnthropicAdapter` 提供语义与 thinking/content 策略；`AnthropicMessagesWireAdapter` 继承 Chat adapter，以 OpenAI-shaped payload 交给 LiteLLM 转换 | 可通过 LiteLLM 调用 Anthropic，但不是项目自实现 `/v1/messages` body、SSE 和原生 error mapper | 新增原生 Anthropic Messages wire adapter；保留并显式命名 LiteLLM compatibility fallback |
+
+当前 `anthropic_messages` 的“wire identity 正确”不能被描述为“原生 Anthropic transport 已完成”。实施后两条 Anthropic adapter route 必须可区分：
+
+```text
+anthropic_messages_native
+anthropic_messages_litellm_compat
+```
+
+二者共享 `WireProtocol.ANTHROPIC_MESSAGES`，但拥有不同 `adapter_id`、backend identity、route fingerprint、错误来源和验收证据。禁止 native 初始化失败后静默切换 compatibility adapter。
+
+所有厂商、relay 与本地模型统一通过内部 semantic request 进入 route resolver；统一不等于把全部服务伪装成 OpenAI：
+
+```text
+SemanticModelRequest
+  -> ResolvedLLMRoute
+  -> ProviderAdapter（厂商语义）
+  -> WireAdapter（请求/事件形态）
+  -> Transport/Backend（官方、relay、本地 runtime）
+  -> TurnOutcome
+```
+
+`service_class` 只表达 `official/relay/self_hosted/local_runtime`；`driver`、`wire_protocol`、`interaction_contract`、endpoint、auth 和 capability provenance 分别校验。relay 后面的模型品牌和本地 runtime 名称均不得用于猜测 wire 或工具能力。
 
 ---
 
@@ -454,12 +488,15 @@ runtime-scene 记录：
 
 ```text
 Task 1 协议字段契约
-  -> Task 2 EffectiveLLMGraph + validator
-    -> Task 3 当前数据迁移
-    -> Task 4 UI/doctor/runtime 同源
-      -> Task 5 recovery/fallback/error mapper
-        -> Task 6 模型目录与 Profile 治理
-          -> Task 7 全链路验收与文档升格
+  ├──> Task 2 EffectiveLLMGraph + validator
+  └──> Task 2A Chat / Responses / Anthropic wire 一等化
+
+Task 2 + Task 2A 汇合
+  -> Task 3 当前数据迁移
+  -> Task 4 UI/doctor/runtime 同源
+    -> Task 5 recovery/fallback/error mapper
+      -> Task 6 模型目录与 Profile 治理
+        -> Task 7 全链路验收与文档升格
 ```
 
 Task 3 与 Task 4 可在 Task 2 的 graph/DTO 契约冻结后分支实施，但 shared config projection 和最终验收由同一主负责人串行整合。
@@ -490,6 +527,23 @@ Task 3 与 Task 4 可在 Task 2 的 graph/DTO 契约冻结后分支实施，但 
   - 使用脱敏的当前配置 fixture 重现 10 个模型错误和 5 个 Agent 引用错误。
   - `inspect_public_config` 不再在 schema v2 下静默跳过模型检查。
   - 所有消费面只调用一个 resolver。
+
+### Task 2A：Chat、Responses 与 Anthropic wire 一等化
+
+- **Owner/Boundary**: `core/llm/protocols.py`、`core/llm/wire/`、`core/llm/adapters.py`、`core/llm/client.py` 与对应 protocol/wire/conversation tests。
+- **Dependency**: Task 1；可与 Task 2 并行，但切换 runtime、迁移和全链路验收前必须汇合。
+- **Mode**: `BDD_TDD`。
+- **Deliverable**:
+  - 保持 Chat Completions 与 Responses 独立 encode/decode/stream adapter。
+  - 实现 `anthropic_messages_native`：原生 `/v1/messages` request、content/tool/thinking 投影、SSE event decode、usage/cache token 归一化和 Anthropic error mapper。
+  - 将现有 LiteLLM 桥接明确为 `anthropic_messages_litellm_compat`；保留兼容读取，不伪装 native。
+  - route fingerprint 包含 wire、adapter、backend 与 endpoint identity。
+  - relay、本地 runtime 和官方 Provider 只按显式 adapter/wire/capability 进入路线，不根据品牌名猜测。
+- **Verification/Stop**:
+  - 同一 semantic fixture 在 Chat、Responses、Anthropic native 下得到语义等价的 text/tool/usage `TurnOutcome`。
+  - Anthropic native 与 compatibility adapter 的 request、stream、error、fingerprint 有明确差异测试。
+  - unsupported contract、tool、stream 或 thinking 能力 fail-closed；禁止静默换 wire/adapter。
+  - 真实 Anthropic smoke 仍需用户授权和有效 credential；模拟测试不能替代。
 
 ### Task 3：当前配置与 Agent 数据迁移
 
@@ -574,6 +628,14 @@ Task 3 与 Task 4 可在 Task 2 的 graph/DTO 契约冻结后分支实施，但 
 - `config/llm_projection.py`
 - `config/public_config.py`
 - `core/llm/protocol_resolver.py`
+- `core/llm/protocols.py`
+- `core/llm/adapters.py`
+- `core/llm/client.py`
+- `core/llm/wire/registry.py`
+- `core/llm/wire/chat_completions.py`
+- `core/llm/wire/responses.py`
+- `core/llm/wire/compat_native.py`
+- `core/llm/wire/anthropic_messages.py`（新增候选）
 - `core/llm/agent_runtime.py`
 - `core/llm/recovery.py`
 - `core/llm/routing.py`
@@ -615,6 +677,7 @@ Task 3 与 Task 4 可在 Task 2 的 graph/DTO 契约冻结后分支实施，但 
 | Schema | 未知字段和混义协议被拒绝 | schema/config tests | 运行时一次成功 |
 | Graph | 所有启用资源和 Agent 绑定被遍历 | graph fixture + active sanitized snapshot | 只检查 Profile |
 | Resolver | 每条有效模型得到唯一 route | protocol resolver tests | UI 文本 |
+| Wire parity | Chat、Responses、Anthropic native 对同一 semantic fixture 产生等价 `TurnOutcome`，且 native/compat identity 不混淆 | protocol/wire/conversation contract tests | 仅注册 enum/adapter |
 | Projection | UI/doctor/runtime fingerprint 一致 | service/DTO contract tests | 手工查看配置页 |
 | Recovery | changed-request recovery 实际执行一次 | deterministic mock tests | 日志里出现 action 名 |
 | Fallback | 与失败路由身份不同 | fingerprint assertion | 不同 Profile 名称 |
@@ -630,6 +693,7 @@ Task 3 与 Task 4 可在 Task 2 的 graph/DTO 契约冻结后分支实施，但 
 - 配置核心：312 passed。
 - 配置面板与 Web route：202 passed。
 - LLM/协议/恢复扩展套件：504 passed。
+- 当前 wire 聚焦基线：`test_llm_protocol_resolver.py`、Chat/Responses wire、outbound bridge、conversation chain 共 70 passed。
 - 修正并重新纳入：
   - Responses stream cancellation Windows 冷启动时序测试。
   - semantic projector reasoning replay state 旧预期测试。
@@ -652,10 +716,11 @@ Task 3 与 Task 4 可在 Task 2 的 graph/DTO 契约冻结后分支实施，但 
 需要用户明确授权远端调用后，按有界矩阵执行：
 
 1. primary Responses 非工具流式调用。
-2. primary 工具调用。
-3. semantic recovery 模拟或受控 fault injection，不用故意制造付费无限重试。
-4. 独立 fallback 直接 smoke，再模拟 primary failure 验证切换。
-5. 本地 Provider 在线时验证 `auth_kind="none"`。
+2. Chat Completions 官方或已声明 OpenAI-compatible endpoint 的非工具与工具调用。
+3. Anthropic native 非工具流式与受控工具调用；另跑 LiteLLM compatibility smoke，分别记录 adapter/backend identity。
+4. semantic recovery 模拟或受控 fault injection，不用故意制造付费无限重试。
+5. 独立 fallback 直接 smoke，再模拟 primary failure 验证切换。
+6. 本地 Provider 在线时验证 `auth_kind="none"`，且未验证 tools/streaming 时保持 capability disabled/unknown。
 
 每项记录：配置 fingerprint、请求模式、终态、错误分类和 runtime-scene。不能记录完整 Prompt 或 secret。
 
