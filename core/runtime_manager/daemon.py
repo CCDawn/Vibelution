@@ -2105,6 +2105,12 @@ def _frontend_dependency_restore_command() -> tuple[str, list[str]]:
     return "node npm-cli.js install", [node_command, npm_cli_script, "install"]
 
 
+def _subprocess_text_kwargs() -> dict[str, object]:
+    """Decode hidden child output without crashing Windows reader threads."""
+
+    return {"text": True, "encoding": "utf-8", "errors": "replace"}
+
+
 def _frontend_build_preflight_missing_dependency_entries(commands: list[tuple[str, list[str]]]) -> list[dict[str, str]]:
     missing: list[dict[str, str]] = []
     for label, command in commands:
@@ -2124,12 +2130,12 @@ def _restore_frontend_dependencies_for_restart(command_id: str, missing_entries:
             cwd=str(PROJECT_ROOT / "web"),
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            text=True,
             timeout=_RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS,
             # Waitable node install: never DETACHED (would ignore CREATE_NO_WINDOW).
             creationflags=_creation_flags(detach=False),
             startupinfo=_hidden_startup_info(),
             check=False,
+            **_subprocess_text_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         payload = {
@@ -2476,12 +2482,12 @@ def _preflight_frontend_build_for_restart(command_id: str, *, force: bool = Fals
                 cwd=str(PROJECT_ROOT / "web"),
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
-                text=True,
                 timeout=_RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS,
                 # Waitable tsc/vite: CREATE_NO_WINDOW only (never with DETACHED).
                 creationflags=_creation_flags(detach=False),
                 startupinfo=_hidden_startup_info(),
                 check=False,
+                **_subprocess_text_kwargs(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             payload = {
