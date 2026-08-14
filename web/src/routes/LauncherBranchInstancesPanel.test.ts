@@ -7,12 +7,15 @@ import {
   canStartInstance,
   canStopInstance,
   cleanupRiskLabels,
+  filterBranchInstances,
+  formatAttentionReason,
   formatBackendStatus,
   formatFrontendStatus,
   formatGitStatus,
   formatWorkbenchStatus,
   groupBranchInstances,
   instanceRuntimeState,
+  instanceStopLabel,
   isCleanupEligible,
   paginateItems,
 } from "./LauncherBranchInstancesPanel.model";
@@ -62,8 +65,14 @@ function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBran
 describe("LauncherBranchInstancesPanel contracts", () => {
   it("keeps the two primary sections on VUI primitives", () => {
     expect(panelSource).toContain("from \"../components/vui\"");
+    expect(panelSource).toContain("LauncherBranchStatusHelp");
     expect(panelSource).toContain("正在运行");
+    expect(panelSource).toContain("需要处理");
     expect(panelSource).toContain("可启动");
+    expect(panelSource).toContain("全部关闭");
+    expect(panelSource).toContain("停止全部");
+    expect(panelSource).toContain("<VNativeInput");
+    expect(panelSource).toContain("<VToolbar");
     expect(panelSource).toContain("Launcher 控制窗口");
     expect(panelSource).toContain("Workbench 窗口");
     expect(panelSource).toContain("启动工作台");
@@ -86,7 +95,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(BRANCH_INSTANCE_PAGE_SIZE).toBe(8);
   });
 
-  it("keeps active, transitional, partial, and failed instances in the running section", () => {
+  it("keeps live instances running and failed zombies in attention", () => {
     const running = instance({
       id: "main",
       kind: "main",
@@ -143,13 +152,36 @@ describe("LauncherBranchInstancesPanel contracts", () => {
 
     expect(groups.running.map((item) => item.id)).toEqual([
       "main",
-      "worktree:failed",
       "worktree:partial",
       "worktree:startable",
     ]);
+    expect(groups.attention.map((item) => item.id)).toEqual(["worktree:failed"]);
     expect(groups.startable).toEqual([]);
     expect(groups.maintenance.map((item) => item.id)).toEqual(["retired:old"]);
     expect(instanceRuntimeState(startable, { instanceId: startable.id, operation: "start" })).toBe("starting");
+    expect(canStopInstance(failed)).toBe(true);
+    expect(instanceStopLabel(failed, true)).toBe("关闭");
+    expect(formatAttentionReason(failed, true)).toBe("上次启动失败");
+  });
+
+  it("lets a retired failed leftover close without restart", () => {
+    const retiredFailed = instance({
+      id: "retired:fix-composer",
+      kind: "retired",
+      checkedOut: false,
+      startable: false,
+      startBlockReason: "unsupported_kind",
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "error",
+        error: { code: "registry_failed", message: "上次启动失败" },
+      },
+    });
+
+    expect(groupBranchInstances([retiredFailed]).attention.map((item) => item.id)).toEqual(["retired:fix-composer"]);
+    expect(canStopInstance(retiredFailed)).toBe(true);
+    expect(instanceStopLabel(retiredFailed, true)).toBe("关闭");
+    expect(canStartInstance(retiredFailed)).toBe(false);
   });
 
   it("does not present a reserved port as a running backend", () => {
@@ -178,8 +210,19 @@ describe("LauncherBranchInstancesPanel contracts", () => {
 
     expect(formatBackendStatus(stopped, true)).toBe("未运行");
     expect(formatBackendStatus(running, true)).toBe("健康 · :8002");
-    expect(formatFrontendStatus(stopped, true)).toBe("内置模式 · 已构建");
-    expect(formatFrontendStatus(running, true)).toBe("内置资源就绪");
+    expect(formatFrontendStatus(stopped, true)).toBe("前端已构建");
+    expect(formatFrontendStatus(running, true)).toBe("前端已构建");
+    expect(formatFrontendStatus(
+      instance({
+        runtime: {
+          ...instance().runtime,
+          lifecycleState: "error",
+          frontend: { mode: "bundled_static_dist", ready: false },
+        },
+        startable: false,
+      }),
+      true,
+    )).toBe("前端未构建 · 启动时构建");
   });
 
   it("shows the Workbench title, window state, and Git state independently", () => {
@@ -219,6 +262,16 @@ describe("LauncherBranchInstancesPanel contracts", () => {
 
     expect(canStartInstance(stale)).toBe(false);
     expect(canStopInstance(stale)).toBe(false);
+  });
+
+  it("filters branch instances by query and dirty/unmerged chips", () => {
+    const dirty = instance({ id: "worktree:dirty", shortName: "timing", dirty: true, mergedToMain: true });
+    const unmerged = instance({ id: "worktree:unmerged", shortName: "composer", dirty: false, mergedToMain: false });
+    const clean = instance({ id: "worktree:clean", shortName: "clean", dirty: false, mergedToMain: true });
+
+    expect(filterBranchInstances([dirty, unmerged, clean], "timing").map((item) => item.id)).toEqual(["worktree:dirty"]);
+    expect(filterBranchInstances([dirty, unmerged, clean], "", { dirty: true }).map((item) => item.id)).toEqual(["worktree:dirty"]);
+    expect(filterBranchInstances([dirty, unmerged, clean], "", { unmerged: true }).map((item) => item.id)).toEqual(["worktree:unmerged"]);
   });
 
   it("pages startable or maintenance lists at 8 rows", () => {

@@ -296,6 +296,27 @@ def _workbench_state_for_item(item: dict[str, Any]) -> dict[str, Any]:
     return dict(workbench)
 
 
+def _clear_isolated_workbench_runtime(item: dict[str, Any]) -> None:
+    """Drop leftover failed/open workbench flags so a stopped row can become startable."""
+
+    path = str(item.get("path") or "").strip()
+    if not path:
+        return
+    state_path = Path(path) / ".runtime" / "launcher" / "state.json"
+    payload = _read_json_file(state_path)
+    workbench = dict(payload.get("workbench") if isinstance(payload.get("workbench"), dict) else {})
+    workbench["desiredState"] = "closed"
+    workbench["observedState"] = "closed"
+    workbench["phase"] = "steady"
+    workbench["failureMessage"] = ""
+    payload["workbench"] = workbench
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return
+
+
 def _bundled_frontend_ready(item: dict[str, Any]) -> bool:
     path = str(item.get("path") or "").strip()
     return bool(path and (Path(path) / "web" / "dist" / "index.html").is_file())
@@ -313,6 +334,14 @@ def resolve_branch_instance(instance_id: str) -> dict[str, Any]:
 
 
 def assert_instance_operable(item: dict[str, Any], operation: str) -> None:
+    if operation not in {"start", "stop", "restart", "force-stop"}:
+        raise BranchInstanceLifecycleError(
+            "invalid_instance_operation",
+            f"不支持的实例操作：{operation}",
+            status_code=400,
+        )
+    if operation in {"stop", "force-stop"} and _is_dismissable_failed_leftover(item):
+        return
     kind = str(item.get("kind") or "")
     if kind not in _STARTABLE_KINDS or not item.get("checkedOut"):
         raise BranchInstanceLifecycleError(
@@ -324,12 +353,6 @@ def assert_instance_operable(item: dict[str, Any], operation: str) -> None:
         raise BranchInstanceLifecycleError(
             "instance_not_startable",
             "该分支没有可用的工作区路径，无法启停。",
-        )
-    if operation not in {"start", "stop", "restart", "force-stop"}:
-        raise BranchInstanceLifecycleError(
-            "invalid_instance_operation",
-            f"不支持的实例操作：{operation}",
-            status_code=400,
         )
 
 
@@ -421,6 +444,7 @@ def run_isolated_operation(
             message="已在隔离端口启动选中工作区。" if operation == "start" else "已在隔离端口重启选中工作区。",
         )
 
+    instance_id = _resolve_registry_instance_id(item) or instance_id
     existing = registry.get_instance(instance_id)
     backend_port = _positive_int(existing.get("port")) or _positive_int(item.get("port")) or registry.DEFAULT_BASE_PORT
     control_port = (
@@ -428,8 +452,16 @@ def run_isolated_operation(
         or _positive_int(item.get("controlPort"))
         or registry.DEFAULT_CONTROL_PORT
     )
-    close_isolated_workbench_window(item)
-    spawn(worktree, "stop", backend_port, control_port)
+    close_item = dict(item)
+    close_item["id"] = instance_id
+    close_isolated_workbench_window(close_item)
+    launcher_script = worktree / "scripts" / "vibelution_launcher.py"
+    if runner is not None or launcher_script.is_file():
+        try:
+            spawn(worktree, "stop", backend_port, control_port)
+        except BranchInstanceLifecycleError:
+            if _item_has_live_runtime(item):
+                raise
     _upsert_instance_with_slot(
         instance_id,
         worktree,
@@ -439,6 +471,7 @@ def run_isolated_operation(
         status="closed",
         window_pid=0,
     )
+    _clear_isolated_workbench_runtime(item)
     return _isolated_response(
         operation,
         instance_id=instance_id,
@@ -611,6 +644,44 @@ def _isolated_backend_alive(item: dict[str, Any]) -> bool:
     if not item.get("alive"):
         return False
     return _positive_int(item.get("port")) > 0
+
+
+def _runtime_bundle(item: dict[str, Any]) -> dict[str, Any]:
+    runtime = item.get("runtime")
+    return runtime if isinstance(runtime, dict) else {}
+
+
+def _runtime_section(item: dict[str, Any], key: str) -> dict[str, Any]:
+    section = _runtime_bundle(item).get(key)
+    return section if isinstance(section, dict) else {}
+
+
+def _item_has_live_runtime(item: dict[str, Any]) -> bool:
+    backend = _runtime_section(item, "backend")
+    window = _runtime_section(item, "window")
+    return bool(
+        item.get("alive")
+        or backend.get("alive")
+        or backend.get("listening")
+        or window.get("open")
+        or _isolated_backend_alive(item)
+    )
+
+
+def _is_dismissable_failed_leftover(item: dict[str, Any]) -> bool:
+    if _item_has_live_runtime(item):
+        return False
+    state = str(_runtime_bundle(item).get("lifecycleState") or "").strip().lower()
+    return state in {"error", "partial"}
+
+
+def _resolve_registry_instance_id(item: dict[str, Any]) -> str:
+    instance_id = str(item.get("id") or "").strip()
+    if instance_id and registry.get_instance(instance_id):
+        return instance_id
+    found = registry.find_instance_by_project_root(str(item.get("path") or ""))
+    found_id = str(found.get("instanceId") or "").strip()
+    return found_id or instance_id
 
 
 def _upsert_instance_with_slot(
