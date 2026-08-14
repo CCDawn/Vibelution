@@ -3852,6 +3852,49 @@ def test_submit_command_joins_active_open_workbench(tmp_path, monkeypatch):
     assert event["payload"]["commandId"] == "cmd-active-open"
 
 
+def test_submit_open_joins_active_restart_workbench(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 51,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "command": {
+                "activeCommandId": "cmd-active-restart",
+                "activeType": "restart_workbench",
+                "noBrowser": False,
+            },
+        },
+    )
+
+    command = command_queue.submit_command(
+        "open_workbench",
+        args={"reason": "launcher_start", "noBrowser": False},
+        requested_by="launcher_api",
+    )
+
+    assert command["commandId"] == "cmd-active-restart"
+    assert list(inbox_dir.glob("*.json")) == []
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.open_joined"
+    assert event["payload"]["joinedCommandType"] == "restart_workbench"
+
+
 def test_submit_command_joins_pending_open_workbench(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -4024,6 +4067,56 @@ def test_submit_command_joins_pending_restart_workbench(tmp_path, monkeypatch):
     assert list(results_dir.glob("*.json")) == []
     event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
     assert event["type"] == "command_queue.restart_joined"
+
+
+def test_submit_open_joins_pending_restart_workbench(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    (inbox_dir / "cmd-pending-restart.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-pending-restart",
+                "type": "restart_workbench",
+                "requestedBy": "launcher_api",
+                "args": {"reason": "launcher_restart", "noBrowser": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 55,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "command": {"activeCommandId": "", "activeType": ""},
+        },
+    )
+
+    command = command_queue.submit_command(
+        "open_workbench",
+        args={"reason": "launcher_start", "noBrowser": False},
+        requested_by="launcher_api",
+    )
+
+    assert command["commandId"] == "cmd-pending-restart"
+    assert [path.name for path in inbox_dir.glob("*.json")] == ["cmd-pending-restart.json"]
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.open_joined"
+    assert event["payload"]["joinedCommandType"] == "restart_workbench"
 
 
 def test_close_workbench_supersedes_pending_open_workbench(tmp_path, monkeypatch):
@@ -8632,6 +8725,8 @@ def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeyp
     for call in calls:
         kwargs = call["kwargs"]
         startupinfo = kwargs["startupinfo"]
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
         # Waitable builds must use CREATE_NO_WINDOW without DETACHED_PROCESS
         # (MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED).
         assert not (kwargs["creationflags"] & 0x00000008)

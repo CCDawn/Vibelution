@@ -260,7 +260,9 @@ def get_launcher_status() -> dict[str, Any]:
     """Return standalone Launcher status without importing the Web service layer."""
 
     runtime_state = _runtime_manager_state()
-    if _recover_stale_close_commands_when_manager_offline(runtime_state):
+    if _recover_stale_open_command_when_manager_offline(runtime_state):
+        runtime_state = _runtime_manager_state()
+    elif _recover_stale_close_commands_when_manager_offline(runtime_state):
         runtime_state = _runtime_manager_state()
     launcher_state = _load_launcher_state()
     observed_workbench = _status_observed_workbench(runtime_state)
@@ -2219,6 +2221,28 @@ def _runtime_manager_state() -> dict[str, Any]:
     payload["managerPid"] = int(manager_pid or 0)
     payload.setdefault("projectRoot", str(PROJECT_ROOT))
     return payload
+
+
+def _recover_stale_open_command_when_manager_offline(runtime_state: dict[str, Any]) -> bool:
+    """Resume an accepted open/restart command if its daemon exited mid-flight.
+
+    Launcher status polling is the one component guaranteed to remain alive
+    while the Workbench overlay waits.  Recovery is restricted to commands
+    already moved into ``processing`` so a passive status read never invents a
+    new lifecycle intent.
+    """
+
+    if bool(runtime_state.get("daemonRunning")):
+        return False
+    try:
+        processing = _recent_command_files(PROCESSING_DIR, limit=20)
+    except Exception:
+        processing = []
+    recoverable_types = {"open_workbench", "restart_workbench", "hot_restart_workbench"}
+    if not any(str(command.get("type") or "").strip() in recoverable_types for command in processing):
+        return False
+    result = ensure_runtime_manager_daemon_alive()
+    return str(result.get("action") or "") in {"restarted", "already_running"}
 
 
 def _recover_stale_close_commands_when_manager_offline(runtime_state: dict[str, Any]) -> bool:
