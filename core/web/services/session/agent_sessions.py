@@ -2338,7 +2338,14 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
         payload["updated_at"] = now
         payload["conversations"] = remaining
         try:
-            timed("save_state", lambda: s.save_chat_state(s.PROJECT_ROOT, payload))
+            timed(
+                "save_state_and_archive",
+                lambda: s.save_chat_state(
+                    s.PROJECT_ROOT,
+                    payload,
+                    archive_session_id=conversation_id,
+                ),
+            )
         except Exception as exc:
             if agent_unbound:
                 try:
@@ -2375,36 +2382,16 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
 
     from . import directory_bridge
 
-    directory_archive_started_at = s._perf_counter()
-    directory_archive_future = directory_bridge.archive_directory_session_safe(
-        conversation_id,
-        wait=False,
+    timings["directory_archive_dispatch"] = 0
+    s._record_session_delete_event(
+        "directory_archived",
+        session_id=conversation_id,
+        outcome="archived",
+        fields={
+            "durationMs": timings.get("save_state_and_archive", 0),
+            "transactional": True,
+        },
     )
-    timings["directory_archive_dispatch"] = s._elapsed_ms(directory_archive_started_at)
-    if directory_archive_future is not None:
-
-        def record_directory_archive_result(completed: Any) -> None:
-            try:
-                completed.result()
-            except Exception as exc:
-                s._record_session_delete_event(
-                    "directory_archive_failed",
-                    session_id=conversation_id,
-                    outcome="degraded",
-                    level="warning",
-                    fields={"reason": type(exc).__name__},
-                )
-            else:
-                s._record_session_delete_event(
-                    "directory_archived",
-                    session_id=conversation_id,
-                    outcome="archived",
-                    fields={
-                        "durationMs": s._elapsed_ms(directory_archive_started_at),
-                    },
-                )
-
-        directory_archive_future.add_done_callback(record_directory_archive_result)
     if replacement_snapshot is not None:
         directory_bridge.sync_conversation_record(replacement_snapshot)
     s._invalidate_session_list_cache()
