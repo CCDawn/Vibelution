@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { SessionSummary } from "../../api/types";
 import { isVisibleDirectSession } from "../conversationIndexModel";
@@ -180,25 +180,20 @@ export function useChatSelectionPersistence({
   selectedAgentId,
   sessions,
 }: UseChatSelectionPersistenceOptions): UseChatSelectionPersistenceResult {
-  const storedSelectionRef = useRef<Partial<ChatSelectionProjection> | null | undefined>(undefined);
-
-  useEffect(() => {
-    if (storedSelectionRef.current !== undefined) {
-      return;
-    }
-    storedSelectionRef.current = readStoredChatSelection(chatSelectionStorage(), CHAT_SELECTION_STORAGE_KEY);
-  }, []);
+  const [storedSelection] = useState<Partial<ChatSelectionProjection> | null>(() =>
+    readStoredChatSelection(chatSelectionStorage(), CHAT_SELECTION_STORAGE_KEY),
+  );
 
   const bareRouteBootstrapTarget = useMemo(() => {
     if (selection.kind !== "bare") {
       return null;
     }
     return resolveBareRouteBootstrapTarget({
-      stored: storedSelectionRef.current ?? null,
+      stored: storedSelection,
       serverSessionId,
       sessions,
     });
-  }, [selection.kind, serverSessionId, sessions]);
+  }, [selection.kind, serverSessionId, sessions, storedSelection]);
 
   // Passively persist the committed direct session (never reads back into navigation).
   const committedSessionId = selection.kind === "session" ? selection.sessionId : "";
@@ -219,7 +214,7 @@ export function useChatSelectionPersistence({
   }, [activeSessionAgentId, committedSessionId, selectedAgentId, sessions]);
 
   return {
-    storedSelection: storedSelectionRef.current ?? null,
+    storedSelection,
     bareRouteBootstrapTarget,
   };
 }
