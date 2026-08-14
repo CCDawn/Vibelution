@@ -54,12 +54,13 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain("void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {");
   });
 
-  it("opens the Launcher window on a bare first launch and does not quit when python is missing", () => {
+  it("opens the Launcher window on a bare first launch and resolves the workbench URL without python", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain("await windowProvider.openLauncher()");
     expect(source).toContain('else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot)');
-    expect(source).toContain("Launcher Service bootstrap skipped");
-    expect(source).not.toContain("VIBELUTION_PYTHON_PATH or PYTHON is required to bootstrap the Launcher Service");
+    expect(source).toContain("bootstrapMainOwnedLauncher(paths)");
+    expect(source).toContain("resolveWorkbenchUrl(desktopEnv, workbenchUrl || undefined)");
+    expect(source).not.toContain("bootstrapPythonLauncherService(");
   });
 });

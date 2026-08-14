@@ -3,7 +3,7 @@ import type { IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../src/ipc.js";
 import { assertLocalHttpUrl } from "../src/security/urlPolicy.js";
 import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
-import { resolveLauncherControlPlaneUrl, resolveLauncherWindowUrl, resolveWorkbenchUrl } from "../src/windows/windowUrlResolver.js";
+import { resolveLauncherWindowUrl, resolveWorkbenchUrl } from "../src/windows/windowUrlResolver.js";
 import {
   ElectronWindowProvider,
   shouldCancelWorkbenchInPageNavigation,
@@ -905,20 +905,6 @@ describe("resolveLauncherWindowUrl", () => {
   it("accepts an explicit development override", () => {
     expect(resolveLauncherWindowUrl({ VIBELUTION_LAUNCHER_URL: "http://127.0.0.1:9000/launcher" } as NodeJS.ProcessEnv)).toBe(
       "http://127.0.0.1:9000/launcher"
-    );
-  });
-});
-
-describe("resolveLauncherControlPlaneUrl", () => {
-  it("prefers a live status URL over the development default", () => {
-    expect(
-      resolveLauncherControlPlaneUrl({ NODE_ENV: "development" } as NodeJS.ProcessEnv, "http://127.0.0.1:8765/launcher")
-    ).toBe("http://127.0.0.1:8765/launcher");
-  });
-
-  it("does not silently hard-code a production port", () => {
-    expect(() => resolveLauncherControlPlaneUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
-      "Launcher control plane URL is not resolved"
     );
   });
 });

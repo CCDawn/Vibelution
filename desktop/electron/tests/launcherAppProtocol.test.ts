@@ -12,8 +12,8 @@ import {
   resolveLauncherDistRoot,
 } from "../src/protocol/launcherAppProtocol.js";
 import {
-  resolveLauncherControlPlaneUrl,
   resolveLauncherWindowUrl,
+  resolveWorkbenchUrl,
 } from "../src/windows/windowUrlResolver.js";
 
 const FAKE_DIST = "C:/fake/web/dist";
@@ -54,12 +54,12 @@ describe("launcher app protocol URLs", () => {
     );
   });
 
-  it("keeps the control plane resolver on local HTTP for the main-process strangler proxy", () => {
+  it("keeps the workbench resolver on local HTTP for the workbench window", () => {
     expect(
-      resolveLauncherControlPlaneUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv, "http://127.0.0.1:8765/launcher")
-    ).toBe("http://127.0.0.1:8765/launcher");
-    expect(() => resolveLauncherControlPlaneUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
-      "Launcher control plane URL is not resolved"
+      resolveWorkbenchUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv, "http://127.0.0.1:8000/")
+    ).toBe("http://127.0.0.1:8000/");
+    expect(() => resolveWorkbenchUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
+      "Workbench URL is not resolved"
     );
   });
 

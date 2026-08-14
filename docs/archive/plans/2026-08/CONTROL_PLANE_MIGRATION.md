@@ -1,7 +1,7 @@
 # Launcher Electron 控制面迁移
 
-Status: **Active** (2026-08-14)
-Authority: [ADR 0009](../../docs/adr/0009-launcher-control-plane-lives-in-electron-main.md) · 本文件只是执行账本，不另立规范。
+Status: **Closed** (2026-08-14). T1–T9 landed; `:8765` retired as the product control plane. Electron main is the Launcher control plane (IPC), the Python workbench runs as a child, and the C# shim forwards to Electron. See `desktop/electron/README.md` and `core/web/services/launcher_runtime.md` for the current contract. Archived per the ledger close condition.
+Authority: [ADR 0009](../../../docs/adr/0009-launcher-control-plane-lives-in-electron-main.md) · 本文件只是执行账本，不另立规范。
 Close condition: 产品路径不再监听/依赖 `127.0.0.1:8765`；控制窗口只经 IPC 拿到 status/lifecycle；C# shim 把命令交给已运行的 Electron；`core/launcher/app.py` 不再作为产品控制面 HTTP 服务。
 On close: 把仍有历史价值的段落提炼进 `README.md` / `launcher_runtime.md` / ADR 0009 Consequences，本文件迁入 `docs/archive/plans/2026-08/`。
 

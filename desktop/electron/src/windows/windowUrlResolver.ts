@@ -12,23 +12,6 @@ export function resolveLauncherWindowUrl(env: NodeJS.ProcessEnv): string {
   return resolveLauncherAppUrl();
 }
 
-export function resolveLauncherControlPlaneUrl(
-  env: NodeJS.ProcessEnv,
-  launcherStatusUrl?: string
-): string {
-  const explicit = String(env.VIBELUTION_LAUNCHER_URL || "").trim();
-  if (explicit && !isLauncherAppUrl(explicit)) {
-    return assertLocalHttpUrl(explicit, new URL(explicit).origin);
-  }
-  if (launcherStatusUrl) {
-    return assertLocalHttpUrl(launcherStatusUrl, new URL(launcherStatusUrl).origin);
-  }
-  if (env.NODE_ENV === "test" || env.NODE_ENV === "development") {
-    return "http://127.0.0.1:8765/launcher";
-  }
-  throw new Error("Launcher control plane URL is not resolved; start through existing Launcher status or explicit dev override");
-}
-
 export function resolveWorkbenchUrl(env: NodeJS.ProcessEnv, workbenchStatusUrl?: string): string {
   const explicit = String(env.VIBELUTION_WORKBENCH_URL || "").trim();
   if (explicit) {

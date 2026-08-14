@@ -64,7 +64,6 @@ import {
   type DeepLinkRegistrationResult
 } from "./protocol/deepLinkRegistration.js";
 import {
-  bootstrapPythonLauncherService,
   stopPythonLauncherService,
   type LauncherServiceStopResult
 } from "./process/launcherServiceClient.js";
@@ -119,8 +118,7 @@ import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
 import {
-  resolveLauncherControlPlaneUrl,
-  resolveLauncherWindowUrl,
+    resolveLauncherWindowUrl,
   resolveWorkbenchUrl
 } from "./windows/windowUrlResolver.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
@@ -424,37 +422,76 @@ function resolveConversationNotificationService(): ConversationNotificationServi
   return conversationNotificationService;
 }
 
-async function bootstrapLauncherIfEnabled(paths: DesktopPaths): Promise<LauncherBootstrapResult | null> {
+async function bootstrapMainOwnedLauncher(paths: DesktopPaths): Promise<LauncherBootstrapResult | null> {
+  // T9: Electron main is the Launcher control plane. The Python :8765 service
+  // is no longer spawned; the workbench URL is resolved through a no-console
+  // Python bridge (env → ports.json → config → default).
   const desktopEnv = desktopEnvironment();
-  if (desktopEnv.VIBELUTION_ELECTRON_START_LAUNCHER === "0") {
-    return null;
-  }
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
-  if (!pythonPath) {
-    console.warn("Launcher Service bootstrap skipped: no VIBELUTION_PYTHON_PATH, PYTHON, or workspace .venv interpreter.");
-    return null;
-  }
   electronStartupStage = "control_plane_attach";
   const stageStartedAtMs = performance.now();
-  const result = await bootstrapPythonLauncherService({
+  let workbenchUrl = "";
+  if (pythonPath) {
+    try {
+      const raw = await runPythonJsonBridge({
+        pythonPath,
+        args: [
+          resolve(paths.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
+          "--action",
+          "resolve-workbench",
+          "--output",
+          "json",
+          "--workspace",
+          paths.workspaceRoot,
+          "--config",
+          String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+          "--no-browser"
+        ],
+        cwd: paths.workspaceRoot,
+        failureLabel: "resolve workbench bridge"
+      });
+      const parsed = JSON.parse(raw) as { schemaVersion?: number; workbenchUrl?: string };
+      if (parsed.schemaVersion === 1 && typeof parsed.workbenchUrl === "string" && parsed.workbenchUrl.trim()) {
+        workbenchUrl = parsed.workbenchUrl.trim();
+      }
+    } catch (error: unknown) {
+      console.warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+  workbenchUrl = resolveWorkbenchUrl(desktopEnv, workbenchUrl || undefined);
+  const bootstrapIdentity = `electron-${process.pid}-${Date.now().toString(36)}`;
+  const result: LauncherBootstrapResult = {
+    schemaVersion: 1,
     workspaceRoot: paths.workspaceRoot,
-    pythonPath,
-    operatorConfigPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim()
-  });
+    operatorConfigPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    workspaceId: "electron-main",
+    launcherInstanceId: bootstrapIdentity,
+    mode: "attached",
+    launcherBackendPid: 0,
+    launcherUrl: workbenchUrl,
+    workbenchUrl,
+    ready: true,
+    protocolVersion: 1,
+    minDesktopProtocolVersion: 1,
+    maxDesktopProtocolVersion: 1,
+    capabilities: [
+      "desktop_actions.claim",
+      "desktop_sessions.heartbeat",
+      "runtime_scene.electron_event",
+      "workbench_close.transaction.v1"
+    ]
+  };
   const event = {
     eventCode: "electron.startup.control_plane_attached",
-    message: "Electron attached to the Launcher control plane.",
+    message: "Electron main is the Launcher control plane.",
     fields: electronStartupFields({
       stage: "control_plane_attach",
       stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
-      mode: result.mode,
-      launcherBackendPid: result.launcherBackendPid
+      mode: "main_orchestrated",
+      launcherBackendPid: 0
     })
   };
-  return completeBootstrapWithoutWaitingForTelemetry(
-    result,
-    () => recordElectronSupervisorEvent(result, event)
-  );
+  return completeBootstrapWithoutWaitingForTelemetry(result, () => recordElectronSupervisorEvent(result, event));
 }
 
 function startDesktopActionLoop(
@@ -755,7 +792,7 @@ async function resolveDesktopActionLoopContext(
     return desktopActionContext;
   }
   const desktopEnv = desktopEnvironment();
-  const launcherOrigin = resolveLauncherControlPlaneUrl(desktopEnv, bootstrap.launcherUrl);
+  const launcherOrigin = resolveWorkbenchUrl(desktopEnv, bootstrap.workbenchUrl);
   const envToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "").trim();
   const controlToken = options.forceControlTokenRefresh
     ? await fetchLauncherControlToken({ launcherOrigin })
@@ -1222,7 +1259,7 @@ async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
   const desktopEnv = desktopEnvironment();
   const bootstrap = await resolveSmokeBootstrap(paths, desktopEnv);
   launcherBootstrap = bootstrap.result;
-  const launcherUrl = bootstrap.launcherUrl || String(desktopEnv.VIBELUTION_LAUNCHER_URL || "http://127.0.0.1:8765/launcher");
+  const launcherUrl = resolveLauncherWindowUrl(desktopEnv);
   const workbenchUrl = bootstrap.workbenchUrl || String(desktopEnv.VIBELUTION_WORKBENCH_URL || "http://127.0.0.1:8000/");
   const controlToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "");
   const shutdown = await prepareDesktopSmokeShutdown({
@@ -1282,7 +1319,7 @@ async function resolveSmokeBootstrap(
     return { summary: emptySmokeBootstrapSummary({ attempted: false }), result: null, launcherUrl: "", workbenchUrl: "" };
   }
   try {
-    const result = await bootstrapLauncherIfEnabled(paths);
+    const result = await bootstrapMainOwnedLauncher(paths);
     if (result === null) {
       return { summary: emptySmokeBootstrapSummary({ attempted: true }), result: null, launcherUrl: "", workbenchUrl: "" };
     }
@@ -1462,7 +1499,7 @@ async function resolveTrayControlContextOrLoopback(): Promise<{
     return await resolveTrayLauncherControlContext();
   } catch {
     return {
-      launcherOrigin: "http://127.0.0.1:8765/launcher",
+      launcherOrigin: resolveWorkbenchUrl(desktopEnvironment(), launcherBootstrap?.workbenchUrl),
       controlToken: ""
     };
   }
@@ -1826,7 +1863,7 @@ app.whenReady()
       return;
     }
     const deepLinkRegistration = registerPackagedDeepLinks(paths);
-    launcherBootstrap = await bootstrapLauncherIfEnabled(paths);
+    launcherBootstrap = await bootstrapMainOwnedLauncher(paths);
     electronStartupStage = "tray_ready";
     const trayStartedAtMs = performance.now();
     windowProvider = createWindowProvider(paths, launcherBootstrap);
