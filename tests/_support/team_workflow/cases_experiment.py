@@ -643,6 +643,96 @@ def test_run_experiment_smoke_run_ignores_formal_fashionmnist_and_uses_v1_cpu(
 
     assert response["adapter"] == "synthetic_classification_baseline_vs_variant"
     assert response["runnerResult"]["runnerMode"] == "v1_cpu_smoke"
+    assert response["status"] == "needs_review"
+
+
+def test_needs_review_smoke_allows_formal_full_run_require():
+    from core.research import formal_runner
+
+    plan = {
+        "experimentContract": {
+            "adapterSelection": {
+                "resolvedAdapterId": formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+            },
+            "methodConfig": {"seeds": [17, 42, 101]},
+        },
+        "contractValidation": {"valid": True},
+        "readiness": {"readyForFullRun": False},
+        "activeSmokeRun": {"status": "needs_review", "smokeRunId": "smokerun-1"},
+    }
+    adapter_id, method = team_workflow_orchestration_service._require_formal_full_run_ready(
+        plan
+    )
+    assert adapter_id == formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    assert method["seeds"] == [17, 42, 101]
+
+
+def test_execute_experiment_full_run_uses_env_execution_config(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.experiment_api import full_run as full_run_api
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    plan_id = _seed_formal_full_run_plan(team["teamId"])
+    captured: dict[str, object] = {}
+
+    monkeypatch.setenv("VIBELUTION_FORMAL_PYTHON_EXECUTABLE", "C:/runner/python.exe")
+    monkeypatch.setenv("VIBELUTION_FORMAL_DATA_ROOT", "C:/data/fashionmnist")
+    monkeypatch.setenv("VIBELUTION_FORMAL_OUTPUT_ROOT", "C:/experiments/out")
+    monkeypatch.setenv("VIBELUTION_FORMAL_EPOCHS", "1")
+    monkeypatch.setenv("VIBELUTION_FORMAL_TRAIN_SAMPLES", "256")
+
+    def _run_full_run(adapter_id, **kwargs):
+        captured["adapterId"] = adapter_id
+        captured["executionConfig"] = kwargs.get("execution_config")
+        return {
+            "adapterId": adapter_id,
+            "status": "completed",
+            "seedCount": 3,
+            "resultPath": "C:/experiments/out/formal-run-result.json",
+            "logRef": "C:/experiments/out/formal-run-log.json",
+            "requiresResultReview": True,
+            "automaticPromotion": False,
+        }
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "run_full_run",
+        _run_full_run,
+    )
+
+    response = team_workflow_orchestration_service.execute_experiment_full_run(
+        team["teamId"], plan_id, {}
+    )
+
+    assert response["execution"]["status"] == "completed"
+    config = captured["executionConfig"]
+    assert isinstance(config, dict)
+    assert config["pythonExecutable"] == "C:/runner/python.exe"
+    assert config["dataRoot"] == "C:/data/fashionmnist"
+    assert config["outputRoot"] == "C:/experiments/out"
+    assert config["epochs"] == 1
+    assert config["trainSamples"] == 256
+    assert full_run_api.formal_execution_config_is_provisioned(config) is True
+
+
+def test_formal_execution_config_prefers_payload_then_skips_bounded_fallback():
+    from core.web.services.team_workflow.experiment_api.full_run import (
+        formal_execution_config_is_provisioned,
+        resolve_formal_execution_config,
+    )
+
+    payload = {
+        "executionConfig": {
+            "pythonExecutable": "C:/payload/python.exe",
+            "dataRoot": "C:/payload/data",
+            "outputRoot": "C:/payload/out",
+        }
+    }
+    resolved = resolve_formal_execution_config({}, payload)
+    assert resolved["pythonExecutable"] == "C:/payload/python.exe"
+    assert formal_execution_config_is_provisioned(resolved) is True
+    assert formal_execution_config_is_provisioned({}) is False
 
 
 def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkeypatch):
