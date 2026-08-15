@@ -17,6 +17,9 @@ import chatWorkbenchCatalogQueriesSource from "./chat/useChatWorkbenchCatalogQue
 import chatCenterTabStripSource from "./chat/ChatCenterTabStrip.tsx?raw";
 import chatCenterSessionSurfaceSource from "./chat/ChatCenterSessionSurface.tsx?raw";
 import chatConversationIndexPanelContentSource from "./chat/ChatConversationIndexPanelContent.tsx?raw";
+import chatToolApprovalBridgeSource from "./chat/useChatToolApprovalBridge.ts?raw";
+import chatComposerBridgeStateSource from "./chat/useChatComposerBridgeState.ts?raw";
+import chatGroupRoomViewModelSource from "./chat/useChatGroupRoomViewModel.ts?raw";
 import chatSessionWorkbenchShellSource from "./chat/ChatSessionWorkbenchShell.tsx?raw";
 import chatWorkbenchCenterColumnSource from "./chat/ChatWorkbenchCenterColumn.tsx?raw";
 import chatWorkbenchFormatSource from "./chat/chatWorkbenchFormat.ts?raw";
@@ -53,8 +56,14 @@ import conversationIndexRailStyles from "./chat/ChatConversationIndexRail.styles
 import chatStatusRailStyles from "./chat/ChatStatusRail.styles";
 import tokenCoreStatusPanelStyles from "./chat/TokenCoreStatusPanel.styles";
 
-/** Workbench shell + catalog queries hook (R01c F1). */
-const routeSource = `${chatCodingRouteWorkbenchSource}\n${chatWorkbenchCatalogQueriesSource}`;
+/** Workbench shell + catalog queries hook (R01c F1) + Phase F2 extract modules. */
+const routeSource = [
+  chatCodingRouteWorkbenchSource,
+  chatWorkbenchCatalogQueriesSource,
+  chatToolApprovalBridgeSource,
+  chatComposerBridgeStateSource,
+  chatGroupRoomViewModelSource,
+].join("\n");
 
 /** Wave 8C/8D: layout contracts resolve class strings across route shell + panel/component maps. */
 const routeStyles = {
@@ -410,10 +419,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndDetailMutationsSource).toContain('"acceptForSession"');
     expect(routeSource).toContain('"acceptAlways"');
     expect(routeAndDetailMutationsSource).toContain("resolveAgentToolGovernanceRequest");
-    expect(routeSource).toContain("onApproveToolApproval={() => {");
+    expect(routeSource).toContain("onApproveToolApproval={handleApproveToolApproval}");
     expect(routeSource).toContain("if (!pendingToolGovernanceApproval) {");
     expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"approve\" })");
-    expect(routeSource).toContain("onRejectToolApproval={() => {");
+    expect(routeSource).toContain("onRejectToolApproval={handleRejectToolApproval}");
     expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"reject\" })");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatToolApprovalDialog");
     expect(chatSessionWorkspacePanelSource).toContain("variant=\"banner\"");

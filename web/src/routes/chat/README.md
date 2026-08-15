@@ -108,7 +108,7 @@ Historical plan (archived): `docs/archive/superpowers/plans/2026-07-19-chat-codi
 ## Phase F (R01c — in progress)
 
 - **F1 done:** `useChatWorkbenchCatalogQueries.ts` — runtime/pet/config/session-index/conversations/teams/agents/skills/chat-room catalog + expanded agent detail queries
-- **Next:** group draft state / dialog chrome / remaining shell wiring until workbench net −300 LOC vs pre-R01c baseline
+- **F2 done:** `useChatToolApprovalBridge.ts` (governance & session tool approval), `useChatComposerBridgeState.ts` (composer draft, follow-up queue & bridge state), `useChatGroupRoomViewModel.ts` (group room identity, candidate agents & modes). Index tree JSX stays in the workbench until a typed owner can take it without a fat prop dump.
 
 ## Bundle note (secondary lazy)
 
