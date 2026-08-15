@@ -1,8 +1,9 @@
 import json
 
 from core.web.services import agent_directory_service
+from core.orchestration import context_engine
 from tools import episodic_memory_tools
-from tools.episodic_memory_tools import append_episodic_memory_tool
+from tools.episodic_memory_tools import append_episodic_memory_tool, supersede_episodic_memory_tool
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
@@ -54,11 +55,16 @@ def test_append_tool_has_no_target_agent_parameter():
     assert "target_agent" not in signature.parameters
 
 
-def test_default_session_policy_includes_personal_episode_tool():
+def test_default_session_policy_includes_personal_episode_tools():
     assert agent_directory_service.PERSONAL_EPISODE_TOOL_NAME == "append_episodic_memory_tool"
-    assert agent_directory_service.PERSONAL_EPISODE_TOOL_NAME in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
-    assert agent_directory_service.PERSONAL_EPISODE_TOOL_NAME not in agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS
-    assert agent_directory_service.PERSONAL_EPISODE_TOOL_NAME not in agent_directory_service.SESSION_PROTOCOL_ALLOWED_TOOLS
+    assert agent_directory_service.PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME == "supersede_episodic_memory_tool"
+    for name in (
+        agent_directory_service.PERSONAL_EPISODE_TOOL_NAME,
+        agent_directory_service.PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME,
+    ):
+        assert name in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
+        assert name not in agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS
+        assert name not in agent_directory_service.SESSION_PROTOCOL_ALLOWED_TOOLS
 
 
 def test_generation_handoff_tools_stay_off_default_session_policy():
@@ -139,15 +145,97 @@ def test_custom_session_policy_is_not_widened():
     assert agent_directory_service.PERSONAL_EPISODE_TOOL_NAME not in projected["allowedTools"]
 
 
-def test_key_tools_catalog_includes_append_episodic_memory_tool():
+def test_key_tools_catalog_includes_personal_episode_tools():
     from core.web.services import tool_catalog
     from tools.Key_Tools import create_key_tools
 
     names = {getattr(item, "name", "") for item in create_key_tools()}
-    assert "append_episodic_memory_tool" in names
+    for name in ("append_episodic_memory_tool", "supersede_episodic_memory_tool"):
+        assert name in names
+        assert name in tool_catalog.TOOL_CATALOG
+        metadata = tool_catalog.metadata_for_tool(name)
+        assert metadata["category"] == "memory_context"
+        assert metadata["permissionTier"] == "medium"
+        assert "memory_write" in metadata["riskTags"]
     assert episodic_memory_tools.APPEND_EPISODIC_MEMORY_TOOL_NAME == "append_episodic_memory_tool"
-    assert "append_episodic_memory_tool" in tool_catalog.TOOL_CATALOG
-    metadata = tool_catalog.metadata_for_tool("append_episodic_memory_tool")
-    assert metadata["category"] == "memory_context"
-    assert metadata["permissionTier"] == "medium"
-    assert "memory_write" in metadata["riskTags"]
+    assert episodic_memory_tools.SUPERSEDE_EPISODIC_MEMORY_TOOL_NAME == "supersede_episodic_memory_tool"
+
+
+def test_supersede_tool_replaces_current_episode(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Episode Editor")
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": agent["agentId"], "sessionId": "session-edit"},
+    )
+    first = json.loads(append_episodic_memory_tool(text="Prefer quiet mornings.", kind="preference"))
+    result = json.loads(
+        supersede_episodic_memory_tool(
+            episode_id=first["episodeId"],
+            successor_text="Prefer focused afternoons.",
+            kind="preference",
+        )
+    )
+    assert result["ok"] is True
+    assert result["status"] == "superseded"
+    current = agent_directory_service.list_current_episodic_events(agent["agentId"])
+    assert [item["episodeId"] for item in current] == [result["successorEpisodeId"]]
+    assert current[0]["text"] == "Prefer focused afternoons."
+
+
+def test_new_session_context_includes_current_personal_episodes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Episode Recall")
+    token = "ACCEPT-RECALL-keep-across-sessions"
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": agent["agentId"], "sessionId": "session-write"},
+    )
+    written = json.loads(append_episodic_memory_tool(text=f"User prefers {token}", kind="preference"))
+    packet = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-read",
+        run_id="turn-read",
+    )
+    assert written["episodeId"] in packet.dynamic_context_block
+    assert token in packet.dynamic_context_block
+    assert token not in packet.static_context_block
+    assert packet.episodic_events[0]["episodeId"] == written["episodeId"]
+
+
+def test_superseded_episode_is_not_dumped_into_new_session_context(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Episode Drop")
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": agent["agentId"], "sessionId": "session-drop"},
+    )
+    first = json.loads(append_episodic_memory_tool(text="Old stale preference.", kind="preference"))
+    json.loads(supersede_episodic_memory_tool(episode_id=first["episodeId"]))
+    packet = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-after-drop",
+        run_id="turn-after-drop",
+    )
+    assert first["episodeId"] not in packet.dynamic_context_block
+    assert "Old stale preference." not in packet.context_block
+    assert "PersonalEpisodes: none" in packet.dynamic_context_block
+
+
+def test_narrow_handoff_snapshot_projects_supersede_tool():
+    agent = {
+        "agentId": "agent-narrow",
+        "toolPolicyId": "tool-agent-narrow",
+        "primaryMode": "chat",
+    }
+    policy = {
+        "policyId": "tool-agent-narrow",
+        "allowedTools": list(agent_directory_service._NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS),
+        "preferredTools": list(agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS),
+    }
+    projected = agent_directory_service._with_session_terminal_protocol_defaults(agent, policy)
+    assert agent_directory_service.PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME in projected["allowedTools"]
+    assert projected["allowedTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
