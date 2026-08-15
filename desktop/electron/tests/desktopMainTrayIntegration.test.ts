@@ -40,6 +40,9 @@ describe("Electron main tray integration", () => {
     expect(traySource).toContain("requestDesktopShellExit()");
     expect(mainSource).toContain("restartLauncherShell");
     expect(mainSource).toContain("reapManagedRuntimeOnDesktopStart");
+    expect(mainSource).toContain("refreshPackagedDesktopShellIfStale");
+    expect(mainSource).toContain("scheduleDesktopShellRefresh");
+    expect(mainSource).toContain("decideLauncherShellRestart");
     expect(mainSource).toContain("stopManagedRuntime()");
     expect(mainSource).toContain("app.relaunch()");
     expect(mainSource).toContain("from \"./protocol/applyProjectSlot.js\"");
@@ -48,10 +51,17 @@ describe("Electron main tray integration", () => {
     const whenReadyIndex = mainSource.indexOf("app.whenReady()");
     const reapIndex = mainSource.indexOf("reapManagedRuntimeOnDesktopStart", whenReadyIndex);
     const smokeIndex = mainSource.indexOf("if (desktopCliArgs.smoke)", whenReadyIndex);
+    const refreshIndex = mainSource.indexOf("refreshPackagedDesktopShellIfStale", whenReadyIndex);
     const bootstrapIndex = mainSource.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths)");
     expect(reapIndex).toBeGreaterThan(whenReadyIndex);
     expect(reapIndex).toBeLessThan(smokeIndex);
-    expect(reapIndex).toBeLessThan(bootstrapIndex);
+    expect(refreshIndex).toBeGreaterThan(smokeIndex);
+    expect(refreshIndex).toBeLessThan(bootstrapIndex);
+    const restartStart = mainSource.indexOf("async function restartLauncherShell");
+    const restartBody = mainSource.slice(restartStart, mainSource.indexOf("async function runTrayLauncherPost"));
+    expect(restartBody).toContain('decideLauncherShellRestart({ isPackaged: app.isPackaged, stale }) === "rebuild-and-exit"');
+    expect(restartBody).toContain("scheduleCurrentDesktopShellRefresh");
+    expect(mainSource).toContain("handleSecondInstanceLifecycleCommand(firstLifecycle)");
   });
 
   it("destroys the tray only after shutdown is approved", () => {

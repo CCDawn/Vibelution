@@ -101,7 +101,7 @@ Web: `core/web/routes/launcher.py` · `runtime.py` · `logs.py` → `launcher_se
 node desktop\electron\node_modules\vitest\vitest.mjs run tests/windowProvider.test.ts tests/desktopTray.test.ts tests/desktopLifecycleCoordinator.test.ts tests/desktopMainTransactionalClose.test.ts tests/desktopMainTrayIntegration.test.ts tests/desktopActionClient.test.ts tests/desktopSmokeShutdown.test.ts tests/launcherIpcHost.test.ts tests/workbenchCloseTransactionStore.test.ts
 ```
 
-选择器：`desktop-electron-smoke`（`tests/test_matrix.yaml`）。这不是双壳重写；改完源码后若用户跑的是 `dist\desktop\win-unpacked\Vibelution.exe`，需要重新 package 才看得到 tray/quit/handoff。
+选择器：`desktop-electron-smoke`（`tests/test_matrix.yaml`）。这不是双壳重写。packaged `Vibelution.exe` 由 Launcher 对照 provenance 自刷新 `app.asar`；不要让用户手跑 `package:dir`。
 
 影响面选择器：`tests\select_tests.py --changed-file <path> --commands-only`。
 

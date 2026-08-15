@@ -67,4 +67,4 @@ npx tsc -b --pretty false
 npm test -- --run launcher
 ```
 
-产品用户测的是 `dist\desktop\win-unpacked\Vibelution.exe`。改 Electron 主进程后必须 **退出桌面程序** 再 `npm run package:dir`；只 `stop` Python `:8765` 不会加载新 `app.asar`。
+产品用户测的是 `dist\desktop\win-unpacked\Vibelution.exe`。Launcher 在 packaged 启动时对照 `package-provenance.json` 的 `electronTreeHash` 与当前 `HEAD:desktop/electron`；壳过期就先退出，由无控制台 helper 重建 `win-unpacked` 再拉起当前 checkout。不要让用户手跑 `package:dir`。只 `stop` Python `:8765` 不会加载新 `app.asar`。

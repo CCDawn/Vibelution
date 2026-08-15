@@ -1420,6 +1420,57 @@ def _resolve_workbench_bridge(_args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _workspace_root(args: argparse.Namespace) -> Path:
+    requested = str(getattr(args, "workspace", "") or "").strip()
+    return Path(requested or PROJECT_ROOT).resolve()
+
+
+def _desktop_shell_status_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.desktop_shell import inspect_desktop_shell
+
+    payload = inspect_desktop_shell(_workspace_root(args))
+    _append_log(
+        "desktop_entry_python.desktop_shell.status",
+        stale=bool(payload.get("stale")),
+        reason=str(payload.get("reason") or ""),
+    )
+    return payload
+
+
+def _schedule_desktop_shell_refresh_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.desktop_shell import schedule_desktop_shell_refresh
+
+    payload = schedule_desktop_shell_refresh(
+        wait_pid=int(args.wait_pid or 0),
+        then_lifecycle=str(args.then_lifecycle or ""),
+        project_root=_workspace_root(args),
+        python_executable=str(args.python_exe or sys.executable),
+    )
+    _append_log(
+        "desktop_entry_python.desktop_shell.refresh_scheduled",
+        helper_pid=int(payload.get("helperPid") or 0),
+        wait_pid=int(payload.get("waitPid") or 0),
+        then_lifecycle=str(payload.get("thenLifecycle") or ""),
+    )
+    return payload
+
+
+def _refresh_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.desktop_shell import run_desktop_shell_refresh
+
+    payload = run_desktop_shell_refresh(
+        wait_pid=int(args.wait_pid or 0),
+        then_lifecycle=str(args.then_lifecycle or ""),
+        project_root=_workspace_root(args),
+    )
+    _append_log(
+        "desktop_entry_python.desktop_shell.refreshed",
+        then_lifecycle=str(args.then_lifecycle or ""),
+        wait_pid=int(args.wait_pid or 0),
+    )
+    return payload
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -1437,6 +1488,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--launcher-api-path", default="")
     parser.add_argument("--launcher-api-method", default="GET")
     parser.add_argument("--launcher-api-body", default="")
+    parser.add_argument("--wait-pid", type=int, default=0)
+    parser.add_argument("--then-lifecycle", default="")
     return parser.parse_args(argv)
 
 
@@ -1451,7 +1504,18 @@ def _configure_utf8_stdio() -> None:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     action = str(args.action or "launcher").strip().lower()
-    if action not in {"launcher", "bootstrap", "stop-launcher", "lifecycle", "branch-instance", "launcher-api", "resolve-workbench"}:
+    if action not in {
+        "launcher",
+        "bootstrap",
+        "stop-launcher",
+        "lifecycle",
+        "branch-instance",
+        "launcher-api",
+        "resolve-workbench",
+        "desktop-shell-status",
+        "schedule-desktop-shell-refresh",
+        "refresh-desktop-shell",
+    }:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     if str(args.output or "").strip().lower() == "json":
         _configure_utf8_stdio()
@@ -1493,6 +1557,24 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(f"Workbench {payload.get('workbenchUrl')}")
+        elif action == "desktop-shell-status":
+            payload = _desktop_shell_status_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Desktop shell stale={payload.get('stale')} reason={payload.get('reason')}")
+        elif action == "schedule-desktop-shell-refresh":
+            payload = _schedule_desktop_shell_refresh_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Desktop shell refresh scheduled helperPid={payload.get('helperPid')}")
+        elif action == "refresh-desktop-shell":
+            payload = _refresh_desktop_shell_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print("Desktop shell refreshed")
         else:
             _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)
