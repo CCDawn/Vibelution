@@ -577,12 +577,14 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStartMutationsSource).toContain("/workflow-orchestration/stage-rounds/start");
     expect(routeSource).toContain("startResearchStageRoundMutation");
     expect(routeSource).toContain("seedSourceCollectionAgentSessionContextMutation");
-    expect(teamWorkflowStartMutationsSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/agent-session-context");
+    expect(teamWorkflowStartMutationsSource).toContain("seedSourceCollectionAgentSessionContext(");
+    expect(sourceCollectionApiSource).toContain("/source-collection-runs/${encodeURIComponent(runId)}/agent-session-context");
     expect(createSourceCollectionStageAgentHelpersSource).toContain("await seedSourceCollectionAgentSessionContextMutation.mutateAsync");
     // Payload type owned by workflow-start mutations module after import cleanup.
-    expect(teamWorkflowStartMutationsSource).toContain("TeamWorkflowSourceCollectionStageSessionTaskPayload");
+    expect(sourceCollectionApiSource).toContain("TeamWorkflowSourceCollectionStageSessionTaskPayload");
     expect(routeSource).toContain("startSourceCollectionStageSessionTaskMutation");
-    expect(teamWorkflowStartMutationsSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks");
+    expect(teamWorkflowStartMutationsSource).toContain("startSourceCollectionStageSessionTask(");
+    expect(sourceCollectionApiSource).toContain("/source-collection-runs/${encodeURIComponent(runId)}/stage-session-tasks");
     expect(routeSource).toContain("createSourceCollectionStageAdvance");
     expect(sourceCollectionControllerSource).toContain("options: { formalRetry?: boolean }");
     expect(sourceCollectionControllerSource).toContain("resetResearchProjectSourceCollectionMutation.isPending");
@@ -692,7 +694,8 @@ describe("TeamsRoute layout contract", () => {
       teamSourceCollectionMutationsSource.indexOf("const extractSourceCollectionCandidatesMutation"),
     );
     expect(executeSearchMutationSource).toContain("researchStageRoundStatusQueryKey(variables.teamId)");
-    expect(teamWorkflowStartMutationsSource).toContain("/workflow-orchestration/source-collection-runs");
+    expect(sourceCollectionApiSource).toContain("/workflow-orchestration/source-collection-runs");
+    expect(teamWorkflowStartMutationsSource).toContain("startSourceCollectionRun(");
     expect(teamSourceCollectionMutationsSource).toContain("/search/execute");
     expect(routeSource).toContain("/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}");
     expect(teamSourceCollectionMutationsSource).toContain("/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs");
