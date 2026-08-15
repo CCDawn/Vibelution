@@ -1,7 +1,6 @@
-"""Public contracts for source-collection start/session write routes.
+"""Public contracts for source-collection write routes.
 
-Run start, agent-session context, and stage-session task payloads still
-evolve. Dual-shape endpoints only require identifiers that exist on every
+Dual-shape endpoints only require identifiers that exist on every
 successful shape. Routes must use response_model_exclude_unset=True so
 missing optional fields stay absent instead of being filled with defaults.
 """
@@ -26,6 +25,35 @@ class SourceCollectionAgentSessionContextResponse(BaseModel):
 
 
 class SourceCollectionStageSessionTaskResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    teamId: str = ""
+    runId: str = ""
+    taskId: str = ""
+
+
+class SourceCollectionCandidateSourceResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class SourceCollectionSourceCandidateImportResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class SourceCollectionSearchExecuteResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    runId: str = ""
+
+
+class SourceCollectionStorageOpenResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    teamId: str = ""
+    runId: str = ""
+
+
+class SourceCollectionStageWritebackResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     teamId: str = ""
