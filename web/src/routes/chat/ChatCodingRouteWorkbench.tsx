@@ -29,7 +29,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { listPendingSessionToolApprovals } from "../../api/chat";
+import { listPendingSessionToolApprovals, querySessions } from "../../api/chat";
 import { fetchJson } from "../../api/client";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
@@ -2538,9 +2538,10 @@ export function ChatCodingRoute() {
   const selectedAgentSessionsQuery = useQuery({
     queryKey: ["sessions", "agent", selectedChatAgentId],
     queryFn: async () => {
-      const payload = await fetchJson<SessionQueryResponse>(
-        `/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`,
-      );
+      const payload = await querySessions({
+        agentId: selectedChatAgentId,
+        limit: 100,
+      });
       const previous = queryClient.getQueryData<SessionQueryResponse>([
         "sessions",
         "agent",

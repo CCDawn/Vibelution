@@ -7,12 +7,12 @@
 import { useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 
+import { fetchChatWorkbenchBootstrap } from "../../api/chat";
 import { listProjectAgentBusTimeline } from "../../api/projectAgentBus";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentInstance,
-  ChatWorkbenchBootstrap,
   ChatRoomDetail,
   ChatRoomMode,
   ChatRoomPurpose,
@@ -101,7 +101,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const activeSessionBootstrapQuery = useQuery({
     queryKey: ["sessions", "active-bootstrap"],
     queryFn: async ({ signal }) => {
-      const payload = await fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50", { signal });
+      const payload = await fetchChatWorkbenchBootstrap({ signal });
       queryClient.setQueryData(queryKeys.agents(), payload.agents);
       queryClient.setQueryData(queryKeys.conversations(), payload.conversations);
       // Never hard-replace the session index page: create optimism / pins must

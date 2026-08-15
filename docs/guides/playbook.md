@@ -34,6 +34,7 @@ LLM：`core/llm/PROTOCOL.md`
 | R6 | 用户内容进模型/索引前隔离清洗 |
 | R7 | remote/force 需明确授权 |
 | R8 | 有意义任务必须有验证 + refresh + claim/memory 判断 |
+| R9 | 验证闭合后主动自审并合入本地 `main`（合入门通过时）；不得等用户再下令 |
 
 ---
 
