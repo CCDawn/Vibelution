@@ -89,4 +89,19 @@ describe("Agent permission preset API", () => {
     expect(apiSource).toContain("export function purgeArchivedAgent");
     expect(apiSource).toContain("/purge");
   });
+
+  it("owns prompt-template, tool-policy, and project-memory transports", () => {
+    expect(apiSource).toContain("export function listPromptTemplates");
+    expect(apiSource).toContain("/api/prompt-templates");
+    expect(apiSource).toContain("export function fetchPromptTemplate");
+    expect(apiSource).toContain("export function updatePromptTemplate");
+    expect(apiSource).toContain("export function resetPromptTemplate");
+    expect(apiSource).toContain("/reset");
+    expect(apiSource).toContain("export function validateAgentToolPolicy");
+    expect(apiSource).toContain("/tool-policy/validate");
+    expect(apiSource).toContain("export function updateAgentToolPolicy");
+    expect(apiSource).toContain("export function listAgentProjectMemoryUpdates");
+    expect(apiSource).toContain("/api/agents/project-memory-updates");
+    expect(apiSource).toContain("export function resolveAgentProjectMemoryUpdate");
+  });
 });

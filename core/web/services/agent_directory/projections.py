@@ -172,6 +172,9 @@ def build_agent_runtime_context_block(
                 )
     else:
         lines.append("AgentInboxMessages: none")
+    from core.web.services import team_service
+
+    lines.extend(team_service.build_team_roster_context_lines(str(agent.get("agentId") or agent_id or "").strip()))
     return "\n".join(line for line in lines if line is not None).strip()
 
 

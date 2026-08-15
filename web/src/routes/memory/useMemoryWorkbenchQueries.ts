@@ -4,7 +4,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 
-import { listAgentSummaries } from "../../api/agents";
+import { listAgentProjectMemoryUpdates, listAgentSummaries } from "../../api/agents";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -86,12 +86,6 @@ export type AgentMemoryInventoryPayload = {
   selectedAgent?: AgentMemoryInventoryAgent | null;
 };
 
-function agentProjectMemoryUpdatesEndpoint(status: MemoryProposalStatusFilter, limit = 100) {
-  const params = new URLSearchParams();
-  params.set("status", status);
-  params.set("limit", String(limit));
-  return `/api/agents/project-memory-updates?${params.toString()}`;
-}
 
 export function appendAgentParam(params: URLSearchParams, agentId: string) {
   const normalized = agentId.trim();
@@ -136,10 +130,11 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   const projectMemoryUpdatesQuery = useQuery({
     queryKey: queryKeys.agentProjectMemoryUpdates(memoryProposalStatusFilter, "", 100),
     queryFn: ({ signal }) =>
-      fetchJson<AgentProjectMemoryUpdateProposal[]>(
-        agentProjectMemoryUpdatesEndpoint(memoryProposalStatusFilter, 100),
-        { signal },
-      ),
+      listAgentProjectMemoryUpdates({
+        status: memoryProposalStatusFilter,
+        limit: 100,
+        signal,
+      }),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
     enabled: forcedView === "overview",
