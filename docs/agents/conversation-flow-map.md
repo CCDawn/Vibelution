@@ -73,6 +73,7 @@
 
 - `turn_journal.jsonl` 是 durable turn record。
 - 发给模型的对话层不得靠 payload 入口静默修补孤儿/未完成 tool chain；系统层（runtime context、Turn Status Bar、skill）不算 transcript。
+- 同一轮内后续 `_invoke_llm`：当前 turn 的 assistant/tool 对话层从 `turn_journal.jsonl` 重建并拼回已组装的 system/history/current user；Turn Status Bar 仍每轮重写，不进 transcript。历史 seed 仍排除当前 turn。
 - **`SessionTurnItem[]`（`message.turnItems`）是 UI 主包 / 单一投影源。**
 - `assistant_delta` 是 transport，不是事实源；流式时按 item 身份更新 active-turn 草稿包。
 - `codexTranscript` 是 cells 渲染适配层，由 `turnItems` 单向派生，不得成为第二写入者。
