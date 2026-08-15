@@ -6,6 +6,7 @@ from core.web.services.team_workflow_orchestration_service import *
 from ._errors import _raise_team_workflow_route_error
 from ._models import *
 from ._router import router
+from .source_collection_catalog_models import SourceCollectionSummaryResponse
 
 @router.post("/teams/{team_id}/workflow-orchestration/candidates/source", status_code=status.HTTP_201_CREATED)
 def team_workflow_candidate_source_create(team_id: str, payload: CandidateSourcePayload) -> dict:
@@ -155,7 +156,11 @@ def team_workflow_source_collection_stage_session_task_writeback(team_id: str, t
         )
 
 
-@router.get("/teams/{team_id}/workflow-orchestration/source-collection/summary")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/source-collection/summary",
+    response_model=SourceCollectionSummaryResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_source_collection_summary(team_id: str, runId: str = "") -> dict:
     try:
         return get_source_collection_summary(team_id, run_id=runId)
