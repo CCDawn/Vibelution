@@ -17,7 +17,8 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 | Registry repair / load/save / shrink guard | `repair_store.py` |
 | Inbox / workspace write / ensure-session / profile defaults | `ops_residual.py` |
 | Personal lossless episode append / supersede | `episodic_memory.py` |
-| Agent-facing private episode write tool | `tools/episodic_memory_tools.py` |
+| Agent-facing private episode write/supersede tools | `tools/episodic_memory_tools.py` |
+| Personal episode prompt dump | `projections.py` + `context_engine.py` |
 | Lifecycle serializers on facade | `../agent_directory_service.py` (wrappers only) |
 | Public import surface | `../agent_directory_service.py` (prefer re-export) |
 
@@ -44,6 +45,7 @@ Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 3. Lifecycle archive/purge/reset keep serializer wrappers on the facade (`__wrapped__` identity).
 4. Re-export public symbols from `agent_directory_service` for route stability.
 5. `get_core_context_tool` / `get_current_goal_tool` / `commit_compressed_memory_tool` belong to self-evolution generation handoff, not the default session pack.
+6. Current personal episodes are dumped into `build_agent_context` so every session of the same Agent can see them.
 
 ## Extraction progress
 
