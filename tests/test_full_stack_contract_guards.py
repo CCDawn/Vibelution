@@ -43,7 +43,7 @@ LEGACY_UNTYPED_ENDPOINT_BUDGETS: dict[str, int] = {
     "knowledge.py": 34,
     "launcher.py": 26,
     "logs.py": 9,
-    "memory.py": 13,
+    "memory.py": 0,
     "pet.py": 0,
     "project_agent_bus.py": 0,
     "research.py": 25,

@@ -1,6 +1,6 @@
 import "../design/route-css/memory.tailwind.css";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Brain,
@@ -12,7 +12,11 @@ import {
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
-import { fetchJson } from "../api/client";
+import {
+  deleteMemoryItem,
+  fetchMemoryItemDetail,
+  restoreMemoryItem,
+} from "../api/memory";
 import { queryKeys } from "../api/queryKeys";
 import {
   AgentProjectMemoryUpdateProposal,
@@ -1815,10 +1819,6 @@ function newKnowledgeSearchDraft(): MemoryKnowledgeSearchDraft {
   };
 }
 
-function memoryMutationEndpoint(sectionId: string, itemId: string, suffix = "") {
-  return `/api/memory/items/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}${suffix}`;
-}
-
 function projectMemoryProposalAgentLabel(proposal: AgentProjectMemoryUpdateProposal) {
   return [proposal.agentName, proposal.agentCode, proposal.agentId].map((value) => String(value || "").trim()).find(Boolean) ?? "-";
 }
@@ -2290,7 +2290,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     setCleanupFeedback,
     fallbackKnowledgeActorAgentId,
     requestedTeamId,
-    memoryMutationEndpoint,
     invalidateMemoryQueries,
     invalidateKnowledgeDashboard,
   });
@@ -2776,8 +2775,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const activeItemDetailQuery = useQuery({
     queryKey: queryKeys.memoryItemDetail(activeSection?.id ?? "", activeItem?.id ?? ""),
     queryFn: ({ signal }) =>
-      fetchJson<MemoryItemDetailPayload>(
-        `/api/memory/items/${encodeURIComponent(activeSection?.id ?? "")}/${encodeURIComponent(activeItem?.id ?? "")}`,
+      fetchMemoryItemDetail<MemoryItemDetailPayload>(
+        activeSection?.id ?? "",
+        activeItem?.id ?? "",
         { signal },
       ),
     enabled: Boolean(activeSection?.id && activeItem?.id && activeItem.contentDeferred),
@@ -3137,10 +3137,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     try {
       await Promise.all(
         pairs.map(({ section, item }) =>
-          fetchJson<MemoryMutationResponse>(
-            memoryMutationEndpoint(section.id, item.id, action === "restore" ? "/restore" : ""),
-            { method: action === "restore" ? "POST" : "DELETE" },
-          ),
+          action === "restore"
+            ? restoreMemoryItem<MemoryMutationResponse>(section.id, item.id)
+            : deleteMemoryItem<MemoryMutationResponse>(section.id, item.id),
         ),
       );
       setSelectedMemoryKeys((current) => {

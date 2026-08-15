@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
+from core.web.routes.memory_models import MemoryRouteResponse
 from core.web.services.memory_service import (
     create_user_memory_item,
     delete_memory_item,
@@ -56,22 +57,38 @@ class MemoryCleanupExecutePayload(MemoryCleanupPreviewPayload):
     previewToken: str = Field("", max_length=160)
 
 
-@router.get("/memory/overview")
+@router.get(
+    "/memory/overview",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_overview(includeContent: bool = True) -> dict:
     return get_memory_overview(include_content=includeContent)
 
 
-@router.get("/memory/usage-contract")
+@router.get(
+    "/memory/usage-contract",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_usage_contract() -> dict:
     return get_memory_usage_contract()
 
 
-@router.get("/memory/agents")
+@router.get(
+    "/memory/agents",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_agents(agentId: str = "", includeContent: bool = False) -> dict:
     return get_agent_memory_inventory(agent_id=agentId, include_content=includeContent)
 
 
-@router.get("/memory/agents/{agent_id}")
+@router.get(
+    "/memory/agents/{agent_id}",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_agent_detail(agent_id: str, includeContent: bool = True, actorAgentId: str = "") -> dict:
     if includeContent:
         index_payload = get_agent_memory_inventory(agent_id=agent_id, include_content=False)
@@ -86,7 +103,11 @@ def memory_agent_detail(agent_id: str, includeContent: bool = True, actorAgentId
     return payload
 
 
-@router.get("/memory/knowledge-graph")
+@router.get(
+    "/memory/knowledge-graph",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_knowledge_graph(
     agentId: str = "",
     teamId: str = "",
@@ -107,7 +128,11 @@ def memory_knowledge_graph(
     )
 
 
-@router.get("/memory/knowledge-graph/node-detail")
+@router.get(
+    "/memory/knowledge-graph/node-detail",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_knowledge_graph_node_detail(
     nodeId: str = "",
     agentId: str = "",
@@ -127,7 +152,11 @@ def memory_knowledge_graph_node_detail(
     return payload
 
 
-@router.post("/memory/cleanup/preview")
+@router.post(
+    "/memory/cleanup/preview",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_cleanup_preview(payload: MemoryCleanupPreviewPayload) -> dict:
     try:
         return preview_memory_cleanup([target.model_dump() for target in payload.targets])
@@ -135,7 +164,11 @@ def memory_cleanup_preview(payload: MemoryCleanupPreviewPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/memory/cleanup/execute")
+@router.post(
+    "/memory/cleanup/execute",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_cleanup_execute(payload: MemoryCleanupExecutePayload, response: Response) -> dict:
     try:
         result = execute_memory_cleanup(
@@ -150,7 +183,12 @@ def memory_cleanup_execute(payload: MemoryCleanupExecutePayload, response: Respo
     return result
 
 
-@router.post("/memory/items", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/memory/items",
+    status_code=status.HTTP_201_CREATED,
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_item_create(payload: MemoryItemPayload) -> dict:
     try:
         return create_user_memory_item(payload.model_dump())
@@ -158,7 +196,11 @@ def memory_item_create(payload: MemoryItemPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/memory/items/{section_id}/{item_id}")
+@router.get(
+    "/memory/items/{section_id}/{item_id}",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_item_detail(section_id: str, item_id: str) -> dict:
     payload = get_memory_item_detail(section_id, item_id)
     if payload is None:
@@ -166,7 +208,11 @@ def memory_item_detail(section_id: str, item_id: str) -> dict:
     return payload
 
 
-@router.patch("/memory/items/{section_id}/{item_id}")
+@router.patch(
+    "/memory/items/{section_id}/{item_id}",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_item_update(section_id: str, item_id: str, payload: MemoryItemPayload) -> dict:
     try:
         return update_memory_item(section_id, item_id, payload.model_dump(exclude_unset=True))
@@ -176,7 +222,11 @@ def memory_item_update(section_id: str, item_id: str, payload: MemoryItemPayload
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/memory/items/{section_id}/{item_id}")
+@router.delete(
+    "/memory/items/{section_id}/{item_id}",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_item_delete(section_id: str, item_id: str) -> dict:
     try:
         return delete_memory_item(section_id, item_id)
@@ -186,7 +236,11 @@ def memory_item_delete(section_id: str, item_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/memory/items/{section_id}/{item_id}/restore")
+@router.post(
+    "/memory/items/{section_id}/{item_id}/restore",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
 def memory_item_restore(section_id: str, item_id: str) -> dict:
     try:
         return restore_memory_item(section_id, item_id)

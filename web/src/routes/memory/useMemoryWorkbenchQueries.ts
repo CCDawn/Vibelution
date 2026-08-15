@@ -6,6 +6,14 @@ import { useQuery } from "@tanstack/react-query";
 
 import { listAgentProjectMemoryUpdates, listAgentSummaries } from "../../api/agents";
 import { fetchJson } from "../../api/client";
+import {
+  fetchMemoryAgentDetail,
+  fetchMemoryAgents,
+  fetchMemoryKnowledgeGraph,
+  fetchMemoryKnowledgeGraphNodeDetail,
+  fetchMemoryOverview,
+  fetchMemoryUsageContract,
+} from "../../api/memory";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentInstance,
@@ -123,7 +131,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
 
   const overviewQuery = useQuery({
     queryKey: queryKeys.memoryOverview(),
-    queryFn: ({ signal }) => fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false", { signal }),
+    queryFn: ({ signal }) => fetchMemoryOverview<MemoryOverview>({ includeContent: false, signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });
@@ -141,7 +149,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   });
   const memoryUsageContractQuery = useQuery({
     queryKey: queryKeys.memoryUsageContract(),
-    queryFn: ({ signal }) => fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract", { signal }),
+    queryFn: ({ signal }) => fetchMemoryUsageContract<MemoryUsageContractPayload>({ signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
     enabled: forcedView === "knowledge",
@@ -155,7 +163,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   });
   const agentMemoryInventoryQuery = useQuery({
     queryKey: ["memory", "agents", "inventory"],
-    queryFn: ({ signal }) => fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents", { signal }),
+    queryFn: ({ signal }) => fetchMemoryAgents<AgentMemoryInventoryPayload>({ signal }),
     enabled: forcedView === "agents",
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
@@ -180,10 +188,10 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   const agentMemoryDetailQuery = useQuery({
     queryKey: ["memory", "agents", selectedAgentMemoryAgentId, "detail"],
     queryFn: ({ signal }) =>
-      fetchJson<AgentMemoryInventoryPayload>(
-        `/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}?actorAgentId=${encodeURIComponent(selectedAgentMemoryAgentId)}`,
-        { signal },
-      ),
+      fetchMemoryAgentDetail<AgentMemoryInventoryPayload>(selectedAgentMemoryAgentId, {
+        actorAgentId: selectedAgentMemoryAgentId,
+        signal,
+      }),
     enabled: forcedView === "agents" && Boolean(selectedAgentMemoryAgentId),
     refetchInterval: false,
   });
@@ -209,29 +217,25 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   });
   const memoryKnowledgeGraphQuery = useQuery({
     queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId),
-    queryFn: ({ signal }) => {
-      const params = appendAgentParam(
-        new URLSearchParams({ include: "officialResearchGraph" }),
-        fallbackKnowledgeActorAgentId,
-      );
-      if (requestedTeamId) {
-        params.set("teamId", requestedTeamId);
-      }
-      return fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`, { signal });
-    },
+    queryFn: ({ signal }) =>
+      fetchMemoryKnowledgeGraph<MemoryKnowledgeGraphPayload>({
+        agentId: fallbackKnowledgeActorAgentId,
+        include: "officialResearchGraph",
+        teamId: requestedTeamId || undefined,
+        signal,
+      }),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
     enabled: forcedView === "graph" && Boolean(fallbackKnowledgeActorAgentId),
   });
   const memoryKnowledgeGraphNodeDetailQuery = useQuery({
     queryKey: queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId),
-    queryFn: ({ signal }) => {
-      const params = appendAgentParam(new URLSearchParams({ nodeId: selectedGraphNodeId }), fallbackKnowledgeActorAgentId);
-      return fetchJson<MemoryKnowledgeGraphNodeDetailPayload>(
-        `/api/memory/knowledge-graph/node-detail?${params.toString()}`,
-        { signal },
-      );
-    },
+    queryFn: ({ signal }) =>
+      fetchMemoryKnowledgeGraphNodeDetail<MemoryKnowledgeGraphNodeDetailPayload>({
+        nodeId: selectedGraphNodeId,
+        agentId: fallbackKnowledgeActorAgentId,
+        signal,
+      }),
     refetchInterval: false,
     enabled: forcedView === "graph" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId),
   });

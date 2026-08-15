@@ -6,7 +6,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
 import { resolveAgentProjectMemoryUpdate } from "../../api/agents";
-import { fetchJson } from "../../api/client";
+import {
+  createMemoryItem,
+  deleteMemoryItem,
+  executeMemoryCleanup,
+  previewMemoryCleanup,
+  restoreMemoryItem,
+  updateMemoryItem,
+} from "../../api/memory";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentProjectMemoryUpdateProposal,
@@ -36,7 +43,6 @@ export type UseMemoryItemMutationsOptions = {
   setCleanupFeedback: Dispatch<SetStateAction<Notice | null>> | ((n: Notice) => void);
   fallbackKnowledgeActorAgentId: string;
   requestedTeamId: string;
-  memoryMutationEndpoint: (sectionId: string, itemId: string, suffix?: string) => string;
   invalidateMemoryQueries: (queryClient: ReturnType<typeof useQueryClient>) => void;
   invalidateKnowledgeDashboard: (queryClient: ReturnType<typeof useQueryClient>, agentId: string) => void;
 };
@@ -53,26 +59,18 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
       sectionId: string;
       itemId: string;
     }) => {
-      const body = JSON.stringify({
+      if (draft.mode === "create") {
+        return createMemoryItem<{ sectionId: string; itemId: string }>({
+          title: draft.title,
+          summary: draft.summary,
+          content: draft.content,
+        });
+      }
+      return updateMemoryItem<{ sectionId: string; itemId: string }>(draft.sectionId, draft.itemId, {
         title: draft.title,
         summary: draft.summary,
         content: draft.content,
       });
-      if (draft.mode === "create") {
-        return fetchJson<{ sectionId: string; itemId: string }>("/api/memory/items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-        });
-      }
-      return fetchJson<{ sectionId: string; itemId: string }>(
-        options.memoryMutationEndpoint(draft.sectionId, draft.itemId),
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body,
-        },
-      );
     },
     onSuccess: (payload) => {
       options.setEditDraft(null);
@@ -91,9 +89,7 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
 
   const deleteMemoryMutation = useMutation({
     mutationFn: async ({ sectionId, itemId }: { sectionId: string; itemId: string }) =>
-      fetchJson<{ sectionId: string; itemId: string }>(options.memoryMutationEndpoint(sectionId, itemId), {
-        method: "DELETE",
-      }),
+      deleteMemoryItem<{ sectionId: string; itemId: string }>(sectionId, itemId),
     onSuccess: (payload) => {
       options.setActiveSectionId(payload.sectionId === "user-managed-memory" ? "" : payload.sectionId);
       options.setActiveItemId(payload.sectionId === "user-managed-memory" ? "" : payload.itemId);
@@ -110,10 +106,7 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
 
   const restoreMemoryMutation = useMutation({
     mutationFn: async ({ sectionId, itemId }: { sectionId: string; itemId: string }) =>
-      fetchJson<{ sectionId: string; itemId: string }>(
-        options.memoryMutationEndpoint(sectionId, itemId, "/restore"),
-        { method: "POST" },
-      ),
+      restoreMemoryItem<{ sectionId: string; itemId: string }>(sectionId, itemId),
     onSuccess: (payload) => {
       options.setActiveSectionId(payload.sectionId);
       options.setActiveItemId(payload.itemId);
@@ -163,11 +156,7 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
 
   const cleanupPreviewMutation = useMutation({
     mutationFn: async (targets: Array<Record<string, unknown>>) =>
-      fetchJson<MemoryCleanupPreviewResponse>("/api/memory/cleanup/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets }),
-      }),
+      previewMemoryCleanup<MemoryCleanupPreviewResponse>(targets),
     onSuccess: (payload) => {
       options.setCleanupPreview(payload);
       options.setCleanupExecution(null);
@@ -192,10 +181,10 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
       confirmationPhrase: string;
       previewToken: string;
     }) =>
-      fetchJson<MemoryCleanupExecuteResponse>("/api/memory/cleanup/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets, confirmationPhrase, previewToken }),
+      executeMemoryCleanup<MemoryCleanupExecuteResponse>({
+        targets,
+        confirmationPhrase,
+        previewToken,
       }),
     onSuccess: (payload) => {
       const succeeded = isMemoryCleanupExecutionSuccessful(payload);
