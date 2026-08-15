@@ -15,6 +15,10 @@ from config.provider_merge_migration import (
     ProviderMergeVerificationError,
 )
 
+from core.web.routes.config_draft_model_models import (
+    ConfigLlmTestResponse,
+    ConfigModelDiscoveryResponse,
+)
 from core.web.routes.config_draft_provider_models import (
     ConfigProviderIdSuggestionResponse,
     ConfigProviderRoutePreviewResponse,
@@ -666,7 +670,11 @@ def config_draft_unpin_provider_model(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/add-model")
+@router.post(
+    "/config/draft/add-model",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_add_model(payload: ConfigDraftAddModelPayload) -> dict:
     try:
         return draft_add_model(
@@ -686,7 +694,11 @@ def config_draft_add_model(payload: ConfigDraftAddModelPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/update-model")
+@router.post(
+    "/config/draft/update-model",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_update_model(payload: ConfigDraftUpdateModelPayload) -> dict:
     try:
         return draft_update_model(
@@ -706,7 +718,11 @@ def config_draft_update_model(payload: ConfigDraftUpdateModelPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/delete-model")
+@router.post(
+    "/config/draft/delete-model",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_delete_model(payload: ConfigDraftDeleteModelPayload) -> dict:
     try:
         return draft_delete_model(
@@ -719,7 +735,11 @@ def config_draft_delete_model(payload: ConfigDraftDeleteModelPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/test-llm")
+@router.post(
+    "/config/test-llm",
+    response_model=ConfigLlmTestResponse,
+    response_model_exclude_unset=True,
+)
 def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
     try:
         return run_draft_llm_test(
@@ -733,7 +753,11 @@ def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/check-model-capabilities")
+@router.post(
+    "/config/draft/check-model-capabilities",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_check_model_capabilities(payload: ConfigDraftCapabilityPayload) -> dict:
     try:
         return draft_check_model_image_input_capabilities(
@@ -746,7 +770,11 @@ def config_draft_check_model_capabilities(payload: ConfigDraftCapabilityPayload)
         _raise_config_http_error(exc)
 
 
-@router.post("/config/discover-models")
+@router.post(
+    "/config/discover-models",
+    response_model=ConfigModelDiscoveryResponse,
+    response_model_exclude_unset=True,
+)
 def config_discover_models(payload: ConfigDiscoverModelsPayload) -> dict:
     try:
         return discover_config_models(

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { fetchJson } from "../api/client";
+import { testConfigLlm } from "../api/config";
 import {
   VActionGroup,
   VButton,
@@ -22,7 +23,6 @@ import {
 import type {
   ConfigCapabilityObservation,
   ConfigCatalogModel,
-  ConfigLlmTestResult,
   ConfigProviderMergePreview,
   ConfigProviderMergeResult,
 } from "../api/types";
@@ -946,11 +946,7 @@ export function ConfigProviderRegistryPanel({
       [modelRef]: { phase: "busy", values: [], message: "正在验证 low/high…" },
     }));
     try {
-      const result = await fetchJson<ConfigLlmTestResult>("/api/config/test-llm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: modelRef, capability: "reasoning_effort" }),
-      });
+      const result = await testConfigLlm({ modelId: modelRef, capability: "reasoning_effort" });
       if (!result.ok || !result.reasoning_contract_persisted) {
         throw new Error(result.message || "推理能力验证失败");
       }
