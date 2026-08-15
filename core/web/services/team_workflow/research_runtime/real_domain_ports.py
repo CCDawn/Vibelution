@@ -12,6 +12,7 @@ reserve -> create task -> turn -> verify -> one ledger commit -> settle.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from core.research.workflow.contracts import PendingAction
@@ -1191,10 +1192,9 @@ def _bounded_controlled_run_execution(
         )
     )
     execution = body.get("execution") if isinstance(body.get("execution"), dict) else {}
-    runner = str(execution.get("adapterId") or execution.get("runnerId") or "")
-    if execution.get("formalRunnerUnavailable") or str(
-        execution.get("runnerMode") or ""
-    ) == "v1_cpu_smoke" or runner == "synthetic_classification_baseline_vs_variant":
+    from .readiness.common import is_bounded_controlled_run
+
+    if is_bounded_controlled_run({**body, **execution, "execution": execution}):
         return execution
     return {}
 
@@ -1231,6 +1231,68 @@ def _bounded_agent_task_handle(action: PendingAction) -> AgentTaskHandle:
     )
 
 
+def _execution_result(execution: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(execution, Mapping):
+        return {}
+    result = execution.get("result")
+    return dict(result) if isinstance(result, Mapping) else {}
+
+
+def _execution_metrics(execution: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(execution, Mapping):
+        return {}
+    metrics = execution.get("metrics")
+    if isinstance(metrics, dict):
+        return metrics
+    result = _execution_result(execution)
+    nested = result.get("metrics")
+    if isinstance(nested, dict):
+        return nested
+    aggregate = result.get("aggregate")
+    if isinstance(aggregate, dict):
+        return aggregate
+    return {}
+
+
+def _execution_boundaries(execution: Mapping[str, Any] | None) -> list[str]:
+    result = _execution_result(execution)
+    raw = ()
+    if isinstance(execution, Mapping):
+        raw = result.get("boundaries") or execution.get("boundaries") or ()
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _bounded_iteration_stop(
+    execution: Mapping[str, Any] | None,
+) -> tuple[str, str, str, str]:
+    """Return reason, terminalReason, target_version, lineage."""
+    unavailable = str(
+        (execution or {}).get("formalRunnerUnavailable") or ""
+    ).strip()
+    if unavailable:
+        return (
+            "Formal FashionMNIST runner unavailable after bounded V1 CPU observation; "
+            "do not promote a proxy result.",
+            "formal_runner_unavailable",
+            "bounded-v1-cpu",
+            "synthetic_classification_baseline_vs_variant",
+        )
+    adapter = str(
+        (execution or {}).get("adapterId")
+        or (execution or {}).get("runnerId")
+        or ""
+    ).strip()
+    return (
+        "FashionMNIST formal observation carries claim boundary and is not a "
+        "scientific conclusion; do not promote.",
+        "claim_boundary_no_promotion",
+        "formal-claim-boundary",
+        adapter or "fashion_mnist_predictive_coding_multi_seed",
+    )
+
+
 def _ledger_result_evaluation(
     action: PendingAction,
     snapshot: dict[str, Any],
@@ -1250,9 +1312,19 @@ def _ledger_result_evaluation(
         return []
     contract = snapshot.get("evaluationContract") if isinstance(snapshot.get("evaluationContract"), dict) else {}
     minimum_claim = float(contract.get("minimumClaimEvidenceCoverage") or 0)
-    metrics = execution.get("metrics") if isinstance(execution.get("metrics"), dict) else {}
+    metrics = _execution_metrics(execution)
     unavailable = str(execution.get("formalRunnerUnavailable") or "").strip()
     decision = str(execution.get("decisionHint") or "").strip()
+    boundaries = _execution_boundaries(execution)
+    failure_analysis = (
+        unavailable
+        or decision
+        or (
+            "FashionMNIST formal observation with claim boundary"
+            if boundaries
+            else "bounded V1 CPU observation"
+        )
+    )
     payload = {
         "evaluationId": f"eval-{action.action_id}",
         "runId": action.run_id,
@@ -1269,12 +1341,18 @@ def _ledger_result_evaluation(
         "reviewerRefs": ["bounded_result_evaluation"],
         "evaluatedAt": iso(utc_now()),
         "baseline_comparison": metrics,
-        "failure_analysis": unavailable or decision or "bounded V1 CPU observation",
+        "failure_analysis": failure_analysis,
         "confidence_bounds": {
-            "runnerMode": execution.get("runnerMode"),
+            "runnerMode": execution.get("runnerMode")
+            or _execution_result(execution).get("executionMode"),
             "formalRunnerUnavailable": unavailable,
             "decisionHint": decision,
             "adapterId": execution.get("adapterId") or execution.get("runnerId"),
+            "boundaries": boundaries,
+            "automaticPromotion": bool(
+                execution.get("automaticPromotion")
+                or _execution_result(execution).get("automaticPromotion")
+            ),
         },
     }
     sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
@@ -1310,11 +1388,12 @@ def _ledger_iteration_decision(
     team_id = str(snapshot.get("teamId") or "").strip()
     if not team_id:
         return []
-    if not _bounded_controlled_run_execution(
+    execution = _bounded_controlled_run_execution(
         team_id=team_id,
         snapshot=snapshot,
         workflow_run_id=action.run_id,
-    ):
+    )
+    if not execution:
         return []
     sc_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
     eval_refs = _collect_kind_refs(
@@ -1353,10 +1432,7 @@ def _ledger_iteration_decision(
     ).strip()
     if frozen_ref and not frozen_ref.startswith("frozen_protocol:"):
         frozen_ref = f"frozen_protocol:{frozen_ref}"
-    reason = (
-        "Formal FashionMNIST runner unavailable after bounded V1 CPU observation; "
-        "do not promote a proxy result."
-    )
+    reason, terminal_reason, target_version, lineage = _bounded_iteration_stop(execution)
     payload = {
         "decisionId": f"decision-{action.action_id}",
         "decisionKind": "stop",
@@ -1368,12 +1444,12 @@ def _ledger_iteration_decision(
         "frozenProtocolRef": frozen_ref,
         "evaluationReportRef": evaluation_ref,
         "reason": reason,
-        "terminalReason": "formal_runner_unavailable",
+        "terminalReason": terminal_reason,
         "decidedBy": "bounded_iteration_decision",
         "decidedAt": iso(utc_now()),
         "idempotencyKey": f"bounded-iter:{action.action_id}",
-        "target_version": "bounded-v1-cpu",
-        "lineage": "synthetic_classification_baseline_vs_variant",
+        "target_version": target_version,
+        "lineage": lineage,
     }
     validate_decision_payload(payload)
     _persist_workflow_artifact(
@@ -1555,7 +1631,10 @@ def _ledger_bounded_result_package(
         snapshot=snapshot,
         workflow_run_id=action.run_id,
     )
-    if not execution and "formal_runner_unavailable" not in terminal:
+    if not execution and terminal not in {
+        "formal_runner_unavailable",
+        "claim_boundary_no_promotion",
+    }:
         return None
     decision = _payload_object(
         _load_run_authority_artifact(
@@ -1580,11 +1659,26 @@ def _ledger_bounded_result_package(
         workflow_run_id=action.run_id,
         source_collection_run_id=sc_run_id,
     )
-    unavailable = str(
-        (execution or {}).get("formalRunnerUnavailable")
-        or decision.get("reason")
-        or terminal
+    actual_unavailable = str(
+        (execution or {}).get("formalRunnerUnavailable") or ""
     ).strip()
+    unavailable = actual_unavailable or (
+        str(decision.get("reason") or terminal).strip()
+        if terminal == "formal_runner_unavailable"
+        else ""
+    )
+    limitation_sections = (
+        [
+            "formal_runner_unavailable",
+            "bounded_v1_cpu_observation",
+            "not_a_fashionmnist_scientific_result",
+        ]
+        if terminal == "formal_runner_unavailable" or actual_unavailable
+        else [
+            "claim_boundary_no_promotion",
+            "not_a_fashionmnist_scientific_result",
+        ]
+    )
     package_core = {
         "runId": action.run_id,
         "teamId": team_id,
@@ -1616,11 +1710,7 @@ def _ledger_bounded_result_package(
         "deliverables": {
             "limitations": {
                 "kind": "limitations",
-                "sections": [
-                    "formal_runner_unavailable",
-                    "bounded_v1_cpu_observation",
-                    "not_a_fashionmnist_scientific_result",
-                ],
+                "sections": limitation_sections,
             }
         },
         "traceability": {
