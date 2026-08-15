@@ -43,7 +43,12 @@
 npm test -- --run PATTERN
 npx tsc -b --pretty false
 
-# —— 诊断三件套（卡住 / 无响应 / 环境先扫这里）——
+# 连不上 / 无响应：先解析本机工作台实开 URL，再进下面三件套。不要默认打 :8000。
+# 必须在 Launcher 打开的那个 checkout 根目录跑（通常是本地 main），不要在任务 worktree 里跑。
+.\.venv\Scripts\python.exe scripts\vibelution_desktop_entry.py --action resolve-workbench --output json
+# 只对返回的 workbenchUrl 探 /api/health。:8000 无监听只说明默认口空，不能当工作台未启动。
+# 实开口权威：env → .runtime/launcher/ports.json → config.toml backend_port（默认 8000）。
+# —— 诊断三件套（卡住 / 会话 / 环境）——
 # 1) 最新 runtime scene（按时间戳目录；先看 summary / package_index / raw log）
 Get-ChildItem .\logs\runtime_scenes -Directory | Sort-Object Name -Descending | Select-Object -First 5 Name
 # 2) 单轮会话诊断

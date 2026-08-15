@@ -584,7 +584,7 @@ powershell -ExecutionPolicy Bypass -File "<project-root>\scripts\vibelution_laun
 python scripts/vibelution_launcher.py --action restart --no-browser
 ```
 
-The Launcher control plane and managed Workbench are separate. `-Action launcher` opens only `http://127.0.0.1:8765/launcher`. Workbench remains `http://127.0.0.1:8000` unless config overrides apply.
+The Launcher control plane and managed Workbench are separate. `-Action launcher` opens only the Launcher control surface. Workbench defaults to port `8000`, but the live listen port is whatever `scripts/vibelution_desktop_entry.py --action resolve-workbench` returns when run from the Launcher checkout (`VIBELUTION_PORT` / `AGENT_WORKBENCH_BACKEND_PORT` → `.runtime/launcher/ports.json` → `[workbench].backend_port`). A closed `:8000` does not mean Workbench is down. Do not resolve the URL from a task worktree; that copy has no live `ports.json` and will fall back to `8000`.
 
 Stopping Workbench must preserve Launcher control unless the user explicitly asks to shut down Launcher itself.
 
