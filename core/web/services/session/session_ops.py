@@ -931,6 +931,25 @@ def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
     return True
 
 
+def _persist_dirty_session_runtime_rows(conversations: list[Any]) -> None:
+    """Write only the supplied session runtime rows; do not prune siblings."""
+
+    s = _service()
+    now = s._now_timestamp()
+    for conversation in conversations:
+        if not isinstance(conversation, dict):
+            continue
+        session_id = str(
+            conversation.get("conversation_id")
+            or conversation.get("conversationId")
+            or ""
+        ).strip()
+        if not session_id:
+            continue
+        conversation.setdefault("updated_at", now)
+        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
+
+
 def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, Any]:
     """Clear persisted running state when no in-memory worker owns it."""
     s = _service()
@@ -946,14 +965,15 @@ def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, An
     if not isinstance(conversations, list):
         return payload
 
-    changed = False
+    dirty: list[dict[str, Any]] = []
     for conversation in conversations:
         if not isinstance(conversation, dict):
             continue
-        changed |= s._repair_stale_running_conversation(conversation)
-    if changed:
+        if s._repair_stale_running_conversation(conversation):
+            dirty.append(conversation)
+    if dirty:
         payload["updated_at"] = s._now_timestamp()
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s._persist_dirty_session_runtime_rows(dirty)
     return payload
 
 

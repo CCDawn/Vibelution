@@ -5,9 +5,9 @@ import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, Ref
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { fetchJson } from "../api/client";
+import { fetchConfigWorkspace } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import {
-  ConfigWorkspace,
   GitCommitSummary,
   GitCommitMessageResponse,
   GitCommitResponse,
@@ -257,7 +257,7 @@ export function GitRoute() {
   });
   const configQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),
-    queryFn: ({ signal }) => fetchJson<ConfigWorkspace>("/api/config/workspace", { signal }),
+    queryFn: ({ signal }) => fetchConfigWorkspace({ signal }),
     staleTime: 30_000,
   });
 
