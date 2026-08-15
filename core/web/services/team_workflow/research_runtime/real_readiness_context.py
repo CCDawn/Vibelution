@@ -204,14 +204,35 @@ class RealDomainReadinessContext:
             return None
         execution = artifact.get("execution") if isinstance(artifact.get("execution"), dict) else {}
         result = execution.get("result") if isinstance(execution.get("result"), dict) else {}
-        metrics = result.get("metrics") or execution.get("metrics") or artifact.get("metrics")
+        metrics = (
+            result.get("metrics")
+            or execution.get("metrics")
+            or artifact.get("metrics")
+            or result.get("aggregate")
+        )
         artifact_hash = (
             result.get("artifactHash")
             or execution.get("artifactHash")
             or artifact.get("artifactHash")
-            or artifact.get("_contentHash")
         )
-        logs = result.get("logs") or execution.get("logs") or artifact.get("logs")
+        if not artifact_hash:
+            runs = result.get("runs") if isinstance(result.get("runs"), list) else []
+            for record in runs:
+                if not isinstance(record, dict):
+                    continue
+                seed_hash = str(record.get("artifactHash") or "").strip()
+                if seed_hash:
+                    artifact_hash = seed_hash
+                    break
+        if not artifact_hash:
+            artifact_hash = artifact.get("_contentHash")
+        logs = (
+            result.get("logs")
+            or execution.get("logs")
+            or artifact.get("logs")
+            or result.get("logRef")
+            or execution.get("logRef")
+        )
         if not logs and (metrics or artifact_hash):
             logs = (
                 execution.get("decisionHint")
