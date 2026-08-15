@@ -1521,6 +1521,10 @@ def _positive_int(value: Any) -> int:
     return max(0, parsed)
 
 
+def _electron_main_orchestrates_windows() -> bool:
+    return str(os.environ.get("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "")).strip() == "1"
+
+
 def request_launcher_start() -> LauncherCommandResponse:
     """Request the managed project bundle to start."""
 
@@ -1539,7 +1543,7 @@ def request_launcher_start() -> LauncherCommandResponse:
         submit_started = time.monotonic()
         command = submit_command(
             "open_workbench",
-            args={"reason": "launcher_start_button", "source": "launcher_api", "noBrowser": False},
+            args={"reason": "launcher_start_button", "source": "launcher_api", "noBrowser": _electron_main_orchestrates_windows()},
             requested_by="launcher_api",
         )
         prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
@@ -1969,7 +1973,7 @@ def request_launcher_restart(
             args={
                 "reason": reason,
                 "source": source,
-                "noBrowser": False,
+                "noBrowser": _electron_main_orchestrates_windows(),
                 "forceFrontendRebuild": bool(force_frontend_rebuild),
             },
             requested_by=source or "launcher_api",
@@ -2069,7 +2073,7 @@ def request_launcher_rebuild_and_start() -> LauncherCommandResponse:
             args={
                 "reason": "tray_rebuild_and_start",
                 "source": "launcher_tray",
-                "noBrowser": False,
+                "noBrowser": _electron_main_orchestrates_windows(),
                 "forceFrontendRebuild": True,
             },
             requested_by="launcher_tray",

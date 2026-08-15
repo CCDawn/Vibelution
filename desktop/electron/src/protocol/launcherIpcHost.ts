@@ -16,6 +16,10 @@ const BRANCH_INSTANCE_PATHS = new Set([
   "branch-instances/restart"
 ]);
 const LAUNCHER_API_PATHS = new Set([
+  "status",
+  "freshness",
+  "branch-instances",
+  "branch-instances/cleanup",
   "settings/workbench-window",
   "settings/startup",
   "developer-mode",
@@ -154,6 +158,8 @@ export function createLauncherIpcHost(input: {
   orchestrateLifecycle?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedLifecycleResult>;
   orchestrateBranchInstance?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedBranchInstanceResult>;
   orchestrateLauncherApi?: (path: string, payload: LauncherIpcInvokePayload) => Promise<unknown>;
+  resolveLocalStatus?: () => unknown;
+  scheduleStatusRefresh?: () => void;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }) {
@@ -172,13 +178,6 @@ export function createLauncherIpcHost(input: {
           `Launcher IPC path is outside the /api/launcher control surface: ${normalized.path.slice(0, 80)}`,
         );
       }
-      const context = await input.resolveContext();
-      if (context === null) {
-        return launcherIpcError(
-          LAUNCHER_IPC_HOST_NOT_READY,
-          "Launcher IPC control plane host is not ready.",
-        );
-      }
       if (LIFECYCLE_PATHS.has(normalized.path) && input.orchestrateLifecycle) {
         try {
           const result = await input.orchestrateLifecycle(normalized.path, normalized);
@@ -189,6 +188,13 @@ export function createLauncherIpcHost(input: {
             error instanceof Error ? error.message : String(error)
           );
         }
+      }
+      if (normalized.path === "status" && input.resolveLocalStatus) {
+        input.scheduleStatusRefresh?.();
+        return {
+          ok: true,
+          payload: overlayLauncherWindowTruth(normalized.path, input.resolveLocalStatus(), resolveWindowTruth())
+        };
       }
       if (BRANCH_INSTANCE_PATHS.has(normalized.path) && input.orchestrateBranchInstance) {
         try {
@@ -205,13 +211,31 @@ export function createLauncherIpcHost(input: {
       if (LAUNCHER_API_PATHS.has(normalized.path) && input.orchestrateLauncherApi) {
         try {
           const result = await input.orchestrateLauncherApi(normalized.path, normalized);
-          return { ok: true, payload: result };
+          return {
+            ok: true,
+            payload: overlayLauncherWindowTruth(normalized.path, result, resolveWindowTruth())
+          };
         } catch (error: unknown) {
           return launcherIpcError(
             LAUNCHER_IPC_LIFECYCLE_ERROR,
             error instanceof Error ? error.message : String(error)
           );
         }
+      }
+      let context: LauncherIpcHostContext | null;
+      try {
+        context = await input.resolveContext();
+      } catch (error: unknown) {
+        return launcherIpcError(
+          LAUNCHER_IPC_NETWORK_ERROR,
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      if (context === null) {
+        return launcherIpcError(
+          LAUNCHER_IPC_HOST_NOT_READY,
+          "Launcher IPC control plane host is not ready.",
+        );
       }
       const init = normalized.init ?? { method: "GET" };
       const method = init.method ?? "GET";

@@ -1369,6 +1369,20 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
             response = launcher_service.preview_launcher_maintenance_plan(body)
         elif path == "maintenance/reset/apply" and method == "POST":
             response = launcher_service.apply_launcher_maintenance_plan(body)
+        elif path == "status" and method == "GET":
+            response = launcher_service.get_launcher_status()
+        elif path == "freshness" and method == "GET":
+            response = launcher_service.get_launcher_freshness()
+        elif path == "branch-instances" and method == "GET":
+            response = launcher_service.list_launcher_branch_instances()
+        elif path == "branch-instances/cleanup" and method == "POST":
+            instance_ids = body.get("instanceIds")
+            if not isinstance(instance_ids, list):
+                instance_ids = []
+            response = launcher_service.cleanup_launcher_branch_instances(
+                [str(item) for item in instance_ids],
+                confirm=bool(body.get("confirm")),
+            )
         else:
             raise RuntimeError(f"Unsupported launcher api path: {method} {path}")
     except Exception as exc:
@@ -1424,11 +1438,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _configure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            with contextlib.suppress(OSError, ValueError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     action = str(args.action or "launcher").strip().lower()
     if action not in {"launcher", "bootstrap", "stop-launcher", "lifecycle", "branch-instance", "launcher-api", "resolve-workbench"}:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
+    if str(args.output or "").strip().lower() == "json":
+        _configure_utf8_stdio()
     try:
         _append_log("desktop_entry_python.open.started", action=action, no_browser=bool(args.no_browser), run_id=args.run_id)
         if action == "bootstrap":

@@ -32,6 +32,18 @@ export type LauncherStatusSummary = {
   overallState: string;
   observedState: string;
   lifecycleConsistency: string;
+  phase: string;
+  stateVersion: number;
+  backendHealthy: boolean;
+  backendPortListening: boolean;
+  lifecycleResults: LauncherLifecycleResultSummary[];
+};
+
+export type LauncherLifecycleResultSummary = {
+  commandId: string;
+  completed: boolean;
+  ok: boolean;
+  message?: string;
 };
 
 function launcherOriginBase(launcherOrigin: string): string {
@@ -51,6 +63,40 @@ function readNestedString(payload: Record<string, unknown>, keys: string[]): str
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readNestedValue(payload: Record<string, unknown>, keys: string[]): unknown {
+  let current: unknown = payload;
+  for (const key of keys) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[key];
+  }
+  return current;
+}
+
+function readLifecycleResults(payload: Record<string, unknown>): LauncherLifecycleResultSummary[] {
+  const recent = readNestedValue(payload, ["controlPlaneEvidence", "results", "recent"]);
+  if (!Array.isArray(recent)) {
+    return [];
+  }
+  return recent.slice(0, 10).flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+    const commandId = typeof item.commandId === "string" ? item.commandId.trim() : "";
+    if (!commandId) {
+      return [];
+    }
+    const message = typeof item.message === "string" && item.message.trim() ? item.message.trim() : "";
+    return [{
+      commandId,
+      completed: item.completed === true,
+      ok: item.ok === true,
+      ...(message ? { message } : {})
+    }];
+  });
 }
 
 async function readFailureDetail(response: Response): Promise<string> {
@@ -143,7 +189,22 @@ export async function fetchLauncherStatusSummary(input: {
     readNestedString(payload, ["lifecycleConsistency"]) ||
     readNestedString(payload, ["workbench", "lifecycleConsistency"]) ||
     "unknown";
-  return { overallState, observedState, lifecycleConsistency };
+  const phase = readNestedString(payload, ["phase"]) || readNestedString(payload, ["workbench", "phase"]);
+  const stateVersionValue = Number(readNestedValue(payload, ["stateVersion"]) ?? 0);
+  return {
+    overallState,
+    observedState,
+    lifecycleConsistency,
+    phase,
+    stateVersion: Number.isFinite(stateVersionValue) ? stateVersionValue : 0,
+    backendHealthy:
+      readNestedValue(payload, ["projectBundle", "backend", "healthy"]) === true
+      || readNestedValue(payload, ["workbench", "backendHealthy"]) === true,
+    backendPortListening:
+      readNestedValue(payload, ["projectBundle", "backend", "portListening"]) === true
+      || readNestedValue(payload, ["workbench", "backendPortListening"]) === true,
+    lifecycleResults: readLifecycleResults(payload)
+  };
 }
 
 export function classifyTrayBranchInstances(payload: unknown): TrayBranchInstance[] {

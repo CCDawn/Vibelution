@@ -539,6 +539,10 @@ def _fake_launcher_service_module():
     launcher_module.get_launcher_maintenance_summary = record("maintenance_summary")
     launcher_module.preview_launcher_maintenance_plan = record("maintenance_preview")
     launcher_module.apply_launcher_maintenance_plan = record("maintenance_apply")
+    launcher_module.get_launcher_status = record("status")
+    launcher_module.get_launcher_freshness = record("freshness")
+    launcher_module.list_launcher_branch_instances = record("branch_instances")
+    launcher_module.cleanup_launcher_branch_instances = record("branch_cleanup")
     return launcher_module
 
 
@@ -563,6 +567,24 @@ def test_launcher_api_bridge_dispatches_settings_and_maintenance(monkeypatch):
     )
     assert payload["ok"] is True
     assert payload["payload"]["marker"] == "maintenance_apply"
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="status", launcher_api_method="GET", launcher_api_body="")
+    )
+    assert payload["ok"] is True
+    assert payload["payload"]["marker"] == "status"
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="freshness", launcher_api_method="GET", launcher_api_body="")
+    )
+    assert payload["ok"] is True
+    assert payload["payload"]["marker"] == "freshness"
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="branch-instances", launcher_api_method="GET", launcher_api_body="")
+    )
+    assert payload["ok"] is True
+    assert payload["payload"]["marker"] == "branch_instances"
 
 
 def test_launcher_api_bridge_rejects_unknown_paths(monkeypatch):

@@ -52,6 +52,7 @@ type LauncherBranchInstancesPanelProps = {
   pendingOperation?: InstancePendingOperation;
   launcherTitle?: string;
   launcherOnline?: boolean;
+  launcherReading?: boolean;
   lifecyclePending?: boolean;
   onLifecycle?: (instanceId: string, operation: Extract<LauncherOperation, "start" | "stop">) => void;
   onStopMany?: (instanceIds: string[]) => void;
@@ -118,6 +119,7 @@ export function LauncherBranchInstancesPanel({
   pendingOperation,
   launcherTitle,
   launcherOnline = false,
+  launcherReading = false,
   lifecyclePending = false,
   onLifecycle,
   onStopMany,
@@ -135,6 +137,7 @@ export function LauncherBranchInstancesPanel({
         maintenance: "维护与清理",
         controlWindow: "Launcher 控制窗口",
         online: "在线",
+        reading: "读取中",
         offline: "未连接",
         emptyRunning: "当前没有运行中的分支",
         emptyAttention: "当前没有需要处理的实例",
@@ -185,6 +188,7 @@ export function LauncherBranchInstancesPanel({
         maintenance: "Maintenance and cleanup",
         controlWindow: "Launcher control window",
         online: "Online",
+        reading: "Reading",
         offline: "Disconnected",
         emptyRunning: "No branch is currently running",
         emptyAttention: "No instance needs attention",
@@ -363,8 +367,8 @@ export function LauncherBranchInstancesPanel({
         <p className={styles.controlWindow} role="status">
           <span>{labels.controlWindow}</span>
           <strong>{launcherTitle || "-"}</strong>
-          <VStatusChip tone={launcherOnline ? "success" : "warning"}>
-            {launcherOnline ? labels.online : labels.offline}
+          <VStatusChip tone={launcherOnline ? "success" : launcherReading ? "neutral" : "warning"}>
+            {launcherOnline ? labels.online : launcherReading ? labels.reading : labels.offline}
           </VStatusChip>
         </p>
       </div>

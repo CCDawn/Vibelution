@@ -1,5 +1,8 @@
+import os
+import subprocess
 from pathlib import Path
 
+import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 NATIVE_ENTRY_SOURCE = PROJECT_ROOT / "scripts" / "windows_launcher_entry" / "VibelutionLauncher.cs"
@@ -75,6 +78,8 @@ def test_native_launcher_forwards_lifecycle_to_packaged_electron():
     assert 'Path.Combine(projectDir, "dist", "desktop", "win-unpacked", "Vibelution.exe")' in source
     assert "native_action.electron_forwarded" in source
     assert "CreateNoWindow = true" in source
+    assert 'action != "force-stop"' in source
+    assert 'action != "rebuild-and-start"' in source
     # Legacy Python bridge remains only for development checkouts without the packaged Electron.
     forward_index = source.index("private static bool ForwardOrLaunchElectron")
     native_action_index = source.index("private static int RunNativeAction")
@@ -102,3 +107,34 @@ def test_native_launcher_build_references_windows_forms_and_icon():
     assert "/reference:System.Drawing.dll" in build_script
     assert "/win32icon:" in build_script
     assert "assets\\icons\\vibelution.ico" in build_script
+
+
+def test_native_launcher_source_compiles_as_windows_executable(tmp_path: Path):
+    if os.name != "nt":
+        pytest.skip("The native Launcher is compiled only on Windows.")
+
+    powershell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    output_path = tmp_path / "VibelutionLauncher.exe"
+    result = subprocess.run(
+        [
+            str(powershell),
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(NATIVE_ENTRY_BUILD_SCRIPT),
+            "-ProjectDir",
+            str(PROJECT_ROOT),
+            "-OutputPath",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert output_path.is_file()

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { parseLauncherBootstrap, type LauncherBootstrapResult } from "./launcherBootstrap.js";
+import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 
 type LauncherServiceChild = Pick<ReturnType<typeof spawn>, "kill" | "once" | "stdout" | "stderr">;
 type LauncherServiceSpawn = (
@@ -10,6 +11,7 @@ type LauncherServiceSpawn = (
     cwd: string;
     windowsHide: boolean;
     stdio: ["ignore", "pipe", "pipe"];
+    env: NodeJS.ProcessEnv;
   }
 ) => LauncherServiceChild;
 
@@ -53,7 +55,8 @@ export async function bootstrapPythonLauncherService(input: LauncherServiceStart
     {
       cwd: input.workspaceRoot,
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      env: pythonBridgeEnv()
     }
   );
   const stdout = await readBoundedStdout(child, 64_000);
@@ -81,7 +84,8 @@ export async function stopPythonLauncherService(input: LauncherServiceStopInput)
     {
       cwd: input.workspaceRoot,
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      env: pythonBridgeEnv()
     }
   );
   const stdout = await readBoundedStdout(child, 64_000);

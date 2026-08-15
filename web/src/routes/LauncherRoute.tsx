@@ -1839,7 +1839,7 @@ export function LauncherRoute() {
       ? copy.lifecycleRunning
       : copy.lifecycleClosed;
   const launcherSummary = !status
-    ? launcherControlPlaneStarting ? copy.launcherMaintaining : copy.launcherOffline
+    ? launcherControlPlaneStarting || statusQuery.isPending ? copy.launcherMaintaining : copy.launcherOffline
     : copy.launcherMaintaining;
   const controlSummary = launcherControlLimited ? copy.controlLimited : copy.controlReady;
   const controlDetail = launcherControlLimited ? copy.controlLimitedDetail : copy.controlReadyDetail;
@@ -2349,6 +2349,9 @@ export function LauncherRoute() {
         onSelect={setSelectedInstanceId}
         launcherTitle={branchInstancesQuery.data?.currentLauncherTitle}
         launcherOnline={Boolean(status && !launcherStatusDisconnected && !launcherControlLimited)}
+        launcherReading={Boolean(
+          !status && (statusQuery.isPending || launcherControlPlaneStarting)
+        )}
         pendingOperation={pendingBranchOperation}
         lifecyclePending={controlMutation.isPending}
         onLifecycle={(instanceId, operation) => {
