@@ -409,20 +409,42 @@ _LEGACY_SESSION_AGENT_PREFERRED_TOOLS = (
     "get_core_context_tool",
     "conversation_log_inspect_tool",
 )
-DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
+SESSION_PROTOCOL_ALLOWED_TOOLS = (
     *_LEGACY_SESSION_AGENT_ALLOWED_TOOLS[:8],
     "exec_command",
     "write_stdin",
     *_LEGACY_SESSION_AGENT_ALLOWED_TOOLS[8:],
 )
-DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
+SESSION_PROTOCOL_PREFERRED_TOOLS = (
     "exec_command",
     "write_stdin",
     *_LEGACY_SESSION_AGENT_PREFERRED_TOOLS,
 )
+PERSONAL_EPISODE_TOOL_NAME = "append_episodic_memory_tool"
+GENERATION_HANDOFF_MEMORY_TOOLS = (
+    "get_core_context_tool",
+    "get_current_goal_tool",
+    "commit_compressed_memory_tool",
+)
+# Default after the personal-episode grant and before generation-handoff was
+# pulled back to self-evolution. Projection matches this snapshot read-only.
+_EPISODE_ERA_SESSION_AGENT_ALLOWED_TOOLS = (
+    *SESSION_PROTOCOL_ALLOWED_TOOLS,
+    PERSONAL_EPISODE_TOOL_NAME,
+)
+DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
+    name
+    for name in _EPISODE_ERA_SESSION_AGENT_ALLOWED_TOOLS
+    if name not in GENERATION_HANDOFF_MEMORY_TOOLS
+)
+DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = tuple(
+    name for name in SESSION_PROTOCOL_PREFERRED_TOOLS if name not in GENERATION_HANDOFF_MEMORY_TOOLS
+)
 # The persistent stdin protocol belongs to ordinary conversation Agents.  Keep
 # self-evolution role policy unchanged until its own execution contract opts in.
-SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(_LEGACY_SESSION_AGENT_ALLOWED_TOOLS)
+SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(
+    dict.fromkeys((*_LEGACY_SESSION_AGENT_ALLOWED_TOOLS, *GENERATION_HANDOFF_MEMORY_TOOLS))
+)
 SELF_EVOLUTION_EXECUTABLE_AGENT_PREFERRED_TOOLS = tuple(_LEGACY_SESSION_AGENT_PREFERRED_TOOLS)
 SELF_EVOLUTION_EXECUTABLE_ROLES = {"executor", "reviewer"}
 SELF_EVOLUTION_OBSERVER_ROLES = {"observer"}
