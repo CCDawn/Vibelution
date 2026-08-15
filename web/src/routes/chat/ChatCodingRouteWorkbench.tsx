@@ -403,6 +403,23 @@ export function useStableSessionDetailPlaceholder(options: {
   );
 }
 
+/**
+ * Stable structural-sharing merge for the active session-detail query.
+ *
+ * React Query keeps the `structuralSharing` option reference across renders;
+ * an inline arrow rebuilt on every render handed the observer a fresh callback
+ * each time and drove `forceStoreRerender` into the "Maximum update depth
+ * exceeded" loop. Hoisting the merge to module scope fixes the identity while
+ * preserving the exact `mergeSessionDetailMessageWindow` previous/next merge
+ * semantics.
+ */
+export function sessionDetailStructuralSharing(
+  previous: unknown,
+  next: unknown,
+): SessionDetail {
+  return mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail);
+}
+
 
 export function ChatCodingRoute() {
   // pet + evolution: companion rail shows mental/pet labels (otherwise raw keys leak).
@@ -1038,8 +1055,7 @@ export function ChatCodingRoute() {
     // Select + GET often race on switch; brief freshness avoids immediate double rebuild
     // when /select already wrote a windowed detail into the same query key.
     staleTime: 1_500,
-    structuralSharing: (previous, next) =>
-      mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
+    structuralSharing: sessionDetailStructuralSharing,
     placeholderData: sessionDetailPlaceholder,
     refetchInterval: startupDetailSettledSessionId === activeSessionId
       ? chatLiveQueryPolicy.sessionDetailRefetchInterval
