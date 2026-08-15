@@ -36,8 +36,10 @@ describe("team research secondary queries contract", () => {
     expect(queriesSource).toContain("fetchExperimentMethodCatalog<");
     expect(queriesSource).not.toContain("/workflow-orchestration/experiments/status");
     expect(queriesSource).not.toContain("/workflow-orchestration/experiments/methods");
-    expect(queriesSource).toContain("/workflow-orchestration/research-loop/templates");
-    expect(queriesSource).toContain("/workflow-orchestration/research-loop/status");
+    expect(queriesSource).not.toContain("/workflow-orchestration/research-loop/templates");
+    expect(queriesSource).not.toContain("/workflow-orchestration/research-loop/status");
+    expect(queriesSource).toContain("fetchResearchLoopTemplates<");
+    expect(queriesSource).toContain("fetchResearchLoopStatus<");
   });
 
   it("keeps the method catalog independent from live status projections", () => {

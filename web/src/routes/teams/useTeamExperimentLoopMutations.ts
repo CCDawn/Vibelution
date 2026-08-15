@@ -5,8 +5,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import {
+  createResearchLoop,
+  materializeResearchLoopIterationDesign,
+  recordResearchLoopDecision,
+  recordResearchLoopEvidence,
+} from "../../api/researchLoop";
 import {
   completeTeamScientificHypothesisFromDesign,
   createTeamExperimentHypothesisRevision,
@@ -474,35 +479,28 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
       const selectedHypothesisIds = payload.plan?.hypothesisCandidateIds?.length
         ? payload.plan.hypothesisCandidateIds
         : payload.plan?.selectedHypotheses.map((candidate) => candidate.candidateId) ?? [];
-      return fetchJson<ResearchLoopCreatePayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/research-loop/loops`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            templateId: payload.templateId,
-            title: payload.plan?.title || "",
-            researchQuestion:
-              payload.draft.researchQuestion.trim()
-              || payload.plan?.goal
-              || payload.plan?.topic
-              || options.sourceCollectionDraftGoal,
-            stageRoundId: payload.plan?.stageRoundId || options.latestExperimentStageRoundId,
-            planId: payload.plan?.planId || "",
-            targetRef: payload.plan?.planId || payload.plan?.stageRoundId || "",
-            candidateIds: selectedHypothesisIds,
-            datasetRefs: splitDraftList(payload.draft.datasetRefs, 24),
-            environmentRefs: splitDraftList(payload.draft.environmentRefs, 24),
-            constraints: payload.draft.constraints.trim(),
-            createdByAgent: options.sourceCollectionOwnerAgentId,
-            metadata: {
-              enteredFrom: "teams_research_loop_panel",
-              noSandboxRunner: true,
-              noTrainingExecution: true,
-            },
-          }),
+      return createResearchLoop<ResearchLoopCreatePayload>(payload.teamId, {
+        templateId: payload.templateId,
+        title: payload.plan?.title || "",
+        researchQuestion:
+          payload.draft.researchQuestion.trim()
+          || payload.plan?.goal
+          || payload.plan?.topic
+          || options.sourceCollectionDraftGoal,
+        stageRoundId: payload.plan?.stageRoundId || options.latestExperimentStageRoundId,
+        planId: payload.plan?.planId || "",
+        targetRef: payload.plan?.planId || payload.plan?.stageRoundId || "",
+        candidateIds: selectedHypothesisIds,
+        datasetRefs: splitDraftList(payload.draft.datasetRefs, 24),
+        environmentRefs: splitDraftList(payload.draft.environmentRefs, 24),
+        constraints: payload.draft.constraints.trim(),
+        createdByAgent: options.sourceCollectionOwnerAgentId,
+        metadata: {
+          enteredFrom: "teams_research_loop_panel",
+          noSandboxRunner: true,
+          noTrainingExecution: true,
         },
-      );
+      });
     },
     onSuccess: (payload, variables) => {
       queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
@@ -517,30 +515,27 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
 
   const recordResearchLoopEvidenceMutation = useMutation({
     mutationFn: (payload: { teamId: string; loop: ResearchLoopRecord; draft: ResearchLoopEvidenceDraft; evidenceType: string }) =>
-      fetchJson<ResearchLoopEvidencePayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/evidence`,
+      recordResearchLoopEvidence<ResearchLoopEvidencePayload>(
+        payload.teamId,
+        payload.loop.loopId,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            evidenceType: payload.evidenceType,
-            status: payload.draft.status,
-            summary: payload.draft.summary.trim(),
-            metricName: payload.draft.metricName.trim(),
-            metricValue: payload.draft.metricValue.trim(),
-            baselineMetricValue: payload.draft.baselineMetricValue.trim(),
-            delta: payload.draft.delta.trim(),
-            artifactRefs: payload.draft.artifactRef.trim() ? [{ path: payload.draft.artifactRef.trim() }] : [],
-            datasetRefs: splitDraftList(payload.draft.datasetRefs, 24),
-            environmentRefs: splitDraftList(payload.draft.environmentRefs, 24),
-            logRefs: splitDraftList(payload.draft.logRefs, 24),
-            commandPreview: payload.draft.commandPreview.trim(),
-            recordedByAgent: options.sourceCollectionOwnerAgentId,
-            metadata: {
-              enteredFrom: "teams_research_loop_panel",
-              commandPreviewOnly: true,
-            },
-          }),
+          evidenceType: payload.evidenceType,
+          status: payload.draft.status,
+          summary: payload.draft.summary.trim(),
+          metricName: payload.draft.metricName.trim(),
+          metricValue: payload.draft.metricValue.trim(),
+          baselineMetricValue: payload.draft.baselineMetricValue.trim(),
+          delta: payload.draft.delta.trim(),
+          artifactRefs: payload.draft.artifactRef.trim() ? [{ path: payload.draft.artifactRef.trim() }] : [],
+          datasetRefs: splitDraftList(payload.draft.datasetRefs, 24),
+          environmentRefs: splitDraftList(payload.draft.environmentRefs, 24),
+          logRefs: splitDraftList(payload.draft.logRefs, 24),
+          commandPreview: payload.draft.commandPreview.trim(),
+          recordedByAgent: options.sourceCollectionOwnerAgentId,
+          metadata: {
+            enteredFrom: "teams_research_loop_panel",
+            commandPreviewOnly: true,
+          },
         },
       ),
     onSuccess: (payload, variables) => {
@@ -562,33 +557,30 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
 
   const recordResearchLoopDecisionMutation = useMutation({
     mutationFn: (payload: { teamId: string; loop: ResearchLoopRecord; draft: ResearchLoopDecisionDraft; nextTemplateId: string }) =>
-      fetchJson<ResearchLoopDecisionPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/decision`,
+      recordResearchLoopDecision<ResearchLoopDecisionPayload>(
+        payload.teamId,
+        payload.loop.loopId,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            decision: payload.draft.decision,
-            rationale: payload.draft.rationale.trim(),
+          decision: payload.draft.decision,
+          rationale: payload.draft.rationale.trim(),
+          nextTemplateId: payload.nextTemplateId,
+          nextActions: splitDraftList(payload.draft.nextActions, 24),
+          allowedVariableChanges: splitDraftList(payload.draft.allowedVariableChanges, 24),
+          frozenControls: splitDraftList(payload.draft.frozenControls, 24),
+          decidedByAgent: options.sourceCollectionOwnerAgentId,
+          createNextDesignDraft:
+            payload.draft.decision === "promote_to_iteration"
+            || payload.draft.decision === "repair_and_repeat",
+          idempotencyKey: buildResearchLoopDecisionIdempotencyKey({
+            loopId: payload.loop.loopId,
+            loopUpdatedAt: payload.loop.updatedAt,
             nextTemplateId: payload.nextTemplateId,
-            nextActions: splitDraftList(payload.draft.nextActions, 24),
-            allowedVariableChanges: splitDraftList(payload.draft.allowedVariableChanges, 24),
-            frozenControls: splitDraftList(payload.draft.frozenControls, 24),
-            decidedByAgent: options.sourceCollectionOwnerAgentId,
-            createNextDesignDraft:
-              payload.draft.decision === "promote_to_iteration"
-              || payload.draft.decision === "repair_and_repeat",
-            idempotencyKey: buildResearchLoopDecisionIdempotencyKey({
-              loopId: payload.loop.loopId,
-              loopUpdatedAt: payload.loop.updatedAt,
-              nextTemplateId: payload.nextTemplateId,
-              draft: payload.draft,
-            }),
-            metadata: {
-              enteredFrom: "teams_research_loop_panel",
-              noAutomaticIterationExecution: true,
-            },
+            draft: payload.draft,
           }),
+          metadata: {
+            enteredFrom: "teams_research_loop_panel",
+            noAutomaticIterationExecution: true,
+          },
         },
       ),
     onSuccess: (payload, variables) => {
@@ -609,13 +601,11 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
 
   const materializeResearchLoopIterationDesignMutation = useMutation({
     mutationFn: (payload: { teamId: string; loopId: string; proposalId: string }) =>
-      fetchJson<ResearchLoopDecisionPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loopId)}/proposals/${encodeURIComponent(payload.proposalId)}/design-draft`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ createdByAgent: options.sourceCollectionOwnerAgentId }),
-        },
+      materializeResearchLoopIterationDesign<ResearchLoopDecisionPayload>(
+        payload.teamId,
+        payload.loopId,
+        payload.proposalId,
+        { createdByAgent: options.sourceCollectionOwnerAgentId },
       ),
     onSuccess: (payload, variables) => {
       queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
