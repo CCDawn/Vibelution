@@ -57,7 +57,7 @@ function readPreviewSearch() {
     : "empty";
 }
 
-function App() {
+export function ComposerFollowupQueuePreviewApp() {
   const initialScene = readPreviewSearch();
   const [sessionBusy, setSessionBusy] = useState(true);
   const [draft, setDraft] = useState("");
@@ -209,7 +209,7 @@ function App() {
           <h1>运行中跟进队列</h1>
           <p className={styles.subtitle}>
             第一次 Enter 只入队。队列已在且输入框为空时，再按 Enter 立刻引导，并在时间线末尾新增一条带「引导」标记的独立消息。
-            当前轮结束后，未发出的条目会按顺序变成普通用户消息。正式对话页尚未改动。
+            当前轮结束后，未发出的条目会按顺序变成普通用户消息。正式对话页已按同一套契约接线。
           </p>
         </div>
         <div className={styles.headerActions}>
@@ -413,7 +413,7 @@ function App() {
           </VSurface>
           <VSurface className={styles.sideCard} tone="card" elevation="panel" padding="normal">
             <h2>预览说明</h2>
-            <p>这是隔离 mock，不写正式会话，也不调用 `/guidance`。批准后才会改 ConversationView。</p>
+            <p>这是隔离 mock，不写正式会话，也不调用 `/guidance`。正式 Chat 已按同一套入队 / 立刻引导 / 结束后队首发出接线。</p>
             <div className={styles.log} aria-label="最近操作">
               {log.map((item) => (
                 <div key={item} className={styles.logItem}>{item}</div>
@@ -426,10 +426,13 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <VuiProvider>
-      <App />
-    </VuiProvider>
-  </StrictMode>,
-);
+const previewRoot = document.getElementById("root");
+if (previewRoot) {
+  createRoot(previewRoot).render(
+    <StrictMode>
+      <VuiProvider>
+        <ComposerFollowupQueuePreviewApp />
+      </VuiProvider>
+    </StrictMode>,
+  );
+}
