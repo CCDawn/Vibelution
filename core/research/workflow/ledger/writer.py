@@ -4,9 +4,10 @@ All formal mutations flow through ``submit(..., force_flush=True)``. The
 writer thread owns one connection and commits each batch inside
 ``BEGIN IMMEDIATE``; per-envelope savepoints isolate failures. Futures are
 staged and only settle after the enclosing COMMIT succeeds. after-commit
-callbacks only run after a successful commit. ``close()`` stops accepting
-new work, drains every accepted envelope in FIFO order, and settles the
-remaining futures explicitly when the drain times out.
+callbacks only run after a successful commit. ``submit()`` enqueues under
+the accept lock so ``close()`` cannot miss an in-flight put. ``close()``
+stops accepting new work, drains every accepted envelope in FIFO order,
+and settles the remaining futures explicitly when the drain times out.
 """
 
 from __future__ import annotations
@@ -97,20 +98,20 @@ class WorkflowLedgerWriter:
     def submit(self, fn: Callable[[WorkflowLedgerUnitOfWork], Any], *, force_flush: bool = False) -> Future:
         if self._startup_error is not None:
             raise self._startup_public_error()
+        envelope = _Envelope(fn, force_flush)
         with self._accept_lock:
             if not self._accepting:
                 raise WorkflowLedgerClosedError("workflow ledger writer is closed")
-            envelope = _Envelope(fn, force_flush)
             with self._condition:
                 self._outstanding += 1
-        try:
-            self._queue.put(envelope, timeout=self._enqueue_timeout_s)
-        except queue.Full as exc:
-            with self._condition:
-                self._outstanding = max(0, self._outstanding - 1)
-            raise WorkflowLedgerBackpressureError(
-                "workflow ledger writer queue is full; mutation rejected"
-            ) from exc
+            try:
+                self._queue.put(envelope, timeout=self._enqueue_timeout_s)
+            except queue.Full as exc:
+                with self._condition:
+                    self._outstanding = max(0, self._outstanding - 1)
+                raise WorkflowLedgerBackpressureError(
+                    "workflow ledger writer queue is full; mutation rejected"
+                ) from exc
         if force_flush:
             self._flush_until(envelope)
         return envelope.future
