@@ -84,6 +84,21 @@ describe("sessionActivityIndicator", () => {
     expect(resolveSessionActivityTone(session)).toBe("none");
   });
 
+  it("does not report a successful mutation when the seen write fails", () => {
+    const session = { id: "s-write-fail", status: "completed", taskSummary: "turn 1" };
+    const stamp = sessionActivityStamp(session);
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("QuotaExceededError");
+      },
+    });
+    expect(markSessionActivitySeen(session.id, stamp)).toBe(false);
+    expect(markSessionActivitySnapshotsSeen(session.id, [session])).toBe(false);
+    expect(isSessionActivitySeen(session.id, stamp)).toBe(false);
+    expect(resolveSessionActivityTone(session)).toBe("completed");
+  });
+
   it("hides completed indicator while the session is actively open", () => {
     expect(resolveSessionActivityTone(
       { id: "s-open", status: "completed", updatedAt: "t1" },

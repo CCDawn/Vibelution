@@ -1,8 +1,13 @@
 import { fetchJson } from "./client";
-import type { ConfigSummary, ConfigWorkspace } from "./types";
+import type {
+  ConfigLlmTestResult,
+  ConfigModelDiscoveryResult,
+  ConfigSummary,
+  ConfigWorkspace,
+} from "./types";
 
 export type ConfigDraftEnvelope = {
-  publicConfig: unknown;
+  publicConfig?: unknown;
   draftMeta?: unknown;
   baseHash?: string;
   [key: string]: unknown;
@@ -129,4 +134,32 @@ export function unpinDraftProviderModel(
     body,
     "DELETE",
   );
+}
+
+export function addDraftModel(body: ConfigDraftEnvelope): Promise<ConfigWorkspace> {
+  return postConfigJson<ConfigWorkspace>("/api/config/draft/add-model", body);
+}
+
+export function updateDraftModel(body: ConfigDraftEnvelope): Promise<ConfigWorkspace> {
+  return postConfigJson<ConfigWorkspace>("/api/config/draft/update-model", body);
+}
+
+export function deleteDraftModel(body: ConfigDraftEnvelope): Promise<ConfigWorkspace> {
+  return postConfigJson<ConfigWorkspace>("/api/config/draft/delete-model", body);
+}
+
+export function testConfigLlm(body: ConfigDraftEnvelope): Promise<ConfigLlmTestResult> {
+  return postConfigJson<ConfigLlmTestResult>("/api/config/test-llm", body);
+}
+
+export function checkDraftModelCapabilities(
+  body: ConfigDraftEnvelope,
+): Promise<ConfigWorkspace> {
+  return postConfigJson<ConfigWorkspace>("/api/config/draft/check-model-capabilities", body);
+}
+
+export function discoverConfigModels(
+  body: ConfigDraftEnvelope,
+): Promise<ConfigModelDiscoveryResult> {
+  return postConfigJson<ConfigModelDiscoveryResult>("/api/config/discover-models", body);
 }

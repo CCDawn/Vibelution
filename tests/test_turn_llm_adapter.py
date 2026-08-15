@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 from agent import SelfEvolvingAgent, TurnStopRequested
@@ -261,3 +262,32 @@ def test_agent_wrapper_writes_failure_diagnostics(monkeypatch):
     assert agent._last_llm_failure_max_attempts >= 1
     assert agent._last_llm_failure_attempts == 1
     assert MAX_CONSECUTIVE_FAILURES >= 1
+
+
+def test_agent_wrapper_clears_stale_diagnostics_before_stop(monkeypatch):
+    import agent as agent_module
+
+    def stop_before_result(**_kwargs):
+        raise TurnStopRequested("operator stopped the turn")
+
+    monkeypatch.setattr(agent_module, "invoke_agent_llm_turn", stop_before_result)
+
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent._last_llm_error_category = "server_error"
+    agent._last_llm_error_retryable = True
+    agent._last_llm_recovery_action = "retry_with_backoff"
+    agent._last_llm_error_message = "stale failure"
+    agent._last_llm_error_details = {"exception_type": "StaleError"}
+    agent._last_llm_failure_attempts = 5
+    agent._last_llm_failure_max_attempts = 5
+
+    with pytest.raises(TurnStopRequested, match="operator stopped the turn"):
+        agent._invoke_llm([AIMessage(content="hello")])
+
+    assert agent._last_llm_error_category is None
+    assert agent._last_llm_error_retryable is False
+    assert agent._last_llm_recovery_action is None
+    assert agent._last_llm_error_message == ""
+    assert agent._last_llm_error_details == {}
+    assert agent._last_llm_failure_attempts == 0
+    assert agent._last_llm_failure_max_attempts == MAX_CONSECUTIVE_FAILURES

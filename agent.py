@@ -2841,6 +2841,15 @@ class SelfEvolvingAgent:
 
     def _invoke_llm(self, messages: list, *, replay_state: Any = None) -> Optional[Any]:
         # Removal: keep while tests call SelfEvolvingAgent._invoke_llm and patch agent.* helpers.
+        # Reset before delegation so a stop/interrupt cannot leave diagnostics
+        # from an earlier invocation attached to the active turn.
+        self._last_llm_error_category = None
+        self._last_llm_error_retryable = False
+        self._last_llm_recovery_action = None
+        self._last_llm_error_message = ""
+        self._last_llm_error_details = {}
+        self._last_llm_failure_attempts = 0
+        self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
         result = invoke_agent_llm_turn(
             messages=messages,
             replay_state=replay_state,

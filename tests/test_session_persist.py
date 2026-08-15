@@ -197,3 +197,47 @@ def test_persist_turn_result_keeps_sibling_and_releases_lock_before_journal(
     assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
     assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "running"
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_commit_session_turn_runtime_state_preserves_concurrent_same_session_fields(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_session_chat_state(
+        tmp_path,
+        "session-a",
+        {
+            "conversation_id": "session-a",
+            "title": "Before",
+            "last_turn_status": "running",
+            "last_turn_error": {"message": "old"},
+        },
+    )
+    previous = load_session_chat_state(tmp_path, "session-a")
+    assert previous is not None
+    desired = dict(previous)
+    desired["last_turn_status"] = "ready"
+    desired.pop("last_turn_error", None)
+
+    save_session_chat_state(
+        tmp_path,
+        "session-a",
+        {
+            **previous,
+            "title": "Renamed concurrently",
+            "operatorNote": "keep",
+        },
+    )
+
+    assert persist._commit_session_turn_runtime_state(
+        "session-a",
+        desired,
+        previous_conversation=previous,
+    ) is True
+    stored = load_session_chat_state(tmp_path, "session-a")
+    assert stored is not None
+    assert stored["title"] == "Renamed concurrently"
+    assert stored["operatorNote"] == "keep"
+    assert stored["last_turn_status"] == "ready"
+    assert "last_turn_error" not in stored
