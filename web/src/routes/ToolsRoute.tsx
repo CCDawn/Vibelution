@@ -5,7 +5,7 @@ import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power,
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { listAgentSummaries } from "../api/agents";
+import { listAgentSummaries, updateAgentToolPolicy, validateAgentToolPolicy } from "../api/agents";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -1231,20 +1231,14 @@ export function ToolsRoute() {
 
   const validateToolPolicyMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: AgentToolPolicyDraft; basePolicy: ToolPolicy | undefined }) =>
-      fetchJson<AgentToolPolicyConfiguration>(`/api/agents/${encodeURIComponent(payload.agentId)}/tool-policy/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toolPolicy: {
-            ...defaultToolPolicy(payload.basePolicy?.policyId || "default"),
-            ...(payload.basePolicy ?? {}),
-            allowedTools: sortedIds(payload.draft.allowedTools),
-            preferredTools: sortedIds(payload.draft.preferredTools),
-            blockedTools: sortedIds(payload.draft.blockedTools),
-            readScopes: sortedIds(payload.draft.readScopes),
-            writeScopes: sortedIds(payload.draft.writeScopes),
-          },
-        }),
+      validateAgentToolPolicy(payload.agentId, {
+        ...defaultToolPolicy(payload.basePolicy?.policyId || "default"),
+        ...(payload.basePolicy ?? {}),
+        allowedTools: sortedIds(payload.draft.allowedTools),
+        preferredTools: sortedIds(payload.draft.preferredTools),
+        blockedTools: sortedIds(payload.draft.blockedTools),
+        readScopes: sortedIds(payload.draft.readScopes),
+        writeScopes: sortedIds(payload.draft.writeScopes),
       }),
     onSuccess: (preview) => {
       setToolPolicyPreview(preview);
@@ -1269,11 +1263,7 @@ export function ToolsRoute() {
         readScopes: sortedIds(payload.draft.readScopes),
         writeScopes: sortedIds(payload.draft.writeScopes),
       };
-      const preview = await fetchJson<AgentToolPolicyConfiguration>(`/api/agents/${encodeURIComponent(payload.agent.agentId)}/tool-policy/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ toolPolicy }),
-      });
+      const preview = await validateAgentToolPolicy(payload.agent.agentId, toolPolicy);
       setToolPolicyPreview(preview);
       if (!preview.validation.valid) {
         throw new Error(preview.validation.errors.join("; "));
@@ -1282,15 +1272,11 @@ export function ToolsRoute() {
       if (!confirmed) {
         throw new Error(lang === "zh" ? "已取消高影响工具策略变更。" : "High-impact ToolPolicy change cancelled.");
       }
-      return fetchJson<AgentToolPolicyConfiguration>(`/api/agents/${encodeURIComponent(payload.agent.agentId)}/tool-policy`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toolPolicy,
-          expectedAgentUpdatedAt: payload.agent.updatedAt,
-          expectedPolicyFingerprint: preview.policyFingerprint,
-          confirmed: preview.confirmation.required,
-        }),
+      return updateAgentToolPolicy(payload.agent.agentId, {
+        toolPolicy,
+        expectedAgentUpdatedAt: payload.agent.updatedAt,
+        expectedPolicyFingerprint: preview.policyFingerprint,
+        confirmed: preview.confirmation.required,
       });
     },
     onSuccess: (configuration) => {
