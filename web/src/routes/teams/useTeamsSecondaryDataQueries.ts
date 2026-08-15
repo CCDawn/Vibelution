@@ -5,8 +5,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { listTeamAiSearchRuns } from "../../api/teams";
 import type { AiSearchRunListPayload } from "../../api/types";
 import { AI_SEARCH_RUN_PREVIEW_LIMIT } from "./aiSearchPresentation";
 import {
@@ -56,13 +56,13 @@ export function useTeamsSecondaryDataQueries({
     researchWorkspaceView,
   ]);
 
-  const aiSearchRunsQuery = useQuery({
+  const aiSearchRunsQuery = useQuery<AiSearchRunListPayload>({
     queryKey: queryKeys.teamAiSearchRuns(effectiveTeamId || "none", AI_SEARCH_RUN_PREVIEW_LIMIT),
     queryFn: ({ signal }) =>
-      fetchJson<AiSearchRunListPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/ai-search-runs?limit=${AI_SEARCH_RUN_PREVIEW_LIMIT}`,
-        { signal },
-      ),
+      listTeamAiSearchRuns(effectiveTeamId, {
+        signal,
+        limit: AI_SEARCH_RUN_PREVIEW_LIMIT,
+      }),
     enabled: Boolean(effectiveTeamId && aiSearchScopeTeamSelected),
   });
 

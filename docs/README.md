@@ -53,12 +53,11 @@
 | [assets/](assets/) | 静态资源 | README 截图等 |
 | [archive/](archive/) | **归档** | 一切历史计划/规格/审计；见 [archive/README.md](archive/README.md) |
 
-**不存在** 现行 `docs/plans/` 或 `docs/superpowers/` 顶层目录作为规范权威（计划正文曾归档）。
-
-在研草案（**不是**规范，升格前不覆盖 `AGENTS.md` / `standards/`）：
+`docs/plans/` **不是**规范权威（见 [ADR 0005](adr/0005-docs-authority-and-archive-policy.md)）。仅下列在研草案可留在该目录；升格前不覆盖 `AGENTS.md` / `standards/`。清单真源：[plans/README.md](plans/README.md)。
 
 | 草案 | 说明 |
 | --- | --- |
+| [plans/2026-08-15-deep-architecture-decoupling-plan.md](plans/2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE：Agent / Chat / API 契约分 Gate 解耦 |
 | [plans/2026-08-13-portable-branch-workspace.md](plans/2026-08-13-portable-branch-workspace.md) | 仓内 `.worktrees` + Launcher 全部分支清单 |
 | [plans/2026-08-11-multi-instance-branch-isolation.md](plans/2026-08-11-multi-instance-branch-isolation.md) | 多实例端口隔离与注册表 |
 
@@ -67,6 +66,7 @@
 | 原路径 | 现路径 |
 | --- | --- |
 | `docs/plans/*` | `archive/plans/2026-06-07/`（及既有 `2026-05/`） |
+| `docs/plans/2026-08-11-vui-wave-migration-backlog.md` | `archive/plans/2026-08-11/` |
 | `docs/ops/2026-05-*`、efficiency-baselines | `archive/ops/` |
 | `docs/frontend/*` | `archive/frontend/` |
 | `docs/superpowers/*` | `archive/superpowers/` |

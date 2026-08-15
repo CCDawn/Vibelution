@@ -1,8 +1,9 @@
-"""Clean legacy memory knowledge records that bypass central source governance.
+"""ONE-SHOT operator CLI: clean legacy memory records that bypass source governance.
 
-The script defaults to dry-run. Pass --apply to rewrite JSONL files and remove
-stale vector-index records. Reports intentionally include only ids, paths, and
-reasons; they do not copy knowledge bodies or original source content.
+Not imported by the product runtime, tests, or CI. Default is dry-run.
+Pass --apply to rewrite JSONL files and remove stale vector-index records.
+Reports include only ids, paths, and reasons; they do not copy knowledge bodies
+or original source content.
 """
 
 from __future__ import annotations
