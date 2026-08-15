@@ -378,6 +378,31 @@ type PetInteractionAction = "feed" | "talk" | "care";
 
 type RightIndexPanel = "conversations" | "members";
 
+/**
+ * Stable session-detail placeholder for the active-session detail query.
+ *
+ * React Query re-derives `placeholderData` while a detail fetch is pending
+ * (`state.data === undefined`). The previous inline callback rebuilt
+ * `resolveSessionDetailPlaceholder` output on every render, so each no-op
+ * parent rerender handed the query observer a fresh placeholder reference
+ * and session switches spiraled into "Maximum update depth exceeded" inside
+ * React Query's `forceStoreRerender`. Memoizing keeps the placeholder
+ * reference identical while `activeSessionId`, the cached detail, and the
+ * list summary are unchanged, and recomputes only when one of those inputs
+ * actually changes.
+ */
+export function useStableSessionDetailPlaceholder(options: {
+  activeSessionId: string | null | undefined;
+  cachedDetail: SessionDetail | undefined;
+  summary: SessionSummary | null | undefined;
+}): SessionDetail | undefined {
+  const { activeSessionId, cachedDetail, summary } = options;
+  return useMemo(
+    () => resolveSessionDetailPlaceholder({ activeSessionId, cachedDetail, summary }),
+    [activeSessionId, cachedDetail, summary],
+  );
+}
+
 
 export function ChatCodingRoute() {
   // pet + evolution: companion rail shows mental/pet labels (otherwise raw keys leak).
@@ -993,6 +1018,13 @@ export function ChatCodingRoute() {
       return { ...current, [activeId]: "" };
     });
   }, [activeSessionId]);
+  const sessionDetailPlaceholder = useStableSessionDetailPlaceholder({
+    activeSessionId,
+    cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
+    summary: activeSessionId
+      ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
+      : undefined,
+  });
   const sessionDetailQuery = useQuery<SessionDetail>({
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     // Temp create shells are local-only; never GET/stream them until rebased.
@@ -1008,14 +1040,7 @@ export function ChatCodingRoute() {
     staleTime: 1_500,
     structuralSharing: (previous, next) =>
       mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
-    placeholderData: () =>
-      resolveSessionDetailPlaceholder({
-        activeSessionId,
-        cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
-        summary: activeSessionId
-          ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
-          : undefined,
-      }),
+    placeholderData: sessionDetailPlaceholder,
     refetchInterval: startupDetailSettledSessionId === activeSessionId
       ? chatLiveQueryPolicy.sessionDetailRefetchInterval
       : false,
