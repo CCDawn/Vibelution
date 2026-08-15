@@ -2,7 +2,13 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.services import research_loop_service, team_service
+from core.web.services import (
+    agent_directory_service,
+    chat_room_service,
+    research_loop_service,
+    team_knowledge_service,
+    team_service,
+)
 
 
 def _client() -> TestClient:
@@ -10,8 +16,12 @@ def _client() -> TestClient:
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(research_loop_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
 
 
 def test_research_loop_routes_create_record_and_decide(tmp_path, monkeypatch):
