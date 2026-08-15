@@ -190,12 +190,10 @@ from core.orchestration.agent_runtime_bindings import (
     _ASSISTANT_GOAL_CONTEXT_KEYWORDS,
     _CONFIRMATION_KEYWORDS,
     _CORE_CHAT_TOOL_NAMES,
-    _INTERNAL_TOOL_PROTOCOL_MARKERS,
     _NUMBERED_CONFIRMATION_RE,
     _SAFE_LLM_ERROR_DIAGNOSTIC_DETAIL_KEYS,
     _SESSION_CHAT_PROMPT_GOAL,
     _STALL_SIGNAL_THRESHOLDS,
-    _TOOL_POLICY_FAILURE_RE,
     _TOOL_SURFACE_GROUPS,
     _agent_api_key_diagnostic,
     _can_reuse_initial_prompt,
@@ -245,6 +243,13 @@ from core.orchestration.tool_authorization_binding import (
     materialize_authorized_tools,
     resolve_turn_authorization,
     restart_allowed_tool_names,
+)
+from core.orchestration.turn_message_assembly import (
+    assemble_prepared_turn_messages,
+    insert_pending_volatile_context_messages,
+    normalize_seeded_tool_calls,
+    refresh_system_prefix_on_messages,
+    sanitize_seeded_chat_content,
 )
 
 
@@ -1367,51 +1372,13 @@ class SelfEvolvingAgent:
 
     @staticmethod
     def _normalize_seeded_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
-        normalized: List[Dict[str, Any]] = []
-        for raw_call in list(raw_calls or []):
-            if not isinstance(raw_call, dict):
-                continue
-            function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
-            call_id = str(
-                raw_call.get("id")
-                or raw_call.get("tool_call_id")
-                or raw_call.get("toolCallId")
-                or ""
-            ).strip()
-            name = str(
-                raw_call.get("name")
-                or raw_call.get("toolName")
-                or function.get("name")
-                or ""
-            ).strip()
-            arguments = raw_call.get("args", raw_call.get("arguments", function.get("arguments", {})))
-            if isinstance(arguments, str):
-                try:
-                    parsed_arguments = json.loads(arguments)
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    parsed_arguments = {"raw": arguments}
-                arguments = parsed_arguments if isinstance(parsed_arguments, dict) else {"value": parsed_arguments}
-            if not isinstance(arguments, dict):
-                arguments = {}
-            if call_id and name:
-                normalized.append({"id": call_id, "name": name, "args": arguments})
-        return normalized
+        # Removal: keep while seed_chat_history and tests call this method.
+        return normalize_seeded_tool_calls(raw_calls)
 
     @staticmethod
     def _sanitize_seeded_chat_content(role: str, content: str) -> str:
-        text = str(content or "")
-        if role.strip().lower() != "assistant":
-            return text
-        for marker in _INTERNAL_TOOL_PROTOCOL_MARKERS:
-            if marker in text:
-                return ""
-        cleaned = _TOOL_POLICY_FAILURE_RE.sub(
-            "[工具策略提示] 历史中有一次未授权工具调用已被省略。",
-            text,
-        )
-        if "Tool failed: spawn_agent_tool" in cleaned:
-            return ""
-        return cleaned.strip()
+        # Removal: keep while seed_chat_history and tests call this method.
+        return sanitize_seeded_chat_content(role, content)
 
     def seed_runtime_context(self, content: str) -> None:
         """Add non-chat runtime context without making it a user/assistant message."""
@@ -1444,23 +1411,13 @@ class SelfEvolvingAgent:
         pending.append(text)
 
     def _insert_pending_volatile_context_messages(self, messages: List[Any]) -> tuple[List[Any], List[str]]:
+        # Removal: keep while tests call this method on the agent instance.
         pending_volatile_context_blocks = list(getattr(self, "_pending_volatile_context_blocks", []) or [])
         self._pending_volatile_context_blocks = []
-        if not pending_volatile_context_blocks:
-            return list(messages or []), []
-        context_messages = [
-            SystemMessage(content=block)
-            for block in pending_volatile_context_blocks
-            if str(block or "").strip()
-        ]
-        if not context_messages:
-            return list(messages or []), []
-        return (
-            TurnOutcomeController.insert_volatile_context_before_current_user(
-                messages=list(messages or []),
-                context_messages=context_messages,
-            ),
+        return insert_pending_volatile_context_messages(
+            messages,
             pending_volatile_context_blocks,
+            insert_volatile_fn=TurnOutcomeController.insert_volatile_context_before_current_user,
         )
 
     def mark_runtime_context_seeded_by_host(self) -> None:
@@ -1968,7 +1925,12 @@ class SelfEvolvingAgent:
                 content,
                 attachments,
             )
-        messages, resumed_messages = TurnOutcomeController.prepare_turn_messages(
+        pending_static_context_blocks = list(getattr(self, "_pending_static_context_blocks", []) or [])
+        turn_static_context_blocks = list(pending_static_context_blocks)
+        self._pending_static_context_blocks = []
+        pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
+        self._pending_runtime_context_blocks = []
+        assembled_turn_messages = assemble_prepared_turn_messages(
             system_prompt=sp,
             user_prompt=user_prompt,
             effective_goal=effective_goal,
@@ -1977,25 +1939,18 @@ class SelfEvolvingAgent:
             build_system_message=build_cacheable_system_prefix_message,
             build_external_request_message=runtime_input_builder_for_turn,
             allow_append_user_message=policy.mode == AgentMode.CHAT and policy.keep_multi_turn_context,
+            static_context_blocks=pending_static_context_blocks,
+            runtime_context_blocks=pending_runtime_context_blocks,
+            dynamic_system_context_message=dynamic_system_context_message,
+            prepare_turn_messages_fn=TurnOutcomeController.prepare_turn_messages,
+            insert_static_fn=TurnOutcomeController.insert_static_context_after_system,
+            insert_volatile_fn=TurnOutcomeController.insert_volatile_context_before_current_user,
+            extend_cacheable_prefix_fn=extend_system_message_cacheable_prefix,
         )
-        pending_static_context_blocks = list(getattr(self, "_pending_static_context_blocks", []) or [])
-        turn_static_context_blocks = list(pending_static_context_blocks)
-        self._pending_static_context_blocks = []
-        if pending_static_context_blocks:
-            cacheable_prefix_merged = False
-            if messages:
-                merged_message, cacheable_prefix_merged = extend_system_message_cacheable_prefix(
-                    messages[0],
-                    pending_static_context_blocks,
-                )
-                if cacheable_prefix_merged:
-                    messages[0] = merged_message
-            if not cacheable_prefix_merged:
-                context_messages = [SystemMessage(content=block) for block in pending_static_context_blocks]
-                messages = TurnOutcomeController.insert_static_context_after_system(
-                    messages=messages,
-                    context_messages=context_messages,
-                )
+        messages = assembled_turn_messages.messages
+        resumed_messages = assembled_turn_messages.resumed
+        cacheable_prefix_merged = assembled_turn_messages.cacheable_prefix_merged
+        if assembled_turn_messages.static_context_inserted:
             _record_agent_scene_event(
                 "prompt",
                 "agent.static_runtime_context_inserted_as_system",
@@ -2014,20 +1969,8 @@ class SelfEvolvingAgent:
                     "cacheableSystemPrefixMerged": cacheable_prefix_merged,
                 },
             )
-        volatile_context_messages = []
-        if dynamic_system_context_message is not None:
-            volatile_context_messages.append(dynamic_system_context_message)
-        pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
-        self._pending_runtime_context_blocks = []
-        if pending_runtime_context_blocks:
-            volatile_context_messages.extend(SystemMessage(content=block) for block in pending_runtime_context_blocks)
-        if volatile_context_messages:
-            messages = TurnOutcomeController.insert_volatile_context_before_current_user(
-                messages=messages,
-                context_messages=volatile_context_messages,
-            )
         messages = self._apply_turn_status_bar(messages, iteration=0)
-        if dynamic_system_context_message is not None:
+        if assembled_turn_messages.dynamic_system_context_inserted:
             _record_agent_scene_event(
                 "prompt",
                 "agent.dynamic_system_context_inserted_before_current_user",
@@ -2128,24 +2071,16 @@ class SelfEvolvingAgent:
                     prompt_built_with_runtime_key = self._last_runtime_state_memory_key
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
-                    messages[0] = build_cacheable_system_prefix_message(current_sp)
-                    messages = [
-                        message for message in messages
-                        if not is_dynamic_system_context_message(message)
-                    ]
-                    current_dynamic_system_context = build_dynamic_system_context_message(current_sp)
-                    if current_dynamic_system_context is not None:
-                        messages = TurnOutcomeController.insert_volatile_context_before_current_user(
-                            messages=messages,
-                            context_messages=[current_dynamic_system_context],
-                        )
-                    if turn_static_context_blocks:
-                        merged_message, cacheable_prefix_merged = extend_system_message_cacheable_prefix(
-                            messages[0],
-                            turn_static_context_blocks,
-                        )
-                        if cacheable_prefix_merged:
-                            messages[0] = merged_message
+                    messages = refresh_system_prefix_on_messages(
+                        messages=messages,
+                        system_prompt=current_sp,
+                        static_context_blocks=turn_static_context_blocks,
+                        build_cacheable_prefix_fn=build_cacheable_system_prefix_message,
+                        is_dynamic_system_context_fn=is_dynamic_system_context_message,
+                        build_dynamic_system_context_fn=build_dynamic_system_context_message,
+                        extend_cacheable_prefix_fn=extend_system_message_cacheable_prefix,
+                        insert_volatile_fn=TurnOutcomeController.insert_volatile_context_before_current_user,
+                    )
                     self._cached_system_prompt = current_prompt
                 # Live runtime status (budget/progress/mental) — every iteration.
                 messages = self._apply_turn_status_bar(messages, iteration=iteration)
