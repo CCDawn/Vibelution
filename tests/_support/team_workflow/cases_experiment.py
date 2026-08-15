@@ -603,6 +603,48 @@ def test_run_experiment_smoke_run_rejects_unavailable_declared_adapter_before_pa
     assert stored["plans"][0].get("smokeRunResults") in (None, [])
 
 
+def test_run_experiment_smoke_run_ignores_formal_fashionmnist_and_uses_v1_cpu(
+    tmp_path, monkeypatch
+):
+    from core.web.services.team_workflow.experiment_api.plan import (
+        bind_frozen_protocol_to_experiment_plan,
+    )
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    bound = bind_frozen_protocol_to_experiment_plan(
+        team["teamId"],
+        {
+            "planId": "exp-plan-20260813211108-fdb104ea",
+            "protocolId": "exp-plan-20260813211108-fdb104ea",
+            "status": "frozen",
+            "protocol": {
+                "dataset": "dataset-sci-096-v1",
+                "metric": "stimulus decoding accuracy",
+                "baseline": "two-layer decoder",
+                "smoke_plan": {
+                    "phase": "smoke_gate",
+                    "required": ["subset 1000 trials"],
+                },
+            },
+        },
+    )
+    selection = bound["experimentContract"]["adapterSelection"]
+    assert (
+        selection["resolvedAdapterId"]
+        == team_workflow_orchestration_service.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    )
+
+    response = team_workflow_orchestration_service.run_experiment_smoke_run(
+        team["teamId"],
+        bound["planId"],
+        {},
+    )
+
+    assert response["adapter"] == "synthetic_classification_baseline_vs_variant"
+    assert response["runnerResult"]["runnerMode"] == "v1_cpu_smoke"
+
+
 def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
