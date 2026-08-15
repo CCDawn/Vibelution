@@ -12,12 +12,15 @@ import {
   importDataRecordAsSourceCandidate,
   openSourceCollectionStorage,
 } from "../../api/sourceCollection";
+import {
+  buildCandidateGraph,
+  completeKnowledgeCollection,
+  extractSourceCollectionCandidates,
+  runKnowledgeIngestionPrecheck,
+} from "../../api/teamKnowledge";
 import type {
   DataProcessingCollectionAssignmentListPayload,
   DataProcessingCollectionOutputPayload,
-  TeamWorkflowCandidateGraphBuildPayload,
-  TeamWorkflowKnowledgeCollectionIngestionPayload,
-  TeamWorkflowSourceCollectionExtractionPayload,
 } from "../../api/types";
 import { SOURCE_COLLECTION_RUN_PREVIEW_LIMIT } from "./source-collection/presentationModel";
 import type { SourceCollectionStorageOpenTarget } from "./source-collection/presentationModel";
@@ -181,20 +184,13 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
 
   const extractSourceCollectionCandidatesMutation = useMutation({
     mutationFn: (payload: { teamId: string; runId: string; extractionAgentId: string; maxRecords?: number; force?: boolean; notes?: string }) =>
-      fetchJson<TeamWorkflowSourceCollectionExtractionPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/knowledge-collection/extract`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            runId: payload.runId,
-            extractionAgentId: payload.extractionAgentId,
-            maxRecords: payload.maxRecords ?? 100,
-            force: payload.force ?? false,
-            notes: payload.notes ?? "",
-          }),
-        },
-      ),
+      extractSourceCollectionCandidates(payload.teamId, {
+        runId: payload.runId,
+        extractionAgentId: payload.extractionAgentId,
+        maxRecords: payload.maxRecords ?? 100,
+        force: payload.force ?? false,
+        notes: payload.notes ?? "",
+      }),
     onSuccess: (payload, variables) => {
       options.setSelectedSourceCollectionRunId(payload.runId);
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
@@ -331,18 +327,14 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
       forceReview?: boolean;
       forceRebuild?: boolean;
     }) =>
-      fetchJson<TeamWorkflowCandidateGraphBuildPayload>(`/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/candidate-graph`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: variables.title || "Agent curated candidate graph",
-          createdByAgent: variables.createdByAgent || options.sourceCollectionRelationMapperAgentId,
-          sourceQualityAgentId: variables.sourceQualityAgentId || options.sourceCollectionExtractorAgentId,
-          curationMode: variables.curationMode || "",
-          maxCandidates: variables.maxCandidates || 80,
-          forceReview: variables.forceReview ?? false,
-          forceRebuild: variables.forceRebuild ?? false,
-        }),
+      buildCandidateGraph(variables.teamId, {
+        title: variables.title || "Agent curated candidate graph",
+        createdByAgent: variables.createdByAgent || options.sourceCollectionRelationMapperAgentId,
+        sourceQualityAgentId: variables.sourceQualityAgentId || options.sourceCollectionExtractorAgentId,
+        curationMode: variables.curationMode || "",
+        maxCandidates: variables.maxCandidates || 80,
+        forceReview: variables.forceReview ?? false,
+        forceRebuild: variables.forceRebuild ?? false,
       }),
     onSuccess: (payload, variables) => {
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
@@ -355,18 +347,11 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
 
   const runKnowledgeIngestionPrecheckMutation = useMutation({
     mutationFn: (variables: { teamId: string; stewardAgentId: string; targetDomain?: string; maxCandidates?: number }) =>
-      fetchJson<TeamWorkflowKnowledgeIngestionPrecheckPayload>(
-        `/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/knowledge-ingestion/precheck`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stewardAgentId: variables.stewardAgentId,
-            targetDomain: variables.targetDomain || options.sourceCollectionDraftTopic || "神经机制启发神经网络算法",
-            maxCandidates: variables.maxCandidates || 32,
-          }),
-        },
-      ),
+      runKnowledgeIngestionPrecheck<TeamWorkflowKnowledgeIngestionPrecheckPayload>(variables.teamId, {
+        stewardAgentId: variables.stewardAgentId,
+        targetDomain: variables.targetDomain || options.sourceCollectionDraftTopic || "神经机制启发神经网络算法",
+        maxCandidates: variables.maxCandidates || 32,
+      }),
     onSuccess: (payload, variables) => {
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
       queryClient.setQueryData(queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId), payload.status);
@@ -395,40 +380,33 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
       forceReview?: boolean;
       forceRebuild?: boolean;
     }) =>
-      fetchJson<TeamWorkflowKnowledgeCollectionIngestionPayload>(
-        `/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/knowledge-collection/complete`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            runId: variables.runId || "",
-            extractionAgentId: variables.extractionAgentId || "",
-            sourceQualityAgentId: variables.sourceQualityAgentId,
-            candidateGraphAgentId: variables.candidateGraphAgentId,
-            stewardAgentId: variables.stewardAgentId,
-            knowledgeBaseId: variables.knowledgeBaseId || "",
-            targetDomain: variables.targetDomain || options.sourceCollectionDraftTopic || "神经机制启发神经网络算法",
-            maxCandidates: variables.maxCandidates || 80,
-            maxSearchBatches: variables.maxSearchBatches ?? 20,
-            maxQueriesPerBatch: variables.maxQueriesPerBatch ?? 4,
-            maxResultsPerQuery: variables.maxResultsPerQuery || Math.max(1, Math.min(5, options.sourceCollectionDraftMaxResultsPerQuery || 3)),
-            maxRecords: variables.maxRecords ?? 500,
-            forceReview: variables.forceReview ?? false,
-            forceRebuild: variables.forceRebuild ?? false,
-            autoCreateKnowledgeBase: true,
-            // 一键入库走同步闭环：提交→来源审核→知识提案→审批→正式 KnowledgeItem。
-            // 职责分离：steward 提案，由后端解析的 coordinator/lead 审批，不再依赖唤醒 agent 的异步交接。
-            autoSubmit: true,
-            autoReviewSource: true,
-            autoApprove: true,
-            notifyStewardAgent: false,
-            wakeStewardAgent: false,
-            // 首次入库需现场生成 steward pack（分钟级）；后台执行让点击立即返回，状态由 activeWorkRun 轮询。
-            backgroundExecution: true,
-            requesterAgentId: options.sourceCollectionOwnerAgentId,
-          }),
-        },
-      ),
+      completeKnowledgeCollection(variables.teamId, {
+        runId: variables.runId || "",
+        extractionAgentId: variables.extractionAgentId || "",
+        sourceQualityAgentId: variables.sourceQualityAgentId,
+        candidateGraphAgentId: variables.candidateGraphAgentId,
+        stewardAgentId: variables.stewardAgentId,
+        knowledgeBaseId: variables.knowledgeBaseId || "",
+        targetDomain: variables.targetDomain || options.sourceCollectionDraftTopic || "神经机制启发神经网络算法",
+        maxCandidates: variables.maxCandidates || 80,
+        maxSearchBatches: variables.maxSearchBatches ?? 20,
+        maxQueriesPerBatch: variables.maxQueriesPerBatch ?? 4,
+        maxResultsPerQuery: variables.maxResultsPerQuery || Math.max(1, Math.min(5, options.sourceCollectionDraftMaxResultsPerQuery || 3)),
+        maxRecords: variables.maxRecords ?? 500,
+        forceReview: variables.forceReview ?? false,
+        forceRebuild: variables.forceRebuild ?? false,
+        autoCreateKnowledgeBase: true,
+        // 一键入库走同步闭环：提交→来源审核→知识提案→审批→正式 KnowledgeItem。
+        // 职责分离：steward 提案，由后端解析的 coordinator/lead 审批，不再依赖唤醒 agent 的异步交接。
+        autoSubmit: true,
+        autoReviewSource: true,
+        autoApprove: true,
+        notifyStewardAgent: false,
+        wakeStewardAgent: false,
+        // 首次入库需现场生成 steward pack（分钟级）；后台执行让点击立即返回，状态由 activeWorkRun 轮询。
+        backgroundExecution: true,
+        requesterAgentId: options.sourceCollectionOwnerAgentId,
+      }),
     onSuccess: (payload, variables) => {
       // 后台执行时响应是 accepted（无 workflow/statusSnapshot）：只失效查询，让 activeWorkRun 轮询接管。
       if (payload.workflow) {
