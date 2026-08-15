@@ -16,6 +16,7 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 | Create/update agent / avatar | `mutations.py` |
 | Registry repair / load/save / shrink guard | `repair_store.py` |
 | Inbox / workspace write / ensure-session / profile defaults | `ops_residual.py` |
+| Personal lossless episode append / supersede | `episodic_memory.py` |
 | Lifecycle serializers on facade | `../agent_directory_service.py` (wrappers only) |
 | Public import surface | `../agent_directory_service.py` (prefer re-export) |
 
@@ -32,6 +33,7 @@ Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 | Create/update + avatar mutations | `mutations.py` | lifecycle purge path |
 | Registry repair / load-save / normalize | `repair_store.py` | workflow orchestration |
 | Inbox / workspace / ensure-session residual | `ops_residual.py` | team membership graph |
+| Personal lossless episode jsonl | `episodic_memory.py` | `team_knowledge`, `outcomeGraph`, `memory_graph_service` |
 
 ## Sole-owner rules
 
@@ -52,6 +54,7 @@ Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 | `mutations.py` | done | Phase 12 — create/update + avatar |
 | `repair_store.py` | done | Phase 17 — registry repair/load-save |
 | `ops_residual.py` | done | Phase 17 — inbox/workspace/ensure-session residual |
+| `episodic_memory.py` | done | P0 — lossless `episodic_events.jsonl`; no summaries/public lift |
 | facade residual | serializers only | lifecycle wrappers |
 
 ## Related
