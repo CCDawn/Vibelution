@@ -45,6 +45,7 @@ from .team import team_crud as _team_crud
 from .team import team_repair as _team_repair
 from .team import team_projection as _team_projection
 from .team import team_membership as _team_membership
+from .team import team_member_messages as _team_member_messages
 from .team import team_logging as _team_logging
 from .team import team_store as _team_store
 from .team import team_constants as _team_constants
@@ -282,7 +283,13 @@ _find_active_team_for_agent_in_state = _team_membership._find_active_team_for_ag
 _unique_active_member_agent_ids = _team_membership._unique_active_member_agent_ids
 _active_member_agent_ids = _team_membership._active_member_agent_ids
 _active_member_session_ids = _team_membership._active_member_session_ids
+_member_direct_session_kind = _team_membership._member_direct_session_kind
+_ensure_active_member_direct_sessions = _team_membership._ensure_active_member_direct_sessions
+build_team_roster_context_lines = _team_membership.build_team_roster_context_lines
 _apply_team_contract = _team_membership._apply_team_contract
+list_team_member_messages = _team_member_messages.list_team_member_messages
+record_team_member_message = _team_member_messages.record_team_member_message
+shared_active_team_for_agents = _team_member_messages.shared_active_team_for_agents
 
 _record_team_event = _team_logging._record_team_event
 _team_detail_log_fields = _team_logging._team_detail_log_fields
