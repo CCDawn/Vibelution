@@ -166,7 +166,7 @@ def _split_agent_runtime_context_block(block: str) -> tuple[str, str]:
     if not text:
         return "", ""
     lines = text.splitlines()
-    dynamic_markers = ("GroupContextEvents:", "AgentInboxMessages:")
+    dynamic_markers = ("PersonalEpisodes:", "GroupContextEvents:", "AgentInboxMessages:")
     dynamic_start: int | None = None
     for index, line in enumerate(lines):
         stripped = str(line or "").strip()
@@ -215,6 +215,7 @@ class AgentContextPacket:
     tool_policy: dict[str, Any] = field(default_factory=dict)
     group_context_events: list[dict[str, Any]] = field(default_factory=list)
     inbox_messages: list[dict[str, Any]] = field(default_factory=list)
+    episodic_events: list[dict[str, Any]] = field(default_factory=list)
     static_context_block: str = ""
     dynamic_context_block: str = ""
     context_segments: list[dict[str, Any]] = field(default_factory=list)
@@ -291,6 +292,12 @@ def build_agent_context(
         )
 
     stage_started_at = _perf_counter()
+    episodic_events = agent_directory_service.list_current_episodic_events(
+        normalized_agent_id,
+        limit=agent_directory_service.PROMPT_LIST_LIMIT,
+    )
+    timings["episodicEventsMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     group_events = agent_directory_service.list_group_context_events_for_agent(
         normalized_agent_id,
         limit=limit,
@@ -315,6 +322,7 @@ def build_agent_context(
         agent_snapshot=agent,
         group_events_snapshot=group_events,
         inbox_messages_snapshot=inbox_messages,
+        episodic_events_snapshot=episodic_events,
         memory_policy_snapshot=memory_policy,
     )
     timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
@@ -449,6 +457,7 @@ def build_agent_context(
         tool_policy=tool_policy,
         group_context_events=group_events,
         inbox_messages=inbox_messages,
+        episodic_events=episodic_events,
         static_context_block=static_context_block,
         dynamic_context_block=dynamic_context_block,
         context_segments=context_segments,

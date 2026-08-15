@@ -75,7 +75,10 @@ from core.infrastructure.workspace_cleaner import (
 )
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
-from tools.episodic_memory_tools import append_episodic_memory_tool as _append_episodic_memory_impl
+from tools.episodic_memory_tools import (
+    append_episodic_memory_tool as _append_episodic_memory_impl,
+    supersede_episodic_memory_tool as _supersede_episodic_memory_impl,
+)
 from tools.agent_tool_governance_tools import agent_tool_permission_request_tool as _agent_tool_permission_request_impl
 from tools.research_organization_tools import (
     research_agent_creation_proposal_tool as _research_agent_creation_proposal_impl,
@@ -1824,6 +1827,32 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def supersede_episodic_memory_tool(
+        episode_id: str,
+        successor_text: str = "",
+        kind: str = "note",
+    ) -> str:
+        """
+        作废当前 Agent 的一条私有 episode；可选同时追加替换条目。
+
+        原 JSONL 行保留，只填 validUntil。用于过期偏好或被更新的事实。
+        不升公共目录，不写团队知识。
+
+        Args:
+            episode_id: 要作废的当前 episode（必填）。
+            successor_text: 可选替换正文；空则只作废。
+            kind: 替换条目的 kind，默认 note。
+
+        Returns:
+            JSON，含 ok、episodeId、successorEpisodeId。
+        """
+        return _supersede_episodic_memory_impl(
+            episode_id=episode_id,
+            successor_text=successor_text,
+            kind=kind,
+        )
+
+    @tool
     def session_reference_query_tool(
         reference_id: str = "",
         session_id: str = "",
@@ -2644,6 +2673,7 @@ def _build_key_tools() -> List[BaseTool]:
         # Agent 间通信
         agent_message_tool,
         append_episodic_memory_tool,
+        supersede_episodic_memory_tool,
         agent_tool_permission_request_tool,
         research_agent_creation_proposal_tool,
         research_communication_edge_proposal_tool,

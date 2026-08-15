@@ -953,11 +953,12 @@ def _with_session_terminal_protocol_defaults(agent: dict[str, Any], policy: dict
     """Project untouched private chat defaults onto the current session protocol.
 
     Covers the pre-terminal legacy list, the protocol list from before the
-    personal episode tool, and the episode-era default that still carried
-    generation-handoff memory tools. Untouched defaults drop those tools,
-    which belong to self-evolution. User-customized policies are never
-    widened or narrowed. The projection is deterministic and read-only, so
-    persisted ToolPolicy remains the single writable source.
+    personal episode tool, the episode-era default that still carried
+    generation-handoff memory tools, and the narrow-handoff default from
+    before supersede. Untouched defaults drop generation-handoff tools and
+    add the current personal-episode tools. User-customized policies are
+    never widened or narrowed. The projection is deterministic and
+    read-only, so persisted ToolPolicy remains the single writable source.
     """
     s = _service()
 
@@ -982,7 +983,11 @@ def _with_session_terminal_protocol_defaults(agent: dict[str, Any], policy: dict
         allowed == list(s._EPISODE_ERA_SESSION_AGENT_ALLOWED_TOOLS)
         and preferred == list(s.SESSION_PROTOCOL_PREFERRED_TOOLS)
     )
-    if not (legacy_untouched or protocol_untouched or episode_era_untouched):
+    narrow_handoff_untouched = (
+        allowed == list(s._NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS)
+        and preferred == list(s.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
+    )
+    if not (legacy_untouched or protocol_untouched or episode_era_untouched or narrow_handoff_untouched):
         return policy
     return {
         **policy,
