@@ -29,7 +29,6 @@ HTTP_METHODS = {
 # "team_workflows/<module>.py" after the monolith split of team_workflows.py.
 LEGACY_UNTYPED_ENDPOINT_BUDGETS: dict[str, int] = {
     "agents.py": 46,
-    "chat_rooms.py": 11,
     "cli_agents.py": 6,
     "computer_use.py": 5,
     "config.py": 31,

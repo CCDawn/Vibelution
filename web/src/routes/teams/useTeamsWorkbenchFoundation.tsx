@@ -83,7 +83,7 @@ import { getTeamResearchProjectProgress } from "../../api/researchProjectAgentTa
 import {
   systemManagedTeamArchiveReason,
 } from "./teamKindModel";
-import { fetchJson } from "../../api/client";
+import { fetchChatRoomDetail } from "../../api/chat";
 import {
   projectAgentBusEventsForTeam,
 } from "../../api/projectAgentBus";
@@ -452,7 +452,7 @@ export function useTeamsWorkbenchFoundation({
   });
   const linkedChatRoomQuery = useQuery({
     queryKey: queryKeys.chatRoom(linkedChatRoomId || "none"),
-    queryFn: ({ signal }) => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`, { signal }),
+    queryFn: ({ signal }) => fetchChatRoomDetail(linkedChatRoomId, { signal }),
     enabled: linkedChatRoomQueryEnabled,
     refetchInterval: (query) => {
       const detail = query.state.data as ChatRoomDetail | undefined;

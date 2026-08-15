@@ -535,8 +535,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamShellMutationsSource).toContain("revokeProjectAgentBusMessage({");
     expect(teamShellMutationsSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
     expect(routeSource).toContain("syncTeamChatRoomMutation");
-    expect(teamShellMutationsSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`");
-    expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`, { signal })");
+    expect(teamShellMutationsSource).toContain("startChatRoomRound(payload.roomId, {");
+    expect(routeSource).toContain("fetchChatRoomDetail(linkedChatRoomId, { signal })");
     expect(routeSource).toContain("enabled: linkedChatRoomQueryEnabled");
     expect(routeSource).toContain("linkedRoomRefetchInterval(pageVisible");
     expect(routeSource).toContain("latestChatRoomRound(linkedRoomDetail)");
