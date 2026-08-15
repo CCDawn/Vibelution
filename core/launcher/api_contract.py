@@ -242,6 +242,48 @@ class LauncherDeveloperNoiseOverviewResponse(LauncherJsonResponse):
     updatedAt: str = ""
 
 
+class LauncherAcceptedCommandResponse(LauncherJsonResponse):
+    accepted: bool = False
+    commandId: str = ""
+    message: str = ""
+    instanceId: str = ""
+    operation: str = ""
+
+
+class LauncherCleanupPlanResponse(LauncherJsonResponse):
+    planId: str = ""
+    action: str = ""
+    ok: bool = False
+
+
+class LauncherLifecycleIntentResponse(LauncherJsonResponse):
+    intentId: str = ""
+    status: str = ""
+    action: str = ""
+
+
+class LauncherWorkbenchCloseResponse(LauncherJsonResponse):
+    closeId: str = ""
+    phase: str = ""
+    desktopSessionId: str = ""
+
+
+class LauncherDesktopActionResponse(LauncherJsonResponse):
+    actionId: str = ""
+    desktopSessionId: str = ""
+
+
+class LauncherDesktopSessionResponse(LauncherJsonResponse):
+    desktopSessionId: str = ""
+    revision: int = 0
+    status: str = ""
+
+
+class LauncherRuntimeSceneEventResponse(LauncherJsonResponse):
+    accepted: bool = False
+    runtimeSceneId: str = ""
+
+
 def launcher_error_detail(code: str, exc: Exception | str, **extra: Any) -> dict[str, Any]:
     detail: dict[str, Any] = {
         "code": str(code or "").strip(),

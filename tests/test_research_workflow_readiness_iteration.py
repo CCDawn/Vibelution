@@ -75,9 +75,48 @@ def test_result_evaluation_ready_for_bounded_run_without_agent() -> None:
     assert result.actor.configured is True
 
 
-def test_result_evaluation_blocks_unbounded_run_without_agent() -> None:
+def test_result_evaluation_ready_for_fashion_mnist_formal_without_agent() -> None:
     context = FakeDomainContext()
     context.bindings["result_evaluation"] = None
+    context.resolvable_agents = set()
+    context._controlled_run = {
+        "terminal": True,
+        "execution": {
+            "status": "completed",
+            "adapterId": "fashion_mnist_predictive_coding_multi_seed",
+            "automaticPromotion": False,
+            "result": {
+                "status": "completed",
+                "aggregate": {"meanAccuracy": 0.42},
+                "logRef": "/tmp/sci096-canvas/out/formal-run-log.json",
+                "boundaries": [
+                    "does_not_validate_neural_realism",
+                    "not_an_official_competition_submission",
+                ],
+                "automaticPromotion": False,
+            },
+        },
+    }
+    result = _evaluate(context, "result_evaluation")
+    assert result.ready is True
+    assert result.actor.configured is True
+
+
+def test_result_evaluation_blocks_fashion_mnist_without_claim_boundary() -> None:
+    context = FakeDomainContext()
+    context.bindings["result_evaluation"] = None
+    context.resolvable_agents = set()
+    context._controlled_run = {
+        "terminal": True,
+        "logs": True,
+        "metrics": True,
+        "artifact_hash": True,
+        "execution": {
+            "status": "completed",
+            "adapterId": "fashion_mnist_predictive_coding_multi_seed",
+            "result": {"status": "completed", "aggregate": {"meanAccuracy": 0.42}},
+        },
+    }
     result = _evaluate(context, "result_evaluation")
     assert result.ready is False
     assert any(b.code == "agent_not_configured" for b in result.blockers)

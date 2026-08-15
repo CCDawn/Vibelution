@@ -3,8 +3,26 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
 
+from core.web.routes.research_models import (
+    ResearchAgentTemplateUpdatePayload,
+    ResearchDeepSearchPayload,
+    ResearchFlowCanvasPayload,
+    ResearchFlowCanvasResponse,
+    ResearchKnowledgeBaseResponse,
+    ResearchOrgMessagePayload,
+    ResearchOrgMessageResponse,
+    ResearchOrgProposalPayload,
+    ResearchOrgProposalResponse,
+    ResearchOrganizationGraphResponse,
+    ResearchOrganizationPayload,
+    ResearchPromptUpdatePayload,
+    ResearchPromptsResponse,
+    ThemeDiscoverySessionDeleteResponse,
+    ThemeDiscoverySessionListResponse,
+    ThemeDiscoverySessionPayload,
+    ThemeDiscoverySessionResponse,
+)
 from core.web.services.research_service import (
     approve_theme_card,
     create_theme_discovery_session,
@@ -40,82 +58,11 @@ from core.web.services.research_organization_service import (
 router = APIRouter(tags=["research"])
 
 
-class ThemeDiscoverySessionPayload(BaseModel):
-    openGoal: str = Field("", max_length=8000)
-    constraints: str = Field("", max_length=8000)
-    preferences: str = Field("", max_length=8000)
-    candidateCount: int = 5
-
-
-class ResearchPromptUpdatePayload(BaseModel):
-    key: str = Field("", max_length=64)
-    content: str = Field("", max_length=50000)
-
-
-class ResearchAgentTemplateUpdatePayload(BaseModel):
-    key: str = Field("", max_length=64)
-    label: str = Field("", max_length=120)
-    promptFilename: str = Field("", max_length=160)
-    templateId: str = Field("", max_length=128)
-    profileId: str = Field("", max_length=128)
-    llmConfigId: str = Field("", max_length=128)
-    enabled: bool | None = None
-
-
-class ResearchDeepSearchPayload(BaseModel):
-    evidenceRequests: list[str] = Field(default_factory=list, max_length=8)
-
-
-class ResearchFlowCanvasPayload(BaseModel):
-    schemaVersion: int = 1
-    canvasKind: str = Field("", max_length=80)
-    viewport: dict = Field(default_factory=dict)
-    nodes: list[dict] = Field(default_factory=list, max_length=80)
-    edges: list[dict] = Field(default_factory=list, max_length=160)
-
-
-class ResearchOrganizationPayload(BaseModel):
-    schemaVersion: int = 1
-    agents: list[dict] = Field(default_factory=list, max_length=200)
-    edges: list[dict] = Field(default_factory=list, max_length=400)
-    zones: list[dict] = Field(default_factory=list, max_length=80)
-    proposals: list[dict] = Field(default_factory=list, max_length=200)
-    auditEvents: list[dict] = Field(default_factory=list, max_length=600)
-    messages: list[dict] = Field(default_factory=list, max_length=300)
-
-
-class ResearchOrgMessagePayload(BaseModel):
-    sourceType: str = Field("", max_length=32)
-    sourceAgentId: str = Field("", max_length=128)
-    sourceSessionId: str = Field("", max_length=128)
-    sourceRoomId: str = Field("", max_length=128)
-    sourceRoundId: str = Field("", max_length=128)
-    targetAgentId: str = Field("", max_length=128)
-    targetAgentIds: list[str] = Field(default_factory=list, max_length=80)
-    deliveryMode: str = Field("private", max_length=32)
-    zoneId: str = Field("", max_length=128)
-    messageType: str = Field("notice", max_length=32)
-    intent: str = Field("", max_length=128)
-    content: str = Field("", max_length=12000)
-    summary: str = Field("", max_length=1000)
-    threadId: str = Field("", max_length=128)
-    wakeTarget: bool = True
-    mailboxOnly: bool = False
-    humanOverride: bool | None = None
-    createdBy: str = Field("", max_length=64)
-
-
-class ResearchOrgProposalPayload(BaseModel):
-    title: str = Field("", max_length=160)
-    description: str = Field("", max_length=4000)
-    proposedByAgentId: str = Field("", max_length=128)
-    recommendedByAgentId: str = Field("", max_length=128)
-    riskLevel: str = Field("", max_length=32)
-    action: dict | None = None
-    actions: list[dict] = Field(default_factory=list, max_length=40)
-
-
-@router.get("/research/knowledge-base")
+@router.get(
+    "/research/knowledge-base",
+    response_model=ResearchKnowledgeBaseResponse,
+    response_model_exclude_unset=True,
+)
 def research_knowledge_base(
     query: str = "",
     kind: str = "",
@@ -125,12 +72,21 @@ def research_knowledge_base(
     return get_research_knowledge_base(query=query, kind=kind, category=category, limit=limit)
 
 
-@router.get("/research/theme-discovery/sessions")
+@router.get(
+    "/research/theme-discovery/sessions",
+    response_model=ThemeDiscoverySessionListResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_sessions() -> dict:
     return list_theme_discovery_sessions()
 
 
-@router.post("/research/theme-discovery/sessions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/research/theme-discovery/sessions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_session_create(payload: ThemeDiscoverySessionPayload) -> dict:
     try:
         return create_theme_discovery_session(payload.model_dump())
@@ -138,7 +94,11 @@ def research_theme_discovery_session_create(payload: ThemeDiscoverySessionPayloa
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/research/theme-discovery/sessions/{session_id}")
+@router.get(
+    "/research/theme-discovery/sessions/{session_id}",
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_session_detail(session_id: str) -> dict:
     try:
         return get_theme_discovery_session(session_id)
@@ -148,7 +108,11 @@ def research_theme_discovery_session_detail(session_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/research/theme-discovery/sessions/{session_id}")
+@router.delete(
+    "/research/theme-discovery/sessions/{session_id}",
+    response_model=ThemeDiscoverySessionDeleteResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_session_delete(session_id: str) -> dict:
     try:
         return delete_theme_discovery_session(session_id)
@@ -158,53 +122,93 @@ def research_theme_discovery_session_delete(session_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/research/theme-discovery/sessions/{session_id}/run-broad-search")
+@router.post(
+    "/research/theme-discovery/sessions/{session_id}/run-broad-search",
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_broad_search(session_id: str) -> dict:
     return _run_research_action(lambda: run_broad_theme_search(session_id))
 
 
-@router.post("/research/theme-discovery/sessions/{session_id}/run-deep-search")
+@router.post(
+    "/research/theme-discovery/sessions/{session_id}/run-deep-search",
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_deep_search(session_id: str, payload: ResearchDeepSearchPayload | None = None) -> dict:
     evidence_requests = payload.evidenceRequests if payload else []
     return _run_research_action(lambda: run_deep_theme_search(session_id, evidence_requests=evidence_requests))
 
 
-@router.post("/research/theme-discovery/sessions/{session_id}/extract-evidence")
+@router.post(
+    "/research/theme-discovery/sessions/{session_id}/extract-evidence",
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_extract_evidence(session_id: str) -> dict:
     return _run_research_action(lambda: extract_theme_discovery_evidence(session_id))
 
 
-@router.post("/research/theme-discovery/sessions/{session_id}/generate-themes")
+@router.post(
+    "/research/theme-discovery/sessions/{session_id}/generate-themes",
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_generate_themes(session_id: str) -> dict:
     return _run_research_action(lambda: generate_candidate_themes(session_id))
 
 
-@router.post("/research/theme-discovery/sessions/{session_id}/run-draft")
+@router.post(
+    "/research/theme-discovery/sessions/{session_id}/run-draft",
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_run_draft(session_id: str) -> dict:
     return _run_research_action(lambda: run_theme_discovery_draft(session_id))
 
 
-@router.post("/research/theme-discovery/sessions/{session_id}/themes/{theme_id}/select")
+@router.post(
+    "/research/theme-discovery/sessions/{session_id}/themes/{theme_id}/select",
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_select_theme(session_id: str, theme_id: str) -> dict:
     return _run_research_action(lambda: select_candidate_theme(session_id, theme_id))
 
 
-@router.post("/research/theme-discovery/sessions/{session_id}/themes/{theme_id}/theme-card")
+@router.post(
+    "/research/theme-discovery/sessions/{session_id}/themes/{theme_id}/theme-card",
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_theme_card(session_id: str, theme_id: str) -> dict:
     return _run_research_action(lambda: generate_theme_card(session_id, theme_id))
 
 
-@router.post("/research/theme-discovery/sessions/{session_id}/theme-cards/{card_id}/approve")
+@router.post(
+    "/research/theme-discovery/sessions/{session_id}/theme-cards/{card_id}/approve",
+    response_model=ThemeDiscoverySessionResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_approve_card(session_id: str, card_id: str) -> dict:
     return _run_research_action(lambda: approve_theme_card(session_id, card_id))
 
 
-@router.get("/research/theme-discovery/prompts")
+@router.get(
+    "/research/theme-discovery/prompts",
+    response_model=ResearchPromptsResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_prompts() -> dict:
     return list_research_prompts()
 
 
-@router.put("/research/theme-discovery/prompts")
+@router.put(
+    "/research/theme-discovery/prompts",
+    response_model=ResearchPromptsResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_prompts_update(payload: ResearchPromptUpdatePayload) -> dict:
     try:
         return save_research_prompt(payload.key, payload.content)
@@ -212,7 +216,11 @@ def research_theme_discovery_prompts_update(payload: ResearchPromptUpdatePayload
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.put("/research/theme-discovery/agent-templates")
+@router.put(
+    "/research/theme-discovery/agent-templates",
+    response_model=ResearchPromptsResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_agent_templates_update(payload: ResearchAgentTemplateUpdatePayload) -> dict:
     try:
         return save_research_agent_binding(
@@ -227,7 +235,11 @@ def research_theme_discovery_agent_templates_update(payload: ResearchAgentTempla
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/research/theme-discovery/agent-templates/{agent_key}")
+@router.delete(
+    "/research/theme-discovery/agent-templates/{agent_key}",
+    response_model=ResearchPromptsResponse,
+    response_model_exclude_unset=True,
+)
 def research_theme_discovery_agent_templates_delete(agent_key: str) -> dict:
     try:
         return delete_research_agent_binding(agent_key)
@@ -235,7 +247,11 @@ def research_theme_discovery_agent_templates_delete(agent_key: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/research/flow-canvas")
+@router.get(
+    "/research/flow-canvas",
+    response_model=ResearchFlowCanvasResponse,
+    response_model_exclude_unset=True,
+)
 def research_flow_canvas() -> dict:
     try:
         return get_research_flow_canvas()
@@ -243,7 +259,11 @@ def research_flow_canvas() -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.put("/research/flow-canvas")
+@router.put(
+    "/research/flow-canvas",
+    response_model=ResearchFlowCanvasResponse,
+    response_model_exclude_unset=True,
+)
 def research_flow_canvas_update(payload: ResearchFlowCanvasPayload) -> dict:
     try:
         return save_research_flow_canvas(payload.model_dump())
@@ -251,17 +271,30 @@ def research_flow_canvas_update(payload: ResearchFlowCanvasPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/research/organization")
+@router.get(
+    "/research/organization",
+    response_model=ResearchOrganizationGraphResponse,
+    response_model_exclude_unset=True,
+)
 def research_organization() -> dict:
     return _run_research_action(get_research_organization)
 
 
-@router.put("/research/organization")
+@router.put(
+    "/research/organization",
+    response_model=ResearchOrganizationGraphResponse,
+    response_model_exclude_unset=True,
+)
 def research_organization_update(payload: ResearchOrganizationPayload) -> dict:
     return _run_research_action(lambda: save_research_organization(payload.model_dump()))
 
 
-@router.post("/research/organization/messages", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/research/organization/messages",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ResearchOrgMessageResponse,
+    response_model_exclude_unset=True,
+)
 def research_organization_message_create(payload: ResearchOrgMessagePayload) -> dict:
     data = payload.model_dump()
     if payload.humanOverride is None:
@@ -269,17 +302,30 @@ def research_organization_message_create(payload: ResearchOrgMessagePayload) -> 
     return _run_research_action(lambda: send_research_org_message(data))
 
 
-@router.post("/research/organization/proposals", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/research/organization/proposals",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ResearchOrgProposalResponse,
+    response_model_exclude_unset=True,
+)
 def research_organization_proposal_create(payload: ResearchOrgProposalPayload) -> dict:
     return _run_research_action(lambda: create_research_org_proposal(payload.model_dump()))
 
 
-@router.post("/research/organization/proposals/{proposal_id}/apply")
+@router.post(
+    "/research/organization/proposals/{proposal_id}/apply",
+    response_model=ResearchOrgProposalResponse,
+    response_model_exclude_unset=True,
+)
 def research_organization_proposal_apply(proposal_id: str) -> dict:
     return _run_research_action(lambda: apply_research_org_proposal(proposal_id))
 
 
-@router.post("/research/organization/messages/{message_id}/retry-wake")
+@router.post(
+    "/research/organization/messages/{message_id}/retry-wake",
+    response_model=ResearchOrgMessageResponse,
+    response_model_exclude_unset=True,
+)
 def research_organization_message_retry_wake(message_id: str) -> dict:
     return _run_research_action(lambda: retry_research_org_message_wake(message_id))
 

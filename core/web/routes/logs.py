@@ -3,8 +3,19 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
 
+from core.web.routes.logs_models import (
+    LogClearPayload,
+    LogContentResponse,
+    LogDeletePayload,
+    LogDeleteResponse,
+    LogRootItem,
+    LogTreeResponse,
+    RuntimeSceneDeletePayload,
+    RuntimeSceneDeleteResponse,
+    RuntimeSceneDetailResponse,
+    RuntimeSceneListItem,
+)
 from core.web.services.log_service import (
     build_log_tree,
     clear_log_file,
@@ -23,26 +34,20 @@ from core.web.services.runtime_scene_service import (
 router = APIRouter(tags=["logs"])
 
 
-class LogClearPayload(BaseModel):
-    root: str = Field(..., min_length=1)
-    path: str = Field(..., min_length=1)
-
-
-class LogDeletePayload(BaseModel):
-    root: str = Field(..., min_length=1)
-    paths: list[str] = Field(default_factory=list)
-
-
-class RuntimeSceneDeletePayload(BaseModel):
-    sceneIds: list[str] = Field(default_factory=list)
-
-
-@router.get("/logs/roots")
+@router.get(
+    "/logs/roots",
+    response_model=list[LogRootItem],
+    response_model_exclude_unset=True,
+)
 def log_roots() -> list[dict]:
     return list_log_roots()
 
 
-@router.get("/logs/tree")
+@router.get(
+    "/logs/tree",
+    response_model=LogTreeResponse,
+    response_model_exclude_unset=True,
+)
 def log_tree(root: str = Query(..., min_length=1)) -> dict:
     try:
         return build_log_tree(root)
@@ -50,7 +55,11 @@ def log_tree(root: str = Query(..., min_length=1)) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get("/logs/content")
+@router.get(
+    "/logs/content",
+    response_model=LogContentResponse,
+    response_model_exclude_unset=True,
+)
 def log_content(
     root: str = Query(..., min_length=1),
     path: str = Query(..., min_length=1),
@@ -63,12 +72,20 @@ def log_content(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get("/logs/runtime-scenes")
+@router.get(
+    "/logs/runtime-scenes",
+    response_model=list[RuntimeSceneListItem],
+    response_model_exclude_unset=True,
+)
 def runtime_scene_list() -> list[dict]:
     return list_runtime_scenes()
 
 
-@router.get("/logs/runtime-scenes/{scene_id}")
+@router.get(
+    "/logs/runtime-scenes/{scene_id}",
+    response_model=RuntimeSceneDetailResponse,
+    response_model_exclude_unset=True,
+)
 def runtime_scene_detail(scene_id: str) -> dict:
     try:
         return get_runtime_scene_detail(scene_id)
@@ -78,7 +95,11 @@ def runtime_scene_detail(scene_id: str) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get("/logs/runtime-scenes/{scene_id}/content")
+@router.get(
+    "/logs/runtime-scenes/{scene_id}/content",
+    response_model=LogContentResponse,
+    response_model_exclude_unset=True,
+)
 def runtime_scene_content(
     scene_id: str,
     path: str = Query(..., min_length=1),
@@ -91,7 +112,11 @@ def runtime_scene_content(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/logs/clear")
+@router.post(
+    "/logs/clear",
+    response_model=LogContentResponse,
+    response_model_exclude_unset=True,
+)
 def clear_log(payload: LogClearPayload) -> dict:
     try:
         return clear_log_file(payload.root, payload.path)
@@ -101,7 +126,11 @@ def clear_log(payload: LogClearPayload) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/logs/delete")
+@router.post(
+    "/logs/delete",
+    response_model=LogDeleteResponse,
+    response_model_exclude_unset=True,
+)
 def delete_logs(payload: LogDeletePayload) -> dict:
     try:
         return delete_log_files(payload.root, payload.paths)
@@ -111,7 +140,11 @@ def delete_logs(payload: LogDeletePayload) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/logs/runtime-scenes/delete")
+@router.post(
+    "/logs/runtime-scenes/delete",
+    response_model=RuntimeSceneDeleteResponse,
+    response_model_exclude_unset=True,
+)
 def delete_runtime_scene_bundles(payload: RuntimeSceneDeletePayload) -> dict:
     try:
         return delete_runtime_scenes(payload.sceneIds)

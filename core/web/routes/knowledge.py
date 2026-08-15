@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from core.web.routes.knowledge_models import KnowledgeRouteResponse
 from core.web.services.rag_retrieval_service import RagRetrievalError, get_rag_retrieval_health, retrieve_rag_contexts
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.team_knowledge_service import (
@@ -174,12 +175,20 @@ class RatingSuggestionBulkReviewPayload(BaseModel):
     resolutionNote: str = Field("", max_length=2000)
 
 
-@router.get("/knowledge/overview")
+@router.get(
+    "/knowledge/overview",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_overview(agentId: str = "") -> dict:
     return list_knowledge_overview(agent_id=agentId)
 
 
-@router.get("/knowledge/dashboard-snapshot")
+@router.get(
+    "/knowledge/dashboard-snapshot",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_dashboard_snapshot(agentId: str = "", recommendationLimit: int = 6, workbenchLimit: int = 8, planLimit: int = 8) -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge dashboard snapshot")
     try:
@@ -195,12 +204,20 @@ def knowledge_dashboard_snapshot(agentId: str = "", recommendationLimit: int = 6
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/steward/overview")
+@router.get(
+    "/knowledge/steward/overview",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_steward_overview(agentId: str = "") -> dict:
     return get_knowledge_steward_overview(agent_id=_require_agent_id(agentId, purpose="knowledge steward overview"))
 
 
-@router.get("/knowledge/steward/recommendations")
+@router.get(
+    "/knowledge/steward/recommendations",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_steward_recommendations(agentId: str = "", limit: int = 12) -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge steward recommendations")
     try:
@@ -211,7 +228,11 @@ def knowledge_steward_recommendations(agentId: str = "", limit: int = 12) -> dic
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/steward/workbench")
+@router.get(
+    "/knowledge/steward/workbench",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_steward_workbench(agentId: str = "", limit: int = 12) -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge steward workbench")
     try:
@@ -222,7 +243,11 @@ def knowledge_steward_workbench(agentId: str = "", limit: int = 12) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/operations/health")
+@router.get(
+    "/knowledge/operations/health",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_operations_health(agentId: str = "") -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge operations health")
     try:
@@ -233,7 +258,11 @@ def knowledge_operations_health(agentId: str = "") -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/agent-readiness")
+@router.get(
+    "/knowledge/agent-readiness",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_agent_readiness(agentId: str = "") -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge agent readiness")
     try:
@@ -244,7 +273,11 @@ def knowledge_agent_readiness(agentId: str = "") -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/governance/plan")
+@router.get(
+    "/knowledge/governance/plan",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_governance_plan(agentId: str = "", limit: int = 12) -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge governance plan")
     try:
@@ -255,7 +288,11 @@ def knowledge_governance_plan(agentId: str = "", limit: int = 12) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/search")
+@router.get(
+    "/knowledge/search",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_search(
     agentId: str = "",
     query: str = "",
@@ -300,7 +337,11 @@ def knowledge_search(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/rag/retrieve")
+@router.get(
+    "/knowledge/rag/retrieve",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_rag_retrieve(
     agentId: str = "",
     query: str = "",
@@ -397,7 +438,11 @@ def knowledge_rag_retrieve(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/rag/health")
+@router.get(
+    "/knowledge/rag/health",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_rag_health(agentId: str = "") -> dict:
     normalized_agent_id = str(agentId or "").strip()
     if not normalized_agent_id:
@@ -435,7 +480,11 @@ def _record_rag_health_event(
         pass
 
 
-@router.post("/knowledge/sources/inbox", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/knowledge/sources/inbox", status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_source_inbox_collect(payload: SourceInboxCollectPayload) -> dict:
     try:
         return collect_source_to_inbox(
@@ -461,7 +510,11 @@ def knowledge_source_inbox_collect(payload: SourceInboxCollectPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/sources/inbox")
+@router.get(
+    "/knowledge/sources/inbox",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_source_inbox_list(ownerType: str = "", ownerId: str = "", agentId: str = "", status: str = "") -> dict:
     try:
         return list_owner_source_inbox(ownerType, ownerId, agent_id=agentId, status=status)
@@ -473,7 +526,11 @@ def knowledge_source_inbox_list(ownerType: str = "", ownerId: str = "", agentId:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/knowledge/sources/inbox/{owner_type}/{owner_id}/{inbox_source_id}/review")
+@router.patch(
+    "/knowledge/sources/inbox/{owner_type}/{owner_id}/{inbox_source_id}/review",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_source_inbox_review(owner_type: str, owner_id: str, inbox_source_id: str, payload: SourceInboxReviewPayload) -> dict:
     try:
         return review_owner_inbox_source(
@@ -499,7 +556,11 @@ def knowledge_source_inbox_review(owner_type: str, owner_id: str, inbox_source_i
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.put("/knowledge/sources/governance/{owner_type}/{owner_id}")
+@router.put(
+    "/knowledge/sources/governance/{owner_type}/{owner_id}",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_source_governance_update(owner_type: str, owner_id: str, payload: SourceGovernanceUpdatePayload) -> dict:
     try:
         return update_owner_source_governance(
@@ -516,7 +577,11 @@ def knowledge_source_governance_update(owner_type: str, owner_id: str, payload: 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/sources/registry")
+@router.get(
+    "/knowledge/sources/registry",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_central_source_registry(agentId: str = "", ownerType: str = "", ownerId: str = "") -> dict:
     try:
         return list_central_sources(agent_id=agentId, owner_type=ownerType, owner_id=ownerId)
@@ -560,12 +625,20 @@ def _record_rag_retrieve_event(
         pass
 
 
-@router.get("/knowledge/permissions/audit")
+@router.get(
+    "/knowledge/permissions/audit",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_permissions_audit(agentId: str = "") -> dict:
     return knowledge_permission_audit(agent_id=_require_agent_id(agentId, purpose="knowledge permission audit"))
 
 
-@router.get("/knowledge/governance/tasks")
+@router.get(
+    "/knowledge/governance/tasks",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_governance_tasks(agentId: str = "", status: str = "open") -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge governance tasks")
     try:
@@ -576,12 +649,20 @@ def knowledge_governance_tasks(agentId: str = "", status: str = "open") -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge/ingestion-adapters")
+@router.get(
+    "/knowledge/ingestion-adapters",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_ingestion_adapters() -> dict:
     return list_ingestion_adapters()
 
 
-@router.get("/teams/{team_id}/knowledge-bases")
+@router.get(
+    "/teams/{team_id}/knowledge-bases",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_knowledge_base_list(team_id: str, agentId: str = "") -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="team knowledge base listing")
     try:
@@ -592,7 +673,11 @@ def team_knowledge_base_list(team_id: str, agentId: str = "") -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/knowledge-bases", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/knowledge-bases", status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_knowledge_base_create(team_id: str, payload: KnowledgeBaseCreatePayload) -> dict:
     try:
         return create_knowledge_base(
@@ -610,7 +695,11 @@ def team_knowledge_base_create(team_id: str, payload: KnowledgeBaseCreatePayload
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/agents/{agent_id}/knowledge-bases")
+@router.get(
+    "/agents/{agent_id}/knowledge-bases",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def agent_knowledge_base_list(agent_id: str, actorAgentId: str = "") -> dict:
     normalized_actor_agent_id = _require_agent_id(actorAgentId, purpose="agent knowledge base listing")
     try:
@@ -623,7 +712,11 @@ def agent_knowledge_base_list(agent_id: str, actorAgentId: str = "") -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/knowledge-bases", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/agents/{agent_id}/knowledge-bases", status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def agent_knowledge_base_create(agent_id: str, payload: KnowledgeBaseCreatePayload) -> dict:
     try:
         return create_agent_knowledge_base(
@@ -641,7 +734,11 @@ def agent_knowledge_base_create(agent_id: str, payload: KnowledgeBaseCreatePaylo
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/knowledge-bases/{knowledge_base_id}/central-source-artifacts", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/knowledge-bases/{knowledge_base_id}/central-source-artifacts", status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_central_source_artifact_create(knowledge_base_id: str, payload: CentralSourceArtifactCreatePayload) -> dict:
     try:
         return create_source_artifact_from_central_source(
@@ -660,7 +757,11 @@ def knowledge_central_source_artifact_create(knowledge_base_id: str, payload: Ce
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/knowledge-bases/{knowledge_base_id}/refinement-proposals", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/knowledge-bases/{knowledge_base_id}/refinement-proposals", status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_refinement_proposal_create(knowledge_base_id: str, payload: RefinementProposalCreatePayload) -> dict:
     try:
         return create_refinement_proposal(
@@ -680,7 +781,11 @@ def knowledge_refinement_proposal_create(knowledge_base_id: str, payload: Refine
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/knowledge-bases/{knowledge_base_id}/ingestion-packages", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/knowledge-bases/{knowledge_base_id}/ingestion-packages", status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_ingestion_package_create(knowledge_base_id: str, payload: IngestionPackageCreatePayload) -> dict:
     try:
         return create_ingestion_package(
@@ -708,7 +813,11 @@ def knowledge_ingestion_package_create(knowledge_base_id: str, payload: Ingestio
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/knowledge-bases/{knowledge_base_id}/refinement-proposals/{proposal_id}/review")
+@router.patch(
+    "/knowledge-bases/{knowledge_base_id}/refinement-proposals/{proposal_id}/review",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_refinement_proposal_review(
     knowledge_base_id: str,
     proposal_id: str,
@@ -730,7 +839,11 @@ def knowledge_refinement_proposal_review(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge-bases/{knowledge_base_id}/items")
+@router.get(
+    "/knowledge-bases/{knowledge_base_id}/items",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_item_list(knowledge_base_id: str, agentId: str = "") -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge item listing")
     try:
@@ -743,7 +856,11 @@ def knowledge_item_list(knowledge_base_id: str, agentId: str = "") -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge-bases/{knowledge_base_id}/trace/{target_id}")
+@router.get(
+    "/knowledge-bases/{knowledge_base_id}/trace/{target_id}",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_trace(knowledge_base_id: str, target_id: str, agentId: str = "") -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge trace")
     try:
@@ -756,7 +873,11 @@ def knowledge_trace(knowledge_base_id: str, target_id: str, agentId: str = "") -
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/knowledge-bases/{knowledge_base_id}/items/{knowledge_item_id}/rating")
+@router.patch(
+    "/knowledge-bases/{knowledge_base_id}/items/{knowledge_item_id}/rating",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_item_rating_update(
     knowledge_base_id: str,
     knowledge_item_id: str,
@@ -782,7 +903,11 @@ def knowledge_item_rating_update(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/knowledge-bases/{knowledge_base_id}/rating-suggestions")
+@router.get(
+    "/knowledge-bases/{knowledge_base_id}/rating-suggestions",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_rating_suggestion_list(knowledge_base_id: str, agentId: str = "", status: str = "") -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="rating suggestion listing")
     try:
@@ -795,7 +920,11 @@ def knowledge_rating_suggestion_list(knowledge_base_id: str, agentId: str = "", 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/knowledge-bases/{knowledge_base_id}/rating-suggestions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/knowledge-bases/{knowledge_base_id}/rating-suggestions", status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_rating_suggestion_create(knowledge_base_id: str, payload: RatingSuggestionCreatePayload) -> dict:
     try:
         return create_rating_suggestion(
@@ -818,7 +947,11 @@ def knowledge_rating_suggestion_create(knowledge_base_id: str, payload: RatingSu
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/knowledge-bases/{knowledge_base_id}/rating-suggestions/{suggestion_id}/review")
+@router.patch(
+    "/knowledge-bases/{knowledge_base_id}/rating-suggestions/{suggestion_id}/review",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_rating_suggestion_review(
     knowledge_base_id: str,
     suggestion_id: str,
@@ -840,7 +973,11 @@ def knowledge_rating_suggestion_review(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/knowledge-bases/{knowledge_base_id}/rating-suggestions/review-batch")
+@router.patch(
+    "/knowledge-bases/{knowledge_base_id}/rating-suggestions/review-batch",
+    response_model=KnowledgeRouteResponse,
+    response_model_exclude_unset=True,
+)
 def knowledge_rating_suggestion_bulk_review(
     knowledge_base_id: str,
     payload: RatingSuggestionBulkReviewPayload,

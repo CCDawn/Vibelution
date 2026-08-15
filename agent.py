@@ -249,6 +249,7 @@ from core.orchestration.turn_message_assembly import (
     insert_pending_volatile_context_messages,
     normalize_seeded_tool_calls,
     refresh_system_prefix_on_messages,
+    replay_current_turn_messages,
     sanitize_seeded_chat_content,
 )
 from core.orchestration.turn_llm_adapter import (
@@ -1374,6 +1375,63 @@ class SelfEvolvingAgent:
         self._active_turn_messages = restored
         self._active_turn_goal = "__chat_session__"
 
+    def _chat_ledger_identity(self) -> Optional[tuple[Path, str, str]]:
+        runtime: Dict[str, Any] = {}
+        try:
+            from core.web.services.agent_directory_service import current_agent_runtime
+
+            loaded = current_agent_runtime() or {}
+            if isinstance(loaded, dict):
+                runtime = loaded
+        except Exception:
+            runtime = {}
+        session_id = str(runtime.get("sessionId") or "").strip()
+        turn_id = str(runtime.get("turnId") or "").strip()
+        if not session_id:
+            tail = getattr(self, "_turn_status_tail_context", None)
+            if isinstance(tail, dict):
+                session_id = str(tail.get("session_id") or "").strip()
+        project_root_raw = str(getattr(self, "project_root", "") or "").strip()
+        if not session_id or not turn_id or not project_root_raw:
+            return None
+        return Path(project_root_raw), session_id, turn_id
+
+    def _replay_current_turn_conversation_from_ledger(self, messages: list) -> list:
+        identity = self._chat_ledger_identity()
+        if identity is None:
+            return messages
+        project_root, session_id, turn_id = identity
+        try:
+            from core.chat.conversation_ledger import load_conversation_events
+
+            events = load_conversation_events(project_root, session_id)
+            replayed = replay_current_turn_messages(messages, events, turn_id=turn_id)
+        except Exception as exc:
+            _record_agent_scene_event(
+                "chat",
+                "agent.turn_journal_replay.skipped",
+                message="Current-turn journal replay failed; keeping in-memory conversation chain.",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "errorType": type(exc).__name__,
+                },
+            )
+            return messages
+        if replayed != messages:
+            _record_agent_scene_event(
+                "chat",
+                "agent.turn_journal_replay.applied",
+                message="Rebuilt current-turn conversation layer from ConversationLedger.",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "beforeCount": len(messages),
+                    "afterCount": len(replayed),
+                },
+            )
+        return replayed
+
     @staticmethod
     def _normalize_seeded_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
         # Removal: keep while seed_chat_history and tests call this method.
@@ -2469,6 +2527,8 @@ class SelfEvolvingAgent:
                 # Tools (and tool blockers / validation notes) may change runtime state memory.
                 if executable_tool_calls or tool_calls:
                     self._mark_runtime_state_memory_dirty()
+                if policy.mode == AgentMode.CHAT:
+                    messages = self._replay_current_turn_conversation_from_ledger(messages)
                 self._raise_if_turn_stop_requested()
                 if lifecycle_action == "turn_complete":
                     round_state.note_lifecycle_completion()
