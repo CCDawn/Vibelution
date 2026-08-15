@@ -10,6 +10,7 @@ const routeSource = `${routeShellSource}\n${routeModelSource}\n${routeFoundation
 import modelSource from "./workflowStartMutationModel.ts?raw";
 import mutationsSource from "./useTeamWorkflowStartMutations.ts?raw";
 import apiSource from "../../api/sourceCollection.ts?raw";
+import stageRoundsApiSource from "../../api/stageRounds.ts?raw";
 
 const mutationOwners = [
   "seedSourceCollectionAgentSessionContextMutation",
@@ -62,7 +63,8 @@ describe("team workflow start mutations contract", () => {
     expect(apiSource).toContain("/workflow-orchestration/source-collection-runs");
     expect(mutationsSource).toContain("startSourceCollectionRun(");
     expect(mutationsSource).toContain("resetTeamResearchProjectSourceCollection(");
-    expect(mutationsSource).toContain("/workflow-orchestration/stage-rounds/start");
+    expect(stageRoundsApiSource).toContain("/workflow-orchestration/stage-rounds/start");
+    expect(mutationsSource).toContain("startResearchStageRound<");
     expect(mutationsSource).toContain("idempotencyKey: payload.idempotencyKey");
   });
 

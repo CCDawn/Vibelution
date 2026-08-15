@@ -1,13 +1,21 @@
 """Team workflow routes: stage_rounds."""
 from __future__ import annotations
-from fastapi import Query, status
+from fastapi import HTTPException, status
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow_orchestration_service import *
 from ._errors import _raise_team_workflow_route_error
 from ._models import *
 from ._router import router
+from .stage_rounds_models import (
+    ResearchStageRoundStartResponse,
+    ResearchStageRoundStatusResponse,
+)
 
-@router.get("/teams/{team_id}/workflow-orchestration/stage-rounds/status")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/stage-rounds/status",
+    response_model=ResearchStageRoundStatusResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_research_stage_round_status(team_id: str) -> dict:
     try:
         return get_research_stage_round_status(team_id)
@@ -17,7 +25,12 @@ def team_workflow_research_stage_round_status(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/stage-rounds/start", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/stage-rounds/start",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ResearchStageRoundStartResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_research_stage_round_start(team_id: str, payload: ResearchStageRoundStartPayload) -> dict:
     try:
         return start_research_stage_round(team_id, payload.model_dump())
