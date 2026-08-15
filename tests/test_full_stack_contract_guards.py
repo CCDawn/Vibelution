@@ -56,7 +56,7 @@ LEGACY_UNTYPED_ENDPOINT_BUDGETS: dict[str, int] = {
     "team_workflows/experiment.py": 0,
     "team_workflows/knowledge.py": 0,
     "team_workflows/orchestration.py": 0,
-    "team_workflows/research_ops.py": 23,
+    "team_workflows/research_ops.py": 0,
     "team_workflows/research_projects.py": 0,
     "team_workflows/research_runtime.py": 0,
     "team_workflows/source_collection.py": 0,

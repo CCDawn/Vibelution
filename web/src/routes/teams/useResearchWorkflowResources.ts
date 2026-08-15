@@ -1,13 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { resolvePollingInterval } from "../../app/pollingPolicy";
-import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import { fetchResearchStageRoundStatus } from "../../api/stageRounds";
 import {
   fetchKnowledgeIngestionStatus,
   fetchTeamWorkflowCoordinationStatus,
 } from "../../api/teamKnowledge";
+import {
+  fetchOfficialModelEvidenceStatus,
+  fetchPaperNoteChunkStatus,
+  fetchSourceQualityStatus,
+} from "../../api/teamResearchOps";
 import { fetchTeamWorkflowCandidates } from "../../api/teamExperiment";
 import { fetchTeamWorkflowOrchestration } from "../../api/teamWorkflow";
 import type {
@@ -374,16 +378,16 @@ export function useResearchWorkflowResources({
   });
   const modelEvidence = useQuery({
     queryKey: officialModelEvidenceStatusQueryKey(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/official-model-evidence/status`,
+    queryFn: ({ signal }) => fetchOfficialModelEvidenceStatus<TeamWorkflowOfficialModelEvidenceStatus>(
+      teamId,
       { signal },
     ),
     enabled: Boolean(teamId && demand.modelEvidence),
   });
   const sourceQuality = useQuery({
     queryKey: sourceQualityStatusQueryKey(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowSourceQualityStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/source-quality/status`,
+    queryFn: ({ signal }) => fetchSourceQualityStatus<TeamWorkflowSourceQualityStatus>(
+      teamId,
       { signal },
     ),
     enabled: Boolean(teamId && demand.sourceQuality),
@@ -396,8 +400,8 @@ export function useResearchWorkflowResources({
   });
   const paperNoteChunks = useQuery({
     queryKey: paperNoteChunkStatusQueryKey(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowPaperNoteChunkStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/paper-note-chunks/status`,
+    queryFn: ({ signal }) => fetchPaperNoteChunkStatus<TeamWorkflowPaperNoteChunkStatus>(
+      teamId,
       { signal },
     ),
     enabled: Boolean(teamId && demand.paperNoteChunks),

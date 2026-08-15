@@ -6,6 +6,7 @@ import stageRoundsApiSource from "../api/stageRounds.ts?raw";
 import teamWorkflowApiSource from "../api/teamWorkflow.ts?raw";
 import teamKnowledgeApiSource from "../api/teamKnowledge.ts?raw";
 import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
+import teamResearchOpsApiSource from "../api/teamResearchOps.ts?raw";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
 import routeSourceRawThin from "./teams/useTeamsWorkbenchModel.tsx?raw";
@@ -552,7 +553,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionMutationsSource).toContain("buildCandidateGraph(");
     expect(researchWorkflowResourcesSource).toContain("fetchKnowledgeIngestionStatus(");
     expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
-    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowOfficialModelEvidenceStatus>");
+    expect(researchWorkflowResourcesSource).toContain("fetchOfficialModelEvidenceStatus<");
     expect(researchWorkflowResourcesSource).toContain("TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT");
     expect(researchWorkflowResourcesSource).toContain("TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT");
     expect(routeSource).toContain("isResearchWorkflowTeam(selectedTeam)");
@@ -560,19 +561,24 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("teamWorkflowKnowledgeIngestionStatusQuery");
     expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
     expect(routeSource).toContain("teamWorkflowOfficialModelEvidenceStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/official-model-evidence/status");
+    expect(teamResearchOpsApiSource).toContain("/workflow-orchestration/official-model-evidence/status");
+    expect(researchWorkflowResourcesSource).toContain("fetchOfficialModelEvidenceStatus<");
     expect(researchWorkflowResourcesSource).toContain("TeamWorkflowSourceQualityStatus");
     expect(routeSource).toContain("teamWorkflowSourceQualityStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/source-quality/status");
+    expect(teamResearchOpsApiSource).toContain("/workflow-orchestration/source-quality/status");
+    expect(researchWorkflowResourcesSource).toContain("fetchSourceQualityStatus<");
     // Wave 8P: SC quality/plan write endpoints live on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("/source-quality/assess");
+    expect(teamResearchOpsApiSource).toContain("/source-quality/assess");
+    expect(teamSourceCollectionMutationsSource).toContain("assessCandidateSourceQuality<");
     expect(routeSource).toContain("assessSourceQualityMutation");
     expect(routeSource).toContain("useTeamSourceCollectionMutations");
     expect(routeSource).toContain("candidateSourceQualityAssessmentSummary");
     expect(researchWorkflowResourcesSource).toContain("TeamWorkflowPaperNoteChunkStatus");
     expect(routeSource).toContain("teamWorkflowPaperNoteChunkStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/paper-note-chunks/status");
-    expect(teamSourceCollectionMutationsSource).toContain("/paper-note-chunks/plan");
+    expect(teamResearchOpsApiSource).toContain("/workflow-orchestration/paper-note-chunks/status");
+    expect(researchWorkflowResourcesSource).toContain("fetchPaperNoteChunkStatus<");
+    expect(teamResearchOpsApiSource).toContain("/paper-note-chunks/plan");
+    expect(teamSourceCollectionMutationsSource).toContain("planPaperNoteChunks<");
     expect(routeSource).toContain("planPaperNoteChunksMutation");
     expect(routeSource).toContain("sourceCandidateHasCompletedExtraction");
     expect(routeSource).toContain("candidatePaperNoteChunkPlanSummary");
@@ -1271,7 +1277,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("assessSourceQualityBatchMutation");
     expect(routeSource).toContain("sourceCollectionExtractorAgentId");
     // Wave 8P: batch assess endpoint lives on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("source-quality/assess-batch");
+    expect(teamResearchOpsApiSource).toContain("source-quality/assess-batch");
+    expect(teamSourceCollectionMutationsSource).toContain("assessSourceQualityBatch<");
     expect(runModelSource).toContain("执行资料提炼复核");
     expect(routeSource).toContain("质量审查中");
     expect(routeSource).toContain("sourceCollectionExpandedPanelId");
