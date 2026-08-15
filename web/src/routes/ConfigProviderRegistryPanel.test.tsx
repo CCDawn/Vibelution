@@ -277,8 +277,8 @@ describe("ConfigProviderRegistryPanel", () => {
   it("offers a preview-first merge only for an exact-contract duplicate", () => {
     expect(panelSource).toContain("合并重复 Provider（高级）");
     expect(panelSource).toContain("日常中转站不需要");
-    expect(panelSource).toContain("/api/config/migration/providers/merge/preview");
-    expect(panelSource).toContain("/api/config/migration/providers/merge/apply");
+    expect(panelSource).toContain("previewProviderMerge(");
+    expect(panelSource).toContain("applyProviderMerge(");
     expect(panelSource).toContain("confirmed: true");
   });
 
