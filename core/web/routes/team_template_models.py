@@ -30,6 +30,15 @@ class TeamTemplateDetailResponse(BaseModel):
 
     templateId: str = ""
     name: str = ""
+    description: str = ""
+    purpose: str = ""
+    defaultTeamName: str = ""
+    safetyLevel: str = ""
+    memberIdPrefix: str = ""
+    agentMetadata: dict[str, Any] = Field(default_factory=dict)
+    chatRoom: dict[str, Any] = Field(default_factory=dict)
+    canvas: dict[str, Any] = Field(default_factory=dict)
+    roles: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TeamTemplateInstantiateResponse(BaseModel):
@@ -39,3 +48,5 @@ class TeamTemplateInstantiateResponse(BaseModel):
     template: dict[str, Any] = Field(default_factory=dict)
     team: dict[str, Any] = Field(default_factory=dict)
     createdAgents: list[dict[str, Any]] = Field(default_factory=list)
+    linkedChatRoom: dict[str, Any] = Field(default_factory=dict)
+    updatedAt: str = ""
