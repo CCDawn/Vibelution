@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from core.research.workflow.models import WorkflowNodeSpec
@@ -12,7 +13,42 @@ from .common import (
     DomainVerdict,
     RunSnapshot,
     blocker,
+    is_bounded_controlled_run,
 )
+
+_PACKAGE_START_DECISIONS = frozenset({"stop", "rollback_candidate", "rollback"})
+
+
+def _governance_kind(governance: Mapping[str, Any] | None) -> str:
+    if not isinstance(governance, Mapping):
+        return ""
+    return str(
+        governance.get("decision_kind")
+        or governance.get("operation")
+        or governance.get("kind")
+        or ""
+    ).strip()
+
+
+def _governance_terminal_reason(governance: Mapping[str, Any] | None) -> str:
+    if not isinstance(governance, Mapping):
+        return ""
+    return str(
+        governance.get("terminalReason")
+        or governance.get("terminal_reason")
+        or governance.get("reason")
+        or ""
+    ).strip()
+
+
+def _result_package_is_complete(package: Mapping[str, Any] | None) -> bool:
+    if not isinstance(package, Mapping):
+        return False
+    return bool(
+        package.get("required_artifacts")
+        and int(package.get("pending_human_tasks") or 0) == 0
+        and str(package.get("terminal_reason") or "").strip()
+    )
 
 
 def evaluate_controlled_run(
@@ -78,7 +114,7 @@ def evaluate_result_evaluation(
             for key in ("logs", "metrics", "artifact_hash")
             if not run_state.get(key)
         ]
-        if missing:
+        if missing and not is_bounded_controlled_run(run_state):
             blockers.append(
                 blocker(
                     "run_artifacts_incomplete",
@@ -204,14 +240,32 @@ def evaluate_result_package(
     common: CommonReadinessResult,
     context: DomainReadinessContext,
 ) -> DomainVerdict:
+    """Start gate for packaging — do not require the output package to exist.
+
+    ``result_package`` is the SYSTEM node that *writes* ``research_result_package``.
+    Requiring that artifact here deadlocks auto-advance after STOP governance.
+    """
     blockers: list[Any] = []
     package = context.result_package(run.team_id, run.run_id)
+    if _result_package_is_complete(package):
+        return DomainVerdict(
+            blockers=(),
+            revision_vector=common.domain_revision_vector,
+        )
+    governance = context.version_governance(run.team_id, run.run_id)
+    kind = _governance_kind(governance)
+    terminal = _governance_terminal_reason(governance)
+    if kind in _PACKAGE_START_DECISIONS and terminal:
+        return DomainVerdict(
+            blockers=(),
+            revision_vector=common.domain_revision_vector,
+        )
     if package is None:
         blockers.append(
             blocker(
                 "result_package_incomplete",
                 "结果包不完整",
-                "必需 artifact 未齐备、存在未决 HumanTask 或终止原因不明",
+                "缺少 STOP/rollback 治理记录，或必需 artifact 未齐备、存在未决 HumanTask、终止原因不明",
             )
         )
     else:

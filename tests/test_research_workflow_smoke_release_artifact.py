@@ -272,6 +272,46 @@ def test_smoke_failure_keeps_human_task_pending(
         harness.close()
 
 
+def test_smoke_accept_releases_needs_review_observation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_smoke_gate(harness)
+        state = _authority_state()
+        state["smoke_evidence"] = {
+            "teamId": "research-team",
+            "kind": "smoke_evidence",
+            "workflowRunId": "run-test",
+            "sourceCollectionRunId": "sc-run-1",
+            "payload": {
+                "planId": "exp-plan-1",
+                "smokeRunId": "smoke-1",
+                "status": "needs_review",
+                "artifactHash": "f" * 64,
+            },
+        }
+        writes, executions = _install_smoke_authority(monkeypatch, state)
+
+        receipt = harness.service.submit(
+            harness.request(
+                command=WorkflowCommandKind.RESOLVE_HUMAN_TASK,
+                node_id="smoke_gate",
+                expected_run_version=1,
+                idempotency_key="ui:accept-needs-review-smoke",
+                payload={"taskId": "ht-smoke", "decision": "accept"},
+            )
+        )
+
+        assert receipt.status == "accepted"
+        assert executions == []
+        assert len(writes) == 1 and writes[0]["kind"] == "smoke_release"
+        assert writes[0]["payload"]["smokeRunId"] == "smoke-1"
+    finally:
+        harness.close()
+
+
 def test_smoke_accept_fails_closed_without_release_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -336,3 +376,164 @@ def test_controlled_retry_recovers_historical_smoke_release(
         assert latest.status == "starting"
     finally:
         harness.close()
+
+
+def _frozen_protocol_body() -> dict[str, object]:
+    return {
+        "planId": "exp-plan-20260813211108-fdb104ea",
+        "protocolId": "exp-plan-20260813211108-fdb104ea",
+        "status": "frozen",
+        "protocol": {
+            "dataset": "dataset-sci-096-v1",
+            "metric": "stimulus decoding accuracy",
+            "baseline": "two-layer decoder",
+            "smoke_plan": {
+                "phase": "smoke_gate",
+                "required": ["subset 1000 trials"],
+            },
+        },
+    }
+
+
+def test_bind_frozen_protocol_creates_plan_in_empty_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_workflow_orchestration_service as twos
+    from core.web.services.team_workflow.experiment_api.plan import (
+        bind_frozen_protocol_to_experiment_plan,
+    )
+
+    store_path = tmp_path / "experiment_plans" / "index.json"
+    monkeypatch.setattr(twos, "_experiment_plan_store_path", lambda team_id: store_path)
+
+    bound = bind_frozen_protocol_to_experiment_plan(
+        "research-team",
+        _frozen_protocol_body(),
+    )
+    assert bound["planId"] == "exp-plan-20260813211108-fdb104ea"
+    assert bound["designGate"]["status"] == "frozen"
+    assert bound["experimentPlan"]["smokePlan"]["phase"] == "smoke_gate"
+
+    reloaded = twos._load_experiment_plan_store("research-team")
+    plan = next(
+        item
+        for item in reloaded["plans"]
+        if item["planId"] == "exp-plan-20260813211108-fdb104ea"
+    )
+    twos._require_explicit_experiment_design_frozen(plan)
+    experiment_plan = plan["experimentPlan"]
+    for field in twos.EXPERIMENT_PLAN_REQUIRED_FIELDS:
+        assert twos._has_value(experiment_plan.get(field)), field
+    selection = plan["experimentContract"]["adapterSelection"]
+    assert (
+        selection["resolvedAdapterId"]
+        == twos.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    )
+    assert plan["contractValidation"]["valid"] is True
+
+
+def test_bind_frozen_protocol_freezes_draft_and_fills_smoke_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_workflow_orchestration_service as twos
+    from core.web.services.team_workflow.experiment_api.plan import (
+        bind_frozen_protocol_to_experiment_plan,
+    )
+
+    store_path = tmp_path / "experiment_plans" / "index.json"
+    monkeypatch.setattr(twos, "_experiment_plan_store_path", lambda team_id: store_path)
+    twos._write_json(
+        store_path,
+        {
+            "schemaVersion": twos.SCHEMA_VERSION,
+            "teamId": "research-team",
+            "storeKind": twos.EXPERIMENT_PLAN_STORE_KIND,
+            "activePlanId": "exp-plan-20260813211108-fdb104ea",
+            "plans": [
+                {
+                    "planId": "exp-plan-20260813211108-fdb104ea",
+                    "teamId": "research-team",
+                    "status": "draft",
+                    "experimentPlan": {
+                        "dataset": "",
+                        "metric": "",
+                        "baseline": "",
+                        "smokePlan": "",
+                    },
+                    "designGate": {"status": "draft"},
+                }
+            ],
+            "createdAt": "2026-08-13T00:00:00+00:00",
+            "updatedAt": "2026-08-13T00:00:00+00:00",
+        },
+    )
+
+    bind_frozen_protocol_to_experiment_plan("research-team", _frozen_protocol_body())
+    plan = twos._find_experiment_plan(
+        twos._load_experiment_plan_store("research-team"),
+        "exp-plan-20260813211108-fdb104ea",
+    )
+    assert plan is not None
+    twos._require_explicit_experiment_design_frozen(plan)
+    assert plan["status"] == "design_frozen"
+    assert plan["experimentPlan"]["smokePlan"]["required"] == ["subset 1000 trials"]
+    assert plan["experimentPlan"]["dataset"] == "dataset-sci-096-v1"
+    assert (
+        plan["experimentContract"]["adapterSelection"]["resolvedAdapterId"]
+        == twos.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    )
+    assert plan["contractValidation"]["valid"] is True
+
+
+def test_execute_smoke_observation_binds_plan_before_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.web.services import team_workflow_orchestration_service as twos
+    from core.web.services.team_workflow.research_runtime import smoke_release_artifact as sra
+
+    store_path = tmp_path / "experiment_plans" / "index.json"
+    monkeypatch.setattr(twos, "_experiment_plan_store_path", lambda team_id: store_path)
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime."
+        "smoke_release_artifact.load_scoped_artifact_payload",
+        lambda kind, **kwargs: {
+            "frozen_protocol": {
+                "payload": _frozen_protocol_body(),
+            }
+        }.get(kind),
+    )
+
+    seen: list[dict[str, object]] = []
+
+    class FakePorts:
+        def __init__(self, store: object) -> None:
+            self.store = store
+
+        def execute_run_smoke(self, **kwargs: object) -> None:
+            plan = twos._find_experiment_plan(
+                twos._load_experiment_plan_store("research-team"),
+                "exp-plan-20260813211108-fdb104ea",
+            )
+            assert plan is not None
+            twos._require_explicit_experiment_design_frozen(plan)
+            assert twos._has_value(plan["experimentPlan"].get("smokePlan"))
+            seen.append(kwargs)
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.real_domain_ports.RealDomainPorts",
+        FakePorts,
+    )
+    run = replace(
+        build_run_record(),
+        input_snapshot_json=json.dumps({"sourceCollectionRunId": "sc-run-1"}),
+    )
+    sra._execute_smoke_observation(
+        store=object(),
+        run=run,
+        plan_id="exp-plan-20260813211108-fdb104ea",
+        handoff_id="ho-1",
+    )
+    assert seen and seen[0]["plan_id"] == "exp-plan-20260813211108-fdb104ea"
