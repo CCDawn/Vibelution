@@ -906,6 +906,12 @@ class WorkspaceChatStateDao:
         ).fetchall()
         return [str(row["session_id"] or "").strip() for row in rows if str(row["session_id"] or "").strip()]
 
+    def get_active_session_id(self) -> str:
+        root = self._connection.execute(
+            "SELECT active_session_id FROM workspace_chat_state WHERE id=1"
+        ).fetchone()
+        return str(root["active_session_id"] or "").strip() if root is not None else ""
+
     def get_one(self, session_id: str) -> dict[str, Any] | None:
         normalized = str(session_id or "").strip()
         if not normalized:
@@ -1522,6 +1528,10 @@ class ConversationRepository:
     def list_session_runtime_ids(self) -> list[str]:
         with self._database.reader() as connection:
             return WorkspaceChatStateDao(connection).list_session_ids()
+
+    def get_active_session_id(self) -> str:
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).get_active_session_id()
 
     def upsert_session_runtime_state(
         self,

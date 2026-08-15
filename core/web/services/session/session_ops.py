@@ -929,11 +929,17 @@ def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
     return True
 
 
-def _persist_dirty_session_runtime_rows(conversations: list[Any]) -> None:
+def _persist_dirty_session_runtime_rows(
+    conversations: list[Any],
+    *,
+    activate_session_id: str = "",
+) -> None:
     """Write only the supplied session runtime rows; do not prune siblings."""
 
     s = _service()
     now = s._now_timestamp()
+    activate = str(activate_session_id or "").strip()
+    persisted_ids: set[str] = set()
     for conversation in conversations:
         if not isinstance(conversation, dict):
             continue
@@ -945,7 +951,17 @@ def _persist_dirty_session_runtime_rows(conversations: list[Any]) -> None:
         if not session_id:
             continue
         conversation.setdefault("updated_at", now)
-        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
+        s.save_session_chat_state(
+            s.PROJECT_ROOT,
+            session_id,
+            conversation,
+            activate=session_id == activate,
+        )
+        persisted_ids.add(session_id)
+    if activate and activate not in persisted_ids:
+        current = s.load_session_chat_state(s.PROJECT_ROOT, activate)
+        if current is not None:
+            s.save_session_chat_state(s.PROJECT_ROOT, activate, current, activate=True)
 
 
 def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, Any]:

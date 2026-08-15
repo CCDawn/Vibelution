@@ -395,6 +395,13 @@ def list_session_runtime_ids(project_root: Path) -> list[str]:
         return list(repository.list_session_runtime_ids())
 
 
+def load_active_conversation_id(project_root: Path) -> str:
+    """Load the workspace active session id without assembling conversations."""
+
+    with _chat_state_repository(project_root) as repository:
+        return str(repository.get_active_session_id() or "").strip()
+
+
 def save_session_chat_state(
     project_root: Path,
     session_id: str,

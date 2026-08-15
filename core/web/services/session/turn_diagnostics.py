@@ -151,9 +151,13 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
     turn_current = bool(is_running and (not normalized_turn_id or active_turn_id == normalized_turn_id))
 
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        payload = s._repair_stale_running_conversations(payload)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+        try:
+            s.reconcile_stale_chat_turn_work_runs()
+        except Exception:
+            pass
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+        if conversation is not None and s._repair_stale_running_conversation(conversation):
+            s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
         if conversation is None:
             return {
                 "sessionId": normalized_session_id,
@@ -174,6 +178,10 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
 
     assistant_message = s._find_turn_scoped_assistant_message(messages, normalized_turn_id)
     assistant_text = str((assistant_message or {}).get("content") or "").strip()
+    if not assistant_text and assistant_message:
+        from core.web.services.session.session_ops import _turn_items_visible_text
+
+        assistant_text = _turn_items_visible_text(assistant_message).strip()
     assistant_turn_id = s._message_turn_id(assistant_message)
     marker_present = s._supervised_completion_marker_present(assistant_text)
     terminal_statuses = {
@@ -752,32 +760,24 @@ def _settle_stale_chat_turn_work_run(
         pass
     try:
         with s._CHAT_STATE_LOCK:
-            state = s.load_chat_state(s.PROJECT_ROOT)
-            conversations = state.get("conversations") if isinstance(state, dict) else None
-            if isinstance(conversations, list):
-                for conversation in conversations:
-                    if not isinstance(conversation, dict):
-                        continue
-                    if str(conversation.get("conversation_id") or "").strip() != session_id:
-                        continue
-                    conversation["last_turn_status"] = status
-                    conversation["updated_at"] = finished_at
-                    conversation["runtime_notices"] = s._append_session_runtime_notice(
-                        conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
-                        {
-                            "kind": "turn_recovered",
-                            "level": "warning",
-                            "message": summary,
-                            "timestamp": finished_at,
-                            "source": "conversation.turn_recovered",
-                            "turnId": run_id,
-                            "previousStatus": previous_status,
-                            "reason": reason,
-                        },
-                    )
-                    state["updated_at"] = finished_at
-                    s.save_chat_state(s.PROJECT_ROOT, state)
-                    break
+            conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
+            if conversation is not None:
+                conversation["last_turn_status"] = status
+                conversation["updated_at"] = finished_at
+                conversation["runtime_notices"] = s._append_session_runtime_notice(
+                    conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
+                    {
+                        "kind": "turn_recovered",
+                        "level": "warning",
+                        "message": summary,
+                        "timestamp": finished_at,
+                        "source": "conversation.turn_recovered",
+                        "turnId": run_id,
+                        "previousStatus": previous_status,
+                        "reason": reason,
+                    },
+                )
+                s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
     except Exception:
         pass
     try:

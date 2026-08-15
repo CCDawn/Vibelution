@@ -857,3 +857,356 @@ def test_latest_unfinished_task_goal_loads_one_row(tmp_path, monkeypatch):
     assert source == "active_task"
     assert full_loads == []
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def _stub_compat_shell_side_effects(monkeypatch) -> None:
+    monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda: None)
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda: {})
+    monkeypatch.setattr(session_service, "_is_session_workspace_intentionally_deleted", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_conversation_is_read_only", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_args, **_kwargs: {"accepted": True})
+    monkeypatch.setattr(
+        "core.web.services.session.directory_bridge.sync_conversation_record",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "core.web.services.session.directory_bridge.sync_conversation_records",
+        lambda *_args, **_kwargs: None,
+    )
+
+
+def test_select_chat_session_writes_only_target_session_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    save_session_chat_state(tmp_path, "session-a", load_session_chat_state(tmp_path, "session-a"), activate=True)
+    _stub_compat_shell_side_effects(monkeypatch)
+    monkeypatch.setattr(session_service, "_ensure_conversation_workspace_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_ensure_conversation_agent_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        session_service,
+        "_normalize_conversation",
+        lambda raw, **_kwargs: {"id": str(raw.get("conversation_id") or ""), "title": raw.get("title")},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_build_lightweight_session_detail",
+        lambda target: {"id": target.get("id"), "title": target.get("title")},
+    )
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    detail = session_service.select_chat_session("session-b", lightweight=True)
+
+    assert detail["id"] == "session-b"
+    assert full_saves == []
+    assert session_saves == ["session-b"]
+    assert load_chat_state(tmp_path)["active_conversation_id"] == "session-b"
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "A"
+
+
+def test_ensure_agent_direct_session_upserts_one_row_without_full_replace(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    _stub_compat_shell_side_effects(monkeypatch)
+    monkeypatch.setattr(
+        session_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: {"agentId": agent_id, "displayName": "Direct", "directSessionId": ""},
+    )
+    monkeypatch.setattr(session_service, "_ensure_conversation_workspace_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_bind_conversation_to_agent_instance", lambda *_args, **_kwargs: None)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    created = session_service.ensure_agent_direct_session(agent_id="agent-direct")
+
+    created_id = str(created.get("id") or "")
+    assert created_id
+    assert full_saves == []
+    assert session_saves == [created_id]
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, created_id)["title"] == "Direct"
+
+
+def test_create_child_session_writes_only_parent_and_child_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    _stub_compat_shell_side_effects(monkeypatch)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_latest_user_message_id", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(session_service, "_append_session_conversation_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_record_child_session_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "get_session_detail", lambda session_id, **_kwargs: {"id": session_id})
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    result = session_service.create_child_session(
+        "session-a",
+        user_request="split this work",
+        task_title="Child",
+        auto_start=False,
+        switch_to_child=False,
+    )
+
+    child_id = str(result.get("childSessionId") or "")
+    assert child_id
+    assert full_saves == []
+    assert "session-a" in session_saves
+    assert child_id in session_saves
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, child_id)["title"] == "Child"
+
+
+def test_archive_agent_sessions_upserts_archived_rows_without_dropping_siblings(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    save_session_chat_state(
+        tmp_path,
+        "session-a",
+        {
+            **load_session_chat_state(tmp_path, "session-a"),
+            "agent_id": "agent-x",
+            "agentId": "agent-x",
+        },
+        activate=True,
+    )
+    _stub_compat_shell_side_effects(monkeypatch)
+    monkeypatch.setattr(session_service, "_ensure_agent_direct_session_not_reassigned", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        session_service,
+        "_normalize_conversation",
+        lambda raw, **_kwargs: {"id": str(raw.get("conversation_id") or ""), "sessionKind": "main"},
+    )
+    monkeypatch.setattr(session_service, "_conversation_phase", lambda *_args, **_kwargs: "ready")
+    monkeypatch.setattr(session_service, "_record_agent_session_lifecycle_event", lambda *_args, **_kwargs: None)
+    full_saves, _session_saves = _spy_runtime_saves(monkeypatch)
+
+    result = session_service.archive_agent_sessions("agent-x", direct_session_id="session-a")
+
+    assert result["archivedCount"] == 1
+    assert full_saves == []
+    archived = load_session_chat_state(tmp_path, "session-a")
+    assert archived["archive_state"]["status"] == "archived"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_chat_state(tmp_path)["active_conversation_id"] == "session-b"
+
+
+def test_mark_direct_session_agent_deleted_writes_only_target_session_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    _stub_compat_shell_side_effects(monkeypatch)
+    monkeypatch.setattr(session_service, "_record_direct_session_agent_deleted_event", lambda *_args, **_kwargs: None)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    result = session_service.mark_direct_session_agent_deleted("session-a", agent_id="agent-x")
+
+    assert result["changed"] is True
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["agentStatusCode"] == "deleted_agent"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_remember_uploaded_attachment_writes_only_target_session_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    _stub_compat_shell_side_effects(monkeypatch)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service._remember_session_uploaded_attachment(
+        "session-a",
+        {"artifactId": "art-1", "filename": "shot.png", "path": "secret"},
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    uploaded = load_session_chat_state(tmp_path, "session-a")["uploaded_attachments"]
+    assert uploaded[0]["artifactId"] == "art-1"
+    assert "path" not in uploaded[0]
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_append_cli_agent_lifecycle_event_writes_only_target_session_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    _stub_compat_shell_side_effects(monkeypatch)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_append_session_conversation_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_record_session_cycle_message", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_record_cli_agent_lifecycle_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_normalize_messages", lambda _session_id, messages: list(messages))
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    event = session_service.append_cli_agent_lifecycle_event(
+        "session-a",
+        event="closed",
+        terminal_session={"terminalSessionId": "term-1", "label": "CLI Agent"},
+    )
+
+    assert event is not None
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_get_session_stream_initial_state_does_not_assemble_compat_document(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda: {})
+    monkeypatch.setattr(
+        session_service,
+        "_load_conversation_detail_target",
+        lambda session_id, **_kwargs: {"id": session_id, "title": "A"},
+    )
+    monkeypatch.setattr(session_service, "_build_session_summary", lambda *_args, **_kwargs: {"id": "session-a"})
+    monkeypatch.setattr(session_service, "_session_stream_initial_latest_message_payload", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_session_ledger_sequence", lambda *_args, **_kwargs: 1)
+    full_loads: list[str] = []
+    original_load = session_service.load_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "load_chat_state",
+        lambda *args, **kwargs: full_loads.append("load") or original_load(*args, **kwargs),
+    )
+
+    payload = session_service.get_session_stream_initial_state("session-a")
+
+    assert payload["sessionId"] == "session-a"
+    assert full_loads == []
+
+
+def test_get_active_session_detail_does_not_assemble_compat_document(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    save_session_chat_state(tmp_path, "session-a", load_session_chat_state(tmp_path, "session-a"), activate=True)
+    monkeypatch.setattr(session_service, "get_session_detail", lambda session_id, **_kwargs: {"id": session_id})
+    full_loads: list[str] = []
+    original_load = session_service.load_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "load_chat_state",
+        lambda *args, **kwargs: full_loads.append("load") or original_load(*args, **kwargs),
+    )
+
+    detail = session_service.get_active_session_detail()
+
+    assert detail == {"id": "session-a"}
+    assert full_loads == []
+
+
+def test_ensure_session_agent_prompt_snapshot_writes_only_target_session_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(
+        session_service.prompt_template_service,
+        "get_agent_prompt_snapshot_versions",
+        lambda *_args, **_kwargs: {
+            "builtinContentVersion": 1,
+            "chatBasePromptVersion": 1,
+            "corePromptSchemaVersion": 1,
+        },
+    )
+    monkeypatch.setattr(
+        session_service.prompt_template_service,
+        "build_agent_prompt_snapshot",
+        lambda *_args, **_kwargs: {"agentId": "agent-x", "promptTemplateId": "tpl", "content": "frozen"},
+    )
+    monkeypatch.setattr(session_service, "_record_session_prompt_snapshot_event", lambda *_args, **_kwargs: None)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    snapshot = session_service._ensure_session_agent_prompt_snapshot(
+        "session-a",
+        {"agentId": "agent-x", "promptTemplateId": "tpl", "primaryMode": "chat"},
+    )
+
+    assert snapshot["content"] == "frozen"
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["agentPromptSnapshot"]["content"] == "frozen"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_turn_completion_snapshot_does_not_assemble_compat_document(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(session_service, "reconcile_stale_chat_turn_work_runs", lambda **_kwargs: [])
+    monkeypatch.setattr(session_service, "_repair_stale_running_conversation", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_find_turn_scoped_assistant_message", lambda *_args, **_kwargs: None)
+    full_loads: list[str] = []
+    original_load = session_service.load_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "load_chat_state",
+        lambda *args, **kwargs: full_loads.append("load") or original_load(*args, **kwargs),
+    )
+
+    snapshot = session_service.get_session_turn_completion_snapshot("session-a", "turn-a")
+
+    assert snapshot["sessionId"] == "session-a"
+    assert snapshot["lastTurnStatus"] == "ready"
+    assert full_loads == []
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_settle_stale_chat_turn_writes_only_target_session_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path)
+    monkeypatch.setattr(session_service, "_persist_chat_turn_work_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_set_session_running", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_clear_session_turn_control", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_append_session_runtime_notice", lambda notices, notice: [notice])
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    from core.web.services.session import turn_diagnostics
+
+    result = turn_diagnostics._settle_stale_chat_turn_work_run(
+        {"runId": "turn-a", "sessionId": "session-a", "status": "running"},
+        reason="absolute_stale",
+    )
+
+    assert result is not None
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "failed_runtime"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_reset_agent_direct_session_saves_replacement_without_full_replace(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    _stub_compat_shell_side_effects(monkeypatch)
+    monkeypatch.setattr(session_service, "get_agent", lambda *_args, **_kwargs: {"agentId": "agent-x", "displayName": "X"})
+    monkeypatch.setattr(session_service, "_ensure_agent_directory_conversation_materialized", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_repair_stale_running_conversation", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        session_service,
+        "_normalize_conversation",
+        lambda raw, **_kwargs: {"id": str(raw.get("conversation_id") or "")},
+    )
+    monkeypatch.setattr(session_service, "_conversation_phase", lambda *_args, **_kwargs: "ready")
+    monkeypatch.setattr(session_service, "_record_session_delete_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_ensure_conversation_workspace_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        session_service.agent_directory_service,
+        "update_agent_instance",
+        lambda *_args, **_kwargs: None,
+    )
+    delete_calls: list[str] = []
+    monkeypatch.setattr(
+        session_service,
+        "_delete_chat_session_state",
+        lambda session_id, **_kwargs: delete_calls.append(str(session_id)) or {"nextActiveSessionId": "replacement"},
+    )
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    result = session_service.reset_agent_direct_session_lightweight("session-a", agent_id="agent-x", title="Replacement")
+
+    replacement_id = str(result.get("replacementDirectSessionId") or "")
+    assert replacement_id
+    assert delete_calls == ["session-a"]
+    assert full_saves == []
+    assert session_saves == [replacement_id]
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, replacement_id)["title"] == "Replacement"

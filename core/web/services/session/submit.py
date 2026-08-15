@@ -391,16 +391,18 @@ def submit_session_message(
         prepare_started_at = s._perf_counter()
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
         if conversation is None:
-            seeded_payload = {"version": s.CHAT_STATE_VERSION, "conversations": []}
-            if s._materialize_agent_directory_conversation_locked(
-                seeded_payload,
+            current_active = str(s.load_active_conversation_id(s.PROJECT_ROOT) or "").strip()
+            if s._ensure_agent_directory_conversation_materialized(
                 conversation_id,
                 source="submit_session_message",
+                activate=not current_active,
             ):
-                conversation = s._find_conversation_entry(seeded_payload, conversation_id)
-                if conversation is not None:
-                    s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
+                conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
         if conversation is not None:
+            s._ensure_session_mutable(
+                conversation_id,
+                conversation=conversation,
+            )
             _require_positive_context_limit(s, conversation, lang)
             prepared_context_limit_ok = True
             prepared_agent_id = str(

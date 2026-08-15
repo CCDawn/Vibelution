@@ -294,14 +294,13 @@ def get_active_session_detail() -> dict | None:
     """Return the current active conversation detail when available."""
     s = _service()
 
-    active_id, conversations = s._load_conversations()
-    if not conversations:
+    active_id = str(s.load_active_conversation_id(s.PROJECT_ROOT) or "").strip()
+    if not active_id:
+        ids = s.list_session_runtime_ids(s.PROJECT_ROOT)
+        active_id = str(ids[0] or "").strip() if ids else ""
+    if not active_id:
         return None
-    target_id = active_id or conversations[0]["id"]
-    for item in conversations:
-        if item["id"] == target_id:
-            return s._build_session_detail(item)
-    return s._build_session_detail(conversations[0])
+    return s.get_session_detail(active_id)
 
 
 def get_active_session_summary() -> dict | None:
@@ -311,25 +310,27 @@ def get_active_session_summary() -> dict | None:
     agent_by_id = s._agent_lookup_for_conversations()
     active_id, target = s._load_active_conversation_summary_target(agent_by_id=agent_by_id)
     if target is None:
-        active_id, conversations = s._load_conversations(
-            repair=False,
-            agent_by_id=agent_by_id,
-            lightweight=True,
-        )
-        conversations = s._append_agent_directory_conversations(conversations, agent_by_id=agent_by_id)
-        if not conversations:
-            return None
-        target_id = str(active_id or "").strip()
-        target = next(
-            (
-                item
-                for item in conversations
-                if isinstance(item, dict) and str(item.get("id") or "").strip() == target_id
-            ),
-            None,
-        )
+        fallback_id = str(active_id or "").strip()
+        if fallback_id:
+            s._ensure_agent_directory_conversation_materialized(
+                fallback_id,
+                source="session.active_summary",
+            )
+            active_id, target = s._load_active_conversation_summary_target(agent_by_id=agent_by_id)
         if target is None:
-            target = next((item for item in conversations if isinstance(item, dict)), None)
+            ids = s.list_session_runtime_ids(s.PROJECT_ROOT)
+            fallback_id = str(ids[0] or "").strip() if ids else ""
+            if fallback_id:
+                raw_target = s.load_session_chat_state(s.PROJECT_ROOT, fallback_id)
+                if raw_target is not None:
+                    target = s._normalize_conversation(
+                        raw_target,
+                        agent_by_id=agent_by_id,
+                        hidden_team_member_agent_ids=s._agent_directory_stub_hidden_team_member_ids(),
+                        ensure_workspace=False,
+                        lightweight=True,
+                    )
+                    active_id = fallback_id
     if target is None:
         return None
     target = s._with_direct_session_agent_for_summary(target, agent_by_id=agent_by_id)
