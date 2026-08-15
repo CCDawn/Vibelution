@@ -27,18 +27,81 @@ BOUNDED_ITERATION_AGENT_NODES = frozenset(
     {"result_evaluation", "iteration_decision", "version_governance"}
 )
 _BOUNDED_RUNNER_ID = "synthetic_classification_baseline_vs_variant"
+FASHION_MNIST_MULTI_SEED_ADAPTER = "fashion_mnist_predictive_coding_multi_seed"
+_CLAIM_BOUNDARY_MARKERS = frozenset(
+    {
+        "does_not_validate_neural_realism",
+        "not_an_official_competition_submission",
+    }
+)
 
 
-def is_bounded_controlled_run(run_state: Mapping[str, Any] | None) -> bool:
-    """True when the V1 CPU / synthetic classification observation is on disk.
+def _controlled_run_execution(run_state: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    if not isinstance(run_state, Mapping):
+        return {}
+    execution = run_state.get("execution")
+    if isinstance(execution, Mapping):
+        return execution
+    return run_state
 
-    FashionMNIST formal runner is not selected for SCI-096; result_evaluation,
-    iteration_decision, and version_governance then complete from this
-    observation without an LLM.
+
+def _controlled_run_result(run_state: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    execution = _controlled_run_execution(run_state)
+    result = execution.get("result")
+    if isinstance(result, Mapping):
+        return result
+    return {}
+
+
+def is_claim_bounded_formal_run(run_state: Mapping[str, Any] | None) -> bool:
+    """True when a completed FashionMNIST formal observation carries claim boundary.
+
+    SCI-096 B-engine may run this adapter, but the result is not a scientific
+    conclusion and must not auto-promote. Iteration agent nodes then complete
+    without an LLM, same as the synthetic V1 observation.
     """
     if not isinstance(run_state, Mapping):
         return False
-    execution = run_state.get("execution") if isinstance(run_state.get("execution"), dict) else {}
+    execution = _controlled_run_execution(run_state)
+    result = _controlled_run_result(run_state)
+    adapter = str(
+        execution.get("adapterId")
+        or execution.get("runnerId")
+        or result.get("adapterId")
+        or run_state.get("adapterId")
+        or run_state.get("runnerId")
+        or ""
+    ).strip()
+    if adapter != FASHION_MNIST_MULTI_SEED_ADAPTER:
+        return False
+    status = str(
+        execution.get("status") or result.get("status") or run_state.get("status") or ""
+    ).strip().lower()
+    if status not in {"completed", "succeeded"}:
+        return False
+    if execution.get("automaticPromotion") is True or result.get("automaticPromotion") is True:
+        return False
+    raw_boundaries = (
+        result.get("boundaries")
+        or execution.get("boundaries")
+        or run_state.get("boundaries")
+        or ()
+    )
+    if not isinstance(raw_boundaries, (list, tuple, set, frozenset)):
+        return False
+    markers = {str(item).strip() for item in raw_boundaries if str(item).strip()}
+    return _CLAIM_BOUNDARY_MARKERS <= markers
+
+
+def is_bounded_controlled_run(run_state: Mapping[str, Any] | None) -> bool:
+    """True when iteration agent nodes can finish from disk without an LLM.
+
+    Covers the synthetic V1 CPU observation (including formal-runner-unavailable)
+    and a completed FashionMNIST formal run that carries claim-boundary markers.
+    """
+    if not isinstance(run_state, Mapping):
+        return False
+    execution = _controlled_run_execution(run_state)
     runner = str(
         execution.get("adapterId")
         or execution.get("runnerId")
@@ -56,6 +119,7 @@ def is_bounded_controlled_run(run_state: Mapping[str, Any] | None) -> bool:
         unavailable
         or mode == "v1_cpu_smoke"
         or runner == _BOUNDED_RUNNER_ID
+        or is_claim_bounded_formal_run(run_state)
     )
 
 
