@@ -8,9 +8,13 @@ import type {
   TeamResearchProjectSourceCollectionResetPayload,
 } from "./types";
 
-export function listTeamResearchProjects(teamId: string) {
+export function listTeamResearchProjects(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+) {
   return fetchJson<TeamResearchProjectListPayload>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects`,
+    { signal: options?.signal },
   );
 }
 

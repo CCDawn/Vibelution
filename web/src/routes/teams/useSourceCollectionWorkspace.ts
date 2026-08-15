@@ -8,8 +8,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchJson } from "../../api/client";
+import { listDataProcessingRuns } from "../../api/dataProcessing";
 import { queryKeys } from "../../api/queryKeys";
+import { listTeamResearchProjects } from "../../api/researchProjectAgentTasks";
 import type { DataProcessingRunListPayload } from "../../api/types";
 import {
   SOURCE_COLLECTION_RUN_PREVIEW_LIMIT,
@@ -108,10 +109,7 @@ export function useSourceCollectionWorkspace(input: UseSourceCollectionWorkspace
   const sourceCollectionResearchProjectsQuery = useQuery<TeamResearchProjectListPayload>({
     queryKey: researchProjectQueryKey(effectiveTeamId || "none"),
     queryFn: ({ signal }) =>
-      fetchJson<TeamResearchProjectListPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-projects`,
-        { signal },
-      ),
+      listTeamResearchProjects(effectiveTeamId, { signal }),
     enabled: sourceCollectionRunsQueryEnabled,
     staleTime: 10_000,
   });
@@ -123,10 +121,12 @@ export function useSourceCollectionWorkspace(input: UseSourceCollectionWorkspace
       activeSourceCollectionResearchProjectId || "unresolved-project",
     ],
     queryFn: ({ signal }) =>
-      fetchJson<DataProcessingRunListPayload>(
-        `/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}&teamId=${encodeURIComponent(effectiveTeamId)}&startedFrom=team_workflow_source_collection`,
-        { signal },
-      ),
+      listDataProcessingRuns({
+        limit: SOURCE_COLLECTION_RUN_PREVIEW_LIMIT,
+        teamId: effectiveTeamId,
+        startedFrom: "team_workflow_source_collection",
+        signal,
+      }),
     enabled: sourceCollectionRunsQueryEnabled && Boolean(activeSourceCollectionResearchProjectId),
     refetchInterval: (query) => {
       const payload = query.state.data as DataProcessingRunListPayload | undefined;
