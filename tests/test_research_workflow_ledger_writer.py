@@ -320,6 +320,124 @@ def test_close_timeout_abandons_blocked_mutation_without_late_commit() -> None:
     assert published == [], "close 超时后不得执行 after_commit callback"
 
 
+def test_close_wins_race_fails_future_before_commit() -> None:
+    """close-wins：close 超时先取得原子边界 → Future 失败、事务不提交、
+    after_commit 不执行（check-then-act 竞态已被线性化）。"""
+    from core.research.workflow.ledger import WorkflowLedgerClosedError
+
+    database = _FakeDatabase()
+    writer = _build_writer(database, poll_interval_s=0.01)
+    writer.start()
+    import threading
+    import time
+
+    entered = threading.Event()
+    release = threading.Event()
+    published: list[str] = []
+
+    def blocker(uow):
+        uow.after_commit(lambda: published.append("blocker-committed"))
+        entered.set()
+        release.wait(timeout=30)
+
+    blocked_future = writer.submit(blocker, force_flush=False)
+    assert entered.wait(timeout=5), "writer 必须已进入 mutation"
+
+    writer.close(timeout=0.2)
+
+    with pytest.raises(WorkflowLedgerClosedError):
+        blocked_future.result(timeout=1)
+
+    release.set()
+    writer._thread.join(timeout=10)
+    assert not writer._thread.is_alive()
+
+    commits = [
+        sql
+        for connection in database.connections
+        for sql in connection.executed
+        if sql == "COMMIT"
+    ]
+    assert commits == [], "close-wins: 事务不得提交"
+    assert published == [], "close-wins: after_commit 不得执行"
+
+
+def test_commit_wins_race_commits_and_settles_success() -> None:
+    """commit-wins：writer 已进入 COMMIT 时 close 必须等待 → 事务提交且
+    Future 成功，不出现 committed-but-failed。"""
+    import threading
+    import time
+
+    commit_started = threading.Event()
+    allow_commit = threading.Event()
+
+    class _BlockingCommitConnection:
+        def __init__(self) -> None:
+            self.executed: list[str] = []
+            self.closed = False
+
+        def execute(self, sql: str) -> None:
+            self.executed.append(sql)
+            if sql == "COMMIT":
+                commit_started.set()
+                allow_commit.wait(timeout=30)
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _BlockingCommitDatabase:
+        def __init__(self) -> None:
+            self.connections: list[_BlockingCommitConnection] = []
+
+        def open_writer(self) -> _BlockingCommitConnection:
+            connection = _BlockingCommitConnection()
+            self.connections.append(connection)
+            return connection
+
+    database = _BlockingCommitDatabase()
+    writer = _build_writer(database, poll_interval_s=0.01)
+    writer.start()
+    try:
+        published: list[str] = []
+
+        def mutate(uow):
+            uow.after_commit(lambda: published.append("committed"))
+            return "ok"
+
+        future = writer.submit(mutate, force_flush=False)
+        assert commit_started.wait(timeout=5), "writer 必须已进入 COMMIT"
+
+        close_results: list[bool] = []
+
+        def do_close():
+            writer.close(timeout=0.2)
+            close_results.append(True)
+
+        closer = threading.Thread(target=do_close)
+        closer.start()
+        time.sleep(0.3)
+        assert not close_results, "close 必须等待在途 COMMIT 完成后再标记超时"
+
+        allow_commit.set()
+        closer.join(timeout=10)
+        assert close_results, "close 未返回"
+
+        assert future.result(timeout=1) == "ok", "committed-but-failed: Future 不得失败"
+        assert published == ["committed"], "commit-wins: after_commit 必须执行"
+
+        commits = [
+            sql
+            for connection in database.connections
+            for sql in connection.executed
+            if sql == "COMMIT"
+        ]
+        assert commits == ["COMMIT"], "commit-wins: 事务必须提交且仅提交一次"
+    finally:
+        allow_commit.set()
+        writer._thread.join(timeout=10)
+        writer.close()
+
+
 def test_close_timeout_settles_remaining_futures(tmp_path: Path) -> None:
     from core.research.workflow.ledger import WorkflowLedgerClosedError
     from core.research.workflow.ledger.database import WorkflowLedgerDatabase

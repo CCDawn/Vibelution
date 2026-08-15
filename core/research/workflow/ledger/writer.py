@@ -69,6 +69,7 @@ class WorkflowLedgerWriter:
         self._startup_error: BaseException | None = None
         self._startup_gate = threading.Event()
         self._condition = threading.Condition()
+        self._commit_guard = threading.Lock()
         self._outstanding = 0
         self._current_group: list[_Envelope] = []
         self._thread = threading.Thread(target=self._run, name="workflow-ledger-writer", daemon=True)
@@ -137,12 +138,12 @@ class WorkflowLedgerWriter:
             pass
         self._thread.join(timeout=max(0.0, timeout))
         if self._thread.is_alive():
-            self._abandoned.set()
-            self._settle_remaining(
-                WorkflowLedgerClosedError(
-                    "workflow ledger writer closed before pending mutations were committed"
-                )
+            error = WorkflowLedgerClosedError(
+                "workflow ledger writer closed before pending mutations were committed"
             )
+            with self._commit_guard:
+                self._abandoned.set()
+                self._settle_remaining(error)
 
     def _flush_until(self, envelope: _Envelope) -> None:
         deadline = time.monotonic() + DEFAULT_FLUSH_TIMEOUT_S
@@ -301,11 +302,14 @@ class WorkflowLedgerWriter:
                     connection.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
                     connection.execute(f"RELEASE SAVEPOINT {savepoint}")
                     self._settle(envelope, error=exc)
-            if self._abandoned.is_set():
-                raise WorkflowLedgerClosedError(
-                    "workflow ledger writer closed before the mutation committed"
-                )
-            connection.execute("COMMIT")
+            with self._commit_guard:
+                if self._abandoned.is_set():
+                    raise WorkflowLedgerClosedError(
+                        "workflow ledger writer closed before the mutation committed"
+                    )
+                connection.execute("COMMIT")
+                for envelope, result in staged:
+                    self._settle(envelope, result=result)
         except Exception as exc:
             try:
                 connection.execute("ROLLBACK")
@@ -314,8 +318,6 @@ class WorkflowLedgerWriter:
             for envelope in group:
                 self._settle(envelope, error=exc)
             return
-        for envelope, result in staged:
-            self._settle(envelope, result=result)
         for callback in callbacks:
             try:
                 callback()
