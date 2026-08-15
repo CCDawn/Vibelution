@@ -14,6 +14,7 @@ Prefer slice modules over growing `team_knowledge_service.py` when possible.
 | Paths / JSONL / owner context / id helpers | `store.py` | promotion domain; ACL policy |
 | ACL / can_* / steward permission helpers | `permissions.py` | inbox promotion domain; store IO |
 | Owner inbox / central promotion domain | `source_inbox.py` | KB CRUD/proposals; pure path helpers |
+| Public structure curation (`workspace/knowledge/public`) | `public_catalog.py` | items.jsonl bodies; `KNOWLEDGE_OWNER_TYPES` |
 | Knowledge base CRUD / proposals | facade (until pack) | pure ranking; path helpers |
 
 ## Sole-owner rules
@@ -32,6 +33,7 @@ Prefer slice modules over growing `team_knowledge_service.py` when possible.
 | `store.py` | **done** | roots/paths/JSONL/owner context/id helpers late-bind facade |
 | `permissions.py` | **done** | can_*/ACL/steward/require gates late-bind facade |
 | `source_inbox.py` | **done** | collect/list/review inbox + central promote/list late-bind facade |
+| `public_catalog.py` | **done** | `workspace/knowledge/public` cards, hash freshness, mixed read, startup budget, archive/conflict, proposals; facade re-export only |
 | KB CRUD / proposals / ratings packs | pending | next slices |
 
 ## Related

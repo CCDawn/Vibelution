@@ -7,10 +7,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function overlayRetiredControlPort(payload: Record<string, unknown>): Record<string, unknown> {
+  const launcher = isRecord(payload.launcher) ? { ...payload.launcher } : null;
+  if (launcher) {
+    const controlPlane = isRecord(launcher.controlPlane) ? { ...launcher.controlPlane } : null;
+    if (controlPlane) {
+      controlPlane.port = 0;
+      controlPlane.url = "";
+      controlPlane.adapter = "electron_main";
+      controlPlane.pid = 0;
+      launcher.controlPlane = controlPlane;
+    }
+    if ("controlPort" in launcher || "effectiveControlPort" in launcher) {
+      launcher.controlPort = 0;
+      launcher.effectiveControlPort = 0;
+    }
+    payload.launcher = launcher;
+  }
+  const settings = isRecord(payload.settings) ? { ...payload.settings } : null;
+  const startup = settings && isRecord(settings.startup) ? { ...settings.startup } : null;
+  const startupLauncher = startup && isRecord(startup.launcher) ? { ...startup.launcher } : null;
+  if (settings && startup && startupLauncher) {
+    startupLauncher.controlPort = 0;
+    startupLauncher.effectiveControlPort = 0;
+    startup.launcher = startupLauncher;
+    settings.startup = startup;
+    payload.settings = settings;
+  }
+  return payload;
+}
+
 function overlayStatusWindowTruth(
   payload: Record<string, unknown>,
   truth: LauncherWindowTruth
 ): Record<string, unknown> {
+  overlayRetiredControlPort(payload);
   const bundle = payload.projectBundle;
   if (!isRecord(bundle)) {
     return payload;
@@ -120,6 +151,9 @@ export function overlayLauncherWindowTruth(
   }
   if (path === "status") {
     return overlayStatusWindowTruth(payload, truth);
+  }
+  if (path === "settings/startup") {
+    return overlayRetiredControlPort(payload);
   }
   if (path === "branch-instances") {
     return overlayBranchInstancesWindowTruth(payload, truth);

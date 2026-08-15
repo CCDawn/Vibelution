@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
+
 export type PythonJsonBridgeChild = Pick<ReturnType<typeof spawn>, "kill" | "once" | "stdout" | "stderr">;
 export type PythonJsonBridgeSpawn = (
   command: string,
@@ -8,6 +10,7 @@ export type PythonJsonBridgeSpawn = (
     cwd: string;
     windowsHide: boolean;
     stdio: ["ignore", "pipe", "pipe"];
+    env: NodeJS.ProcessEnv;
   }
 ) => PythonJsonBridgeChild;
 
@@ -25,7 +28,7 @@ export async function runPythonJsonBridge(input: {
     cwd: input.cwd,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS: "1" }
+    env: pythonBridgeEnv()
   });
   return await new Promise((resolveOutput, reject) => {
     const chunks: Buffer[] = [];

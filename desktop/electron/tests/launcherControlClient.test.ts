@@ -82,7 +82,7 @@ describe("postLauncherControl", () => {
 });
 
 describe("fetchLauncherStatusSummary", () => {
-  it("reads overall/observed/consistency fields for tray status", async () => {
+  it("reads tray fields plus backend readiness and bounded lifecycle results", async () => {
     const requests: string[] = [];
     const summary = await fetchLauncherStatusSummary({
       launcherOrigin: "http://127.0.0.1:8765/launcher",
@@ -92,7 +92,23 @@ describe("fetchLauncherStatusSummary", () => {
         return jsonResponse({
           overallState: "ready",
           observedState: "open",
-          workbench: { lifecycleConsistency: "consistent" }
+          stateVersion: "42",
+          workbench: { lifecycleConsistency: "consistent" },
+          projectBundle: {
+            backend: {
+              healthy: true,
+              portListening: true
+            }
+          },
+          controlPlaneEvidence: {
+            results: {
+              recent: [
+                { commandId: "cmd-1", completed: true, ok: true, message: "ready" },
+                { commandId: "", completed: true, ok: true },
+                "invalid"
+              ]
+            }
+          }
         });
       }
     });
@@ -101,7 +117,12 @@ describe("fetchLauncherStatusSummary", () => {
     expect(summary).toEqual({
       overallState: "ready",
       observedState: "open",
-      lifecycleConsistency: "consistent"
+      lifecycleConsistency: "consistent",
+      phase: "",
+      stateVersion: 42,
+      backendHealthy: true,
+      backendPortListening: true,
+      lifecycleResults: [{ commandId: "cmd-1", completed: true, ok: true, message: "ready" }]
     });
     expect(formatLauncherStatusSummary(summary)).toBe("状态：ready / open / consistent");
   });

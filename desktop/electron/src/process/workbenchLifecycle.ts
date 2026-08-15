@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
+import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
+
 export type WorkbenchLifecycleOperation = "start" | "stop" | "force-stop" | "restart" | "rebuild-and-start";
 
 export type WorkbenchLifecycleResult = {
@@ -21,6 +23,7 @@ type LifecycleSpawn = (
     cwd: string;
     windowsHide: boolean;
     stdio: ["ignore", "pipe", "pipe"];
+    env: NodeJS.ProcessEnv;
   }
 ) => LifecycleChild;
 
@@ -66,7 +69,7 @@ export async function runWorkbenchLifecycle(input: {
     cwd: input.workspaceRoot,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS: "1" }
+    env: pythonBridgeEnv()
   });
   const stdout = await readBoundedLifecycleStdout(child, 64_000);
   return parseWorkbenchLifecycleResult(stdout);

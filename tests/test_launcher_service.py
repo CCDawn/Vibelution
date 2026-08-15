@@ -3686,3 +3686,24 @@ def test_ensure_runtime_manager_daemon_alive_records_recovery_failure_but_still_
     assert calls == ["recover", "ensure"]
     assert "launcher.daemon.watchdog.recovery_failed" in events
     assert "launcher.daemon.watchdog.restarted" in events
+
+
+def test_request_launcher_start_skips_browser_when_electron_orchestrates_windows(monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setenv("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "1")
+    monkeypatch.setattr(launcher_service, "ensure_runtime_manager_daemon_alive", lambda: None)
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="": captured.update({"type": command_type, "args": dict(args or {})})
+        or {"commandId": "cmd-electron-start"},
+    )
+    monkeypatch.setattr(launcher_service, "_record_launcher_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(launcher_service, "_record_launcher_prequeue_timing", lambda *_args, **_kwargs: None)
+
+    response = launcher_service.request_launcher_start()
+
+    assert captured["type"] == "open_workbench"
+    assert captured["args"]["noBrowser"] is True
+    assert response["accepted"] is True
+    assert response["commandId"] == "cmd-electron-start"

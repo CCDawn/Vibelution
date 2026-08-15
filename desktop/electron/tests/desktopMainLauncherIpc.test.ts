@@ -35,4 +35,37 @@ describe("Electron main Launcher IPC facade", () => {
     expect(launcherWindowSource).toContain('additionalArguments: ["--vibelution-window-role=launcher-control"]');
     expect(mainSource).toContain("launcherIpcTrustedOrigins");
   });
+
+  it("does not require a workbench control token before serving launcher status", () => {
+    const hostSource = readFileSync(fileURLToPath(new URL("../src/protocol/launcherIpcHost.ts", import.meta.url)), "utf8");
+    const invokeStart = hostSource.indexOf("async invoke(");
+    const contextStart = hostSource.indexOf("await input.resolveContext()", invokeStart);
+    const statusApi = hostSource.indexOf('"status"', hostSource.indexOf("const LAUNCHER_API_PATHS"));
+    expect(statusApi).toBeGreaterThan(0);
+    expect(statusApi).toBeLessThan(contextStart);
+    expect(mainSource).toContain("createLocalLauncherStatusSnapshot");
+    expect(mainSource).toContain("resolveLocalStatus");
+    expect(mainSource).toContain("scheduleStatusRefresh");
+  });
+
+  it("opens the current workbench window after start even without an isolated port", () => {
+    expect(mainSource).toContain("openOrchestratedWorkbenchWindow");
+    expect(mainSource).toContain("isCurrentCheckoutInstance(instanceId)");
+    expect(mainSource).toContain("provider.openOrFocusWorkbench(url)");
+    expect(mainSource).toContain("await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS })");
+    expect(mainSource).toContain("return workbenchLoopbackUrl();");
+    const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
+    const branchBody = mainSource.slice(branchStart, branchStart + 1800);
+    expect(branchBody).toContain('operation === "start" || operation === "restart"');
+    expect(branchBody).toContain("isCurrentCheckoutInstance(instanceId) || (result.port && result.port > 0)");
+  });
+
+  it("closes Electron workbench windows on stop instead of waiting for Python to own them", () => {
+    expect(mainSource).toContain("closeOrchestratedWorkbenchWindow");
+    expect(mainSource).toContain("approveWorkbenchCloseOnce");
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
+    expect(lifecycleBody).toContain('operation === "stop" || operation === "force-stop"');
+    expect(lifecycleBody).toContain("approveWorkbenchCloseOnce");
+  });
 });

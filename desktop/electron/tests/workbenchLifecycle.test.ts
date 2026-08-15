@@ -73,6 +73,11 @@ describe("runWorkbenchLifecycle", () => {
     expect(options.cwd).toBe("C:/repo");
     expect(options.windowsHide).toBe(true);
     expect(options.stdio).toEqual(["ignore", "pipe", "pipe"]);
+    expect((options.env as { PYTHONIOENCODING?: string; PYTHONUTF8?: string }).PYTHONIOENCODING).toBe("utf-8");
+    expect((options.env as { PYTHONUTF8?: string }).PYTHONUTF8).toBe("1");
+    expect(
+      (options.env as { VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS?: string }).VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS
+    ).toBe("1");
   });
 
   it("passes stop/restart/rebuild operations through the bridge", async () => {

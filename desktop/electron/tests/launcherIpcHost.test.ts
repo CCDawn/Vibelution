@@ -50,33 +50,100 @@ describe("createLauncherIpcHost", () => {
     }
   });
 
-  it("reports host not ready when the control plane context is unavailable", async () => {
+  it("reports host not ready when leftover HTTP paths have no control-plane context", async () => {
     const host = createLauncherIpcHost({
       resolveContext: async () => null,
     });
-    const result = await host.invoke(validPayload());
+    const result = await host.invoke(validPayload({ path: "supervisor" }));
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe(LAUNCHER_IPC_HOST_NOT_READY);
     }
   });
 
-  it("proxies launcher GET requests through the main-process control plane", async () => {
-    const fetchImpl = vi.fn().mockResolvedValueOnce(
-      jsonResponse({ launcher: { mode: "standalone_control_plane" } }),
-    );
+  it("returns a local status snapshot without waiting for the CLI orchestrator", async () => {
+    const fetchImpl = vi.fn();
+    const orchestrate = vi.fn().mockImplementation(() => new Promise(() => undefined));
+    const refresh = vi.fn();
     const host = createLauncherIpcHost({
-      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
+      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
+      resolveLocalStatus: () => ({
+        launcher: { mode: "standalone_control_plane", controlPlane: { port: 8765, url: "http://127.0.0.1:8765/launcher" } },
+        projectBundle: {
+          observedState: "closed",
+          lifecycleConsistency: "",
+          browser: { managed: false, windowPid: 0, alive: false },
+          components: [],
+        },
+      }),
+      scheduleStatusRefresh: refresh,
+      orchestrateLauncherApi: orchestrate,
       fetchImpl,
     });
     const result = await host.invoke(validPayload({ path: "status" }));
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.payload).toEqual({ launcher: { mode: "standalone_control_plane" } });
+      const bundle = (result.payload as Record<string, unknown>).projectBundle as Record<string, unknown>;
+      expect(bundle.observedState).toBe("open");
+    }
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(orchestrate).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("serves status through the local CLI orchestrator without fetching the workbench", async () => {
+    const fetchImpl = vi.fn();
+    const resolveContext = vi.fn().mockResolvedValue({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" });
+    const orchestrate = vi.fn().mockResolvedValue({
+      launcher: { mode: "standalone_control_plane", controlPlane: { port: 8765, url: "http://127.0.0.1:8765/launcher" } },
+      projectBundle: {
+        observedState: "closed",
+        lifecycleConsistency: "",
+        browser: { managed: false, windowPid: 0, alive: false },
+        components: [],
+      },
+    });
+    const host = createLauncherIpcHost({
+      resolveContext,
+      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
+      orchestrateLauncherApi: orchestrate,
+      fetchImpl,
+    });
+    const result = await host.invoke(validPayload({ path: "status" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const payload = result.payload as Record<string, unknown>;
+      const launcher = payload.launcher as Record<string, unknown>;
+      const controlPlane = launcher.controlPlane as Record<string, unknown>;
+      expect(controlPlane.port).toBe(0);
+      expect(controlPlane.adapter).toBe("electron_main");
+      const bundle = payload.projectBundle as Record<string, unknown>;
+      expect(bundle.observedState).toBe("open");
+      expect(bundle.browser).toMatchObject({ alive: true, windowPid: 7070 });
+    }
+    expect(orchestrate).toHaveBeenCalledTimes(1);
+    expect(orchestrate.mock.calls[0][0]).toBe("status");
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(resolveContext).not.toHaveBeenCalled();
+  });
+
+  it("proxies leftover launcher GET requests through the main-process HTTP fallback", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({ supervisor: { alive: false } }),
+    );
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
+      fetchImpl,
+    });
+    const result = await host.invoke(validPayload({ path: "supervisor" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload).toEqual({ supervisor: { alive: false } });
     }
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [resource, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
-    expect(resource).toBe("http://127.0.0.1:8765/api/launcher/status");
+    expect(resource).toBe("http://127.0.0.1:8002/api/launcher/supervisor");
     expect(init.method).toBe("GET");
   });
 
@@ -107,15 +174,15 @@ describe("createLauncherIpcHost", () => {
     expect(JSON.parse(String(init.body))).toEqual({ instanceId: "main" });
   });
 
-  it("surfaces launcher HTTP rejections as structured IPC errors", async () => {
+  it("surfaces leftover HTTP rejections as structured IPC errors", async () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(
       jsonResponse({ detail: "active work blocks restart" }, false, 409),
     );
     const host = createLauncherIpcHost({
-      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
       fetchImpl,
     });
-    const result = await host.invoke(validPayload({ path: "restart", init: { method: "POST" } }));
+    const result = await host.invoke(validPayload({ path: "supervisor", init: { method: "POST" } }));
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe("LAUNCHER_IPC_HTTP_409");
@@ -123,22 +190,39 @@ describe("createLauncherIpcHost", () => {
     }
   });
 
-  it("surfaces launcher network failures as structured IPC errors", async () => {
+  it("surfaces leftover HTTP network failures as structured IPC errors", async () => {
     const fetchImpl = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const host = createLauncherIpcHost({
-      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
       fetchImpl,
     });
-    const result = await host.invoke(validPayload({ path: "status" }));
+    const result = await host.invoke(validPayload({ path: "supervisor" }));
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe("LAUNCHER_IPC_NETWORK_ERROR");
     }
   });
 
-  it("overlays the Electron window truth on the status snapshot", async () => {
-    const fetchImpl = vi.fn().mockResolvedValueOnce(
-      jsonResponse({
+  it("does not throw when leftover HTTP context resolution fails", async () => {
+    const host = createLauncherIpcHost({
+      resolveContext: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    const result = await host.invoke(validPayload({ path: "supervisor" }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("LAUNCHER_IPC_NETWORK_ERROR");
+      expect(result.error.message).toContain("fetch failed");
+    }
+  });
+
+  it("overlays the Electron window truth on a locally served status snapshot", async () => {
+    const fetchImpl = vi.fn();
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
+      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
+      orchestrateLauncherApi: async () => ({
         projectBundle: {
           observedState: "closed",
           lifecycleConsistency: "",
@@ -146,10 +230,6 @@ describe("createLauncherIpcHost", () => {
           components: [],
         },
       }),
-    );
-    const host = createLauncherIpcHost({
-      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
-      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
       fetchImpl,
     });
     const result = await host.invoke(validPayload({ path: "status" }));
@@ -159,19 +239,19 @@ describe("createLauncherIpcHost", () => {
       expect(bundle.observedState).toBe("open");
       expect(bundle.browser).toMatchObject({ alive: true, windowPid: 7070 });
     }
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("overlays the Electron window truth on branch instances", async () => {
-    const fetchImpl = vi.fn().mockResolvedValueOnce(
-      jsonResponse({
+  it("overlays the Electron window truth on locally served branch instances", async () => {
+    const fetchImpl = vi.fn();
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
+      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
+      orchestrateLauncherApi: async () => ({
         items: [
           { id: "main", current: true, alive: false, startable: true, runtime: { window: { open: false, pid: 0 } } },
         ],
       }),
-    );
-    const host = createLauncherIpcHost({
-      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
-      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
       fetchImpl,
     });
     const result = await host.invoke(validPayload({ path: "branch-instances" }));
@@ -181,6 +261,7 @@ describe("createLauncherIpcHost", () => {
       expect(item.startable).toBe(false);
       expect((item.runtime as Record<string, unknown>).window).toMatchObject({ open: true, pid: 7070 });
     }
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("routes lifecycle commands through the main orchestrator instead of the Python proxy", async () => {
