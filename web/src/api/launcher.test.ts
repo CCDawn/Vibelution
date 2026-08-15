@@ -79,6 +79,35 @@ describe("launcher api helpers", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/status");
   });
 
+  it("keeps published launcher status extras used by tray and control-plane UI", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        launcher: { mode: "standalone_control_plane" },
+        overallState: "open",
+        observedState: "open",
+        controlPlaneEvidence: { customEvidence: true },
+        guardianAdapter: { adapterCount: 1, customGuardian: true },
+        customTrayField: "keep-me",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await getLauncherStatus();
+
+    expect(payload.overallState).toBe("open");
+    expect(payload.observedState).toBe("open");
+    expect(payload.controlPlaneEvidence?.customEvidence).toBe(true);
+    expect(payload.guardianAdapter?.customGuardian).toBe(true);
+    expect((payload as { customTrayField?: string }).customTrayField).toBe("keep-me");
+  });
+
   it("fetches launcher branch instances as a read-only request", async () => {
     vi.stubGlobal("window", {
       location: {
