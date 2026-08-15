@@ -19,6 +19,10 @@ _EXPORTS = {
         ".conversation_invariant",
         "canonical_conversation_messages_from_events",
     ),
+    "live_conversation_messages_from_events": (
+        ".conversation_invariant",
+        "live_conversation_messages_from_events",
+    ),
     "check_conversation_payload_invariant": (
         ".conversation_invariant",
         "check_conversation_payload_invariant",
