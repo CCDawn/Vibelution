@@ -1,13 +1,28 @@
 """Team workflow routes: knowledge."""
 from __future__ import annotations
-from fastapi import Query, status
+from fastapi import HTTPException, Query, status
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow_orchestration_service import *
 from ._errors import _raise_team_workflow_route_error
 from ._models import *
 from ._router import router
+from .knowledge_models import (
+    CandidateGraphBuildResponse,
+    CandidateSourceExtractionResponse,
+    CoordinationStatusResponse,
+    KnowledgeCollectionCompleteResponse,
+    KnowledgeCollectionExtractResponse,
+    KnowledgeCollectionIngestResponse,
+    KnowledgeIngestionPrecheckResponse,
+    KnowledgeIngestionStatusResponse,
+    PaperNoteDraftResponse,
+)
 
-@router.get("/teams/{team_id}/workflow-orchestration/knowledge-ingestion/status")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/knowledge-ingestion/status",
+    response_model=KnowledgeIngestionStatusResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_knowledge_ingestion_status(team_id: str) -> dict:
     try:
         return get_knowledge_ingestion_status(team_id)
@@ -17,7 +32,12 @@ def team_workflow_knowledge_ingestion_status(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/knowledge-ingestion/precheck", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/knowledge-ingestion/precheck",
+    status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeIngestionPrecheckResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_knowledge_ingestion_precheck(team_id: str, payload: KnowledgeIngestionPrecheckPayload) -> dict:
     try:
         return run_knowledge_ingestion_precheck(team_id, payload.model_dump())
@@ -33,7 +53,12 @@ def team_workflow_knowledge_ingestion_precheck(team_id: str, payload: KnowledgeI
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/knowledge-collection/extract", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/knowledge-collection/extract",
+    status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeCollectionExtractResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_knowledge_collection_extract(team_id: str, payload: KnowledgeCollectionExtractionPayload) -> dict:
     try:
         return extract_source_collection_candidates(team_id, payload.model_dump())
@@ -53,7 +78,12 @@ def team_workflow_knowledge_collection_extract(team_id: str, payload: KnowledgeC
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/knowledge-collection/ingest", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/knowledge-collection/ingest",
+    status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeCollectionIngestResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_knowledge_collection_ingest(team_id: str, payload: KnowledgeCollectionIngestionPayload) -> dict:
     try:
         payload_dict = payload.model_dump()
@@ -78,7 +108,12 @@ def team_workflow_knowledge_collection_ingest(team_id: str, payload: KnowledgeCo
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/knowledge-collection/complete", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/knowledge-collection/complete",
+    status_code=status.HTTP_201_CREATED,
+    response_model=KnowledgeCollectionCompleteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_knowledge_collection_complete(team_id: str, payload: KnowledgeCollectionIngestionPayload) -> dict:
     try:
         payload_dict = payload.model_dump()
@@ -110,7 +145,11 @@ def team_workflow_knowledge_collection_complete(team_id: str, payload: Knowledge
         )
 
 
-@router.get("/teams/{team_id}/workflow-orchestration/coordination/status")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/coordination/status",
+    response_model=CoordinationStatusResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_coordination_status(team_id: str) -> dict:
     try:
         return get_team_workflow_coordination_status(team_id)
@@ -120,7 +159,12 @@ def team_workflow_coordination_status(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/candidate-graph", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/candidate-graph",
+    status_code=status.HTTP_201_CREATED,
+    response_model=CandidateGraphBuildResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_candidate_graph_build(team_id: str, payload: CandidateGraphBuildPayload) -> dict:
     try:
         return build_candidate_graph(team_id, payload.model_dump())
@@ -136,7 +180,11 @@ def team_workflow_candidate_graph_build(team_id: str, payload: CandidateGraphBui
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/source-extraction")
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/source-extraction",
+    response_model=CandidateSourceExtractionResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_candidate_source_extract(team_id: str, candidate_id: str, payload: SourceExtractionPayload) -> dict:
     try:
         return extract_candidate_source_pages(team_id, candidate_id, payload.model_dump())
@@ -158,7 +206,12 @@ def team_workflow_candidate_source_extract(team_id: str, candidate_id: str, payl
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft",
+    status_code=status.HTTP_201_CREATED,
+    response_model=PaperNoteDraftResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_candidate_paper_note_autodraft(team_id: str, candidate_id: str, payload: PaperNoteAutodraftPayload) -> dict:
     try:
         return draft_paper_note_from_source_candidate(team_id, candidate_id, payload.model_dump())

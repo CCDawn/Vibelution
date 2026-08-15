@@ -65,6 +65,7 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("approveWorkbenchCloseOnce");
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
     const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
+    expect(lifecycleBody).toContain("shouldRefreshBeforeLifecycle");
     expect(lifecycleBody).toContain('operation === "stop" || operation === "force-stop"');
     expect(lifecycleBody).toContain("approveWorkbenchCloseOnce");
   });

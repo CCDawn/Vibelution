@@ -4,10 +4,13 @@ import { resolvePollingInterval } from "../../app/pollingPolicy";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import { fetchResearchStageRoundStatus } from "../../api/stageRounds";
+import {
+  fetchKnowledgeIngestionStatus,
+  fetchTeamWorkflowCoordinationStatus,
+} from "../../api/teamKnowledge";
 import { fetchTeamWorkflowOrchestration } from "../../api/teamWorkflow";
 import type {
   TeamWorkflowCandidateListPayload,
-  TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeIngestionStatus,
 } from "../../api/types";
 import {
@@ -346,18 +349,12 @@ export function useResearchWorkflowResources({
   });
   const coordination = useQuery({
     queryKey: queryKeys.teamWorkflowCoordinationStatus(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowCoordinationStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/coordination/status`,
-      { signal },
-    ),
+    queryFn: ({ signal }) => fetchTeamWorkflowCoordinationStatus(teamId, { signal }),
     enabled: Boolean(teamId && demand.coordination),
   });
   const knowledgeIngestion = useQuery({
     queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowKnowledgeIngestionStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/knowledge-ingestion/status`,
-      { signal },
-    ),
+    queryFn: ({ signal }) => fetchKnowledgeIngestionStatus(teamId, { signal }),
     enabled: Boolean(teamId && demand.knowledgeIngestion),
     refetchInterval: (query) => {
       const data = query.state.data as TeamWorkflowKnowledgeIngestionStatus | undefined;
