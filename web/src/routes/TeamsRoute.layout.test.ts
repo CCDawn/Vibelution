@@ -510,7 +510,7 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("uses Team APIs and Agent Center as the binding source", () => {
-    expect(routeSource).toContain('fetchJson<TeamListPayload>("/api/teams", { signal })');
+    expect(routeSource).toContain("listTeams({ signal })");
     expect(routeSource).toContain("TEAM_BOOTSTRAP_REFETCH_STATUSES");
     expect(routeSource).toContain("query.state.data?.systemTeamBootstrap?.status");
     expect(routeSource).toContain("TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS");
@@ -519,8 +519,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("instantiateTeamTemplateMutation");
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
     expect(canvasDataSource).toContain("const TEAM_PICKER_TEAM_IDS = [RESEARCH_TEAM_ID, AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID] as const");
-    expect(useTeamsSelectedTeamDetailSource).toContain("`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`");
-    expect(useTeamsSelectedTeamDetailSource).toContain("fetchJson<Team>(");
+    expect(useTeamsSelectedTeamDetailSource).toContain("fetchTeam(effectiveTeamId, { signal, detail: teamDetailLoadMode })");
     expect(routeSource).toContain("queryKeys.agentSummary(false)");
     expect(routeSource).toContain("listAgentSummaries<AgentConfigWorkspaceAgent>({ signal })");
     expect(routeSource).not.toContain("includeArchived=true&detail=summary");
@@ -758,7 +757,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectedTeam?.sourceScope");
     expect(routeSource).toContain("AiSearchRunListPayload");
     expect(routeSource).toContain("queryKeys.teamAiSearchRuns");
-    expect(routeSource).toContain("/api/teams/${encodeURIComponent(effectiveTeamId)}/ai-search-runs?limit=${AI_SEARCH_RUN_PREVIEW_LIMIT}");
+    expect(routeSource).toContain("listTeamAiSearchRuns(effectiveTeamId, {");
     expect(teamWorkflowStartMutationsSource).toContain("/api/teams/${encodeURIComponent(payload.teamId)}/ai-search-runs");
     expect(routeSource).toContain("startAiSearchRunMutation");
     expect(routeSource).toContain("aiSearchRunTopic");
@@ -1888,7 +1887,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("resolveTeamCanvasQueryEnabled");
     expect(routeSource).toContain("resolveSourceCollectionRunsQueryEnabled");
     expect(routeSource).toContain("queryKeys.team(effectiveTeamId, teamDetailLoadMode)");
-    expect(routeSource).toContain("detail=${teamDetailLoadMode}");
+    expect(routeSource).toContain("detail: teamDetailLoadMode");
     expect(routeSource).toContain("enabled: teamCanvasQueryEnabled");
     expect(routeSource).toContain("sourceCollectionAgentIdsFromTeam(selectedTeam, canvas)");
     expect(routeSource).toContain("sourceCollectionOwnerAgentIdFromTeam(selectedTeam, canvas)");
@@ -2036,7 +2035,7 @@ describe("TeamsRoute layout contract", () => {
 
     // R2-d: teams list / agent summary / bus bootstrap live in useTeamsCatalogQueries.
     expect(useTeamsCatalogQueriesSource).toContain("export function useTeamsCatalogQueries");
-    expect(useTeamsCatalogQueriesSource).toContain("queryFn: ({ signal }) => fetchJson<TeamListPayload>(\"/api/teams\", { signal })");
+    expect(useTeamsCatalogQueriesSource).toContain("queryFn: ({ signal }) => listTeams({ signal })");
     expect(useTeamsCatalogQueriesSource).toContain("TEAM_BOOTSTRAP_REFETCH_STATUSES");
     expect(useTeamsCatalogQueriesSource).toContain("listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal })");
     expect(routeSourceRaw).toContain("useTeamsCatalogQueries({");
@@ -2044,15 +2043,14 @@ describe("TeamsRoute layout contract", () => {
     // R2-e: team detail + kind flags live in useTeamsSelectedTeamDetail.
     expect(useTeamsSelectedTeamDetailSource).toContain("export function useTeamsSelectedTeamDetail");
     expect(useTeamsSelectedTeamDetailSource).toContain(
-      "fetchJson<Team>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`,",
+      "fetchTeam(effectiveTeamId, { signal, detail: teamDetailLoadMode })",
     );
     expect(routeSourceRaw).toContain("useTeamsSelectedTeamDetail({");
     expect(routeSourceRaw).not.toContain("const teamDetailQuery = useQuery<Team>({");
     expect(useTeamsSelectedTeamDetailSource).not.toContain("fetchJson<TeamOrganizationCanvas>");
     expect(useTeamsSelectedTeamDetailSource).not.toContain("queryKey: researchProjectQueryKey");
     // Phase 3: organization canvas query lives in useTeamsCanvasProjection.
-    expect(useTeamsShellCanvasWorkspaceSource).toContain("fetchJson<TeamOrganizationCanvas>(");
-    expect(useTeamsShellCanvasWorkspaceSource).toContain("`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`");
+    expect(useTeamsShellCanvasWorkspaceSource).toContain("fetchTeamCanvas(effectiveTeamId, { signal })");
     // Phase 1 state-machine: project/run list queries live in useSourceCollectionWorkspace.
     expect(useSourceCollectionWorkspaceSource).toContain("queryKey: researchProjectQueryKey(effectiveTeamId || \"none\")");
     expect(useSourceCollectionWorkspaceSource).toContain("activeSourceCollectionResearchProjectId");
