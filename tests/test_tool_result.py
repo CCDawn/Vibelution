@@ -788,6 +788,18 @@ class TestInferToolBusinessSuccess:
     def test_plain_text_is_success(self):
         assert infer_tool_business_success("normal output") is True
 
+    def test_multiline_jsonl_is_not_misreported_as_parse_failure(self, monkeypatch):
+        import core.infrastructure.tool_result as tr
+
+        warnings = []
+        monkeypatch.setattr(tr._debug_logger, "warning", lambda *a, **k: warnings.append((a, k)))
+
+        result = '{"type":"session_start","ts":1}\n{"type":"debug","ts":2}'
+        assert infer_tool_business_success(result) is True
+        assert warnings == []
+
+        assert infer_tool_business_success('{"status":"failed"}') is False
+
     def test_completed_terminal_nonzero_exit_keeps_transport_completion_semantics(self):
         payload = {
             "status": "completed",
