@@ -365,6 +365,7 @@ from .agent_directory.ops_residual import (
 )
 from .agent_directory.episodic_memory import (
     EPISODE_KINDS,
+    PROMPT_LIST_LIMIT,
     REF_TYPES,
     append_episodic_event,
     list_current_episodic_events,
@@ -421,6 +422,7 @@ SESSION_PROTOCOL_PREFERRED_TOOLS = (
     *_LEGACY_SESSION_AGENT_PREFERRED_TOOLS,
 )
 PERSONAL_EPISODE_TOOL_NAME = "append_episodic_memory_tool"
+PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME = "supersede_episodic_memory_tool"
 GENERATION_HANDOFF_MEMORY_TOOLS = (
     "get_core_context_tool",
     "get_current_goal_tool",
@@ -432,10 +434,15 @@ _EPISODE_ERA_SESSION_AGENT_ALLOWED_TOOLS = (
     *SESSION_PROTOCOL_ALLOWED_TOOLS,
     PERSONAL_EPISODE_TOOL_NAME,
 )
-DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
+# Default after generation-handoff left the session pack and before supersede.
+_NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS = tuple(
     name
     for name in _EPISODE_ERA_SESSION_AGENT_ALLOWED_TOOLS
     if name not in GENERATION_HANDOFF_MEMORY_TOOLS
+)
+DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
+    *_NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS,
+    PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME,
 )
 DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = tuple(
     name for name in SESSION_PROTOCOL_PREFERRED_TOOLS if name not in GENERATION_HANDOFF_MEMORY_TOOLS

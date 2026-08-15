@@ -201,4 +201,35 @@ describe("DirectSessionIndexList helpers", () => {
     expect(result.conversationIndexKind).toBe("team_agent");
     expect(result.conversationIndexErrors).toEqual(["missing_source_authority"]);
   });
+
+  it("copies conversation team fields onto the fallback session summary", () => {
+    const result = conversationToSessionSummary(
+      conversation({
+        directSessionId: "session-4",
+        agentId: "agent-1",
+        teamId: "team-a",
+        teamName: "Alpha Team",
+      } as ConversationSummary & { teamId: string; teamName: string }),
+      new Map(),
+    );
+
+    expect(result.teamId).toBe("team-a");
+    expect(result.teamName).toBe("Alpha Team");
+  });
+
+  it("fills missing cached session team fields from the conversation index", () => {
+    const cached = session({ id: "session-2", title: "用户改名" });
+    const result = conversationToSessionSummary(
+      conversation({
+        directSessionId: "session-2",
+        teamId: "team-a",
+        teamName: "Alpha Team",
+      } as ConversationSummary & { teamId: string; teamName: string }),
+      new Map([[cached.id, cached]]),
+    );
+
+    expect(result.title).toBe("用户改名");
+    expect(result.teamId).toBe("team-a");
+    expect(result.teamName).toBe("Alpha Team");
+  });
 });

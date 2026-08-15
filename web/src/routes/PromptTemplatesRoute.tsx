@@ -5,10 +5,15 @@ import { Archive, ArrowLeft, CheckCircle2, CheckSquare, FileText, RefreshCw, Rot
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { listAgentSummaries } from "../api/agents";
-import { fetchJson } from "../api/client";
+import {
+  fetchPromptTemplate,
+  listAgentSummaries,
+  listPromptTemplates,
+  resetPromptTemplate,
+  updatePromptTemplate,
+} from "../api/agents";
 import { queryKeys } from "../api/queryKeys";
-import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
+import { AgentInstance, PromptTemplate } from "../api/types";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
@@ -236,7 +241,7 @@ export function PromptTemplatesRoute() {
 
   const templatesQuery = useQuery({
     queryKey: queryKeys.promptTemplates(),
-    queryFn: () => fetchJson<PromptTemplateWorkspace>("/api/prompt-templates?includeInactive=true"),
+    queryFn: () => listPromptTemplates({ includeInactive: true }),
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
@@ -338,7 +343,7 @@ export function PromptTemplatesRoute() {
   const activeAgents = activeTemplate ? agentsByTemplate.get(activeTemplate.promptTemplateId) ?? [] : [];
   const detailQuery = useQuery({
     queryKey: ["prompt-templates", activeTemplateId, "detail"] as const,
-    queryFn: () => fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(activeTemplateId)}`),
+    queryFn: () => fetchPromptTemplate(activeTemplateId),
     enabled: Boolean(activeTemplateId),
   });
 
@@ -363,13 +368,9 @@ export function PromptTemplatesRoute() {
 
   const saveMutation = useMutation({
     mutationFn: (payload: PromptEditorState) =>
-      fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(payload.templateId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: payload.name,
-          content: payload.content,
-        }),
+      updatePromptTemplate(payload.templateId, {
+        name: payload.name,
+        content: payload.content,
       }),
     onSuccess: async (template) => {
       if (activeTemplateId === template.promptTemplateId) {
@@ -381,10 +382,7 @@ export function PromptTemplatesRoute() {
   });
   const resetMutation = useMutation({
     mutationFn: (templateId: string) =>
-      fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(templateId)}/reset`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      }),
+      resetPromptTemplate(templateId),
     onSuccess: async (template) => {
       if (activeTemplateId === template.promptTemplateId) {
         setEditor(editorFromTemplate(template));
@@ -441,11 +439,7 @@ export function PromptTemplatesRoute() {
     const notes: string[] = [];
     for (const template of selectedTemplates) {
       try {
-        await fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(template.promptTemplateId)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
-        });
+        await updatePromptTemplate(template.promptTemplateId, patch);
         success += 1;
       } catch (error) {
         failed += 1;
@@ -479,10 +473,7 @@ export function PromptTemplatesRoute() {
         continue;
       }
       try {
-        await fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(template.promptTemplateId)}/reset`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
+        await resetPromptTemplate(template.promptTemplateId);
         success += 1;
       } catch (error) {
         failed += 1;

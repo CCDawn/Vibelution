@@ -19,6 +19,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | Team index / membership repair | `team_repair.py` | public CRUD entrypoints |
 | Team API projection / agent refs | `team_projection.py` | index write repair |
 | Active membership / contract helpers | `team_membership.py` | runtime-scene telemetry; public CRUD |
+| Same-team member message index | `team_member_messages.py` | broadcast `send_team_message`; session body SSOT |
 | Team runtime-scene logging helpers | `team_logging.py` | membership resolve; index IO |
 | Team index / path / lock store helpers | `team_store.py` | domain CRUD; system materialize |
 | Team domain constants / role catalogs | `team_constants.py` | mutable locks; kind maps (`kind_helpers`) |

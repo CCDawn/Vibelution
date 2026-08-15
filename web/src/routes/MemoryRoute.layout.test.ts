@@ -234,8 +234,8 @@ describe("MemoryRoute layout contract", () => {
   it("surfaces the project-memory proposal queue without implying a coordinator role", () => {
     expect(routeSource).toContain("AgentProjectMemoryUpdateProposal");
     expect(workbenchQueriesSource).toContain("queryKeys.agentProjectMemoryUpdates");
-    expect(workbenchQueriesSource).toContain("/api/agents/project-memory-updates?");
-    expect(routeSource).toContain("project-memory-updates");
+    expect(workbenchQueriesSource).toContain("listAgentProjectMemoryUpdates(");
+    expect(itemMutationsSource).toContain("resolveAgentProjectMemoryUpdate(");
     expect(routeSource).toContain("projectMemoryUpdatesQuery");
     expect(itemMutationsSource).toContain('resolvedBy: "user"');
     expect(routeSource).toContain("projectMemoryProposalResolverLabel");

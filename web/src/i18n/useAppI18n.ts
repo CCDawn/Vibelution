@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { fetchJson } from "../api/client";
+import { fetchPublicConfig } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
-import { ConfigSummary } from "../api/types";
 import {
   dictionaryDomainsQueryKey,
   normalizeDictionaryDomains,
@@ -138,7 +137,7 @@ export function useAppI18n(options?: UseAppI18nOptions) {
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    queryFn: () => fetchPublicConfig(),
   });
 
   const dictionaryQuery = useQuery({
