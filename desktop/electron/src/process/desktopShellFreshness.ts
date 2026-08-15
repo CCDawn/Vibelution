@@ -23,6 +23,45 @@ export type DesktopShellRefreshSchedule = {
   thenLifecycle: string;
 };
 
+export type TrayLauncherFreshness = {
+  current: boolean | null;
+  label: string;
+};
+
+function shortTree(value: string | undefined): string {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, 12) : "";
+}
+
+export function formatTrayLauncherFreshness(
+  status: Pick<DesktopShellStatus, "stale" | "reason" | "packagedElectronTree" | "currentElectronTree">
+): TrayLauncherFreshness {
+  const packaged = shortTree(status.packagedElectronTree);
+  const current = shortTree(status.currentElectronTree);
+  if (!status.stale && status.reason === "current") {
+    return {
+      current: true,
+      label: packaged ? `Launcher 已是最新 · ${packaged}` : "Launcher 已是最新"
+    };
+  }
+  if (status.reason === "missing_package" || status.reason === "missing_provenance") {
+    return {
+      current: false,
+      label: `Launcher 壳未就绪 · ${status.reason}`
+    };
+  }
+  if (packaged && current && packaged !== current) {
+    return {
+      current: false,
+      label: `Launcher 落后本地 desktop/electron · ${packaged} → ${current}`
+    };
+  }
+  return {
+    current: false,
+    label: `Launcher 落后本地代码 · ${status.reason || "stale"}`
+  };
+}
+
 export function decidePackagedDesktopShellRefresh(input: {
   isPackaged: boolean;
   smoke: boolean;

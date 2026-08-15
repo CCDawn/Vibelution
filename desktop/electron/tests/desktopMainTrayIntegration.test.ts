@@ -34,6 +34,9 @@ describe("Electron main tray integration", () => {
     expect(traySource).toContain("stopInstance:");
     expect(traySource).toContain("listInstances:");
     expect(traySource).toContain("getFreshness:");
+    expect(traySource).toContain("formatTrayLauncherFreshness");
+    expect(traySource).toContain("inspectCurrentDesktopShell");
+    expect(traySource).not.toContain("fetchLauncherFreshness");
     expect(traySource).toContain("resolveTrayControlContextOrLoopback");
     expect(traySource).toContain("restartLauncher:");
     expect(traySource).toContain("showStatus:");

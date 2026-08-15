@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   decideLauncherShellRestart,
   decidePackagedDesktopShellRefresh,
+  formatTrayLauncherFreshness,
   inspectDesktopShell,
   parseDesktopShellStatus,
   scheduleDesktopShellRefresh,
@@ -116,5 +117,33 @@ describe("desktop shell freshness", () => {
 
   it("rejects a status payload without schemaVersion", () => {
     expect(() => parseDesktopShellStatus(JSON.stringify({ stale: true }))).toThrow("invalid desktop shell status");
+  });
+
+  it("formats tray launcher version from desktop shell status, not workbench HTTP", () => {
+    expect(
+      formatTrayLauncherFreshness({
+        stale: false,
+        reason: "current",
+        packagedElectronTree: "abcdef1234567890",
+        currentElectronTree: "abcdef1234567890"
+      })
+    ).toEqual({
+      current: true,
+      label: "Launcher 已是最新 · abcdef123456"
+    });
+    expect(
+      formatTrayLauncherFreshness({
+        stale: true,
+        reason: "provenance_mismatch",
+        packagedElectronTree: "oldtree000001",
+        currentElectronTree: "newtree000002"
+      }).label
+    ).toContain("Launcher 落后本地 desktop/electron · oldtree00000 → newtree00000");
+    expect(
+      formatTrayLauncherFreshness({
+        stale: true,
+        reason: "missing_package"
+      }).label
+    ).toBe("Launcher 壳未就绪 · missing_package");
   });
 });
