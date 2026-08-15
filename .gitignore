@@ -116,9 +116,13 @@ workspace/
 /.grok/
 
 # --- Local competition / experiment working trees (generated or local-only) ---
-# Root competition materials and challenge-cup experiment spikes stay on disk only.
+# Root competition materials stay on disk only. The trusted FashionMNIST
+# formal runner is product code and must be in git so cloud/CI can execute it.
 /挑战杯/
 /experiments/challenge_cup_*/
+!/experiments/challenge_cup_predictive_coding/
+!/experiments/challenge_cup_predictive_coding/fashion_mnist_smoke.py
+!/experiments/challenge_cup_predictive_coding/requirements-cpu.lock
 
 # Challenge-cup design docs and preview materials stay local (not pushed to GitHub).
 /docs/archive/plans/2026-08-07/challenge-cup-*
