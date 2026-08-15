@@ -20,6 +20,7 @@ import type {
   ConversationSummary,
   PetSummary,
   RuntimeSummary,
+  SessionSummary,
   SkillLibraryPayload,
   TeamListPayload,
 } from "../../api/types";
@@ -33,6 +34,7 @@ import type { ChatSecondaryPollPolicy } from "../chatSecondaryPollPolicy";
 import { useSessionIndexQuery } from "../chatSessionIndexQuery";
 import { shouldEnableSessionIndexQuery } from "../chatSessionStartupGate";
 import { isVisibleDirectSession } from "../conversationIndexModel";
+import { mergePreservedCreatedSessions } from "../sessionCreatePreserve";
 import { filterOutTombstonedConversations } from "../sessionDeleteTombstone";
 import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 
@@ -102,11 +104,31 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
       const payload = await fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50", { signal });
       queryClient.setQueryData(queryKeys.agents(), payload.agents);
       queryClient.setQueryData(queryKeys.conversations(), payload.conversations);
+      // Never hard-replace the session index page: create optimism / pins must
+      // survive bootstrap refetch triggered by broad `["sessions"]` invalidation.
+      const previous = queryClient.getQueryData<{
+        pages: Array<{ items?: SessionSummary[] }>;
+        pageParams: unknown[];
+      }>(queryKeys.sessionQuery("", 50));
+      const previousItems = previous?.pages.flatMap((page) => page.items ?? []) ?? [];
+      const mergedItems = mergePreservedCreatedSessions(payload.sessionPage?.items ?? [], {
+        localItems: previousItems,
+      });
+      const mergedPage = {
+        ...payload.sessionPage,
+        items: mergedItems,
+      };
       queryClient.setQueryData(
         queryKeys.sessionQuery("", 50),
-        { pages: [payload.sessionPage], pageParams: [""] },
+        { pages: [mergedPage], pageParams: [""] },
       );
-      return payload;
+      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (existing) =>
+        mergePreservedCreatedSessions(mergedItems, { localItems: existing ?? previousItems }),
+      );
+      return {
+        ...payload,
+        sessionPage: mergedPage,
+      };
     },
     staleTime: 5_000,
   });
