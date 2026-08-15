@@ -62,7 +62,7 @@ Use the lightest tier that protects the user, the repository, and concurrent wor
 | Tier | Use when | Required workflow | Validation and closeout |
 | --- | --- | --- | --- |
 | `FAST_PATCH` | Single-surface, reversible, low-risk work such as copy, docs, rule wording, tiny UI style/layout polish, small tests, focused read-only review, or a mechanical helper change. No data migration, API contract, deletion, permissions, runtime lifecycle, release, or shared DTO impact. | Use a task worktree and `codex/<task-slug>` branch exactly like every other write. `FAST_PATCH` only reduces planning and validation weight; it never permits direct writes or commits on `main`. BRT can be silent/micro. No planning/task-splitting/memory sync by default. Hot-file edits need active-claim review, narrow scope, scoped staging, and stronger final evidence. | Run the smallest useful check, or state why no executable check is useful. Review `git status` and the current diff. Commit the task branch, then integrate with `git merge --ff-only` when the merge gates pass. Report refresh/memory/version as `not affected` when true. |
-| `STANDARD_TASK` | Normal feature or bug work, multi-file UI changes, user-visible behavior, component extraction, backend route/service changes, or changes that need focused tests to be trustworthy. | Use a task worktree by default. Run BRT in micro/align mode, claim relevant scopes in multi-session work, and reuse project-native patterns. | Run focused tests and any required build/typecheck for the affected surface. Make a Launcher refresh decision. Commit or explicitly hand off not-ready work. Update or propose project memory when the task changes durable project state. |
+| `STANDARD_TASK` | Normal feature or bug work, multi-file UI changes, user-visible behavior, component extraction, backend route/service changes, or changes that need focused tests to be trustworthy. | Use a task worktree by default. Run BRT in micro/align mode, claim relevant scopes in multi-session work, and reuse project-native patterns. | Run focused tests and any required build/typecheck for the affected surface. Make a Launcher refresh decision. Self-review the current-task diff, then merge with `git merge --ff-only` when the merge gates pass, or report an exact blocker. Waiting for the user to request review or merge is not done. Update or propose project memory when the task changes durable project state. |
 | `HIGH_RISK` | Work touching data loss, archive/delete/reset, permissions, secrets, persistence, migrations, public API/DTO contracts, runtime/Launcher lifecycle, LLM/tool routing, memory/RAG, release/versioning, cross-lane coordination, remote publication, or shared hot files. | Full flow: BRT, root-cause or source-of-truth reasoning, explicit guard/claim decision, isolated worktree, plan when useful, no destructive action without explicit confirmation. Remote push/PR/publication may proceed only after the remote sync gate passes. | Add or update tests/logging evidence, run broad enough validation, handle refresh and memory explicitly, judge version impact, self-review diff, and close the claim with evidence. |
 
 Upgrade the tier when evidence shows hidden risk. Downgrade when the remaining process would only create delay without improving correctness, safety, or handoff quality.
@@ -629,7 +629,7 @@ Commit messages should be concise, scoped, and behavior-oriented. Prefer prefixe
 - `docs: ...`;
 - `chore: ...`.
 
-After implementation and validation in a task worktree, the owning Agent should self-review and close the local loop. This is the default expectation for every development session: do not hand off routine PR review, scoped validation, local commit, or local `main` merge merely because a separate main integration session exists. A task Agent should first try to finish its own local review-and-merge cycle when the merge gates below pass.
+After implementation and validation in a task worktree, the owning Agent should self-review and close the local loop. This is the default expectation for every development session: do not hand off routine PR review, scoped validation, local commit, or local `main` merge merely because a separate main integration session exists, and do not wait for the user to request review or merge. A task Agent should first try to finish its own local review-and-merge cycle when the merge gates below pass.
 
 `FAST_PATCH` work must also be committed in its task worktree. It may use compact diff review and scoped validation, but it still enters local `main` only through a reviewed `git merge --ff-only` when all merge gates pass:
 
@@ -725,7 +725,7 @@ Task handoff must include version bump recommendation, capability domain, user-v
 
 ## 16. Mainline Integration
 
-Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; complete all review, validation, staged-path light gates, claim-bound `closeout`, and acceptance evidence; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; then immediately release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
+Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. Waiting for the user to request review or merge is not done. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; complete all review, validation, staged-path light gates, claim-bound `closeout`, and acceptance evidence; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; then immediately release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
 
 - keeping local `main` clean before each merge;
 - reviewing claim status and write scopes;
@@ -915,6 +915,7 @@ A development round is not done until its tier-specific checklist is satisfied:
 - logging, testing, Launcher refresh, project memory, and version impact are either handled or explicitly `not affected`;
 - relevant lightweight checks ran, or the final report explains why no executable check is useful;
 - Git status and the current-task diff were reviewed;
+- the owning Agent actively self-reviewed the current-task diff and either merged into local `main` with `git merge --ff-only` or reported an exact merge blocker; waiting for the user to request review or merge is not done;
 - any guard claim created for a hot file was released;
 - if the task was merged, its task-owned temporary content, background processes/listeners, claim, junction, clean worktree, and merged local branch were cleaned immediately, or exact `cleanup pending` residue was reported;
 - final report states remaining risk and next action.
@@ -934,7 +935,7 @@ A development round is not done until its tier-specific checklist is satisfied:
 - Git status was reviewed;
 - current-task diff was self-reviewed;
 - changes are committed or explicitly marked not ready;
-- merge gates were evaluated;
+- merge gates were evaluated, and the owning Agent either merged into local `main` with `git merge --ff-only` or reported an exact merge blocker; waiting for the user to request review or merge is not done;
 - lightweight guard claim was released as `completed`, `blocked`, or `released`, or the handoff queue state is explicitly recorded as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`;
 - if the task was merged, cleanup ran immediately without waiting for post-merge validation and the final report records removed resources or exact `cleanup pending` residue;
 - project memory was updated, explicitly not affected, or an exact update proposal was handed off;

@@ -23,7 +23,7 @@
 4 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
 5 VERIFY    select_tests → focused → UI contract if FE；所有验证在 merge 前完成
 6 EVIDENCE  logging decision；runtime_scenes if 运行时；closeout/验收证据在 merge 前闭合
-7 INTEGRATE merge gate 全绿后 `git merge --ff-only`
+7 INTEGRATE 合入门全绿后必须主动 `git merge --ff-only`；不得等用户再下令审查/合入
 8 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
 9 CLOSE     完成块（§4）；refresh 三选一
 ```
@@ -107,7 +107,9 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 
 ## 协作
 - worktree/branch/claim: …
-- cleanup: removed=… | cleanup pending=精确残留与原因 | not merged
+- review: pass | blocker=…
+- merge: merged | not merged + 精确原因
+- cleanup: removed=… | cleanup pending=精确残留与原因 | not merged（仅当有精确 blocker）
 - project-memory: not affected | 更新点=…
 - version impact: none | …
 
@@ -124,6 +126,7 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 | 条件 | 动作 |
 | --- | --- |
 | 与他人 diff/claim 重叠 | 停；查 claim；不覆盖 |
+| 合入门已通过却未主动合入 | 未完成；立即 ff-only 或写精确 blocker |
 | 需 remote push/PR/force | 停；要用户授权 |
 | 需 force、远端删除、或归属不明的删/重置 | 停；要确认；已合入本任务的安全本地清理不重复询问 |
 | SSOT 表填不出 | 停；不实现 |
