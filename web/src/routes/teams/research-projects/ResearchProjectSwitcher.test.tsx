@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TeamResearchProject } from "../../../api/types";
 import { projectDraftFromProject, researchProjectQueryKey } from "./ResearchProjectSwitcher";
 import switcherSource from "./ResearchProjectSwitcher.tsx?raw";
+import apiSource from "../../../api/researchProjectAgentTasks.ts?raw";
 
 const project: TeamResearchProject = {
   projectId: "research-1",
@@ -31,7 +32,10 @@ describe("ResearchProjectSwitcher", () => {
 
   it("exposes create, edit, activate, and isolated workspace guidance", () => {
     expect(switcherSource).toContain("research-projects");
-    expect(switcherSource).toContain("/activate");
+    expect(switcherSource).toContain("activateTeamResearchProject(");
+    expect(switcherSource).toContain("createTeamResearchProject(");
+    expect(switcherSource).toContain("updateTeamResearchProject(");
+    expect(apiSource).toContain("/activate");
     expect(switcherSource).toContain("新建研究项目");
     expect(switcherSource).toContain("每个项目拥有独立的资料、实验设计和迭代数据");
   });

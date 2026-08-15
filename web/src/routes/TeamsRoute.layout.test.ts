@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import sourceCollectionApiSource from "../api/sourceCollection.ts?raw";
 import dataProcessingApiSource from "../api/dataProcessing.ts?raw";
 import stageRoundsApiSource from "../api/stageRounds.ts?raw";
+import teamWorkflowApiSource from "../api/teamWorkflow.ts?raw";
 import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
@@ -542,8 +543,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("enabled: linkedChatRoomQueryEnabled");
     expect(routeSource).toContain("linkedRoomRefetchInterval(pageVisible");
     expect(routeSource).toContain("latestChatRoomRound(linkedRoomDetail)");
-    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowOrchestration>");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration`");
+    expect(researchWorkflowResourcesSource).toContain("fetchTeamWorkflowOrchestration(");
+    expect(teamWorkflowApiSource).toContain("/workflow-orchestration");
     expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowCandidateListPayload>");
     // Wave 8P: candidate-graph build fetch lives on useTeamSourceCollectionMutations.
     expect(teamSourceCollectionMutationsSource).toContain("fetchJson<TeamWorkflowCandidateGraphBuildPayload>");
