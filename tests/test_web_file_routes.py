@@ -41,6 +41,16 @@ def test_files_tree_skips_pytest_run_directories(tmp_path, monkeypatch):
     assert ".pytest-run-live-tool-pairing" not in names
 
 
+def test_file_content_returns_text_preview():
+    response = client.get("/api/files/content", params={"path": "README.md"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["path"] == "README.md"
+    assert payload["language"] == "markdown"
+    assert "Vibelution" in payload["content"]
+    assert payload["truncated"] is False
+
+
 def test_file_content_rejects_path_escape():
     response = client.get("/api/files/content", params={"path": "../outside.txt"})
     assert response.status_code == 400
