@@ -1,10 +1,19 @@
 import { fetchJson } from "./client";
 import type {
+  AiSearchRun,
   AiSearchRunListPayload,
   Team,
   TeamListPayload,
   TeamOrganizationCanvas,
 } from "./types";
+
+function writeJson<T>(url: string, method: string, body?: unknown): Promise<T> {
+  return fetchJson<T>(url, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
 
 export function listTeams(options?: {
   signal?: AbortSignal;
@@ -58,4 +67,73 @@ export function listTeamAiSearchRuns(
   return fetchJson<AiSearchRunListPayload>(suffix ? `${path}?${suffix}` : path, {
     signal: options?.signal,
   });
+}
+
+export function createTeam(body: {
+  name?: string;
+  description?: string;
+  purpose?: string;
+  members?: unknown[];
+}): Promise<Team> {
+  return writeJson<Team>("/api/teams", "POST", body);
+}
+
+export function updateTeam(
+  teamId: string,
+  body: {
+    name?: string | null;
+    description?: string | null;
+    purpose?: string | null;
+    status?: string | null;
+    members?: unknown[] | null;
+  },
+): Promise<Team> {
+  return writeJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`, "PATCH", body);
+}
+
+export function archiveTeam(teamId: string): Promise<Team> {
+  return writeJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`, "DELETE");
+}
+
+export function saveTeamCanvas(canvas: TeamOrganizationCanvas): Promise<TeamOrganizationCanvas> {
+  return writeJson<TeamOrganizationCanvas>(
+    `/api/teams/${encodeURIComponent(canvas.teamId)}/canvas`,
+    "PUT",
+    canvas,
+  );
+}
+
+export function startAiSearchRun(
+  teamId: string,
+  body: {
+    topic: string;
+    sourceLimit?: number;
+    maxResultsPerQuery?: number;
+    includeSignals?: boolean;
+  },
+): Promise<AiSearchRun> {
+  return writeJson<AiSearchRun>(`/api/teams/${encodeURIComponent(teamId)}/ai-search-runs`, "POST", body);
+}
+
+export function syncTeamChatRoom(teamId: string): Promise<Team> {
+  return writeJson<Team>(`/api/teams/${encodeURIComponent(teamId)}/chat-room/sync`, "POST");
+}
+
+export type TeamRepairResult = {
+  team?: Team;
+  teamId?: string;
+};
+
+export function repairChallengeCupTeamAgents(teamId: string): Promise<TeamRepairResult> {
+  return writeJson<TeamRepairResult>(
+    `/api/teams/${encodeURIComponent(teamId)}/challenge-cup-agents/repair`,
+    "POST",
+  );
+}
+
+export function repairKnowledgeExpansionTeamAgents(teamId: string): Promise<TeamRepairResult> {
+  return writeJson<TeamRepairResult>(
+    `/api/teams/${encodeURIComponent(teamId)}/knowledge-expansion-agents/repair`,
+    "POST",
+  );
 }

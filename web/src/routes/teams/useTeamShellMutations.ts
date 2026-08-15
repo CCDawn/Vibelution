@@ -6,12 +6,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
 import { startChatRoomRound } from "../../api/chat";
-import { fetchJson } from "../../api/client";
 import {
   revokeProjectAgentBusMessage,
   sendTeamProjectBusMessage,
 } from "../../api/projectAgentBus";
 import { queryKeys } from "../../api/queryKeys";
+import {
+  archiveTeam,
+  repairChallengeCupTeamAgents,
+  repairKnowledgeExpansionTeamAgents,
+  saveTeamCanvas,
+  syncTeamChatRoom,
+} from "../../api/teams";
 import type { ChatRoomDetail, Team, TeamOrganizationCanvas } from "../../api/types";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 
@@ -32,10 +38,7 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   const { chatWorkspaceCache } = options;
 
   const archiveTeamMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`, {
-        method: "DELETE",
-      }),
+    mutationFn: (teamId: string) => archiveTeam(teamId),
     onSuccess: (team, teamId) => {
       options.setSelectedTeamId("");
       options.setSelectedNodeId("");
@@ -45,12 +48,7 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   });
 
   const saveCanvasMutation = useMutation({
-    mutationFn: (nextCanvas: TeamOrganizationCanvas) =>
-      fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextCanvas),
-      }),
+    mutationFn: (nextCanvas: TeamOrganizationCanvas) => saveTeamCanvas(nextCanvas),
     onSuccess: (canvas, variables) => {
       queryClient.setQueryData(queryKeys.teamCanvas(variables.teamId), canvas);
       void chatWorkspaceCache.afterTeamChanged(variables.teamId);
@@ -80,10 +78,7 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   });
 
   const syncTeamChatRoomMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}/chat-room/sync`, {
-        method: "POST",
-      }),
+    mutationFn: (teamId: string) => syncTeamChatRoom(teamId),
     onSuccess: (team) => {
       queryClient.setQueryData(queryKeys.team(team.teamId, "light"), team);
       queryClient.setQueryData(queryKeys.team(team.teamId, "full"), team);
@@ -96,10 +91,7 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   });
 
   const repairChallengeCupTeamAgentsMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<{ team: Team }>(`/api/teams/${encodeURIComponent(teamId)}/challenge-cup-agents/repair`, {
-        method: "POST",
-      }),
+    mutationFn: (teamId: string) => repairChallengeCupTeamAgents(teamId),
     onSuccess: (payload, teamId) => {
       if (payload.team) {
         queryClient.setQueryData(queryKeys.team(payload.team.teamId, "light"), payload.team);
@@ -111,10 +103,7 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   });
 
   const repairKnowledgeExpansionTeamAgentsMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<{ team: Team }>(`/api/teams/${encodeURIComponent(teamId)}/knowledge-expansion-agents/repair`, {
-        method: "POST",
-      }),
+    mutationFn: (teamId: string) => repairKnowledgeExpansionTeamAgents(teamId),
     onSuccess: (payload, teamId) => {
       if (payload.team) {
         queryClient.setQueryData(queryKeys.team(payload.team.teamId, "light"), payload.team);
