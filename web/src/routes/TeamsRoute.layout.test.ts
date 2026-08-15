@@ -4,6 +4,7 @@ import sourceCollectionApiSource from "../api/sourceCollection.ts?raw";
 import dataProcessingApiSource from "../api/dataProcessing.ts?raw";
 import stageRoundsApiSource from "../api/stageRounds.ts?raw";
 import teamWorkflowApiSource from "../api/teamWorkflow.ts?raw";
+import teamKnowledgeApiSource from "../api/teamKnowledge.ts?raw";
 import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
@@ -547,15 +548,16 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowApiSource).toContain("/workflow-orchestration");
     expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowCandidateListPayload>");
     // Wave 8P: candidate-graph build fetch lives on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("fetchJson<TeamWorkflowCandidateGraphBuildPayload>");
-    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowKnowledgeIngestionStatus>");
+    expect(teamSourceCollectionMutationsSource).toContain("buildCandidateGraph(");
+    expect(researchWorkflowResourcesSource).toContain("fetchKnowledgeIngestionStatus(");
+    expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
     expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowOfficialModelEvidenceStatus>");
     expect(researchWorkflowResourcesSource).toContain("TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT");
     expect(researchWorkflowResourcesSource).toContain("TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT");
     expect(routeSource).toContain("isResearchWorkflowTeam(selectedTeam)");
     expect(routeSource).toContain("researchWorkflowTeamSelected");
     expect(routeSource).toContain("teamWorkflowKnowledgeIngestionStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
+    expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
     expect(routeSource).toContain("teamWorkflowOfficialModelEvidenceStatusQuery");
     expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/official-model-evidence/status");
     expect(researchWorkflowResourcesSource).toContain("TeamWorkflowSourceQualityStatus");
@@ -752,7 +754,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("SOURCE_COLLECTION_DEFAULT_ROLES");
     expect(researchWorkflowResourcesSource).toContain("candidateType=candidate_graph");
     // Wave 8P: candidate-graph write endpoint lives on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("/workflow-orchestration/candidate-graph");
+    expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/candidate-graph");
+    expect(teamSourceCollectionMutationsSource).toContain("buildCandidateGraph(");
     expect(routeSource).toContain("buildCandidateGraphMutation");
     expect(teamShellMutationsSource).toContain('source: "team_workspace"');
     // Wave 8Q: team round + room membership cache live on shell mutations / remaining route selects.
@@ -1617,12 +1620,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionIngestorAgentId");
     expect(routeSource).toContain("runKnowledgeIngestionPrecheckMutation");
     // Wave 8P: ingestion precheck/complete write endpoints live on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("knowledge-ingestion/precheck");
+    expect(teamKnowledgeApiSource).toContain("knowledge-ingestion/precheck");
+    expect(teamSourceCollectionMutationsSource).toContain("runKnowledgeIngestionPrecheck<");
     expect(routeSource).toContain("runSourceCollectionGraphAction");
     expect(routeSource).not.toContain("runSourceCollectionMemoryPrecheckAction");
     expect(routeSource).toContain("runKnowledgeCollectionLoopAction");
     expect(routeSource).toContain("runKnowledgeCollectionCompletionMutation");
-    expect(teamSourceCollectionMutationsSource).toContain("/workflow-orchestration/knowledge-collection/complete");
+    expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/knowledge-collection/complete");
+    expect(teamSourceCollectionMutationsSource).toContain("completeKnowledgeCollection(");
     expect(routeSource).toContain("sourceCollectionActionRunId");
     // R2-o: summary runId projection lives in deriveSourceCollectionSummaryProjection.
     expect(deriveSourceCollectionSummaryProjectionSource).toContain("sourceCollectionSummary?.runId");

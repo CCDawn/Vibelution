@@ -79,6 +79,14 @@ import {
 } from "./process/branchInstanceBridge.js";
 import { runPythonJsonBridge } from "./process/pythonJsonBridge.js";
 import {
+  decideLauncherShellRestart,
+  decidePackagedDesktopShellRefresh,
+  inspectDesktopShell,
+  scheduleDesktopShellRefresh,
+  shouldRefreshBeforeLifecycle,
+  thenLifecycleFromDesktopCli
+} from "./process/desktopShellFreshness.js";
+import {
   completeBootstrapWithoutWaitingForTelemetry,
   drainTelemetryWithDeadline,
   scheduleTelemetryWithoutWaiting,
@@ -1273,6 +1281,74 @@ async function stopManagedRuntime(): Promise<void> {
   });
 }
 
+function desktopPythonPath(): string {
+  const desktopEnv = desktopEnvironment();
+  return String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+}
+
+async function inspectCurrentDesktopShell(): Promise<{ stale: boolean; reason: string }> {
+  const pythonPath = desktopPythonPath();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to inspect the desktop shell");
+  }
+  const paths = createDesktopPathsForApp();
+  return await inspectDesktopShell({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath
+  });
+}
+
+async function scheduleCurrentDesktopShellRefresh(thenLifecycle: string): Promise<void> {
+  const pythonPath = desktopPythonPath();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to refresh the desktop shell");
+  }
+  const paths = createDesktopPathsForApp();
+  const scheduled = await scheduleDesktopShellRefresh({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    waitPid: process.pid,
+    thenLifecycle
+  });
+  if (!scheduled.scheduled || scheduled.helperPid <= 0) {
+    throw new Error("desktop shell refresh helper did not start");
+  }
+}
+
+async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promise<boolean> {
+  if (decidePackagedDesktopShellRefresh({ isPackaged: app.isPackaged, smoke: desktopCliArgs.smoke, stale: true }) !== "refresh") {
+    return false;
+  }
+  let stale = false;
+  try {
+    stale = (await inspectCurrentDesktopShell()).stale;
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `检查桌面壳版本失败，继续使用当前壳：${detail.slice(0, 220)}`, "warning");
+    return false;
+  }
+  if (decidePackagedDesktopShellRefresh({ isPackaged: app.isPackaged, smoke: desktopCliArgs.smoke, stale }) !== "refresh") {
+    return false;
+  }
+  notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新…");
+  try {
+    await scheduleCurrentDesktopShellRefresh(thenLifecycle);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `无法安排桌面壳更新：${detail.slice(0, 220)}`, "warning");
+    return false;
+  }
+  try {
+    await stopManagedRuntime();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将退出以便更新：${detail.slice(0, 220)}`, "warning");
+  }
+  shutdownApproved = true;
+  app.exit(0);
+  return true;
+}
+
 async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
   const desktopEnv = desktopEnvironment();
   const bootstrap = await resolveSmokeBootstrap(paths, desktopEnv);
@@ -1536,6 +1612,14 @@ async function resolveTrayControlContextOrLoopback(): Promise<{
 
 async function restartLauncherShell(): Promise<void> {
   notifyDesktopTray("Vibelution", "正在重启 Launcher，以加载最新本地代码…");
+  let stale = false;
+  if (app.isPackaged) {
+    try {
+      stale = (await inspectCurrentDesktopShell()).stale;
+    } catch {
+      stale = true;
+    }
+  }
   try {
     await stopManagedRuntime();
   } catch (error: unknown) {
@@ -1547,6 +1631,21 @@ async function restartLauncherShell(): Promise<void> {
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     notifyDesktopTray("Vibelution", `停止旧 Launcher 服务失败，仍将重启：${detail.slice(0, 220)}`, "warning");
+  }
+  if (decideLauncherShellRestart({ isPackaged: app.isPackaged, stale }) === "rebuild-and-exit") {
+    try {
+      await scheduleCurrentDesktopShellRefresh("");
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      notifyDesktopTray("Vibelution", `无法安排桌面壳更新，改用当前壳重启：${detail.slice(0, 220)}`, "warning");
+      app.relaunch();
+      shutdownApproved = true;
+      app.exit(0);
+      return;
+    }
+    shutdownApproved = true;
+    app.exit(0);
+    return;
   }
   app.relaunch();
   shutdownApproved = true;
@@ -1672,6 +1771,31 @@ async function orchestrateLauncherLifecycle(
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   if (!pythonPath) {
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to orchestrate the workbench lifecycle");
+  }
+  if (app.isPackaged) {
+    try {
+      const status = await inspectCurrentDesktopShell();
+      if (shouldRefreshBeforeLifecycle(operation, { isPackaged: true, stale: status.stale })) {
+        notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新后再执行…");
+        await scheduleCurrentDesktopShellRefresh(operation);
+        try {
+          await stopManagedRuntime();
+        } catch (error: unknown) {
+          const detail = error instanceof Error ? error.message : String(error);
+          notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将退出以便更新：${detail.slice(0, 220)}`, "warning");
+        }
+        shutdownApproved = true;
+        app.exit(0);
+        return {
+          schemaVersion: 1,
+          accepted: true,
+          operation,
+          message: "desktop shell refresh scheduled"
+        };
+      }
+    } catch (error: unknown) {
+      console.warn(error instanceof Error ? error.message : String(error));
+    }
   }
   const paths = createDesktopPathsForApp();
   const result = await runWorkbenchLifecycle({
@@ -1989,6 +2113,9 @@ app.whenReady()
       await runSmokeAndQuit(paths);
       return;
     }
+    if (await refreshPackagedDesktopShellIfStale(thenLifecycleFromDesktopCli(desktopCliArgs))) {
+      return;
+    }
     const deepLinkRegistration = registerPackagedDeepLinks(paths);
     launcherBootstrap = await bootstrapMainOwnedLauncher(paths);
     electronStartupStage = "tray_ready";
@@ -2101,6 +2228,18 @@ app.whenReady()
     if (desktopCliArgs.workbenchCloseCanary) {
       await windowProvider.openOrFocusWorkbench();
       return;
+    }
+    const firstLifecycle = String(desktopCliArgs.lifecycleCommand || "").trim().toLowerCase();
+    if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
+      if (firstLifecycle === "open") {
+        pendingOpenWorkbenchRequest = false;
+        markWorkbenchOpenRequested();
+        await windowProvider.openOrFocusWorkbench();
+      } else {
+        void handleSecondInstanceLifecycleCommand(firstLifecycle).catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+      }
     }
     // T6: window actions are orchestrated by Electron main; the Python desktop
     // action claim loop is no longer polled. startDesktopActionLoop stays

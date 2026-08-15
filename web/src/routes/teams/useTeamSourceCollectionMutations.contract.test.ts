@@ -71,9 +71,9 @@ describe("team source-collection mutations contract", () => {
     expect(mutationsSource).toContain("/source-quality/assess");
     expect(mutationsSource).toContain("source-quality/assess-batch");
     expect(mutationsSource).toContain("/paper-note-chunks/plan");
-    expect(mutationsSource).toContain("/workflow-orchestration/candidate-graph");
-    expect(mutationsSource).toContain("knowledge-ingestion/precheck");
-    expect(mutationsSource).toContain("/workflow-orchestration/knowledge-collection/complete");
-    expect(mutationsSource).toContain("/knowledge-collection/extract");
+    expect(mutationsSource).toContain("buildCandidateGraph(");
+    expect(mutationsSource).toContain("runKnowledgeIngestionPrecheck<");
+    expect(mutationsSource).toContain("completeKnowledgeCollection(");
+    expect(mutationsSource).toContain("extractSourceCollectionCandidates(");
   });
 });
