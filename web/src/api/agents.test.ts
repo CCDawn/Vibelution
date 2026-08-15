@@ -18,4 +18,12 @@ describe("Agent permission preset API", () => {
     expect(mutationSource).not.toContain("fetchJson");
     expect(mutationSource).not.toContain("/api/agents/");
   });
+
+  it("owns chat-catalog agent summary, direct-session reset, and tool-governance transports", () => {
+    expect(apiSource).toContain("/api/agents?detail=summary");
+    expect(apiSource).toContain("/reset");
+    expect(apiSource).toContain("resetDirectSession: true");
+    expect(apiSource).toContain("/tool-governance-requests/");
+    expect(apiSource).toContain("resolvedBy: \"user\"");
+  });
 });

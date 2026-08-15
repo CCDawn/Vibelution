@@ -20,6 +20,11 @@ from core.web.routes.session_catalog_models import (
     SessionQueryResponse,
 )
 from core.web.routes.session_detail_models import SessionDetailResponse
+from core.web.routes.session_side_models import (
+    SessionChatReviewCandidateResponse,
+    SessionChildCreateResponse,
+    SessionToolApprovalItem,
+)
 from core.web.routes.session_turn_models import (
     SessionAttachmentResponse,
     SessionLlmOptionsResponse,
@@ -365,12 +370,21 @@ def session_select(session_id: str, request: Request) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/sessions/{session_id}/child-sessions")
+@router.get(
+    "/sessions/{session_id}/child-sessions",
+    response_model=list[SessionCatalogItem],
+    response_model_exclude_unset=True,
+)
 def session_child_sessions(session_id: str) -> list[dict]:
     return list_child_sessions(session_id)
 
 
-@router.post("/sessions/{session_id}/child-sessions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/sessions/{session_id}/child-sessions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SessionChildCreateResponse,
+    response_model_exclude_unset=True,
+)
 def session_create_child_session(session_id: str, payload: ChildSessionCreatePayload) -> dict:
     try:
         return create_child_session(
@@ -584,7 +598,11 @@ def session_stop_turn(session_id: str, payload: SessionStopPayload) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.get("/sessions/{session_id}/tool-approvals")
+@router.get(
+    "/sessions/{session_id}/tool-approvals",
+    response_model=list[SessionToolApprovalItem],
+    response_model_exclude_unset=True,
+)
 def session_tool_approvals(
     session_id: str,
     approval_status: str = Query("", alias="status"),
@@ -595,7 +613,11 @@ def session_tool_approvals(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/tool-approvals/{request_id}/decision")
+@router.post(
+    "/sessions/{session_id}/tool-approvals/{request_id}/decision",
+    response_model=SessionToolApprovalItem,
+    response_model_exclude_unset=True,
+)
 def session_resolve_tool_approval(
     session_id: str,
     request_id: str,
@@ -630,7 +652,12 @@ def session_submit_guidance(session_id: str, payload: SessionGuidancePayload) ->
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/chat-review-candidate", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/sessions/{session_id}/chat-review-candidate",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SessionChatReviewCandidateResponse,
+    response_model_exclude_unset=True,
+)
 def session_create_chat_review_candidate(session_id: str) -> dict:
     try:
         return create_chat_review_candidate_from_session(session_id)

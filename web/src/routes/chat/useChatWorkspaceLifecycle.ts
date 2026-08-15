@@ -2,6 +2,10 @@ import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import {
+  resetAgentDirectSession,
+  type AgentDirectSessionResetResponse,
+} from "../../api/agents";
+import {
   createChatRoom,
   createChatSession,
   createSessionChatReviewCandidate,
@@ -14,7 +18,6 @@ import {
   updateChatRoom,
   updateChatSession,
 } from "../../api/chat";
-import { fetchJson } from "../../api/client";
 import {
   revokeProjectAgentBusMessage,
   sendProjectAgentBusMessage,
@@ -103,14 +106,7 @@ function pickOptimisticNextActiveSessionId(
   return String(remaining[0]?.id || "").trim();
 }
 
-export type AgentDirectSessionResetResponse = {
-  agent: AgentInstance;
-  resetSummary: {
-    resetDirectSession?: boolean;
-    previousDirectSessionId?: string;
-    replacementDirectSessionId?: string;
-  };
-};
+export type { AgentDirectSessionResetResponse };
 
 export type UseChatWorkspaceLifecycleOptions = {
   queryClient: QueryClient;
@@ -849,20 +845,7 @@ export function useChatWorkspaceLifecycle({
 
   const clearSessionHistoryMutation = useMutation({
     mutationFn: async ({ sessionId, agentId }: { sessionId: string; agentId: string }) =>
-      fetchJson<AgentDirectSessionResetResponse>(`/api/agents/${encodeURIComponent(agentId)}/reset`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clearRuntimeState: false,
-          resetDirectSession: true,
-          directSessionId: sessionId,
-          resetPersonaProfile: false,
-          resetTaskProfile: false,
-          resetToolPolicy: false,
-          resetMemoryPolicy: false,
-          resetRuntimePolicy: false,
-        }),
-      }),
+      resetAgentDirectSession(agentId, sessionId),
     onSuccess: (result, variables) => {
       const previousDirectSessionId = String(
         result.resetSummary.previousDirectSessionId || variables.sessionId,
