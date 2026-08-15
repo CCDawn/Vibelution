@@ -919,8 +919,7 @@ def _ensure_session_mutable(
     target = conversation
     if target is None:
         with s._CHAT_STATE_LOCK:
-            payload = s.load_chat_state(s.PROJECT_ROOT)
-            target = s._find_conversation_entry(payload, normalized_session_id)
+            target = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
     if target is None:
         raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
     # Intentional delete/clear/reset: do not mutate state on a deleted session.
@@ -954,15 +953,14 @@ def _ensure_session_reasoning_effort_initialized(session_id: str) -> str:
         agent = s.get_agent(fallback_agent_id, include_archived=False) if fallback_agent_id else None
     initial = s._initial_session_reasoning_effort(agent, model)
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
             raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
         if "reasoning_effort" in conversation:
             return s.normalize_reasoning_effort(conversation.get("reasoning_effort"))
         conversation["reasoning_effort"] = initial
         conversation["updated_at"] = s._now_timestamp()
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
     s._invalidate_session_list_cache()
     return initial
 

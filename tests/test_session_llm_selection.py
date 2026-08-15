@@ -186,6 +186,18 @@ def test_session_reasoning_effort_recovers_missing_chat_state_from_workspace(mon
 
     monkeypatch.setattr(session_service, "load_chat_state", lambda _project_root: copy.deepcopy(state))
     monkeypatch.setattr(session_service, "save_chat_state", save_state)
+    monkeypatch.setattr(
+        session_service,
+        "load_session_chat_state",
+        lambda _project_root, session_id: next(
+            (
+                copy.deepcopy(item)
+                for item in state.get("conversations") or []
+                if str(item.get("conversation_id") or "") == session_id
+            ),
+            None,
+        ),
+    )
     monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_a, **_k: None)
     monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
     monkeypatch.setattr(session_service, "_is_session_running", lambda _sid: False)
@@ -325,6 +337,18 @@ def _install_chat_state(monkeypatch: pytest.MonkeyPatch, efforts: dict[str, str]
 
     monkeypatch.setattr(session_service, "load_chat_state", lambda _project_root: copy.deepcopy(state))
     monkeypatch.setattr(session_service, "save_chat_state", save_state)
+    monkeypatch.setattr(
+        session_service,
+        "load_session_chat_state",
+        lambda _project_root, session_id: next(
+            (
+                copy.deepcopy(item)
+                for item in state.get("conversations") or []
+                if str(item.get("conversation_id") or "") == session_id
+            ),
+            None,
+        ),
+    )
     monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         session_service,

@@ -619,3 +619,79 @@ def test_mark_session_turn_dequeued_writes_only_target_session_row(tmp_path, mon
     assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "running"
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
     assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+def test_ensure_session_mutable_loads_one_row_without_full_document(tmp_path, monkeypatch):
+    """A missing in-memory conversation must not assemble the compatibility document."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(session_service, "_is_session_workspace_intentionally_deleted", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_conversation_is_read_only", lambda *_args, **_kwargs: False)
+    full_loads: list[str] = []
+    original_load = session_service.load_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "load_chat_state",
+        lambda *args, **kwargs: full_loads.append("load") or original_load(*args, **kwargs),
+    )
+
+    loaded = session_service._ensure_session_mutable("session-a")
+
+    assert full_loads == []
+    assert loaded["title"] == "A"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_update_chat_session_title_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Title updates must upsert the renamed session instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(session_service, "_is_session_workspace_intentionally_deleted", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_conversation_is_read_only", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_load_conversation_detail_target", lambda *_args, **_kwargs: {"id": "session-a", "title": "A2"})
+    monkeypatch.setattr(session_service, "_build_lightweight_session_detail", lambda target: target)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_args, **_kwargs: {"accepted": True})
+    monkeypatch.setattr(
+        "core.web.services.session.directory_bridge.touch_directory_session_safe",
+        lambda *_args, **_kwargs: None,
+    )
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service.update_chat_session_title("session-a", "A2")
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "A2"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_load_conversation_detail_target_never_full_replaces_siblings(tmp_path, monkeypatch):
+    """A one-row detail payload must not prune sibling runtime rows on repair writeback."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="running")
+    monkeypatch.setattr(session_service, "_repair_child_root_agent_direct_session_bindings", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_repair_stale_running_conversation", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(session_service, "_ensure_conversation_agent_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_ensure_conversation_workspace_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        session_service,
+        "_normalize_conversation",
+        lambda raw, **_kwargs: {"id": str(raw.get("conversation_id") or "")},
+    )
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+    only_a = {"conversations": [dict(load_session_chat_state(tmp_path, "session-a"))]}
+
+    session_service._load_conversation_detail_target(
+        "session-a",
+        payload=only_a,
+        persist_session_row=False,
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
