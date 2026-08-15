@@ -5,7 +5,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import {
   resetTeamResearchProjectProgress,
@@ -16,6 +15,7 @@ import {
   startSourceCollectionRun,
   startSourceCollectionStageSessionTask,
 } from "../../api/sourceCollection";
+import { startResearchStageRound } from "../../api/stageRounds";
 import { startAiSearchRun } from "../../api/teams";
 import type {
   DataProcessingRunListPayload,
@@ -295,36 +295,32 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
       draft: SourceCollectionDraft;
     }) => {
       const querySeeds = compactSourceCollectionQuerySeeds(payload.draft.topic, payload.draft.querySeeds);
-      return fetchJson<ResearchStageRoundStartPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/stage-rounds/start`,
+      return startResearchStageRound<ResearchStageRoundStartPayload>(
+        payload.teamId,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stageType: payload.stageType,
-            mode: payload.mode || "continue_or_start",
-            title: payload.draft.title.trim() || "",
-            topic: payload.draft.topic.trim(),
-            goal: payload.draft.goal.trim(),
-            ownerAgentId: options.sourceCollectionOwnerAgentId,
-            requestedByAgent: options.sourceCollectionOwnerAgentId,
-            agentRoles: SOURCE_COLLECTION_DEFAULT_ROLES,
-            agentIds: options.sourceCollectionAgentIds,
-            inputRefs: splitDraftList(payload.draft.inputRefs, 24),
-            querySeeds,
-            searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
-            sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
-            maxResultsPerQuery: payload.draft.maxResultsPerQuery,
-            promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
-            scope: {
-              // The source plan also expands scope.domain into query seeds.
-              // Keep it aligned with the active research project instead of
-              // carrying an old predictive-coding demo subject into every run.
-              domain: payload.draft.topic.trim(),
-              workflowStage: payload.stageType,
-              uiEntry: "teams_research_stage_launcher",
-            },
-          }),
+          stageType: payload.stageType,
+          mode: payload.mode || "continue_or_start",
+          title: payload.draft.title.trim() || "",
+          topic: payload.draft.topic.trim(),
+          goal: payload.draft.goal.trim(),
+          ownerAgentId: options.sourceCollectionOwnerAgentId,
+          requestedByAgent: options.sourceCollectionOwnerAgentId,
+          agentRoles: SOURCE_COLLECTION_DEFAULT_ROLES,
+          agentIds: options.sourceCollectionAgentIds,
+          inputRefs: splitDraftList(payload.draft.inputRefs, 24),
+          querySeeds,
+          searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
+          sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
+          maxResultsPerQuery: payload.draft.maxResultsPerQuery,
+          promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
+          scope: {
+            // The source plan also expands scope.domain into query seeds.
+            // Keep it aligned with the active research project instead of
+            // carrying an old predictive-coding demo subject into every run.
+            domain: payload.draft.topic.trim(),
+            workflowStage: payload.stageType,
+            uiEntry: "teams_research_stage_launcher",
+          },
         },
       );
     },

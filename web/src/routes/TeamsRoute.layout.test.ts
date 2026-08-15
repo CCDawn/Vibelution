@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import sourceCollectionApiSource from "../api/sourceCollection.ts?raw";
+import dataProcessingApiSource from "../api/dataProcessing.ts?raw";
+import stageRoundsApiSource from "../api/stageRounds.ts?raw";
 import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
@@ -573,8 +575,10 @@ describe("TeamsRoute layout contract", () => {
     // Owned by research workflow resources + stageProjection type, not inlined in workbench.
     expect(researchWorkflowResourcesSource).toContain("ResearchStageRoundStatusPayload");
     expect(routeSource).toContain("researchStageRoundStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/stage-rounds/status");
-    expect(teamWorkflowStartMutationsSource).toContain("/workflow-orchestration/stage-rounds/start");
+    expect(stageRoundsApiSource).toContain("/workflow-orchestration/stage-rounds/status");
+    expect(researchWorkflowResourcesSource).toContain("fetchResearchStageRoundStatus<");
+    expect(stageRoundsApiSource).toContain("/workflow-orchestration/stage-rounds/start");
+    expect(teamWorkflowStartMutationsSource).toContain("startResearchStageRound<");
     expect(routeSource).toContain("startResearchStageRoundMutation");
     expect(routeSource).toContain("seedSourceCollectionAgentSessionContextMutation");
     expect(teamWorkflowStartMutationsSource).toContain("seedSourceCollectionAgentSessionContext(");
@@ -698,7 +702,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStartMutationsSource).toContain("startSourceCollectionRun(");
     expect(sourceCollectionApiSource).toContain("/search/execute");
     expect(teamSourceCollectionMutationsSource).toContain("executeSourceCollectionSearch<");
-    expect(routeSource).toContain("/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}");
+    expect(dataProcessingApiSource).toContain("/api/data-processing/runs?");
+    expect(useSourceCollectionWorkspaceSource).toContain("listDataProcessingRuns(");
+    expect(useSourceCollectionWorkspaceSource).toContain("limit: SOURCE_COLLECTION_RUN_PREVIEW_LIMIT");
     expect(teamSourceCollectionMutationsSource).toContain("/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs");
     expect(sourceCollectionApiSource).toContain("/source-candidate");
     expect(teamSourceCollectionMutationsSource).toContain("importDataRecordAsSourceCandidate(");
@@ -1222,7 +1228,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionRunPendingScreeningCount");
     expect(routeSource).toContain("sourceCollectionPendingCandidateImportCount");
     // Wave 8S: selected-run records live on useSourceCollectionRunQueries.
-    expect(sourceCollectionRunQueriesSource).toContain("/api/data-processing/runs/${encodeURIComponent(options.selectedSourceCollectionRunEffectiveId)}/records");
+    expect(dataProcessingApiSource).toContain("/api/data-processing/runs/${encodeURIComponent(runId)}/records");
+    expect(sourceCollectionRunQueriesSource).toContain("listDataProcessingRunRecords<");
     expect(teamSourceCollectionConversationPanelSource).toContain("还有 ${pendingCandidateImportCount} 条原始记录尚未进入候选库");
     expect(evidenceModelSource).toContain('label: "DOI"');
     expect(evidenceModelSource).toContain("https://doi.org/");

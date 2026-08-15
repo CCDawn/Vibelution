@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { fetchResearchStageRoundStatus } from "../../api/stageRounds";
 import type {
   TeamWorkflowCandidateListPayload,
   TeamWorkflowCoordinationStatus,
@@ -312,8 +313,8 @@ export function useResearchWorkflowResources({
   });
   const stageRound = useQuery({
     queryKey: researchStageRoundStatusQueryKey(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<ResearchStageRoundStatusPayload>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/stage-rounds/status`,
+    queryFn: ({ signal }) => fetchResearchStageRoundStatus<ResearchStageRoundStatusPayload>(
+      teamId,
       { signal },
     ),
     enabled: Boolean(teamId && demand.stageRound),

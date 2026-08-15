@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from core.web.services.team_workflow_orchestration_service import DEFAULT_OWNER_AGENT_ID, WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH
 
 class WorkflowEnsurePayload(BaseModel):
@@ -121,6 +121,13 @@ class ResearchStageRoundStartPayload(BaseModel):
     maxResultsPerQuery: int = Field(10, ge=1, le=100)
     promptCachePolicy: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResearchProjectListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    teamId: str = ""
+    activeProjectId: str = ""
 
 
 class ResearchProjectCreatePayload(BaseModel):

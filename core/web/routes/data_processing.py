@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.web.services.data_processing_service import (
     DataProcessingError,
@@ -64,6 +64,28 @@ class CollectionOutputCreatePayload(BaseModel):
     blockingIssues: list[str] = Field(default_factory=list, max_length=80)
 
 
+class DataProcessingRunListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+class DataProcessingRunStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    runId: str = ""
+
+
+class DataProcessingRecordListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    runId: str = ""
+
+
+class DataProcessingCollectionAssignmentListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    runId: str = ""
+
+
 @router.get("/data-processing/profiles")
 def data_processing_profiles() -> dict:
     return list_profiles()
@@ -94,7 +116,11 @@ def data_processing_run_create(payload: DataProcessingRunCreatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/data-processing/runs")
+@router.get(
+    "/data-processing/runs",
+    response_model=DataProcessingRunListResponse,
+    response_model_exclude_unset=True,
+)
 def data_processing_run_list(
     limit: int = Query(50, ge=1, le=200),
     profile_id: str = Query("", alias="profileId", max_length=120),
@@ -126,7 +152,11 @@ def data_processing_run_detail(run_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/data-processing/runs/{run_id}/records")
+@router.get(
+    "/data-processing/runs/{run_id}/records",
+    response_model=DataProcessingRecordListResponse,
+    response_model_exclude_unset=True,
+)
 def data_processing_records(run_id: str) -> dict:
     try:
         return list_records(run_id)
@@ -146,7 +176,11 @@ def data_processing_record_create(run_id: str, payload: DataRecordCreatePayload)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/data-processing/runs/{run_id}/collection-assignments")
+@router.get(
+    "/data-processing/runs/{run_id}/collection-assignments",
+    response_model=DataProcessingCollectionAssignmentListResponse,
+    response_model_exclude_unset=True,
+)
 def data_processing_collection_assignments(run_id: str) -> dict:
     try:
         return list_collection_assignments(run_id)
@@ -176,7 +210,11 @@ def data_processing_collection_output_create(run_id: str, assignment_id: str, pa
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/data-processing/runs/{run_id}/status")
+@router.get(
+    "/data-processing/runs/{run_id}/status",
+    response_model=DataProcessingRunStatusResponse,
+    response_model_exclude_unset=True,
+)
 def data_processing_run_status(run_id: str) -> dict:
     try:
         return get_processing_status(run_id)
