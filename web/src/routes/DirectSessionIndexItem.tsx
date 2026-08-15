@@ -1,7 +1,7 @@
 import { Bot, Check, LoaderCircle, MessageCircle, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
-import type { AgentInstance, SessionSummary } from "../api/types";
+import type { AgentInstance, SessionSummary, Team } from "../api/types";
 import { VIconButton, VNativeButton, VNativeInput, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import {
@@ -16,6 +16,7 @@ import {
   sessionPrimaryStatus,
   type SessionActivityTone,
 } from "./sessionActivityIndicator";
+import { SessionTeamBindingTag } from "./chat/SessionTeamBindingTag";
 import styles from "./DirectSessionIndexItem.styles";
 
 export function sessionListTitle(
@@ -253,6 +254,7 @@ type DirectSessionIndexItemProps = {
   sessionDisplay: AgentDisplayInfo;
   sessionSummary: string;
   sessionTitle: string;
+  teams?: Team[];
   lang: "zh" | "en";
   statusLabel: (status: string) => string;
   formatTime: (value: string) => string;
@@ -292,6 +294,7 @@ export function DirectSessionIndexItem({
   sessionDisplay,
   sessionSummary,
   sessionTitle,
+  teams = [],
   lang,
   statusLabel,
   formatTime,
@@ -488,6 +491,9 @@ export function DirectSessionIndexItem({
           </VNativeButton>
         </VTooltip>
       )}
+      <div className={styles.sessionTeamBindingSlot} onClick={(event) => event.stopPropagation()}>
+        <SessionTeamBindingTag session={session} lang={lang} teams={teams} />
+      </div>
       {editing ? (
         <div className={styles.sessionActionStack}>
           <VIconButton

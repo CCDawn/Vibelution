@@ -7,6 +7,8 @@ describe("config workspace queries contract", () => {
   it("owns config workspace and health diagnostics reads", () => {
     expect(queriesSource).toContain("queryKeys.configWorkspace()");
     expect(queriesSource).toContain("queryKeys.diagnosticsHealth()");
+    expect(queriesSource).toContain("fetchConfigWorkspace(");
+    expect(queriesSource).not.toContain("/api/config/workspace");
     expect(queriesSource.match(/\buseQuery\(/g) ?? []).toHaveLength(2);
   });
 

@@ -162,8 +162,7 @@ def _persist_recovered_live_output_to_chat_state(
         return
     normalized_turn_id = str(turn_id or "").strip()
     with s._CHAT_STATE_LOCK:
-        chat_payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(chat_payload, session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
         if conversation is None:
             return
         if s._find_turn_scoped_assistant_message(s._session_ledger_visible_messages(session_id), normalized_turn_id) is not None:
@@ -184,8 +183,7 @@ def _persist_recovered_live_output_to_chat_state(
         conversation.pop("messages", None)
         conversation["last_turn_status"] = "ready"
         conversation["updated_at"] = assistant_entry["timestamp"]
-        chat_payload["updated_at"] = assistant_entry["timestamp"]
-        s.save_chat_state(s.PROJECT_ROOT, chat_payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
 
 
 def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
