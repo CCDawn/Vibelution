@@ -281,6 +281,45 @@ def test_close_drains_accepted_queue_in_fifo_order(tmp_path: Path) -> None:
     assert processed == ["run-a", "run-b"]
 
 
+def test_close_timeout_abandons_blocked_mutation_without_late_commit() -> None:
+    from core.research.workflow.ledger import WorkflowLedgerClosedError
+
+    database = _FakeDatabase()
+    writer = _build_writer(database, poll_interval_s=0.01)
+    writer.start()
+    import threading
+    import time
+
+    release = threading.Event()
+    published: list[str] = []
+
+    def blocker(uow):
+        uow.after_commit(lambda: published.append("blocker-committed"))
+        release.wait(timeout=30)
+
+    blocked_future = writer.submit(blocker, force_flush=False)
+    # 确保 writer 已取走 blocker 并阻塞在 mutation 内。
+    time.sleep(0.3)
+    writer.close(timeout=0.2)
+
+    # 确定性顺序：close 超时 → 当前批次 Future 已标记失败 → 调用方才释放阻塞。
+    with pytest.raises(WorkflowLedgerClosedError):
+        blocked_future.result(timeout=1)
+
+    release.set()
+    writer._thread.join(timeout=10)
+    assert not writer._thread.is_alive()
+
+    commits = [
+        sql
+        for connection in database.connections
+        for sql in connection.executed
+        if sql == "COMMIT"
+    ]
+    assert commits == [], "close 超时后阻塞 mutation 不得执行 late COMMIT"
+    assert published == [], "close 超时后不得执行 after_commit callback"
+
+
 def test_close_timeout_settles_remaining_futures(tmp_path: Path) -> None:
     from core.research.workflow.ledger import WorkflowLedgerClosedError
     from core.research.workflow.ledger.database import WorkflowLedgerDatabase
