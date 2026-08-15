@@ -225,6 +225,38 @@ def test_readiness_projects_typed_smoke_run_and_package_facts(
 
         put_workflow_artifact(
             "research-team",
+            kind="run_artifacts",
+            workflow_run_id="run-facts",
+            source_collection_run_id="run-facts",
+            artifact_identity="formal-attempt",
+            payload={
+                "execution": {
+                    "status": "completed",
+                    "adapterId": "fashion_mnist_predictive_coding_multi_seed",
+                    "automaticPromotion": False,
+                    "result": {
+                        "status": "completed",
+                        "aggregate": {"meanAccuracy": 0.41},
+                        "logRef": "/tmp/sci096-canvas/out/formal-run-log.json",
+                        "runs": [{"seed": 17, "artifactHash": "f" * 64}],
+                        "boundaries": [
+                            "does_not_validate_neural_realism",
+                            "not_an_official_competition_submission",
+                        ],
+                        "automaticPromotion": False,
+                    },
+                }
+            },
+        )
+        formal = context.controlled_run("research-team", "run-facts")
+        assert formal is not None
+        assert formal["terminal"] is True
+        assert formal["metrics"]["meanAccuracy"] == 0.41
+        assert formal["logs"] == "/tmp/sci096-canvas/out/formal-run-log.json"
+        assert formal["artifact_hash"] == "f" * 64
+
+        put_workflow_artifact(
+            "research-team",
             kind="research_result_package",
             workflow_run_id="run-facts",
             source_collection_run_id="run-facts",

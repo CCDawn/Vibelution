@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 from core.orchestration.agent_runtime_bindings import (
     _INTERNAL_TOOL_PROTOCOL_MARKERS,
@@ -229,3 +229,103 @@ def refresh_system_prefix_on_messages(
         if cacheable_prefix_merged:
             updated[0] = merged_message
     return updated
+
+
+def _message_role_name(message: Any) -> str:
+    if isinstance(message, dict):
+        role = str(message.get("role") or "").strip().lower()
+    else:
+        role = str(getattr(message, "type", "") or getattr(message, "role", "") or "").strip().lower()
+    if role in {"ai", "assistant"}:
+        return "assistant"
+    if role in {"human", "user"}:
+        return "user"
+    return role
+
+
+def langchain_messages_from_conversation_layer(messages: Iterable[Any]) -> list:
+    """Project ledger conversation-layer dicts into LangChain/provider messages."""
+
+    restored: list = []
+    for item in list(messages or []):
+        if not isinstance(item, dict):
+            restored.append(item)
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        assistant_tool_calls = (
+            normalize_seeded_tool_calls(item.get("tool_calls") or item.get("toolCalls") or [])
+            if role == "assistant"
+            else []
+        )
+        raw_content = item.get("content")
+        content = raw_content if isinstance(raw_content, list) else str(raw_content or "").strip()
+        if isinstance(content, str):
+            content = sanitize_seeded_chat_content(role, content)
+        if not content and not assistant_tool_calls and role != "tool":
+            continue
+        if role in {"runtime_context", "runtime", "system"}:
+            restored.append(SystemMessage(content=str(content)))
+        elif role == "user":
+            restored.append({"role": "user", "content": content})
+        elif role == "assistant":
+            restored.append(AIMessage(content=str(content), tool_calls=assistant_tool_calls))
+        elif role == "tool":
+            tool_call_id = str(item.get("tool_call_id") or item.get("toolCallId") or "").strip()
+            if tool_call_id:
+                restored.append(ToolMessage(content=str(content), tool_call_id=tool_call_id))
+    return restored
+
+
+def splice_current_turn_conversation(
+    messages: Sequence[Any] | None,
+    current_turn_layer: Sequence[Any] | None,
+) -> list:
+    """Keep assembled prefix/current user; replace this turn's assistant/tool suffix."""
+
+    from core.orchestration.turn_status_bar import strip_turn_status_bar_messages
+
+    stripped = strip_turn_status_bar_messages(list(messages or []))
+    continuation = [
+        item
+        for item in list(current_turn_layer or [])
+        if _message_role_name(item) in {"assistant", "tool"}
+    ]
+    if not continuation:
+        return stripped
+    last_user = -1
+    for index, message in enumerate(stripped):
+        if _message_role_name(message) == "user":
+            last_user = index
+    if last_user < 0:
+        return stripped + continuation
+    return stripped[: last_user + 1] + continuation
+
+
+def replay_current_turn_messages(
+    messages: Sequence[Any] | None,
+    events: Iterable[Any],
+    *,
+    turn_id: str,
+) -> list:
+    """Rebuild the in-flight turn's assistant/tool chain from ledger events.
+
+    No-op when the current turn has no model-visible assistant/tool events, or
+    when the reconstructed layer would fail the send-time conversation invariant.
+    """
+
+    from core.chat.conversation_invariant import (
+        check_conversation_payload_invariant,
+        live_conversation_messages_from_events,
+    )
+
+    materialized = list(messages or [])
+    layer = live_conversation_messages_from_events(events, turn_id=turn_id)
+    if not any(_message_role_name(item) in {"assistant", "tool"} for item in layer):
+        return materialized
+    invariant = check_conversation_payload_invariant(layer)
+    if not invariant.ok:
+        return materialized
+    return splice_current_turn_conversation(
+        materialized,
+        langchain_messages_from_conversation_layer(layer),
+    )

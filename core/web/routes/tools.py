@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
+from core.web.routes.tools_models import (
+    GeneratedToolBulkEnabledPayload,
+    GeneratedToolEnabledPayload,
+    GeneratedToolPayload,
+    Image2DefaultModelPayload,
+    ToolBulkActionResponse,
+    ToolBulkDeletePayload,
+    ToolDeleteResponse,
+    ToolGeneratedItemResponse,
+    ToolImage2ModelsResponse,
+    ToolRegistryResponse,
+    ToolTestPayload,
+    ToolTestResponse,
+    ToolWebSearchHealthResponse,
+)
 from core.web.services.tool_registry_service import (
     ToolRegistryConflictError,
     ToolRegistryError,
@@ -27,36 +39,6 @@ from core.web.services.tool_registry_service import (
 router = APIRouter(tags=["tools"])
 
 
-class GeneratedToolPayload(BaseModel):
-    name: str = ""
-    description: str = ""
-    argsSchema: dict[str, Any] = Field(default_factory=lambda: {"type": "object", "properties": {}})
-    responseTemplate: str = ""
-
-
-class GeneratedToolEnabledPayload(BaseModel):
-    enabled: bool
-
-
-class GeneratedToolBulkEnabledPayload(BaseModel):
-    toolIds: list[str] = Field(default_factory=list)
-    enabled: bool
-
-
-class ToolBulkDeletePayload(BaseModel):
-    toolIds: list[str] = Field(default_factory=list)
-
-
-class ToolTestPayload(BaseModel):
-    args: dict[str, Any] = Field(default_factory=dict)
-    agentScope: str = ""
-    agentId: str = ""
-
-
-class Image2DefaultModelPayload(BaseModel):
-    modelRef: str = ""
-
-
 def _raise_tool_registry_error(exc: Exception) -> None:
     if isinstance(exc, FileNotFoundError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -69,12 +51,20 @@ def _raise_tool_registry_error(exc: Exception) -> None:
     raise HTTPException(status_code=500, detail="Tool registry operation failed") from exc
 
 
-@router.get("/tools")
+@router.get(
+    "/tools",
+    response_model=ToolRegistryResponse,
+    response_model_exclude_unset=True,
+)
 def tools_registry() -> dict:
     return get_tool_registry()
 
 
-@router.get("/tools/web-search/health")
+@router.get(
+    "/tools/web-search/health",
+    response_model=ToolWebSearchHealthResponse,
+    response_model_exclude_unset=True,
+)
 def tools_web_search_health() -> dict:
     from tools.web_search_tool import check_autoglm_token_service
 
@@ -84,7 +74,11 @@ def tools_web_search_health() -> dict:
     }
 
 
-@router.get("/tools/image2/models")
+@router.get(
+    "/tools/image2/models",
+    response_model=ToolImage2ModelsResponse,
+    response_model_exclude_unset=True,
+)
 def tools_image2_models() -> dict:
     try:
         return get_image2_model_config()
@@ -92,7 +86,11 @@ def tools_image2_models() -> dict:
         _raise_tool_registry_error(exc)
 
 
-@router.put("/tools/image2/default-model")
+@router.put(
+    "/tools/image2/default-model",
+    response_model=ToolImage2ModelsResponse,
+    response_model_exclude_unset=True,
+)
 def tools_image2_default_model(payload: Image2DefaultModelPayload) -> dict:
     try:
         return set_image2_default_model(payload.modelRef)
@@ -100,7 +98,11 @@ def tools_image2_default_model(payload: Image2DefaultModelPayload) -> dict:
         _raise_tool_registry_error(exc)
 
 
-@router.post("/tools/generated")
+@router.post(
+    "/tools/generated",
+    response_model=ToolGeneratedItemResponse,
+    response_model_exclude_unset=True,
+)
 def tools_generated_create(payload: GeneratedToolPayload) -> dict:
     try:
         return create_generated_tool(payload.model_dump())
@@ -108,7 +110,11 @@ def tools_generated_create(payload: GeneratedToolPayload) -> dict:
         _raise_tool_registry_error(exc)
 
 
-@router.post("/tools/generated/{tool_id}/validate")
+@router.post(
+    "/tools/generated/{tool_id}/validate",
+    response_model=ToolGeneratedItemResponse,
+    response_model_exclude_unset=True,
+)
 def tools_generated_validate(tool_id: str) -> dict:
     try:
         return validate_generated_tool(tool_id)
@@ -116,7 +122,11 @@ def tools_generated_validate(tool_id: str) -> dict:
         _raise_tool_registry_error(exc)
 
 
-@router.put("/tools/generated/{tool_id}/enabled")
+@router.put(
+    "/tools/generated/{tool_id}/enabled",
+    response_model=ToolGeneratedItemResponse,
+    response_model_exclude_unset=True,
+)
 def tools_generated_enabled(tool_id: str, payload: GeneratedToolEnabledPayload) -> dict:
     try:
         return set_generated_tool_enabled(tool_id, payload.enabled)
@@ -124,7 +134,11 @@ def tools_generated_enabled(tool_id: str, payload: GeneratedToolEnabledPayload) 
         _raise_tool_registry_error(exc)
 
 
-@router.put("/tools/generated/bulk-enabled")
+@router.put(
+    "/tools/generated/bulk-enabled",
+    response_model=ToolBulkActionResponse,
+    response_model_exclude_unset=True,
+)
 def tools_generated_bulk_enabled(payload: GeneratedToolBulkEnabledPayload) -> dict:
     try:
         return set_generated_tools_enabled_bulk(payload.toolIds, payload.enabled)
@@ -132,7 +146,11 @@ def tools_generated_bulk_enabled(payload: GeneratedToolBulkEnabledPayload) -> di
         _raise_tool_registry_error(exc)
 
 
-@router.post("/tools/bulk-delete")
+@router.post(
+    "/tools/bulk-delete",
+    response_model=ToolBulkActionResponse,
+    response_model_exclude_unset=True,
+)
 def tools_bulk_delete(payload: ToolBulkDeletePayload) -> dict:
     try:
         return delete_tools_bulk(payload.toolIds)
@@ -140,7 +158,11 @@ def tools_bulk_delete(payload: ToolBulkDeletePayload) -> dict:
         _raise_tool_registry_error(exc)
 
 
-@router.delete("/tools/{tool_id}")
+@router.delete(
+    "/tools/{tool_id}",
+    response_model=ToolDeleteResponse,
+    response_model_exclude_unset=True,
+)
 def tools_delete(tool_id: str) -> dict:
     try:
         return delete_tool(tool_id)
@@ -148,7 +170,11 @@ def tools_delete(tool_id: str) -> dict:
         _raise_tool_registry_error(exc)
 
 
-@router.post("/tools/{tool_id}/test")
+@router.post(
+    "/tools/{tool_id}/test",
+    response_model=ToolTestResponse,
+    response_model_exclude_unset=True,
+)
 def tools_test(tool_id: str, payload: ToolTestPayload | None = None) -> dict:
     try:
         return test_tool(
