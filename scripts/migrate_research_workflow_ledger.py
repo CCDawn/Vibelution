@@ -1,5 +1,7 @@
-"""CLI for one-shot Workflow Ledger migration (spec §14.3).
+"""ONE-SHOT operator CLI for Workflow Ledger migration (spec §14.3).
 
+Not imported by the product runtime or CI. Keep this file under scripts/
+because --project-root defaults to Path(__file__).resolve().parents[1].
 Never defaults to the operator Documents data-root inside tests. Callers must
 pass --data-root explicitly.
 """
