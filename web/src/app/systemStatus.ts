@@ -510,11 +510,12 @@ function activeWorkCandidatesFromItems(
   fallback?: ActiveWorkRunSnapshot | null,
 ): ActiveWorkIndicatorItem[] {
   if (Array.isArray(items) && items.length) {
+    const allowSharedRuntimeFallback = items.length <= 1;
     return items
-      .map((item) => buildActiveWorkCandidate(kind, item, runtime, lang))
+      .map((item) => buildActiveWorkCandidate(kind, item, runtime, lang, { allowSharedRuntimeFallback }))
       .filter((item): item is ActiveWorkIndicatorItem => Boolean(item));
   }
-  const candidate = buildActiveWorkCandidate(kind, fallback, runtime, lang);
+  const candidate = buildActiveWorkCandidate(kind, fallback, runtime, lang, { allowSharedRuntimeFallback: true });
   return candidate ? [candidate] : [];
 }
 
@@ -557,6 +558,7 @@ function buildActiveWorkCandidate(
   run: ActiveWorkRunSnapshot | null | undefined,
   runtime: RuntimeWorkSnapshot,
   lang: "zh" | "en",
+  options: { allowSharedRuntimeFallback?: boolean } = {},
 ): ActiveWorkIndicatorItem | null {
   if (!run || typeof run !== "object") {
     return null;
@@ -568,7 +570,7 @@ function buildActiveWorkCandidate(
   }
 
   const label = activeWorkKindLabel(kind, lang);
-  const summary = activeWorkSummary(kind, run, runtime, lang);
+  const summary = activeWorkSummary(kind, run, runtime, lang, options);
   const runId = textValue(run.runId);
   const href = activeWorkHref(kind, run);
   // User-facing detail: kind + summary only. Raw status/"id=…" made native title tooltips unreadable.
@@ -657,6 +659,7 @@ function activeWorkSummary(
   run: ActiveWorkRunSnapshot,
   runtime: RuntimeWorkSnapshot,
   lang: "zh" | "en",
+  options: { allowSharedRuntimeFallback?: boolean } = {},
 ): string {
   if (kind === "supervised") {
     return firstTextValue(run, [
@@ -695,12 +698,18 @@ function activeWorkSummary(
   }
 
   const lastToolError = recordTextValue(run["lastToolError"], ["summary", "errorPreview", "toolName"]);
-  return firstTextValue(run, ["summary", "currentTask"])
+  const perRunSummary = firstTextValue(run, ["summary", "currentTask"])
     || lastToolError
-    || firstTextValue(run, ["userMessage"])
-    || textValue(runtime.taskSummary)
-    || textValue(runtime.sessionTitle)
-    || (lang === "en" ? "Chat turn is active" : "对话正在运行");
+    || firstTextValue(run, ["userMessage"]);
+  if (perRunSummary) {
+    return perRunSummary;
+  }
+  if (options.allowSharedRuntimeFallback !== false) {
+    return textValue(runtime.taskSummary)
+      || textValue(runtime.sessionTitle)
+      || (lang === "en" ? "Chat turn is active" : "对话正在运行");
+  }
+  return lang === "en" ? "Chat turn is active" : "对话正在运行";
 }
 
 function recordTextValue(source: unknown, keys: string[]): string {
