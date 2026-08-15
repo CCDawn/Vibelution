@@ -15,9 +15,9 @@ from langgraph.types import interrupt
 
 from .definition import build_challenge_cup_workflow_definition
 from .iteration_decisions import (
+    ITERATION_ROUTE_TARGETS,
     IterationDecisionError,
-    IterationDecisionKind,
-    parse_decision_kind,
+    route_target_after_governance,
     route_target_for_decision,
 )
 
@@ -71,10 +71,9 @@ def route_after_iteration_decision(
             "missing decisionKind after iteration_decision",
             code="missing_decision",
         )
-    kind = parse_decision_kind(kind_raw)
-    if kind is IterationDecisionKind.REVISE_PROTOCOL:
+    target = route_target_for_decision(kind_raw)
+    if target is None:
         return END  # type: ignore[return-value]
-    target = route_target_for_decision(kind)
     if target not in {"controlled_run", "version_governance"}:
         raise IterationDecisionError(
             f"illegal route target {target}",
@@ -93,17 +92,7 @@ def route_after_version_governance(
             "missing decisionKind after version_governance",
             code="missing_decision",
         )
-    kind = parse_decision_kind(kind_raw)
-    if kind is IterationDecisionKind.PROMOTE_CANDIDATE:
-        return "candidate_promotion"
-    if kind is IterationDecisionKind.STOP:
-        return "result_package"
-    if kind is IterationDecisionKind.ROLLBACK_CANDIDATE:
-        return "result_package"
-    raise IterationDecisionError(
-        f"illegal governed decision {kind.value}",
-        code="illegal_governed_decision",
-    )
+    return route_target_after_governance(kind_raw)  # type: ignore[return-value]
 
 
 _LINEAR_EDGES: tuple[tuple[str, str], ...] = (
@@ -158,13 +147,4 @@ def compile_challenge_cup_graph(checkpointer: Any):
 
 
 def compiled_iteration_route_map() -> dict[str, str | None]:
-    return {
-        kind.value: target
-        for kind, target in {
-            IterationDecisionKind.RERUN_SAME_PROTOCOL: "controlled_run",
-            IterationDecisionKind.REVISE_PROTOCOL: None,
-            IterationDecisionKind.PROMOTE_CANDIDATE: "version_governance",
-            IterationDecisionKind.ROLLBACK_CANDIDATE: "version_governance",
-            IterationDecisionKind.STOP: "version_governance",
-        }.items()
-    }
+    return {kind.value: target for kind, target in ITERATION_ROUTE_TARGETS.items()}
