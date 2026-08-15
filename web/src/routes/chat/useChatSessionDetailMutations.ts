@@ -1,12 +1,13 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
+import { resolveAgentToolGovernanceRequest } from "../../api/agents";
 import {
   resolveSessionToolApprovalDecision,
   updateSessionReasoningEffort,
   type SessionToolApprovalDecision,
 } from "../../api/chat";
-import { fetchJson } from "../../api/client";
+import { postPetAction } from "../../api/pet";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentToolGovernanceRequest,
@@ -129,20 +130,7 @@ export function useChatSessionDetailMutations({
         decision: "approve" | "reject";
       },
     ) =>
-      fetchJson<AgentToolGovernanceRequest>(
-        `/api/agents/${encodeURIComponent(request.targetAgentId)}/tool-governance-requests/${encodeURIComponent(request.requestId)}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            decision,
-            resolvedBy: "user",
-            resolutionNote: decision === "approve" ? "会话内批准" : "会话内拒绝",
-          }),
-        },
-      ),
+      resolveAgentToolGovernanceRequest(request, decision),
     onSuccess: (_payload, variables) => {
       const sessionId = activeSessionId || variables.request.sourceSessionId || "";
       setSessionComposerErrors((current) => (sessionId ? { ...current, [sessionId]: "" } : current));
@@ -213,13 +201,7 @@ export function useChatSessionDetailMutations({
 
   const petActionMutation = useMutation({
     mutationFn: async ({ action }: { action: PetInteractionAction }) =>
-      fetchJson<PetActionResponse>("/api/pet/actions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ action }),
-      }),
+      postPetAction(action),
     onSuccess: (payload) => {
       setPetActionFeedback(payload.message);
       queryClient.setQueryData(queryKeys.petSummary(), payload.summary);

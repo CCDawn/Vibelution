@@ -1,5 +1,66 @@
 import { fetchJson } from "./client";
-import type { AgentConfigWorkspaceAgent, AgentPermissionPreset } from "./types";
+import type {
+  AgentConfigWorkspaceAgent,
+  AgentInstance,
+  AgentPermissionPreset,
+  AgentToolGovernanceRequest,
+} from "./types";
+
+export type AgentDirectSessionResetResponse = {
+  agent: AgentInstance;
+  resetSummary: {
+    resetDirectSession?: boolean;
+    previousDirectSessionId?: string;
+    replacementDirectSessionId?: string;
+  };
+};
+
+export function listAgentSummaries(): Promise<AgentInstance[]> {
+  return fetchJson<AgentInstance[]>("/api/agents?detail=summary");
+}
+
+export function resetAgentDirectSession(
+  agentId: string,
+  sessionId: string,
+): Promise<AgentDirectSessionResetResponse> {
+  return fetchJson<AgentDirectSessionResetResponse>(
+    `/api/agents/${encodeURIComponent(agentId)}/reset`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clearRuntimeState: false,
+        resetDirectSession: true,
+        directSessionId: sessionId,
+        resetPersonaProfile: false,
+        resetTaskProfile: false,
+        resetToolPolicy: false,
+        resetMemoryPolicy: false,
+        resetRuntimePolicy: false,
+      }),
+    },
+  );
+}
+
+export function resolveAgentToolGovernanceRequest(
+  request: AgentToolGovernanceRequest,
+  decision: "approve" | "reject",
+): Promise<AgentToolGovernanceRequest> {
+  return fetchJson<AgentToolGovernanceRequest>(
+    `/api/agents/${encodeURIComponent(request.targetAgentId)}/tool-governance-requests/${encodeURIComponent(request.requestId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        decision,
+        resolvedBy: "user",
+        resolutionNote: decision === "approve" ? "会话内批准" : "会话内拒绝",
+      }),
+    },
+  );
+}
 
 export type UpdateAgentPermissionPresetPayload = {
   agentId: string;

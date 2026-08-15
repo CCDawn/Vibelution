@@ -74,6 +74,12 @@ describe("Chat session tool approval API", () => {
     expect(lifecycleSource).not.toContain("/chat-review-candidate");
   });
 
+  it("owns conversation and child-session list transport", () => {
+    expect(apiSource).toContain("/api/conversations");
+    expect(apiSource).toContain("/child-sessions");
+    expect(lifecycleSource).not.toContain("/api/conversations");
+  });
+
   it("owns chat-room transport outside chat and team hooks", () => {
     expect(apiSource).toContain("/api/chat-rooms/modes");
     expect(apiSource).toContain("/api/chat-rooms/purposes");

@@ -409,7 +409,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatApiSource).toContain("/tool-approvals/");
     expect(routeAndDetailMutationsSource).toContain('"acceptForSession"');
     expect(routeSource).toContain('"acceptAlways"');
-    expect(routeAndDetailMutationsSource).toContain("/tool-governance-requests/");
+    expect(routeAndDetailMutationsSource).toContain("resolveAgentToolGovernanceRequest");
     expect(routeSource).toContain("onApproveToolApproval={() => {");
     expect(routeSource).toContain("if (!pendingToolGovernanceApproval) {");
     expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"approve\" })");
@@ -1885,7 +1885,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("exposes dynamic group creation from the unified conversation list", () => {
     expect(routeSource).toContain("handleToggleGroupComposer");
     expect(routeSource).toContain("handleCreateGroupRoom");
-    expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents?detail=summary\")");
+    expect(routeSource).toContain("listAgentSummaries()");
     expect(chatApiSource).toContain("body: JSON.stringify({ title, agentIds, mode, purpose })");
     expect(routeAndLifecycleSource).toContain("createChatRoom({ title, agentIds, mode, purpose })");
     expect(routeAndIndexRailSource).toContain("styles.groupComposerPanel");
@@ -2701,7 +2701,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("shows each visible agent with a functional role label, not only a person name", () => {
-    expect(routeSource).toContain("fetchJson<ConfigSummary>(\"/api/config/public\")");
+    expect(routeSource).toContain("fetchPublicConfig()");
     expect(routeSource).toContain("queryKeys.configPublic()");
     expect(routeSource).toContain("const modelLabelsById = useMemo");
     expect(routeSource).toContain("const resolveModelLabel = useCallback");
@@ -3060,7 +3060,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("renders a compact QQ-style tree with direct sessions separate from Team-owned rooms", () => {
-    expect(routeSource).toContain("fetchJson<TeamListPayload>(\"/api/teams\")");
+    expect(routeSource).toContain("listTeams()");
     expect(routeSource).toContain("queryKeys.teams()");
     // Directory partition needs teams without opening the group picker.
     expect(routeSource).toContain("Must load whenever the left-rail agent directory is active");
@@ -3370,15 +3370,7 @@ describe("ChatCodingRoute layout contract", () => {
       routeAndLifecycleSource.indexOf("const clearSessionHistoryMutation"),
       routeAndLifecycleSource.indexOf("const renameSessionMutation"),
     );
-    expect(clearMutationSource).toContain("/api/agents/${encodeURIComponent(agentId)}/reset");
-    expect(clearMutationSource).toContain("clearRuntimeState: false");
-    expect(clearMutationSource).toContain("resetDirectSession: true");
-    expect(clearMutationSource).toContain("directSessionId: sessionId");
-    expect(clearMutationSource).toContain("resetPersonaProfile: false");
-    expect(clearMutationSource).toContain("resetTaskProfile: false");
-    expect(clearMutationSource).toContain("resetToolPolicy: false");
-    expect(clearMutationSource).toContain("resetMemoryPolicy: false");
-    expect(clearMutationSource).toContain("resetRuntimePolicy: false");
+    expect(clearMutationSource).toContain("resetAgentDirectSession(agentId, sessionId)");
     expect(clearMutationSource).toContain("removeSessionWorkspace(previousDirectSessionId)");
     expect(clearMutationSource).toContain("replaceIfStillViewing(");
     expect(clearMutationSource).toContain("previousDirectSessionId");
