@@ -26,6 +26,7 @@ Agent 单轮编排的现有 SSOT。新逻辑优先扩这里的模块，不要在
 | `turn_carryover.py` | 转轮消息序列化 / 反序列化 | `SelfEvolvingAgent` 的 serialize/deserialize wrapper |
 | `turn_compression.py` | 上下文压缩与账本检查点 | `SelfEvolvingAgent._compress_messages` |
 | `turn_diagnostics.py` | 重试广播、cache 诊断、invocation context、stall 报告 | `SelfEvolvingAgent` 对应 wrapper |
+| `tool_authorization_binding.py` | 运行时身份绑定、可见工具物化、隐藏工具文案、重启护栏 | `SelfEvolvingAgent` 对应 wrapper；policy 仍在 `core.authorization` |
 
 硬约束：
 

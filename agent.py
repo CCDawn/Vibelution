@@ -238,6 +238,14 @@ from core.orchestration.turn_diagnostics import (
     record_turn_cache_diagnostics,
     report_round_state_stall_signals,
 )
+from core.orchestration.tool_authorization_binding import (
+    guard_restart_focus_tool,
+    hidden_tool_call_message,
+    is_tool_visible_to_agent,
+    materialize_authorized_tools,
+    resolve_turn_authorization,
+    restart_allowed_tool_names,
+)
 
 
 def _record_llm_route_success(*args, **kwargs):
@@ -897,97 +905,29 @@ class SelfEvolvingAgent:
         self._bound_llm_cache = {"default": self.llm_with_tools}
 
     def _resolve_tool_authorization(self, registered_tools: List[Any]) -> Any:
+        # Removal: keep while tests construct SelfEvolvingAgent and patch this method.
         del registered_tools
-        started = time.perf_counter()
-        runtime: Dict[str, Any] = {}
-        try:
-            from core.authorization.tool_authorization_service import (
-                install_execution_authorization,
-                resolve_enforced_authorization,
-            )
-            from core.logging.tool_authorization_events import record_authorization_decision
-            from core.web.services.agent_directory_service import current_agent_runtime
-
-            runtime = dict(current_agent_runtime() or {})
-            turn_runtime = _turn_runtime_from_env()
-            binding = dict(getattr(self, "runtime_agent_binding", {}) or {})
-            agent_id = str(
-                runtime.get("agentId")
-                or turn_runtime.get("agentId")
-                or binding.get("agentId")
-                or ""
-            ).strip()
-            if not str(runtime.get("agentId") or "").strip():
-                runtime["agentId"] = agent_id
-            if not str(runtime.get("turnId") or "").strip():
-                runtime["turnId"] = str(
-                    turn_runtime.get("runId")
-                    or binding.get("directSessionId")
-                    or (f"agent-bootstrap:{agent_id}" if agent_id else "")
-                ).strip()
-            runtime.setdefault("runId", str(turn_runtime.get("runId") or "").strip())
-            runtime.setdefault("mode", str(turn_runtime.get("mode") or "").strip())
-            report = resolve_enforced_authorization(
-                runtime=runtime,
-            )
-            install_execution_authorization(report)
-            record_authorization_decision(report)
-            return report
-        except Exception as exc:
-            try:
-                from core.authorization.tool_authorization_service import clear_execution_authorization
-                from core.logging.tool_authorization_events import record_authorization_failure
-
-                clear_execution_authorization()
-                record_authorization_failure(
-                    runtime=runtime,
-                    error=exc,
-                    duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
-                )
-            except Exception:
-                pass
-            return None
+        return resolve_turn_authorization(
+            runtime_agent_binding=getattr(self, "runtime_agent_binding", {}) or {},
+            turn_runtime_fn=_turn_runtime_from_env,
+        )
 
     @staticmethod
     def _materialize_authorized_tools(registered_tools: List[Any], authorization_report: Any) -> List[Any]:
-        decision = getattr(authorization_report, "decision", None)
-        visible_names = {
-            str(name or "").strip()
-            for name in getattr(decision, "visible_tools", ()) or ()
-            if str(name or "").strip()
-        }
-        if not visible_names:
-            return []
-        return [
-            tool
-            for tool in registered_tools or []
-            if str(getattr(tool, "name", "") or "").strip() in visible_names
-        ]
+        # Removal: keep while tests call SelfEvolvingAgent._materialize_authorized_tools.
+        return materialize_authorized_tools(registered_tools, authorization_report)
 
     def _is_tool_visible_to_current_agent(self, tool_name: str) -> bool:
-        name = str(tool_name or "").strip()
-        return bool(name and name in getattr(self, "key_tool_maps", set()))
+        # Removal: keep while tests patch this method on the agent instance.
+        return is_tool_visible_to_agent(tool_name, getattr(self, "key_tool_maps", set()))
 
     def _hidden_tool_call_message(self, tool_name: str) -> str:
-        name = str(tool_name or "").strip() or "[unknown_tool]"
-        return (
-            f"[工具可见性提示] `{name}` 未暴露给当前 Agent。"
-            "请只使用当前工具 schema 或工具索引中列出的工具；"
-            "如果确实需要该能力，请让用户或能力管家调整该 Agent 的 ToolPolicy。"
-        )
+        # Removal: keep while tests patch this method on the agent instance.
+        return hidden_tool_call_message(tool_name)
 
     @staticmethod
     def _restart_allowed_tool_names() -> tuple[str, ...]:
-        return (
-            "task_create_tool",
-            "task_update_tool",
-            "task_list_tool",
-            "get_current_goal_tool",
-            "get_core_context_tool",
-            "get_memory_summary_tool",
-            "trigger_self_restart_tool",
-            "close_evolution_transaction_tool",
-        )
+        return restart_allowed_tool_names()
 
     def _get_llm_for_current_mode(
         self,
@@ -3384,16 +3324,11 @@ class SelfEvolvingAgent:
         return is_restart_focused_goal(getattr(self, "_active_goal", ""))
 
     def _guard_tool_execution(self, tool_name: str, tool_args: Dict[str, Any]) -> Optional[str]:
-        if not self._is_restart_focus_mode():
-            return None
-
-        allowed_tools = set(self._restart_allowed_tool_names())
-        if tool_name in allowed_tools:
-            return None
-
-        return (
-            "[短路] 当前处于重启测试模式，只允许任务管理与重启闭环工具。"
-            "请优先：创建任务 -> 勾选任务 -> 调用 trigger_self_restart_tool。"
+        # Removal: keep while ToolLifecycleBridge is constructed with this bound method.
+        del tool_args
+        return guard_restart_focus_tool(
+            tool_name,
+            restart_focus=self._is_restart_focus_mode(),
         )
 
     def set_turn_interrupt_checker(self, checker=None) -> None:
