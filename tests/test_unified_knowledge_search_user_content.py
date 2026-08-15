@@ -50,3 +50,48 @@ def test_unified_search_can_include_user_markdown_results(tmp_path, monkeypatch)
     assert payload["results"][0]["resultType"] == "user_markdown_page"
     assert payload["citations"][0]["sourceDomain"] == "user_content"
     assert payload["retrievalPolicy"]["honorsUserContentPolicy"] is True
+
+
+def test_unified_search_can_include_public_catalog_cards_without_bodies(tmp_path, monkeypatch):
+    from core.web.services import team_knowledge_service, agent_directory_service
+
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        unified_knowledge_search_service.team_knowledge_service,
+        "search_knowledge_items",
+        lambda **kwargs: {"summary": {"resultCount": 0, "scannedKnowledgeBaseCount": 0}, "results": []},
+    )
+    source = tmp_path / "docs"
+    source.mkdir(parents=True, exist_ok=True)
+    (source / "guide.md").write_text("guide body", encoding="utf-8")
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    team_knowledge_service.upsert_public_card(
+        {
+            "cardId": "pin-unified-1",
+            "kind": "pin",
+            "partition": "standards",
+            "title": "Unified Search Guide",
+            "whenToUse": "Search integration tests",
+            "summary": "Unified search guide summary.",
+            "stewardWeight": 1,
+            "visibility": "agent_visible",
+            "source": {"type": "git_path", "locator": "docs/guide.md"},
+            "freshnessPolicy": "steward_review",
+        },
+        actor_agent_id=steward_id,
+    )
+
+    payload = unified_knowledge_search_service.search_unified_memory(
+        agent_id="agent-1",
+        query="Unified Search Guide",
+    )
+    catalog_hits = [result for result in payload["results"] if result["resultType"] == "public_catalog_card"]
+    assert len(catalog_hits) == 1
+    hit = catalog_hits[0]
+    assert hit["cardId"] == "pin-unified-1"
+    assert hit["openRequired"] is True
+    assert "content" not in hit
+    assert "excerpt" not in hit
+    assert hit["locator"] == "docs/guide.md"
+    assert hit["summary"] == "Unified search guide summary."
