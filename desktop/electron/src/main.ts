@@ -674,7 +674,7 @@ async function persistManagedWindowState(
         ...context,
         workspaceRoot: paths.workspaceRoot,
         capabilities: desktopSessionCapabilities(bootstrap)
-      }));
+      })).catch(() => undefined);
       startDesktopSessionHeartbeatIfNeeded(paths, bootstrap);
       const registrationEvent = {
         eventCode: "electron.startup.desktop_session_registered",
@@ -699,7 +699,7 @@ async function persistManagedWindowState(
       role: state.role,
       revision: mirrorRevision,
       state
-    }));
+    })).catch(() => undefined);
     if (state.role === "workbench" && state.open && !electronStartupSummaryRecorded) {
       electronStartupStage = "workbench_window_ready";
       const stageStartedAtMs = workbenchOpenRequestedAtMs ?? ELECTRON_PROCESS_STARTED_AT_MS;

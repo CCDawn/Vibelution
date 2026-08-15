@@ -48,14 +48,14 @@ describe("team shell mutations contract", () => {
   });
 
   it("preserves key shell write endpoints", () => {
-    expect(mutationsSource).toContain('method: "DELETE"');
-    expect(mutationsSource).toContain("/canvas");
+    expect(mutationsSource).toContain("archiveTeam(");
+    expect(mutationsSource).toContain("saveTeamCanvas(");
     expect(mutationsSource).toContain("sendTeamProjectBusMessage");
     expect(mutationsSource).toContain("revokeProjectAgentBusMessage");
-    expect(mutationsSource).toContain("/chat-room/sync");
-    expect(mutationsSource).toContain("/challenge-cup-agents/repair");
-    expect(mutationsSource).toContain("/knowledge-expansion-agents/repair");
-    expect(mutationsSource).toContain("/rounds");
+    expect(mutationsSource).toContain("syncTeamChatRoom(");
+    expect(mutationsSource).toContain("repairChallengeCupTeamAgents(");
+    expect(mutationsSource).toContain("repairKnowledgeExpansionTeamAgents(");
+    expect(mutationsSource).toContain("startChatRoomRound(");
     expect(mutationsSource).toContain('source: "team_workspace"');
   });
 });

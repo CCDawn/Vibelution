@@ -1,177 +1,43 @@
 # Vibelution 项目索引
 
-**版本：** v7.9
-**日期：** 2026-08-05
-**用途：** AI Agent 执行任务的结构索引（细节冲突时以 `docs/README.md` 与 `AGENTS.md` 为准）
+**用途：** 仓库目录地图。
+**权威：** 根 [`AGENTS.md`](AGENTS.md) → [`docs/README.md`](docs/README.md) → [`docs/standards/`](docs/standards/README.md)。本文件不定义流程、不维护待办、不记录行数。
+
+项目记忆：运行 `python scripts/migrate_project_storage.py inventory`，读取 `activePaths.memory` 下的 `INDEX.md`。`.docs/project-memory/` 只是迁移前只读兼容路径，禁止当作现行规范或新写入目标。
 
 ---
 
 ## 项目结构
 
-```
+```text
 Vibelution/
-├── agent.py                    # Agent 主入口与主循环编排（当前约 2.5k 行，持续收敛中）
-├── config/                     # 配置模型库、provider、runtime defaults 与 public config 同步
-├── core/                       # 核心模块（按功能分类）
-│   ├── chat/                   # Chat session、结果格式、任务状态
-│   ├── chatroom/               # 多 Agent 协作 chat room
-│   ├── code_context_graph/     # 项目代码上下文图与索引
-│   ├── core_prompt/            # 核心提示词（身份与规范）
-│   │   ├── SOUL.md             # 身份定义
-│   │   ├── MENTAL_SOUL.md      # 心智模型说明
-│   │   ├── COMMON.md           # 通用准则
-│   │   └── SPEC.md             # 开发流程规范
-│   ├── evaluation/             # 监督进化、dataset registry、dashboard、chat case review
-│   ├── gym/                    # proposal lifecycle、advisory baseline、promotion 记录
-│   ├── infrastructure/         # session、tool executor、git memory、security、workspace 等
-│   ├── llm/                    # LLM payload builder、路由、protocol 解析
-│   ├── logging/                # transcript、tool tracker、runtime scene 日志
-│   ├── orchestration/          # 模式策略、委托、输出边界、回合收束
-│   ├── pet_system/             # 长期陪伴体子系统
-│   ├── prompt_manager/         # prompt 组装、任务分析、代码库地图
-│   ├── research/               # 研究流程与知识组织
-│   ├── restarter_manager/      # 重启管理
-│   ├── runtime_manager/        # Web workbench 与运行进程生命周期
-│   ├── ui/                     # CLI 主题、Workbench、Token 显示
-│   ├── web/                    # FastAPI app、routes、services
-│   └── workspace/              # 工作区分析与产物管理
-├── tools/                      # Agent 可见工具（约 27 个 *_tools.py 模块）
-├── tests/                      # Python 测试套件（以 pytest 收集为准）
-├── web/                        # React + Vite 前端工程
-├── docs/                       # 文档总图与归档（现行规范在 standards/）
-│   ├── README.md               # 文档地图（现行 vs 历史）
-│   ├── standards/              # 现行跨模块规范
-│   ├── agents/                 # 协作 / 授权 / 对话链路
-│   ├── guides/                 # Agent 开发路由（route/ownership/loop/playbook）
-│   ├── product/                # 产品语境 / UI 注册表（现行）
-│   ├── adr/                    # 架构决策
-│   ├── ops/config/             # Operator 配置索引
-│   ├── testing/                # 测试补充（权威命令见 tests/README）
-│   └── archive/                # 历史 plans / superpowers / 产品快照
-├── workspace/                  # 本地运行态产物、evaluation 数据和日志（gitignored）
-├── scripts/                    # launcher、web_workbench、doctor、prune_logs 等
-└── .docs/project-memory/       # 项目记忆与多页 HTML 状态面
+├── AGENTS.md                   # Agent 红线与路由入口
+├── agent.py                    # Agent composition root（新逻辑进 core/）
+├── config/                     # 配置模型库、provider、runtime defaults
+├── core/                       # 运行时核心（chat / llm / orchestration / web / …）
+├── desktop/                    # Electron Launcher 控制面
+├── tools/                      # Agent 可见工具（*_tools.py）
+├── tests/                      # pytest；命令见 tests/README.md
+├── web/                        # React + Vite 工作台
+├── docs/                       # 文档地图：standards / guides / adr / archive
+│   ├── README.md               # 现行 vs 历史
+│   └── plans/                  # 白名单在研草案（非正式规范）
+├── scripts/                    # launcher、doctor、migrate_project_storage 等
+├── workspace/                  # 本地运行态产物（gitignored）
+└── .worktrees/                 # 任务 worktree 池（gitignored）
 ```
 
 ---
 
-## 版本信息
+## 从这里打开
 
-| 文件 | 版本 | 更新日期 |
-|------|------|----------|
-| INDEX.md | v7.4 | 2026-07-04 |
-| SOUL.md | v4.1 | 2026-04-30 |
-| SPEC.md | v4.5 | 2026-04-30 |
-
----
-
-## 核心约束
-
-| 约束 | 限制 | 当前状态 |
-|------|------|----------|
-| agent.py 体量 | 优先将新逻辑放入 `core/`，入口保持黏合与循环 | ⚠️ 约 2.5k 行；入口保持薄，新逻辑进 `core/` |
-| Core First 规范 | 必须执行 | ✅ 已建立 |
-| 测试 | 变更后跑相关 `pytest`；全量见下 | ✅ `tests/test_*.py` 按功能面持续增长，数量以 `tests/README.md` 中的统计命令为准 |
-| Service facade 体量 | 优先 re-export + pack；新业务尽量不堆 facade | ✅ 四大 facade 约 0.7–1.4k 行（session / workflow / agent_directory / runtime_scene）；业务在 pack |
-| 单文件体量意识 | 实现文件约 1.5–2k 行起评估拆分；约 2.5–3k 为软提示 | ⚠️ 部分 pack / 前端 route 仍厚（如 knowledge*、agent_sessions、ChatCodingRoute 约 3k 行）；规范见 `docs/standards/development-standard.md` §8.3 |
-| 规范入口 | 流程 Standard；认领看 services README | ✅ `docs/README.md` 规范地图 |
-
----
-
-## 开发流程 (SPEC.md)
-
-每次任务执行流程：
-
-```
-[感知] git diff --stat 上次变更
-[感知] 读取 INDEX.md 修改日志
-[对比] 对比本次目标与上次产出
-[决策] Core First 检查
-[执行] 修改代码
-[验证] py_compile + pytest + prompt_debugger
-[分析] 流程自分析与优化
-[记录] INDEX.md 修改日志追加
-[交付] git commit
-```
-
-### Core First 检查清单
-
-```
-1. ls core/ → 了解目录结构
-2. rg "function_name" core/ --type py → 搜索相似功能
-3. 有 → import 使用，agent.py 仅写调用代码 (<10行)
-   无 → 在 core/ 对应子目录创建/修改
-```
-
----
-
-## 测试状态
-
-勿在此手工维护用例个数（易与仓库漂移）。在已激活的 **项目 `.venv`** 下执行：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ --collect-only -q
-```
-
-全量运行（同上，需 venv 以满足 `environment_smoke`）：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -q
-```
-
----
-
-## 待处理任务追踪表
-
-| # | 优先级 | 任务描述 | 状态 |
-|---|--------|----------|------|
-| 1 | P0 | 拆分 `core/web/services/session_service.py`（~1.3w 行）按域抽出 | ✅ 已完成（facade 现 ~1.35k 行，业务在 `session/` pack） |
-| 2 | P0 | 拆分 `web/src/routes/ChatCodingRoute.tsx`（~6.4k 行） | ✅ 已完成（route 现为薄壳，实现拆至 `chat/ChatCodingRouteWorkbench.tsx`） |
-| 3 | P1 | 给 `log_info/` / `.runtime/` / `backups/` 落地本地 retention 策略 | 📋 进行中 |
-| 4 | P1 | 生产环境锁定 Python 3.11–3.12 并文档化 CI 镜像 | 📋 待办 |
-| 5 | P2 | 明确 `挑战杯/` 子项目归属：保留当前根目录入口或迁移前同步 flow 站点与项目记忆 | 📋 待决策 |
-| 6 | P2 | 优化 `core/prompt_manager/builder.py` 可读性 | 📋 待办 |
-
----
-
-## 关键文件路径
-
-| 文件 | 用途 |
-|------|------|
-| `core/core_prompt/SOUL.md` | 身份定义 |
-| `docs/standards/development-standard.md` | 详细开发流程规范 |
-| `core/core_prompt/COMMON.md` | 通用准则 |
-| `core/core_prompt/MENTAL_SOUL.md` | 心智模型说明 |
-| `docs/standards/README.md` | 当前开发与协作规范入口 |
-| `docs/README.md` | 当前文档入口与归档边界 |
-| `tests/README.md` | 测试入口与验证说明 |
-| `挑战杯/research_team_flow_design.html` | 挑战杯科研流程 HTML 入口 |
-
----
-
-## 健康检查
-
-- [x] Core First 规范已建立
-- [x] 索引与 README 已与当前目录树对齐（持续随提交更新）
-- [x] 测试套件：`tests/test_*.py` 按功能面持续增长，数量以 `tests/README.md` 中的统计命令为准
-- [ ] agent.py 体量偏大，按任务表继续收敛
-- [x] 超大单文件（session_service.py / ChatCodingRoute.tsx）已拆分收尾
-
----
-
-## 修改日志
-
-| 版本 | 日期 | 变更 |
-|------|------|------|
-| v7.9 | 2026-08-05 | `docs/guides/` 改为纯 Agent 路由表（route/ownership/loop/playbook）；去掉用户向叙述 |
-| v7.8 | 2026-08-05 | 新增 `docs/guides/`；后于 v7.9 改为 Agent-only 形态 |
-| v7.7 | 2026-08-05 | 产品/设计全文归档；`docs/product/` 现行提炼；ADR 0003–0005（config 外置 / VUI only / 文档权威） |
-| v7.6 | 2026-08-05 | 文档整理：`superpowers`/一次性 testing 进 archive；现行树只保留 standards/agents/ops/adr/testing/prds/security；索引与 AGENTS 对齐 |
-| v7.4 | 2026-07-04 | 对齐 guard 命令到 `status/check/claim/release`；补充 `docs/superpowers/` 入口（后于 v7.6 归档）；将 README 状态说明委托给项目记忆；修正测试文档编号 |
-| v7.3 | 2026-06-19 | 增加 docs 入口；将 2026-05 历史计划归档到 docs/archive/plans/2026-05；刷新 README/INDEX 文档边界 |
-| v7.2 | 2026-06-05 | 补齐缺失子目录（chatroom/code_context_graph/llm/research/workspace）；修正 agent.py 行数；重排 P0/P1 待办，新增单文件红线约束与日志 retention 项 |
-| v7.1 | 2026-05-21 | 删除重复的根目录 reset.py，Reset 入口统一到 Web 工作台白名单清理动作面 |
-| v7.0 | 2026-05-11 | 同步项目结构（orchestration、infrastructure、ui）；修正 agent.py 体量与测试说明；移除过时的 ≤500 行与手工用例计数表 |
-| v7.0 | 2026-05-03 | 重建 INDEX.md，修复损坏的表格格式；记录 v7.0 版本信息；清理冗余内容；建立清晰的待处理任务追踪表 |
-| v6.9 | 2026-04-30 | 补充缺失的测试用例；完善 prompt_manager 模块 |
-| v6.8 | 2026-04-29 | 完成 Core First 规范建立；agent.py 代码迁移完成 |
+| 需求 | 打开 |
+| --- | --- |
+| Agent 红线 / 工作分级 | [`AGENTS.md`](AGENTS.md) |
+| 文档地图 | [`docs/README.md`](docs/README.md) |
+| 开发标准 | [`docs/standards/development-standard.md`](docs/standards/development-standard.md) |
+| 任务路由 | [`docs/guides/README.md`](docs/guides/README.md) |
+| Web services | [`core/web/services/README.md`](core/web/services/README.md) |
+| 测试 | [`tests/README.md`](tests/README.md) |
+| Operator 配置 | [`docs/ops/config/INDEX.md`](docs/ops/config/INDEX.md) |
+| 身份 / 通用纪律（运行时 Prompt，不扩权） | [`core/core_prompt/SOUL.md`](core/core_prompt/SOUL.md) · [`COMMON.md`](core/core_prompt/COMMON.md) |
