@@ -24,6 +24,8 @@ def team_workflow_research_projects(team_id: str) -> dict:
 @router.post(
     "/teams/{team_id}/workflow-orchestration/research-projects",
     status_code=status.HTTP_201_CREATED,
+    response_model=ResearchProjectListResponse,
+    response_model_exclude_unset=True,
 )
 def team_workflow_research_project_create(team_id: str, payload: ResearchProjectCreatePayload) -> dict:
     try:
@@ -34,7 +36,11 @@ def team_workflow_research_project_create(team_id: str, payload: ResearchProject
         _raise_team_workflow_route_error("research_project.create", team_id, exc, status_code=422)
 
 
-@router.patch("/teams/{team_id}/workflow-orchestration/research-projects/{project_id}")
+@router.patch(
+    "/teams/{team_id}/workflow-orchestration/research-projects/{project_id}",
+    response_model=ResearchProjectListResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_research_project_update(
     team_id: str,
     project_id: str,
@@ -75,7 +81,11 @@ def team_workflow_research_project_update(
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/research-projects/{project_id}/activate")
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/research-projects/{project_id}/activate",
+    response_model=ResearchProjectListResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_research_project_activate(team_id: str, project_id: str) -> dict:
     try:
         return activate_research_project(team_id, project_id)

@@ -1,13 +1,18 @@
 """Team workflow routes: orchestration."""
 from __future__ import annotations
-from fastapi import Query, status
+from fastapi import HTTPException, status
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow_orchestration_service import *
 from ._errors import _raise_team_workflow_route_error
 from ._models import *
 from ._router import router
+from .orchestration_models import TeamWorkflowOrchestrationResponse
 
-@router.get("/teams/{team_id}/workflow-orchestration")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration",
+    response_model=TeamWorkflowOrchestrationResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_detail(team_id: str) -> dict:
     try:
         return get_team_workflow_orchestration(team_id)
@@ -17,7 +22,11 @@ def team_workflow_detail(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.put("/teams/{team_id}/workflow-orchestration")
+@router.put(
+    "/teams/{team_id}/workflow-orchestration",
+    response_model=TeamWorkflowOrchestrationResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_ensure(team_id: str, payload: WorkflowEnsurePayload) -> dict:
     try:
         return ensure_team_workflow_orchestration(

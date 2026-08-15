@@ -24,4 +24,11 @@ describe("research project Agent task API", () => {
     expect(workspaceSource).toContain("listTeamResearchProjects(");
     expect(workspaceSource).not.toContain("/workflow-orchestration/research-projects");
   });
+
+  it("owns create, update, and activate transports used by the project switcher", () => {
+    expect(apiSource).toContain("export function createTeamResearchProject");
+    expect(apiSource).toContain("export function updateTeamResearchProject");
+    expect(apiSource).toContain("export function activateTeamResearchProject");
+    expect(apiSource).toContain("/activate");
+  });
 });
