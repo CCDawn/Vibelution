@@ -23,7 +23,6 @@ from .adapters import get_provider_adapter
 from .discovery import discover_model
 from .errors import classify_exception
 from .message_projector import message_to_openai_dict as project_message_to_openai_dict
-from .message_projector import normalize_messages_for_provider
 from .payload_builder import PayloadBuildInput, compose_runtime_wire_payload
 from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
@@ -2038,6 +2037,9 @@ class LLMClient:
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])
+        from core.chat.conversation_invariant import check_conversation_payload_invariant
+        from core.chat.model_messages import ProviderMessageChain
+
         ui_tool_calls_index = _find_ui_tool_calls_message_index(list(messages or []))
         if ui_tool_calls_index >= 0:
             raise LLMError(
@@ -2053,7 +2055,28 @@ class LLMClient:
                 },
             )
         projection_messages = list(messages or [])
-        provider_messages = normalize_messages_for_provider(projection_messages)
+        provider_chain = ProviderMessageChain.from_messages(projection_messages)
+        provider_messages = provider_chain.to_provider_payload()
+        invariant = check_conversation_payload_invariant(
+            provider_messages,
+            expected_fingerprint=str(
+                (metadata or {}).get("ledgerConversationFingerprint") or ""
+            ).strip(),
+        )
+        if not invariant.ok:
+            raise LLMError(
+                "payload_protocol_error",
+                invariant.message,
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={
+                    "requiredSource": "conversation_ledger_model_projection",
+                    "payloadValidationResult": "blocked_before_provider",
+                    "payloadValidationErrorType": invariant.error_type,
+                    **invariant.details,
+                },
+            )
         if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
             strict_blank_messages = _strict_blank_responses_messages(
                 projection_messages,

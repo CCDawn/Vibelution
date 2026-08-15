@@ -205,6 +205,10 @@ def rewrite_conversation_events(
     session_id: str,
     events: Iterable[ConversationLedgerEvent],
 ) -> None:
+    """Physical rewrite exception. See ``rewrite_turn_events`` and
+    ``core.chat.conversation_invariant.LEDGER_REWRITE_EXCEPTION_OWNERS``.
+    """
+
     rewrite_turn_events(project_root, session_id, events)
 
 

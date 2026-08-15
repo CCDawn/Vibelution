@@ -56,7 +56,8 @@
 | 窗口内当前页面/直接会话/群聊/Project Agent Bus（window-local authority） | committed React Router URL（`location.search`），唯一写入口 `useChatRouteSelection` | `activeSessionId`/`activeGroupRoomId` 仅作局部派生变量；Zustand 不保存 active session；`window.location` recovery、localStorage、后端 pointer、后台 SSE/轮询/任务完成/焦点恢复都不得导航；异步 create/delete/archive/reset/select 结果走 compare-and-swap。 |
 | Agent 顶栏 Tab 顺序 | 会话 `createdAt` 升序，缺省再 `id`（前端 `compareAgentSessionTabOrder`） | `updatedAt` / `lastActive` 只表示活动/绿圈，不决定 Tab 顺序。 |
 | session 控制态与热路径薄壳（submit/detail 仍读 compatibility document） | `workspace/chat/conversations.sqlite3` 的 `workspace_chat_state` / `session_runtime_state`；大诊断快照单独存于 `session_debug_snapshots`，通过 `core/ui/chat_state.py` 兼容 API 访问 | running/error 壳、active session、submit 定位与 experiment binding overlay。正常运行不再读写 `chat_state.json`。 |
-| turn transcript/replay 事实 | `turn_journal.jsonl`，通过 `core/chat/turn_journal.py` | model-visible messages、`SessionDetail.messages`、native transcript/timeline 投影。 |
+| turn transcript/replay 事实 | `turn_journal.jsonl`，通过 `core/chat/turn_journal.py` | model-visible messages、`SessionDetail.messages`、native transcript/timeline 投影。发给模型的 **对话层**（user/assistant/tool）必须能从该 JSONL 重建；运行时检查见 `core/chat/conversation_invariant.py`。 |
+| journal 物理 rewrite（显式例外） | `rewrite_turn_events`：编辑重提截断、群聊 transcript 清理 | 不是第二写入权威。rewrite 后仍按新 JSONL 重建；默认路径保持仅追加。 |
 | 运行中 assistant text/thought/tools | `SessionLiveOutputState` 和可选 live-output checkpoint | `assistant_delta` SSE、live overlay message、active-turn layer。 |
 | 多会话 live work-run | 内存 `_RUNNING_SESSION_IDS` → `workRuns.activeItems.chat_turn`（顺序稳定） | 绿圈 / tool-approval busy。`workRuns.active.chat_turn` 是单槽遗留，不得当选中态或唯一 running。runtime summary 轮询不得为 live status 抢 `chat_state` 锁。 |
 | 最终 assistant 回复 | `turn_journal.jsonl` 里的 `assistant_item_committed` / final answer | 持久 `SessionDetail.messages.turnItems`；`content` 为兼容镜像；`codexTranscript` 由 items 单向派生。 |
@@ -71,6 +72,7 @@
 经验规则：
 
 - `turn_journal.jsonl` 是 durable turn record。
+- 发给模型的对话层不得靠 payload 入口静默修补孤儿/未完成 tool chain；系统层（runtime context、Turn Status Bar、skill）不算 transcript。
 - **`SessionTurnItem[]`（`message.turnItems`）是 UI 主包 / 单一投影源。**
 - `assistant_delta` 是 transport，不是事实源；流式时按 item 身份更新 active-turn 草稿包。
 - `codexTranscript` 是 cells 渲染适配层，由 `turnItems` 单向派生，不得成为第二写入者。

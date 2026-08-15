@@ -15,6 +15,14 @@ from typing import Any
 
 _EXPORTS = {
     "assemble_conversation_context": (".context_assembler", "assemble_conversation_context"),
+    "canonical_conversation_messages_from_events": (
+        ".conversation_invariant",
+        "canonical_conversation_messages_from_events",
+    ),
+    "check_conversation_payload_invariant": (
+        ".conversation_invariant",
+        "check_conversation_payload_invariant",
+    ),
     "append_context_compression_checkpoint": (".conversation_ledger", "append_context_compression_checkpoint"),
     "append_conversation_event": (".conversation_ledger", "append_conversation_event"),
     "apply_context_compression_checkpoints": (".conversation_ledger", "apply_context_compression_checkpoints"),
