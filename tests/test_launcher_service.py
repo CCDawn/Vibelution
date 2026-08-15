@@ -3829,10 +3829,74 @@ def test_ensure_runtime_manager_daemon_alive_records_recovery_failure_but_still_
     assert "launcher.daemon.watchdog.restarted" in events
 
 
+def test_request_launcher_start_reaps_leftover_workbench_before_open(monkeypatch):
+    calls: list[object] = []
+    monkeypatch.setattr(
+        launcher_service,
+        "_terminate_managed_launcher_subtree",
+        lambda **kwargs: calls.append(("reap", kwargs)) or {"processCleanup": {"terminated": [30524], "remaining": []}},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "ensure_runtime_manager_daemon_alive",
+        lambda: calls.append("ensure") or {"ensured": True},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="": calls.append((command_type, dict(args or {}), requested_by))
+        or {"commandId": "cmd-start-reap"},
+    )
+    monkeypatch.setattr(launcher_service, "_record_launcher_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(launcher_service, "_record_launcher_prequeue_timing", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(launcher_service, "_electron_main_orchestrates_windows", lambda: True)
+
+    response = launcher_service.request_launcher_start()
+
+    assert response["accepted"] is True
+    assert response["commandId"] == "cmd-start-reap"
+    assert calls[0] == ("reap", {"include_runtime_manager": False, "reason": "launcher_start_button"})
+    assert calls[1] == "ensure"
+    assert calls[2][0] == "open_workbench"
+
+
+def test_request_launcher_restart_reaps_leftover_workbench_before_queue(monkeypatch):
+    calls: list[object] = []
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(
+        launcher_service,
+        "_terminate_managed_launcher_subtree",
+        lambda **kwargs: calls.append(("reap", kwargs)) or {"processCleanup": {"terminated": [30524], "remaining": []}},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "ensure_runtime_manager_daemon_alive",
+        lambda: calls.append("ensure") or {"ensured": True},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="": calls.append((command_type, dict(args or {}), requested_by))
+        or {"commandId": "cmd-restart-reap"},
+    )
+    monkeypatch.setattr(launcher_service, "_record_launcher_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(launcher_service, "_record_launcher_prequeue_timing", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(launcher_service, "_electron_main_orchestrates_windows", lambda: True)
+
+    response = launcher_service.request_launcher_restart()
+
+    assert response["accepted"] is True
+    assert response["commandId"] == "cmd-restart-reap"
+    assert calls[0] == ("reap", {"include_runtime_manager": False, "reason": "launcher_restart_button"})
+    assert calls[1] == "ensure"
+    assert calls[2][0] == "restart_workbench"
+
+
 def test_request_launcher_start_skips_browser_when_electron_orchestrates_windows(monkeypatch):
     captured: dict[str, object] = {}
     monkeypatch.setenv("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "1")
     monkeypatch.setattr(launcher_service, "ensure_runtime_manager_daemon_alive", lambda: None)
+    monkeypatch.setattr(launcher_service, "_terminate_managed_launcher_subtree", lambda **_kwargs: {})
     monkeypatch.setattr(
         launcher_service,
         "submit_command",

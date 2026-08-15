@@ -2722,6 +2722,11 @@ def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch)
     monkeypatch.setattr(standalone_launcher_service, "ensure_daemon_running", lambda: calls.append("ensure"))
     monkeypatch.setattr(
         standalone_launcher_service,
+        "_terminate_managed_launcher_subtree",
+        lambda **kwargs: calls.append(("reap", kwargs)),
+    )
+    monkeypatch.setattr(
+        standalone_launcher_service,
         "submit_command",
         lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
         or {"commandId": "cmd-launcher-start"},
@@ -2734,6 +2739,7 @@ def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch)
     assert payload["accepted"] is True
     assert payload["commandId"] == "cmd-launcher-start"
     assert calls == [
+        ("reap", {"include_runtime_manager": False, "reason": "launcher_start_button"}),
         "ensure",
         (
             "open_workbench",

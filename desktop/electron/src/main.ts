@@ -85,7 +85,7 @@ import {
   type LauncherBootstrapResult
 } from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
-import { executeApprovedDesktopShellShutdown, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
+import { executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
 import {
   decideShutdown,
   executeShutdownAuthorizationBoundary,
@@ -1978,6 +1978,12 @@ app.whenReady()
         packaged: app.isPackaged,
         env: desktopEnvironment()
       })
+    });
+    await reapManagedRuntimeOnDesktopStart({
+      stopManagedRuntime,
+      recordEvent: async (event) => {
+        await recordElectronSupervisorEvent(launcherBootstrap, event);
+      }
     });
     if (desktopCliArgs.smoke) {
       await runSmokeAndQuit(paths);
