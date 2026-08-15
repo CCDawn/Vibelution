@@ -696,10 +696,12 @@ describe("TeamsRoute layout contract", () => {
     expect(executeSearchMutationSource).toContain("researchStageRoundStatusQueryKey(variables.teamId)");
     expect(sourceCollectionApiSource).toContain("/workflow-orchestration/source-collection-runs");
     expect(teamWorkflowStartMutationsSource).toContain("startSourceCollectionRun(");
-    expect(teamSourceCollectionMutationsSource).toContain("/search/execute");
+    expect(sourceCollectionApiSource).toContain("/search/execute");
+    expect(teamSourceCollectionMutationsSource).toContain("executeSourceCollectionSearch<");
     expect(routeSource).toContain("/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}");
     expect(teamSourceCollectionMutationsSource).toContain("/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs");
-    expect(teamSourceCollectionMutationsSource).toContain("/source-candidate");
+    expect(sourceCollectionApiSource).toContain("/source-candidate");
+    expect(teamSourceCollectionMutationsSource).toContain("importDataRecordAsSourceCandidate(");
     expect(routeSource).toContain("sourceCollectionRunsForTeam");
     expect(routeSource).toContain("sourceCollectionRunHasUsableRecords");
     expect(routeSource).toContain("selectDefaultSourceCollectionRun");
@@ -1667,7 +1669,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("通知资料入库 Agent");
     expect(routeSource).not.toContain("待继续搜索");
     // Wave 8P: storage open write endpoint lives on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("/storage/open");
+    expect(sourceCollectionApiSource).toContain("/storage/open");
+    expect(teamSourceCollectionMutationsSource).toContain("openSourceCollectionStorage<");
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("本轮产物");
     expect(routeAndPureSource).toContain("打开批次目录");
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("更多证据文件");

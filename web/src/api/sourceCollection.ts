@@ -1,5 +1,6 @@
 import { fetchJson } from "./client";
 import type {
+  TeamWorkflowDataRecordSourceCandidateImportPayload,
   TeamWorkflowSourceCollectionAgentSessionContextPayload,
   TeamWorkflowSourceCollectionRunStartPayload,
   TeamWorkflowSourceCollectionStageSessionTaskPayload,
@@ -71,6 +72,66 @@ export function startSourceCollectionStageSessionTask(
 ): Promise<TeamWorkflowSourceCollectionStageSessionTaskPayload> {
   return writeJson<TeamWorkflowSourceCollectionStageSessionTaskPayload>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(runId)}/stage-session-tasks`,
+    "POST",
+    body,
+  );
+}
+
+export function registerCandidateSource<T = Record<string, unknown>>(
+  teamId: string,
+  body: unknown,
+): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/candidates/source`,
+    "POST",
+    body,
+  );
+}
+
+export function importDataRecordAsSourceCandidate(
+  teamId: string,
+  runId: string,
+  recordId: string,
+  body: unknown,
+): Promise<TeamWorkflowDataRecordSourceCandidateImportPayload> {
+  return writeJson<TeamWorkflowDataRecordSourceCandidateImportPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/data-processing/runs/${encodeURIComponent(runId)}/records/${encodeURIComponent(recordId)}/source-candidate`,
+    "POST",
+    body,
+  );
+}
+
+export function executeSourceCollectionSearch<T>(
+  teamId: string,
+  runId: string,
+  body: unknown,
+): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(runId)}/search/execute`,
+    "POST",
+    body,
+  );
+}
+
+export function openSourceCollectionStorage<T>(
+  teamId: string,
+  runId: string,
+  body: unknown,
+): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(runId)}/storage/open`,
+    "POST",
+    body,
+  );
+}
+
+export function writebackSourceCollectionStageSessionTask<T = Record<string, unknown>>(
+  teamId: string,
+  taskId: string,
+  body: unknown,
+): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/stage-session-tasks/${encodeURIComponent(taskId)}/writeback`,
     "POST",
     body,
   );
