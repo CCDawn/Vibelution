@@ -14,6 +14,7 @@
 | [plans/2026-08-07/](plans/2026-08-07/) | Challenge Cup 工作流历史计划 |
 | [plans/2026-08-09/](plans/2026-08-09/) | MCP 受管 Agent 网关历史计划 |
 | [plans/2026-08-10/](plans/2026-08-10/) | Electron workbench 事务关闭历史计划 |
+| [plans/2026-08-11/](plans/2026-08-11/) | VUI 波次迁移待办快照（契约清单已迁回测试；非正式规范） |
 | [plans/2026-08-15/](plans/2026-08-15/) | 团队 Agent 感知 / 点对点 / 会话团队标签历史计划 |
 | [ops/2026-05/](ops/2026-05/) | 原 ops 根下治理/审计快照 |
 | [ops/efficiency-baselines/](ops/efficiency-baselines/) | 效率基线快照 |
