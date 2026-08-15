@@ -148,12 +148,10 @@ def _create_session_in_competing_process(
     workspace_home: str,
     agent_id: str,
     role: str,
-    first_loaded,
-    second_loaded,
-    first_saved,
+    start_gate,
     result_queue,
 ) -> None:
-    """Force the pre-fix stale-snapshot ordering across independent processes."""
+    """Create one session after a shared start gate so both writers overlap."""
     os.environ["VIBELUTION_DATA_HOME"] = data_home
     from core.infrastructure import developer_sandbox as child_developer_sandbox
     from core.web.services import session_service as child_session_service
@@ -161,41 +159,7 @@ def _create_session_in_competing_process(
     child_developer_sandbox.is_developer_mode_enabled = lambda: False
     child_developer_sandbox.resolve_workspace_home = lambda *args, **kwargs: Path(workspace_home)
     child_session_service.PROJECT_ROOT = Path(workspace_home).parent
-
-    original_load = child_session_service.load_chat_state
-    original_save = child_session_service.save_chat_state
-    handshake_used = {"load": False, "save": False}
-
-    def controlled_load(project_root):
-        state = original_load(project_root)
-        # Prompt-snapshot warm-up also calls load_chat_state under the
-        # mutation lock. Participating in the create handshake there
-        # deadlocks the second process, which cannot set second_loaded
-        # until it acquires that same lock.
-        if threading.current_thread() is not threading.main_thread() or handshake_used["load"]:
-            return state
-        handshake_used["load"] = True
-        if role == "first":
-            first_loaded.set()
-            second_loaded.wait(timeout=1.0)
-        else:
-            first_loaded.wait(timeout=2.0)
-            second_loaded.set()
-            first_saved.wait(timeout=2.0)
-        return state
-
-    def controlled_save(project_root, state):
-        original_save(project_root, state)
-        if (
-            role == "first"
-            and threading.current_thread() is threading.main_thread()
-            and not handshake_used["save"]
-        ):
-            handshake_used["save"] = True
-            first_saved.set()
-
-    child_session_service.load_chat_state = controlled_load
-    child_session_service.save_chat_state = controlled_save
+    start_gate.wait(timeout=10.0)
     try:
         created = child_session_service.create_chat_session(
             title=f"Concurrent {role}",
@@ -214,9 +178,7 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
     workspace_home = tmp_path / "workspace"
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
     context = multiprocessing.get_context("spawn")
-    first_loaded = context.Event()
-    second_loaded = context.Event()
-    first_saved = context.Event()
+    start_gate = context.Event()
     result_queue = context.Queue()
     first = context.Process(
         target=_create_session_in_competing_process,
@@ -225,9 +187,7 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
             str(workspace_home),
             "",
             "first",
-            first_loaded,
-            second_loaded,
-            first_saved,
+            start_gate,
             result_queue,
         ),
     )
@@ -238,15 +198,13 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
             str(workspace_home),
             "",
             "second",
-            first_loaded,
-            second_loaded,
-            first_saved,
+            start_gate,
             result_queue,
         ),
     )
     first.start()
-    assert first_loaded.wait(timeout=10.0)
     second.start()
+    start_gate.set()
     try:
         first.join(timeout=15.0)
         second.join(timeout=15.0)
@@ -274,6 +232,45 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
         if isinstance(item, dict)
     }
     assert created_ids <= indexed_ids
+
+
+def test_create_chat_session_upserts_one_row_without_full_replace(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {"conversation_id": "session-a", "title": "A", "last_turn_status": "ready"},
+            ],
+        },
+    )
+    full_saves: list[str] = []
+    original_save_chat_state = session_service.save_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "save_chat_state",
+        lambda *args, **kwargs: full_saves.append("save") or original_save_chat_state(*args, **kwargs),
+    )
+
+    created = session_service.create_chat_session(
+        title="B",
+        activate=True,
+        conversation_index_kind="team_agent",
+        lightweight=True,
+    )
+
+    created_id = str(created.get("id") or "")
+    assert created_id
+    assert full_saves == []
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "A"
+    assert load_session_chat_state(tmp_path, created_id)["title"] == "B"
+    document = load_chat_state(tmp_path)
+    assert document["active_conversation_id"] == created_id
+    assert {item["conversation_id"] for item in document["conversations"]} == {
+        "session-a",
+        created_id,
+    }
 
 
 def _wait_until(predicate, *, timeout: float = 1.0) -> bool:
