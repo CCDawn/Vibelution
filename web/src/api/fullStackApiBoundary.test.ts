@@ -24,41 +24,33 @@ const routeTestPattern = /\.test\.(ts|tsx)$/;
 // Regenerated 2026-08 (R01 Chat workbench extract + current route client imports).
 // Counts may only stay equal or decrease from this snapshot without explicit review.
 const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
-  "routes/AgentsRoute.tsx": 9,
-  "routes/ConfigProviderRegistryPanel.tsx": 4,
+  "routes/AgentsRoute.tsx": 1,
+  "routes/ConfigProviderRegistryPanel.tsx": 3,
   "routes/ConfigRoute.tsx": 1,
-  "routes/EvolutionRoute.tsx": 6,
-  "routes/GitRoute.tsx": 9,
-  "routes/HomeRedirect.tsx": 1,
-  "routes/LegacyEvolutionRedirect.tsx": 1,
+  "routes/EvolutionRoute.tsx": 5,
+  "routes/GitRoute.tsx": 8,
   "routes/LogsRoute.tsx": 5,
   "routes/MemoryRoute.tsx": 2,
   "routes/MemoryUserContentPanel.tsx": 6,
   "routes/PetRoute.tsx": 1,
-  "routes/PromptTemplatesRoute.tsx": 6,
   "routes/RuntimeScenesPane.tsx": 4,
   "routes/SelfEvolutionTrack.tsx": 2,
   "routes/SkillsRoute.tsx": 2,
   "routes/SupervisedReviewRoute.tsx": 7,
-  "routes/SupervisedWorkspaceControls.tsx": 3,
-  "routes/ToolsRoute.tsx": 12,
+  "routes/SupervisedWorkspaceControls.tsx": 2,
+  "routes/ToolsRoute.tsx": 9,
   "routes/UsageRoute.tsx": 1,
-  "routes/WorkbenchDomainRoute.tsx": 1,
-  "routes/WorkbenchModeRoute.tsx": 1,
-  "routes/agent-create/AgentCreateWizardDialog.tsx": 2,
-  "routes/agents/useAgentConfigDraftMutations.ts": 3,
-  "routes/agents/useAgentWorkbenchMutations.ts": 8,
+  "routes/agent-create/AgentCreateWizardDialog.tsx": 1,
   "routes/chat/ChatCodingRouteWorkbench.tsx": 4,
   "routes/chat/CliAgentRunTerminalPanel.tsx": 3,
   "routes/chat/useChatCliAgentTerminal.ts": 1,
   "routes/config/useConfigMigrationActions.ts": 1,
-  "routes/config/useConfigProviderDraftActions.ts": 1,
-  "routes/config/useConfigWorkspaceQueries.ts": 2,
+  "routes/config/useConfigWorkspaceQueries.ts": 1,
   "routes/evolution/useEvolutionProposalMutations.ts": 5,
   "routes/evolution/useEvolutionRunMutations.ts": 8,
-  "routes/memory/useMemoryItemMutations.ts": 7,
+  "routes/memory/useMemoryItemMutations.ts": 6,
   "routes/memory/useMemoryKnowledgeMutations.ts": 8,
-  "routes/memory/useMemoryWorkbenchQueries.ts": 19,
+  "routes/memory/useMemoryWorkbenchQueries.ts": 18,
   "routes/teams/research-projects/ResearchProjectSwitcher.tsx": 4,
   "routes/teams/useResearchWorkflowResources.ts": 9,
   "routes/teams/useSourceCollectionRunQueries.ts": 4,
@@ -74,7 +66,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/teams/useTeamsShellCanvasWorkspace.ts": 1,
 };
 // Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
-const legacyRouteFetchJsonAggregateBudget = 215;
+const legacyRouteFetchJsonAggregateBudget = 173;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {

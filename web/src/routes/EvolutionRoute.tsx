@@ -5,13 +5,13 @@ import { lazy, Suspense, type CSSProperties, type KeyboardEvent, type PointerEve
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
+import { fetchPublicConfig } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import {
   EvolutionActiveRun,
   EvolutionActiveRunAgentBinding,
   EvolutionActiveRunStreamEvent,
   EvolutionActionState,
-  ConfigSummary,
   EvolutionRunActionResponse,
   EvolutionWorkbench,
   EvolutionProposalBulkDeleteResponse,
@@ -354,7 +354,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    queryFn: () => fetchPublicConfig(),
     staleTime: 30_000,
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,

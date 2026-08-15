@@ -8,13 +8,13 @@ import {
   listAgentAvatarOptions,
 } from "../../api/agents";
 import { fetchJson } from "../../api/client";
+import { testConfigLlm } from "../../api/config";
 import { queryKeys } from "../../api/queryKeys";
 import {
   type AgentAvatarOptionsPayload,
   type AgentConfigWorkspace,
   type AgentConfigWorkspaceAgent,
   type AgentInstance,
-  type ConfigLlmTestResult,
   type ToolRegistryPayload,
 } from "../../api/types";
 import { VButton, VDialog } from "../../components/vui";
@@ -307,14 +307,10 @@ export function AgentCreateWizardDialog({
         cursor += 1;
         const modelId = targets[index];
         try {
-          const result = await fetchJson<ConfigLlmTestResult>("/api/config/test-llm", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              publicConfig: {},
-              modelId,
-              capability: "text",
-            }),
+          const result = await testConfigLlm({
+            publicConfig: {},
+            modelId,
+            capability: "text",
           });
           if (result.ok) {
             okCount += 1;

@@ -5,11 +5,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import { updateAgent } from "../../api/agents";
-import { fetchJson } from "../../api/client";
+import {
+  discardAgentConfigDraft,
+  promoteAgentModel,
+  saveAgentConfigDraft,
+  updateAgent,
+} from "../../api/agents";
 import { queryKeys } from "../../api/queryKeys";
 import type {
-  AgentConfigChanges,
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AgentLlmSlotDefinition,
@@ -62,18 +65,11 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
 
   const saveAgentConfigDraftMutation = useMutation({
     mutationFn: (payload: { agentId: string; baseUpdatedAt: string; snapshot: Record<string, unknown> }) =>
-      fetchJson<NonNullable<AgentConfigChanges["activeDraft"]>>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/config-drafts`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            baseUpdatedAt: payload.baseUpdatedAt,
-            snapshot: payload.snapshot,
-            summary: options.lang === "zh" ? "来自 Agent Center 配置编辑器。" : "Saved from the Agent Center configuration editor.",
-          }),
-        },
-      ),
+      saveAgentConfigDraft(payload.agentId, {
+        baseUpdatedAt: payload.baseUpdatedAt,
+        snapshot: payload.snapshot,
+        summary: options.lang === "zh" ? "来自 Agent Center 配置编辑器。" : "Saved from the Agent Center configuration editor.",
+      }),
     onSuccess: async (_, variables) => {
       options.setNotice({
         tone: "success",
@@ -94,10 +90,7 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
 
   const discardAgentConfigDraftMutation = useMutation({
     mutationFn: (payload: { agentId: string; draftId: string }) =>
-      fetchJson<{ draftId: string; status: string }>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/config-drafts/${encodeURIComponent(payload.draftId)}`,
-        { method: "DELETE" },
-      ),
+      discardAgentConfigDraft(payload.agentId, payload.draftId),
     onSuccess: async (_, variables) => {
       options.setNotice({
         tone: "success",
@@ -177,17 +170,14 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
       candidate: AgentModelChoice;
       expectedBaseHash: string;
     }) =>
-      fetchJson<AgentModelPromotionResult>(
-        `/api/agents/${encodeURIComponent(payload.agent.agentId)}/llm-bindings/${encodeURIComponent(payload.slot.slot)}/promote`,
+      promoteAgentModel<AgentModelPromotionResult>(
+        payload.agent.agentId,
+        payload.slot.slot,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            modelRef: payload.candidate.modelRef,
-            expectedBaseHash: payload.expectedBaseHash,
-            expectedAgentUpdatedAt: payload.agent.updatedAt,
-            confirmed: true,
-          }),
+          modelRef: payload.candidate.modelRef,
+          expectedBaseHash: payload.expectedBaseHash,
+          expectedAgentUpdatedAt: payload.agent.updatedAt,
+          confirmed: true,
         },
       ),
     onSuccess: async (result) => {

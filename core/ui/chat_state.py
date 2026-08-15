@@ -378,6 +378,64 @@ def mutate_chat_state(
         return result
 
 
+def load_session_chat_state(project_root: Path, session_id: str) -> dict[str, Any] | None:
+    """Load one session runtime row without assembling the compatibility document."""
+
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return None
+    with _chat_state_repository(project_root) as repository:
+        return repository.get_session_runtime_state(normalized)
+
+
+def list_session_runtime_ids(project_root: Path) -> list[str]:
+    """List session runtime ids without assembling conversation payloads."""
+
+    with _chat_state_repository(project_root) as repository:
+        return list(repository.list_session_runtime_ids())
+
+
+def save_session_chat_state(
+    project_root: Path,
+    session_id: str,
+    conversation: dict[str, Any],
+    *,
+    activate: bool = False,
+) -> None:
+    """Persist one session runtime row without rewriting sibling sessions."""
+
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        raise ValueError("Session runtime state requires a session id.")
+    cleaned, _changed = _drop_legacy_chat_state_messages(
+        {"conversations": [dict(conversation)]},
+        project_root=project_root,
+    )
+    conversations = cleaned.get("conversations") if isinstance(cleaned, dict) else []
+    payload = dict(conversations[0]) if conversations and isinstance(conversations[0], dict) else dict(conversation)
+    payload.setdefault("conversation_id", normalized)
+    payload.setdefault("conversationId", normalized)
+    with chat_state_transaction(project_root):
+        with _chat_state_repository(project_root) as repository:
+            result = repository.upsert_session_runtime_state(
+                normalized,
+                payload,
+                activate=activate,
+            ).result(timeout=5)
+    revision = int((result or {}).get("stateRevision") or 0)
+    notify_session_catalog_dirty(
+        project_root,
+        normalized,
+        f"state:{revision}",
+    )
+    if activate:
+        notify_session_catalog_dirty(
+            project_root,
+            CATALOG_GLOBAL_DIRTY_SESSION_ID,
+            f"state:{revision}",
+        )
+
+
 @contextmanager
 def _chat_state_repository(project_root: Path):
     """Yield the process store repository or a bounded standalone store."""

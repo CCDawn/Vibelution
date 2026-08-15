@@ -48,6 +48,7 @@ HIGH_RISK_GRANT_TOOLS = {
     "commit_compressed_memory_tool",
     "get_core_context_tool",
     "get_current_goal_tool",
+    "supersede_episodic_memory_tool",
     "compress_context_tool",
     "image2_generate_tool",
     "knowledge_proposal_tool",

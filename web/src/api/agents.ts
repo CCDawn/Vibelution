@@ -1,11 +1,22 @@
 import { fetchJson } from "./client";
 import type {
   AgentAvatarOptionsPayload,
+  AgentAvatarUploadResponse,
+  AgentConfigChanges,
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
+  AgentInboxMessage,
   AgentInstance,
+  AgentModeBindings,
   AgentPermissionPreset,
+  AgentProjectMemoryUpdateProposal,
+  AgentPurgeResponse,
+  AgentRunHistory,
+  AgentRuntimeEvidence,
   AgentToolGovernanceRequest,
+  AgentToolPolicyConfiguration,
+  PromptTemplate,
+  PromptTemplateWorkspace,
 } from "./types";
 
 export type AgentDirectSessionResetResponse = {
@@ -108,6 +119,362 @@ export function resetAgentDirectSession(
     resetMemoryPolicy: false,
     resetRuntimePolicy: false,
   });
+}
+
+export function fetchAgentConfigChanges<T = AgentConfigChanges>(
+  agentId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/agents/${encodeURIComponent(agentId)}/config-changes`,
+    { signal: options?.signal },
+  );
+}
+
+export function saveAgentConfigDraft(
+  agentId: string,
+  payload: {
+    baseUpdatedAt: string;
+    snapshot: Record<string, unknown>;
+    summary: string;
+  },
+): Promise<NonNullable<AgentConfigChanges["activeDraft"]>> {
+  return fetchJson<NonNullable<AgentConfigChanges["activeDraft"]>>(
+    `/api/agents/${encodeURIComponent(agentId)}/config-drafts`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function discardAgentConfigDraft(
+  agentId: string,
+  draftId: string,
+): Promise<{ draftId: string; status: string }> {
+  return fetchJson<{ draftId: string; status: string }>(
+    `/api/agents/${encodeURIComponent(agentId)}/config-drafts/${encodeURIComponent(draftId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function promoteAgentModel<T = { agent: AgentConfigWorkspaceAgent; modelRef: string }>(
+  agentId: string,
+  slot: string,
+  payload: object,
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/agents/${encodeURIComponent(agentId)}/llm-bindings/${encodeURIComponent(slot)}/promote`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function fetchAgentRunHistory(
+  agentId: string,
+  options?: { limit?: number; signal?: AbortSignal },
+): Promise<AgentRunHistory> {
+  const search = new URLSearchParams();
+  if (options?.limit != null) {
+    search.set("limit", String(options.limit));
+  }
+  const suffix = search.toString();
+  const path = `/api/agents/${encodeURIComponent(agentId)}/runs`;
+  return fetchJson<AgentRunHistory>(suffix ? `${path}?${suffix}` : path, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchAgentInboxMessages(
+  agentId: string,
+  options?: { status?: string; limit?: number; signal?: AbortSignal },
+): Promise<AgentInboxMessage[]> {
+  const search = new URLSearchParams();
+  if (options?.status) {
+    search.set("status", options.status);
+  }
+  if (options?.limit != null) {
+    search.set("limit", String(options.limit));
+  }
+  const suffix = search.toString();
+  const path = `/api/agents/${encodeURIComponent(agentId)}/messages`;
+  return fetchJson<AgentInboxMessage[]>(suffix ? `${path}?${suffix}` : path, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchAgentRuntimeEvidence(
+  agentId: string,
+  options?: { sessionId?: string; runId?: string; limit?: number; signal?: AbortSignal },
+): Promise<AgentRuntimeEvidence> {
+  const search = new URLSearchParams();
+  if (options?.sessionId !== undefined) {
+    search.set("sessionId", options.sessionId);
+  }
+  if (options?.runId) {
+    search.set("runId", options.runId);
+  }
+  if (options?.limit != null) {
+    search.set("limit", String(options.limit));
+  }
+  const suffix = search.toString();
+  const path = `/api/agents/${encodeURIComponent(agentId)}/runtime-evidence`;
+  return fetchJson<AgentRuntimeEvidence>(suffix ? `${path}?${suffix}` : path, {
+    signal: options?.signal,
+  });
+}
+
+export function bulkUpdateAgentConfig<T>(payload: {
+  agentIds: string[];
+  applyFields: string[];
+  patch: Record<string, unknown>;
+}): Promise<T> {
+  return fetchJson<T>("/api/agents/bulk-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function bulkUpdateAgentPromptTemplate<T>(payload: {
+  agentIds: string[];
+  promptTemplateId: string;
+}): Promise<T> {
+  return fetchJson<T>("/api/agents/bulk-prompt-template", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function bulkArchiveAgents<T>(agentIds: string[]): Promise<T> {
+  return fetchJson<T>("/api/agents/bulk-archive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agentIds }),
+  });
+}
+
+export function bulkPurgeAgents<T>(agentIds: string[]): Promise<T> {
+  return fetchJson<T>("/api/agents/bulk-purge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agentIds }),
+  });
+}
+
+export function updateAgentAvatar(
+  agentId: string,
+  payload: { avatarImagePath?: string; resetToDefault?: boolean },
+): Promise<AgentConfigWorkspaceAgent> {
+  return fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}/avatar`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      avatarImagePath: payload.avatarImagePath ?? "",
+      resetToDefault: Boolean(payload.resetToDefault),
+    }),
+  });
+}
+
+export function uploadAgentAvatarImage(
+  agentId: string,
+  payload: { filename: string; contentType: string; dataBase64: string },
+): Promise<AgentAvatarUploadResponse> {
+  return fetchJson<AgentAvatarUploadResponse>(`/api/agents/${encodeURIComponent(agentId)}/avatar-image`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAgentModeMembership<T = AgentModeBindings>(
+  agentId: string,
+  draft: Record<string, unknown>,
+): Promise<T> {
+  return fetchJson<T>(`/api/agents/${encodeURIComponent(agentId)}/mode-membership`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+}
+
+export function createAgentToolGovernanceRequest(
+  agentId: string,
+  payload: {
+    proposedByAgentId: string;
+    grantTools: string[];
+    revokeTools: string[];
+    blockTools: string[];
+    unblockTools: string[];
+    reason: string;
+    applyMode: string;
+  },
+): Promise<AgentToolGovernanceRequest> {
+  return fetchJson<AgentToolGovernanceRequest>(
+    `/api/agents/${encodeURIComponent(agentId)}/tool-governance-requests`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function resolveAgentCenterToolGovernanceRequest(
+  agentId: string,
+  requestId: string,
+  decision: "approve" | "reject",
+): Promise<AgentToolGovernanceRequest> {
+  return fetchJson<AgentToolGovernanceRequest>(
+    `/api/agents/${encodeURIComponent(agentId)}/tool-governance-requests/${encodeURIComponent(requestId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        decision,
+        resolvedBy: "user",
+        resolutionNote: decision,
+      }),
+    },
+  );
+}
+
+export function consumeAgentInboxMessage(
+  agentId: string,
+  messageId: string,
+  payload: { consumedBySessionId: string; consumedByTurnId: string },
+): Promise<AgentInboxMessage> {
+  return fetchJson<AgentInboxMessage>(
+    `/api/agents/${encodeURIComponent(agentId)}/messages/${encodeURIComponent(messageId)}/consume`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function consumeAllAgentInboxMessages<T>(
+  agentId: string,
+  payload: { consumedBySessionId: string; consumedByTurnId: string },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/agents/${encodeURIComponent(agentId)}/messages/consume-all`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function purgeArchivedAgent<T = AgentPurgeResponse>(agentId: string): Promise<T> {
+  return fetchJson<T>(`/api/agents/${encodeURIComponent(agentId)}/purge`, {
+    method: "DELETE",
+  });
+}
+
+export function listPromptTemplates<T = PromptTemplateWorkspace>(options?: {
+  includeInactive?: boolean;
+}): Promise<T> {
+  const search = new URLSearchParams();
+  if (options?.includeInactive) {
+    search.set("includeInactive", "true");
+  }
+  const suffix = search.toString();
+  return fetchJson<T>(suffix ? `/api/prompt-templates?${suffix}` : "/api/prompt-templates");
+}
+
+export function fetchPromptTemplate(templateId: string): Promise<PromptTemplate> {
+  return fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(templateId)}`);
+}
+
+export function updatePromptTemplate(
+  templateId: string,
+  payload: Record<string, unknown>,
+): Promise<PromptTemplate> {
+  return fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(templateId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resetPromptTemplate(templateId: string): Promise<PromptTemplate> {
+  return fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(templateId)}/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export function validateAgentToolPolicy(
+  agentId: string,
+  toolPolicy: Record<string, unknown>,
+): Promise<AgentToolPolicyConfiguration> {
+  return fetchJson<AgentToolPolicyConfiguration>(
+    `/api/agents/${encodeURIComponent(agentId)}/tool-policy/validate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toolPolicy }),
+    },
+  );
+}
+
+export function updateAgentToolPolicy(
+  agentId: string,
+  payload: {
+    toolPolicy: Record<string, unknown>;
+    expectedAgentUpdatedAt: string;
+    expectedPolicyFingerprint: string;
+    confirmed: boolean;
+  },
+): Promise<AgentToolPolicyConfiguration> {
+  return fetchJson<AgentToolPolicyConfiguration>(
+    `/api/agents/${encodeURIComponent(agentId)}/tool-policy`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function listAgentProjectMemoryUpdates<T = AgentProjectMemoryUpdateProposal[]>(options: {
+  status: string;
+  limit?: number;
+  agentId?: string;
+  signal?: AbortSignal;
+}): Promise<T> {
+  const search = new URLSearchParams();
+  search.set("status", options.status);
+  search.set("limit", String(options.limit ?? 100));
+  if (options.agentId) {
+    search.set("agentId", options.agentId);
+  }
+  return fetchJson<T>(`/api/agents/project-memory-updates?${search.toString()}`, {
+    signal: options.signal,
+  });
+}
+
+export function resolveAgentProjectMemoryUpdate<T = AgentProjectMemoryUpdateProposal>(
+  agentId: string,
+  proposalId: string,
+  payload: { status: string; resolvedBy: string; resolutionNote: string },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/agents/${encodeURIComponent(agentId)}/project-memory-updates/${encodeURIComponent(proposalId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function resolveAgentToolGovernanceRequest(

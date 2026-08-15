@@ -5,19 +5,25 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import { archiveAgent, resetAgent, updateAgent } from "../../api/agents";
-import { fetchJson } from "../../api/client";
+import {
+  archiveAgent,
+  consumeAllAgentInboxMessages,
+  consumeAgentInboxMessage,
+  createAgentToolGovernanceRequest,
+  purgeArchivedAgent,
+  resetAgent,
+  resolveAgentCenterToolGovernanceRequest,
+  updateAgent,
+  updateAgentAvatar,
+  updateAgentModeMembership,
+  uploadAgentAvatarImage,
+} from "../../api/agents";
 import { queryKeys } from "../../api/queryKeys";
 import type {
-  AgentAvatarUploadResponse,
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AgentDelegationPolicy,
-  AgentInboxMessage,
-  AgentModeBindings,
-  AgentPurgeResponse,
   AgentSupervisionPolicy,
-  AgentToolGovernanceRequest,
   MemoryPolicy,
   ToolPolicy,
 } from "../../api/types";
@@ -163,10 +169,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const purgeAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      fetchJson<AgentPurgeResponse>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/purge`,
-        { method: "DELETE" },
-      ),
+      purgeArchivedAgent(payload.agentId),
     onMutate: async (payload) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
       const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
@@ -252,13 +255,9 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateAvatarMutation = useMutation({
     mutationFn: (payload: { agentId: string; avatarImagePath?: string; resetToDefault?: boolean }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}/avatar`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          avatarImagePath: payload.avatarImagePath ?? "",
-          resetToDefault: Boolean(payload.resetToDefault),
-        }),
+      updateAgentAvatar(payload.agentId, {
+        avatarImagePath: payload.avatarImagePath,
+        resetToDefault: payload.resetToDefault,
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -275,14 +274,10 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const uploadAvatarMutation = useMutation({
     mutationFn: async (payload: { agentId: string; file: File }) =>
-      fetchJson<AgentAvatarUploadResponse>(`/api/agents/${encodeURIComponent(payload.agentId)}/avatar-image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: payload.file.name,
-          contentType: payload.file.type || "image/png",
-          dataBase64: options.encodeArrayBufferBase64(await payload.file.arrayBuffer()),
-        }),
+      uploadAgentAvatarImage(payload.agentId, {
+        filename: payload.file.name,
+        contentType: payload.file.type || "image/png",
+        dataBase64: options.encodeArrayBufferBase64(await payload.file.arrayBuffer()),
       }),
     onSuccess: (result) => {
       const agent = result.agent as AgentConfigWorkspaceAgent;
@@ -301,11 +296,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateMembershipMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: AgentModeMembershipDraft }) =>
-      fetchJson<AgentModeBindings>(`/api/agents/${encodeURIComponent(payload.agentId)}/mode-membership`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload.draft),
-      }),
+      updateAgentModeMembership(payload.agentId, { ...payload.draft }),
     onSuccess: (payload, variables) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
@@ -363,18 +354,14 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       draft: any;
       delta: any;
     }) =>
-      fetchJson<AgentToolGovernanceRequest>(`/api/agents/${encodeURIComponent(payload.agentId)}/tool-governance-requests`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          proposedByAgentId: payload.draft.proposedByAgentId,
-          grantTools: options.sortedIds(payload.delta.grantTools),
-          revokeTools: options.sortedIds(payload.delta.revokeTools),
-          blockTools: options.sortedIds(payload.delta.blockTools),
-          unblockTools: options.sortedIds(payload.delta.unblockTools),
-          reason: payload.draft.reason,
-          applyMode: payload.draft.applyMode,
-        }),
+      createAgentToolGovernanceRequest(payload.agentId, {
+        proposedByAgentId: payload.draft.proposedByAgentId,
+        grantTools: options.sortedIds(payload.delta.grantTools),
+        revokeTools: options.sortedIds(payload.delta.revokeTools),
+        blockTools: options.sortedIds(payload.delta.blockTools),
+        unblockTools: options.sortedIds(payload.delta.unblockTools),
+        reason: payload.draft.reason,
+        applyMode: payload.draft.applyMode,
       }),
     onSuccess: (request) => {
       options.setNotice({
@@ -391,18 +378,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const resolveToolGovernanceMutation = useMutation({
     mutationFn: (payload: { agentId: string; requestId: string; decision: "approve" | "reject" }) =>
-      fetchJson<AgentToolGovernanceRequest>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/tool-governance-requests/${encodeURIComponent(payload.requestId)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            decision: payload.decision,
-            resolvedBy: "user",
-            resolutionNote: payload.decision,
-          }),
-        },
-      ),
+      resolveAgentCenterToolGovernanceRequest(payload.agentId, payload.requestId, payload.decision),
     onSuccess: () => {
       options.setNotice({ tone: "success", text: options.copy.toolGovernanceResolved });
       void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
@@ -482,17 +458,10 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const consumeMessageMutation = useMutation({
     mutationFn: (payload: { agentId: string; messageId: string; sessionId: string }) =>
-      fetchJson<AgentInboxMessage>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/messages/${encodeURIComponent(payload.messageId)}/consume`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            consumedBySessionId: payload.sessionId,
-            consumedByTurnId: "agent-center",
-          }),
-        },
-      ),
+      consumeAgentInboxMessage(payload.agentId, payload.messageId, {
+        consumedBySessionId: payload.sessionId,
+        consumedByTurnId: "agent-center",
+      }),
     onSuccess: (_message, variables) => {
       options.setNotice({
         tone: "success",
@@ -508,17 +477,15 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const consumeAllMessagesMutation = useMutation({
     mutationFn: (payload: { agentId: string; sessionId: string }) =>
-      fetchJson<{ agentId: string; consumed: boolean; consumedCount: number; remainingPendingCount: number }>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/messages/consume-all`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            consumedBySessionId: payload.sessionId,
-            consumedByTurnId: "agent-center",
-          }),
-        },
-      ),
+      consumeAllAgentInboxMessages<{
+        agentId: string;
+        consumed: boolean;
+        consumedCount: number;
+        remainingPendingCount: number;
+      }>(payload.agentId, {
+        consumedBySessionId: payload.sessionId,
+        consumedByTurnId: "agent-center",
+      }),
     onSuccess: (result, variables) => {
       options.setNotice({
         tone: "success",
