@@ -1,7 +1,12 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import { createSessionChatReviewCandidate } from "../../api/chat";
+import {
+  createChatSession,
+  createSessionChatReviewCandidate,
+  deleteChatSession,
+  updateChatSession,
+} from "../../api/chat";
 import { fetchJson } from "../../api/client";
 import {
   revokeProjectAgentBusMessage,
@@ -253,14 +258,7 @@ export function useChatWorkspaceLifecycle({
 }: UseChatWorkspaceLifecycleOptions): UseChatWorkspaceLifecycleResult {
   const createSessionMutation = useMutation({
     mutationFn: async ({ agentId }: { agentId: string }) =>
-      fetchJson<SessionDetail>("/api/sessions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Prefer: "respond-async",
-        },
-        body: JSON.stringify({ agentId }),
-      }),
+      createChatSession({ agentId }),
     onMutate: async ({ agentId }) => {
       // T0: mint a local temp tab + empty transcript immediately (ChatGPT-style).
       // Real id arrives on success; UI must stay interactive while POST is in flight.
@@ -473,11 +471,7 @@ export function useChatWorkspaceLifecycle({
       ]);
       if (keepDraft && keepFocusOnCreated) {
         // Persist the draft name once the real id exists (temp shells cannot PATCH).
-        void fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(nextId)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title }),
-        }).then((renamed) => {
+        void updateChatSession(nextId, { title }).then((renamed) => {
           const confirmedTitle = String(renamed.title || title).trim() || title;
           const confirmedDetail = {
             ...seededDetail,
@@ -736,12 +730,7 @@ export function useChatWorkspaceLifecycle({
 
   const deleteSessionMutation = useMutation({
     mutationFn: async ({ sessionId }: { sessionId: string }) =>
-      fetchJson<SessionDeleteResponse>(`/api/sessions/${sessionId}`, {
-        method: "DELETE",
-        headers: {
-          Prefer: "respond-async",
-        },
-      }),
+      deleteChatSession(sessionId),
     onMutate: async (variables) => {
       // Do not await cancelQueries — waiting freezes tab switching while list
       // queries settle. Optimistic UI must apply immediately.
@@ -952,13 +941,7 @@ export function useChatWorkspaceLifecycle({
 
   const renameSessionMutation = useMutation({
     mutationFn: async ({ sessionId, title }: { sessionId: string; title: string }) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ title }),
-      }),
+      updateChatSession(sessionId, { title }),
     onMutate: (variables) => {
       const updatedAt = new Date().toISOString();
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());

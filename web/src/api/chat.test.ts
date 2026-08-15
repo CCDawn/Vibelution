@@ -21,6 +21,20 @@ describe("Chat session tool approval API", () => {
     expect(mutationSource).not.toContain("/tool-approvals/");
   });
 
+  it("owns session catalog transport outside chat route hooks", () => {
+    expect(apiSource).toContain("/api/sessions/query");
+    expect(apiSource).toContain("/api/sessions/bootstrap?limit=50");
+    expect(apiSource).toContain("/api/sessions/active");
+    expect(apiSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
+    expect(apiSource).toContain('method: "PATCH"');
+    expect(apiSource).toContain('method: "DELETE"');
+    expect(lifecycleSource).toContain("createChatSession");
+    expect(lifecycleSource).toContain("deleteChatSession");
+    expect(lifecycleSource).toContain("updateChatSession");
+    expect(lifecycleSource).not.toContain('fetchJson<SessionDetail>("/api/sessions"');
+    expect(lifecycleSource).not.toContain('fetchJson<SessionDeleteResponse>(`/api/sessions/${sessionId}`');
+  });
+
   it("owns review-candidate transport outside the chat lifecycle hook", () => {
     expect(apiSource).toContain("/chat-review-candidate");
     expect(apiSource).toContain('method: "POST"');

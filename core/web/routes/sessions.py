@@ -12,6 +12,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 
+from core.web.routes.session_catalog_models import (
+    ChatWorkbenchBootstrapResponse,
+    SessionActiveResponse,
+    SessionCatalogItem,
+    SessionDeleteResponse,
+    SessionQueryResponse,
+)
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.session.tool_approvals import (
     ToolApprovalConflictError,
@@ -197,18 +204,30 @@ class SessionToolApprovalDecisionPayload(BaseModel):
     decision: Literal["accept", "acceptForSession", "acceptAlways", "decline", "cancel"]
 
 
-@router.get("/sessions")
+@router.get(
+    "/sessions",
+    response_model=list[SessionCatalogItem],
+    response_model_exclude_unset=True,
+)
 def sessions() -> list[dict]:
     return list_sessions()
 
 
-@router.get("/sessions/active")
+@router.get(
+    "/sessions/active",
+    response_model=SessionActiveResponse,
+    response_model_exclude_unset=True,
+)
 def active_session() -> dict[str, str]:
     summary = get_active_session_summary() or {}
     return {"activeSessionId": str(summary.get("id") or "").strip()}
 
 
-@router.get("/sessions/query")
+@router.get(
+    "/sessions/query",
+    response_model=SessionQueryResponse,
+    response_model_exclude_unset=True,
+)
 def session_query(
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str = "",
@@ -229,7 +248,11 @@ def session_query(
     )
 
 
-@router.get("/sessions/bootstrap")
+@router.get(
+    "/sessions/bootstrap",
+    response_model=ChatWorkbenchBootstrapResponse,
+    response_model_exclude_unset=True,
+)
 def session_bootstrap(
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str = "",
@@ -246,7 +269,12 @@ def session_bootstrap(
     )
 
 
-@router.post("/sessions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/sessions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_create(
     request: Request,
     payload: SessionCreatePayload | None = None,
@@ -303,7 +331,11 @@ def session_reasoning_effort_update(session_id: str, payload: SessionReasoningEf
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/select")
+@router.post(
+    "/sessions/{session_id}/select",
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_select(session_id: str, request: Request) -> dict:
     try:
         prefer = str(request.headers.get("prefer") or "").lower()
@@ -345,7 +377,11 @@ def session_create_child_session(session_id: str, payload: ChildSessionCreatePay
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/sessions/{session_id}")
+@router.patch(
+    "/sessions/{session_id}",
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_update(session_id: str, payload: SessionUpdatePayload) -> dict:
     try:
         if payload.agentId is not None:
@@ -361,7 +397,11 @@ def session_update(session_id: str, payload: SessionUpdatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/sessions/{session_id}")
+@router.delete(
+    "/sessions/{session_id}",
+    response_model=SessionDeleteResponse,
+    response_model_exclude_unset=True,
+)
 def session_delete(session_id: str, request: Request) -> dict:
     try:
         if "respond-async" in str(request.headers.get("prefer") or "").lower():
@@ -375,7 +415,7 @@ def session_delete(session_id: str, request: Request) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/sessions/{session_id}/events")
+@router.get("/sessions/{session_id}/events", response_class=StreamingResponse)
 async def session_events(session_id: str, initial: str = Query("light")) -> StreamingResponse:
     try:
         initial_mode, detail, initial_state = await asyncio.get_running_loop().run_in_executor(
@@ -401,7 +441,7 @@ async def session_events(session_id: str, initial: str = Query("light")) -> Stre
     )
 
 
-@router.get("/sessions/{session_id}/artifacts/{artifact_id}")
+@router.get("/sessions/{session_id}/artifacts/{artifact_id}", response_class=FileResponse)
 def session_image_artifact(
     session_id: str,
     artifact_id: str,

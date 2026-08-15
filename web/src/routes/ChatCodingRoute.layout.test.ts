@@ -623,7 +623,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("selectDirectSessionMutation");
     expect(routeSource).toContain("useChatSessionSelection");
     expect(routeSource).toContain("useChatRouteSelection");
-    expect(routeAndSelectionSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
+    expect(chatApiSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
+    expect(routeAndSelectionSource).toContain("selectChatSession(sessionId)");
     // The committed route is the only select input; clicks delegate to openSession.
     expect(routeAndActionsSource).toContain("chatRoute.openSession(normalizedSessionId)");
     expect(routeAndSelectionSource).toContain("routeSessionId");
@@ -1911,8 +1912,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps Agent rebinding out of chat while allowing new sessions for the selected Agent", () => {
     expect(routeAndLifecycleSource).toContain("const createSessionMutation");
-    expect(routeAndLifecycleSource).toContain('fetchJson<SessionDetail>("/api/sessions"');
-    expect(routeAndLifecycleSource).toContain('Prefer: "respond-async"');
+    expect(chatApiSource).toContain('fetchJson<SessionDetail>("/api/sessions"');
+    expect(chatApiSource).toContain('Prefer: "respond-async"');
+    expect(routeAndLifecycleSource).toContain("createChatSession({ agentId })");
     expect(routeAndLifecycleSource).toContain("mergeSessionDetailIntoSummaries");
     expect(routeAndLifecycleSource).toContain("updateAgentSessionSummaryCaches");
     expect(routeAndLifecycleSource).toContain("pinSessionCreatePreserve");
@@ -3283,9 +3285,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("bootstraps the first-paint catalog once before fallback catalog queries", () => {
     expect(routeSource).toContain('queryKey: ["sessions", "active-bootstrap"]');
-    expect(routeSource).toContain(
-      'fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50", { signal })',
-    );
+    expect(chatApiSource).toContain('fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50"');
+    expect(routeSource).toContain("fetchChatWorkbenchBootstrap({ signal })");
     expect(routeSource).toContain("queryClient.setQueryData(queryKeys.agents(), payload.agents)");
     expect(routeSource).toContain("queryClient.setQueryData(queryKeys.conversations(), payload.conversations)");
     expect(routeSource).toContain('queryKeys.sessionQuery("", 50)');
@@ -3403,7 +3404,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(deleteMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
       deleteMutationSource.indexOf("void chatWorkspaceCache.afterSessionDeleted({"),
     );
-    expect(deleteMutationSource).toContain("Prefer: \"respond-async\"");
+    expect(deleteMutationSource).toContain("deleteChatSession(sessionId)");
+    expect(chatApiSource).toContain('method: "DELETE"');
+    expect(chatApiSource).toContain('Prefer: "respond-async"');
     expect(deleteMutationSource).toContain("onMutate: async (variables)");
     // cancelQueries must not be awaited — that froze tab switching during delete.
     expect(deleteMutationSource).toContain("void queryClient.cancelQueries({ queryKey: queryKeys.sessions() })");
