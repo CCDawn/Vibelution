@@ -28,12 +28,18 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { Query } from "@tanstack/react-query";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { SessionDetail, SessionSummary, SessionToolApprovalRequest } from "../../api/types";
 import {
+  clearSessionDetailPaintCacheForTests,
+  rememberSessionDetailPaint,
+  resolveStickySessionDetailPaint,
+} from "./chatSessionPaintCache";
+import {
   sessionDetailStructuralSharing,
   useSessionToolApprovalsRefetchInterval,
+  useStableSessionDetailPaint,
   useStableSessionDetailPlaceholder,
 } from "./ChatCodingRouteWorkbench";
 
@@ -53,8 +59,14 @@ type RefetchIntervalInput = {
 
 type RefetchIntervalResolver = ReturnType<typeof useSessionToolApprovalsRefetchInterval>;
 
+type PaintInput = {
+  activeSessionId: string | null;
+  detail: SessionDetail | undefined;
+};
+
 let snapshots: Array<{ placeholder: SessionDetail | undefined }> = [];
 let intervalSnapshots: Array<{ refetchInterval: RefetchIntervalResolver }> = [];
+let paintSnapshots: Array<{ detail: SessionDetail | undefined }> = [];
 
 function Host({ input }: { input: PlaceholderInput }) {
   const placeholder = useStableSessionDetailPlaceholder(input);
@@ -65,6 +77,12 @@ function Host({ input }: { input: PlaceholderInput }) {
 function IntervalHost({ input }: { input: RefetchIntervalInput }) {
   const refetchInterval = useSessionToolApprovalsRefetchInterval(input);
   intervalSnapshots.push({ refetchInterval });
+  return null;
+}
+
+function PaintHost({ input }: { input: PaintInput }) {
+  const detail = useStableSessionDetailPaint(input);
+  paintSnapshots.push({ detail });
   return null;
 }
 
@@ -115,6 +133,45 @@ function rerenderInterval(input: RefetchIntervalInput) {
   });
 }
 
+function mountPaint(input: PaintInput) {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => {
+    root!.render(React.createElement(PaintHost, { input }));
+  });
+}
+
+function rerenderPaint(input: PaintInput) {
+  act(() => {
+    root!.render(React.createElement(PaintHost, { input }));
+  });
+}
+
+function stickyDetailFor(id: string, count: number): SessionDetail {
+  return {
+    id,
+    title: id,
+    messages: Array.from({ length: count }, (_, index) => ({
+      id: `${id}-m${index}`,
+      role: index % 2 === 0 ? "assistant" : "user",
+      content: `message ${index}`,
+      timestamp: "2026-08-15T10:00:00Z",
+    })),
+    messageWindow: {
+      mode: "window",
+      totalMessages: count,
+      returnedMessages: count,
+      oldestMessageIndex: 0,
+      newestMessageIndex: count - 1,
+      hasEarlier: false,
+      hasLater: false,
+      transcriptScope: "window",
+    },
+    provisionalTranscript: undefined,
+  } as SessionDetail;
+}
+
 function intervalFor(
   snapshot: { refetchInterval: RefetchIntervalResolver },
   data: SessionToolApprovalRequest[] | undefined,
@@ -124,6 +181,11 @@ function intervalFor(
   } as unknown as Query<SessionToolApprovalRequest[]>);
 }
 
+beforeEach(() => {
+  clearSessionDetailPaintCacheForTests();
+  paintSnapshots = [];
+});
+
 afterEach(() => {
   act(() => {
     root?.unmount();
@@ -132,6 +194,7 @@ afterEach(() => {
   container?.remove();
   snapshots = [];
   intervalSnapshots = [];
+  paintSnapshots = [];
 });
 
 describe("ChatCodingRouteWorkbench update-depth regression", () => {
@@ -340,5 +403,71 @@ describe("sessionToolApprovals refetchInterval stability", () => {
     expect(inactive.refetchInterval).not.toBe(busy.refetchInterval);
     expect(intervalFor(inactive, [pendingApproval])).toBe(false);
     expect(intervalFor(inactive, undefined)).toBe(false);
+  });
+});
+
+describe("useStableSessionDetailPaint sticky-paint stability", () => {
+  it("reproduces the pre-fix churn where resolveStickySessionDetailPaint rebuilds detail/messages references for identical inputs", () => {
+    rememberSessionDetailPaint(stickyDetailFor("s1", 4));
+    const live = stickyDetailFor("s1", 2);
+
+    const first = resolveStickySessionDetailPaint({ activeSessionId: "s1", detail: live });
+    const second = resolveStickySessionDetailPaint({ activeSessionId: "s1", detail: live });
+
+    expect(first).toBeDefined();
+    // Pre-fix: the merged sticky+live paint is rebuilt on every call, so a no-op
+    // parent rerender hands downstream effects a brand-new detail/messages pair
+    // and the token-speed effect re-fires setTokenSpeedTracker endlessly.
+    expect(second).not.toBe(first);
+    expect(second?.messages).not.toBe(first?.messages);
+  });
+
+  it("keeps a stable sticky paint detail/messages reference across no-op parent rerenders", () => {
+    rememberSessionDetailPaint(stickyDetailFor("s1", 4));
+    const input: PaintInput = { activeSessionId: "s1", detail: stickyDetailFor("s1", 2) };
+    mountPaint(input);
+    const first = paintSnapshots.at(-1)!;
+    expect(first.detail).toBeDefined();
+    // Sticky transcript is folded into the paint while the live window hydrates.
+    expect(first.detail?.messages?.length).toBeGreaterThanOrEqual(4);
+
+    // Same logical inputs behind a fresh props object: the no-op parent rerender
+    // that previously handed downstream effects a fresh detail/messages pair.
+    rerenderPaint({ ...input });
+    expect(paintSnapshots.at(-1)!.detail).toBe(first.detail);
+    expect(paintSnapshots.at(-1)!.detail?.messages).toBe(first.detail?.messages);
+    rerenderPaint({ ...input });
+    expect(paintSnapshots.at(-1)!.detail).toBe(first.detail);
+    expect(paintSnapshots.at(-1)!.detail?.messages).toBe(first.detail?.messages);
+    rerenderPaint({ ...input });
+    expect(paintSnapshots.at(-1)!.detail).toBe(first.detail);
+    expect(paintSnapshots.at(-1)!.detail?.messages).toBe(first.detail?.messages);
+  });
+
+  it("recomputes the sticky paint when the raw session detail reference changes", () => {
+    rememberSessionDetailPaint(stickyDetailFor("s1", 4));
+    mountPaint({ activeSessionId: "s1", detail: stickyDetailFor("s1", 2) });
+    const first = paintSnapshots.at(-1)!.detail;
+
+    // A genuinely new live window (new reference) must re-resolve the paint.
+    rerenderPaint({ activeSessionId: "s1", detail: stickyDetailFor("s1", 3) });
+    const second = paintSnapshots.at(-1)!.detail;
+    expect(second).not.toBe(first);
+    // Sticky semantics preserved: the richer sticky history survives the merge.
+    expect(second?.messages?.length).toBeGreaterThanOrEqual(4);
+    expect(second?.messages?.some((message) => message.id === "s1-m3")).toBe(true);
+  });
+
+  it("recomputes the sticky paint when the active session id changes", () => {
+    rememberSessionDetailPaint(stickyDetailFor("s1", 4));
+    rememberSessionDetailPaint(stickyDetailFor("s2", 1));
+    mountPaint({ activeSessionId: "s1", detail: stickyDetailFor("s1", 2) });
+    const first = paintSnapshots.at(-1)!.detail;
+
+    rerenderPaint({ activeSessionId: "s2", detail: stickyDetailFor("s2", 1) });
+    const second = paintSnapshots.at(-1)!.detail;
+    expect(second).not.toBe(first);
+    expect(second?.id).toBe("s2");
+    expect(second?.messages?.length).toBeGreaterThanOrEqual(1);
   });
 });
