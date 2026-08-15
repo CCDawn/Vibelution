@@ -194,6 +194,26 @@ def agent_message_tool(
                 metadata=metadata,
             )
             if research_org_result is not None:
+                missing_intent = (
+                    str(research_org_result.get("reason") or "").strip() == "research_org_intent_required"
+                )
+                if not missing_intent or _research_org_route_claimed(metadata):
+                    return _json_result(research_org_result)
+                same_team_fallback = _try_send_same_team_message(
+                    source_agent=source_agent_payload,
+                    target_agent=target_agent_payload,
+                    source_agent_id=source_agent_id,
+                    source_session_id=source_session_id,
+                    target_agent_id=target_agent_id,
+                    target_session_id=normalized_target_session,
+                    content=message_body,
+                    summary=summary,
+                    wake_target=wake_target,
+                    thread_id=thread_id,
+                    metadata=metadata,
+                )
+                if same_team_fallback is not None:
+                    return _json_result(same_team_fallback)
                 return _json_result(research_org_result)
             same_team_result = _try_send_same_team_message(
                 source_agent=source_agent_payload,
@@ -832,6 +852,13 @@ def _research_org_kernel_trace_fields(delivery: dict[str, Any]) -> dict[str, Any
         "adapterVersion": str(delivery.get("kernelAdapterVersion") or "").strip(),
         "reused": bool(delivery.get("kernelReused")),
     }
+
+
+def _research_org_route_claimed(metadata: dict[str, Any]) -> bool:
+    return bool(
+        _metadata_text(metadata, "researchOrgMessageType", "messageType")
+        or _metadata_text(metadata, "researchOrgIntent", "intent")
+    )
 
 
 def _metadata_text(metadata: dict[str, Any], *keys: str) -> str:
