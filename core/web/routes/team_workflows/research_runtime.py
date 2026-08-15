@@ -64,6 +64,25 @@ from core.web.services.team_workflow.research_runtime.service import (
 )
 
 from ._router import router
+from .research_runtime_models import (
+    ResearchWorkflowBindingConfigResponse,
+    ResearchWorkflowBudgetResponse,
+    ResearchWorkflowCampaignListResponse,
+    ResearchWorkflowCommandReceiptResponse,
+    ResearchWorkflowCreateRunResponse,
+    ResearchWorkflowDefinitionResponse,
+    ResearchWorkflowEffectiveBindingsResponse,
+    ResearchWorkflowEvaluationResponse,
+    ResearchWorkflowEventPageResponse,
+    ResearchWorkflowHandoffDetailResponse,
+    ResearchWorkflowHandoffListResponse,
+    ResearchWorkflowHypothesisListResponse,
+    ResearchWorkflowLaunchOptionsResponse,
+    ResearchWorkflowLedgerResponse,
+    ResearchWorkflowNodeDetailResponse,
+    ResearchWorkflowRunListResponse,
+    ResearchWorkflowRunSnapshotResponse,
+)
 
 
 class TeamScopedPayload(BaseModel):
@@ -208,7 +227,11 @@ def _map_query_error(exc: Exception) -> HTTPException:
     )
 
 
-@router.get("/research/workflows/{workflow_id}/definition")
+@router.get(
+    "/research/workflows/{workflow_id}/definition",
+    response_model=ResearchWorkflowDefinitionResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_definition(workflow_id: str) -> dict:
     try:
         return _svc().get_definition(workflow_id)
@@ -216,7 +239,11 @@ def research_workflow_definition(workflow_id: str) -> dict:
         raise _map_error(exc) from exc
 
 
-@router.get("/research/workflows/{workflow_id}/runs")
+@router.get(
+    "/research/workflows/{workflow_id}/runs",
+    response_model=ResearchWorkflowRunListResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_runs(
     workflow_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -230,7 +257,11 @@ def research_workflow_runs(
         raise _map_query_error(exc) from exc
 
 
-@router.get("/research/workflows/{workflow_id}/launch-options")
+@router.get(
+    "/research/workflows/{workflow_id}/launch-options",
+    response_model=ResearchWorkflowLaunchOptionsResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_launch_options(
     workflow_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -244,7 +275,11 @@ def research_workflow_launch_options(
         raise _map_error(exc) from exc
 
 
-@router.get("/research/workflows/{workflow_id}/agent-bindings/effective")
+@router.get(
+    "/research/workflows/{workflow_id}/agent-bindings/effective",
+    response_model=ResearchWorkflowEffectiveBindingsResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_effective_bindings(
     workflow_id: str,
     # Keep the canonical camel-case contract identical to the runs endpoint.
@@ -256,7 +291,11 @@ def research_workflow_effective_bindings(
         raise _map_error(exc) from exc
 
 
-@router.put("/research/workflows/{workflow_id}/agent-bindings")
+@router.put(
+    "/research/workflows/{workflow_id}/agent-bindings",
+    response_model=ResearchWorkflowBindingConfigResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_put_binding_config(
     workflow_id: str,
     payload: AgentBindingConfigPayload,
@@ -271,7 +310,12 @@ def research_workflow_put_binding_config(
         raise _map_error(exc) from exc
 
 
-@router.post("/research/workflows/{workflow_id}/runs", status_code=201)
+@router.post(
+    "/research/workflows/{workflow_id}/runs",
+    status_code=201,
+    response_model=ResearchWorkflowCreateRunResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_create_run(workflow_id: str, payload: CreateRunPayload) -> dict:
     try:
         return create_question_run(
@@ -287,7 +331,11 @@ def research_workflow_create_run(workflow_id: str, payload: CreateRunPayload) ->
         raise _map_error(exc) from exc
 
 
-@router.get("/research/workflow-runs/{run_id}/snapshot")
+@router.get(
+    "/research/workflow-runs/{run_id}/snapshot",
+    response_model=ResearchWorkflowRunSnapshotResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_run_snapshot(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -302,7 +350,11 @@ def research_workflow_run_snapshot(
         raise _map_query_error(exc) from exc
 
 
-@router.get("/research/workflow-runs/{run_id}/nodes/{node_id}")
+@router.get(
+    "/research/workflow-runs/{run_id}/nodes/{node_id}",
+    response_model=ResearchWorkflowNodeDetailResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_node_detail(
     run_id: str,
     node_id: str,
@@ -318,7 +370,11 @@ def research_workflow_node_detail(
         raise _map_query_error(exc) from exc
 
 
-@router.get("/research/workflow-runs/{run_id}/events")
+@router.get(
+    "/research/workflow-runs/{run_id}/events",
+    response_model=ResearchWorkflowEventPageResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_events(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -345,7 +401,10 @@ def research_workflow_events(
         raise _map_query_error(exc) from exc
 
 
-@router.get("/research/workflow-runs/{run_id}/stream")
+@router.get(
+    "/research/workflow-runs/{run_id}/stream",
+    response_class=StreamingResponse,
+)
 def research_workflow_event_stream(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -395,7 +454,11 @@ def _snapshot_or_raise(run_id: str, team_id: str):
         raise _map_query_error(exc) from exc
 
 
-@router.get("/research/workflow-runs/{run_id}/handoffs")
+@router.get(
+    "/research/workflow-runs/{run_id}/handoffs",
+    response_model=ResearchWorkflowHandoffListResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_handoffs(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -403,7 +466,11 @@ def research_workflow_handoffs(
     return project_handoffs(_snapshot_or_raise(run_id, team_id))
 
 
-@router.get("/research/workflow-runs/{run_id}/research-ledger")
+@router.get(
+    "/research/workflow-runs/{run_id}/research-ledger",
+    response_model=ResearchWorkflowLedgerResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_research_ledger(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -414,7 +481,11 @@ def research_workflow_research_ledger(
         raise _map_error(exc) from exc
 
 
-@router.get("/research/workflow-runs/{run_id}/budget")
+@router.get(
+    "/research/workflow-runs/{run_id}/budget",
+    response_model=ResearchWorkflowBudgetResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_budget(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -422,7 +493,11 @@ def research_workflow_budget(
     return project_budget_from_snapshot(_snapshot_or_raise(run_id, team_id))
 
 
-@router.get("/research/workflow-runs/{run_id}/hypotheses")
+@router.get(
+    "/research/workflow-runs/{run_id}/hypotheses",
+    response_model=ResearchWorkflowHypothesisListResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_hypotheses(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -430,7 +505,11 @@ def research_workflow_hypotheses(
     return project_hypotheses_from_snapshot(_snapshot_or_raise(run_id, team_id))
 
 
-@router.get("/research/workflow-runs/{run_id}/experiment-campaigns")
+@router.get(
+    "/research/workflow-runs/{run_id}/experiment-campaigns",
+    response_model=ResearchWorkflowCampaignListResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_experiment_campaigns(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -438,7 +517,11 @@ def research_workflow_experiment_campaigns(
     return project_campaigns_from_snapshot(_snapshot_or_raise(run_id, team_id))
 
 
-@router.get("/research/workflow-runs/{run_id}/evaluation")
+@router.get(
+    "/research/workflow-runs/{run_id}/evaluation",
+    response_model=ResearchWorkflowEvaluationResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_evaluation(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
@@ -446,7 +529,11 @@ def research_workflow_evaluation(
     return project_evaluation_from_snapshot(_snapshot_or_raise(run_id, team_id))
 
 
-@router.get("/research/workflow-runs/{run_id}/handoffs/{handoff_id}")
+@router.get(
+    "/research/workflow-runs/{run_id}/handoffs/{handoff_id}",
+    response_model=ResearchWorkflowHandoffDetailResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_handoff_detail(
     run_id: str,
     handoff_id: str,
@@ -461,7 +548,12 @@ def research_workflow_handoff_detail(
         ) from exc
 
 
-@router.post("/research/workflow-runs/{run_id}/commands", status_code=202)
+@router.post(
+    "/research/workflow-runs/{run_id}/commands",
+    status_code=202,
+    response_model=ResearchWorkflowCommandReceiptResponse,
+    response_model_exclude_unset=True,
+)
 def research_workflow_command(
     run_id: str,
     payload: CommandPayload,

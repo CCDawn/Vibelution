@@ -17,6 +17,14 @@ export type SessionTeamBinding = {
   purpose?: string;
 };
 
+export function sessionTeamBindingAriaLabel(binding: SessionTeamBinding, lang: "zh" | "en"): string {
+  const teamTitle = binding.teamName || binding.teamId;
+  if (!binding.teamId) {
+    return lang === "zh" ? `已绑定团队：${teamTitle}` : `Bound team: ${teamTitle}`;
+  }
+  return lang === "zh" ? `打开团队：${teamTitle}` : `Open team: ${teamTitle}`;
+}
+
 function isActiveTeamStatus(status: string | undefined) {
   const normalized = String(status || "active").trim().toLowerCase();
   return !normalized || normalized === "active";
@@ -81,7 +89,7 @@ export function SessionTeamBindingTag({
   const label = lang === "zh" ? "团队" : "Team";
   const teamTitle = binding.teamName || binding.teamId;
   const tooltip = [teamTitle, binding.purpose].filter(Boolean).join("\n");
-  const ariaLabel = lang === "zh" ? `打开团队：${teamTitle}` : `Open team: ${teamTitle}`;
+  const ariaLabel = sessionTeamBindingAriaLabel(binding, lang);
   const handleActivate = (event: MouseEvent) => {
     event.stopPropagation();
   };
