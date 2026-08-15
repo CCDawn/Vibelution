@@ -12,13 +12,18 @@ _started: dict[str, str] | None = None
 
 
 def capture_launcher_start_identity() -> dict[str, str]:
-    """Record the Git identity of this process once, at startup."""
+    """Record the Git identity of this process once, at startup.
+
+    An empty first capture (git unavailable) must not freeze the process as
+    unknown forever; retry until a commit is known.
+    """
 
     global _started
-    if _started is None:
-        identity = _git_identity()
-        identity["startedAt"] = _now_iso()
-        _started = identity
+    if _started is not None and str(_started.get("commit") or "").strip():
+        return dict(_started)
+    identity = _git_identity()
+    identity["startedAt"] = str((_started or {}).get("startedAt") or "") or _now_iso()
+    _started = identity
     return dict(_started)
 
 

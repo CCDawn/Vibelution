@@ -35,7 +35,6 @@ import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desk
 import { applyProjectSlot } from "./protocol/applyProjectSlot.js";
 import {
   fetchLauncherBranchInstances,
-  fetchLauncherFreshness,
   fetchLauncherStatusSummary,
   formatLauncherStatusSummary,
   postLauncherControl,
@@ -81,10 +80,12 @@ import { runPythonJsonBridge } from "./process/pythonJsonBridge.js";
 import {
   decideLauncherShellRestart,
   decidePackagedDesktopShellRefresh,
+  formatTrayLauncherFreshness,
   inspectDesktopShell,
   scheduleDesktopShellRefresh,
   shouldRefreshBeforeLifecycle,
-  thenLifecycleFromDesktopCli
+  thenLifecycleFromDesktopCli,
+  type DesktopShellStatus
 } from "./process/desktopShellFreshness.js";
 import {
   completeBootstrapWithoutWaitingForTelemetry,
@@ -1286,7 +1287,7 @@ function desktopPythonPath(): string {
   return String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
 }
 
-async function inspectCurrentDesktopShell(): Promise<{ stale: boolean; reason: string }> {
+async function inspectCurrentDesktopShell(): Promise<DesktopShellStatus> {
   const pythonPath = desktopPythonPath();
   if (!pythonPath) {
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to inspect the desktop shell");
@@ -2134,10 +2135,11 @@ app.whenReady()
         });
       },
       getFreshness: async () => {
-        return fetchLauncherFreshness({
-          ...(await resolveTrayControlContextOrLoopback()),
-          requestTimeoutMs: 20_000
-        });
+        try {
+          return formatTrayLauncherFreshness(await inspectCurrentDesktopShell());
+        } catch {
+          return { current: null, label: DESKTOP_TRAY_MENU_LABELS.freshnessUnknown };
+        }
       },
       restartLauncher: () => {
         void restartLauncherShell();

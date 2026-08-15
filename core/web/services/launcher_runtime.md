@@ -25,6 +25,7 @@ Electron 壳：[`desktop/electron/README.md`](../../../desktop/electron/README.m
 | Scene 证据包读写 / 诊断 | `runtime_scene/*` · facade `runtime_scene_service.py` | 手写无界 log dump 进 Prompt |
 | 托盘 / 脚本入口 | `scripts/vibelution_launcher.py` · `scripts/vibelution_desktop_entry.py`（JSON CLI bridge） | 后台路径弹 `cmd`/`powershell`/WT |
 | 产品托盘 owner | Electron `desktopTray.ts` + `desktopShellOwner.ts` | 与 WinForms 同时显示 NotifyIcon |
+| 托盘 Launcher 代码版本 | `desktopShellFreshness.ts` `formatTrayLauncherFreshness` ← `desktop-shell-status` | 向工作台 HTTP `/api/launcher/freshness` 问「Launcher 版本」 |
 
 ---
 
