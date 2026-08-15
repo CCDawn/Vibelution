@@ -73,4 +73,21 @@ describe("Chat session tool approval API", () => {
     expect(lifecycleSource).toContain("createSessionChatReviewCandidate");
     expect(lifecycleSource).not.toContain("/chat-review-candidate");
   });
+
+  it("owns chat-room transport outside chat and team hooks", () => {
+    expect(apiSource).toContain("/api/chat-rooms/modes");
+    expect(apiSource).toContain("/api/chat-rooms/purposes");
+    expect(apiSource).toContain("`/api/chat-rooms/${encodeURIComponent(roomId)}`");
+    expect(apiSource).toContain("/rounds");
+    expect(apiSource).toContain("/reset");
+    expect(apiSource).toContain('method: "PATCH"');
+    expect(apiSource).toContain('method: "DELETE"');
+    expect(lifecycleSource).toContain("createChatRoom");
+    expect(lifecycleSource).toContain("startChatRoomRound");
+    expect(lifecycleSource).toContain("stopChatRoomRound");
+    expect(lifecycleSource).toContain("updateChatRoom");
+    expect(lifecycleSource).toContain("deleteChatRoom");
+    expect(lifecycleSource).toContain("resetChatRoom");
+    expect(lifecycleSource).not.toContain("/api/chat-rooms");
+  });
 });
