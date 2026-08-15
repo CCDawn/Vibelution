@@ -3656,7 +3656,7 @@ def test_ensure_runtime_manager_daemon_alive_recycles_stale_running_daemon(monke
         @staticmethod
         def recover_processing_queue():
             calls.append("recover")
-            return ["cmd-stale"]
+            raise AssertionError("the replacement daemon owns startup queue recovery")
 
     monkeypatch.setattr(launcher_service, "is_daemon_running", lambda: True)
     monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: calls.append("ensure") or True)
@@ -3672,8 +3672,34 @@ def test_ensure_runtime_manager_daemon_alive_recycles_stale_running_daemon(monke
 
     assert result["action"] == "restarted"
     assert result["ensured"] is True
-    assert calls == ["ensure", "recover"]
+    assert result["recoveredCommandCount"] == 0
+    assert calls == ["ensure"]
     assert "launcher.daemon.watchdog.restarted" in events
+
+
+def test_terminate_managed_launcher_subtree_only_clears_the_terminated_daemon_pid(monkeypatch):
+    from core.runtime_manager import daemon, process_inventory
+
+    cleared = []
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 202)
+    monkeypatch.setattr(
+        process_inventory,
+        "terminate_workbench_processes",
+        lambda **_kwargs: {"terminated": [202], "remaining": []},
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_mark_persistent_active_work_runs_force_stopped",
+        lambda _reason: [],
+    )
+    monkeypatch.setattr(launcher_service, "clear_pid", lambda expected_pid=None: cleared.append(expected_pid))
+
+    launcher_service._terminate_managed_launcher_subtree(
+        include_runtime_manager=True,
+        reason="desktop_shell_quit",
+    )
+
+    assert cleared == [202]
 
 
 def test_request_launcher_runtime_shutdown_kills_runtime_manager(monkeypatch):
