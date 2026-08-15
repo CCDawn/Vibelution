@@ -104,8 +104,17 @@ def apply_node_run_block(
         )
 
 
+def _normalized_terminal_decision(value: str) -> str:
+    text = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "promote": "promote_candidate",
+        "rollback": "rollback_candidate",
+    }
+    return aliases.get(text, text)
+
+
 def terminal_facts_for_run(run: Any) -> tuple[str, str]:
-    """``(completionKind, terminalReason)`` from the STOP package / governance."""
+    """``(completionKind, terminalReason)`` from the package / governance."""
     snapshot: dict[str, Any] = {}
     if getattr(run, "input_snapshot_json", None):
         try:
@@ -164,8 +173,11 @@ def terminal_facts_for_run(run: Any) -> tuple[str, str]:
     ).strip()
     if not terminal:
         terminal = str(governance.get("terminalReason") or "").strip()
-    if operation in {"rollback", "rollback_candidate"}:
+    kind = _normalized_terminal_decision(operation or decision)
+    if kind == "rollback_candidate":
         return "rolled_back", terminal or "rollback"
+    if kind == "promote_candidate":
+        return "promoted", terminal
     return "stopped", terminal or "formal_runner_unavailable"
 
 
