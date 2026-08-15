@@ -6,6 +6,7 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
+import { fetchConfigWorkspace } from "../../api/config";
 import type {
   ConfigCatalogModel,
   ConfigDraftMeta,
@@ -168,7 +169,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       const detail = providerDiscoveryFailureDetail(error);
       const message = providerDiscoveryFailureMessage(detail).slice(0, 480);
       try {
-        const refreshed = await requestJson<ConfigWorkspace>("/api/config/workspace", undefined, "GET");
+        const refreshed = await fetchConfigWorkspace();
         // Full reload: disk is the new baseline after a failed discover reconciliation.
         syncWorkspace(refreshed, "neutral", { resetBase: true });
       } catch {
