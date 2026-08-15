@@ -10,6 +10,9 @@ import {
   type CliAgentTerminalSession,
 } from "./cliAgentRunModel";
 
+const EMPTY_CLI_AGENT_RUN_TOKENS: string[] = [];
+const EMPTY_MOUNTED_CLI_AGENT_RUN_IDS: string[] = [];
+
 export type UseChatCliAgentTerminalOptions = {
   activeSessionId: string | null | undefined;
   activeCliAgentRunId: string | null | undefined;
@@ -48,7 +51,9 @@ export function useChatCliAgentTerminal({
   const [cliAgentTerminalSessions, setCliAgentTerminalSessions] = useState<Record<string, CliAgentTerminalSession>>({});
   const [mountedCliAgentRunIdsBySession, setMountedCliAgentRunIdsBySession] = useState<Record<string, string[]>>({});
 
-  const closedCliAgentRunTokens = activeSessionId ? (closedCliAgentRunTokensBySession[activeSessionId] ?? []) : [];
+  const closedCliAgentRunTokens = activeSessionId
+    ? (closedCliAgentRunTokensBySession[activeSessionId] ?? EMPTY_CLI_AGENT_RUN_TOKENS)
+    : EMPTY_CLI_AGENT_RUN_TOKENS;
   const closedCliAgentRunTokenSet = useMemo(() => new Set(closedCliAgentRunTokens), [closedCliAgentRunTokens]);
   const cliAgentRunTabs = useMemo(
     () => buildCliAgentRunViews(detailMessages ?? [], activeSessionId ?? "").filter((run) => !closedCliAgentRunTokenSet.has(cliAgentRunCloseToken(run))),
@@ -58,7 +63,9 @@ export function useChatCliAgentTerminal({
     () => activeCliAgentRunId ? cliAgentRunTabs.find((run) => run.id === activeCliAgentRunId) : undefined,
     [activeCliAgentRunId, cliAgentRunTabs],
   );
-  const mountedCliAgentRunIds = activeSessionId ? (mountedCliAgentRunIdsBySession[activeSessionId] ?? []) : [];
+  const mountedCliAgentRunIds = activeSessionId
+    ? (mountedCliAgentRunIdsBySession[activeSessionId] ?? EMPTY_MOUNTED_CLI_AGENT_RUN_IDS)
+    : EMPTY_MOUNTED_CLI_AGENT_RUN_IDS;
   const mountedCliAgentRunIdSet = useMemo(() => {
     const ids = new Set(mountedCliAgentRunIds);
     if (activeCliAgentRun && !groupPanelActive) {
