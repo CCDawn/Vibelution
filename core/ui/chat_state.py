@@ -388,10 +388,19 @@ def load_session_chat_state(project_root: Path, session_id: str) -> dict[str, An
         return repository.get_session_runtime_state(normalized)
 
 
+def list_session_runtime_ids(project_root: Path) -> list[str]:
+    """List session runtime ids without assembling conversation payloads."""
+
+    with _chat_state_repository(project_root) as repository:
+        return list(repository.list_session_runtime_ids())
+
+
 def save_session_chat_state(
     project_root: Path,
     session_id: str,
     conversation: dict[str, Any],
+    *,
+    activate: bool = False,
 ) -> None:
     """Persist one session runtime row without rewriting sibling sessions."""
 
@@ -406,14 +415,25 @@ def save_session_chat_state(
     payload = dict(conversations[0]) if conversations and isinstance(conversations[0], dict) else dict(conversation)
     payload.setdefault("conversation_id", normalized)
     payload.setdefault("conversationId", normalized)
-    with _chat_state_repository(project_root) as repository:
-        result = repository.upsert_session_runtime_state(normalized, payload).result(timeout=5)
+    with chat_state_transaction(project_root):
+        with _chat_state_repository(project_root) as repository:
+            result = repository.upsert_session_runtime_state(
+                normalized,
+                payload,
+                activate=activate,
+            ).result(timeout=5)
     revision = int((result or {}).get("stateRevision") or 0)
     notify_session_catalog_dirty(
         project_root,
         normalized,
         f"state:{revision}",
     )
+    if activate:
+        notify_session_catalog_dirty(
+            project_root,
+            CATALOG_GLOBAL_DIRTY_SESSION_ID,
+            f"state:{revision}",
+        )
 
 
 @contextmanager

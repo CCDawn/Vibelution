@@ -190,7 +190,7 @@ describe("GitRoute layout contract", () => {
   it("reserves loading surfaces for the Git workspace panes", () => {
     expect(routeSource).toContain('queryFn: ({ signal }) => fetchJson<GitStatusSummary>("/api/git/status?limit=500", { signal })');
     expect(routeSource).toContain('queryFn: ({ signal }) => fetchJson<GitCommitsResponse>("/api/git/commits?limit=20", { signal })');
-    expect(routeSource).toContain('queryFn: ({ signal }) => fetchJson<ConfigWorkspace>("/api/config/workspace", { signal })');
+    expect(routeSource).toContain("queryFn: ({ signal }) => fetchConfigWorkspace({ signal })");
     expect(routeSource).toContain('fetchJson<GitFileDiff>(`/api/git/diff?path=${encodeURIComponent(activePath ?? "")}`, { signal })');
     expect(routeSource).toContain('fetchJson<GitObjectDetail>(`/api/git/object-detail?${params.toString()}`, { signal })');
     expect(routeSource).toContain("invalidateQueries({ queryKey: queryKeys.gitStatusSummary() })");

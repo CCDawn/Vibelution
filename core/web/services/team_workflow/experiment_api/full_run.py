@@ -6,13 +6,91 @@ Late-bound facade keeps route imports and monkeypatches on
 
 from __future__ import annotations
 
+import os
 from typing import Any
+
+_FORMAL_EXECUTION_PATH_KEYS = ("pythonExecutable", "dataRoot", "outputRoot")
+_FORMAL_ENV_OPTIONAL_INTS = (
+    ("VIBELUTION_FORMAL_TIMEOUT_SECONDS", "timeoutSeconds"),
+    ("VIBELUTION_FORMAL_TRAIN_SAMPLES", "trainSamples"),
+    ("VIBELUTION_FORMAL_TEST_SAMPLES", "testSamples"),
+    ("VIBELUTION_FORMAL_EPOCHS", "epochs"),
+)
 
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
 
     return team_workflow_orchestration_service
+
+
+def formal_execution_config_is_provisioned(config: dict[str, Any] | None) -> bool:
+    """True when the operator supplied the three explicit local runner paths."""
+    if not isinstance(config, dict):
+        return False
+    return all(str(config.get(key) or "").strip() for key in _FORMAL_EXECUTION_PATH_KEYS)
+
+
+def resolve_formal_execution_config(
+    plan: dict[str, Any] | None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Prefer request payload, then a stored preparation, then process env.
+
+    Workflow canvas retry does not send executionConfig. Cloud/operator
+    provision must still reach ``run_full_run`` without silently bounded-STOP.
+    """
+    request = payload if isinstance(payload, dict) else {}
+    for candidate in (
+        request.get("executionConfig"),
+        _execution_config_from_preparation(plan),
+        _execution_config_from_env(),
+    ):
+        if formal_execution_config_is_provisioned(candidate):
+            return dict(candidate)
+    return dict(request.get("executionConfig") or {}) if isinstance(request.get("executionConfig"), dict) else {}
+
+
+def _execution_config_from_preparation(plan: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(plan, dict):
+        return {}
+    prep = plan.get("activeFullRunPreparation")
+    if not isinstance(prep, dict):
+        return {}
+    stored = prep.get("executionConfig")
+    if formal_execution_config_is_provisioned(stored if isinstance(stored, dict) else None):
+        return dict(stored)
+    environment = prep.get("environment") if isinstance(prep.get("environment"), dict) else {}
+    mapped = {
+        "pythonExecutable": environment.get("pythonExecutable"),
+        "dataRoot": environment.get("dataRoot"),
+        "outputRoot": environment.get("outputRoot"),
+    }
+    timeout = prep.get("timeoutSecondsPerSeed")
+    if timeout is not None:
+        mapped["timeoutSeconds"] = timeout
+    run_options = prep.get("runOptions") if isinstance(prep.get("runOptions"), dict) else {}
+    for key in ("trainSamples", "testSamples", "epochs", "batchSize"):
+        if key in run_options:
+            mapped[key] = run_options[key]
+    return mapped
+
+
+def _execution_config_from_env() -> dict[str, Any]:
+    mapped = {
+        "pythonExecutable": os.environ.get("VIBELUTION_FORMAL_PYTHON_EXECUTABLE", ""),
+        "dataRoot": os.environ.get("VIBELUTION_FORMAL_DATA_ROOT", ""),
+        "outputRoot": os.environ.get("VIBELUTION_FORMAL_OUTPUT_ROOT", ""),
+    }
+    for env_key, field in _FORMAL_ENV_OPTIONAL_INTS:
+        raw = str(os.environ.get(env_key) or "").strip()
+        if not raw:
+            continue
+        try:
+            mapped[field] = int(raw)
+        except ValueError:
+            continue
+    return mapped
 
 
 def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -36,11 +114,12 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         plan_snapshot = s.deepcopy(plan)
 
     adapter_id, method_config = s._require_formal_full_run_ready(plan_snapshot)
+    execution_config = resolve_formal_execution_config(plan_snapshot, request_payload)
     try:
         preparation = s.formal_runner.prepare_full_run(
             adapter_id,
             method_config=method_config,
-            execution_config=request_payload.get("executionConfig"),
+            execution_config=execution_config,
             project_root=s.PROJECT_ROOT,
         )
     except s.formal_runner.FormalRunnerError as exc:
@@ -51,6 +130,7 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         "preparationId": s._new_record_id("full-run-preparation"),
         "recordedByAgent": recorded_by_agent,
         "preparedAt": now,
+        "executionConfig": execution_config,
     }
     with s._WORKFLOW_LOCK:
         plan_store = s._load_experiment_plan_store(normalized_team_id)
@@ -114,6 +194,7 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         plan_snapshot = s.deepcopy(plan)
 
     adapter_id, method_config = s._require_formal_full_run_ready(plan_snapshot)
+    execution_config = resolve_formal_execution_config(plan_snapshot, request_payload)
     started_at = s.utc_now_iso()
     execution_id = s._new_record_id("full-run-execution")
     with s._WORKFLOW_LOCK:
@@ -150,7 +231,7 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         runner_result = s.formal_runner.run_full_run(
             adapter_id,
             method_config=method_config,
-            execution_config=request_payload.get("executionConfig"),
+            execution_config=execution_config,
             project_root=s.PROJECT_ROOT,
         )
     except s.formal_runner.FormalRunnerError as exc:
