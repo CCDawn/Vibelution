@@ -55,7 +55,7 @@ describe("team workflow start mutations contract", () => {
   it("preserves key start/session write endpoints", () => {
     expect(mutationsSource).toContain("/agent-session-context");
     expect(mutationsSource).toContain("/stage-session-tasks");
-    expect(mutationsSource).toContain("/ai-search-runs");
+    expect(mutationsSource).toContain("startAiSearchRun(");
     expect(mutationsSource).toContain("/workflow-orchestration/source-collection-runs");
     expect(mutationsSource).toContain("resetTeamResearchProjectSourceCollection(");
     expect(mutationsSource).toContain("/workflow-orchestration/stage-rounds/start");

@@ -11,8 +11,8 @@ import {
   resetTeamResearchProjectProgress,
   resetTeamResearchProjectSourceCollection,
 } from "../../api/researchProjectAgentTasks";
+import { startAiSearchRun } from "../../api/teams";
 import type {
-  AiSearchRun,
   DataProcessingRunListPayload,
   Team,
   TeamWorkflowSourceCollectionAgentSessionContextPayload,
@@ -224,15 +224,11 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
 
   const startAiSearchRunMutation = useMutation({
     mutationFn: (payload: { teamId: string; topic: string }) =>
-      fetchJson<AiSearchRun>(`/api/teams/${encodeURIComponent(payload.teamId)}/ai-search-runs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic: payload.topic.trim() || "AI 最新动态",
-          sourceLimit: 8,
-          maxResultsPerQuery: 3,
-          includeSignals: false,
-        }),
+      startAiSearchRun(payload.teamId, {
+        topic: payload.topic.trim() || "AI 最新动态",
+        sourceLimit: 8,
+        maxResultsPerQuery: 3,
+        includeSignals: false,
       }),
     onSuccess: (_run, variables) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamAiSearchRuns(variables.teamId, AI_SEARCH_RUN_PREVIEW_LIMIT) });
