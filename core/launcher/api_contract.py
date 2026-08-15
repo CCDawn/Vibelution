@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorkbenchWindowModePayload(BaseModel):
@@ -116,6 +116,57 @@ class LauncherRuntimeSceneEventPayload(BaseModel):
     level: str = "info"
     outcome: str = "observed"
     occurredAt: str = ""
+
+
+class LauncherJsonResponse(BaseModel):
+    """Evolving Launcher JSON envelopes.
+
+    Status and settings shapes still grow tray/control-plane extras. Keep
+    declared fields empty so FastAPI cannot inject defaults or drop unknown
+    nested keys. Routes must use response_model_exclude_unset=True.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class LauncherStatusResponse(LauncherJsonResponse):
+    pass
+
+
+class LauncherFreshnessResponse(LauncherJsonResponse):
+    pass
+
+
+class LauncherBranchInstanceListResponse(LauncherJsonResponse):
+    pass
+
+
+class WorkbenchWindowModeSettingResponse(LauncherJsonResponse):
+    pass
+
+
+class WorkbenchWindowModeUpdateResponse(LauncherJsonResponse):
+    pass
+
+
+class LauncherStartupSettingsResponse(LauncherJsonResponse):
+    pass
+
+
+class LauncherStartupSettingsUpdateResponse(LauncherJsonResponse):
+    pass
+
+
+class LauncherDeveloperModeSettingResponse(LauncherJsonResponse):
+    pass
+
+
+class LauncherDeveloperModeUpdateResponse(LauncherJsonResponse):
+    pass
+
+
+class LauncherDeveloperNoiseOverviewResponse(LauncherJsonResponse):
+    pass
 
 
 def launcher_error_detail(code: str, exc: Exception | str, **extra: Any) -> dict[str, Any]:

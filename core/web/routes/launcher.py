@@ -15,12 +15,22 @@ from core.launcher.api_contract import (
     DeveloperCleanupApplyPayload,
     DeveloperCleanupPreviewPayload,
     DeveloperModePayload,
+    LauncherBranchInstanceListResponse,
+    LauncherDeveloperModeSettingResponse,
+    LauncherDeveloperModeUpdateResponse,
+    LauncherDeveloperNoiseOverviewResponse,
+    LauncherFreshnessResponse,
     LauncherRuntimeSceneEventPayload,
     LauncherStartupSettingsPayload,
+    LauncherStartupSettingsResponse,
+    LauncherStartupSettingsUpdateResponse,
+    LauncherStatusResponse,
     LifecycleIntentPayload,
     WorkbenchCloseTransactionPayload,
     WorkbenchCloseWindowClosedPayload,
     WorkbenchWindowModePayload,
+    WorkbenchWindowModeSettingResponse,
+    WorkbenchWindowModeUpdateResponse,
 )
 from core.launcher import service as launcher_service
 from core.launcher.desktop_session_store import DesktopSessionClosed, DesktopSessionRevisionConflict
@@ -75,17 +85,29 @@ def _workbench_close_transaction_response(operation):
         ) from exc
 
 
-@router.get("/launcher/status")
+@router.get(
+    "/launcher/status",
+    response_model=LauncherStatusResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_status() -> dict:
     return launcher_service.get_launcher_status()
 
 
-@router.get("/launcher/freshness")
+@router.get(
+    "/launcher/freshness",
+    response_model=LauncherFreshnessResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_freshness() -> dict:
     return launcher_service.get_launcher_freshness()
 
 
-@router.get("/launcher/branch-instances")
+@router.get(
+    "/launcher/branch-instances",
+    response_model=LauncherBranchInstanceListResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_branch_instances() -> dict:
     return launcher_service.list_launcher_branch_instances()
 
@@ -149,17 +171,29 @@ def launcher_branch_instances_cleanup(payload: BranchInstanceCleanupPayload) -> 
         ) from exc
 
 
-@router.get("/launcher/settings/workbench-window")
+@router.get(
+    "/launcher/settings/workbench-window",
+    response_model=WorkbenchWindowModeSettingResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_workbench_window_setting() -> dict:
     return launcher_service.get_workbench_window_mode_setting()
 
 
-@router.get("/launcher/settings/startup")
+@router.get(
+    "/launcher/settings/startup",
+    response_model=LauncherStartupSettingsResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_startup_settings() -> dict:
     return launcher_service.get_launcher_startup_settings()
 
 
-@router.put("/launcher/settings/startup")
+@router.put(
+    "/launcher/settings/startup",
+    response_model=LauncherStartupSettingsUpdateResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_update_startup_settings(payload: LauncherStartupSettingsPayload) -> dict:
     try:
         return launcher_service.update_launcher_startup_settings(payload.model_dump())
@@ -169,7 +203,11 @@ def launcher_update_startup_settings(payload: LauncherStartupSettingsPayload) ->
         raise HTTPException(status_code=400, detail={"code": "invalid_launcher_startup_settings", "message": str(exc)}) from exc
 
 
-@router.put("/launcher/settings/workbench-window")
+@router.put(
+    "/launcher/settings/workbench-window",
+    response_model=WorkbenchWindowModeUpdateResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_update_workbench_window_setting(payload: WorkbenchWindowModePayload) -> dict:
     try:
         return launcher_service.update_workbench_window_mode(payload.mode, base_hash=payload.baseHash)
@@ -179,12 +217,20 @@ def launcher_update_workbench_window_setting(payload: WorkbenchWindowModePayload
         raise HTTPException(status_code=400, detail={"code": "invalid_workbench_window_mode", "message": str(exc)}) from exc
 
 
-@router.get("/launcher/developer-mode")
+@router.get(
+    "/launcher/developer-mode",
+    response_model=LauncherDeveloperModeSettingResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_developer_mode_setting() -> dict:
     return launcher_service.get_launcher_developer_mode_setting()
 
 
-@router.put("/launcher/developer-mode")
+@router.put(
+    "/launcher/developer-mode",
+    response_model=LauncherDeveloperModeUpdateResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_update_developer_mode(payload: DeveloperModePayload) -> dict:
     try:
         return launcher_service.update_launcher_developer_mode(payload.enabled, base_hash=payload.baseHash)
@@ -194,7 +240,11 @@ def launcher_update_developer_mode(payload: DeveloperModePayload) -> dict:
         raise HTTPException(status_code=400, detail={"code": "invalid_developer_mode", "message": str(exc)}) from exc
 
 
-@router.get("/launcher/developer-mode/noise-overview")
+@router.get(
+    "/launcher/developer-mode/noise-overview",
+    response_model=LauncherDeveloperNoiseOverviewResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_developer_mode_noise_overview() -> dict:
     return launcher_service.get_launcher_developer_noise_overview()
 
