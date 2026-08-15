@@ -6,6 +6,7 @@ import mutationSource from "../routes/chat/useChatSessionDetailMutations.ts?raw"
 import lifecycleSource from "../routes/chat/useChatWorkspaceLifecycle.ts?raw";
 import composerSource from "../routes/chat/useChatComposerSubmit.ts?raw";
 import composerModelSource from "../routes/chat/chatComposerSubmitModel.ts?raw";
+import helperSource from "../routes/chat/chatSessionDetailHelpers.ts?raw";
 
 describe("Chat session tool approval API", () => {
   it("owns pending approval query and decision transports", () => {
@@ -21,6 +22,15 @@ describe("Chat session tool approval API", () => {
     expect(mutationSource).toContain("resolveSessionToolApprovalDecision");
     expect(routeSource).not.toContain("/tool-approvals?status=pending");
     expect(mutationSource).not.toContain("/tool-approvals/");
+  });
+
+  it("owns session detail GET transport outside chat route helpers", () => {
+    expect(apiSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}`");
+    expect(apiSource).toContain("search.set(\"includeSecondary\", \"false\")");
+    expect(helperSource).toContain("fetchSessionDetail(normalizedSessionId, {");
+    expect(lifecycleSource).toContain("fetchSessionDetail(optimisticNextActiveSessionId)");
+    expect(helperSource).not.toContain("/api/sessions/");
+    expect(lifecycleSource).not.toContain("`/api/sessions/${encodeURIComponent(optimisticNextActiveSessionId)}`");
   });
 
   it("owns session catalog transport outside chat route hooks", () => {

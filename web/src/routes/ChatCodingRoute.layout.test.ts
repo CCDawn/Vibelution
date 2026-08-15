@@ -3324,8 +3324,9 @@ describe("ChatCodingRoute layout contract", () => {
   it("loads direct session details as a window and wires top-edge history paging", () => {
     expect(routeAndHelpersSource).toContain("const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40");
     expect(routeAndHelpersSource).toContain("function fetchSessionDetailWindow(");
-    expect(routeAndHelpersSource).toContain("params.set(\"messageLimit\", String(options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT))");
-    expect(routeAndHelpersSource).toContain("params.set(\"transcriptScope\", options.transcriptScope ?? \"window\")");
+    expect(routeAndHelpersSource).toContain("fetchSessionDetail(normalizedSessionId, {");
+    expect(chatApiSource).toContain("search.set(\"messageLimit\", String(options.messageLimit))");
+    expect(chatApiSource).toContain("search.set(\"transcriptScope\", options.transcriptScope)");
     expect(routeSource).toContain("structuralSharing: (previous, next) =>");
     expect(routeAndDetailMutationsSource).toContain("mergeSessionDetailMessageWindow(current, page)");
     expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");

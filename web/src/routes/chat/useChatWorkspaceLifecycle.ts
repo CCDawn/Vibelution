@@ -5,6 +5,7 @@ import {
   createChatSession,
   createSessionChatReviewCandidate,
   deleteChatSession,
+  fetchSessionDetail,
   updateChatSession,
 } from "../../api/chat";
 import { fetchJson } from "../../api/client";
@@ -800,7 +801,7 @@ export function useChatWorkspaceLifecycle({
           void queryClient.prefetchQuery({
             queryKey: queryKeys.session(optimisticNextActiveSessionId),
             queryFn: () =>
-              fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(optimisticNextActiveSessionId)}`),
+              fetchSessionDetail(optimisticNextActiveSessionId),
           }).catch(() => undefined);
         }
       }

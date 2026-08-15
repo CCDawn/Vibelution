@@ -111,6 +111,38 @@ export function listSessions(): Promise<SessionSummary[]> {
   return fetchJson<SessionSummary[]>("/api/sessions");
 }
 
+export type SessionDetailQueryOptions = {
+  messageLimit?: number;
+  beforeMessageIndex?: number;
+  transcriptScope?: "all" | "window" | "none";
+  includeSecondary?: boolean;
+  signal?: AbortSignal;
+};
+
+export function fetchSessionDetail(
+  sessionId: string,
+  options: SessionDetailQueryOptions = {},
+): Promise<SessionDetail> {
+  const search = new URLSearchParams();
+  if (options.messageLimit != null) {
+    search.set("messageLimit", String(options.messageLimit));
+  }
+  if (options.transcriptScope) {
+    search.set("transcriptScope", options.transcriptScope);
+  }
+  if (options.beforeMessageIndex && options.beforeMessageIndex > 0) {
+    search.set("beforeMessageIndex", String(options.beforeMessageIndex));
+  }
+  if (options.includeSecondary === false) {
+    search.set("includeSecondary", "false");
+  }
+  const suffix = search.toString();
+  const path = `/api/sessions/${encodeURIComponent(sessionId)}`;
+  return fetchJson<SessionDetail>(suffix ? `${path}?${suffix}` : path, {
+    signal: options.signal,
+  });
+}
+
 export function createChatSession(payload: {
   agentId?: string;
   title?: string;
