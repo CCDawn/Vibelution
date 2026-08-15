@@ -23,6 +23,11 @@ from langgraph.types import Command, interrupt
 
 from core.research.workflow.contracts import ExecutionReceipt, PendingAction
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.iteration_decisions import (
+    IterationDecisionError,
+    route_target_after_governance,
+    route_target_for_decision,
+)
 from core.research.workflow.models import ActorKind
 
 
@@ -233,13 +238,13 @@ def route_after_iteration_decision(
     if state.get("blocked_outcome"):
         return END  # type: ignore[return-value]
     decision = str(state.get("branch_decision") or "")
-    if decision == "rerun_same_protocol":
-        return "controlled_run"
-    if decision == "revise_protocol":
+    try:
+        target = route_target_for_decision(decision)
+    except IterationDecisionError as exc:
+        raise ValueError(f"unknown iteration decision {decision!r}") from exc
+    if target is None:
         return END  # type: ignore[return-value]
-    if decision in ("promote_candidate", "rollback_candidate", "stop"):
-        return "version_governance"
-    raise ValueError(f"unknown iteration decision {decision!r}")
+    return target  # type: ignore[return-value]
 
 
 def route_after_version_governance(
@@ -248,11 +253,10 @@ def route_after_version_governance(
     if state.get("blocked_outcome"):
         return END  # type: ignore[return-value]
     decision = str(state.get("branch_decision") or "")
-    if decision == "promote_candidate":
-        return "candidate_promotion"
-    if decision in ("stop", "rollback_candidate"):
-        return "result_package"
-    raise ValueError(f"unknown governed decision {decision!r}")
+    try:
+        return route_target_after_governance(decision)  # type: ignore[return-value]
+    except IterationDecisionError as exc:
+        raise ValueError(f"unknown governed decision {decision!r}") from exc
 
 
 def _route_after_linear(source: str, target: str):

@@ -221,6 +221,63 @@ def test_routed_successors_stop_goes_to_version_governance() -> None:
     )
 
 
+def test_graph_and_worker_routes_share_iteration_decision_tables() -> None:
+    from langgraph.graph import END
+
+    from core.research.workflow.challenge_cup_graph import (
+        compiled_iteration_route_map,
+        route_after_iteration_decision as definition_route_after_iteration,
+        route_after_version_governance as definition_route_after_governance,
+    )
+    from core.research.workflow.challenge_cup_runtime import (
+        route_after_iteration_decision as runtime_route_after_iteration,
+        route_after_version_governance as runtime_route_after_governance,
+    )
+    from core.research.workflow.iteration_decisions import (
+        GOVERNANCE_ROUTE_TARGETS,
+        ITERATION_ROUTE_TARGETS,
+        IterationDecisionKind,
+        route_target_after_governance,
+        route_target_for_decision,
+    )
+    from core.web.services.team_workflow.research_runtime.iteration_route import (
+        routed_successors,
+    )
+
+    assert compiled_iteration_route_map() == {
+        kind.value: target for kind, target in ITERATION_ROUTE_TARGETS.items()
+    }
+
+    for kind in IterationDecisionKind:
+        target = route_target_for_decision(kind)
+        runtime = runtime_route_after_iteration({"branch_decision": kind.value})
+        definition = definition_route_after_iteration(
+            {"iteration_decision": {"decisionKind": kind.value}}
+        )
+        worker = routed_successors("iteration_decision", kind.value)
+        if target is None:
+            assert runtime == END
+            assert definition == END
+            assert worker == ()
+        else:
+            assert runtime == target
+            assert definition == target
+            assert worker == (target,)
+
+        if kind in GOVERNANCE_ROUTE_TARGETS:
+            governed = route_target_after_governance(kind)
+            assert runtime_route_after_governance({"branch_decision": kind.value}) == governed
+            assert (
+                definition_route_after_governance(
+                    {"iteration_decision": {"decisionKind": kind.value}}
+                )
+                == governed
+            )
+            assert routed_successors("version_governance", kind.value) == (governed,)
+        else:
+            assert routed_successors("version_governance", kind.value) == ()
+
+
 def test_branch_decision_from_run_heals_compact_authority_drift(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
