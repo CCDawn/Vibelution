@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchJson } from "../api/client";
+import { fetchPublicConfig } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
-import type { ConfigSummary } from "../api/types";
 import { shellDictionary, type Language, type ShellTranslationKey } from "./shellDictionary";
 
 const statusKeyMap: Record<string, ShellTranslationKey> = {
@@ -69,7 +68,7 @@ export function useShellI18n(options: ShellI18nOptions = {}) {
   const configEnabled = options.configEnabled ?? true;
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    queryFn: () => fetchPublicConfig(),
     enabled: configEnabled,
   });
 

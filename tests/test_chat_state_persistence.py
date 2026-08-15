@@ -2,6 +2,7 @@ import json
 import multiprocessing
 import os
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from core.ui.chat_state import (
     save_session_chat_state,
 )
 from core.web.services import session_service
+from core.web.services.session.live_output import SessionLiveOutputState
 
 
 @pytest.fixture(autouse=True)
@@ -147,12 +149,10 @@ def _create_session_in_competing_process(
     workspace_home: str,
     agent_id: str,
     role: str,
-    first_loaded,
-    second_loaded,
-    first_saved,
+    start_gate,
     result_queue,
 ) -> None:
-    """Force the pre-fix stale-snapshot ordering across independent processes."""
+    """Create one session after a shared start gate so both writers overlap."""
     os.environ["VIBELUTION_DATA_HOME"] = data_home
     from core.infrastructure import developer_sandbox as child_developer_sandbox
     from core.web.services import session_service as child_session_service
@@ -160,41 +160,7 @@ def _create_session_in_competing_process(
     child_developer_sandbox.is_developer_mode_enabled = lambda: False
     child_developer_sandbox.resolve_workspace_home = lambda *args, **kwargs: Path(workspace_home)
     child_session_service.PROJECT_ROOT = Path(workspace_home).parent
-
-    original_load = child_session_service.load_chat_state
-    original_save = child_session_service.save_chat_state
-    handshake_used = {"load": False, "save": False}
-
-    def controlled_load(project_root):
-        state = original_load(project_root)
-        # Prompt-snapshot warm-up also calls load_chat_state under the
-        # mutation lock. Participating in the create handshake there
-        # deadlocks the second process, which cannot set second_loaded
-        # until it acquires that same lock.
-        if threading.current_thread() is not threading.main_thread() or handshake_used["load"]:
-            return state
-        handshake_used["load"] = True
-        if role == "first":
-            first_loaded.set()
-            second_loaded.wait(timeout=1.0)
-        else:
-            first_loaded.wait(timeout=2.0)
-            second_loaded.set()
-            first_saved.wait(timeout=2.0)
-        return state
-
-    def controlled_save(project_root, state):
-        original_save(project_root, state)
-        if (
-            role == "first"
-            and threading.current_thread() is threading.main_thread()
-            and not handshake_used["save"]
-        ):
-            handshake_used["save"] = True
-            first_saved.set()
-
-    child_session_service.load_chat_state = controlled_load
-    child_session_service.save_chat_state = controlled_save
+    start_gate.wait(timeout=10.0)
     try:
         created = child_session_service.create_chat_session(
             title=f"Concurrent {role}",
@@ -213,9 +179,7 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
     workspace_home = tmp_path / "workspace"
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
     context = multiprocessing.get_context("spawn")
-    first_loaded = context.Event()
-    second_loaded = context.Event()
-    first_saved = context.Event()
+    start_gate = context.Event()
     result_queue = context.Queue()
     first = context.Process(
         target=_create_session_in_competing_process,
@@ -224,9 +188,7 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
             str(workspace_home),
             "",
             "first",
-            first_loaded,
-            second_loaded,
-            first_saved,
+            start_gate,
             result_queue,
         ),
     )
@@ -237,15 +199,13 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
             str(workspace_home),
             "",
             "second",
-            first_loaded,
-            second_loaded,
-            first_saved,
+            start_gate,
             result_queue,
         ),
     )
     first.start()
-    assert first_loaded.wait(timeout=10.0)
     second.start()
+    start_gate.set()
     try:
         first.join(timeout=15.0)
         second.join(timeout=15.0)
@@ -273,3 +233,389 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
         if isinstance(item, dict)
     }
     assert created_ids <= indexed_ids
+
+
+def test_create_chat_session_upserts_one_row_without_full_replace(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {"conversation_id": "session-a", "title": "A", "last_turn_status": "ready"},
+            ],
+        },
+    )
+    full_saves: list[str] = []
+    original_save_chat_state = session_service.save_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "save_chat_state",
+        lambda *args, **kwargs: full_saves.append("save") or original_save_chat_state(*args, **kwargs),
+    )
+
+    created = session_service.create_chat_session(
+        title="B",
+        activate=True,
+        conversation_index_kind="team_agent",
+        lightweight=True,
+    )
+
+    created_id = str(created.get("id") or "")
+    assert created_id
+    assert full_saves == []
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "A"
+    assert load_session_chat_state(tmp_path, created_id)["title"] == "B"
+    document = load_chat_state(tmp_path)
+    assert document["active_conversation_id"] == created_id
+    assert {item["conversation_id"] for item in document["conversations"]} == {
+        "session-a",
+        created_id,
+    }
+
+
+def _wait_until(predicate, *, timeout: float = 1.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_stale_full_replace_cannot_clobber_parallel_session_row(tmp_path, monkeypatch):
+    """A long-held full replace must not overwrite a later session-row upsert."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {
+                    "conversation_id": "session-a",
+                    "title": "A",
+                    "last_turn_status": "ready",
+                },
+                {
+                    "conversation_id": "session-b",
+                    "title": "B",
+                    "last_turn_status": "ready",
+                },
+            ],
+        },
+    )
+
+    persist_holds_lock = threading.Event()
+    persist_may_save = threading.Event()
+    persist_errors: list[BaseException] = []
+    submit_errors: list[BaseException] = []
+
+    def persist_stale_snapshot() -> None:
+        try:
+            with session_service._CHAT_STATE_LOCK:
+                stale = load_chat_state(tmp_path)
+                persist_holds_lock.set()
+                assert persist_may_save.wait(timeout=2.0)
+                save_chat_state(tmp_path, stale)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            persist_errors.append(exc)
+
+    def submit_running_row() -> None:
+        try:
+            assert persist_holds_lock.wait(timeout=2.0)
+            save_session_chat_state(
+                tmp_path,
+                "session-b",
+                {
+                    "conversation_id": "session-b",
+                    "title": "B",
+                    "last_turn_status": "running",
+                },
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            submit_errors.append(exc)
+
+    persist_thread = threading.Thread(target=persist_stale_snapshot)
+    submit_thread = threading.Thread(target=submit_running_row)
+    persist_thread.start()
+    assert persist_holds_lock.wait(timeout=2.0)
+    submit_thread.start()
+    assert _wait_until(submit_thread.is_alive, timeout=1.0)
+    time.sleep(0.1)
+    persist_may_save.set()
+    persist_thread.join(timeout=3.0)
+    submit_thread.join(timeout=3.0)
+
+    assert persist_errors == []
+    assert submit_errors == []
+    assert not persist_thread.is_alive()
+    assert not submit_thread.is_alive()
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "running"
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "A"
+
+
+def test_stale_full_replace_cannot_prune_parallel_new_session_row(tmp_path, monkeypatch):
+    """A stale replace snapshot must not delete a session row upserted while it held the lock."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {"conversation_id": "session-a", "title": "A"},
+            ],
+        },
+    )
+
+    persist_holds_lock = threading.Event()
+    persist_may_save = threading.Event()
+    persist_errors: list[BaseException] = []
+    submit_errors: list[BaseException] = []
+
+    def persist_stale_snapshot() -> None:
+        try:
+            with session_service._CHAT_STATE_LOCK:
+                stale = load_chat_state(tmp_path)
+                persist_holds_lock.set()
+                assert persist_may_save.wait(timeout=2.0)
+                save_chat_state(tmp_path, stale)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            persist_errors.append(exc)
+
+    def create_session_c() -> None:
+        try:
+            assert persist_holds_lock.wait(timeout=2.0)
+            save_session_chat_state(
+                tmp_path,
+                "session-c",
+                {"conversation_id": "session-c", "title": "C"},
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            submit_errors.append(exc)
+
+    persist_thread = threading.Thread(target=persist_stale_snapshot)
+    submit_thread = threading.Thread(target=create_session_c)
+    persist_thread.start()
+    assert persist_holds_lock.wait(timeout=2.0)
+    submit_thread.start()
+    assert _wait_until(submit_thread.is_alive, timeout=1.0)
+    time.sleep(0.1)
+    persist_may_save.set()
+    persist_thread.join(timeout=3.0)
+    submit_thread.join(timeout=3.0)
+
+    assert persist_errors == []
+    assert submit_errors == []
+    assert not persist_thread.is_alive()
+    assert not submit_thread.is_alive()
+    assert load_session_chat_state(tmp_path, "session-c")["title"] == "C"
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "A"
+
+
+def test_load_conversations_repair_writes_only_dirty_session_rows(tmp_path, monkeypatch):
+    """List repair must upsert dirty runtime rows instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {
+                    "conversation_id": "session-a",
+                    "title": "A",
+                    "last_turn_status": "running",
+                },
+                {
+                    "conversation_id": "session-b",
+                    "title": "B",
+                    "last_turn_status": "ready",
+                },
+            ],
+        },
+    )
+
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
+    monkeypatch.setattr(session_service, "reconcile_stale_chat_turn_work_runs", lambda **_kwargs: [])
+    monkeypatch.setattr(session_service, "_release_stale_chat_turn_work_run", lambda **_kwargs: None)
+    monkeypatch.setattr(session_service, "_ensure_conversation_agent_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_ensure_conversation_workspace_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_repair_child_root_agent_direct_session_bindings", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *_args, **_kwargs: None)
+
+    full_saves: list[str] = []
+    original_save_chat_state = session_service.save_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "save_chat_state",
+        lambda *args, **kwargs: full_saves.append("save") or original_save_chat_state(*args, **kwargs),
+    )
+    session_saves: list[str] = []
+    original_save_session = session_service.save_session_chat_state
+
+    def _spy_save_session(project_root, session_id, conversation, **kwargs):
+        session_saves.append(str(session_id))
+        return original_save_session(project_root, session_id, conversation, **kwargs)
+
+    monkeypatch.setattr(session_service, "save_session_chat_state", _spy_save_session)
+
+    _active_id, conversations = session_service._load_conversations(
+        repair=True,
+        agent_by_id={},
+        hidden_team_member_agent_ids=set(),
+        lightweight=True,
+        defer_hidden_previews=True,
+    )
+
+    by_id = {str(item.get("id") or ""): item for item in conversations}
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert by_id["session-a"]["lastTurnStatus"] == "ready"
+    assert by_id["session-b"]["lastTurnStatus"] == "ready"
+    assert by_id["session-b"]["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+def _seed_two_runtime_rows(tmp_path, *, status_a: str = "running") -> None:
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {
+                    "conversation_id": "session-a",
+                    "title": "A",
+                    "last_turn_status": status_a,
+                },
+                {
+                    "conversation_id": "session-b",
+                    "title": "B",
+                    "last_turn_status": "ready",
+                },
+            ],
+        },
+    )
+
+
+def _spy_runtime_saves(monkeypatch) -> tuple[list[str], list[str]]:
+    full_saves: list[str] = []
+    original_save_chat_state = session_service.save_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "save_chat_state",
+        lambda *args, **kwargs: full_saves.append("save") or original_save_chat_state(*args, **kwargs),
+    )
+    session_saves: list[str] = []
+    original_save_session = session_service.save_session_chat_state
+
+    def _spy_save_session(project_root, session_id, conversation, **kwargs):
+        session_saves.append(str(session_id))
+        return original_save_session(project_root, session_id, conversation, **kwargs)
+
+    monkeypatch.setattr(session_service, "save_session_chat_state", _spy_save_session)
+    return full_saves, session_saves
+
+
+def test_persist_interrupted_snapshot_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Stop snapshot must upsert the stopped session instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path)
+    monkeypatch.setattr(session_service, "_snapshot_session_live_output", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_latest_assistant_message_is_stop", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(session_service, "_clear_session_live_output", lambda *_args, **_kwargs: None)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service._persist_session_interrupted_snapshot(
+        "session-a",
+        {
+            "turnId": "turn-a",
+            "stopReason": "stop",
+            "stopRequestedAt": "2026-08-15T12:00:00",
+        },
+        lang="zh",
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+def test_persist_recovered_live_output_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Recovered live output must upsert one session row instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_find_turn_scoped_assistant_message", lambda *_args, **_kwargs: None)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service._persist_recovered_live_output_to_chat_state(
+        "session-a",
+        "turn-a",
+        SessionLiveOutputState(session_id="session-a", turn_id="turn-a", content="partial"),
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+def _stub_schedule_side_effects(monkeypatch) -> None:
+    monkeypatch.setattr(session_service, "_is_session_turn_current", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(session_service, "_set_session_turn_progress_live_output", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_persist_chat_turn_work_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "core.web.services.session.directory_bridge.touch_directory_session_safe",
+        lambda *_args, **_kwargs: None,
+    )
+
+
+def test_mark_session_turn_queued_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Queue status must upsert the waiting session instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    _stub_schedule_side_effects(monkeypatch)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service._mark_session_turn_queued(
+        {"session_id": "session-a", "turn_id": "turn-a", "agent_id": "agent-a"},
+        queue_position=1,
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "queued"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+def test_mark_session_turn_dequeued_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Dequeue status must upsert the admitted session instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="queued")
+    _stub_schedule_side_effects(monkeypatch)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service._mark_session_turn_dequeued(
+        {"session_id": "session-a", "turn_id": "turn-a", "agent_id": "agent-a"},
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "running"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"

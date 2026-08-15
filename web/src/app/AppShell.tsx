@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
+import { fetchPublicConfig } from "../api/config";
 import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { queryKeys } from "../api/queryKeys";
@@ -718,7 +719,7 @@ export function AppShell() {
   const suppressNextReturnStackPushRef = useRef(false);
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: ({ signal }) => fetchJson<ConfigSummary>("/api/config/public", { signal }),
+    queryFn: ({ signal }) => fetchPublicConfig({ signal }),
   });
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),

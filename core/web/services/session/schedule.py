@@ -232,13 +232,11 @@ def _mark_session_turn_queued(context: dict[str, Any], *, queue_position: int) -
     context["_scheduler_queued_at_monotonic"] = s._perf_counter()
     now = s._now_timestamp()
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
         if conversation is not None and s._is_session_turn_current(session_id, turn_id):
             conversation["last_turn_status"] = "queued"
             conversation["updated_at"] = now
-            payload["updated_at"] = now
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
     from . import directory_bridge
 
     directory_bridge.touch_directory_session_safe(session_id, status="queued", wait=False)
@@ -272,13 +270,11 @@ def _mark_session_turn_dequeued(context: dict[str, Any]) -> None:
     context["_scheduler_started_at_monotonic"] = dequeued_at
     now = s._now_timestamp()
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
         if conversation is not None and s._is_session_turn_current(session_id, turn_id):
             conversation["last_turn_status"] = "running"
             conversation["updated_at"] = now
-            payload["updated_at"] = now
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
     from . import directory_bridge
 
     directory_bridge.touch_directory_session_safe(session_id, status="running", wait=False)
