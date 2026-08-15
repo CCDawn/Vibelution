@@ -474,6 +474,33 @@ export function useSessionToolApprovalsRefetchInterval(options: {
   );
 }
 
+/**
+ * Stable sticky session-detail paint for the active session.
+ *
+ * `resolveStickySessionDetailPaint` rebuilds the merged sticky+live detail
+ * (including a brand-new `messages` array) on every call. Called inline during
+ * render, an unrelated parent rerender with the same `activeSessionId` and the
+ * same `rawSessionDetail` reference handed downstream effects a fresh
+ * detail/messages reference each time; the token-speed effect depended on
+ * `detail.messages` and called `setTokenSpeedTracker`, and a single React Query
+ * observer notification restarted the whole cycle until React bailed out with
+ * "Maximum update depth exceeded" inside `forceStoreRerender`. Memoizing keeps
+ * the detail (and its `messages` array) reference strictly identical while both
+ * inputs are unchanged, and recomputes only when `activeSessionId` or the
+ * resolved raw detail actually changes, preserving the existing sticky
+ * transcript semantics.
+ */
+export function useStableSessionDetailPaint(options: {
+  activeSessionId: string | null | undefined;
+  detail: SessionDetail | undefined;
+}): SessionDetail | undefined {
+  const { activeSessionId, detail: rawSessionDetail } = options;
+  return useMemo(
+    () => resolveStickySessionDetailPaint({ activeSessionId, detail: rawSessionDetail }),
+    [activeSessionId, rawSessionDetail],
+  );
+}
+
 export function ChatCodingRoute() {
   // pet + evolution: companion rail shows mental/pet labels (otherwise raw keys leak).
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat", "agents", "pet", "evolution"] });
@@ -1604,7 +1631,9 @@ export function ChatCodingRoute() {
       : undefined,
   });
   // Codex/ChatGPT: paint sticky last-good transcript while provisional shell hydrates.
-  const detail = resolveStickySessionDetailPaint({
+  // Memoized seam: identical activeSessionId/rawSessionDetail must yield the same
+  // detail/messages reference across unrelated parent rerenders.
+  const detail = useStableSessionDetailPaint({
     activeSessionId,
     detail: rawSessionDetail,
   });
