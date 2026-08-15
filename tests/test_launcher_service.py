@@ -3707,3 +3707,213 @@ def test_request_launcher_start_skips_browser_when_electron_orchestrates_windows
     assert captured["args"]["noBrowser"] is True
     assert response["accepted"] is True
     assert response["commandId"] == "cmd-electron-start"
+
+
+# ---------------------------------------------------------------------------
+# 桌面会话查询下推 / 过期行 / 清理策略 / lifecycle 初始化与 FK
+
+
+def _seed_desktop_row(
+    desktop_session_id: str,
+    *,
+    workspace_root: str,
+    heartbeat_iso: str,
+    status: str = "active",
+    provider: str = "electron",
+    windows_json: str = "{}",
+) -> None:
+    import sqlite3
+
+    from core.launcher import desktop_session_store
+
+    desktop_session_store.DESKTOP_SESSION_DB_PATH.parent.mkdir(
+        parents=True, exist_ok=True
+    )
+    conn = sqlite3.connect(str(desktop_session_store.DESKTOP_SESSION_DB_PATH))
+    try:
+        desktop_session_store._init_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO desktop_sessions (
+              desktop_session_id, provider, status, revision, workspace_root,
+              capabilities_json, windows_json, created_at, updated_at, last_heartbeat_at
+            ) VALUES (?, ?, ?, 1, ?, '[]', ?, ?, ?, ?)
+            """,
+            (
+                desktop_session_id,
+                provider,
+                status,
+                workspace_root,
+                windows_json,
+                heartbeat_iso,
+                heartbeat_iso,
+                heartbeat_iso,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_latest_active_session_finds_target_beyond_32_newer_rows(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from core.launcher import desktop_session_store
+
+    now = datetime.now(timezone.utc)
+    other_workspace = str(tmp_path / "other-workspace")
+    target_workspace = str(tmp_path / "target-workspace")
+    for index in range(40):
+        _seed_desktop_row(
+            f"other-{index}",
+            workspace_root=other_workspace,
+            heartbeat_iso=(now - timedelta(seconds=index)).isoformat(),
+        )
+    _seed_desktop_row(
+        "target-1",
+        workspace_root=target_workspace,
+        heartbeat_iso=(now - timedelta(seconds=40)).isoformat(),
+    )
+
+    result = desktop_session_store.latest_active_desktop_session(
+        workspace_root=target_workspace
+    )
+
+    assert result.get("desktopSessionId") == "target-1"
+
+
+def test_expired_rows_do_not_shadow_valid_rows(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from core.launcher import desktop_session_store
+
+    now = datetime.now(timezone.utc)
+    workspace = str(tmp_path / "shared-workspace")
+    for index in range(12):
+        _seed_desktop_row(
+            f"expired-{index}",
+            workspace_root=workspace,
+            heartbeat_iso=(now - timedelta(seconds=600 + index)).isoformat(),
+            windows_json='{"workbench": {"open": true, "role": "workbench"}}',
+        )
+    for index in range(20):
+        _seed_desktop_row(
+            f"live-without-role-{index}",
+            workspace_root=workspace,
+            heartbeat_iso=(now - timedelta(seconds=index)).isoformat(),
+        )
+    _seed_desktop_row(
+        "target-with-role",
+        workspace_root=workspace,
+        heartbeat_iso=(now - timedelta(seconds=30)).isoformat(),
+        windows_json='{"workbench": {"open": true, "role": "workbench"}}',
+    )
+
+    result = desktop_session_store.latest_active_desktop_session(
+        workspace_root=workspace,
+        window_role="workbench",
+    )
+
+    assert result.get("desktopSessionId") == "target-with-role"
+
+
+def test_desktop_schema_init_runs_once_per_process(tmp_path, monkeypatch):
+    from core.launcher import desktop_session_store
+
+    getattr(desktop_session_store, "_schema_ready", {}).clear()
+    original = desktop_session_store._init_schema
+    calls = []
+
+    def counting_init(conn):
+        calls.append(1)
+        return original(conn)
+
+    monkeypatch.setattr(desktop_session_store, "_init_schema", counting_init)
+    for _ in range(3):
+        with desktop_session_store._connect() as conn:
+            conn.execute("SELECT COUNT(*) FROM desktop_sessions").fetchone()
+
+    assert len(calls) == 1
+
+
+def test_prune_keeps_leased_sessions_and_removes_stale_rows(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from core.launcher import desktop_session_store
+
+    now = datetime.now(timezone.utc)
+    _seed_desktop_row(
+        "leased-live",
+        workspace_root=str(tmp_path / "ws"),
+        heartbeat_iso=now.isoformat(),
+    )
+    _seed_desktop_row(
+        "closed-old",
+        workspace_root=str(tmp_path / "ws"),
+        heartbeat_iso=(now - timedelta(days=10)).isoformat(),
+        status="closed",
+    )
+    _seed_desktop_row(
+        "active-stale",
+        workspace_root=str(tmp_path / "ws"),
+        heartbeat_iso=(now - timedelta(days=31)).isoformat(),
+    )
+
+    with desktop_session_store._connect() as conn:
+        desktop_session_store._prune_sessions(conn)
+        remaining = {
+            str(row["desktop_session_id"])
+            for row in conn.execute(
+                "SELECT desktop_session_id FROM desktop_sessions"
+            ).fetchall()
+        }
+
+    assert remaining == {"leased-live"}
+
+
+def test_lifecycle_foreign_keys_are_enforced(tmp_path, monkeypatch):
+    import sqlite3
+
+    from core.launcher import lifecycle_intent_store
+
+    conn = lifecycle_intent_store._connect()
+    try:
+        enabled = int(conn.execute("PRAGMA foreign_keys").fetchone()[0])
+        assert enabled == 1
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO desktop_actions (
+                  action_id, intent_id, action, status, payload_json, created_at, updated_at
+                ) VALUES ('action-orphan', 'intent-missing', 'focus_workbench', 'pending', '{}', '', '')
+                """
+            )
+    finally:
+        conn.close()
+
+
+def test_lifecycle_concurrent_first_init_is_idempotent(tmp_path, monkeypatch):
+    import threading
+
+    from core.launcher import lifecycle_intent_store
+
+    getattr(lifecycle_intent_store, "_schema_ready", {}).clear()
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            conn = lifecycle_intent_store._connect()
+            try:
+                conn.execute("SELECT COUNT(*) FROM lifecycle_intents").fetchone()
+            finally:
+                conn.close()
+        except BaseException as exc:  # noqa: BLE001 - test collects all failures
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert errors == []

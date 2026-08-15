@@ -22,6 +22,7 @@ from .importer import (
 )
 from .repository import (
     AgentConfigRevisionConflictError,
+    ChatStateRevisionConflictError,
     ConversationRepository,
     ConversationUnitOfWork,
     LAST_PREVIEW_MAX_CHARS,
@@ -38,6 +39,7 @@ __all__ = [
     "AgentConfigImportError",
     "AgentConfigRevisionConflictError",
     "ChatStateImportError",
+    "ChatStateRevisionConflictError",
     "ConversationBackpressureError",
     "ConversationRepository",
     "ConversationStore",
