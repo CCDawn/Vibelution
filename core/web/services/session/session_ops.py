@@ -601,6 +601,7 @@ def _load_conversation_detail_target(
     repair: bool = True,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
     lightweight: bool = False,
+    persist_session_row: bool = False,
 ) -> dict[str, Any] | None:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
@@ -634,7 +635,10 @@ def _load_conversation_detail_target(
         )
         if changed:
             payload["updated_at"] = s._now_timestamp()
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            if persist_session_row:
+                s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, raw)
+            else:
+                s.save_chat_state(s.PROJECT_ROOT, payload)
         return conversation
     return None
 

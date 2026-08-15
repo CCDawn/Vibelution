@@ -64,6 +64,28 @@ def _session_still_running_error(service: Any, lang: str) -> Any:
     )
 
 
+def _session_reference_conversation_rows(
+    service: Any,
+    conversation_id: str,
+    conversation: dict[str, Any],
+    references: Any,
+) -> list[dict[str, Any]]:
+    """Load only the current session and referenced session runtime rows."""
+
+    rows = [conversation]
+    seen = {str(conversation_id or "").strip()}
+    for reference in service._normalize_session_references(references):
+        target_id = str(reference.get("sessionId") or "").strip()
+        if not target_id or target_id in seen:
+            continue
+        target = service.load_session_chat_state(service.PROJECT_ROOT, target_id)
+        if target is None:
+            continue
+        rows.append(target)
+        seen.add(target_id)
+    return rows
+
+
 def _require_positive_context_limit(service: Any, conversation: dict[str, Any], lang: str) -> dict[str, Any]:
     context_limit_payload = service._session_context_limit_payload(conversation)
     if int(context_limit_payload.get("limit") or 0) <= 0:
@@ -367,15 +389,22 @@ def submit_session_message(
         previous_messages = s._session_ledger_visible_messages(conversation_id)
         submit_timing_fields["ledgerReconcileMs"] = s._elapsed_ms(ledger_started_at)
         prepare_started_at = s._perf_counter()
-        preview_conversation = s._find_conversation_entry(
-            s.load_chat_state(s.PROJECT_ROOT),
-            conversation_id,
-        )
-        if preview_conversation is not None:
-            _require_positive_context_limit(s, preview_conversation, lang)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
+        if conversation is None:
+            seeded_payload = {"version": s.CHAT_STATE_VERSION, "conversations": []}
+            if s._materialize_agent_directory_conversation_locked(
+                seeded_payload,
+                conversation_id,
+                source="submit_session_message",
+            ):
+                conversation = s._find_conversation_entry(seeded_payload, conversation_id)
+                if conversation is not None:
+                    s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
+        if conversation is not None:
+            _require_positive_context_limit(s, conversation, lang)
             prepared_context_limit_ok = True
             prepared_agent_id = str(
-                preview_conversation.get("agent_id") or preview_conversation.get("agentId") or ""
+                conversation.get("agent_id") or conversation.get("agentId") or ""
             ).strip()
             if prepared_agent_id:
                 prepared_agent = s._resolve_active_agent_for_turn(
@@ -388,13 +417,9 @@ def submit_session_message(
         admit_lock.release()
         raise
 
-    lock_wait_started_at = s._perf_counter()
-    with _release_acquired_lock(admit_lock), s._CHAT_STATE_LOCK:
-        lock_acquired_at = s._perf_counter()
-        submit_timing_fields["chatStateLockWaitMs"] = s._elapsed_ms_between(lock_wait_started_at, lock_acquired_at)
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        s._materialize_agent_directory_conversation_locked(payload, conversation_id, source="submit_session_message")
-        conversation = s._find_conversation_entry(payload, conversation_id)
+    persist_started_at = s._perf_counter()
+    submit_timing_fields["chatStateLockWaitMs"] = 0
+    try:
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
         # Fail closed: never run a turn with an invented context window.
@@ -413,7 +438,12 @@ def submit_session_message(
         session_references = s._resolve_session_references(
             conversation_id,
             references or [],
-            conversations=payload.get("conversations") or [],
+            conversations=_session_reference_conversation_rows(
+                s,
+                conversation_id,
+                conversation,
+                references or [],
+            ),
             lang=lang,
         )
         active_task = s._normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
@@ -494,8 +524,7 @@ def submit_session_message(
                 lease_conflicts=lease_decision.conflicts,
                 lang=lang,
             )
-            payload["updated_at"] = conversation.get("updated_at") or s._now_timestamp()
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
             raise s.SessionBusyError(localized_reason)
 
         if prepared_agent is None:
@@ -587,8 +616,7 @@ def submit_session_message(
         conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = user_entry["timestamp"]
-        payload["updated_at"] = user_entry["timestamp"]
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
         s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
         s._persist_chat_turn_work_run(
             session_id=conversation_id,
@@ -600,7 +628,9 @@ def submit_session_message(
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
         )
-        submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(lock_acquired_at)
+        submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(persist_started_at)
+    finally:
+        admit_lock.release()
     from . import directory_bridge
 
     directory_bridge.sync_conversation_record(
@@ -980,9 +1010,10 @@ def edit_and_resubmit_session_message(
         )
     s._validate_user_message_not_encoding_replacement(message, lang=lang)
 
-    with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, conversation_id)
+    admit_lock = _session_submit_admit_lock(conversation_id)
+    admit_lock.acquire()
+    try:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
         s._ensure_session_mutable(
@@ -1040,8 +1071,7 @@ def edit_and_resubmit_session_message(
                 lease_conflicts=lease_decision.conflicts,
                 lang=lang,
             )
-            payload["updated_at"] = conversation.get("updated_at") or s._now_timestamp()
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
             raise s.SessionBusyError(localized_reason)
 
         s._ensure_conversation_agent_metadata(conversation)
@@ -1083,8 +1113,7 @@ def edit_and_resubmit_session_message(
         conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = user_entry["timestamp"]
-        payload["updated_at"] = user_entry["timestamp"]
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
         s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
         s._persist_chat_turn_work_run(
             session_id=conversation_id,
@@ -1096,6 +1125,8 @@ def edit_and_resubmit_session_message(
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
         )
+    finally:
+        admit_lock.release()
     s._append_session_conversation_event(
         conversation_id,
         turn_control.turn_id,
