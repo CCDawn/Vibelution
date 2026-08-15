@@ -377,14 +377,10 @@ def infer_tool_business_success(result: Any) -> bool:
         )):
             return False
         if stripped.startswith("{"):
-            try:
-                return not _looks_like_business_failure(json.loads(stripped))
-            except Exception as exc:
-                _debug_logger.warning(
-                    f"[工具结果] 工具结果 JSON 解析失败: {type(exc).__name__}: {exc}",
-                    tag="TOOL_RESULT",
-                )
-                return True
+            parsed = _try_parse_json_object(stripped)
+            if parsed is not None:
+                return not _looks_like_business_failure(parsed)
+            return True
     return True
 
 
