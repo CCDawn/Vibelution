@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { fetchSourceCollectionSummary } from "../../api/sourceCollection";
 import type {
   DataProcessingCollectionAssignmentListPayload,
   DataProcessingStatus,
@@ -38,15 +39,14 @@ export function useSourceCollectionRunQueries(options: UseSourceCollectionRunQue
       options.effectiveTeamId || "none",
       options.selectedSourceCollectionRunEffectiveId || "latest",
     ),
-    queryFn: ({ signal }) => {
-      const params = options.selectedSourceCollectionRunEffectiveId
-        ? `?runId=${encodeURIComponent(options.selectedSourceCollectionRunEffectiveId)}`
-        : "";
-      return fetchJson<SourceCollectionSummaryPayload>(
-        `/api/teams/${encodeURIComponent(options.effectiveTeamId)}/workflow-orchestration/source-collection/summary${params}`,
-        { signal },
-      );
-    },
+    queryFn: ({ signal }) =>
+      fetchSourceCollectionSummary<SourceCollectionSummaryPayload>(
+        options.effectiveTeamId,
+        {
+          signal,
+          runId: options.selectedSourceCollectionRunEffectiveId || undefined,
+        },
+      ),
     enabled: Boolean(
       options.effectiveTeamId
       && options.sourceCollectionWorkspaceSelected
