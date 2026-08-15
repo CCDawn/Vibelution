@@ -76,8 +76,8 @@ from core.infrastructure.workspace_cleaner import (
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
 from tools.episodic_memory_tools import (
-    append_episodic_memory_tool as _append_episodic_memory_impl,
-    supersede_episodic_memory_tool as _supersede_episodic_memory_impl,
+    append_personal_memory_tool as _append_personal_memory_impl,
+    supersede_personal_memory_tool as _supersede_personal_memory_impl,
 )
 from tools.agent_tool_governance_tools import agent_tool_permission_request_tool as _agent_tool_permission_request_impl
 from tools.research_organization_tools import (
@@ -1798,19 +1798,20 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
-    def append_episodic_memory_tool(
+    def append_personal_memory_tool(
         text: str,
         kind: str = "note",
         refs_json: str = "",
         occurred_at: str = "",
     ) -> str:
         """
-        为当前 Agent 追加一条跨会话私有记忆（偏好、会话事实、私人笔记）。
+        为当前 Agent 追加一条个人记忆（偏好、会话事实、私人笔记）。
 
-        先读本轮上下文 PersonalEpisodes，再决定是否写入。
+        先读本轮「个人记忆」章节，再决定是否写入。
         不要用 glob、grep 或 cli_tool 查找或打开个人记忆落盘文件。
-        只写后续会话仍有用的内容；不拷规范、skill、代码或身份；不升公共目录，不写团队知识。
-        热路径只追加。当前会话会自动记入 refs。过期请用 supersede_episodic_memory_tool。
+        只写后续会话仍有用的内容；不拷规范、skill、代码或身份。
+        这不是世代交接记忆，不升公共目录，不写团队知识。
+        热路径只追加。当前会话会自动记入 refs。过期请用 supersede_personal_memory_tool。
 
         Args:
             text: 记忆正文（必填）。
@@ -1821,7 +1822,7 @@ def _build_key_tools() -> List[BaseTool]:
         Returns:
             JSON，含 ok、episodeId。
         """
-        return _append_episodic_memory_impl(
+        return _append_personal_memory_impl(
             text=text,
             kind=kind,
             refs_json=refs_json,
@@ -1829,27 +1830,27 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
-    def supersede_episodic_memory_tool(
+    def supersede_personal_memory_tool(
         episode_id: str,
         successor_text: str = "",
         kind: str = "note",
     ) -> str:
         """
-        作废当前 Agent 的一条私有记忆；可选同时追加替换条目。
+        作废当前 Agent 的一条个人记忆；可选同时追加替换条目。
 
-        episodeId 取自本轮上下文 PersonalEpisodes，不要用文件搜索去找。
+        episodeId 取自本轮「个人记忆」章节，不要用文件搜索去找。
         原记录保留，只填 validUntil。用于过期偏好或被更新的事实。
-        不升公共目录，不写团队知识。
+        这不是世代交接记忆，不升公共目录，不写团队知识。
 
         Args:
-            episode_id: 要作废的当前 episode（必填）。
+            episode_id: 要作废的当前个人记忆（必填）。
             successor_text: 可选替换正文；空则只作废。
             kind: 替换条目的 kind，默认 note。
 
         Returns:
             JSON，含 ok、episodeId、successorEpisodeId。
         """
-        return _supersede_episodic_memory_impl(
+        return _supersede_personal_memory_impl(
             episode_id=episode_id,
             successor_text=successor_text,
             kind=kind,
@@ -2675,8 +2676,8 @@ def _build_key_tools() -> List[BaseTool]:
         get_session_files_tool,
         # Agent 间通信
         agent_message_tool,
-        append_episodic_memory_tool,
-        supersede_episodic_memory_tool,
+        append_personal_memory_tool,
+        supersede_personal_memory_tool,
         agent_tool_permission_request_tool,
         research_agent_creation_proposal_tool,
         research_communication_edge_proposal_tool,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import sourceCollectionApiSource from "../api/sourceCollection.ts?raw";
 import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
@@ -1954,8 +1955,9 @@ describe("TeamsRoute layout contract", () => {
     expect(sourceQualityStatusQuerySource).toContain("stageWritebackSync.active");
     expect(routeSource).toContain("SourceCollectionSummaryPayload");
     expect(routeSource).toContain("sourceCollectionSummaryQueryKey");
-    // Wave 8S: SC summary endpoint lives on useSourceCollectionRunQueries.
-    expect(sourceCollectionRunQueriesSource).toContain("/workflow-orchestration/source-collection/summary");
+    // Wave 8S: SC summary query lives on useSourceCollectionRunQueries; path lives in sourceCollection.ts.
+    expect(sourceCollectionRunQueriesSource).toContain("fetchSourceCollectionSummary");
+    expect(sourceCollectionApiSource).toContain("/workflow-orchestration/source-collection/summary");
     expect(routeSource).toContain("sourceCollectionSummaryQueryPrefix");
     expect(researchWorkflowResourcesSource).toContain("includeValidation=false&includeStore=false");
     expect(researchWorkflowResourcesSource).toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;");

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Current-Agent private episode write tool.
+"""Current-Agent private personal-memory write tools.
 
 Hot path: append JSONL via agent_directory. No LLM extraction, no public lift,
-and no write to another Agent's memory.
+and no write to another Agent's memory. This is not generation-handoff memory.
 """
 
 from __future__ import annotations
@@ -12,27 +12,30 @@ from typing import Any
 
 from core.chat.chat_task_types import trim_lines
 
-APPEND_EPISODIC_MEMORY_TOOL_NAME = "append_episodic_memory_tool"
-SUPERSEDE_EPISODIC_MEMORY_TOOL_NAME = "supersede_episodic_memory_tool"
+APPEND_PERSONAL_MEMORY_TOOL_NAME = "append_personal_memory_tool"
+SUPERSEDE_PERSONAL_MEMORY_TOOL_NAME = "supersede_personal_memory_tool"
+# Legacy LLM-facing names kept as callable aliases for tests/imports.
+APPEND_EPISODIC_MEMORY_TOOL_NAME = APPEND_PERSONAL_MEMORY_TOOL_NAME
+SUPERSEDE_EPISODIC_MEMORY_TOOL_NAME = SUPERSEDE_PERSONAL_MEMORY_TOOL_NAME
 
 
-def append_episodic_memory_tool(
+def append_personal_memory_tool(
     text: str,
     kind: str = "note",
     refs_json: str = "",
     occurred_at: str = "",
 ) -> str:
     """
-    Append one private cross-session episode for the current Agent.
+    Append one private personal memory for the current Agent.
 
-    Read PersonalEpisodes in the current turn context first. Do not use
+    Read the 个人记忆 section in the current turn context first. Do not use
     glob, grep, or cli_tool to find or open private memory files.
     Write only preferences, session facts, or private notes that should
-    survive later sessions. Do not copy standards, skills, code, identity,
-    or team/public knowledge. This does not promote to the public catalog.
+    survive later sessions. This is not generation-handoff memory. Do not
+    copy standards, skills, code, identity, or team/public knowledge.
 
     Args:
-        text: Episode body (required).
+        text: Memory body (required).
         kind: note | preference | session_fact | private_note. Default note.
         refs_json: Optional JSON list of {type, id} where type is
             session|path|card|item. Current session is attached automatically.
@@ -89,23 +92,24 @@ def append_episodic_memory_tool(
         )
 
 
-def supersede_episodic_memory_tool(
+def supersede_personal_memory_tool(
     episode_id: str,
     successor_text: str = "",
     kind: str = "note",
 ) -> str:
     """
-    Invalidate one current private episode for the current Agent.
+    Invalidate one current private personal memory for the current Agent.
 
-    Take episodeId from PersonalEpisodes in the current turn context; do
+    Take episodeId from the 个人记忆 section in the current turn context; do
     not search memory files. Use this when a preference or fact is outdated.
     The original record stays; only validUntil is filled. Optional
-    successor_text appends a replacement episode and links the old one to it.
+    successor_text appends a replacement memory and links the old one to it.
+    This is not generation-handoff memory.
 
     Args:
-        episode_id: Current episode to supersede (required).
+        episode_id: Current personal memory to supersede (required).
         successor_text: Optional replacement body. Empty means invalidate only.
-        kind: Kind for the successor episode. Default note.
+        kind: Kind for the successor memory. Default note.
 
     Returns:
         JSON with ok/status and episode ids.
@@ -132,7 +136,7 @@ def supersede_episodic_memory_tool(
                     "ok": False,
                     "status": "blocked",
                     "error": "episode_id_required",
-                    "message": "作废私有 episode 需要 episode_id。",
+                    "message": "作废个人记忆需要 episode_id。",
                 }
             )
         successor_id = ""
@@ -173,6 +177,10 @@ def supersede_episodic_memory_tool(
                 "message": trim_lines(str(exc), max_lines=2),
             }
         )
+
+
+append_episodic_memory_tool = append_personal_memory_tool
+supersede_episodic_memory_tool = supersede_personal_memory_tool
 
 
 def _parse_refs(refs_json: str) -> list[dict[str, Any]]:
