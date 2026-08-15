@@ -8,6 +8,9 @@ callbacks only run after a successful commit. ``submit()`` enqueues under
 the accept lock so ``close()`` cannot miss an in-flight put. ``close()``
 stops accepting new work, drains every accepted envelope in FIFO order,
 and settles the remaining futures explicitly when the drain times out.
+``close()`` never blocks longer than its timeout: an in-flight COMMIT that
+already started wins and its futures settle by the real commit result,
+while batches and queued envelopes that have not entered COMMIT fail.
 """
 
 from __future__ import annotations
@@ -71,6 +74,7 @@ class WorkflowLedgerWriter:
         self._startup_gate = threading.Event()
         self._condition = threading.Condition()
         self._commit_guard = threading.Lock()
+        self._commit_in_progress = False
         self._outstanding = 0
         self._current_group: list[_Envelope] = []
         self._thread = threading.Thread(target=self._run, name="workflow-ledger-writer", daemon=True)
@@ -127,6 +131,10 @@ class WorkflowLedgerWriter:
                 self._condition.wait(timeout=remaining)
 
     def close(self, timeout: float = DEFAULT_CLOSE_TIMEOUT_S) -> None:
+        """Stop accepting work and drain. Bounded by ``timeout`` even when an
+        in-flight COMMIT blocks longer: the COMMIT already started wins and its
+        futures settle by the real commit result, while the current batch and
+        queued envelopes that have not entered COMMIT fail."""
         with self._accept_lock:
             if self._closed:
                 return
@@ -144,7 +152,12 @@ class WorkflowLedgerWriter:
             )
             with self._commit_guard:
                 self._abandoned.set()
-                self._settle_remaining(error)
+                if self._commit_in_progress:
+                    # 已进入 COMMIT 的在途批次由 writer 按真实结果 settle，
+                    # close 只结算尚未进入 COMMIT 的排队 envelope。
+                    self._settle_queued(error)
+                else:
+                    self._settle_remaining(error)
 
     def _flush_until(self, envelope: _Envelope) -> None:
         deadline = time.monotonic() + DEFAULT_FLUSH_TIMEOUT_S
@@ -196,6 +209,17 @@ class WorkflowLedgerWriter:
                 continue
             items.append(envelope)
         for envelope in items:
+            self._settle(envelope, error=error)
+
+    def _settle_queued(self, error: BaseException) -> None:
+        """Settle only queued envelopes, never the in-flight commit group."""
+        while True:
+            try:
+                envelope = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if envelope is _WAKEUP:
+                continue
             self._settle(envelope, error=error)
 
     # ------------------------------------------------------------------ run
@@ -308,9 +332,19 @@ class WorkflowLedgerWriter:
                     raise WorkflowLedgerClosedError(
                         "workflow ledger writer closed before the mutation committed"
                     )
+                self._commit_in_progress = True
+            try:
                 connection.execute("COMMIT")
-                for envelope, result in staged:
-                    self._settle(envelope, result=result)
+            except BaseException:
+                with self._commit_guard:
+                    self._commit_in_progress = False
+                raise
+            with self._commit_guard:
+                try:
+                    for envelope, result in staged:
+                        self._settle(envelope, result=result)
+                finally:
+                    self._commit_in_progress = False
         except Exception as exc:
             try:
                 connection.execute("ROLLBACK")
