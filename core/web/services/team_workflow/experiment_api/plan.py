@@ -728,3 +728,155 @@ def register_experiment_baseline_artifact(team_id: str, plan_id: str, payload: d
         "team": {"teamId": team.get("teamId", normalized_team_id), "name": team.get("name", "")},
         "boundaries": s._experiment_planning_boundaries(),
     }
+
+
+def bind_frozen_protocol_to_experiment_plan(
+    team_id: str,
+    frozen: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Copy a research-workflow frozen protocol into the experiment plan store.
+
+    Protocol freeze writes ``frozen_protocol`` without updating ``designGate``.
+    Smoke still reads the plan store, so historical SCI-096 retries 422 with
+    ``Experiment plan not found`` or an unfrozen draft. This bind is idempotent.
+    """
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    payload = frozen if isinstance(frozen, dict) else {}
+    nested = payload.get("payload")
+    if isinstance(nested, dict) and (
+        nested.get("planId") or nested.get("protocolId") or nested.get("protocol")
+    ):
+        payload = nested
+    protocol = payload.get("protocol") if isinstance(payload.get("protocol"), dict) else {}
+    plan_id = str(
+        payload.get("planId") or payload.get("protocolId") or protocol.get("planId") or ""
+    ).strip()
+    if not plan_id:
+        raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
+    smoke_plan = protocol.get("smokePlan")
+    if not s._has_value(smoke_plan):
+        smoke_plan = protocol.get("smoke_plan")
+    now = s.utc_now_iso()
+    with s._WORKFLOW_LOCK:
+        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plans = [item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)]
+        plan = next((item for item in plans if str(item.get("planId") or "") == plan_id), None)
+        if plan is None:
+            plan = {
+                "planId": plan_id,
+                "teamId": normalized_team_id,
+                "status": "design_frozen",
+                "createdAt": now,
+                "experimentPlan": {},
+                "designGate": {},
+            }
+            plans.append(plan)
+        experiment_plan = (
+            plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
+        )
+        for field, source in (
+            ("dataset", protocol.get("dataset")),
+            ("metric", protocol.get("metric")),
+            ("baseline", protocol.get("baseline")),
+        ):
+            if s._has_value(source):
+                experiment_plan[field] = source
+        if s._has_value(smoke_plan):
+            experiment_plan["smokePlan"] = smoke_plan
+        plan["experimentPlan"] = experiment_plan
+        gate = plan.get("designGate") if isinstance(plan.get("designGate"), dict) else {}
+        gate["status"] = "frozen"
+        gate["frozenAt"] = str(gate.get("frozenAt") or now)
+        gate["source"] = str(gate.get("source") or "research_workflow_frozen_protocol")
+        plan["designGate"] = gate
+        plan["status"] = "design_frozen"
+        _stamp_frozen_protocol_formal_adapter(s, plan, protocol=protocol)
+        s._refresh_experiment_plan_readiness(plan)
+        plan["updatedAt"] = now
+        plan_store["plans"] = plans
+        plan_store["activePlanId"] = plan_id
+        plan_store["updatedAt"] = now
+        s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
+    return dict(plan)
+
+
+def _stamp_frozen_protocol_formal_adapter(
+    s: Any,
+    plan: dict[str, Any],
+    *,
+    protocol: dict[str, Any],
+) -> None:
+    """Frozen protocol bind is the explicit FashionMNIST adapter selection.
+
+    ``fashion_mnist_predictive_coding_multi_seed`` requiresExplicitSelection and
+    is never a catalog default. The governed freeze of this workflow *is* that
+    selection. Without it, ``controlled_run`` fails at
+    ``_require_formal_full_run_ready``.
+    """
+    adapter_id = s.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    contract = (
+        plan.get("experimentContract")
+        if isinstance(plan.get("experimentContract"), dict)
+        else {}
+    )
+    selection = (
+        contract.get("adapterSelection")
+        if isinstance(contract.get("adapterSelection"), dict)
+        else {}
+    )
+    if str(selection.get("resolvedAdapterId") or "") == adapter_id:
+        s.experiment_contract.sync_plan_record_contract_status(plan)
+        return
+    experiment_plan = (
+        plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
+    )
+    raw_seeds = protocol.get("seeds")
+    if raw_seeds is None:
+        raw_seeds = protocol.get("seed")
+    seeds: list[int] = []
+    if isinstance(raw_seeds, list):
+        seeds = [int(item) for item in raw_seeds if isinstance(item, int) and not isinstance(item, bool)]
+    elif isinstance(raw_seeds, int) and not isinstance(raw_seeds, bool):
+        seeds = [int(raw_seeds)]
+    if len(seeds) < 3:
+        seeds = [17, 42, 101]
+    metric = str(experiment_plan.get("metric") or protocol.get("metric") or "primary metric")
+    question = str(
+        protocol.get("researchQuestion")
+        or plan.get("researchQuestion")
+        or f"Frozen protocol comparison on {experiment_plan.get('dataset') or 'FashionMNIST'}."
+    ).strip()
+    rebuilt = s.experiment_contract.build_experiment_contract(
+        plan_id=str(plan.get("planId") or ""),
+        team_id=str(plan.get("teamId") or ""),
+        research_question=question,
+        payload={
+            "researchProfileId": str(
+                protocol.get("researchProfileId") or "challenge-cup-predictive-coding"
+            ),
+            "researchMode": "full_research_loop",
+            "experimentMethod": "model_training_inference",
+            "requestedAdapterId": adapter_id,
+            "methodConfig": {
+                "dataset": experiment_plan.get("dataset") or "FashionMNIST",
+                "model": protocol.get("model") or "predictive-coding-inspired candidate",
+                "baseline": experiment_plan.get("baseline") or "standard backpropagation",
+                "seeds": seeds,
+                "budget": protocol.get("budget") or "same seeds and training budget",
+                "smokePlan": experiment_plan.get("smokePlan") or "bounded smoke observation",
+            },
+            "decisionContract": {
+                "successCriteria": [f"improve {metric} under the frozen protocol"],
+                "failureCriteria": ["consistently worse than baseline"],
+                "inconclusiveCriteria": ["seed variance prevents a fair conclusion"],
+            },
+            "status": "prepared",
+        },
+        legacy_plan=experiment_plan,
+        hypothesis_refs=protocol.get("hypothesisRefs")
+        if isinstance(protocol.get("hypothesisRefs"), list)
+        else [],
+    )
+    plan["experimentContract"] = rebuilt
+    s.experiment_contract.sync_plan_record_contract_status(plan)

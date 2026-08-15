@@ -357,9 +357,257 @@ def test_ledger_ports_controlled_run_execute_system_action(
         harness.close()
 
 
+def test_ledger_ports_controlled_run_reads_plan_from_smoke_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SCI-096 snapshot has no planId/campaign; frozen_protocol + smoke_release do."""
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        put_workflow_artifact,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / "ledger-controlled-artifact.sqlite3")
+    try:
+        run_id = "run-controlled-artifact"
+        calls: list[tuple[str, str]] = []
+
+        def fake_full_run(team_id: str, plan_id: str, _payload: dict) -> dict:
+            calls.append((team_id, plan_id))
+            return {
+                "execution": {
+                    "executionId": "execution-from-artifact",
+                    "status": "completed",
+                    "adapterId": "formal_runner_v1",
+                }
+            }
+
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.experiment_api.full_run.execute_experiment_full_run",
+            fake_full_run,
+        )
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-sys",
+                "sourceCollectionRunId": "sc-ledger-1",
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="frozen_protocol",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="human-gate:ht-freeze",
+            payload={
+                "teamId": "team-ledger-sys",
+                "workflowRunId": run_id,
+                "sourceCollectionRunId": "sc-ledger-1",
+                "protocolId": "plan-from-artifact",
+                "planId": "plan-from-artifact",
+                "status": "frozen",
+                "protocolDraftHash": "3" * 64,
+                "protocolReviewHash": "4" * 64,
+                "protocol": {
+                    "planId": "plan-from-artifact",
+                    "dataset": "ds",
+                    "baseline": "bl",
+                    "metric": "macro_f1",
+                    "seed": [42, 2026],
+                    "stop_condition": "max rounds",
+                    "hypothesisPortfolioId": "challenge-sci-096",
+                    "hypothesisRefs": ["H1"],
+                },
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="smoke_release",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="human-gate:ht-smoke",
+            payload={
+                "teamId": "team-ledger-sys",
+                "workflowRunId": run_id,
+                "sourceCollectionRunId": "sc-ledger-1",
+                "planId": "plan-from-artifact",
+                "smokeRunId": "smoke-1",
+                "status": "released",
+                "frozenProtocolHash": "b" * 64,
+                "smokeEvidenceHash": "c" * 64,
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-controlled-artifact",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-controlled_run-a1",
+            node_id="controlled_run",
+            attempt=1,
+            actor_kind=ActorKind.SYSTEM,
+            action_kind="system_action:controlled_run",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        refs, meta = ports.execute_system_action(action=action)
+        assert calls == [("team-ledger-sys", "plan-from-artifact")]
+        assert meta.get("planId") == "plan-from-artifact"
+        assert meta.get("executionId") == "execution-from-artifact"
+        assert refs and refs[0]["kind"] == "run_artifacts"
+    finally:
+        harness.close()
+
+
+def test_ledger_ports_controlled_run_uses_bounded_runner_when_formal_adapter_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SCI-096 smoke_release is accepted but FashionMNIST is not selected."""
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        put_workflow_artifact,
+    )
+    from core.web.services.team_workflow_orchestration_service import (
+        TeamWorkflowOrchestrationError,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+
+    def reject_formal(team_id: str, plan_id: str, _payload: dict) -> dict:
+        raise TeamWorkflowOrchestrationError(
+            "Experiment plan does not select the formal FashionMNIST multi-seed adapter."
+        )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.experiment_api.full_run.execute_experiment_full_run",
+        reject_formal,
+    )
+    harness = CommandHarness(tmp_path / "ledger-controlled-bounded.sqlite3")
+    try:
+        run_id = "run-controlled-bounded"
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-sys",
+                "sourceCollectionRunId": "sc-ledger-1",
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="frozen_protocol",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="human-gate:ht-freeze",
+            payload={
+                "teamId": "team-ledger-sys",
+                "workflowRunId": run_id,
+                "sourceCollectionRunId": "sc-ledger-1",
+                "protocolId": "plan-from-artifact",
+                "planId": "plan-from-artifact",
+                "status": "frozen",
+                "protocolDraftHash": "3" * 64,
+                "protocolReviewHash": "4" * 64,
+                "protocol": {
+                    "planId": "plan-from-artifact",
+                    "dataset": "ds",
+                    "baseline": "bl",
+                    "metric": "macro_f1",
+                    "seed": 42,
+                    "stop_condition": "max rounds",
+                    "hypothesisPortfolioId": "challenge-sci-096",
+                    "hypothesisRefs": ["H1"],
+                },
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="smoke_release",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="human-gate:ht-smoke",
+            payload={
+                "teamId": "team-ledger-sys",
+                "workflowRunId": run_id,
+                "sourceCollectionRunId": "sc-ledger-1",
+                "planId": "plan-from-artifact",
+                "smokeRunId": "smoke-1",
+                "status": "released",
+                "frozenProtocolHash": "b" * 64,
+                "smokeEvidenceHash": "c" * 64,
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-controlled-bounded",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-controlled_run-a1",
+            node_id="controlled_run",
+            attempt=1,
+            actor_kind=ActorKind.SYSTEM,
+            action_kind="system_action:controlled_run",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        refs, meta = ports.execute_system_action(action=action)
+        assert meta.get("planId") == "plan-from-artifact"
+        assert str(meta.get("executionId") or "").startswith("exec-")
+        assert meta.get("runnerId") == "synthetic_classification_baseline_vs_variant"
+        assert refs and refs[0]["kind"] == "run_artifacts"
+    finally:
+        harness.close()
+
+
+def test_ledger_ports_controlled_run_still_requires_plan_id_without_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / "ledger-controlled-missing.sqlite3")
+    try:
+        run_id = "run-controlled-missing"
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-sys",
+                "sourceCollectionRunId": "sc-ledger-1",
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-controlled-missing",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-controlled_run-a1",
+            node_id="controlled_run",
+            attempt=1,
+            actor_kind=ActorKind.SYSTEM,
+            action_kind="system_action:controlled_run",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        with pytest.raises(RuntimeError, match="controlled_run requires planId"):
+            ports.execute_system_action(action=action)
+    finally:
+        harness.close()
+
+
 def test_ledger_ports_result_package_execute_system_action(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
     harness = CommandHarness(tmp_path / "ledger-package.sqlite3")
     try:
         run_id = "run-package"
@@ -431,6 +679,114 @@ def test_ledger_ports_result_package_execute_system_action(
         )
         verified = adapter.verify(action, result)
         assert verified.outcome == "succeeded"
+    finally:
+        harness.close()
+
+
+def test_ledger_ports_result_package_bounded_without_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        load_workflow_artifact_payload,
+        put_workflow_artifact,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / "ledger-package-bounded.sqlite3")
+    try:
+        run_id = "run-package-bounded"
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-sys",
+                "sourceCollectionRunId": "sc-ledger-1",
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="run_artifacts",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="nr-bounded",
+            payload={
+                "execution": {
+                    "status": "completed",
+                    "adapterId": "synthetic_classification_baseline_vs_variant",
+                    "runnerMode": "v1_cpu_smoke",
+                    "metrics": {"delta": {"macro_f1": 0.02}},
+                    "artifactHash": "e" * 64,
+                    "formalRunnerUnavailable": (
+                        "Experiment plan does not select the formal FashionMNIST multi-seed adapter."
+                    ),
+                }
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="iteration_decision",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="nr-iter",
+            payload={
+                "decisionId": "decision-stop-1",
+                "decisionKind": "stop",
+                "kind": "stop",
+                "terminalReason": "formal_runner_unavailable",
+                "reason": "Formal FashionMNIST runner unavailable after bounded V1 CPU observation.",
+                "selectedCandidateRef": "H1",
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="version_governance_record",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="nr-gov",
+            payload={
+                "operation": "stop",
+                "status": "official",
+                "terminalReason": "formal_runner_unavailable",
+                "candidateRef": "H1",
+                "versionId": "bounded-v1-cpu",
+                "decisionId": "decision-stop-1",
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-package-bounded",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-result_package-a1",
+            node_id="result_package",
+            attempt=1,
+            actor_kind=ActorKind.SYSTEM,
+            action_kind="system_action:result_package",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        refs, meta = ports.execute_system_action(action=action)
+        assert meta["runnerId"] == "bounded_package_builder"
+        assert str(meta["packageId"]).startswith(f"rrp-bounded:{run_id}:")
+        assert refs and refs[0]["kind"] == "research_result_package"
+        loaded = load_workflow_artifact_payload(
+            "research_result_package",
+            team_id="team-ledger-sys",
+            authority_run_id="sc-ledger-1",
+            workflow_run_id=run_id,
+        )
+        assert loaded is not None
+        body = loaded.get("payload") if isinstance(loaded.get("payload"), dict) else loaded
+        package = body.get("package") if isinstance(body.get("package"), dict) else body
+        assert package["bounded"] is True
+        assert package["terminalReason"] == "formal_runner_unavailable"
+        assert package["source"] == "bounded_result_package"
+        assert "not_a_fashionmnist_scientific_result" in (
+            package["deliverables"]["limitations"]["sections"]
+        )
     finally:
         harness.close()
 
@@ -533,5 +889,502 @@ def test_ledger_ports_run_smoke_persists_smoke_evidence(
         assert refs and {item["kind"] for item in refs} == {"smoke_evidence"}
         assert "smoke_release" not in {item["kind"] for item in refs}
         _ = SystemActionAdapter  # ownership boundary documented above
+    finally:
+        harness.close()
+
+
+def test_ledger_ports_result_evaluation_writes_bounded_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.research.workflow.contracts.competition_evaluation import (
+        CompetitionEvaluationSnapshot,
+    )
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        load_workflow_artifact_payload,
+        put_workflow_artifact,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / "ledger-eval-bounded.sqlite3")
+    try:
+        run_id = "run-eval-bounded"
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-sys",
+                "sourceCollectionRunId": "sc-ledger-1",
+                "evaluationContract": {"minimumClaimEvidenceCoverage": 0.9},
+                "agentBindingSnapshot": [
+                    {
+                        "nodeId": "result_evaluation",
+                        "agentId": "agent-ledger",
+                        "roleKey": "experiment_ledger",
+                        "snapshotId": "snap:eval",
+                    }
+                ],
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="run_artifacts",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="nr-bounded",
+            payload={
+                "execution": {
+                    "status": "completed",
+                    "adapterId": "synthetic_classification_baseline_vs_variant",
+                    "runnerId": "synthetic_classification_baseline_vs_variant",
+                    "runnerMode": "v1_cpu_smoke",
+                    "metrics": {"delta": {"macro_f1": 0.02}},
+                    "artifactHash": "e" * 64,
+                    "formalRunnerUnavailable": (
+                        "Record a passing smoke result before formal full-run preparation."
+                    ),
+                    "decisionHint": "needs_full_run",
+                }
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-eval-bounded",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-result_evaluation-a1",
+            node_id="result_evaluation",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id="snap:eval",
+            budget_policy_hash="p-1",
+        )
+        handle = ports.create_agent_task(action=action)
+        assert str(handle.task_id).startswith("bounded-eval")
+        refs = ports.execute_agent_turn(action=action, handle=handle)
+        assert refs and refs[0]["kind"] == "evaluation_report"
+        loaded = load_workflow_artifact_payload(
+            "evaluation_report",
+            team_id="team-ledger-sys",
+            authority_run_id="sc-ledger-1",
+            workflow_run_id=run_id,
+        )
+        assert loaded is not None
+        body = loaded.get("payload") if isinstance(loaded.get("payload"), dict) else loaded
+        assert body["runId"] == run_id
+        assert body["blockingWarnings"] == []
+        assert body["baseline_comparison"]["delta"]["macro_f1"] == 0.02
+        CompetitionEvaluationSnapshot.from_dict(body)
+    finally:
+        harness.close()
+
+
+def test_ledger_ports_result_evaluation_bounded_without_agent_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        put_workflow_artifact,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / "ledger-eval-unbound.sqlite3")
+    try:
+        run_id = "run-eval-unbound"
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-sys",
+                "sourceCollectionRunId": "sc-ledger-1",
+                "agentBindingSnapshot": [],
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="run_artifacts",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="nr-bounded",
+            payload={
+                "execution": {
+                    "status": "completed",
+                    "adapterId": "synthetic_classification_baseline_vs_variant",
+                    "runnerMode": "v1_cpu_smoke",
+                    "metrics": {"baseline": {"accuracy": 1.0}},
+                    "artifactHash": "e" * 64,
+                    "formalRunnerUnavailable": (
+                        "Experiment plan does not select the formal FashionMNIST multi-seed adapter."
+                    ),
+                }
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-eval-unbound",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-result_evaluation-a1",
+            node_id="result_evaluation",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        handle = ports.create_agent_task(action=action)
+        assert str(handle.task_id).startswith("bounded-eval")
+        refs = ports.execute_agent_turn(action=action, handle=handle)
+        assert refs and refs[0]["kind"] == "evaluation_report"
+    finally:
+        harness.close()
+
+
+def test_result_evaluation_binding_heals_from_sibling_freeze(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime.real_readiness_context import (
+        RealDomainReadinessContext,
+    )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.team_role_source.resolve_team_role_bindings",
+        lambda team_id: {},
+    )
+    harness = CommandHarness(tmp_path / "ledger-eval-sibling.sqlite3")
+    try:
+        run_id = "run-eval-sibling"
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "research-team",
+                "agentBindingSnapshot": [
+                    {
+                        "nodeId": "protocol_review",
+                        "agentId": "agent-from-freeze",
+                        "roleKey": "protocol_reviewer",
+                        "snapshotId": "snap:review",
+                    },
+                    {
+                        "nodeId": "result_evaluation",
+                        "agentId": "",
+                        "roleKey": "experiment_ledger",
+                        "snapshotId": "snap:empty",
+                    },
+                ],
+            },
+        )
+        context = RealDomainReadinessContext(harness.store)
+        binding = context.binding_snapshot(run_id, "result_evaluation")
+        assert binding is not None
+        assert binding["agentId"] == "agent-from-freeze"
+        assert binding["resolvedFrom"] == "sibling_freeze"
+        ports = RealDomainPorts(harness.store)
+        resolved = ports.resolve_binding(
+            PendingAction(
+                action_id="act-sibling",
+                run_id=run_id,
+                node_run_id=f"nr-{run_id}-result_evaluation-a1",
+                node_id="result_evaluation",
+                attempt=1,
+                actor_kind=ActorKind.AGENT,
+                action_kind="start_agent_task",
+                input_snapshot_hash="a" * 64,
+                input_artifact_refs=(),
+                binding_snapshot_id=None,
+                budget_policy_hash="p-1",
+            )
+        )
+        assert resolved.agent_id == "agent-from-freeze"
+    finally:
+        harness.close()
+
+
+def test_result_evaluation_binding_heals_empty_freeze_from_team_role(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime.real_readiness_context import (
+        RealDomainReadinessContext,
+    )
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.team_role_source.resolve_team_role_bindings",
+        lambda team_id: {"experiment_ledger": "agent-from-canvas"},
+    )
+    harness = CommandHarness(tmp_path / "ledger-eval-heal.sqlite3")
+    try:
+        run_id = "run-eval-heal"
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "research-team",
+                "agentBindingSnapshot": [
+                    {
+                        "nodeId": "result_evaluation",
+                        "agentId": "",
+                        "roleKey": "experiment_ledger",
+                        "snapshotId": "snap:empty",
+                    }
+                ],
+            },
+        )
+        context = RealDomainReadinessContext(harness.store)
+        binding = context.binding_snapshot(run_id, "result_evaluation")
+        assert binding is not None
+        assert binding["agentId"] == "agent-from-canvas"
+        ports = RealDomainPorts(harness.store)
+        resolved = ports.resolve_binding(
+            PendingAction(
+                action_id="act-heal",
+                run_id=run_id,
+                node_run_id=f"nr-{run_id}-result_evaluation-a1",
+                node_id="result_evaluation",
+                attempt=1,
+                actor_kind=ActorKind.AGENT,
+                action_kind="start_agent_task",
+                input_snapshot_hash="a" * 64,
+                input_artifact_refs=(),
+                binding_snapshot_id=None,
+                budget_policy_hash="p-1",
+            )
+        )
+        assert resolved.agent_id == "agent-from-canvas"
+    finally:
+        harness.close()
+
+
+def test_ledger_ports_iteration_decision_writes_stop_from_bounded_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.research.workflow.iteration_decisions import validate_decision_payload
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        load_workflow_artifact_payload,
+        put_workflow_artifact,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / "ledger-iter-bounded.sqlite3")
+    try:
+        run_id = "run-iter-bounded"
+        snapshot = {
+            "snapshotHash": "a" * 64,
+            "teamId": "team-ledger-sys",
+            "sourceCollectionRunId": "sc-ledger-1",
+            "questionId": "SCI-096",
+            "evaluationContract": {"minimumClaimEvidenceCoverage": 0.9},
+            "agentBindingSnapshot": [
+                {
+                    "nodeId": "result_evaluation",
+                    "agentId": "agent-ledger",
+                    "roleKey": "experiment_ledger",
+                    "snapshotId": "snap:eval",
+                },
+                {
+                    "nodeId": "iteration_decision",
+                    "agentId": "agent-iter",
+                    "roleKey": "iteration_planner",
+                    "snapshotId": "snap:iter",
+                },
+                {
+                    "nodeId": "version_governance",
+                    "agentId": "agent-gov",
+                    "roleKey": "version_governor",
+                    "snapshotId": "snap:gov",
+                },
+            ],
+        }
+        _seed_run_with_snapshot(harness, run_id=run_id, snapshot=snapshot)
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="run_artifacts",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="nr-bounded",
+            payload={
+                "execution": {
+                    "status": "completed",
+                    "adapterId": "synthetic_classification_baseline_vs_variant",
+                    "runnerMode": "v1_cpu_smoke",
+                    "metrics": {"delta": {"macro_f1": 0.02}},
+                    "artifactHash": "e" * 64,
+                    "formalRunnerUnavailable": (
+                        "Record a passing smoke result before formal full-run preparation."
+                    ),
+                    "decisionHint": "needs_full_run",
+                }
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="frozen_protocol",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="ht-freeze",
+            payload={
+                "protocolId": "exp-plan-1",
+                "planId": "exp-plan-1",
+                "protocol": {"planId": "exp-plan-1", "hypothesisRefs": ["H1"]},
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        eval_action = PendingAction(
+            action_id="act-eval-then-iter",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-result_evaluation-a1",
+            node_id="result_evaluation",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id="snap:eval",
+            budget_policy_hash="p-1",
+        )
+        ports.execute_agent_turn(
+            action=eval_action,
+            handle=ports.create_agent_task(action=eval_action),
+        )
+        action = PendingAction(
+            action_id="act-iter-bounded",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-iteration_decision-a1",
+            node_id="iteration_decision",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id="snap:iter",
+            budget_policy_hash="p-1",
+        )
+        handle = ports.create_agent_task(action=action)
+        assert str(handle.task_id).startswith("bounded-iter")
+        refs = ports.execute_agent_turn(action=action, handle=handle)
+        assert refs and refs[0]["kind"] == "iteration_decision"
+        loaded = load_workflow_artifact_payload(
+            "iteration_decision",
+            team_id="team-ledger-sys",
+            authority_run_id="sc-ledger-1",
+            workflow_run_id=run_id,
+        )
+        assert loaded is not None
+        body = loaded.get("payload") if isinstance(loaded.get("payload"), dict) else loaded
+        assert body["decisionKind"] == "stop"
+        assert body["selectedCandidateRef"] == "H1"
+        validate_decision_payload(body)
+        gov_action = PendingAction(
+            action_id="act-gov-bounded",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-version_governance-a1",
+            node_id="version_governance",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id="snap:gov",
+            budget_policy_hash="p-1",
+        )
+        gov_handle = ports.create_agent_task(action=gov_action)
+        assert str(gov_handle.task_id).startswith("bounded-gov")
+        gov_refs = ports.execute_agent_turn(action=gov_action, handle=gov_handle)
+        assert gov_refs and gov_refs[0]["kind"] == "version_governance_record"
+        gov_loaded = load_workflow_artifact_payload(
+            "version_governance_record",
+            team_id="team-ledger-sys",
+            authority_run_id="sc-ledger-1",
+            workflow_run_id=run_id,
+        )
+        assert gov_loaded is not None
+        gov_body = (
+            gov_loaded.get("payload")
+            if isinstance(gov_loaded.get("payload"), dict)
+            else gov_loaded
+        )
+        assert gov_body["operation"] == "stop"
+        assert gov_body["status"] == "official"
+        assert gov_body["candidateRef"] == "H1"
+        assert gov_body["decisionId"] == body["decisionId"]
+        again = ports.execute_agent_turn(action=action, handle=handle)
+        assert again and again[0]["kind"] == "iteration_decision"
+        replayed = load_workflow_artifact_payload(
+            "iteration_decision",
+            team_id="team-ledger-sys",
+            authority_run_id="sc-ledger-1",
+            workflow_run_id=run_id,
+        )
+        replayed_body = (
+            replayed.get("payload")
+            if isinstance(replayed, dict) and isinstance(replayed.get("payload"), dict)
+            else replayed
+        )
+        assert replayed_body["decidedAt"] == body["decidedAt"]
+        assert replayed_body["decisionId"] == body["decisionId"]
+    finally:
+        harness.close()
+
+
+def test_bounded_version_governance_without_decision_fails_loudly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        put_workflow_artifact,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / "ledger-gov-empty.sqlite3")
+    try:
+        run_id = "run-gov-empty"
+        snapshot = {
+            "snapshotHash": "a" * 64,
+            "teamId": "team-ledger-sys",
+            "sourceCollectionRunId": "sc-ledger-1",
+            "questionId": "SCI-096",
+        }
+        _seed_run_with_snapshot(harness, run_id=run_id, snapshot=snapshot)
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="run_artifacts",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="nr-bounded",
+            payload={
+                "execution": {
+                    "status": "completed",
+                    "adapterId": "synthetic_classification_baseline_vs_variant",
+                    "runnerMode": "v1_cpu_smoke",
+                    "formalRunnerUnavailable": "Record a passing smoke result first.",
+                }
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        action = PendingAction(
+            action_id="act-gov-empty",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-version_governance-a1",
+            node_id="version_governance",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id="snap:gov",
+            budget_policy_hash="p-1",
+        )
+        handle = ports.create_agent_task(action=action)
+        assert str(handle.task_id).startswith("bounded-gov")
+        with pytest.raises(RuntimeError, match="produced no artifact refs"):
+            ports.execute_agent_turn(action=action, handle=handle)
     finally:
         harness.close()

@@ -1914,12 +1914,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLifecycleSource).toContain('fetchJson<SessionDetail>("/api/sessions"');
     expect(routeAndLifecycleSource).toContain('Prefer: "respond-async"');
     expect(routeAndLifecycleSource).toContain("mergeSessionDetailIntoSummaries");
+    expect(routeAndLifecycleSource).toContain("updateAgentSessionSummaryCaches");
+    expect(routeAndLifecycleSource).toContain("pinSessionCreatePreserve");
     expect(routeAndLifecycleSource).toContain("createTempSessionId()");
     expect(routeAndLifecycleSource).toContain("Seed real id cache BEFORE the route swaps");
     expect(routeAndLifecycleSource).toContain("fetchSessionDetailWindow(nextId");
     expect(routeAndLifecycleSource).toContain("includeSecondary: false");
+    // Create must not broad-invalidate ["sessions"] (bootstrap/index race wipes the new tab).
+    expect(routeAndLifecycleSource).not.toContain("void chatWorkspaceCache.afterSessionChanged({\n        sessionId: nextId");
     expect(routeSource).toContain("resolveActiveSessionDetailForUi");
     expect(routeSource).toContain("isSessionDetailHardLoading");
+    expect(routeSource).toContain("mergePreservedCreatedSessions");
     expect(routeAndActionsSource).toContain("createSessionMutation.mutate({ agentId: selectedChatAgentId })");
     expect(routeSource).not.toContain("updateSessionAgentMutation");
     expect(routeSource).not.toContain("sessionAgentOptions");
@@ -3284,6 +3289,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queryClient.setQueryData(queryKeys.agents(), payload.agents)");
     expect(routeSource).toContain("queryClient.setQueryData(queryKeys.conversations(), payload.conversations)");
     expect(routeSource).toContain('queryKeys.sessionQuery("", 50)');
+    expect(routeSource).toContain("mergePreservedCreatedSessions");
+    expect(routeSource).toContain("Never hard-replace the session index page");
+    expect(routeSource).toContain("mergePreservedCreatedSessions");
+    expect(routeSource).toContain("Never hard-replace the session index page");
     expect(routeSource).toContain(
       "const bootstrapSettled = activeSessionBootstrapQuery.isFetched || activeSessionBootstrapQuery.isError",
     );
