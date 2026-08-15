@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import apiSource from "./researchProjectAgentTasks.ts?raw";
 import hookSource from "../routes/teams/research-projects/useResearchProjectAgentTasks.ts?raw";
+import workspaceSource from "../routes/teams/useSourceCollectionWorkspace.ts?raw";
 
 describe("research project Agent task API", () => {
   it("owns project list, task status, and task start transport", () => {
@@ -15,5 +16,12 @@ describe("research project Agent task API", () => {
     expect(hookSource).not.toContain('from "../../../api/client"');
     expect(hookSource).not.toContain("fetchJson<");
     expect(hookSource).not.toContain("directSessionId");
+  });
+
+  it("lets the source-collection workspace reuse the project list transport", () => {
+    expect(apiSource).toContain("export function listTeamResearchProjects");
+    expect(apiSource).toContain("options?.signal");
+    expect(workspaceSource).toContain("listTeamResearchProjects(");
+    expect(workspaceSource).not.toContain("/workflow-orchestration/research-projects");
   });
 });

@@ -1,13 +1,17 @@
 """Team workflow routes: research_projects."""
 from __future__ import annotations
-from fastapi import Query, status
+from fastapi import HTTPException, Query, status
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow_orchestration_service import *
 from ._errors import _raise_team_workflow_route_error
 from ._models import *
 from ._router import router
 
-@router.get("/teams/{team_id}/workflow-orchestration/research-projects")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/research-projects",
+    response_model=ResearchProjectListResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_research_projects(team_id: str) -> dict:
     try:
         return list_research_projects(team_id)
