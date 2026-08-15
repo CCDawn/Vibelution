@@ -147,6 +147,15 @@ export function updateTokenSpeedTracker(
     };
   }
 
+  // React Query may publish a fresh session-detail object even when the
+  // streaming assistant message did not gain any text. Its render-time sample
+  // gets a later timestamp, but it conveys no new token-speed information.
+  // Preserve the state reference so the caller's functional setState is a
+  // no-op instead of feeding that observer notification back into React.
+  if (sample.tokenCount === previous.tokenCount) {
+    return previous;
+  }
+
   const elapsedMs = sample.timestampMs - previous.timestampMs;
   const tokenDelta = sample.tokenCount - previous.tokenCount;
   if (elapsedMs < MIN_SAMPLE_INTERVAL_MS || tokenDelta <= 0) {
