@@ -42,7 +42,7 @@ describe("DesktopSessionMirrorQueue", () => {
     expect(mirror.currentRevision()).toBe(8);
   });
 
-  it("keeps later mirror work running after a best-effort request fails", async () => {
+  it("surfaces a failed request to the caller while keeping later mirror work running", async () => {
     const errors: string[] = [];
     const operations: string[] = [];
     const mirror = new DesktopSessionMirrorQueue((error) => errors.push(String(error)));
@@ -56,7 +56,8 @@ describe("DesktopSessionMirrorQueue", () => {
       return { desktopSessionId: "desktop-1", revision: 2 };
     });
 
-    await Promise.all([failed, recovered]);
+    await expect(failed).rejects.toThrow("offline");
+    await recovered;
 
     expect(operations).toEqual(["register", "heartbeat:1"]);
     expect(errors).toEqual(["Error: offline"]);

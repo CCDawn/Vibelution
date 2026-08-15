@@ -147,6 +147,34 @@ describe("launcher branch-instances window truth overlay", () => {
     expect((items[1].runtime as Record<string, unknown>).window).toMatchObject({ open: false, pid: 0 });
     expect(items[1].startable).toBe(true);
   });
+
+  it("recomputes lifecycleState from Electron window truth instead of a stale starting/open phase", () => {
+    const payload = {
+      items: [
+        {
+          id: "main",
+          current: true,
+          alive: true,
+          startable: false,
+          runtime: {
+            lifecycleState: "starting",
+            phase: "opening",
+            observedState: "open",
+            backend: { alive: true, healthy: true, listening: true, portConflict: false },
+            frontend: { ready: true },
+            window: { open: false, pid: 0 },
+          },
+        },
+      ],
+    };
+    const overlaid = overlayLauncherWindowTruth("branch-instances", payload, truth()) as Record<string, unknown>;
+    const item = (overlaid.items as Record<string, unknown>[])[0];
+    const runtime = item.runtime as Record<string, unknown>;
+    expect(runtime.lifecycleState).toBe("partial");
+    expect((runtime.window as Record<string, unknown>).open).toBe(false);
+    expect(item.alive).toBe(true);
+    expect(item.startable).toBe(false);
+  });
 });
 
 describe("retired launcher control port overlay", () => {

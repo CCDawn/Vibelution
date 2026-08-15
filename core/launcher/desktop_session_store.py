@@ -419,8 +419,8 @@ def latest_active_window_provider_projection(*, workspace_root: str = "") -> dic
         "desktopSessionRevision": int(session.get("revision") or 0),
         "desktopSessionLeaseExpiresAt": str(session.get("leaseExpiresAt") or "").strip(),
     }
-    if workbench:
-        projection["observedState"] = "open" if is_open else "closed"
+    if is_open:
+        projection["observedState"] = "open"
     return projection
 
 
@@ -434,8 +434,7 @@ def latest_active_workbench_projection() -> dict[str, Any]:
     if not window:
         return {}
     is_open = bool(window.get("open", False))
-    return {
-        "observedState": "open" if is_open else "closed",
+    payload = {
         "browserWindowAlive": is_open,
         "browserManaged": False,
         "windowProvider": "electron",
@@ -447,6 +446,9 @@ def latest_active_workbench_projection() -> dict[str, Any]:
         "desktopSessionRevision": int(window.get("desktopSessionRevision") or 0),
         "desktopSessionLeaseExpiresAt": str(window.get("desktopSessionLeaseExpiresAt") or "").strip(),
     }
+    if is_open:
+        payload["observedState"] = "open"
+    return payload
 
 
 def _normalize_workspace_root(value: Any) -> str:

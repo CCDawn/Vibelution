@@ -44,6 +44,16 @@ def window_provider_projection(workbench: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def compose_observed_state(*, backend_ready: bool, window_ready: bool) -> str:
+    """Workbench is open only when backend and window are both ready."""
+
+    if backend_ready and window_ready:
+        return "open"
+    if backend_ready or window_ready:
+        return "partial"
+    return "closed"
+
+
 def with_window_provider_projection(workbench: Mapping[str, Any]) -> dict[str, Any]:
     payload = dict(workbench)
     payload.update(window_provider_projection(payload))
