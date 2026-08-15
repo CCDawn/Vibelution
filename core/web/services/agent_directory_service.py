@@ -421,32 +421,61 @@ SESSION_PROTOCOL_PREFERRED_TOOLS = (
     "write_stdin",
     *_LEGACY_SESSION_AGENT_PREFERRED_TOOLS,
 )
-PERSONAL_EPISODE_TOOL_NAME = "append_episodic_memory_tool"
-PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME = "supersede_episodic_memory_tool"
+PERSONAL_MEMORY_APPEND_TOOL_NAME = "append_personal_memory_tool"
+PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME = "supersede_personal_memory_tool"
+PERSONAL_EPISODE_TOOL_NAME = PERSONAL_MEMORY_APPEND_TOOL_NAME
+PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME = PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME
+LEGACY_PERSONAL_MEMORY_TOOL_RENAMES = {
+    "append_episodic_memory_tool": PERSONAL_MEMORY_APPEND_TOOL_NAME,
+    "supersede_episodic_memory_tool": PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME,
+}
 GENERATION_HANDOFF_MEMORY_TOOLS = (
     "get_core_context_tool",
     "get_current_goal_tool",
     "commit_compressed_memory_tool",
 )
-# Default after the personal-episode grant and before generation-handoff was
-# pulled back to self-evolution. Projection matches this snapshot read-only.
+# Historical persisted defaults keep the old episodic tool names as literals.
 _EPISODE_ERA_SESSION_AGENT_ALLOWED_TOOLS = (
     *SESSION_PROTOCOL_ALLOWED_TOOLS,
-    PERSONAL_EPISODE_TOOL_NAME,
+    "append_episodic_memory_tool",
 )
-# Default after generation-handoff left the session pack and before supersede.
 _NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS = tuple(
     name
     for name in _EPISODE_ERA_SESSION_AGENT_ALLOWED_TOOLS
     if name not in GENERATION_HANDOFF_MEMORY_TOOLS
 )
-DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
+_EPISODIC_NAMED_SESSION_AGENT_ALLOWED_TOOLS = (
     *_NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS,
-    PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME,
+    "supersede_episodic_memory_tool",
+)
+DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
+    [
+        *[
+            name
+            for name in _NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS
+            if name not in LEGACY_PERSONAL_MEMORY_TOOL_RENAMES
+        ],
+        PERSONAL_MEMORY_APPEND_TOOL_NAME,
+        PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME,
+    ]
 )
 DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = tuple(
     name for name in SESSION_PROTOCOL_PREFERRED_TOOLS if name not in GENERATION_HANDOFF_MEMORY_TOOLS
 )
+
+
+def _rewrite_legacy_personal_memory_tool_names(names: list[str]) -> list[str]:
+    rewritten: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        mapped = LEGACY_PERSONAL_MEMORY_TOOL_RENAMES.get(name, name)
+        if mapped in seen:
+            continue
+        seen.add(mapped)
+        rewritten.append(mapped)
+    return rewritten
+
+
 # The persistent stdin protocol belongs to ordinary conversation Agents.  Keep
 # self-evolution role policy unchanged until its own execution contract opts in.
 SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(
