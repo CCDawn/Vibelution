@@ -19,6 +19,7 @@ from .team_knowledge import search_ranking as _tk_search_ranking
 from .team_knowledge import store as _tk_store
 from .team_knowledge import permissions as _tk_permissions
 from .team_knowledge import source_inbox as _tk_source_inbox
+from .team_knowledge import public_catalog as _tk_public_catalog
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -874,6 +875,7 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open",
                             source_artifact_ids=[source_id],
                         )
                     )
+    tasks.extend(_catalog_governance_tasks(status=normalized_status))
     tasks.sort(key=lambda item: (_priority_rank(str(item.get("priority") or "")), str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -885,6 +887,9 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open",
             "proposalReviewCount": sum(1 for task in tasks if task.get("taskType") == "proposal_review"),
             "ratingReviewCount": sum(1 for task in tasks if task.get("taskType") == "rating_review"),
             "sourceNeedsProposalCount": sum(1 for task in tasks if task.get("taskType") == "source_needs_proposal"),
+            "catalogFreshnessCount": sum(1 for task in tasks if task.get("taskType") == "catalog_freshness"),
+            "catalogConflictCount": sum(1 for task in tasks if task.get("taskType") == "catalog_conflict"),
+            "catalogProposalCount": sum(1 for task in tasks if task.get("taskType") == "catalog_proposal"),
         },
         "updatedAt": utc_now_iso(),
     }
@@ -2594,6 +2599,45 @@ _stage_local_source_copies = _tk_source_inbox._stage_local_source_copies
 _relocate_local_copies_to_central = _tk_source_inbox._relocate_local_copies_to_central
 _resolve_copyable_local_file = _tk_source_inbox._resolve_copyable_local_file
 _sha256_local_file = _tk_source_inbox._sha256_local_file
+
+# --- public structure curation catalog (workspace/knowledge/public) ---
+PUBLIC_STRUCTURE_SCHEMA_VERSION = _tk_public_catalog.PUBLIC_STRUCTURE_SCHEMA_VERSION
+STARTUP_STRUCTURE_MAX_CARDS = _tk_public_catalog.STARTUP_STRUCTURE_MAX_CARDS
+STARTUP_STRUCTURE_MAX_CHARS = _tk_public_catalog.STARTUP_STRUCTURE_MAX_CHARS
+STARTUP_CARD_WHEN_TO_USE_CHARS = _tk_public_catalog.STARTUP_CARD_WHEN_TO_USE_CHARS
+STARTUP_CARD_SUMMARY_CHARS = _tk_public_catalog.STARTUP_CARD_SUMMARY_CHARS
+DEFAULT_PARTITION_QUOTAS = _tk_public_catalog.DEFAULT_PARTITION_QUOTAS
+PUBLIC_PARTITIONS = _tk_public_catalog.PUBLIC_PARTITIONS
+PUBLIC_CARD_KINDS = _tk_public_catalog.PUBLIC_CARD_KINDS
+PUBLIC_VISIBILITIES = _tk_public_catalog.PUBLIC_VISIBILITIES
+PUBLIC_FRESHNESS_POLICIES = _tk_public_catalog.PUBLIC_FRESHNESS_POLICIES
+PUBLIC_FRESHNESS_STATUSES = _tk_public_catalog.PUBLIC_FRESHNESS_STATUSES
+PUBLIC_SOURCE_TYPES = _tk_public_catalog.PUBLIC_SOURCE_TYPES
+PUBLIC_QUEUE_KINDS = _tk_public_catalog.PUBLIC_QUEUE_KINDS
+PUBLIC_QUEUE_STATUSES = _tk_public_catalog.PUBLIC_QUEUE_STATUSES
+PUBLIC_QUEUE_REASONS = _tk_public_catalog.PUBLIC_QUEUE_REASONS
+PUBLIC_QUEUE_RESOLUTIONS = _tk_public_catalog.PUBLIC_QUEUE_RESOLUTIONS
+PUBLIC_MAX_EXPERIENCE_BYTES = _tk_public_catalog.PUBLIC_MAX_EXPERIENCE_BYTES
+PublicCatalogError = _tk_public_catalog.PublicCatalogError
+PublicCatalogPermissionError = _tk_public_catalog.PublicCatalogPermissionError
+PublicCatalogNotFoundError = _tk_public_catalog.PublicCatalogNotFoundError
+PublicCatalogSourceUnavailableError = _tk_public_catalog.PublicCatalogSourceUnavailableError
+PublicCatalogConflictError = _tk_public_catalog.PublicCatalogConflictError
+get_public_catalog = _tk_public_catalog.get_public_catalog
+save_public_structure = _tk_public_catalog.save_public_structure
+upsert_public_card = _tk_public_catalog.upsert_public_card
+archive_public_card = _tk_public_catalog.archive_public_card
+refresh_public_catalog_freshness = _tk_public_catalog.refresh_public_catalog_freshness
+search_public_catalog = _tk_public_catalog.search_public_catalog
+resolve_public_locator = _tk_public_catalog.resolve_public_locator
+open_public_card = _tk_public_catalog.open_public_card
+build_startup_structure_block = _tk_public_catalog.build_startup_structure_block
+submit_public_proposal = _tk_public_catalog.submit_public_proposal
+list_public_proposals = _tk_public_catalog.list_public_proposals
+resolve_public_proposal = _tk_public_catalog.resolve_public_proposal
+list_catalog_queue_events = _tk_public_catalog.list_catalog_queue_events
+resolve_catalog_queue_event = _tk_public_catalog.resolve_catalog_queue_event
+_catalog_governance_tasks = _tk_public_catalog._catalog_governance_tasks
 
 
 def _local_copies_from_source_artifacts(source_artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
