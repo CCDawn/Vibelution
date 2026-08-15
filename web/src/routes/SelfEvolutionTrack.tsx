@@ -26,6 +26,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { fetchAgentConfigWorkspace } from "../api/agents";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -802,7 +803,7 @@ export function SelfEvolutionTrack({
   });
   const agentConfigWorkspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace?includeRuntime=false"),
+    queryFn: () => fetchAgentConfigWorkspace({ includeRuntime: false }),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });

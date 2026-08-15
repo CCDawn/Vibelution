@@ -20,8 +20,7 @@ describe("AgentCreateWizardDialog contract", () => {
   });
 
   it("loads avatar options while open for create-time library picks", () => {
-    expect(dialogSource).toContain("/api/agents/avatar-options");
-    expect(dialogSource).toContain("modelId=${encodeURIComponent(selectedModelId)}");
+    expect(dialogSource).toContain("listAgentAvatarOptions({ modelId: selectedModelId })");
     expect(dialogSource).toContain('["agent-avatar-options", selectedModelId]');
     expect(dialogSource).toContain("avatarOptions=");
     expect(dialogSource).toContain("avatarOptionsPending=");
@@ -37,7 +36,7 @@ describe("AgentCreateWizardDialog contract", () => {
     expect(dialogSource).toContain("enabled: open");
     expect(dialogSource).toContain("draftDirty");
     expect(dialogSource).toContain("normalizeCreateDraftForWorkspace");
-    expect(dialogSource).toContain('fetchJson<AgentConfigWorkspaceAgent>("/api/agents"');
+    expect(dialogSource).toContain("createAgent(createAgentPayload(nextDraft, toolBundles))");
     expect(dialogSource).toContain("onStartConversation");
     expect(dialogSource).toContain("onStartConversation(createdAgent)");
     expect(dialogSource).not.toContain('fetchJson<SessionDetail>("/api/sessions"');
