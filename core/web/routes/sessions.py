@@ -19,6 +19,7 @@ from core.web.routes.session_catalog_models import (
     SessionDeleteResponse,
     SessionQueryResponse,
 )
+from core.web.routes.session_detail_models import SessionDetailResponse
 from core.web.routes.session_turn_models import (
     SessionAttachmentResponse,
     SessionLlmOptionsResponse,
@@ -293,7 +294,11 @@ def session_create(
     )
 
 
-@router.get("/sessions/{session_id}")
+@router.get(
+    "/sessions/{session_id}",
+    response_model=SessionDetailResponse,
+    response_model_exclude_unset=True,
+)
 def session_detail(
     session_id: str,
     messageLimit: int = Query(default=0, ge=0, le=200),

@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { fetchJson } from "../../api/client";
+import { fetchSessionDetail } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   ChatRoomDetail,
@@ -42,19 +42,13 @@ export function fetchSessionDetailWindow(
   options: SessionDetailWindowOptions = {},
 ) {
   const normalizedSessionId = String(sessionId || "").trim();
-  const params = new URLSearchParams();
-  params.set("messageLimit", String(options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT));
-  params.set("transcriptScope", options.transcriptScope ?? "window");
-  if (options.beforeMessageIndex && options.beforeMessageIndex > 0) {
-    params.set("beforeMessageIndex", String(options.beforeMessageIndex));
-  }
-  if (options.includeSecondary === false) {
-    params.set("includeSecondary", "false");
-  }
-  return fetchJson<SessionDetail>(
-    `/api/sessions/${encodeURIComponent(normalizedSessionId)}?${params.toString()}`,
-    { signal: options.signal },
-  );
+  return fetchSessionDetail(normalizedSessionId, {
+    messageLimit: options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT,
+    transcriptScope: options.transcriptScope ?? "window",
+    beforeMessageIndex: options.beforeMessageIndex,
+    includeSecondary: options.includeSecondary,
+    signal: options.signal,
+  });
 }
 
 /**
