@@ -16,6 +16,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   fetchAgentConfigChanges,
   fetchAgentConfigWorkspace,
+  fetchAgentInboxMessages,
+  fetchAgentRunHistory,
+  fetchAgentRuntimeEvidence,
   listAgentAvatarOptions,
   listAgentSummaries,
 } from "../api/agents";
@@ -26,9 +29,7 @@ import {
   AgentInboxMessage,
   AgentAvatarOptionsPayload,
   AgentAvatarUploadResponse,
-  AgentRuntimeEvidence,
   AgentRuntimeEvidenceMatch,
-  AgentRunHistory,
   AgentConfigHealthIssue,
   AgentModeBindings,
   AgentPersonaProfile,
@@ -777,14 +778,14 @@ export function AgentsRoute() {
   const panes = useMemo(() => agentConfigPanes(copy, selectedAgent), [copy, selectedAgent]);
   const agentRunsQuery = useQuery({
     queryKey: queryKeys.agentRuns(selectedAgent?.agentId ?? ""),
-    queryFn: () => fetchJson<AgentRunHistory>(`/api/agents/${encodeURIComponent(selectedAgent?.agentId ?? "")}/runs?limit=12`),
+    queryFn: () => fetchAgentRunHistory(selectedAgent?.agentId ?? "", { limit: 12 }),
     enabled: Boolean(selectedAgent?.agentId && (activePane === "overview" || activePane === "activity")),
     refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 12_000) : false,
     refetchIntervalInBackground: false,
   });
   const agentMessagesQuery = useQuery({
     queryKey: queryKeys.agentMessages(selectedAgent?.agentId ?? "", "pending"),
-    queryFn: () => fetchJson<AgentInboxMessage[]>(`/api/agents/${encodeURIComponent(selectedAgent?.agentId ?? "")}/messages?status=pending&limit=8`),
+    queryFn: () => fetchAgentInboxMessages(selectedAgent?.agentId ?? "", { status: "pending", limit: 8 }),
     enabled: Boolean(selectedAgent?.agentId && (activePane === "overview" || activePane === "activity")),
     refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 12_000) : false,
     refetchIntervalInBackground: false,
@@ -792,9 +793,10 @@ export function AgentsRoute() {
   const selectedAgentInboxPendingCount = selectedAgent?.agentInboxPendingCount ?? agentMessagesQuery.data?.length ?? 0;
   const agentRuntimeEvidenceQuery = useQuery({
     queryKey: queryKeys.agentRuntimeEvidence(selectedAgent?.agentId ?? ""),
-    queryFn: () => fetchJson<AgentRuntimeEvidence>(
-      `/api/agents/${encodeURIComponent(selectedAgent?.agentId ?? "")}/runtime-evidence?sessionId=${encodeURIComponent(selectedAgent?.directSessionId ?? "")}&limit=5`,
-    ),
+    queryFn: () => fetchAgentRuntimeEvidence(selectedAgent?.agentId ?? "", {
+      sessionId: selectedAgent?.directSessionId ?? "",
+      limit: 5,
+    }),
     enabled: Boolean(selectedAgent?.agentId && (activePane === "overview" || activePane === "activity")),
     refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 20_000) : false,
     refetchIntervalInBackground: false,

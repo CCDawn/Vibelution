@@ -1587,7 +1587,7 @@ describe("AgentsRoute layout contract", () => {
     expect(memoryPolicyPanelSource).toContain("copy.memoryPolicyTitle");
     expect(modeMembershipPanelSource).toContain("copy.membershipTitle");
     expect(selectedDetailContentPanelSource).toContain("activePane === \"activity\"");
-    expect(routeSource).toContain("fetchJson<AgentRunHistory>");
+    expect(routeSource).toContain("fetchAgentRunHistory(");
     expect(routeSource).toContain("queryKeys.agentRuns");
     expect(routeSource).not.toContain("summary?.runningAgentCount");
     expect(routeSource).not.toContain("summary?.blockedAgentCount");
@@ -1689,7 +1689,9 @@ describe("AgentsRoute layout contract", () => {
   it("surfaces pending Agent inbox messages from the activity pane", () => {
     expect(routeSource).toContain("AgentInboxMessage");
     expect(routeSource).toContain("queryKeys.agentMessages");
-    expect(routeSource).toContain("/messages?status=pending&limit=8");
+    expect(routeSource).toContain("fetchAgentInboxMessages(");
+    expect(routeSource).toContain("status: \"pending\"");
+    expect(routeSource).toContain("limit: 8");
     expect(workbenchMutationsSource).toContain("/consume");
     expect(routeSource).toContain("consumeMessageMutation");
     expect(routeSource).toContain("consumeAllMessagesMutation");
