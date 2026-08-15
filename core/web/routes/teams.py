@@ -21,6 +21,7 @@ from core.web.services.team_service import (
     list_teams_compact,
     request_system_team_bootstrap,
     save_team_canvas,
+    list_team_member_messages,
     send_team_message,
     start_ai_search_source_scope_run,
     sync_team_chat_room,
@@ -179,6 +180,16 @@ def team_ai_search_run_start(team_id: str, payload: AiSearchRunStartPayload) -> 
             max_results_per_query=payload.maxResultsPerQuery,
             include_signals=payload.includeSignals,
         )
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/member-messages")
+def team_member_message_list(team_id: str, limit: int = 40) -> dict:
+    try:
+        return list_team_member_messages(team_id, limit=limit)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TeamServiceError as exc:
