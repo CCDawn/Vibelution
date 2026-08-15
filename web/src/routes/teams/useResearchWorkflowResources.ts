@@ -8,6 +8,7 @@ import {
   fetchKnowledgeIngestionStatus,
   fetchTeamWorkflowCoordinationStatus,
 } from "../../api/teamKnowledge";
+import { fetchTeamWorkflowCandidates } from "../../api/teamExperiment";
 import { fetchTeamWorkflowOrchestration } from "../../api/teamWorkflow";
 import type {
   TeamWorkflowCandidateListPayload,
@@ -327,9 +328,14 @@ export function useResearchWorkflowResources({
   });
   const candidates = useQuery({
     queryKey: queryKeys.teamWorkflowCandidates(teamId || "none", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowCandidateListPayload>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false&includeStore=false`,
-      { signal },
+    queryFn: ({ signal }) => fetchTeamWorkflowCandidates<TeamWorkflowCandidateListPayload>(
+      teamId,
+      {
+        limit: TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT,
+        includeValidation: false,
+        includeStore: false,
+        signal,
+      },
     ),
     enabled: Boolean(teamId && demand.candidates),
     refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
@@ -341,9 +347,14 @@ export function useResearchWorkflowResources({
   });
   const candidateGraph = useQuery({
     queryKey: queryKeys.teamWorkflowCandidateGraph(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowCandidateListPayload>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}&includeStore=false`,
-      { signal },
+    queryFn: ({ signal }) => fetchTeamWorkflowCandidates<TeamWorkflowCandidateListPayload>(
+      teamId,
+      {
+        candidateType: "candidate_graph",
+        limit: TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT,
+        includeStore: false,
+        signal,
+      },
     ),
     enabled: Boolean(teamId && demand.candidateGraph),
   });

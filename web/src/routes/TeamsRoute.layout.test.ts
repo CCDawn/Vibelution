@@ -546,7 +546,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("latestChatRoomRound(linkedRoomDetail)");
     expect(researchWorkflowResourcesSource).toContain("fetchTeamWorkflowOrchestration(");
     expect(teamWorkflowApiSource).toContain("/workflow-orchestration");
-    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowCandidateListPayload>");
+    expect(researchWorkflowResourcesSource).toContain("fetchTeamWorkflowCandidates<");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/candidates");
     // Wave 8P: candidate-graph build fetch lives on useTeamSourceCollectionMutations.
     expect(teamSourceCollectionMutationsSource).toContain("buildCandidateGraph(");
     expect(researchWorkflowResourcesSource).toContain("fetchKnowledgeIngestionStatus(");
@@ -606,8 +607,10 @@ describe("TeamsRoute layout contract", () => {
     expect(experimentLoopModelSource).toContain("ExperimentFullRunResultRegisterPayload");
     expect(experimentLoopModelSource).toContain("ExperimentResultKnowledgeIngestionPayload");
     // Wave 8O: experiment write endpoints live on useTeamExperimentLoopMutations.
-    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/full-run-result");
-    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/knowledge-ingestion-request");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/full-run-result");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/knowledge-ingestion-request");
+    expect(teamExperimentLoopMutationsSource).toContain("registerTeamExperimentFullRunResult<");
+    expect(teamExperimentLoopMutationsSource).toContain("requestTeamExperimentKnowledgeIngestion<");
     expect(routeSource).toContain("registerExperimentFullRunResultMutation");
     expect(routeSource).toContain("useTeamExperimentLoopMutations");
     expect(routeSource).toContain("requestExperimentKnowledgeIngestionMutation");
@@ -644,7 +647,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toMatch(/researchLoopStatusQuery\?\.refetch|researchLoopStatusQuery\.refetch/);
     expect(routeSource).toMatch(/createExperimentPlanMutation\?\.reset|createExperimentPlanMutation\.reset/);
     expect(routeSource).toContain("freezeExperimentDesignMutation");
-    expect(teamExperimentLoopMutationsSource).toContain("/freeze`");
+    expect(teamExperimentApiSource).toContain("/freeze");
+    expect(teamExperimentLoopMutationsSource).toContain("freezeTeamExperimentDesign<");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("冻结设计");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("designExecutionAllowed");
     expect(routeSource).toContain("materializeResearchLoopIterationDesignMutation");
@@ -752,7 +756,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("本轮产物");
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("更多证据文件");
     expect(routeSource).toContain("SOURCE_COLLECTION_DEFAULT_ROLES");
-    expect(researchWorkflowResourcesSource).toContain("candidateType=candidate_graph");
+    expect(researchWorkflowResourcesSource).toContain('candidateType: "candidate_graph"');
+    expect(researchWorkflowResourcesSource).toContain("fetchTeamWorkflowCandidates<");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/candidates");
     // Wave 8P: candidate-graph write endpoint lives on useTeamSourceCollectionMutations.
     expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/candidate-graph");
     expect(teamSourceCollectionMutationsSource).toContain("buildCandidateGraph(");
@@ -1978,7 +1984,8 @@ describe("TeamsRoute layout contract", () => {
     expect(sourceCollectionRunQueriesSource).toContain("fetchSourceCollectionSummary");
     expect(sourceCollectionApiSource).toContain("/workflow-orchestration/source-collection/summary");
     expect(routeSource).toContain("sourceCollectionSummaryQueryPrefix");
-    expect(researchWorkflowResourcesSource).toContain("includeValidation=false&includeStore=false");
+    expect(researchWorkflowResourcesSource).toContain("includeValidation: false");
+    expect(researchWorkflowResourcesSource).toContain("includeStore: false");
     expect(researchWorkflowResourcesSource).toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;");
     expect(researchWorkflowResourcesSource).not.toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;");
     expect(routeSource).toContain("sourceCollectionWorkspaceSelected");
@@ -2190,7 +2197,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("<VStringSelect");
     expect(routeSource).toContain("preferredExperimentMethod=");
     // Wave 8S / Phase 2: methods endpoint on secondary queries; route consumes via experiment workspace.
-    expect(teamResearchSecondaryQueriesSource).toContain("/workflow-orchestration/experiments/methods");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/experiments/methods");
+    expect(teamResearchSecondaryQueriesSource).toContain("fetchExperimentMethodCatalog<");
     expect(routeSourceRaw).toContain("useResearchExperimentWorkspace");
     expect(routeSourceRaw).not.toContain("useTeamResearchSecondaryQueries({");
     // SC run detail queries composed inside useSourceCollectionWorkspace (Phase 1).
@@ -2209,7 +2217,8 @@ describe("TeamsRoute layout contract", () => {
     // Single-column form — no empty half / forced min-height.
     expect(teamExperimentMethodPanelStyles.form).toContain("grid-cols-1");
     expect(teamExperimentMethodPanelStyles.form).not.toContain("min-h-[18rem]");
-    expect(teamExperimentLoopMutationsSource).toContain("baseline-artifact");
+    expect(teamExperimentApiSource).toContain("baseline-artifact");
+    expect(teamExperimentLoopMutationsSource).toContain("registerTeamExperimentBaselineArtifact<");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("登记基线工件");
     expect(teamExperimentPlanningLedgerPanelSource).toMatch(
       /const canRegisterBaselineArtifact[\s\S]*?&& designExecutionAllowed[\s\S]*?&& !activePlan\.baselineSelection\.activeBaselineReady/,
@@ -2232,7 +2241,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentPlanningLedgerPanelSource).toMatch(
       /const activePlan =\s*statusPayload\?\.activePlan\s*\?\? latestFreezePayload\?\.plan/,
     );
-    expect(teamExperimentLoopMutationsSource).toContain("smoke-result");
+    expect(teamExperimentApiSource).toContain("smoke-result");
+    expect(teamExperimentLoopMutationsSource).toContain("registerTeamExperimentSmokeResult<");
     expect(routeAndPureSource).toContain("ExperimentSmokeResultRecord");
     expect(routeAndPureSource).toContain("activeSmokeResult");
     expect(routeAndPureSource).toContain("gateDecision");

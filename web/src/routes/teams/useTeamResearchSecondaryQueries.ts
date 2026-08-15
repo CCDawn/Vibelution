@@ -5,6 +5,10 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { fetchJson } from "../../api/client";
+import {
+  fetchExperimentMethodCatalog,
+  fetchExperimentPlanningStatus,
+} from "../../api/teamExperiment";
 import type { ExperimentMethodCatalogPayload } from "../../api/types";
 import {
   experimentMethodCatalogQueryKey,
@@ -29,20 +33,14 @@ export function useTeamResearchSecondaryQueries(options: UseTeamResearchSecondar
   const experimentPlanningStatusQuery = useQuery({
     queryKey: experimentPlanningStatusQueryKey(options.effectiveTeamId || "none"),
     queryFn: ({ signal }) =>
-      fetchJson<ExperimentPlanningStatusPayload>(
-        `/api/teams/${encodeURIComponent(options.effectiveTeamId)}/workflow-orchestration/experiments/status`,
-        { signal },
-      ),
+      fetchExperimentPlanningStatus<ExperimentPlanningStatusPayload>(options.effectiveTeamId, { signal }),
     enabled: options.researchSecondaryStatusQueryEnabled,
   });
 
   const experimentMethodCatalogQuery = useQuery({
     queryKey: experimentMethodCatalogQueryKey(options.effectiveTeamId || "none"),
     queryFn: ({ signal }) =>
-      fetchJson<ExperimentMethodCatalogPayload>(
-        `/api/teams/${encodeURIComponent(options.effectiveTeamId)}/workflow-orchestration/experiments/methods`,
-        { signal },
-      ),
+      fetchExperimentMethodCatalog<ExperimentMethodCatalogPayload>(options.effectiveTeamId, { signal }),
     enabled: Boolean(
       options.effectiveTeamId
       && options.researchWorkflowTeamSelected

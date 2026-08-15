@@ -6,8 +6,13 @@ from core.web.services.team_workflow_orchestration_service import *
 from ._errors import _raise_team_workflow_route_error
 from ._models import *
 from ._router import router
+from .experiment_models import ExperimentRouteResponse
 
-@router.get("/teams/{team_id}/workflow-orchestration/experiments/status")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/experiments/status",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_planning_status(team_id: str) -> dict:
     try:
         return get_experiment_planning_status(team_id)
@@ -17,7 +22,11 @@ def team_workflow_experiment_planning_status(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/teams/{team_id}/workflow-orchestration/challenge-program/question-runs/status")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/question-runs/status",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_challenge_question_run_status(team_id: str) -> dict:
     try:
         return get_challenge_question_run_status(team_id)
@@ -51,6 +60,8 @@ def team_workflow_challenge_question_run_detail(
 @router.post(
     "/teams/{team_id}/workflow-orchestration/challenge-program/question-runs",
     status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
 )
 def team_workflow_challenge_question_run_register(team_id: str, payload: ChallengeQuestionOutputPayload) -> dict:
     try:
@@ -70,6 +81,8 @@ def team_workflow_challenge_question_run_register(team_id: str, payload: Challen
 @router.post(
     "/teams/{team_id}/workflow-orchestration/challenge-program/question-runs/publish",
     status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
 )
 def team_workflow_challenge_question_run_publish(
     team_id: str,
@@ -96,6 +109,8 @@ def team_workflow_challenge_question_run_publish(
 
 @router.post(
     "/teams/{team_id}/workflow-orchestration/challenge-program/questions/{question_id}/runs/{run_id}/review",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
 )
 def team_workflow_challenge_question_run_review(
     team_id: str,
@@ -117,7 +132,11 @@ def team_workflow_challenge_question_run_review(
         )
 
 
-@router.get("/teams/{team_id}/workflow-orchestration/experiments/methods")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/experiments/methods",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_method_catalog(team_id: str) -> dict:
     try:
         return get_experiment_method_catalog(team_id)
@@ -127,7 +146,12 @@ def team_workflow_experiment_method_catalog(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/experiments/plan", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plan",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_plan_create(team_id: str, payload: ExperimentPlanCreatePayload) -> dict:
     try:
         return create_experiment_plan(team_id, payload.model_dump())
@@ -152,6 +176,8 @@ def team_workflow_experiment_plan_create(team_id: str, payload: ExperimentPlanCr
 @router.post(
     "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/hypotheses/engineering-proxy",
     status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
 )
 def team_workflow_experiment_proxy_hypothesis_materialize(
     team_id: str,
@@ -191,6 +217,8 @@ def team_workflow_experiment_proxy_hypothesis_materialize(
 @router.post(
     "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/hypotheses/{candidate_id}/complete-design",
     status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
 )
 def team_workflow_experiment_scientific_hypothesis_complete(
     team_id: str,
@@ -226,6 +254,8 @@ def team_workflow_experiment_scientific_hypothesis_complete(
 @router.post(
     "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/hypotheses/{candidate_id}/revision",
     status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
 )
 def team_workflow_experiment_hypothesis_revision_create(
     team_id: str,
@@ -259,7 +289,12 @@ def team_workflow_experiment_hypothesis_revision_create(
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/baseline-artifact", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/baseline-artifact",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_baseline_artifact_register(team_id: str, plan_id: str, payload: ExperimentBaselineArtifactPayload) -> dict:
     try:
         return register_experiment_baseline_artifact(team_id, plan_id, payload.model_dump())
@@ -281,7 +316,11 @@ def team_workflow_experiment_baseline_artifact_register(team_id: str, plan_id: s
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/freeze")
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/freeze",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_design_freeze(team_id: str, plan_id: str, payload: ExperimentDesignFreezePayload) -> dict:
     try:
         return freeze_experiment_design(team_id, plan_id, payload.model_dump())
@@ -295,7 +334,12 @@ def team_workflow_experiment_design_freeze(team_id: str, plan_id: str, payload: 
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/smoke-result", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/smoke-result",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_smoke_result_register(team_id: str, plan_id: str, payload: ExperimentSmokeResultPayload) -> dict:
     try:
         return register_experiment_smoke_result(team_id, plan_id, payload.model_dump())
@@ -317,7 +361,12 @@ def team_workflow_experiment_smoke_result_register(team_id: str, plan_id: str, p
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/smoke-run", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/smoke-run",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_smoke_run(team_id: str, plan_id: str, payload: ExperimentSmokeRunPayload) -> dict:
     try:
         return run_experiment_smoke_run(team_id, plan_id, payload.model_dump())
@@ -335,7 +384,12 @@ def team_workflow_experiment_smoke_run(team_id: str, plan_id: str, payload: Expe
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run-result", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run-result",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_full_run_result_register(team_id: str, plan_id: str, payload: ExperimentFullRunResultPayload) -> dict:
     try:
         return register_experiment_full_run_result(team_id, plan_id, payload.model_dump())
@@ -357,7 +411,12 @@ def team_workflow_experiment_full_run_result_register(team_id: str, plan_id: str
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run/prepare", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run/prepare",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_full_run_prepare(team_id: str, plan_id: str, payload: ExperimentFullRunExecutionPayload) -> dict:
     try:
         return prepare_experiment_full_run(team_id, plan_id, payload.model_dump())
@@ -375,7 +434,12 @@ def team_workflow_experiment_full_run_prepare(team_id: str, plan_id: str, payloa
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run/execute", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run/execute",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_full_run_execute(team_id: str, plan_id: str, payload: ExperimentFullRunExecutionPayload) -> dict:
     try:
         return execute_experiment_full_run(team_id, plan_id, payload.model_dump())
@@ -393,7 +457,12 @@ def team_workflow_experiment_full_run_execute(team_id: str, plan_id: str, payloa
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/knowledge-ingestion-request", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/knowledge-ingestion-request",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_experiment_result_knowledge_ingestion_request(team_id: str, plan_id: str, payload: ExperimentResultKnowledgeIngestionPayload) -> dict:
     try:
         return request_experiment_result_knowledge_ingestion(team_id, plan_id, payload.model_dump())
@@ -420,7 +489,11 @@ def team_workflow_experiment_result_knowledge_ingestion_request(team_id: str, pl
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/stage-rounds/{stage_round_id}/coordination/retry")
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/stage-rounds/{stage_round_id}/coordination/retry",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_research_stage_round_coordination_retry(team_id: str, stage_round_id: str) -> dict:
     try:
         return retry_research_stage_round_coordination(team_id, stage_round_id)
@@ -442,7 +515,11 @@ def team_workflow_research_stage_round_coordination_retry(team_id: str, stage_ro
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/stage-rounds/{stage_round_id}/memory-record/retry")
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/stage-rounds/{stage_round_id}/memory-record/retry",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_research_stage_round_memory_retry(team_id: str, stage_round_id: str) -> dict:
     try:
         return retry_research_stage_round_memory_record(team_id, stage_round_id)
@@ -464,7 +541,11 @@ def team_workflow_research_stage_round_memory_retry(team_id: str, stage_round_id
         )
 
 
-@router.get("/teams/{team_id}/workflow-orchestration/candidates")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/candidates",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_candidate_list(
     team_id: str,
     candidateType: str = "",
@@ -490,7 +571,11 @@ def team_workflow_candidate_list(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/teams/{team_id}/workflow-orchestration/candidates/validation")
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/candidates/validation",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_candidate_validation(team_id: str) -> dict:
     try:
         return validate_candidate_store(team_id)
