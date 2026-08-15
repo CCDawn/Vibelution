@@ -503,6 +503,64 @@ def test_future_not_done_before_commit(tmp_path: Path) -> None:
         store.close()
 
 
+def test_close_waits_for_in_flight_submit_put_and_settles_accepted_envelope() -> None:
+    """submit 已通过 accept 检查后，close 必须等到 put 完成并结算该 envelope。
+
+    回归：put 若在 accept_lock 外，close 会排空空队列并让 writer 退出，
+    随后 put 把 future 丢进无消费者队列。
+    """
+    import queue
+    import threading
+    import time
+
+    from core.research.workflow.ledger.writer import _Envelope, _WAKEUP
+
+    database = _FakeDatabase()
+    writer = _build_writer(database, poll_interval_s=0.01, enqueue_timeout_ms=2000)
+    writer.start()
+    put_started = threading.Event()
+    allow_put = threading.Event()
+    original_queue = writer._queue
+
+    def gated_put(item, block=True, timeout=None):
+        if item is not _WAKEUP and isinstance(item, _Envelope):
+            put_started.set()
+            assert allow_put.wait(timeout=30), "test gate did not release put"
+        return queue.Queue.put(original_queue, item, block=block, timeout=timeout)
+
+    writer._queue.put = gated_put  # type: ignore[method-assign]
+    submit_box: dict[str, object] = {}
+
+    def do_submit() -> None:
+        submit_box["future"] = writer.submit(lambda uow: "late-ok", force_flush=False)
+
+    submitter = threading.Thread(target=do_submit, name="late-submit")
+    submitter.start()
+    assert put_started.wait(timeout=5), "submit 必须已进入 put"
+
+    close_done = threading.Event()
+
+    def do_close() -> None:
+        writer.close(timeout=2)
+        close_done.set()
+
+    closer = threading.Thread(target=do_close, name="close-during-put")
+    closer.start()
+    try:
+        time.sleep(0.3)
+        assert not close_done.is_set(), "close 不得在 in-flight submit.put 完成前返回"
+    finally:
+        allow_put.set()
+        submitter.join(timeout=5)
+        closer.join(timeout=10)
+    assert close_done.is_set(), "close 未返回"
+    future = submit_box.get("future")
+    assert future is not None
+    assert future.result(timeout=2) == "late-ok"
+    writer._thread.join(timeout=5)
+    assert not writer._thread.is_alive()
+
+
 def test_writer_start_failure_exposed_synchronously() -> None:
     from core.research.workflow.ledger import WorkflowLedgerUnavailableError
 
