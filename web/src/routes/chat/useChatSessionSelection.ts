@@ -1,8 +1,9 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
-import { selectChatSession } from "../../api/chat";
+import { isSessionNotFoundError, selectChatSession } from "../../api/chat";
 import type { SessionDetail } from "../../api/types";
+import { evictUnopenableSessionFromCaches } from "../chatSessionIndexQuery";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { isTempSessionId } from "../sessionOptimisticIds";
 
@@ -48,6 +49,7 @@ export type UseChatSessionSelectionResult = {
  * for A while the user already views B updates only A's cache.
  */
 export function useChatSessionSelection({
+  queryClient,
   chatWorkspaceCache,
   lang,
   describeError,
@@ -85,11 +87,16 @@ export function useChatSessionSelection({
       if (latestDirectSessionSelectionRef.current !== variables.sessionId) {
         return;
       }
+      if (isSessionNotFoundError(error)) {
+        evictUnopenableSessionFromCaches(queryClient, variables.sessionId);
+      }
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, lang === "zh" ? "选择会话失败" : "Select session failed"),
       }));
-      void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
+      if (!isSessionNotFoundError(error)) {
+        void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
+      }
     },
   });
 

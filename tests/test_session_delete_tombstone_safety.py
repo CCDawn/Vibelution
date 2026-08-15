@@ -10,9 +10,12 @@ Covers:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
+from core.ui.chat_state import load_chat_state, load_session_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
@@ -119,3 +122,59 @@ def test_t5_normal_session_still_materializes(tmp_path, monkeypatch):
     # Select on an existing session must succeed.
     detail = session_service.select_chat_session(session["id"])
     assert detail.get("id") == session["id"]
+
+
+class _BoomChatStateLock:
+    def __enter__(self):
+        raise AssertionError("ghost session path must not enter _CHAT_STATE_LOCK")
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def test_ghost_directory_session_select_404s_without_chat_state_lock(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "_CHAT_STATE_LOCK", _BoomChatStateLock())
+    with pytest.raises(session_service.SessionNotFoundError):
+        session_service.select_chat_session("session-ghost-directory-only")
+
+
+def test_ghost_directory_session_delete_succeeds_without_chat_state_lock(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "_CHAT_STATE_LOCK", _BoomChatStateLock())
+    result = session_service._delete_chat_session_state("session-ghost-directory-only")
+    assert "nextActiveSessionId" in result
+
+
+def test_ghost_directory_session_detail_skips_chat_state_lock(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "_CHAT_STATE_LOCK", _BoomChatStateLock())
+    assert session_service.get_session_detail("session-ghost-directory-only") is None
+
+
+def test_workspace_recoverable_session_select_still_opens(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    session, agent_id = _create_direct_session()
+    session_id = session["id"]
+    workspace = session_service._ensure_session_workspace(session_id)
+    Path(workspace).joinpath("turn_journal.jsonl").write_text(
+        '{"eventType":"user_message"}\n',
+        encoding="utf-8",
+    )
+    agent_directory_service.update_agent_instance(agent_id, direct_session_id="")
+    state = load_chat_state(tmp_path)
+    conversations = []
+    for item in state.get("conversations") or []:
+        if not isinstance(item, dict):
+            continue
+        item_id = str(item.get("conversation_id") or item.get("conversationId") or "").strip()
+        if item_id != session_id:
+            conversations.append(item)
+    state["conversations"] = conversations
+    if str(state.get("active_conversation_id") or "").strip() == session_id:
+        state["active_conversation_id"] = ""
+    save_chat_state(tmp_path, state)
+    assert load_session_chat_state(tmp_path, session_id) is None
+    assert session_service._session_has_openable_body(session_id) is True
+    detail = session_service.select_chat_session(session_id)
+    assert detail.get("id") == session_id

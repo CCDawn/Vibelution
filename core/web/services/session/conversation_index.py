@@ -1098,6 +1098,55 @@ def query_sessions(
     return payload
 
 
+def _session_has_openable_body(session_id: str) -> bool:
+    """True when select/delete can open this id without inventing a ghost row.
+
+    Runs without ``_CHAT_STATE_LOCK`` so a directory-only miss can 404 quickly
+    instead of queuing behind an unrelated turn/delete.
+    """
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    if s._is_session_workspace_intentionally_deleted(normalized_session_id):
+        return False
+    if s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) is not None:
+        return True
+    if s._session_workspace_has_recoverable_activity(normalized_session_id):
+        return True
+    if s._agent_for_direct_session(normalized_session_id):
+        return True
+    return False
+
+
+def _retire_unopenable_directory_session(session_id: str, *, source: str) -> None:
+    """Drop a directory row that can no longer be opened so the tab list matches."""
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    from . import directory_bridge
+
+    directory_bridge.archive_directory_session_safe(normalized_session_id, wait=True)
+    s._invalidate_session_list_cache()
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "chat_state",
+            "conversation.directory_ghost_retired",
+            level="info",
+            outcome="retired",
+            message="Retired an unopenable session from the directory index.",
+            fields={
+                "sessionId": normalized_session_id,
+                "source": str(source or "").strip()[:64],
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+
+
 def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     """Make an existing or AgentDirectory direct session the active chat session.
 
@@ -1109,37 +1158,48 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         raise s.SessionNotFoundError("Session not found")
+    if not s._session_has_openable_body(normalized_session_id):
+        s._retire_unopenable_directory_session(
+            normalized_session_id,
+            source="s.select_chat_session",
+        )
+        raise s.SessionNotFoundError("Session not found")
     s._sync_agent_directory_project_root()
     agent_by_id = s._agent_lookup_for_conversations()
+    if s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) is None:
+        s._ensure_session_conversation_record(
+            normalized_session_id,
+            source="s.select_chat_session",
+        )
+    missing_after_lock = False
+    selected_conversation: dict[str, Any] | None = None
     with s._CHAT_STATE_LOCK:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         changed = False
         if conversation is None:
-            if not s._ensure_agent_directory_conversation_materialized(
-                normalized_session_id,
-                source="s.select_chat_session",
-                activate=True,
-            ):
-                raise s.SessionNotFoundError("Session not found")
-            conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
-            changed = True
-        if conversation is None:
-            raise s.SessionNotFoundError("Session not found")
-        s._ensure_session_mutable(normalized_session_id, conversation=conversation)
-        changed = s._ensure_conversation_workspace_metadata(conversation) or changed
-        changed = s._ensure_conversation_agent_metadata(conversation, agent_by_id=agent_by_id) or changed
-        previous_active_id = s.load_active_conversation_id(s.PROJECT_ROOT)
-        need_activate = previous_active_id != normalized_session_id
-        if changed or need_activate:
-            if changed:
-                conversation["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
-            s.save_session_chat_state(
-                s.PROJECT_ROOT,
-                normalized_session_id,
-                conversation,
-                activate=need_activate,
-            )
-        selected_conversation = dict(conversation)
+            missing_after_lock = True
+        else:
+            s._ensure_session_mutable(normalized_session_id, conversation=conversation)
+            changed = s._ensure_conversation_workspace_metadata(conversation) or changed
+            changed = s._ensure_conversation_agent_metadata(conversation, agent_by_id=agent_by_id) or changed
+            previous_active_id = s.load_active_conversation_id(s.PROJECT_ROOT)
+            need_activate = previous_active_id != normalized_session_id
+            if changed or need_activate:
+                if changed:
+                    conversation["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
+                s.save_session_chat_state(
+                    s.PROJECT_ROOT,
+                    normalized_session_id,
+                    conversation,
+                    activate=need_activate,
+                )
+            selected_conversation = dict(conversation)
+    if missing_after_lock or selected_conversation is None:
+        s._retire_unopenable_directory_session(
+            normalized_session_id,
+            source="s.select_chat_session",
+        )
+        raise s.SessionNotFoundError("Session not found")
     from . import directory_bridge
 
     directory_bridge.sync_conversation_record(selected_conversation)
@@ -1765,6 +1825,12 @@ def _ensure_session_conversation_record(
     from . import directory_runtime
 
     if directory_runtime.is_legacy_discard_in_progress():
+        return False
+    if not s._session_has_openable_body(normalized_session_id):
+        s._retire_unopenable_directory_session(
+            normalized_session_id,
+            source=source,
+        )
         return False
     s._ensure_agent_directory_conversation_materialized(
         normalized_session_id,

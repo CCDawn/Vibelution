@@ -2173,6 +2173,34 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
     if not conversation_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
 
+    if not s._session_has_openable_body(conversation_id):
+        s._retire_unopenable_directory_session(
+            conversation_id,
+            source="s.delete_chat_session",
+        )
+        if (
+            s._session_workspace_dir_if_present(conversation_id) is not None
+            and not s._is_session_workspace_intentionally_deleted(conversation_id)
+        ):
+            s._mark_session_workspace_intentionally_deleted(
+                conversation_id,
+                reason="deleted",
+            )
+        s._record_session_delete_event(
+            "already_deleted",
+            session_id=conversation_id,
+            outcome="already_deleted",
+            fields={
+                "phase": "deleted",
+                "agentId": "",
+                "messageCount": 0,
+            },
+        )
+        return {
+            "nextActiveSessionId": str(s.load_active_conversation_id(s.PROJECT_ROOT) or "").strip(),
+            "replacementDirectSessionId": "",
+        }
+
     next_active_id = ""
     replacement_snapshot: dict[str, Any] | None = None
     with s._CHAT_STATE_LOCK:

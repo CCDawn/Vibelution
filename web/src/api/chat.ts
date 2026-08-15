@@ -18,6 +18,11 @@ import type {
   SessionTurnAcceptedResponse,
 } from "./types";
 
+export function isSessionNotFoundError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /session not found|会话不存在|未找到会话|未找到当前会话/i.test(message);
+}
+
 export type SessionToolApprovalDecision =
   | "accept"
   | "acceptForSession"
@@ -193,13 +198,24 @@ export function updateChatSession(
   });
 }
 
-export function deleteChatSession(sessionId: string): Promise<SessionDeleteResponse> {
-  return fetchJson<SessionDeleteResponse>(`/api/sessions/${encodeURIComponent(sessionId)}`, {
-    method: "DELETE",
-    headers: {
-      Prefer: "respond-async",
-    },
-  });
+export async function deleteChatSession(sessionId: string): Promise<SessionDeleteResponse> {
+  try {
+    return await fetchJson<SessionDeleteResponse>(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+      headers: {
+        Prefer: "respond-async",
+      },
+    });
+  } catch (error) {
+    if (isSessionNotFoundError(error)) {
+      return {
+        deleted: true,
+        deletedSessionId: sessionId,
+        nextActiveSessionId: "",
+      };
+    }
+    throw error;
+  }
 }
 
 export function fetchSessionLlmOptions(sessionId: string): Promise<SessionLlmOptions> {

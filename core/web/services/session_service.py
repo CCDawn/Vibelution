@@ -367,6 +367,8 @@ from core.web.services.session.conversation_index import (
     _agent_directory_stub_hidden_team_member_ids,
     _ensure_agent_directory_conversation_materialized,
     _ensure_session_conversation_record,
+    _session_has_openable_body,
+    _retire_unopenable_directory_session,
     _recover_agent_id_from_session_journal,
     _recover_stage_task_workspace_conversation,
     _recover_missing_conversation_from_workspace_locked,
