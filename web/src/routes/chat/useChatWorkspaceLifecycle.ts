@@ -306,13 +306,11 @@ export function useChatWorkspaceLifecycle({
           transcriptScope: "window",
         },
       };
-      // Cancel in-flight index/bootstrap/agent list responses so stale pages cannot
-      // overwrite the optimistic tab while another session is still running.
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: ["sessions", "query"] }),
-        queryClient.cancelQueries({ queryKey: ["sessions", "agent"] }),
-        queryClient.cancelQueries({ queryKey: ["sessions", "active-bootstrap"] }),
-      ]);
+      // Do not await cancelQueries — waiting freezes tab switching while list
+      // queries are in flight, same as deleteSessionMutation.
+      void queryClient.cancelQueries({ queryKey: ["sessions", "query"] });
+      void queryClient.cancelQueries({ queryKey: ["sessions", "agent"] });
+      void queryClient.cancelQueries({ queryKey: ["sessions", "active-bootstrap"] });
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: "",

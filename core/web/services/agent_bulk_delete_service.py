@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Callable
@@ -21,13 +22,25 @@ from .agent_mode_binding_service import (
     remove_agents_from_mode_bindings,
     restore_removed_agents_to_mode_bindings,
 )
-from .chat_room_service import remove_agents_from_chat_rooms, restore_removed_agents_to_chat_rooms
+from .chat_room_service import (
+    ChatRoomBusyError,
+    remove_agents_from_chat_rooms,
+    restore_removed_agents_to_chat_rooms,
+)
 from .runtime_scene_service import record_runtime_scene_event
 from .team_service import remove_agents_from_teams, restore_removed_agents_to_teams
 from . import session_service
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+MAX_BULK_AGENT_IDS = 100
+
+_ARCHIVE_IN_FLIGHT_LOCK = threading.Lock()
+_ARCHIVE_IN_FLIGHT_IDS: set[str] = set()
+
+
+class AgentLifecycleBusyError(AgentDirectoryError):
+    """Raised when overlapping Agent archive work is already running."""
 
 
 def _dedupe_agent_ids(agent_ids: list[str] | None) -> list[str]:
@@ -74,9 +87,31 @@ def _archive_skip_reason(error: Exception) -> str:
     message = str(error)
     if isinstance(error, AgentNotFoundError):
         return "not_found"
+    if isinstance(error, ChatRoomBusyError) or "Chat room already has an active round" in message:
+        return "busy"
     if "Protected core Agent cannot be archived" in message:
         return "protected"
     return "invalid"
+
+
+def _claim_archive_in_flight(agent_ids: list[str]) -> None:
+    with _ARCHIVE_IN_FLIGHT_LOCK:
+        overlap = [agent_id for agent_id in agent_ids if agent_id in _ARCHIVE_IN_FLIGHT_IDS]
+        if overlap:
+            raise AgentLifecycleBusyError(f"Agent archive already in progress for {overlap[0]}.")
+        _ARCHIVE_IN_FLIGHT_IDS.update(agent_ids)
+
+
+def _release_archive_in_flight(agent_ids: list[str]) -> None:
+    with _ARCHIVE_IN_FLIGHT_LOCK:
+        _ARCHIVE_IN_FLIGHT_IDS.difference_update(agent_ids)
+
+
+def _extend_unique(target: list[str], values: list[Any]) -> None:
+    for item in list(values or []):
+        token = str(item or "").strip()
+        if token and token not in target:
+            target.append(token)
 
 
 def _status(success_count: int, skipped_count: int, failed_count: int) -> str:
@@ -120,6 +155,7 @@ def _prepare_bulk_archive_references(
     *,
     snapshots_by_agent_id: dict[str, dict[str, Any]],
     timings: dict[str, float],
+    allow_empty_rooms: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Remove archive references while compensating every completed stage on failure."""
 
@@ -137,6 +173,7 @@ def _prepare_bulk_archive_references(
             "remove_from_chat_rooms",
             lambda: remove_agents_from_chat_rooms(
                 candidate_ids,
+                allow_empty_rooms=allow_empty_rooms,
                 include_chat_rooms=False,
                 include_restore_token=True,
             ),
@@ -178,159 +215,157 @@ def _prepare_bulk_archive_references(
     return mode_restore_token, team_cleanup, room_cleanup, mode_cleanup
 
 
-@session_service.session_agent_lifecycle_serialized
-def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
-    """Archive many Agents with per-Agent compensation on write failure."""
+def _compensate_failed_archive_item(
+    timings: dict[str, float],
+    *,
+    session_restore_token: dict[str, Any] | None,
+    mode_restore_token: dict[str, Any] | None,
+    room_cleanup: dict[str, Any],
+    team_cleanup: dict[str, Any],
+) -> list[str]:
+    compensations: list[tuple[str, Callable[[], Any]]] = []
+    if isinstance(session_restore_token, dict):
+        compensations.append(
+            (
+                "rollback_agent_sessions",
+                lambda: session_service.restore_agent_sessions_archive(session_restore_token),
+            )
+        )
+    if mode_restore_token is not None:
+        compensations.append(
+            (
+                "rollback_mode_bindings",
+                lambda: restore_removed_agents_to_mode_bindings(mode_restore_token),
+            )
+        )
+    if room_cleanup:
+        compensations.append(
+            (
+                "rollback_chat_rooms",
+                lambda: restore_removed_agents_to_chat_rooms(room_cleanup.get("restoreToken")),
+            )
+        )
+    if team_cleanup:
+        compensations.append(
+            (
+                "rollback_teams",
+                lambda: restore_removed_agents_to_teams(team_cleanup.get("restoreToken")),
+            )
+        )
+    return _run_best_effort_compensations(timings, compensations)
+
+
+def bulk_archive_agents(
+    agent_ids: list[str] | None,
+    *,
+    allow_empty_rooms: bool = False,
+) -> dict[str, Any]:
+    """Archive Agents one-by-one. Earlier successes stay committed if a later Agent fails."""
 
     requested_agent_ids = _dedupe_agent_ids(agent_ids)
+    if len(requested_agent_ids) > MAX_BULK_AGENT_IDS:
+        raise AgentDirectoryError(f"Bulk archive accepts at most {MAX_BULK_AGENT_IDS} Agent ids.")
+    _claim_archive_in_flight(requested_agent_ids)
+    try:
+        return _bulk_archive_agents_unlocked(
+            requested_agent_ids,
+            allow_empty_rooms=allow_empty_rooms,
+        )
+    finally:
+        _release_archive_in_flight(requested_agent_ids)
+
+
+def _bulk_archive_agents_unlocked(
+    requested_agent_ids: list[str],
+    *,
+    allow_empty_rooms: bool,
+) -> dict[str, Any]:
     timings: dict[str, float] = {}
     started_at = perf_counter()
     success: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
-    archive_candidates: list[dict[str, Any]] = []
+    changed_team_ids: list[str] = []
+    changed_room_ids: list[str] = []
+    mode_repair_warnings: list[Any] = []
+    session_archive_by_agent_id: dict[str, dict[str, Any]] = {}
+
     for agent_id in requested_agent_ids:
         try:
-            agent = _timed(timings, "ensure_archive_allowed", lambda agent_id=agent_id: ensure_agent_archive_allowed(agent_id))
+            snapshot = _timed(
+                timings,
+                "ensure_archive_allowed",
+                lambda agent_id=agent_id: ensure_agent_archive_allowed(agent_id),
+            )
         except (AgentDirectoryError, AgentNotFoundError) as exc:
             skipped.append(_skip_item(agent_id, _archive_skip_reason(exc), str(exc)))
             continue
-        archive_candidates.append(agent)
 
-    candidate_ids = [str(agent.get("agentId") or "").strip() for agent in archive_candidates if str(agent.get("agentId") or "").strip()]
-    team_cleanup = {"changedTeamIds": []}
-    room_cleanup = {"changedRoomIds": []}
-    mode_cleanup = {"repairWarnings": []}
-    if candidate_ids:
-        snapshots_by_agent_id = {str(agent.get("agentId") or "").strip(): agent for agent in archive_candidates}
-        mode_restore_token, team_cleanup, room_cleanup, mode_cleanup = _prepare_bulk_archive_references(
-            candidate_ids,
-            snapshots_by_agent_id=snapshots_by_agent_id,
-            timings=timings,
-        )
-        archived_by_agent_id: dict[str, dict[str, Any]] = {}
-        session_archive_by_agent_id: dict[str, dict[str, Any]] = {}
-        session_archive_restore_tokens_by_agent_id: dict[str, dict[str, Any]] = {}
-        newly_archived_agent_ids: set[str] = set()
-        archive_failure: tuple[str, Exception] | None = None
-        for agent_id in candidate_ids:
-            session_archive: dict[str, Any] = {}
-            try:
-                snapshot = snapshots_by_agent_id.get(agent_id, {})
-                session_archive = _timed(
-                    timings,
-                    "archive_agent_sessions",
-                    lambda agent_id=agent_id, snapshot=snapshot: session_service.archive_agent_sessions(
-                        agent_id,
-                        direct_session_id=str(snapshot.get("directSessionId") or "").strip(),
-                        include_restore_token=True,
-                    ),
-                )
-                session_archive_by_agent_id[agent_id] = _public_agent_session_cleanup(session_archive)
-                restore_token = session_archive.get("restoreToken")
-                if isinstance(restore_token, dict):
-                    session_archive_restore_tokens_by_agent_id[agent_id] = restore_token
-                archived_by_agent_id[agent_id] = _timed(
-                    timings,
-                    "archive_agents",
-                    lambda agent_id=agent_id: archive_agent_instance(agent_id, repair_mode_bindings=False),
-                )
-                if str(snapshot.get("status") or "active").strip() != "archived":
-                    newly_archived_agent_ids.add(agent_id)
-            except Exception as exc:
-                restore_token = session_archive.get("restoreToken")
-                if isinstance(restore_token, dict):
-                    rollback_failures = _run_best_effort_compensations(
-                        timings,
-                        [
-                            (
-                                "rollback_agent_sessions",
-                                lambda restore_token=restore_token: session_service.restore_agent_sessions_archive(
-                                    restore_token
-                                ),
-                            )
-                        ],
-                    )
-                    if rollback_failures:
-                        exc.add_note(
-                            "Bulk archive compensation incomplete: "
-                            + ", ".join(rollback_failures)
-                        )
-                archive_failure = (agent_id, exc)
-                break
-        if archive_failure is not None:
-            failed_agent_id, archive_error = archive_failure
-            compensations: list[tuple[str, Callable[[], Any]]] = []
-            for archived_agent_id in reversed(list(archived_by_agent_id)):
-                if archived_agent_id in newly_archived_agent_ids:
-                    compensations.append(
-                        (
-                            "rollback_archived_agents",
-                            lambda archived_agent_id=archived_agent_id: reactivate_agent_instance(
-                                archived_agent_id,
-                                reason="bulk_archive_rollback",
-                            ),
-                        )
-                    )
-                restore_token = session_archive_restore_tokens_by_agent_id.get(archived_agent_id)
-                if restore_token:
-                    compensations.append(
-                        (
-                            "rollback_agent_sessions",
-                            lambda restore_token=restore_token: session_service.restore_agent_sessions_archive(
-                                restore_token
-                            ),
-                        )
-                    )
-            compensations.extend(
-                [
-                    (
-                        "rollback_mode_bindings",
-                        lambda: restore_removed_agents_to_mode_bindings(mode_restore_token),
-                    ),
-                    (
-                        "rollback_chat_rooms",
-                        lambda: restore_removed_agents_to_chat_rooms(
-                            room_cleanup.get("restoreToken")
-                        ),
-                    ),
-                    (
-                        "rollback_teams",
-                        lambda: restore_removed_agents_to_teams(
-                            team_cleanup.get("restoreToken")
-                        ),
-                    ),
-                ]
+        mode_restore_token: dict[str, Any] | None = None
+        team_cleanup: dict[str, Any] = {}
+        room_cleanup: dict[str, Any] = {}
+        mode_cleanup: dict[str, Any] = {}
+        session_archive: dict[str, Any] = {}
+        prepared = False
+        try:
+            mode_restore_token, team_cleanup, room_cleanup, mode_cleanup = _prepare_bulk_archive_references(
+                [agent_id],
+                snapshots_by_agent_id={agent_id: snapshot},
+                timings=timings,
+                allow_empty_rooms=allow_empty_rooms,
             )
-            rollback_failures = _run_best_effort_compensations(
+            prepared = True
+            session_archive = _timed(
                 timings,
-                compensations,
+                "archive_agent_sessions",
+                lambda agent_id=agent_id, snapshot=snapshot: session_service.archive_agent_sessions(
+                    agent_id,
+                    direct_session_id=str(snapshot.get("directSessionId") or "").strip(),
+                    include_restore_token=True,
+                ),
             )
-            if rollback_failures:
-                archive_error.add_note(
-                    "Bulk archive compensation incomplete: "
-                    + ", ".join(rollback_failures)
+            archived = _timed(
+                timings,
+                "archive_agents",
+                lambda agent_id=agent_id: archive_agent_instance(agent_id, repair_mode_bindings=False),
+            )
+        except Exception as exc:
+            if prepared:
+                rollback_failures = _compensate_failed_archive_item(
+                    timings,
+                    session_restore_token=session_archive.get("restoreToken")
+                    if isinstance(session_archive.get("restoreToken"), dict)
+                    else None,
+                    mode_restore_token=mode_restore_token,
+                    room_cleanup=room_cleanup,
+                    team_cleanup=team_cleanup,
                 )
-            for agent_id in candidate_ids:
-                if agent_id == failed_agent_id:
-                    failed.append(_failed_item(agent_id, _archive_skip_reason(archive_error), str(archive_error)))
-                else:
-                    failed.append(_failed_item(agent_id, "batch_rolled_back", "Bulk archive was rolled back because another Agent could not be archived."))
-        else:
-            for agent_id in candidate_ids:
-                archived = archived_by_agent_id[agent_id]
-                success.append(
-                    {
-                        **archived,
-                        "archiveSummary": {
-                            "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
-                            "removedFromRoomIds": list((room_cleanup.get("removedByAgentId") or {}).get(agent_id) or []),
-                            "removedFromTeamIds": list((team_cleanup.get("removedByAgentId") or {}).get(agent_id) or []),
-                            "sessions": session_archive_by_agent_id.get(agent_id, {}),
-                            "dataRetention": "sealed",
-                        },
-                    }
-                )
+                if rollback_failures:
+                    exc.add_note(
+                        "Bulk archive compensation incomplete: " + ", ".join(rollback_failures)
+                    )
+            failed.append(_failed_item(agent_id, _archive_skip_reason(exc), str(exc)))
+            continue
+
+        public_session_cleanup = _public_agent_session_cleanup(session_archive)
+        session_archive_by_agent_id[agent_id] = public_session_cleanup
+        removed_from_room_ids = list((room_cleanup.get("removedByAgentId") or {}).get(agent_id) or [])
+        removed_from_team_ids = list((team_cleanup.get("removedByAgentId") or {}).get(agent_id) or [])
+        _extend_unique(changed_room_ids, room_cleanup.get("changedRoomIds") or [])
+        _extend_unique(changed_team_ids, team_cleanup.get("changedTeamIds") or [])
+        mode_repair_warnings.extend(list(mode_cleanup.get("repairWarnings") or []))
+        success.append(
+            {
+                **archived,
+                "archiveSummary": {
+                    "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
+                    "removedFromRoomIds": removed_from_room_ids,
+                    "removedFromTeamIds": removed_from_team_ids,
+                    "sessions": public_session_cleanup,
+                    "dataRetention": "sealed",
+                },
+            }
+        )
 
     summary = _summary(len(requested_agent_ids), success, skipped, failed)
     duration_ms = round((perf_counter() - started_at) * 1000, 3)
@@ -343,13 +378,13 @@ def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
             **summary,
             "durationMs": duration_ms,
             "timingsMs": timings,
-            "removedFromTeamCount": len(team_cleanup.get("changedTeamIds") or []),
-            "removedFromRoomCount": len(room_cleanup.get("changedRoomIds") or []),
-            "modeBindingRepairWarningCount": len(mode_cleanup.get("repairWarnings") or []),
+            "removedFromTeamCount": len(changed_team_ids),
+            "removedFromRoomCount": len(changed_room_ids),
+            "modeBindingRepairWarningCount": len(mode_repair_warnings),
             "archivedSessionCount": sum(
                 int(item.get("archivedCount") or 0)
                 for item in session_archive_by_agent_id.values()
-            ) if candidate_ids else 0,
+            ),
         },
     )
     return {
@@ -360,9 +395,9 @@ def bulk_archive_agents(agent_ids: list[str] | None) -> dict[str, Any]:
         "failed": failed,
         "summary": summary,
         "cleanupSummary": {
-            "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
-            "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
-            "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
+            "removedFromRoomIds": changed_room_ids,
+            "removedFromTeamIds": changed_team_ids,
+            "modeBindingsRepaired": len(mode_repair_warnings),
             "dataRetention": "sealed",
         },
         "timingsMs": timings,

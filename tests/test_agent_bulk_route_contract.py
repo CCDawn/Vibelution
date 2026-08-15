@@ -165,3 +165,25 @@ def test_agent_bulk_response_models_keep_unknown_fields(monkeypatch) -> None:
     )
     assert configured.status_code == 200
     assert configured.json() == expected_config
+
+
+def test_agent_bulk_archive_rejects_over_limit_with_400(monkeypatch) -> None:
+    monkeypatch.setattr(agent_routes, "invalidate_agent_config_workspace_cache", lambda: None)
+    too_many = [f"agent-{index}" for index in range(101)]
+    response = client.post("/api/agents/bulk-archive", json={"agentIds": too_many})
+    assert response.status_code == 400
+    assert "at most 100" in response.json()["detail"]
+
+
+def test_agent_bulk_archive_returns_409_when_lifecycle_is_busy(monkeypatch) -> None:
+    from core.web.services.agent_bulk_delete_service import AgentLifecycleBusyError
+
+    monkeypatch.setattr(agent_routes, "invalidate_agent_config_workspace_cache", lambda: None)
+
+    def raise_busy(*_args, **_kwargs):
+        raise AgentLifecycleBusyError("Agent archive already in progress for agent-live.")
+
+    monkeypatch.setattr(agent_routes, "bulk_archive_agents", raise_busy)
+    response = client.post("/api/agents/bulk-archive", json={"agentIds": ["agent-live"]})
+    assert response.status_code == 409
+    assert "already in progress" in response.json()["detail"]

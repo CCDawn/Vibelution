@@ -82,6 +82,8 @@ from core.web.services.agent_model_promotion_service import (
     promote_agent_model,
 )
 from core.web.services.agent_bulk_delete_service import (
+    MAX_BULK_AGENT_IDS,
+    AgentLifecycleBusyError,
     bulk_archive_agents,
     bulk_purge_agents,
 )
@@ -1426,8 +1428,15 @@ def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
     response_model_exclude_unset=True,
 )
 def agent_bulk_archive(payload: AgentBulkActionPayload) -> dict:
+    if len(payload.agentIds) > MAX_BULK_AGENT_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bulk archive accepts at most {MAX_BULK_AGENT_IDS} Agent ids.",
+        )
     try:
         return _with_agent_workspace_cache_invalidated(bulk_archive_agents(payload.agentIds))
+    except AgentLifecycleBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
