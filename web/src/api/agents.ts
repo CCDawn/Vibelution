@@ -221,6 +221,45 @@ export function fetchAgentRuntimeEvidence(
   });
 }
 
+export function bulkUpdateAgentConfig<T>(payload: {
+  agentIds: string[];
+  applyFields: string[];
+  patch: Record<string, unknown>;
+}): Promise<T> {
+  return fetchJson<T>("/api/agents/bulk-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function bulkUpdateAgentPromptTemplate<T>(payload: {
+  agentIds: string[];
+  promptTemplateId: string;
+}): Promise<T> {
+  return fetchJson<T>("/api/agents/bulk-prompt-template", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function bulkArchiveAgents<T>(agentIds: string[]): Promise<T> {
+  return fetchJson<T>("/api/agents/bulk-archive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agentIds }),
+  });
+}
+
+export function bulkPurgeAgents<T>(agentIds: string[]): Promise<T> {
+  return fetchJson<T>("/api/agents/bulk-purge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agentIds }),
+  });
+}
+
 export function resolveAgentToolGovernanceRequest(
   request: AgentToolGovernanceRequest,
   decision: "approve" | "reject",

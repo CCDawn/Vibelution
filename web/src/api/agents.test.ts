@@ -60,4 +60,15 @@ describe("Agent permission preset API", () => {
     expect(apiSource).toContain("export function fetchAgentRuntimeEvidence");
     expect(apiSource).toContain("/runtime-evidence");
   });
+
+  it("owns agent bulk archive, purge, config, and prompt-template transports", () => {
+    expect(apiSource).toContain("export function bulkUpdateAgentConfig");
+    expect(apiSource).toContain("/api/agents/bulk-config");
+    expect(apiSource).toContain("export function bulkUpdateAgentPromptTemplate");
+    expect(apiSource).toContain("/api/agents/bulk-prompt-template");
+    expect(apiSource).toContain("export function bulkArchiveAgents");
+    expect(apiSource).toContain("/api/agents/bulk-archive");
+    expect(apiSource).toContain("export function bulkPurgeAgents");
+    expect(apiSource).toContain("/api/agents/bulk-purge");
+  });
 });

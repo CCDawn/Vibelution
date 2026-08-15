@@ -21,6 +21,7 @@ from core.web.routes.agent_activity_models import (
     AgentRunHistoryResponse,
     AgentRuntimeEvidenceResponse,
 )
+from core.web.routes.agent_bulk_models import AgentBulkActionResponse
 from core.web.routes.agent_config_change_models import (
     AgentConfigChangesResponse,
     AgentConfigDraftDiscardResponse,
@@ -1332,7 +1333,11 @@ def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
         raise
 
 
-@router.post("/agents/bulk-archive")
+@router.post(
+    "/agents/bulk-archive",
+    response_model=AgentBulkActionResponse,
+    response_model_exclude_unset=True,
+)
 def agent_bulk_archive(payload: AgentBulkActionPayload) -> dict:
     try:
         return _with_agent_workspace_cache_invalidated(bulk_archive_agents(payload.agentIds))
@@ -1342,7 +1347,11 @@ def agent_bulk_archive(payload: AgentBulkActionPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/bulk-purge")
+@router.post(
+    "/agents/bulk-purge",
+    response_model=AgentBulkActionResponse,
+    response_model_exclude_unset=True,
+)
 def agent_bulk_purge(payload: AgentBulkActionPayload) -> dict:
     try:
         return _with_agent_workspace_cache_invalidated(bulk_purge_agents(payload.agentIds))
@@ -1352,7 +1361,11 @@ def agent_bulk_purge(payload: AgentBulkActionPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/bulk-prompt-template")
+@router.post(
+    "/agents/bulk-prompt-template",
+    response_model=AgentBulkActionResponse,
+    response_model_exclude_unset=True,
+)
 def agent_bulk_prompt_template(payload: AgentBulkPromptTemplatePayload) -> dict:
     try:
         return _with_agent_workspace_cache_invalidated(bulk_update_agent_prompt_template(payload.agentIds, payload.promptTemplateId))
@@ -1360,7 +1373,11 @@ def agent_bulk_prompt_template(payload: AgentBulkPromptTemplatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/bulk-config")
+@router.post(
+    "/agents/bulk-config",
+    response_model=AgentBulkActionResponse,
+    response_model_exclude_unset=True,
+)
 def agent_bulk_config(payload: AgentBulkConfigPayload) -> dict:
     try:
         return _with_agent_workspace_cache_invalidated(bulk_update_agent_config(payload.agentIds, payload.patch, payload.applyFields))

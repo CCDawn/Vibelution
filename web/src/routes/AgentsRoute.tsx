@@ -14,6 +14,10 @@ import { lazy, Suspense, type MouseEvent, useEffect, useMemo, useRef, useState }
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
+  bulkArchiveAgents as requestBulkArchiveAgents,
+  bulkPurgeAgents as requestBulkPurgeAgents,
+  bulkUpdateAgentConfig,
+  bulkUpdateAgentPromptTemplate,
   fetchAgentConfigChanges,
   fetchAgentConfigWorkspace,
   fetchAgentInboxMessages,
@@ -1522,14 +1526,10 @@ export function AgentsRoute() {
     const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
 
     try {
-      const response = await fetchJson<AgentBulkConfigResponse>("/api/agents/bulk-config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agentIds: selectedBulkAgents.map((agent) => agent.agentId),
-          applyFields: bulkConfigApplyFields(bulkConfigApply),
-          patch: bulkConfigPatchFromDraft(bulkConfigDraft, bulkConfigApply),
-        }),
+      const response = await bulkUpdateAgentConfig<AgentBulkConfigResponse>({
+        agentIds: selectedBulkAgents.map((agent) => agent.agentId),
+        applyFields: bulkConfigApplyFields(bulkConfigApply),
+        patch: bulkConfigPatchFromDraft(bulkConfigDraft, bulkConfigApply),
       });
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
@@ -1574,10 +1574,9 @@ export function AgentsRoute() {
     const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
 
     try {
-      const response = await fetchJson<AgentBulkPromptTemplateResponse>("/api/agents/bulk-prompt-template", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentIds: selectedBulkAgents.map((agent) => agent.agentId), promptTemplateId: bulkPromptTemplateId }),
+      const response = await bulkUpdateAgentPromptTemplate<AgentBulkPromptTemplateResponse>({
+        agentIds: selectedBulkAgents.map((agent) => agent.agentId),
+        promptTemplateId: bulkPromptTemplateId,
       });
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
@@ -1627,11 +1626,9 @@ export function AgentsRoute() {
 
     try {
       if (archiveAgents.length) {
-        const response = await fetchJson<AgentBulkActionResponse>("/api/agents/bulk-archive", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ agentIds: archiveAgents.map((agent) => agent.agentId) }),
-        });
+        const response = await requestBulkArchiveAgents<AgentBulkActionResponse>(
+          archiveAgents.map((agent) => agent.agentId),
+        );
         response.success.forEach((item) => {
           const archivedAgent = item as AgentConfigWorkspaceAgent;
           if (archivedAgent.agentId === selectedAgent?.agentId) {
@@ -1693,11 +1690,9 @@ export function AgentsRoute() {
 
     try {
       if (purgeAgents.length) {
-        const response = await fetchJson<AgentBulkActionResponse>("/api/agents/bulk-purge", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ agentIds: purgeAgents.map((agent) => agent.agentId) }),
-        });
+        const response = await requestBulkPurgeAgents<AgentBulkActionResponse>(
+          purgeAgents.map((agent) => agent.agentId),
+        );
         queryClient.setQueryData<AgentConfigWorkspace | undefined>(
           queryKeys.agentConfigWorkspace(),
           (current) => bulkPurgeWorkspaceCache(current, response),
