@@ -18,6 +18,8 @@ import {
   type UseChatCliAgentTerminalOptions,
 } from "./useChatCliAgentTerminal";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 type DerivedSnapshot = {
   cliAgentRunTabs: ReturnType<typeof useChatCliAgentTerminal>["cliAgentRunTabs"];
   mountedCliAgentRuns: ReturnType<typeof useChatCliAgentTerminal>["mountedCliAgentRuns"];
