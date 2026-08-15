@@ -71,4 +71,22 @@ describe("Agent permission preset API", () => {
     expect(apiSource).toContain("export function bulkPurgeAgents");
     expect(apiSource).toContain("/api/agents/bulk-purge");
   });
+
+  it("owns Agent Center workbench write transports", () => {
+    expect(apiSource).toContain("export function updateAgentAvatar");
+    expect(apiSource).toContain("/avatar");
+    expect(apiSource).toContain("export function uploadAgentAvatarImage");
+    expect(apiSource).toContain("/avatar-image");
+    expect(apiSource).toContain("export function updateAgentModeMembership");
+    expect(apiSource).toContain("/mode-membership");
+    expect(apiSource).toContain("export function createAgentToolGovernanceRequest");
+    expect(apiSource).toContain("export function resolveAgentCenterToolGovernanceRequest");
+    expect(apiSource).toContain("resolutionNote: decision");
+    expect(apiSource).toContain("export function consumeAgentInboxMessage");
+    expect(apiSource).toContain("/consume");
+    expect(apiSource).toContain("export function consumeAllAgentInboxMessages");
+    expect(apiSource).toContain("/messages/consume-all");
+    expect(apiSource).toContain("export function purgeArchivedAgent");
+    expect(apiSource).toContain("/purge");
+  });
 });
