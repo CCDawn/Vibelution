@@ -1,0 +1,312 @@
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--vui-surface-workspace);
+  color: var(--fg-primary);
+  overflow: auto;
+}
+
+.queue-preview-page {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.queue-preview-header {
+  max-width: 1180px;
+  margin: 0 auto 18px;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.queue-preview-eyebrow {
+  margin: 0 0 6px;
+  font-size: var(--vui-font-xs);
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--fg-tertiary);
+}
+
+.queue-preview-header h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+.queue-preview-subtitle {
+  margin: 8px 0 0;
+  max-width: 640px;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: var(--vui-line-readable);
+}
+
+.queue-preview-header-actions,
+.queue-preview-keymap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.queue-preview-chip {
+  border: 1px solid var(--vui-border-subtle);
+  background: var(--vui-surface-panel);
+  color: var(--fg-secondary);
+}
+
+.queue-preview-layout {
+  max-width: 1180px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 16px;
+  align-items: start;
+}
+
+.queue-preview-stage {
+  min-width: 0;
+}
+
+.queue-preview-chat {
+  display: grid;
+  grid-template-rows: minmax(280px, 1fr) auto;
+  min-height: 620px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 88%, transparent);
+  border-radius: 20px;
+  background: var(--vui-surface-chat);
+  overflow: hidden;
+}
+
+.queue-preview-transcript {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 18px 16px 12px;
+  overflow: auto;
+}
+
+.queue-preview-turn {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.queue-preview-turn-user {
+  justify-items: end;
+  grid-template-columns: minmax(0, 1fr) 32px;
+}
+
+.queue-preview-turn-user .queue-preview-avatar {
+  grid-column: 2;
+}
+
+.queue-preview-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--vui-control-muted);
+  border: 1px solid var(--vui-border-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.queue-preview-bubble {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.queue-preview-turn-user .queue-preview-bubble {
+  justify-self: end;
+  width: fit-content;
+  max-width: min(100%, 36rem);
+  border-radius: 16px;
+  background: var(--vui-control-muted);
+  padding: 8px 12px;
+}
+
+.queue-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 20px;
+  margin: 0 0 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 16%, var(--vui-control-muted));
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+}
+
+.queue-preview-streaming {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.queue-preview-queue-stack {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 10px;
+}
+
+.queue-preview-queue-bar,
+.queue-preview-composer-hint {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: var(--radius-control);
+  border: 1px solid color-mix(in srgb, var(--vui-border-subtle) 88%, transparent);
+  background: color-mix(in srgb, var(--vui-control-muted) 55%, transparent);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+.queue-preview-queue-bar-editing {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--vui-border-subtle));
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--vui-surface-panel));
+}
+
+.queue-preview-queue-handle {
+  color: var(--fg-tertiary);
+  cursor: grab;
+  user-select: none;
+}
+
+.queue-preview-queue-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.queue-preview-queue-label {
+  font-weight: 700;
+}
+
+.queue-preview-queue-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-primary);
+}
+
+.queue-preview-queue-editor {
+  width: 100%;
+  min-height: 36px;
+  resize: vertical;
+  border: 0;
+  background: transparent;
+  color: var(--fg-primary);
+}
+
+.queue-preview-queue-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.queue-preview-composer {
+  margin: 0 12px 12px;
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 88%, transparent);
+  background: color-mix(in srgb, var(--vui-surface-panel) 96%, var(--vui-surface-workspace));
+}
+
+.queue-preview-composer-hint {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.queue-preview-composer-field {
+  min-width: 0;
+}
+
+.queue-preview-composer-input {
+  min-height: 72px !important;
+  max-height: 160px;
+  resize: none !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.queue-preview-composer-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 44%, transparent);
+  padding-top: 8px;
+}
+
+.queue-preview-primary-action {
+  min-width: 5.5rem;
+}
+
+.queue-preview-stop-action {
+  min-width: 2.25rem;
+}
+
+.queue-preview-side {
+  display: grid;
+  gap: 12px;
+}
+
+.queue-preview-side-card {
+  padding: 14px;
+}
+
+.queue-preview-side-card h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.queue-preview-side-card p,
+.queue-preview-keymap span,
+.queue-preview-log {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.55;
+}
+
+.queue-preview-log {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.queue-preview-log-item {
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: var(--vui-control-muted);
+}
+
+@media (max-width: 900px) {
+  .queue-preview-page {
+    padding: 16px;
+  }
+
+  .queue-preview-header,
+  .queue-preview-layout {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .queue-preview-header-actions {
+    justify-content: flex-start;
+  }
+}

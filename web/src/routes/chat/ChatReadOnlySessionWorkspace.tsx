@@ -75,6 +75,7 @@ export function ChatReadOnlySessionWorkspace({
           disabled: true,
           editUserMessageDisabled: true,
           error: "",
+          followupQueue: [],
           guidance: "",
           interruptGuidancePending: false,
           modeNotice: "",
