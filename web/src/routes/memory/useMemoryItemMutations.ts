@@ -5,6 +5,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
+import { resolveAgentProjectMemoryUpdate } from "../../api/agents";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -36,7 +37,6 @@ export type UseMemoryItemMutationsOptions = {
   fallbackKnowledgeActorAgentId: string;
   requestedTeamId: string;
   memoryMutationEndpoint: (sectionId: string, itemId: string, suffix?: string) => string;
-  projectMemoryProposalResolveEndpoint: (proposal: AgentProjectMemoryUpdateProposal) => string;
   invalidateMemoryQueries: (queryClient: ReturnType<typeof useQueryClient>) => void;
   invalidateKnowledgeDashboard: (queryClient: ReturnType<typeof useQueryClient>, agentId: string) => void;
 };
@@ -138,14 +138,10 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
       status: string;
       resolutionNote: string;
     }) =>
-      fetchJson<AgentProjectMemoryUpdateProposal>(options.projectMemoryProposalResolveEndpoint(proposal), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status,
-          resolvedBy: "user",
-          resolutionNote,
-        }),
+      resolveAgentProjectMemoryUpdate(proposal.agentId, proposal.proposalId, {
+        status,
+        resolvedBy: "user",
+        resolutionNote,
       }),
     onSuccess: (proposal) => {
       options.setMutationFeedback({ tone: "success", text: `${options.copy.mutationDone} · ${proposal.status}` });

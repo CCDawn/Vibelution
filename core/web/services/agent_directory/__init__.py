@@ -7,6 +7,7 @@
 - ``mutations`` — create/update + avatar (Phase 12)
 - ``repair_store`` — registry repair/load-save (Phase 17)
 - ``ops_residual`` — inbox/workspace/ensure-session residual (Phase 17)
+- ``episodic_memory`` — personal lossless ``episodic_events.jsonl`` (P0)
 
 Public callers use ``agent_directory_service`` facade re-exports.
 """

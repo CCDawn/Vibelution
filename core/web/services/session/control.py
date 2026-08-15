@@ -127,15 +127,14 @@ def _persist_session_interrupted_snapshot(
     )
 
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
         if conversation is None:
             return
         messages = s._session_ledger_visible_messages(session_id)
         if s._latest_assistant_message_is_stop(messages):
             conversation["last_turn_status"] = "ready"
-            payload["updated_at"] = conversation.get("updated_at") or s._now_timestamp()
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            conversation.setdefault("updated_at", s._now_timestamp())
+            s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
             s._clear_session_live_output(session_id)
             return
         if queued_before_worker:
@@ -159,8 +158,7 @@ def _persist_session_interrupted_snapshot(
             )
             conversation["last_turn_status"] = "ready"
             conversation["updated_at"] = stopped_at
-            payload["updated_at"] = stopped_at
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
             s._persist_chat_turn_work_run(
                 session_id=session_id,
                 turn_id=turn_id,
@@ -236,8 +234,7 @@ def _persist_session_interrupted_snapshot(
         conversation.pop("messages", None)
         conversation["last_turn_status"] = "ready"
         conversation["updated_at"] = assistant_entry["timestamp"]
-        payload["updated_at"] = assistant_entry["timestamp"]
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
         s._persist_chat_turn_work_run(
             session_id=session_id,
             turn_id=turn_id,

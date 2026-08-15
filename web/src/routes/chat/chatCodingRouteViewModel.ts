@@ -127,6 +127,27 @@ export function formatTokenSpeedValue(tokensPerSecond: number | null | undefined
   return tokensPerSecond < 1 ? "<1 t/s" : `${Math.round(tokensPerSecond)} t/s`;
 }
 
+export function formatChatRuntimeMismatchLine(options: {
+  otherRunningSessionIds: Iterable<string>;
+  resolveSessionLabel: (sessionId: string) => string;
+  lang: "zh" | "en";
+}) {
+  const others = Array.from(options.otherRunningSessionIds, (sessionId) => String(sessionId || "").trim())
+    .filter(Boolean);
+  if (others.length === 0) {
+    return "";
+  }
+  if (others.length === 1) {
+    const label = String(options.resolveSessionLabel(others[0]) || "").trim() || others[0];
+    return options.lang === "zh"
+      ? `运行器正在处理：${label}`
+      : `Runtime is processing: ${label}`;
+  }
+  return options.lang === "zh"
+    ? `另有 ${others.length} 个会话在运行`
+    : `${others.length} other sessions are running`;
+}
+
 export function runtimeMatchesSelectedChatSession(options: {
   selectedSessionId: string | null | undefined;
   activeRuntimeSessionId: string | null | undefined;

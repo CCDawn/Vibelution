@@ -233,7 +233,7 @@ describe("ToolsRoute layout contract", () => {
   });
 
   it("hosts dedicated Agent ToolPolicy editing with return navigation", () => {
-    expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents?detail=summary\")");
+    expect(routeSource).toContain("listAgentSummaries()");
     expect(routeSource).toContain("const requestedAgentId = useMemo(");
     expect(routeSource).toContain("agentMatchesDeepLink(agent, requestedAgentId)");
     expect(routeSource).toContain("const requestedToolKey = useMemo(");
@@ -272,8 +272,8 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain('id: "blocked"');
     expect(routeSource).toContain('id: "inherited"');
     expect(routeSource).toContain("保存工具配置");
-    expect(routeSource).toContain("/tool-policy/validate");
-    expect(routeSource).toContain('method: "PUT"');
+    expect(routeSource).toContain("validateAgentToolPolicy(");
+    expect(routeSource).toContain("updateAgentToolPolicy(");
     expect(routeSource).toContain("expectedPolicyFingerprint: preview.policyFingerprint");
     expect(routeSource).toContain("window.confirm(preview.confirmation.summary)");
     expect(routeSource).toContain("服务端生效预览");

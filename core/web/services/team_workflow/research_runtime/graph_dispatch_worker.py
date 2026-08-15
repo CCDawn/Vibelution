@@ -577,6 +577,27 @@ class GraphDispatchWorker:
             f"thread 中断于 {node_id}，但 dispatch 目标是 {dispatch.node_id}"
         )
 
+    def _result_at_target(
+        self, dispatch: GraphDispatch, snapshot: dict[str, Any]
+    ) -> GraphDispatchResult:
+        values = dict(snapshot.get("values") or {})
+        interrupt = snapshot.get("pendingAction") or {}
+        if str(interrupt.get("nodeId") or "") == dispatch.node_id:
+            pending_target = PendingAction.from_dict(dict(interrupt))
+        else:
+            pending_target = build_pending_action(values, dispatch.node_id)
+        if pending_target.attempt != dispatch.attempt:
+            return self._coordinator.restart_attempt(dispatch)
+        return GraphDispatchResult(
+            dispatch_kind="start",
+            pending_action=pending_target,
+            next_node_ids=tuple(
+                str(item) for item in (snapshot.get("nextNodeIds") or [])
+            ),
+            checkpoint_id=str(snapshot.get("checkpointId") or ""),
+            state=values,
+        )
+
     def _advance_lagging_checkpoint(
         self, dispatch: GraphDispatch, *, interrupt_node_id: str
     ) -> GraphDispatchResult | None:
@@ -608,26 +629,10 @@ class GraphDispatchWorker:
         snapshot = self._coordinator.snapshot(dispatch.run_id)
         if not _graph_at_node(snapshot, dispatch.node_id):
             return None
-        values = dict(snapshot.get("values") or {})
-        interrupt = snapshot.get("pendingAction") or {}
-        if str(interrupt.get("nodeId") or "") == dispatch.node_id:
-            pending_target = PendingAction.from_dict(dict(interrupt))
-        else:
-            pending_target = build_pending_action(values, dispatch.node_id)
-        if pending_target.attempt != dispatch.attempt:
-            # Re-enter the target interrupt with the ledger attempt. Never
-            # Command.goto a different node — that overwrites active_node_id
-            # while leaving the stale source_finding interrupt in place.
-            return self._coordinator.restart_attempt(dispatch)
-        return GraphDispatchResult(
-            dispatch_kind="start",
-            pending_action=pending_target,
-            next_node_ids=tuple(
-                str(item) for item in (snapshot.get("nextNodeIds") or [])
-            ),
-            checkpoint_id=str(snapshot.get("checkpointId") or ""),
-            state=values,
-        )
+        # Re-enter the target interrupt with the ledger attempt. Never
+        # Command.goto a different node — that overwrites active_node_id
+        # while leaving the stale source_finding interrupt in place.
+        return self._result_at_target(dispatch, snapshot)
 
     def _resume_lagging_predecessor(
         self, dispatch: GraphDispatch, *, predecessor_node_id: str
@@ -718,6 +723,45 @@ class GraphDispatchWorker:
             receipt=None,
             state_update=None,
         )
+        interrupt_receipt = _receipt_for_interrupt_identity(
+            interrupt,
+            predecessor_node_id=predecessor_node_id,
+            attempt=attempt,
+            artifact_receipt_ids=ledger_receipt.artifact_receipt_ids,
+            execution_anchor_id=ledger_receipt.execution_anchor_id,
+            completed_at_ms=ledger_receipt.completed_at_ms,
+        )
+        visible_run_id = str(interrupt.get("runId") or "").strip()
+        visible_action_id = str(interrupt.get("actionId") or "").strip()
+        if (
+            visible_run_id
+            and visible_action_id
+            and str(interrupt.get("nodeId") or "") == predecessor_node_id
+        ):
+            # Live SCI-096 interrupt already has formula identity. Resume it
+            # before restart_attempt — time-travel on a dirty checkpoint can
+            # leave the hop at source_finding and look like success.
+            try:
+                self._coordinator.resume_action(
+                    replace(
+                        heal_dispatch,
+                        action_id=interrupt_receipt.action_id,
+                        node_run_id=interrupt_receipt.node_run_id,
+                        dispatch_kind="resume_action",
+                        receipt=interrupt_receipt,
+                        binding_snapshot_id=(
+                            predecessor.binding_snapshot_id
+                            if predecessor is not None
+                            else None
+                        ),
+                        state_update=heal_update,
+                    )
+                )
+                after = self._coordinator.snapshot(dispatch.run_id)
+                if not _graph_at_node(after, predecessor_node_id):
+                    return True
+            except Exception:
+                pass
         try:
             # Command.goto leaves pending writes that get_state.interrupts
             # does not show. A bare Command(resume=receipt) then raises
@@ -735,37 +779,35 @@ class GraphDispatchWorker:
             ),
             state_update=heal_update,
         )
+        heal_exc: Exception | None = None
         try:
             # Call the coordinator directly: worker._resume() overwrites
             # node_attempts with successor latest+1, which skips the retry
             # attempt already inserted by the command layer.
             self._coordinator.resume_action(predecessor_dispatch)
-            return True
-        except Exception as heal_exc:
-            interrupt_receipt = _receipt_for_interrupt_identity(
-                interrupt,
-                predecessor_node_id=predecessor_node_id,
-                attempt=attempt,
-                artifact_receipt_ids=ledger_receipt.artifact_receipt_ids,
-                execution_anchor_id=ledger_receipt.execution_anchor_id,
-                completed_at_ms=ledger_receipt.completed_at_ms,
-            )
-            fallback_dispatch = replace(
-                predecessor_dispatch,
-                action_id=interrupt_receipt.action_id,
-                node_run_id=interrupt_receipt.node_run_id,
-                receipt=interrupt_receipt,
-                state_update={"node_attempts": node_attempts},
-            )
-            try:
-                self._coordinator.resume_action(fallback_dispatch)
-            except Exception as fallback_exc:
-                raise GraphDecisionError(
-                    "thread 中断于 "
-                    f"{predecessor_node_id}，resume 失败: {fallback_exc} "
-                    f"(heal: {heal_exc})"
-                ) from fallback_exc
-            return True
+            after = self._coordinator.snapshot(dispatch.run_id)
+            if not _graph_at_node(after, predecessor_node_id):
+                return True
+            heal_exc = RuntimeError("resume did not leave predecessor")
+        except Exception as exc:
+            heal_exc = exc
+        fallback_dispatch = replace(
+            predecessor_dispatch,
+            action_id=interrupt_receipt.action_id,
+            node_run_id=interrupt_receipt.node_run_id,
+            receipt=interrupt_receipt,
+            state_update={"node_attempts": node_attempts},
+        )
+        try:
+            self._coordinator.resume_action(fallback_dispatch)
+        except Exception as fallback_exc:
+            raise GraphDecisionError(
+                "thread 中断于 "
+                f"{predecessor_node_id}，resume 失败: {fallback_exc} "
+                f"(heal: {heal_exc})"
+            ) from fallback_exc
+        after = self._coordinator.snapshot(dispatch.run_id)
+        return not _graph_at_node(after, predecessor_node_id)
 
     def _resume(self, dispatch: GraphDispatch) -> GraphDispatchResult:
         if dispatch.receipt is None:

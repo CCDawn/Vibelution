@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchJson } from "../api/client";
+import { fetchPublicConfig, updateIntakeMode } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
-import { ConfigSummary, EvolutionOverview } from "../api/types";
+import { EvolutionOverview } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { VTabs } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -52,7 +53,7 @@ export function SupervisedWorkspaceControls({
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    queryFn: () => fetchPublicConfig(),
     enabled: shouldFetchConfig,
   });
   const overviewQuery = useQuery({
@@ -63,14 +64,7 @@ export function SupervisedWorkspaceControls({
     refetchIntervalInBackground: false,
   });
   const intakeModeMutation = useMutation({
-    mutationFn: (intakeMode: IntakeMode) =>
-      fetchJson<ConfigSummary>("/api/config/intake-mode", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ intakeMode }),
-      }),
+    mutationFn: (intakeMode: IntakeMode) => updateIntakeMode(intakeMode),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() }),

@@ -27,8 +27,11 @@ describe("agent config draft mutations contract", () => {
   });
 
   it("preserves draft and promote endpoints", () => {
-    expect(mutationsSource).toContain("/config-drafts");
-    expect(mutationsSource).toContain("/promote");
+    expect(mutationsSource).toContain("saveAgentConfigDraft(");
+    expect(mutationsSource).toContain("discardAgentConfigDraft(");
+    expect(mutationsSource).toContain("promoteAgentModel<AgentModelPromotionResult>(");
+    expect(mutationsSource).not.toContain("fetchJson");
+    expect(mutationsSource).not.toContain('from "../../api/client"');
   });
 
   it("publishes the Agent-owned permission preset with config revision concurrency", () => {

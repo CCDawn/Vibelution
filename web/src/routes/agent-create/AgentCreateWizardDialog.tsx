@@ -2,14 +2,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, MessageSquare, Settings2 } from "lucide-react";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  createAgent,
+  fetchAgentConfigWorkspace,
+  listAgentAvatarOptions,
+} from "../../api/agents";
 import { fetchJson } from "../../api/client";
+import { testConfigLlm } from "../../api/config";
 import { queryKeys } from "../../api/queryKeys";
 import {
   type AgentAvatarOptionsPayload,
   type AgentConfigWorkspace,
   type AgentConfigWorkspaceAgent,
   type AgentInstance,
-  type ConfigLlmTestResult,
   type ToolRegistryPayload,
 } from "../../api/types";
 import { VButton, VDialog } from "../../components/vui";
@@ -134,7 +139,7 @@ export function AgentCreateWizardDialog({
 
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace?includeRuntime=false"),
+    queryFn: () => fetchAgentConfigWorkspace({ includeRuntime: false }),
     enabled: open,
     staleTime: 10_000,
   });
@@ -146,7 +151,7 @@ export function AgentCreateWizardDialog({
   });
   const avatarOptionsQuery = useQuery({
     queryKey: ["agent-avatar-options", selectedModelId],
-    queryFn: () => fetchJson<AgentAvatarOptionsPayload>(`/api/agents/avatar-options?modelId=${encodeURIComponent(selectedModelId)}`),
+    queryFn: () => listAgentAvatarOptions({ modelId: selectedModelId }),
     enabled: open,
     staleTime: 30_000,
   });
@@ -221,11 +226,7 @@ export function AgentCreateWizardDialog({
   }, [draftDirty, lang, open, toolBundles, workspaceQuery.data]);
 
   const createMutation = useMutation({
-    mutationFn: (nextDraft: AgentCreateDraft) => fetchJson<AgentConfigWorkspaceAgent>("/api/agents", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(createAgentPayload(nextDraft, toolBundles)),
-    }),
+    mutationFn: (nextDraft: AgentCreateDraft) => createAgent(createAgentPayload(nextDraft, toolBundles)),
     onSuccess: (agent) => {
       setCreatedAgent(agent);
       setStartConversationError("");
@@ -306,14 +307,10 @@ export function AgentCreateWizardDialog({
         cursor += 1;
         const modelId = targets[index];
         try {
-          const result = await fetchJson<ConfigLlmTestResult>("/api/config/test-llm", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              publicConfig: {},
-              modelId,
-              capability: "text",
-            }),
+          const result = await testConfigLlm({
+            publicConfig: {},
+            modelId,
+            capability: "text",
           });
           if (result.ok) {
             okCount += 1;

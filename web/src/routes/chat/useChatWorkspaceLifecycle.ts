@@ -1,8 +1,23 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import { createSessionChatReviewCandidate } from "../../api/chat";
-import { fetchJson } from "../../api/client";
+import {
+  resetAgentDirectSession,
+  type AgentDirectSessionResetResponse,
+} from "../../api/agents";
+import {
+  createChatRoom,
+  createChatSession,
+  createSessionChatReviewCandidate,
+  deleteChatRoom,
+  deleteChatSession,
+  fetchSessionDetail,
+  resetChatRoom,
+  startChatRoomRound,
+  stopChatRoomRound,
+  updateChatRoom,
+  updateChatSession,
+} from "../../api/chat";
 import {
   revokeProjectAgentBusMessage,
   sendProjectAgentBusMessage,
@@ -91,14 +106,7 @@ function pickOptimisticNextActiveSessionId(
   return String(remaining[0]?.id || "").trim();
 }
 
-export type AgentDirectSessionResetResponse = {
-  agent: AgentInstance;
-  resetSummary: {
-    resetDirectSession?: boolean;
-    previousDirectSessionId?: string;
-    replacementDirectSessionId?: string;
-  };
-};
+export type { AgentDirectSessionResetResponse };
 
 export type UseChatWorkspaceLifecycleOptions = {
   queryClient: QueryClient;
@@ -253,14 +261,7 @@ export function useChatWorkspaceLifecycle({
 }: UseChatWorkspaceLifecycleOptions): UseChatWorkspaceLifecycleResult {
   const createSessionMutation = useMutation({
     mutationFn: async ({ agentId }: { agentId: string }) =>
-      fetchJson<SessionDetail>("/api/sessions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Prefer: "respond-async",
-        },
-        body: JSON.stringify({ agentId }),
-      }),
+      createChatSession({ agentId }),
     onMutate: async ({ agentId }) => {
       // T0: mint a local temp tab + empty transcript immediately (ChatGPT-style).
       // Real id arrives on success; UI must stay interactive while POST is in flight.
@@ -473,11 +474,7 @@ export function useChatWorkspaceLifecycle({
       ]);
       if (keepDraft && keepFocusOnCreated) {
         // Persist the draft name once the real id exists (temp shells cannot PATCH).
-        void fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(nextId)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title }),
-        }).then((renamed) => {
+        void updateChatSession(nextId, { title }).then((renamed) => {
           const confirmedTitle = String(renamed.title || title).trim() || title;
           const confirmedDetail = {
             ...seededDetail,
@@ -530,13 +527,7 @@ export function useChatWorkspaceLifecycle({
     mutationFn: async (
       { title, agentIds, mode, purpose }: { title: string; agentIds: string[]; mode: string; purpose: string },
     ) =>
-      fetchJson<ChatRoomDetail>("/api/chat-rooms", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ title, agentIds, mode, purpose }),
-      }),
+      createChatRoom({ title, agentIds, mode, purpose }),
     onMutate: () => ({
       routeSelectionAtRequest: routeSelectionRef.current,
     }),
@@ -575,14 +566,7 @@ export function useChatWorkspaceLifecycle({
     mutationFn: async (
       { roomId, topic, mode, purpose }: { roomId: string; topic: string; mode: string; purpose: string },
     ) =>
-      fetchJson<ChatRoomRoundAcceptedResponse>(`/api/chat-rooms/${roomId}/rounds`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Prefer: "respond-async",
-        },
-        body: JSON.stringify({ topic, mode, purpose }),
-      }),
+      startChatRoomRound(roomId, { topic, mode, purpose }, { preferAsync: true }),
     onSuccess: (accepted) => {
       setRightIndexPanel("members");
       setGroupTopicDraft("");
@@ -597,9 +581,7 @@ export function useChatWorkspaceLifecycle({
 
   const stopGroupRoundMutation = useMutation({
     mutationFn: async ({ roomId }: { roomId: string }) =>
-      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/stop`, {
-        method: "POST",
-      }),
+      stopChatRoomRound(roomId),
     onSuccess: (room) => {
       setRightIndexPanel("members");
       setGroupRoomActionError("");
@@ -660,17 +642,11 @@ export function useChatWorkspaceLifecycle({
         purpose: string;
       },
     ) =>
-      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          title,
-          participantSessionIds: sessionIds,
-          mode,
-          purpose,
-        }),
+      updateChatRoom(roomId, {
+        title,
+        participantSessionIds: sessionIds,
+        mode,
+        purpose,
       }),
     onSuccess: (room) => {
       setRightIndexPanel("members");
@@ -692,9 +668,7 @@ export function useChatWorkspaceLifecycle({
 
   const deleteGroupRoomMutation = useMutation({
     mutationFn: async ({ roomId }: { roomId: string }) =>
-      fetchJson<{ deleted: boolean; roomId: string }>(`/api/chat-rooms/${roomId}`, {
-        method: "DELETE",
-      }),
+      deleteChatRoom(roomId),
     onSuccess: (_payload, variables) => {
       setRightIndexPanel("conversations");
       setGroupTopicDraft("");
@@ -717,9 +691,7 @@ export function useChatWorkspaceLifecycle({
 
   const resetGroupRoomMutation = useMutation({
     mutationFn: async ({ roomId }: { roomId: string }) =>
-      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/reset`, {
-        method: "POST",
-      }),
+      resetChatRoom(roomId),
     onSuccess: (room) => {
       setRightIndexPanel("members");
       setGroupRoomActionError("");
@@ -736,12 +708,7 @@ export function useChatWorkspaceLifecycle({
 
   const deleteSessionMutation = useMutation({
     mutationFn: async ({ sessionId }: { sessionId: string }) =>
-      fetchJson<SessionDeleteResponse>(`/api/sessions/${sessionId}`, {
-        method: "DELETE",
-        headers: {
-          Prefer: "respond-async",
-        },
-      }),
+      deleteChatSession(sessionId),
     onMutate: async (variables) => {
       // Do not await cancelQueries — waiting freezes tab switching while list
       // queries settle. Optimistic UI must apply immediately.
@@ -811,7 +778,7 @@ export function useChatWorkspaceLifecycle({
           void queryClient.prefetchQuery({
             queryKey: queryKeys.session(optimisticNextActiveSessionId),
             queryFn: () =>
-              fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(optimisticNextActiveSessionId)}`),
+              fetchSessionDetail(optimisticNextActiveSessionId),
           }).catch(() => undefined);
         }
       }
@@ -878,20 +845,7 @@ export function useChatWorkspaceLifecycle({
 
   const clearSessionHistoryMutation = useMutation({
     mutationFn: async ({ sessionId, agentId }: { sessionId: string; agentId: string }) =>
-      fetchJson<AgentDirectSessionResetResponse>(`/api/agents/${encodeURIComponent(agentId)}/reset`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clearRuntimeState: false,
-          resetDirectSession: true,
-          directSessionId: sessionId,
-          resetPersonaProfile: false,
-          resetTaskProfile: false,
-          resetToolPolicy: false,
-          resetMemoryPolicy: false,
-          resetRuntimePolicy: false,
-        }),
-      }),
+      resetAgentDirectSession(agentId, sessionId),
     onSuccess: (result, variables) => {
       const previousDirectSessionId = String(
         result.resetSummary.previousDirectSessionId || variables.sessionId,
@@ -952,13 +906,7 @@ export function useChatWorkspaceLifecycle({
 
   const renameSessionMutation = useMutation({
     mutationFn: async ({ sessionId, title }: { sessionId: string; title: string }) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ title }),
-      }),
+      updateChatSession(sessionId, { title }),
     onMutate: (variables) => {
       const updatedAt = new Date().toISOString();
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());

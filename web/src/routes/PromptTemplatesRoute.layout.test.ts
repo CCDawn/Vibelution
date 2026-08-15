@@ -40,19 +40,17 @@ describe("PromptTemplatesRoute layout contract", () => {
 
   it("loads prompt templates and linked Agents through the existing APIs", () => {
     expect(routeSource).toContain('queryKeys.promptTemplates()');
-    expect(routeSource).toContain('fetchJson<PromptTemplateWorkspace>("/api/prompt-templates?includeInactive=true")');
+    expect(routeSource).toContain("listPromptTemplates({ includeInactive: true })");
     expect(routeSource).toContain('queryKeys.agents()');
-    expect(routeSource).toContain('fetchJson<AgentInstance[]>("/api/agents?detail=summary")');
+    expect(routeSource).toContain("listAgentSummaries()");
     expect(routeSource).toContain("agentsByTemplate");
   });
 
   it("keeps editing in the dedicated prompt center with save and reset actions", () => {
-    expect(routeSource).toContain('method: "PATCH"');
-    expect(routeSource).toContain('method: "POST"');
-    expect(routeSource).toContain('body: JSON.stringify({');
-    expect(routeSource).toContain('name: payload.name');
-    expect(routeSource).toContain('content: payload.content');
-    expect(routeSource).toContain('/reset`');
+    expect(routeSource).toContain("updatePromptTemplate(");
+    expect(routeSource).toContain("resetPromptTemplate(");
+    expect(routeSource).toContain("name: payload.name");
+    expect(routeSource).toContain("content: payload.content");
   });
 
   it("keeps save and reset pending state scoped to the active template", () => {
@@ -128,9 +126,8 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("selectableRowClass");
     expect(routeSource).toContain("<VTooltip content={`${copy.bulkSelected}:");
     expect(routeSource).toContain("disabledReason={bulkPromptPending ? copy.bulkWorking : copy.bulkNoSelection}");
-    expect(routeSource).toContain('method: "PATCH"');
-    expect(routeSource).toContain('method: "POST"');
-    expect(routeSource).toContain("/reset`");
+    expect(routeSource).toContain("updatePromptTemplate(");
+    expect(routeSource).toContain("resetPromptTemplate(");
   });
 
   it("keeps bulk prompt controls in their own compact row above the list", () => {

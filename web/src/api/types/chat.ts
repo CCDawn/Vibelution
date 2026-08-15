@@ -69,6 +69,8 @@ export type SessionSummary = {
   conversationIndexVisibility?: ConversationIndexVisibility;
   conversationIndexKind?: ConversationIndexKind;
   conversationIndexErrors?: string[];
+  teamId?: string;
+  teamName?: string;
 };
 
 export type SessionExperimentBinding = {

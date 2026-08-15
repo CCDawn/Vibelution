@@ -1,8 +1,13 @@
+import { useQuery } from "@tanstack/react-query";
 import { Play, Send } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { kernelTaskCenterHref } from "../../api/kernel";
 import { isProjectAgentBusEventRevoked } from "../../api/projectAgentBus";
+import {
+  listTeamMemberMessages,
+  teamMemberMessageSessionHref,
+} from "../../api/teamMemberMessages";
 import type {
   ChatRoomDetail,
   ChatRoomRound,
@@ -107,6 +112,12 @@ export function TeamCommunicationPanel({
 }: TeamCommunicationPanelProps) {
   const teamBackLabel = lang === "zh" ? "返回团队页面" : "Back to team";
   const workspaceHref = teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID);
+  const memberMessagesQuery = useQuery({
+    queryKey: ["teams", selectedTeam?.teamId || "", "member-messages"],
+    queryFn: ({ signal }) => listTeamMemberMessages(selectedTeam?.teamId || "", 40, { signal }),
+    enabled: Boolean(selectedTeam?.teamId),
+  });
+  const memberMessages = memberMessagesQuery.data?.messages ?? [];
 
   return (
     <div className={styles.researchDiscussionPanel} id="research-workflow-discussion">
@@ -254,6 +265,47 @@ export function TeamCommunicationPanel({
           <div className={styles.messageError}>{messageError.message}</div>
         ) : null}
       </form>
+      <section className={styles.teamHistoryPanel} data-team-member-messages>
+        <div className={styles.sectionTitle}>
+          <strong>{lang === "zh" ? "成员通信" : "Member messages"}</strong>
+          <span>{memberMessages.length} events</span>
+        </div>
+        {memberMessagesQuery.isPending ? (
+          <VStateSurface
+            tone="loading"
+            title={lang === "zh" ? "正在读取成员通信" : "Loading member messages"}
+            skeletonLines={2}
+          />
+        ) : memberMessages.length ? (
+          <div className={styles.teamHistoryList}>
+            {memberMessages.map((item) => {
+              const sessionHref = teamMemberMessageSessionHref(item.targetSessionId, workspaceHref, teamBackLabel);
+              return (
+                <article key={item.messageId || `${item.sourceAgentId}-${item.targetSessionId}-${item.createdAt}`} className={styles.teamHistoryItem}>
+                  <div className={styles.teamHistoryHeader}>
+                    <strong>{item.summary || (lang === "zh" ? "点对点消息" : "Direct message")}</strong>
+                    <span>{formatTime(item.createdAt, lang)}</span>
+                  </div>
+                  <p>
+                    {(item.sourceAgentName || item.sourceAgentId) || (lang === "zh" ? "未知发件人" : "Unknown sender")}
+                    {" → "}
+                    {(item.targetAgentName || item.targetAgentId) || (lang === "zh" ? "未知收件人" : "Unknown recipient")}
+                  </p>
+                  <div className={styles.teamHistoryMeta}>
+                    {sessionHref ? (
+                      <Link to={sessionHref}>{lang === "zh" ? "打开会话" : "Open session"}</Link>
+                    ) : (
+                      <span>{lang === "zh" ? "会话不可用" : "Session unavailable"}</span>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className={styles.empty}>{lang === "zh" ? "当前团队还没有成员点对点记录。" : "No member-to-member messages yet."}</div>
+        )}
+      </section>
       <section className={styles.teamHistoryPanel}>
         <div className={styles.sectionTitle}>
           <strong>{lang === "zh" ? "最近团队广播" : "Recent team broadcasts"}</strong>
