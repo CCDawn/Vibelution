@@ -105,10 +105,11 @@ Historical plan (archived): `docs/archive/superpowers/plans/2026-07-19-chat-codi
 - **E1–E4i done:** stream selection split, workspace hooks, surface models, center surfaces
 - **D2 (ROI queue):** `conversationFeedbackStatusPresentation.ts` — feedback status placeholder pure boundary for `ConversationView` (projection vs shell)
 
-## Phase F (R01c — in progress)
+## Phase F (R01c — Gate 3 done)
 
 - **F1 done:** `useChatWorkbenchCatalogQueries.ts` — runtime/pet/config/session-index/conversations/teams/agents/skills/chat-room catalog + expanded agent detail queries
 - **F2 done:** `useChatToolApprovalBridge.ts` (governance & session tool approval), `useChatComposerBridgeState.ts` (composer draft, follow-up queue & bridge state), `useChatGroupRoomViewModel.ts` (group room identity, candidate agents & modes). Index tree JSX stays in the workbench until a typed owner can take it without a fat prop dump.
+- **F3 done (Gate 3):** `useChatGroupDraftState` + `chatGroupRoomActionModel` own group composer/manage drafts and action flags; `useChatWorkbenchContextMenus` owns session/agent menu chrome; `useChatConversationIndexChrome` owns collapsed groups / members tab; Agent create wizard open state lives in `useChatAgentDirectoryActions`; direct-session prefetch is wired through `useChatWorkspaceActions`. Shell remains `ChatSessionWorkbenchShell` → `VSessionWorkbenchPage` (`WORKBENCH_LAYOUT_IDS.chat`) with lazy secondary panels. **G3-3 closed without extra memoization** — no new render/interaction finding; `ChatCodingRouteWorkbench.updateDepth.test.tsx` remains the update-depth guard.
 
 ## Bundle note (secondary lazy)
 
@@ -161,7 +162,7 @@ See `PERF_BASELINE.md` for F0 numbers and gaps.
 
 ## Next (planned)
 
-- Prefer chunk wins over further pure LOC grind on `ChatCodingRoute` (already hook/panel split)
+- Prefer chunk wins over further pure LOC grind on `ChatCodingRoute` (already hook/panel split; Gate 3 closed)
 - ConversationView block map is documented (M6); further pure extracts only when claimability requires it
 - Target `ChatCodingRoute` toward ~800–1500 LOC only when a concrete claim needs it
 - Agents structure M1–M3 and Teams/Evolution M4–M5 are on local main; see lane READMEs
@@ -171,7 +172,7 @@ See `PERF_BASELINE.md` for F0 numbers and gaps.
 Prefer automated substitutes over manual click smoke when validating Chat split work:
 
 ```bash
-npm --prefix web test -- --run src/routes/chat/chatHandTestSubstitute.test.ts src/routes/chat/ChatGroupCenterSurface.test.tsx src/routes/chat/cliAgentRunModel.test.ts
+npm --prefix web test -- --run src/routes/chat/chatHandTestSubstitute.test.ts src/routes/chat/ChatGroupCenterSurface.test.tsx src/routes/chat/cliAgentRunModel.test.ts src/routes/chat/chatGroupRoomActionModel.test.ts
 ```
 
 - `chatHandTestSubstitute.test.ts` — maps hand checklist to pure models, stream ownership, wiring contracts, and optional live `/api`+SSE probe when workbench is up
