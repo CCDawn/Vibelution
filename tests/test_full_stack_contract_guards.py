@@ -32,7 +32,7 @@ LEGACY_UNTYPED_ENDPOINT_BUDGETS: dict[str, int] = {
     "cli_agents.py": 6,
     "computer_use.py": 5,
     "config.py": 0,
-    "conversations.py": 1,
+    "conversations.py": 0,
     "data_processing.py": 11,
     "diagnostics.py": 0,
     "evolution.py": 48,
