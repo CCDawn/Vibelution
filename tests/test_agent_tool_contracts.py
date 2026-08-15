@@ -105,6 +105,7 @@ def test_team_evolution_and_memory_tools_have_current_registry_contract():
         assert metadata["capabilityTags"], tool_name
 
     bundles = {bundle["bundleId"]: bundle for bundle in tool_catalog.list_tool_bundles()}
+    assert set(agent_directory_service.GENERATION_HANDOFF_MEMORY_TOOLS).isdisjoint(set(bundles["core"]["toolNames"]))
     assert TEAM_COLLABORATION_TOOLS.issubset(set(bundles["source_collection_stage"]["toolNames"]))
     assert {"unified_memory_search_tool"}.issubset(set(bundles["memory_context"]["toolNames"]))
     assert {
