@@ -189,7 +189,7 @@ describe("ConfigProviderRegistryPanel", () => {
 
     expect(markup).toContain("推理 low / high 已验证");
     expect(markup).not.toContain("验证推理 low / high");
-    expect(panelSource).toContain('"/api/config/test-llm"');
+    expect(panelSource).toContain("testConfigLlm(");
     expect(panelSource).toContain('capability: "reasoning_effort"');
     expect(panelSource).toContain("一期探测仅验证 low/high");
   });

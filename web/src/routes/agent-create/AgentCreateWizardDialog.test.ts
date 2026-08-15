@@ -48,7 +48,7 @@ describe("AgentCreateWizardDialog contract", () => {
   });
 
   it("requires a successful saved-config probe before creation", () => {
-    expect(dialogSource).toContain('fetchJson<ConfigLlmTestResult>("/api/config/test-llm"');
+    expect(dialogSource).toContain("testConfigLlm(");
     expect(dialogSource).toContain("publicConfig: {}");
     expect(dialogSource).toContain('capability: "text"');
     expect(dialogSource).toContain("probeUsableModelIds");

@@ -26,7 +26,15 @@ import {
 import { type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
-import { previewConfigDraft } from "../api/config";
+import {
+  addDraftModel,
+  checkDraftModelCapabilities,
+  deleteDraftModel,
+  discoverConfigModels,
+  previewConfigDraft,
+  testConfigLlm,
+  updateDraftModel,
+} from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import {
   ConfigEditorMeta,
@@ -35,7 +43,6 @@ import {
   ConfigDiscoveredModel,
   ConfigDraftMeta,
   ConfigLlmTestResult,
-  ConfigModelDiscoveryResult,
   ConfigModelOption,
   ConfigMigrationArtifactResolution,
   ConfigMigrationPreview,
@@ -2683,7 +2690,7 @@ export function ConfigRoute() {
       message: `正在真实调用测试 ${modelRef}…`,
     });
     try {
-      const result = await requestJson<ConfigLlmTestResult>("/api/config/test-llm", {
+      const result = await testConfigLlm({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -3098,7 +3105,7 @@ export function ConfigRoute() {
           : modelEditor.model_id.trim() ||
             uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
       const discoveryApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(discoveryModelId);
-      const response = await requestJson<ConfigModelDiscoveryResult>("/api/config/discover-models", {
+      const response = await discoverConfigModels({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -3132,14 +3139,13 @@ export function ConfigRoute() {
     setBusyAction(copy.modelSavePending);
     setModelEditorError("");
     try {
-      const endpoint = modelEditor.mode === "edit" ? "/api/config/draft/update-model" : "/api/config/draft/add-model";
       const resolvedModelId =
         modelEditor.mode === "edit"
           ? modelEditor.model_id
           : modelEditor.model_id.trim() ||
             uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
       const resolvedApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(resolvedModelId);
-      const response = await requestJson<ConfigWorkspace>(endpoint, {
+      const draftModelBody = {
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -3152,7 +3158,10 @@ export function ConfigRoute() {
         apiKeyEnv: resolvedApiKeyEnv,
         apiKey: modelEditor.api_key,
         clearApiKey: modelEditor.clear_api_key,
-      });
+      };
+      const response = modelEditor.mode === "edit"
+        ? await updateDraftModel(draftModelBody)
+        : await addDraftModel(draftModelBody);
       syncWorkspace(response, "success", { resetBase: false });
       setModelEditorExpanded(false);
     } catch (error) {
@@ -3172,7 +3181,7 @@ export function ConfigRoute() {
     }
     setBusyAction(copy.modelSavePending);
     try {
-      const response = await requestJson<ConfigWorkspace>("/api/config/draft/delete-model", {
+      const response = await deleteDraftModel({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -3210,7 +3219,7 @@ export function ConfigRoute() {
     }
     setBusyAction(copy.testPending);
     try {
-      const result = await requestJson<ConfigLlmTestResult>("/api/config/test-llm", {
+      const result = await testConfigLlm({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -3233,7 +3242,7 @@ export function ConfigRoute() {
     }
     setBusyAction(copy.imageCapabilityCheckPending);
     try {
-      const response = await requestJson<ConfigWorkspace>("/api/config/draft/check-model-capabilities", {
+      const response = await checkDraftModelCapabilities({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
