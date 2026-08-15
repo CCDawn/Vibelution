@@ -1,13 +1,20 @@
 import json
 import multiprocessing
 import os
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 from core.infrastructure import developer_sandbox
-from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
+from core.ui.chat_state import (
+    chat_state_path,
+    load_chat_state,
+    load_session_chat_state,
+    save_chat_state,
+    save_session_chat_state,
+)
 from core.web.services import session_service
 
 
@@ -34,6 +41,33 @@ def test_save_chat_state_uses_valid_replace_target(tmp_path):
     assert not path.exists()
     assert payload["conversations"][0]["messages"] == []
     assert not list(path.parent.glob(f".{path.name}.*.tmp"))
+
+
+def test_save_session_chat_state_does_not_drop_siblings(tmp_path):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {"conversation_id": "session-a", "title": "A"},
+                {"conversation_id": "session-b", "title": "B"},
+            ],
+        },
+    )
+
+    save_session_chat_state(
+        tmp_path,
+        "session-a",
+        {"conversation_id": "session-a", "title": "A2"},
+    )
+
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "A2"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    document = load_chat_state(tmp_path)
+    assert [item["conversation_id"] for item in document["conversations"]] == [
+        "session-a",
+        "session-b",
+    ]
 
 
 def test_load_chat_state_backs_up_corrupt_json(tmp_path):
@@ -125,12 +159,21 @@ def _create_session_in_competing_process(
 
     child_developer_sandbox.is_developer_mode_enabled = lambda: False
     child_developer_sandbox.resolve_workspace_home = lambda *args, **kwargs: Path(workspace_home)
+    child_session_service.PROJECT_ROOT = Path(workspace_home).parent
 
     original_load = child_session_service.load_chat_state
     original_save = child_session_service.save_chat_state
+    handshake_used = {"load": False, "save": False}
 
     def controlled_load(project_root):
         state = original_load(project_root)
+        # Prompt-snapshot warm-up also calls load_chat_state under the
+        # mutation lock. Participating in the create handshake there
+        # deadlocks the second process, which cannot set second_loaded
+        # until it acquires that same lock.
+        if threading.current_thread() is not threading.main_thread() or handshake_used["load"]:
+            return state
+        handshake_used["load"] = True
         if role == "first":
             first_loaded.set()
             second_loaded.wait(timeout=1.0)
@@ -142,7 +185,12 @@ def _create_session_in_competing_process(
 
     def controlled_save(project_root, state):
         original_save(project_root, state)
-        if role == "first":
+        if (
+            role == "first"
+            and threading.current_thread() is threading.main_thread()
+            and not handshake_used["save"]
+        ):
+            handshake_used["save"] = True
             first_saved.set()
 
     child_session_service.load_chat_state = controlled_load
@@ -213,6 +261,11 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
     assert not [result for result in results if result.get("error")]
     created_ids = {str(result.get("sessionId") or "") for result in results}
     assert all(created_ids)
+    monkeypatch.setattr(
+        developer_sandbox,
+        "resolve_workspace_home",
+        lambda *args, **kwargs: workspace_home,
+    )
     state = load_chat_state(tmp_path)
     indexed_ids = {
         str(item.get("conversation_id") or "")
