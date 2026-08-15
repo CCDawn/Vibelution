@@ -15,6 +15,9 @@ from core.web.services.team_workflow.research_runtime.blocked_reason import (
 from core.web.services.team_workflow.research_runtime.command_offers import (
     build_command_offers,
 )
+from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
+    _linear_successor_path,
+)
 from core.web.services.team_workflow.research_runtime.query_service import (
     WorkflowQueryService,
 )
@@ -171,6 +174,450 @@ def test_retry_advances_lagging_source_finding_checkpoint(tmp_path: Path) -> Non
         payload = json.loads(pending.payload_json)
         assert payload["nodeId"] == "source_extraction"
         assert int(payload["attempt"]) == 2
+    finally:
+        harness.close()
+
+
+def test_linear_path_reaches_controlled_run_from_source_finding() -> None:
+    path = _linear_successor_path("source_finding", "controlled_run")
+    assert path is not None
+    assert path[0] == "source_finding"
+    assert path[-1] == "controlled_run"
+    assert path[path.index("smoke_gate") + 1] == "controlled_run"
+    assert _linear_successor_path("controlled_run", "source_finding") is None
+    assert _linear_successor_path("source_finding", "source_extraction") == [
+        "source_finding",
+        "source_extraction",
+    ]
+
+
+def test_retry_advances_multi_hop_lagging_checkpoint(tmp_path: Path) -> None:
+    """SCI-096: thread still at source_finding, retry is two+ hops downstream."""
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        harness.consume_adapter(first_pending.action_id)
+
+        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
+        assert finding is not None
+
+        def prepare(uow):
+            uow.repository.update_attempt_status(
+                finding.node_run_id,
+                "succeeded",
+                FIXED_NOW_MS + 10,
+                finished_at_ms=FIXED_NOW_MS + 10,
+            )
+            uow.repository.insert_handoff(
+                handoff_id="ho-finding-extract",
+                run_id="run-test",
+                edge_id="source_finding->source_extraction",
+                from_node_run_id=finding.node_run_id,
+                to_node_id="source_extraction",
+                to_node_run_id=None,
+                gate_kind="auto",
+                input_snapshot_hash="a" * 64,
+                offered_at_ms=FIXED_NOW_MS + 10,
+            )
+            uow.repository.update_handoff_status(
+                "ho-finding-extract", "ready", FIXED_NOW_MS + 11
+            )
+            uow.repository.update_handoff_status(
+                "ho-finding-extract", "accepted", FIXED_NOW_MS + 12
+            )
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-extract-seed",
+                    run_id="run-test",
+                    node_id="source_extraction",
+                    idempotency_key="seed-extract",
+                )
+            )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="nr-run-test-source_extraction-a1",
+                    run_id="run-test",
+                    node_id="source_extraction",
+                    attempt=1,
+                    status="succeeded",
+                    command_id="cmd-extract-seed",
+                )
+            )
+            uow.repository.insert_handoff(
+                handoff_id="ho-extract-relations",
+                run_id="run-test",
+                edge_id="source_extraction->evidence_relations",
+                from_node_run_id="nr-run-test-source_extraction-a1",
+                to_node_id="evidence_relations",
+                to_node_run_id=None,
+                gate_kind="auto",
+                input_snapshot_hash="a" * 64,
+                offered_at_ms=FIXED_NOW_MS + 13,
+            )
+            uow.repository.update_handoff_status(
+                "ho-extract-relations", "ready", FIXED_NOW_MS + 14
+            )
+            uow.repository.update_handoff_status(
+                "ho-extract-relations", "accepted", FIXED_NOW_MS + 15
+            )
+
+        harness.commands.store.submit(prepare, force_flush=True).result(timeout=10)
+
+        snapshot_before = harness.coordinator.snapshot("run-test")
+        assert "source_finding" in (snapshot_before.get("nextNodeIds") or [])
+
+        harness.enqueue_graph_dispatch("run-test", "evidence_relations", 2)
+        harness.worker.run_once()
+
+        snapshot_after = harness.coordinator.snapshot("run-test")
+        assert "evidence_relations" in (snapshot_after.get("nextNodeIds") or []) or (
+            (snapshot_after.get("values") or {}).get("active_node_id")
+            == "evidence_relations"
+        )
+        relations = harness.commands.store.latest_attempt(
+            "run-test", "evidence_relations"
+        )
+        assert relations is not None
+        assert relations.attempt == 2
+        assert relations.status == "dispatching"
+        assert "checkpoint_node_mismatch" not in (relations.problem_json or "")
+        pending = harness.latest_adapter_pending()
+        assert pending is not None
+        payload = json.loads(pending.payload_json)
+        assert payload["nodeId"] == "evidence_relations"
+        assert int(payload["attempt"]) == 2
+        finding_after = harness.commands.store.latest_attempt(
+            "run-test", "source_finding"
+        )
+        assert finding_after is not None
+        assert finding_after.status == "succeeded"
+    finally:
+        harness.close()
+
+
+def test_succeeded_interrupt_redispatch_does_not_rewind_attempt(tmp_path: Path) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        harness.consume_adapter(first_pending.action_id)
+        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
+        assert finding is not None
+
+        def prepare(uow):
+            uow.repository.update_attempt_status(
+                finding.node_run_id,
+                "succeeded",
+                FIXED_NOW_MS + 10,
+                finished_at_ms=FIXED_NOW_MS + 10,
+            )
+
+        harness.commands.store.submit(prepare, force_flush=True).result(timeout=10)
+        harness.enqueue_graph_dispatch(
+            "run-test",
+            "source_finding",
+            1,
+            command_id="cmd-stale-finding",
+            idempotency_key="graph-stale-finding",
+        )
+        harness.worker.run_once()
+        finding_after = harness.commands.store.latest_attempt(
+            "run-test", "source_finding"
+        )
+        assert finding_after is not None
+        assert finding_after.status == "succeeded"
+    finally:
+        harness.close()
+
+
+def test_graph_at_node_ignores_active_node_id_without_interrupt() -> None:
+    from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
+        _graph_at_node,
+    )
+
+    snapshot = {
+        "nextNodeIds": ["source_finding"],
+        "values": {"active_node_id": "controlled_run", "active_attempt": 4},
+        "pendingAction": {"nodeId": "source_finding", "runId": "run-test", "attempt": 1},
+    }
+    assert _graph_at_node(snapshot, "source_finding") is True
+    assert _graph_at_node(snapshot, "controlled_run") is False
+
+
+def test_retry_does_not_empty_ack_when_active_node_id_is_ahead(tmp_path: Path) -> None:
+    """SCI-096 split: values already at the target, interrupt still upstream."""
+    from core.research.workflow.challenge_cup_runtime import GraphDispatch
+
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        harness.consume_adapter(first_pending.action_id)
+        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
+        assert finding is not None
+
+        def prepare(uow):
+            uow.repository.update_attempt_status(
+                finding.node_run_id,
+                "succeeded",
+                FIXED_NOW_MS + 10,
+                finished_at_ms=FIXED_NOW_MS + 10,
+            )
+            uow.repository.insert_handoff(
+                handoff_id="ho-split-extract",
+                run_id="run-test",
+                edge_id="source_finding->source_extraction",
+                from_node_run_id=finding.node_run_id,
+                to_node_id="source_extraction",
+                to_node_run_id=None,
+                gate_kind="auto",
+                input_snapshot_hash="a" * 64,
+                offered_at_ms=FIXED_NOW_MS + 10,
+            )
+            uow.repository.update_handoff_status(
+                "ho-split-extract", "ready", FIXED_NOW_MS + 11
+            )
+            uow.repository.update_handoff_status(
+                "ho-split-extract", "accepted", FIXED_NOW_MS + 12
+            )
+
+        harness.commands.store.submit(prepare, force_flush=True).result(timeout=10)
+        harness.coordinator.retry_attempt(
+            GraphDispatch(
+                action_id="act-goto-split",
+                run_id="run-test",
+                node_run_id="nr-run-test-source_extraction-a2",
+                node_id="source_extraction",
+                attempt=2,
+                dispatch_kind="start",
+                team_id="research-team",
+                input_snapshot_hash="a" * 64,
+            )
+        )
+        harness.enqueue_graph_dispatch("run-test", "source_extraction", 2)
+        harness.worker.run_once()
+        extraction = harness.commands.store.latest_attempt(
+            "run-test", "source_extraction"
+        )
+        assert extraction is not None
+        assert extraction.status != "starting"
+        if extraction.status == "dispatching":
+            pending = harness.latest_adapter_pending()
+            assert pending is not None
+            assert json.loads(pending.payload_json)["nodeId"] == "source_extraction"
+        finding_after = harness.commands.store.latest_attempt(
+            "run-test", "source_finding"
+        )
+        assert finding_after is not None
+        assert finding_after.status == "succeeded"
+    finally:
+        harness.close()
+
+
+_HUMAN_NODES = {"knowledge_handoff", "protocol_freeze", "smoke_gate"}
+
+
+def _split_empty_run_id_interrupt(harness: GraphHarness, run_id: str = "run-test") -> None:
+    """Reproduce SCI-096: empty-runId finding interrupt, values at controlled_run."""
+    graph, stack = harness.coordinator._compile()
+    try:
+        state = graph.get_state(harness.coordinator._config(run_id))
+        saved = graph.update_state(
+            state.config,
+            {"run_id": "", "active_node_id": "controlled_run"},
+        )
+        graph.invoke(None, saved)
+    finally:
+        stack.close()
+
+
+def _seed_succeeded_path(
+    harness: GraphHarness,
+    path: list[str],
+    *,
+    run_id: str = "run-test",
+    with_handoffs: bool = True,
+) -> None:
+    def prepare(uow):
+        for index, node_id in enumerate(path):
+            node_run_id = f"nr-{run_id}-{node_id}-a1"
+            actor_kind = "human" if node_id in _HUMAN_NODES else "agent"
+            if uow.repository.get_attempt(node_run_id) is None:
+                command_id = f"cmd-seed-{node_id}"
+                uow.repository.insert_command(
+                    build_command_record(
+                        command_id=command_id,
+                        run_id=run_id,
+                        node_id=node_id,
+                        idempotency_key=f"seed-{node_id}",
+                    )
+                )
+                uow.repository.insert_attempt(
+                    build_attempt_record(
+                        node_run_id=node_run_id,
+                        run_id=run_id,
+                        node_id=node_id,
+                        attempt=1,
+                        actor_kind=actor_kind,
+                        status="succeeded",
+                        command_id=command_id,
+                    )
+                )
+            else:
+                uow.repository.update_attempt_status(
+                    node_run_id,
+                    "succeeded",
+                    FIXED_NOW_MS + 10 + index,
+                    finished_at_ms=FIXED_NOW_MS + 10 + index,
+                )
+            if not with_handoffs or index + 1 >= len(path):
+                continue
+            nxt = path[index + 1]
+            handoff_id = f"ho-seed-{node_id}"
+            uow.repository.insert_handoff(
+                handoff_id=handoff_id,
+                run_id=run_id,
+                edge_id=f"{node_id}->{nxt}",
+                from_node_run_id=node_run_id,
+                to_node_id=nxt,
+                to_node_run_id=None,
+                gate_kind="human" if node_id in _HUMAN_NODES else "auto",
+                input_snapshot_hash="a" * 64,
+                offered_at_ms=FIXED_NOW_MS + 20 + index,
+            )
+            uow.repository.update_handoff_status(
+                handoff_id, "ready", FIXED_NOW_MS + 21 + index
+            )
+            uow.repository.update_handoff_status(
+                handoff_id, "accepted", FIXED_NOW_MS + 22 + index
+            )
+
+    harness.commands.store.submit(prepare, force_flush=True).result(timeout=10)
+
+
+def test_empty_runid_interrupt_advances_without_handoff(tmp_path: Path) -> None:
+    """SCI-096: stale finding interrupt has empty runId; Ledger already moved on."""
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        harness.consume_adapter(first_pending.action_id)
+        _split_empty_run_id_interrupt(harness)
+        before = harness.coordinator.snapshot("run-test")
+        pending_before = before.get("pendingAction") or {}
+        assert pending_before.get("nodeId") == "source_finding"
+        assert not str(pending_before.get("runId") or "").strip()
+        assert pending_before.get("nodeRunId") == "nr--source_finding-a1"
+        values = before.get("values") or {}
+        assert values.get("active_node_id") == "controlled_run"
+
+        harness.enqueue_graph_dispatch("run-test", "source_extraction", 2)
+        harness.worker.run_once()
+
+        after = harness.coordinator.snapshot("run-test")
+        pending_after = after.get("pendingAction") or {}
+        assert pending_after.get("nodeId") == "source_extraction"
+        assert pending_after.get("runId") == "run-test"
+        extraction = harness.commands.store.latest_attempt(
+            "run-test", "source_extraction"
+        )
+        assert extraction is not None
+        assert extraction.status == "dispatching"
+        assert "checkpoint_node_mismatch" not in (extraction.problem_json or "")
+        adapter = harness.latest_adapter_pending()
+        assert adapter is not None
+        payload = json.loads(adapter.payload_json)
+        assert payload["nodeId"] == "source_extraction"
+        assert payload["runId"] == "run-test"
+    finally:
+        harness.close()
+
+
+def test_empty_runid_interrupt_walks_to_controlled_run(tmp_path: Path) -> None:
+    """SCI-096: finding interrupt must be pushed all the way to controlled_run."""
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        harness.consume_adapter(first_pending.action_id)
+        _split_empty_run_id_interrupt(harness)
+        path = _linear_successor_path("source_finding", "controlled_run")
+        assert path is not None
+        _seed_succeeded_path(harness, path[:-1], with_handoffs=False)
+
+        harness.enqueue_graph_dispatch("run-test", "controlled_run", 4)
+        harness.worker.run_once()
+
+        after = harness.coordinator.snapshot("run-test")
+        pending_after = after.get("pendingAction") or {}
+        assert pending_after.get("nodeId") == "controlled_run"
+        assert pending_after.get("runId") == "run-test"
+        assert pending_after.get("nodeRunId") == "nr-run-test-controlled_run-a4"
+        controlled = harness.commands.store.latest_attempt(
+            "run-test", "controlled_run"
+        )
+        assert controlled is not None
+        assert controlled.status == "dispatching"
+        assert "checkpoint_node_mismatch" not in (controlled.problem_json or "")
+        adapter = harness.latest_adapter_pending()
+        assert adapter is not None
+        payload = json.loads(adapter.payload_json)
+        assert payload["nodeId"] == "controlled_run"
+        assert int(payload["attempt"]) == 4
+        assert payload["runId"] == "run-test"
+    finally:
+        harness.close()
+
+
+def test_pump_repairs_starting_attempt_missing_graph_dispatch(tmp_path: Path) -> None:
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+
+        def seed_starting(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-starting-orphan",
+                    run_id="run-test",
+                    node_id="source_finding",
+                    idempotency_key="seed-starting-orphan",
+                )
+            )
+            uow.repository.insert_attempt(
+                build_attempt_record(
+                    node_run_id="nr-run-test-source_finding-a1",
+                    run_id="run-test",
+                    node_id="source_finding",
+                    attempt=1,
+                    status="starting",
+                    command_id="cmd-starting-orphan",
+                )
+            )
+
+        harness.commands.store.submit(seed_starting, force_flush=True).result(timeout=10)
+        harness.worker.run_once()
+        harness.worker.run_once()
+        finding = harness.commands.store.latest_attempt("run-test", "source_finding")
+        assert finding is not None
+        assert finding.status == "dispatching"
+        pending = harness.latest_adapter_pending()
+        assert pending is not None
     finally:
         harness.close()
 

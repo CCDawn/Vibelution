@@ -5,6 +5,7 @@ import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
 import { mergeSessionDetailIntoSummaries } from "./chatSessionState";
+import { mergePreservedCreatedSessions } from "./sessionCreatePreserve";
 import { filterOutTombstonedSessions } from "./sessionDeleteTombstone";
 
 export const SESSION_INDEX_PAGE_SIZE = 50;
@@ -226,9 +227,21 @@ export function useSessionIndexQuery({
     queryFn: async ({ pageParam }) => {
       const payload = await fetchJson<SessionQueryResponse>(sessionQueryUrl(normalizedQueryText, String(pageParam || "")));
       const existing = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? [];
-      const merged = filterOutTombstonedSessions(mergeSessions([existing, payload.items])) ?? [];
-      // Drop tombstoned rows from the page payload so infinite pages stay clean.
-      const filteredItems = filterOutTombstonedSessions(payload.items) ?? [];
+      const previousPages = queryClient.getQueryData<SessionQueryInfiniteData>(
+        queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE),
+      );
+      const previousPageItems = previousPages ? mergeSessionPages(previousPages.pages) : [];
+      // Drop tombstoned rows, then re-attach optimistic / just-created tabs that a
+      // racing bootstrap or index refetch can briefly omit after create.
+      const filteredItems = mergePreservedCreatedSessions(
+        filterOutTombstonedSessions(payload.items) ?? [],
+        { localItems: previousPageItems },
+      );
+      const merged = filterOutTombstonedSessions(
+        mergePreservedCreatedSessions(mergeSessions([existing, filteredItems]), {
+          localItems: previousPageItems,
+        }),
+      ) ?? [];
       queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), merged);
       return {
         ...payload,

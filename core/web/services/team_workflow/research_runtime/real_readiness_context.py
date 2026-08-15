@@ -19,6 +19,7 @@ from core.research.workflow.models import ActorKind
 
 from . import readiness_providers
 from .human_gate_artifacts import canonical_sha256
+from .smoke_release_artifact import smoke_observation_is_releasable
 from .readiness.common import (
     BudgetLimitsSnapshot,
     HandoffSnapshot,
@@ -184,7 +185,7 @@ class RealDomainReadinessContext:
         release_plan_id = str((release or {}).get("planId") or "").strip()
         released = bool(
             release
-            and str(evidence.get("status") or "").lower() == "passed"
+            and smoke_observation_is_releasable(evidence.get("status"))
             and str(release.get("decision") or "").lower() == "accept"
             and str(release.get("resolvedBy") or "").strip()
             and evidence_smoke_id
@@ -203,15 +204,39 @@ class RealDomainReadinessContext:
             return None
         execution = artifact.get("execution") if isinstance(artifact.get("execution"), dict) else {}
         result = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+        metrics = result.get("metrics") or execution.get("metrics") or artifact.get("metrics")
+        artifact_hash = (
+            result.get("artifactHash")
+            or execution.get("artifactHash")
+            or artifact.get("artifactHash")
+            or artifact.get("_contentHash")
+        )
+        logs = result.get("logs") or execution.get("logs") or artifact.get("logs")
+        if not logs and (metrics or artifact_hash):
+            logs = (
+                execution.get("decisionHint")
+                or execution.get("formalRunnerUnavailable")
+                or artifact.get("formalRunnerUnavailable")
+                or f"adapter={execution.get('adapterId') or execution.get('runnerId') or artifact.get('adapterId') or ''} "
+                f"status={execution.get('status') or artifact.get('status') or ''}"
+            ).strip()
+        status = str(execution.get("status") or artifact.get("status") or "").lower()
+        terminal = status in {"completed", "succeeded", "failed", "cancelled"}
+        if not terminal:
+            from .readiness.common import is_bounded_controlled_run
+
+            terminal = is_bounded_controlled_run({**artifact, **execution}) and bool(
+                metrics or artifact_hash or logs
+            )
         return {
             **artifact,
-            "terminal": str(execution.get("status") or "").lower()
-            in {"completed", "succeeded", "failed", "cancelled"},
-            "logs": result.get("logs") or execution.get("logs"),
-            "metrics": result.get("metrics") or execution.get("metrics"),
-            "artifact_hash": result.get("artifactHash")
-            or execution.get("artifactHash")
-            or artifact.get("_contentHash"),
+            "terminal": terminal,
+            "logs": logs,
+            "metrics": metrics,
+            "artifact_hash": artifact_hash,
+            "runnerMode": execution.get("runnerMode") or artifact.get("runnerMode"),
+            "formalRunnerUnavailable": execution.get("formalRunnerUnavailable")
+            or artifact.get("formalRunnerUnavailable"),
         }
 
     def evaluation_report(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
@@ -278,12 +303,17 @@ class RealDomainReadinessContext:
 
     def binding_snapshot(self, run_id: str, node_id: str) -> Mapping[str, Any] | None:
         snapshot = self._input_snapshot(run_id)
+        frozen: dict[str, Any] | None = None
         for binding in snapshot.get("agentBindingSnapshot") or []:
             if not isinstance(binding, Mapping):
                 continue
             if str(binding.get("nodeId") or "") == node_id:
-                return dict(binding)
-        return None
+                frozen = dict(binding)
+                break
+        if frozen and str(frozen.get("agentId") or "").strip():
+            return frozen
+        healed = _heal_binding(snapshot, node_id)
+        return healed or frozen
 
     def agent_resolvable(self, agent_id: str) -> bool:
         override = self._query("agent_resolvable", agent_id)
@@ -334,6 +364,24 @@ class RealDomainReadinessContext:
         ]
 
 
+def _heal_binding(snapshot: Mapping[str, Any], node_id: str) -> dict[str, Any] | None:
+    from .team_role_source import (
+        heal_agent_binding_for_node,
+        heal_agent_binding_from_sibling_freeze,
+    )
+
+    team_id = str(snapshot.get("teamId") or "").strip()
+    node_key = str(node_id or "").strip()
+    if not node_key:
+        return None
+    if team_id:
+        healed = heal_agent_binding_for_node(team_id, node_key)
+        if healed:
+            return dict(healed)
+    sibling = heal_agent_binding_from_sibling_freeze(snapshot, node_key)
+    return dict(sibling) if sibling else None
+
+
 def _artifact_payload(
     kind: str,
     team_id: str,
@@ -355,6 +403,13 @@ def _artifact_payload(
         workflow_run_id=run_id,
     )
     if envelope is None:
+        envelope = _readiness_artifact_envelope(
+            kind,
+            team_id=team_id,
+            run_id=run_id,
+            authority_run_id=authority_run_id,
+        )
+    if envelope is None:
         return None
     raw_payload = envelope.get("payload")
     payload = dict(raw_payload) if isinstance(raw_payload, dict) else dict(envelope)
@@ -364,6 +419,45 @@ def _artifact_payload(
         "teamId": team_id,
         "_contentHash": canonical_sha256(envelope),
     }
+
+
+def _readiness_artifact_envelope(
+    kind: str,
+    *,
+    team_id: str,
+    run_id: str,
+    authority_run_id: str,
+) -> dict[str, Any] | None:
+    """Recover a same-run record when authority/run ids drifted in compact restore."""
+    from .workflow_artifact_store import list_workflow_artifacts
+
+    workflow = str(run_id or "").strip()
+    team = str(team_id or "").strip()
+    if not team or not workflow:
+        return None
+    rows = list_workflow_artifacts(team, kind=kind, workflow_run_id=workflow)
+    authority = str(authority_run_id or "").strip()
+    if not rows and authority and authority != workflow:
+        rows = [
+            item
+            for item in list_workflow_artifacts(
+                team, kind=kind, source_collection_run_id=authority
+            )
+            if str(item.get("workflowRunId") or "") in {workflow, authority}
+        ]
+    for latest in reversed(rows):
+        payload = latest.get("payload")
+        if isinstance(payload, dict) and payload:
+            return {
+                "teamId": team,
+                "kind": kind,
+                "workflowRunId": str(latest.get("workflowRunId") or workflow),
+                "sourceCollectionRunId": str(
+                    latest.get("sourceCollectionRunId") or authority or workflow
+                ),
+                "payload": payload,
+            }
+    return None
 
 
 def _budget_consumed_from_ledger(store: WorkflowLedgerStore, run_id: str) -> dict[str, int]:
