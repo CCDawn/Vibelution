@@ -216,6 +216,14 @@ def register_experiment_smoke_result(team_id: str, plan_id: str, payload: dict[s
         plan["status"] = "smoke_passed" if smoke_result["status"] == "passed" else f"smoke_{smoke_result['status']}"
         plan["updatedAt"] = smoke_result["recordedAt"]
         s._refresh_experiment_plan_readiness(plan)
+        from core.web.services.team_workflow.outcome_graph import merge_registered_result
+
+        merge_registered_result(
+            plan,
+            smoke_result,
+            extra=request_payload,
+            peer_plans=[item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)],
+        )
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = smoke_result["recordedAt"]
         s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)

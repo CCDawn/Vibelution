@@ -2471,3 +2471,114 @@ def test_planning_gap_does_not_claim_complete_active_design_fields_are_missing()
         "Review and select an algorithm_hypothesis candidate that is ready for plan review.",
         "Keep the complete active design contract unchanged unless the selected hypothesis requires a new revision.",
     ]
+
+
+def test_experiment_smoke_failure_writes_working_falsifies_edge(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+
+    registered = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {
+            "status": "failed",
+            "metricValue": "0.65 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing-failed.json",
+            "logRef": "logs/experiments/context-gated-routing-smoke-failed.log",
+            "notes": "routing entropy collapsed",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    graph = registered["plan"]["outcomeGraph"]
+    live = [edge for edge in graph["edges"] if not edge.get("validUntil")]
+    falsifies = [edge for edge in live if edge["relation"] == "falsifies"]
+    context = team_workflow_orchestration_service._build_research_memory_context(
+        stage_type="experiment_design",
+        research_question=registered["plan"]["experimentContract"]["researchQuestion"],
+        plans=[registered["plan"]],
+    )
+    claim_id = context["claimMap"][0]["claimId"]
+
+    assert falsifies[0]["fromId"] == f"run:{registered['smokeResult']['smokeResultId']}"
+    assert falsifies[0]["toId"] == claim_id
+    assert falsifies[0]["interpretation"]
+    assert falsifies[0]["failedGates"]
+    assert falsifies[0]["evidenceRefs"]
+    assert context["negativeExperiments"][0]["planId"] == registered["plan"]["planId"]
+    assert context["forbiddenDuplicateExperiments"][0]["experimentSignature"] == falsifies[0]["experimentSignature"]
+    assert context["claimMap"][0]["status"] == "unsupported"
+
+
+def test_experiment_full_run_pass_writes_working_supports_without_qualifying_claim(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    registered = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        smoke["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.79 validation accuracy",
+            "resultPath": "workspace/experiments/full_run/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    live = [edge for edge in registered["plan"]["outcomeGraph"]["edges"] if not edge.get("validUntil")]
+    supports = [edge for edge in live if edge["relation"] == "supports"]
+    context = team_workflow_orchestration_service._build_research_memory_context(
+        stage_type="experiment_design",
+        research_question=registered["plan"]["experimentContract"]["researchQuestion"],
+        plans=[registered["plan"]],
+    )
+
+    assert any(edge["fromId"] == f"run:{registered['fullRunResult']['fullRunResultId']}" for edge in supports)
+    assert registered["fullRunResult"]["fullRunResultId"] in {
+        item["resultId"] for item in context["priorSuccessfulRuns"]
+    }
+    assert context["claimMap"][0]["status"] == "not_established"
+    assert context["claimMap"][0]["claimId"] == supports[-1]["toId"]
+
+
+def test_experiment_later_smoke_failure_closes_prior_supports_and_keeps_old_edge(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    passed = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    failed = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        passed["plan"]["planId"],
+        {
+            "status": "failed",
+            "metricValue": "0.61 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing-failed.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    graph = failed["plan"]["outcomeGraph"]
+    supports = [edge for edge in graph["edges"] if edge["relation"] == "supports"]
+    falsifies = [edge for edge in graph["edges"] if edge["relation"] == "falsifies"]
+
+    assert supports
+    assert supports[0]["validUntil"] == failed["smokeResult"]["recordedAt"]
+    assert supports[0]["supersededByEdgeId"] == falsifies[0]["edgeId"]
+    assert all(not edge.get("validUntil") for edge in falsifies)
