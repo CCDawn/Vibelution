@@ -7,6 +7,11 @@ from ._errors import _raise_team_workflow_route_error
 from ._models import *
 from ._router import router
 from .source_collection_catalog_models import SourceCollectionSummaryResponse
+from .source_collection_write_models import (
+    SourceCollectionAgentSessionContextResponse,
+    SourceCollectionRunStartResponse,
+    SourceCollectionStageSessionTaskResponse,
+)
 
 @router.post("/teams/{team_id}/workflow-orchestration/candidates/source", status_code=status.HTTP_201_CREATED)
 def team_workflow_candidate_source_create(team_id: str, payload: CandidateSourcePayload) -> dict:
@@ -49,7 +54,12 @@ def team_workflow_import_data_record_source_candidate(team_id: str, run_id: str,
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/source-collection-runs",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SourceCollectionRunStartResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_source_collection_run_start(team_id: str, payload: SourceCollectionRunStartPayload) -> dict:
     try:
         return start_source_collection_run(team_id, payload.model_dump())
@@ -90,7 +100,12 @@ def team_workflow_source_collection_search_execute(team_id: str, run_id: str, pa
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/agent-session-context", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/agent-session-context",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SourceCollectionAgentSessionContextResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_source_collection_agent_session_context(team_id: str, run_id: str, payload: SourceCollectionAgentSessionContextPayload) -> dict:
     try:
         return seed_source_collection_agent_session_context(team_id, run_id, payload.model_dump())
@@ -112,7 +127,12 @@ def team_workflow_source_collection_agent_session_context(team_id: str, run_id: 
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/stage-session-tasks", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/stage-session-tasks",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SourceCollectionStageSessionTaskResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_source_collection_stage_session_task_start(team_id: str, run_id: str, payload: SourceCollectionStageSessionTaskPayload) -> dict:
     try:
         return start_source_collection_stage_session_task(team_id, run_id, payload.model_dump())
