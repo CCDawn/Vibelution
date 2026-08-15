@@ -22,6 +22,13 @@ from core.web.routes.agent_activity_models import (
     AgentRuntimeEvidenceResponse,
 )
 from core.web.routes.agent_bulk_models import AgentBulkActionResponse
+from core.web.routes.agent_workbench_models import (
+    AgentAvatarUploadResponse,
+    AgentInboxConsumeAllResponse,
+    AgentModeMembershipResponse,
+    AgentPurgeResponse,
+    AgentToolGovernanceRequestResponse,
+)
 from core.web.routes.agent_config_change_models import (
     AgentConfigChangesResponse,
     AgentConfigDraftDiscardResponse,
@@ -612,7 +619,11 @@ def agent_tool_governance_request_list(status: str = "pending_review", agentId: 
     return agent_tool_governance_service.list_tool_governance_requests(agent_id=agentId, status=status, limit=limit)
 
 
-@router.patch("/agents/{agent_id}/avatar")
+@router.patch(
+    "/agents/{agent_id}/avatar",
+    response_model=AgentDocumentResponse,
+    response_model_exclude_unset=True,
+)
 def agent_avatar_update(agent_id: str, payload: AgentAvatarUpdatePayload) -> dict:
     try:
         return update_agent_avatar(
@@ -626,7 +637,11 @@ def agent_avatar_update(agent_id: str, payload: AgentAvatarUpdatePayload) -> dic
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/avatar-image")
+@router.post(
+    "/agents/{agent_id}/avatar-image",
+    response_model=AgentAvatarUploadResponse,
+    response_model_exclude_unset=True,
+)
 def agent_avatar_upload(agent_id: str, payload: AgentAvatarUploadPayload) -> dict:
     try:
         return store_agent_avatar_image(
@@ -860,7 +875,12 @@ def agent_project_memory_update_resolve(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/tool-governance-requests", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/agents/{agent_id}/tool-governance-requests",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AgentToolGovernanceRequestResponse,
+    response_model_exclude_unset=True,
+)
 def agent_tool_governance_request_create(agent_id: str, payload: AgentToolGovernanceRequestPayload) -> dict:
     try:
         return agent_tool_governance_service.submit_tool_governance_request(
@@ -882,7 +902,11 @@ def agent_tool_governance_request_create(agent_id: str, payload: AgentToolGovern
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/agents/{agent_id}/tool-governance-requests/{request_id}")
+@router.patch(
+    "/agents/{agent_id}/tool-governance-requests/{request_id}",
+    response_model=AgentToolGovernanceRequestResponse,
+    response_model_exclude_unset=True,
+)
 def agent_tool_governance_request_resolve(
     agent_id: str,
     request_id: str,
@@ -937,7 +961,11 @@ def agent_message_create(agent_id: str, payload: AgentMessagePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/messages/{message_id}/consume")
+@router.post(
+    "/agents/{agent_id}/messages/{message_id}/consume",
+    response_model=AgentInboxMessageResponse,
+    response_model_exclude_unset=True,
+)
 def agent_message_consume(agent_id: str, message_id: str, payload: AgentMessageConsumePayload) -> dict:
     try:
         return consume_agent_inbox_message(
@@ -950,7 +978,11 @@ def agent_message_consume(agent_id: str, message_id: str, payload: AgentMessageC
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/messages/consume-all")
+@router.post(
+    "/agents/{agent_id}/messages/consume-all",
+    response_model=AgentInboxConsumeAllResponse,
+    response_model_exclude_unset=True,
+)
 def agent_messages_consume_all(agent_id: str, payload: AgentMessageConsumePayload) -> dict:
     try:
         return consume_all_agent_inbox_messages(
@@ -1066,7 +1098,11 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/agents/{agent_id}/mode-membership")
+@router.patch(
+    "/agents/{agent_id}/mode-membership",
+    response_model=AgentModeMembershipResponse,
+    response_model_exclude_unset=True,
+)
 def agent_mode_membership_update(agent_id: str, payload: AgentModeMembershipUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
@@ -1437,7 +1473,11 @@ def agent_archive(agent_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/agents/{agent_id}/purge")
+@router.delete(
+    "/agents/{agent_id}/purge",
+    response_model=AgentPurgeResponse,
+    response_model_exclude_unset=True,
+)
 @session_service.session_agent_lifecycle_serialized
 def agent_purge(agent_id: str) -> dict:
     timings: dict[str, float] = {}

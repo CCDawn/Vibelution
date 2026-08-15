@@ -1,12 +1,15 @@
 import { fetchJson } from "./client";
 import type {
   AgentAvatarOptionsPayload,
+  AgentAvatarUploadResponse,
   AgentConfigChanges,
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AgentInboxMessage,
   AgentInstance,
+  AgentModeBindings,
   AgentPermissionPreset,
+  AgentPurgeResponse,
   AgentRunHistory,
   AgentRuntimeEvidence,
   AgentToolGovernanceRequest,
@@ -257,6 +260,118 @@ export function bulkPurgeAgents<T>(agentIds: string[]): Promise<T> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ agentIds }),
+  });
+}
+
+export function updateAgentAvatar(
+  agentId: string,
+  payload: { avatarImagePath?: string; resetToDefault?: boolean },
+): Promise<AgentConfigWorkspaceAgent> {
+  return fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}/avatar`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      avatarImagePath: payload.avatarImagePath ?? "",
+      resetToDefault: Boolean(payload.resetToDefault),
+    }),
+  });
+}
+
+export function uploadAgentAvatarImage(
+  agentId: string,
+  payload: { filename: string; contentType: string; dataBase64: string },
+): Promise<AgentAvatarUploadResponse> {
+  return fetchJson<AgentAvatarUploadResponse>(`/api/agents/${encodeURIComponent(agentId)}/avatar-image`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAgentModeMembership<T = AgentModeBindings>(
+  agentId: string,
+  draft: Record<string, unknown>,
+): Promise<T> {
+  return fetchJson<T>(`/api/agents/${encodeURIComponent(agentId)}/mode-membership`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+}
+
+export function createAgentToolGovernanceRequest(
+  agentId: string,
+  payload: {
+    proposedByAgentId: string;
+    grantTools: string[];
+    revokeTools: string[];
+    blockTools: string[];
+    unblockTools: string[];
+    reason: string;
+    applyMode: string;
+  },
+): Promise<AgentToolGovernanceRequest> {
+  return fetchJson<AgentToolGovernanceRequest>(
+    `/api/agents/${encodeURIComponent(agentId)}/tool-governance-requests`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function resolveAgentCenterToolGovernanceRequest(
+  agentId: string,
+  requestId: string,
+  decision: "approve" | "reject",
+): Promise<AgentToolGovernanceRequest> {
+  return fetchJson<AgentToolGovernanceRequest>(
+    `/api/agents/${encodeURIComponent(agentId)}/tool-governance-requests/${encodeURIComponent(requestId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        decision,
+        resolvedBy: "user",
+        resolutionNote: decision,
+      }),
+    },
+  );
+}
+
+export function consumeAgentInboxMessage(
+  agentId: string,
+  messageId: string,
+  payload: { consumedBySessionId: string; consumedByTurnId: string },
+): Promise<AgentInboxMessage> {
+  return fetchJson<AgentInboxMessage>(
+    `/api/agents/${encodeURIComponent(agentId)}/messages/${encodeURIComponent(messageId)}/consume`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function consumeAllAgentInboxMessages<T>(
+  agentId: string,
+  payload: { consumedBySessionId: string; consumedByTurnId: string },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/agents/${encodeURIComponent(agentId)}/messages/consume-all`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function purgeArchivedAgent<T = AgentPurgeResponse>(agentId: string): Promise<T> {
+  return fetchJson<T>(`/api/agents/${encodeURIComponent(agentId)}/purge`, {
+    method: "DELETE",
   });
 }
 
