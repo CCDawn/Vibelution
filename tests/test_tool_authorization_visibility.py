@@ -8,6 +8,14 @@ from core.authorization.tool_authorization_service import (
     ToolAuthorizationContextError,
     resolve_enforced_authorization,
 )
+from core.orchestration.tool_authorization_binding import (
+    bind_authorization_runtime,
+    guard_restart_focus_tool,
+    hidden_tool_call_message,
+    is_tool_visible_to_agent,
+    materialize_authorized_tools,
+    restart_allowed_tool_names,
+)
 
 
 def _tool(name: str):
@@ -22,6 +30,33 @@ def test_enforced_authorization_requires_agent_and_turn_identity():
         resolve_enforced_authorization(
             runtime={"agentId": "agent-a"},
         )
+
+
+def test_bind_authorization_runtime_fills_identity_without_policy():
+    runtime = bind_authorization_runtime(
+        current_runtime={},
+        turn_runtime={"runId": "turn-a", "agentId": "agent-a", "mode": "chat"},
+        agent_binding={"directSessionId": "session-a"},
+    )
+    assert runtime["agentId"] == "agent-a"
+    assert runtime["turnId"] == "turn-a"
+    assert runtime["runId"] == "turn-a"
+    assert runtime["mode"] == "chat"
+
+
+def test_adapter_materialize_and_visibility_match_agent_wrappers():
+    report = SimpleNamespace(
+        decision=SimpleNamespace(visible_tools=("read_file_tool",)),
+    )
+    tools = [_tool("read_file_tool"), _tool("write_file_tool")]
+    assert [tool.name for tool in materialize_authorized_tools(tools, report)] == ["read_file_tool"]
+    assert is_tool_visible_to_agent("read_file_tool", {"read_file_tool"}) is True
+    assert is_tool_visible_to_agent("spawn_agent_tool", {"read_file_tool"}) is False
+    assert "未暴露给当前 Agent" in hidden_tool_call_message("spawn_agent_tool")
+    assert "trigger_self_restart_tool" in restart_allowed_tool_names()
+    assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus=True)
+    assert guard_restart_focus_tool("trigger_self_restart_tool", restart_focus=True) is None
+    assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus=False) is None
 
 
 def test_authorized_surface_materializes_only_canonical_visible_tools():
