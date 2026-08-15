@@ -5,8 +5,35 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
+
+from core.web.routes.evolution_models import (
+    ChatReviewActionPayload,
+    ChatReviewBulkDeletePayload,
+    EvolutionChatReviewCandidateResponse,
+    EvolutionChatReviewQueueResponse,
+    EvolutionCommandStatusResponse,
+    EvolutionDeletedResponse,
+    EvolutionJsonResponse,
+    EvolutionLibraryResponse,
+    EvolutionOverviewResponse,
+    EvolutionProposalResponse,
+    EvolutionRunResponse,
+    EvolutionSelfWorkspaceSnapshotResponse,
+    EvolutionWorkspaceSnapshotResponse,
+    ProposalBulkDeletePayload,
+    ProposalUpdatePayload,
+    SelfEvolutionAutonomousRunActionPayload,
+    SelfEvolutionAutonomousRunStartPayload,
+    SelfEvolutionHistoryDeletePayload,
+    SelfEvolutionWorktreeRunStartPayload,
+    SelfObservationRunActionPayload,
+    SelfObservationRunStartPayload,
+    SupervisedRunActionPayload,
+    SupervisedRunStartPayload,
+    SupervisedWorktreeRunActionPayload,
+    SupervisedWorktreeRunStartPayload,
+)
 
 from core.web.services.chat_review_service import (
     ChatReviewCandidateNotFoundError,
@@ -112,104 +139,6 @@ from core.web.services.supervised_worktree_evolution_service import (
 router = APIRouter(tags=["evolution"])
 
 
-class SupervisedRunStartPayload(BaseModel):
-    sourceKind: str = ""
-    datasetName: str = ""
-    datasetLimit: int | None = None
-    bundleName: str = ""
-    keepWorktree: bool = False
-    mentalModelMode: str = "follow"
-
-
-class SupervisedRunActionPayload(BaseModel):
-    action: str = ""
-
-
-class ProposalBulkDeletePayload(BaseModel):
-    sessionIds: list[str] = Field(default_factory=list)
-
-
-class SupervisedWorktreeRunStartPayload(BaseModel):
-    sourceKind: str = "bundle"
-    datasetName: str = ""
-    datasetLimit: int | None = None
-    bundleName: str = ""
-    keepWorktree: bool = True
-    mode: str = "auto"
-    approvalMode: str = "human"
-    executionMode: str = "simulation"
-    confirmRealLlmCost: bool = False
-    mentalModelMode: str = "follow"
-    uiRoute: str = "/evolution"
-    clientAction: str = "start_supervised_worktree_run"
-
-
-class SelfEvolutionWorktreeRunStartPayload(BaseModel):
-    goal: str = ""
-    sourceKind: str = "bundle"
-    datasetName: str = ""
-    datasetLimit: int | None = None
-    bundleName: str = ""
-    mode: str = "manual"
-    executionMode: str = "simulation"
-    confirmRealLlmCost: bool = False
-    uiRoute: str = "/evolution?track=self"
-
-
-class SelfObservationRunStartPayload(BaseModel):
-    goal: str = ""
-    durationSeconds: int = 300
-    inputMode: str = "prompt"
-    uiRoute: str = "/evolution?track=self"
-
-
-class SelfObservationRunActionPayload(BaseModel):
-    action: str = ""
-
-
-class SelfEvolutionAutonomousRunStartPayload(BaseModel):
-    goal: str = ""
-    maxIterations: int = 1
-
-
-class SelfEvolutionAutonomousRunActionPayload(BaseModel):
-    action: str = ""
-    comment: str = ""
-
-
-class SupervisedWorktreeRunActionPayload(BaseModel):
-    action: str = ""
-    force: bool = False
-    reviewerNote: str = ""
-
-
-class ProposalUpdatePayload(BaseModel):
-    improvementType: str | None = None
-    expectedEffect: str | None = None
-    summary: str | None = None
-    candidatePrompt: str | None = None
-    baselinePrompt: str | None = None
-    editNote: str | None = None
-
-
-class SelfEvolutionHistoryDeletePayload(BaseModel):
-    txnIds: list[str] = Field(default_factory=list)
-
-
-class ChatReviewActionPayload(BaseModel):
-    decision: str = ""
-    reasonCode: str = ""
-    errorType: str = ""
-    correctPrinciple: str = ""
-    idealBehavior: str = ""
-    reviewerNote: str = ""
-
-
-class ChatReviewBulkDeletePayload(BaseModel):
-    candidateIds: list[str] = Field(default_factory=list)
-    reviewerNote: str = ""
-
-
 def _is_self_evolution_worktree_run(run: dict | None) -> bool:
     if not isinstance(run, dict):
         return False
@@ -223,12 +152,20 @@ def _is_self_evolution_worktree_run(run: dict | None) -> bool:
     )
 
 
-@router.get("/evolution/overview")
+@router.get(
+    "/evolution/overview",
+    response_model=EvolutionOverviewResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_overview() -> dict:
     return get_evolution_overview()
 
 
-@router.get("/evolution/workspace-snapshot")
+@router.get(
+    "/evolution/workspace-snapshot",
+    response_model=EvolutionWorkspaceSnapshotResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
     started_at = time.perf_counter()
     timings: dict[str, float] = {}
@@ -335,7 +272,11 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
     return payload
 
 
-@router.get("/evolution/self/workspace-snapshot")
+@router.get(
+    "/evolution/self/workspace-snapshot",
+    response_model=EvolutionSelfWorkspaceSnapshotResponse,
+    response_model_exclude_unset=True,
+)
 def self_evolution_workspace_snapshot() -> dict:
     """Return only the self-evolution data needed for the self workbench first paint."""
 
@@ -391,12 +332,20 @@ def _reviewable_supervised_closed_loop_record(latest_run: dict | None) -> dict |
     return record
 
 
-@router.get("/evolution/runs")
+@router.get(
+    "/evolution/runs",
+    response_model=list[EvolutionRunResponse],
+    response_model_exclude_unset=True,
+)
 def evolution_runs() -> list[dict]:
     return list_runs()
 
 
-@router.get("/evolution/library")
+@router.get(
+    "/evolution/library",
+    response_model=EvolutionLibraryResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_library() -> dict:
     return {
         "items": list_library_items(),
@@ -404,7 +353,11 @@ def evolution_library() -> dict:
     }
 
 
-@router.get("/evolution/proposals/{session_id}")
+@router.get(
+    "/evolution/proposals/{session_id}",
+    response_model=EvolutionProposalResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_proposal_detail(session_id: str) -> dict:
     try:
         return get_proposal_detail(session_id)
@@ -412,7 +365,11 @@ def evolution_proposal_detail(session_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.patch("/evolution/proposals/{session_id}")
+@router.patch(
+    "/evolution/proposals/{session_id}",
+    response_model=EvolutionProposalResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_update_proposal(session_id: str, payload: ProposalUpdatePayload) -> dict:
     updates = {}
     if payload.improvementType is not None:
@@ -439,7 +396,11 @@ def evolution_update_proposal(session_id: str, payload: ProposalUpdatePayload) -
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/evolution/proposals/{session_id}")
+@router.delete(
+    "/evolution/proposals/{session_id}",
+    response_model=EvolutionProposalResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_delete_proposal(session_id: str) -> dict:
     try:
         return delete_proposal(session_id)
@@ -451,22 +412,38 @@ def evolution_delete_proposal(session_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/evolution/proposals/delete")
+@router.post(
+    "/evolution/proposals/delete",
+    response_model=EvolutionDeletedResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_bulk_delete_proposals(payload: ProposalBulkDeletePayload) -> dict:
     return bulk_delete_proposals(payload.sessionIds)
 
 
-@router.get("/evolution/workbench")
+@router.get(
+    "/evolution/workbench",
+    response_model=EvolutionJsonResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_workbench() -> dict:
     return get_supervised_workbench()
 
 
-@router.get("/evolution/chat-review")
+@router.get(
+    "/evolution/chat-review",
+    response_model=EvolutionChatReviewQueueResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_chat_review(includeDetails: bool = False) -> dict:
     return get_chat_review_queue(include_details=includeDetails)
 
 
-@router.get("/evolution/chat-review/{candidate_id}")
+@router.get(
+    "/evolution/chat-review/{candidate_id}",
+    response_model=EvolutionChatReviewCandidateResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_chat_review_candidate(candidate_id: str) -> dict:
     try:
         return get_chat_review_candidate(candidate_id)
@@ -474,12 +451,20 @@ def evolution_chat_review_candidate(candidate_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/evolution/self/candidates")
+@router.get(
+    "/evolution/self/candidates",
+    response_model=EvolutionChatReviewQueueResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_self_candidates() -> dict:
     return get_self_evolution_candidate_review_queue()
 
 
-@router.post("/evolution/chat-review/delete")
+@router.post(
+    "/evolution/chat-review/delete",
+    response_model=EvolutionDeletedResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_chat_review_bulk_delete(payload: ChatReviewBulkDeletePayload) -> dict:
     return bulk_discard_chat_review_candidates(
         payload.candidateIds,
@@ -487,7 +472,11 @@ def evolution_chat_review_bulk_delete(payload: ChatReviewBulkDeletePayload) -> d
     )
 
 
-@router.post("/evolution/chat-review/{candidate_id}/approve")
+@router.post(
+    "/evolution/chat-review/{candidate_id}/approve",
+    response_model=EvolutionChatReviewCandidateResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_chat_review_approve(candidate_id: str, payload: ChatReviewActionPayload) -> dict:
     try:
         return approve_chat_review_candidate(candidate_id, reviewer_note=payload.reviewerNote)
@@ -497,7 +486,11 @@ def evolution_chat_review_approve(candidate_id: str, payload: ChatReviewActionPa
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/evolution/chat-review/{candidate_id}/reject")
+@router.post(
+    "/evolution/chat-review/{candidate_id}/reject",
+    response_model=EvolutionChatReviewCandidateResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_chat_review_reject(candidate_id: str, payload: ChatReviewActionPayload) -> dict:
     try:
         return reject_chat_review_candidate(candidate_id, reviewer_note=payload.reviewerNote)
@@ -507,7 +500,11 @@ def evolution_chat_review_reject(candidate_id: str, payload: ChatReviewActionPay
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/evolution/chat-review/{candidate_id}/decision")
+@router.post(
+    "/evolution/chat-review/{candidate_id}/decision",
+    response_model=EvolutionChatReviewCandidateResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_chat_review_decision(candidate_id: str, payload: ChatReviewActionPayload) -> dict:
     try:
         return submit_chat_review_decision(
@@ -527,17 +524,28 @@ def evolution_chat_review_decision(candidate_id: str, payload: ChatReviewActionP
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
-@router.get("/evolution/active-run")
+@router.get(
+    "/evolution/active-run",
+    response_model=EvolutionRunResponse | None,
+    response_model_exclude_unset=True,
+)
 def evolution_active_run() -> dict | None:
     return get_active_supervised_run()
 
 
-@router.get("/evolution/latest-run")
+@router.get(
+    "/evolution/latest-run",
+    response_model=EvolutionRunResponse | None,
+    response_model_exclude_unset=True,
+)
 def evolution_latest_run() -> dict | None:
     return get_latest_supervised_run()
 
 
-@router.get("/evolution/active-run/events")
+@router.get(
+    "/evolution/active-run/events",
+    response_class=StreamingResponse,
+)
 def evolution_active_run_events() -> StreamingResponse:
     snapshot = get_active_supervised_run()
     return StreamingResponse(
@@ -550,7 +558,11 @@ def evolution_active_run_events() -> StreamingResponse:
     )
 
 
-@router.get("/evolution/runs/commands/{command_id}")
+@router.get(
+    "/evolution/runs/commands/{command_id}",
+    response_model=EvolutionCommandStatusResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_run_command_status(command_id: str) -> dict:
     try:
         return get_supervised_runtime_manager_command_status(command_id)
@@ -558,17 +570,30 @@ def evolution_run_command_status(command_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/evolution/worktree-runs")
+@router.get(
+    "/evolution/worktree-runs",
+    response_model=list[EvolutionRunResponse],
+    response_model_exclude_unset=True,
+)
 def evolution_worktree_runs() -> list[dict]:
     return list_supervised_worktree_runs()
 
 
-@router.get("/evolution/worktree-runs/active")
+@router.get(
+    "/evolution/worktree-runs/active",
+    response_model=EvolutionRunResponse | None,
+    response_model_exclude_unset=True,
+)
 def evolution_worktree_active_run() -> dict | None:
     return get_active_supervised_worktree_run()
 
 
-@router.post("/evolution/worktree-runs", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/evolution/worktree-runs",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_start_worktree_run(payload: SupervisedWorktreeRunStartPayload) -> dict:
     try:
         data = payload.model_dump()
@@ -581,7 +606,12 @@ def evolution_start_worktree_run(payload: SupervisedWorktreeRunStartPayload) -> 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/evolution/self/worktree-runs", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/evolution/self/worktree-runs",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def self_evolution_start_worktree_run(payload: SelfEvolutionWorktreeRunStartPayload) -> dict:
     try:
         return start_self_evolution_worktree_run(payload.model_dump())
@@ -591,7 +621,12 @@ def self_evolution_start_worktree_run(payload: SelfEvolutionWorktreeRunStartPayl
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/evolution/self/observation-runs", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/evolution/self/observation-runs",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def self_observation_start_run(payload: SelfObservationRunStartPayload) -> dict:
     try:
         return start_self_observation_run(payload.model_dump())
@@ -601,7 +636,11 @@ def self_observation_start_run(payload: SelfObservationRunStartPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/evolution/self/observation-runs/{run_id}")
+@router.get(
+    "/evolution/self/observation-runs/{run_id}",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def self_observation_run(run_id: str) -> dict:
     snapshot = get_self_observation_run_snapshot(run_id)
     if snapshot is None:
@@ -609,7 +648,10 @@ def self_observation_run(run_id: str) -> dict:
     return snapshot
 
 
-@router.get("/evolution/self/observation-runs/{run_id}/events")
+@router.get(
+    "/evolution/self/observation-runs/{run_id}/events",
+    response_class=StreamingResponse,
+)
 def self_observation_run_events(run_id: str) -> StreamingResponse:
     snapshot = get_self_observation_run_snapshot(run_id)
     if snapshot is None:
@@ -624,7 +666,11 @@ def self_observation_run_events(run_id: str) -> StreamingResponse:
     )
 
 
-@router.post("/evolution/self/observation-runs/{run_id}/actions")
+@router.post(
+    "/evolution/self/observation-runs/{run_id}/actions",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def self_observation_run_action(run_id: str, payload: SelfObservationRunActionPayload) -> dict:
     try:
         return execute_self_observation_action(run_id, payload.action)
@@ -639,6 +685,8 @@ def self_observation_run_action(run_id: str, payload: SelfObservationRunActionPa
 @router.post(
     "/evolution/self/autonomous-runs",
     status_code=status.HTTP_202_ACCEPTED,
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
 )
 def self_evolution_start_autonomous_run(
     payload: SelfEvolutionAutonomousRunStartPayload,
@@ -651,17 +699,29 @@ def self_evolution_start_autonomous_run(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/evolution/self/autonomous-runs/active")
+@router.get(
+    "/evolution/self/autonomous-runs/active",
+    response_model=EvolutionRunResponse | None,
+    response_model_exclude_unset=True,
+)
 def self_evolution_active_autonomous_run() -> dict | None:
     return get_active_autonomous_self_evolution_run()
 
 
-@router.get("/evolution/self/autonomous-runs/latest")
+@router.get(
+    "/evolution/self/autonomous-runs/latest",
+    response_model=EvolutionRunResponse | None,
+    response_model_exclude_unset=True,
+)
 def self_evolution_latest_autonomous_run() -> dict | None:
     return get_latest_autonomous_self_evolution_run()
 
 
-@router.get("/evolution/self/autonomous-runs/{run_id}")
+@router.get(
+    "/evolution/self/autonomous-runs/{run_id}",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def self_evolution_autonomous_run(run_id: str) -> dict:
     try:
         return get_autonomous_self_evolution_run(run_id)
@@ -669,7 +729,11 @@ def self_evolution_autonomous_run(run_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/evolution/self/autonomous-runs/{run_id}/actions")
+@router.post(
+    "/evolution/self/autonomous-runs/{run_id}/actions",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def self_evolution_autonomous_run_action(
     run_id: str,
     payload: SelfEvolutionAutonomousRunActionPayload,
@@ -702,7 +766,11 @@ def self_evolution_autonomous_run_action(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/evolution/worktree-runs/{run_id}")
+@router.get(
+    "/evolution/worktree-runs/{run_id}",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_worktree_run(run_id: str) -> dict:
     snapshot = get_supervised_worktree_run(run_id)
     if snapshot is None:
@@ -710,7 +778,10 @@ def evolution_worktree_run(run_id: str) -> dict:
     return snapshot
 
 
-@router.get("/evolution/worktree-runs/{run_id}/events")
+@router.get(
+    "/evolution/worktree-runs/{run_id}/events",
+    response_class=StreamingResponse,
+)
 def evolution_worktree_run_events(run_id: str) -> StreamingResponse:
     snapshot = get_supervised_worktree_run(run_id)
     if snapshot is None:
@@ -725,7 +796,11 @@ def evolution_worktree_run_events(run_id: str) -> StreamingResponse:
     )
 
 
-@router.post("/evolution/worktree-runs/{run_id}/actions")
+@router.post(
+    "/evolution/worktree-runs/{run_id}/actions",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_worktree_run_action(run_id: str, payload: SupervisedWorktreeRunActionPayload) -> dict:
     try:
         return execute_supervised_worktree_action(
@@ -742,7 +817,12 @@ def evolution_worktree_run_action(run_id: str, payload: SupervisedWorktreeRunAct
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/evolution/runs", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/evolution/runs",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_start_run(payload: SupervisedRunStartPayload) -> dict:
     try:
         return start_supervised_run(payload.model_dump())
@@ -754,7 +834,11 @@ def evolution_start_run(payload: SupervisedRunStartPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/evolution/runs/{run_id}/pause")
+@router.post(
+    "/evolution/runs/{run_id}/pause",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_pause_run(run_id: str) -> dict:
     try:
         return request_pause_supervised_run(run_id)
@@ -766,7 +850,11 @@ def evolution_pause_run(run_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/evolution/runs/{run_id}/resume")
+@router.post(
+    "/evolution/runs/{run_id}/resume",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_resume_run(run_id: str) -> dict:
     try:
         return request_resume_supervised_run(run_id)
@@ -778,7 +866,12 @@ def evolution_resume_run(run_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/evolution/runs/{run_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/evolution/runs/{run_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_retry_run(run_id: str) -> dict:
     try:
         return retry_supervised_run(run_id)
@@ -792,7 +885,11 @@ def evolution_retry_run(run_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/evolution/runs/{run_id}/terminate")
+@router.post(
+    "/evolution/runs/{run_id}/terminate",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_terminate_run(run_id: str) -> dict:
     try:
         return request_stop_supervised_run(run_id)
@@ -804,7 +901,11 @@ def evolution_terminate_run(run_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/evolution/runs/{run_id}")
+@router.delete(
+    "/evolution/runs/{run_id}",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_delete_run(run_id: str) -> dict:
     try:
         return delete_supervised_run_snapshot(run_id)
@@ -818,7 +919,11 @@ def evolution_delete_run(run_id: str) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/evolution/runs/{session_id}/actions")
+@router.post(
+    "/evolution/runs/{session_id}/actions",
+    response_model=EvolutionRunResponse,
+    response_model_exclude_unset=True,
+)
 def evolution_run_action(session_id: str, payload: SupervisedRunActionPayload) -> dict:
     try:
         return execute_supervised_action(session_id, payload.action)
@@ -830,17 +935,29 @@ def evolution_run_action(session_id: str, payload: SupervisedRunActionPayload) -
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.get("/evolution/self/overview")
+@router.get(
+    "/evolution/self/overview",
+    response_model=EvolutionOverviewResponse,
+    response_model_exclude_unset=True,
+)
 def self_evolution_overview() -> dict:
     return get_self_evolution_overview()
 
 
-@router.get("/evolution/self/transactions")
+@router.get(
+    "/evolution/self/transactions",
+    response_model=list[EvolutionRunResponse],
+    response_model_exclude_unset=True,
+)
 def self_evolution_transactions() -> list[dict]:
     return list_self_evolution_transactions()
 
 
-@router.post("/evolution/self/history/delete")
+@router.post(
+    "/evolution/self/history/delete",
+    response_model=EvolutionDeletedResponse,
+    response_model_exclude_unset=True,
+)
 def self_evolution_delete_history(payload: SelfEvolutionHistoryDeletePayload) -> dict:
     try:
         return delete_self_evolution_history_groups(payload.txnIds)
@@ -848,6 +965,10 @@ def self_evolution_delete_history(payload: SelfEvolutionHistoryDeletePayload) ->
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/evolution/self/audit")
+@router.get(
+    "/evolution/self/audit",
+    response_model=list[EvolutionRunResponse],
+    response_model_exclude_unset=True,
+)
 def self_evolution_audit() -> list[dict]:
     return list_self_evolution_audit_events()
