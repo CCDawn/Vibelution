@@ -606,6 +606,12 @@ def _latest_preview_tool_placeholder(
 
 
 def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[TurnJournalEvent]) -> None:
+    """Replace the journal file. This is an explicit exception to append-only.
+
+    Allowed owners: edit-resubmit truncation and group-room transcript cleanup.
+    Model context must reconstruct from the rewritten JSONL afterwards; do not
+    treat rewrite as a second conversation fact source.
+    """
     path = turn_journal_path(project_root, session_id)
     event_list = [event for event in list(events or []) if isinstance(event, TurnJournalEvent)]
     with _journal_thread_lock(path):

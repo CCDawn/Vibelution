@@ -81,6 +81,12 @@ def test_llm_client_payload_rejects_ui_tool_calls_before_provider_projection():
     assert exc_info.value.details["forbiddenField"] == "toolCalls"
 
 
+def _assert_silent_repair_blocked(exc_info: pytest.ExceptionInfo[LLMError]) -> None:
+    assert exc_info.value.category == "payload_protocol_error"
+    assert exc_info.value.details["payloadValidationErrorType"] == "silent_provider_tool_chain_repair"
+    assert exc_info.value.details["payloadValidationResult"] == "blocked_before_provider"
+
+
 def test_llm_client_payload_repairs_orphan_tool_result_before_provider():
     config = make_config(
         **{
@@ -93,25 +99,19 @@ def test_llm_client_payload_repairs_orphan_tool_result_before_provider():
     )
 
     client = LLMClient(config=config, backend=lambda payload: payload)
-    payload = client._build_payload(
-        [
-            {
-                "role": "tool",
-                "tool_call_id": "call_orphan",
-                "content": "payload_protocol_error: Tool result has no pending assistant tool call.",
-            },
-            {"role": "user", "content": "继续"},
-        ]
-    )
+    with pytest.raises(LLMError) as exc_info:
+        client._build_payload(
+            [
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_orphan",
+                    "content": "payload_protocol_error: Tool result has no pending assistant tool call.",
+                },
+                {"role": "user", "content": "继续"},
+            ]
+        )
 
-    assert [message["role"] for message in payload["messages"]] == ["assistant", "user"]
-    assert "历史工具结果: unknown_tool" in payload["messages"][0]["content"]
-    assert "pending assistant tool call" in payload["messages"][0]["content"]
-    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
-    assert client._last_payload_protocol_summary["payloadMessageRoleSequence"] == ["assistant", "user"]
-    assert client._last_payload_protocol_summary["payloadMessageOrphanToolResultCount"] == 0
-    assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
-    assert client._last_payload_protocol_summary["payloadMessageShapeHash"]
+    _assert_silent_repair_blocked(exc_info)
 
 
 def test_responses_payload_repairs_orphan_tool_result_before_semantic_projection():
@@ -128,22 +128,18 @@ def test_responses_payload_repairs_orphan_tool_result_before_semantic_projection
     )
 
     client = LLMClient(config=config, backend=lambda payload: payload)
-    payload = client._build_payload(
-        [
-            ToolMessage(
-                content="payload_protocol_error: tool result has no preceding call",
-                tool_call_id="call_orphan",
-            ),
-            {"role": "user", "content": "继续"},
-        ]
-    )
+    with pytest.raises(LLMError) as exc_info:
+        client._build_payload(
+            [
+                ToolMessage(
+                    content="payload_protocol_error: tool result has no preceding call",
+                    tool_call_id="call_orphan",
+                ),
+                {"role": "user", "content": "继续"},
+            ]
+        )
 
-    assert "messages" not in payload
-    assert [item["role"] for item in payload["input"]] == ["assistant", "user"]
-    assert "历史工具结果: unknown_tool" in str(payload["input"][0]["content"])
-    assert "function_call_output" not in str(payload["input"])
-    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
-    assert client._last_payload_protocol_summary["payloadMessageOrphanToolResultCount"] == 0
+    _assert_silent_repair_blocked(exc_info)
 
 
 def test_responses_payload_demotes_partial_parallel_tool_chain_to_semantic_wire_history():
@@ -160,29 +156,22 @@ def test_responses_payload_demotes_partial_parallel_tool_chain_to_semantic_wire_
     )
 
     client = LLMClient(config=config, backend=lambda payload: payload)
-    payload = client._build_payload(
-        [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {"id": "call_ok", "name": "cli_tool", "args": {"command": "echo ok"}},
-                    {"id": "call_missing", "name": "read_file_tool", "args": {"file_path": "missing.txt"}},
-                ],
-            ),
-            ToolMessage(content="ok", tool_call_id="call_ok"),
-            {"role": "user", "content": "继续"},
-        ]
-    )
+    with pytest.raises(LLMError) as exc_info:
+        client._build_payload(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"id": "call_ok", "name": "cli_tool", "args": {"command": "echo ok"}},
+                        {"id": "call_missing", "name": "read_file_tool", "args": {"file_path": "missing.txt"}},
+                    ],
+                ),
+                ToolMessage(content="ok", tool_call_id="call_ok"),
+                {"role": "user", "content": "继续"},
+            ]
+        )
 
-    assert "messages" not in payload
-    assert [item.get("type") or item.get("role") for item in payload["input"]] == [
-        "assistant",
-        "assistant",
-        "user",
-    ]
-    assert all(item.get("type") not in {"function_call", "function_call_output"} for item in payload["input"])
-    assert "历史工具调用未返回结果: read_file_tool" in str(payload["input"][0]["content"])
-    assert "历史工具结果: cli_tool" in str(payload["input"][1]["content"])
+    _assert_silent_repair_blocked(exc_info)
 
 
 def test_responses_payload_preserves_complete_tool_pair_wire_shape():
@@ -237,30 +226,25 @@ def test_llm_client_payload_repairs_unresolved_tool_call_before_provider():
     )
 
     client = LLMClient(config=config, backend=lambda payload: payload)
-    payload = client._build_payload(
-        [
-            {
-                "role": "assistant",
-                "content": "准备读取文件",
-                "tool_calls": [
-                    {
-                        "id": "call_pending",
-                        "type": "function",
-                        "function": {"name": "read_file_tool", "arguments": "{\"file_path\":\"demo.py\"}"},
-                    }
-                ],
-            },
-            {"role": "user", "content": "继续"},
-        ]
-    )
+    with pytest.raises(LLMError) as exc_info:
+        client._build_payload(
+            [
+                {
+                    "role": "assistant",
+                    "content": "准备读取文件",
+                    "tool_calls": [
+                        {
+                            "id": "call_pending",
+                            "type": "function",
+                            "function": {"name": "read_file_tool", "arguments": "{\"file_path\":\"demo.py\"}"},
+                        }
+                    ],
+                },
+                {"role": "user", "content": "继续"},
+            ]
+        )
 
-    assert [message["role"] for message in payload["messages"]] == ["assistant", "user"]
-    assert "tool_calls" not in payload["messages"][0]
-    assert "历史工具调用未返回结果: read_file_tool" in payload["messages"][0]["content"]
-    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
-    assert client._last_payload_protocol_summary["payloadMessageAssistantToolCallCount"] == 0
-    assert client._last_payload_protocol_summary["payloadMessageToolResultCount"] == 0
-    assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
+    _assert_silent_repair_blocked(exc_info)
 
 
 def test_llm_client_payload_demotes_partial_live_tool_chain_before_provider():
@@ -275,29 +259,22 @@ def test_llm_client_payload_demotes_partial_live_tool_chain_before_provider():
     )
 
     client = LLMClient(config=config, backend=lambda payload: payload)
-    payload = client._build_payload(
-        [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {"id": "call_ok", "name": "cli_tool", "args": {"command": "echo ok"}},
-                    {"id": "call_timeout", "name": "cli_tool", "args": {"command": "bash -c find ."}},
-                ],
-            ),
-            ToolMessage(content="ok", tool_call_id="call_ok"),
-            {"role": "user", "content": "继续"},
-        ]
-    )
+    with pytest.raises(LLMError) as exc_info:
+        client._build_payload(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"id": "call_ok", "name": "cli_tool", "args": {"command": "echo ok"}},
+                        {"id": "call_timeout", "name": "cli_tool", "args": {"command": "bash -c find ."}},
+                    ],
+                ),
+                ToolMessage(content="ok", tool_call_id="call_ok"),
+                {"role": "user", "content": "继续"},
+            ]
+        )
 
-    assert [message["role"] for message in payload["messages"]] == ["assistant", "assistant", "user"]
-    assert "tool_calls" not in payload["messages"][0]
-    assert "历史工具调用未返回结果: cli_tool" in payload["messages"][0]["content"]
-    assert "历史工具结果: cli_tool" in payload["messages"][1]["content"]
-    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
-    assert client._last_payload_protocol_summary["payloadMessageAssistantToolCallCount"] == 0
-    assert client._last_payload_protocol_summary["payloadMessageToolResultCount"] == 0
-    assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
-    assert client._last_payload_protocol_summary["payloadPolicyProviderToolChainRepaired"] >= 1
+    _assert_silent_repair_blocked(exc_info)
 
 
 def test_llm_client_payload_preserves_complete_live_timeout_tool_pair():
