@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
 
+from core.web.routes.team_template_models import (
+    TeamTemplateDetailResponse,
+    TeamTemplateInstantiatePayload,
+    TeamTemplateInstantiateResponse,
+    TeamTemplateListResponse,
+)
 from core.web.services.team_template_service import (
     TeamTemplateError,
     get_team_template,
@@ -16,16 +21,20 @@ from core.web.services.team_template_service import (
 router = APIRouter(tags=["team-templates"])
 
 
-class TeamTemplateInstantiatePayload(BaseModel):
-    name: str = Field("", max_length=160)
-
-
-@router.get("/team-templates")
+@router.get(
+    "/team-templates",
+    response_model=TeamTemplateListResponse,
+    response_model_exclude_unset=True,
+)
 def team_template_list() -> dict:
     return list_team_templates()
 
 
-@router.get("/team-templates/{template_id}")
+@router.get(
+    "/team-templates/{template_id}",
+    response_model=TeamTemplateDetailResponse,
+    response_model_exclude_unset=True,
+)
 def team_template_detail(template_id: str) -> dict:
     try:
         return get_team_template(template_id)
@@ -33,7 +42,12 @@ def team_template_detail(template_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/team-templates/{template_id}/instantiate", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/team-templates/{template_id}/instantiate",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TeamTemplateInstantiateResponse,
+    response_model_exclude_unset=True,
+)
 def team_template_instantiate(template_id: str, payload: TeamTemplateInstantiatePayload) -> dict:
     try:
         return instantiate_team_template(template_id, name=payload.name)
