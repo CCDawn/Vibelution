@@ -1017,19 +1017,20 @@ def test_delete_session_switches_to_latest_remaining_session(tmp_path, monkeypat
     ]
     assert [event["eventCode"] for event in events] == [
         "session.delete.requested",
+        "session.delete.directory_archived",
         "session.delete.deleted",
     ]
     assert events[0]["fields"]["phase"] == "ready"
-    assert events[1]["fields"]["nextActiveSessionId"] == "session-newer"
+    assert events[2]["fields"]["nextActiveSessionId"] == "session-newer"
     assert {
         "load_state",
         "repair_state",
         "resolve_target",
         "unbind_agent",
-        "save_state",
+        "save_state_and_archive",
         "runtime_cleanup",
-    }.issubset(events[1]["fields"]["timingsMs"])
-    assert events[1]["fields"]["durationMs"] >= events[1]["fields"]["timingsMs"]["save_state"]
+    }.issubset(events[2]["fields"]["timingsMs"])
+    assert events[2]["fields"]["durationMs"] >= events[2]["fields"]["timingsMs"]["save_state_and_archive"]
 
 
 def test_delete_session_keeps_bound_agent_active(tmp_path, monkeypatch):
