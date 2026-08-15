@@ -15,6 +15,10 @@ from config.provider_merge_migration import (
     ProviderMergeVerificationError,
 )
 
+from core.web.routes.config_workspace_models import (
+    ConfigWorkspaceResponse,
+    PublicConfigSummaryResponse,
+)
 from core.web.services.avatar_image_service import resolve_user_avatar_file, store_user_avatar_image
 from core.web.services.config_service import (
     ConfigConflictError,
@@ -310,12 +314,20 @@ def _raise_migration_http_error(exc: Exception) -> None:
     ) from exc
 
 
-@router.get("/config/public")
+@router.get(
+    "/config/public",
+    response_model=PublicConfigSummaryResponse,
+    response_model_exclude_unset=True,
+)
 def public_config_summary() -> dict:
     return get_config_summary()
 
 
-@router.get("/config/workspace")
+@router.get(
+    "/config/workspace",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_workspace() -> dict:
     return get_config_workspace()
 
