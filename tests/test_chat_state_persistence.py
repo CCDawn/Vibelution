@@ -568,3 +568,54 @@ def test_persist_recovered_live_output_writes_only_target_session_row(tmp_path, 
     assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
     assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+def _stub_schedule_side_effects(monkeypatch) -> None:
+    monkeypatch.setattr(session_service, "_is_session_turn_current", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(session_service, "_set_session_turn_progress_live_output", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_persist_chat_turn_work_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "core.web.services.session.directory_bridge.touch_directory_session_safe",
+        lambda *_args, **_kwargs: None,
+    )
+
+
+def test_mark_session_turn_queued_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Queue status must upsert the waiting session instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    _stub_schedule_side_effects(monkeypatch)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service._mark_session_turn_queued(
+        {"session_id": "session-a", "turn_id": "turn-a", "agent_id": "agent-a"},
+        queue_position=1,
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "queued"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+def test_mark_session_turn_dequeued_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Dequeue status must upsert the admitted session instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="queued")
+    _stub_schedule_side_effects(monkeypatch)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service._mark_session_turn_dequeued(
+        {"session_id": "session-a", "turn_id": "turn-a", "agent_id": "agent-a"},
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "running"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"

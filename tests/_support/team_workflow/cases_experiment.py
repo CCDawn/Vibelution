@@ -735,6 +735,35 @@ def test_formal_execution_config_prefers_payload_then_skips_bounded_fallback():
     assert formal_execution_config_is_provisioned({}) is False
 
 
+def test_formal_execution_config_overlays_partial_payload_on_stored_preparation():
+    from core.web.services.team_workflow.experiment_api.full_run import (
+        resolve_formal_execution_config,
+    )
+
+    plan = {
+        "activeFullRunPreparation": {
+            "executionConfig": {
+                "pythonExecutable": "C:/stored/python.exe",
+                "dataRoot": "C:/stored/data",
+                "outputRoot": "C:/stored/out",
+                "epochs": 5,
+                "timeoutSeconds": 3600,
+            },
+        },
+    }
+
+    resolved = resolve_formal_execution_config(
+        plan,
+        {"executionConfig": {"epochs": 1, "timeoutSeconds": 60}},
+    )
+
+    assert resolved["pythonExecutable"] == "C:/stored/python.exe"
+    assert resolved["dataRoot"] == "C:/stored/data"
+    assert resolved["outputRoot"] == "C:/stored/out"
+    assert resolved["epochs"] == 1
+    assert resolved["timeoutSeconds"] == 60
+
+
 def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
