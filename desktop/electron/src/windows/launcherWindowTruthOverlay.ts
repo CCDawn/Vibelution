@@ -7,6 +7,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function composeInstanceLifecycleState(input: {
+  phase?: string;
+  observedState?: string;
+  backendAlive?: boolean;
+  backendHealthy?: boolean;
+  backendListening?: boolean;
+  backendConflict?: boolean;
+  frontendReady?: boolean;
+  windowOpen?: boolean;
+  failureMessage?: string;
+}): "starting" | "restarting" | "stopping" | "error" | "running" | "partial" | "closed" {
+  const phase = String(input.phase || "").trim().toLowerCase();
+  if (phase === "restarting" || phase === "restart") {
+    return "restarting";
+  }
+  if (phase === "closing" || phase === "stopping" || phase === "force_stopping") {
+    return "stopping";
+  }
+  if (input.backendConflict) {
+    return "error";
+  }
+  if (phase === "failed" || String(input.failureMessage || "").trim()) {
+    return "error";
+  }
+  const backendReady = Boolean(
+    input.backendAlive && input.backendHealthy && input.backendListening && !input.backendConflict
+  );
+  if ((phase === "opening" || phase === "starting") && !backendReady && !input.windowOpen) {
+    return "starting";
+  }
+  if (backendReady && input.frontendReady !== false && input.windowOpen) {
+    return "running";
+  }
+  const observed = String(input.observedState || "").trim().toLowerCase();
+  if (
+    input.backendAlive
+    || input.backendListening
+    || input.windowOpen
+    || observed === "open"
+    || observed === "partial"
+    || observed === "running"
+    || observed === "healthy"
+  ) {
+    return "partial";
+  }
+  return "closed";
+}
+
+function backendReadyFromBundle(bundle: Record<string, unknown>): boolean {
+  const backend = isRecord(bundle.backend) ? bundle.backend : {};
+  return backend.alive === true && backend.healthy === true && backend.portListening === true && backend.portConflict !== true;
+}
+
 function overlayRetiredControlPort(payload: Record<string, unknown>): Record<string, unknown> {
   const launcher = isRecord(payload.launcher) ? { ...payload.launcher } : null;
   if (launcher) {
@@ -67,11 +120,19 @@ function overlayStatusWindowTruth(
     browser.alive = false;
     browser.managed = false;
     const observed = String(bundle.observedState || "").toLowerCase();
-    if (observed === "open") {
+    const backendReady = backendReadyFromBundle(bundle);
+    if (observed === "open" || (backendReady && observed !== "closed")) {
       bundle.observedState = "partial";
       if (!String(bundle.lifecycleConsistency || "").trim()) {
         bundle.lifecycleConsistency = "browser_missing";
       }
+    } else if (backendReady) {
+      bundle.observedState = "partial";
+      bundle.lifecycleConsistency = "browser_missing";
+    }
+    const phase = String(bundle.phase || "").toLowerCase();
+    if ((phase === "opening" || phase === "starting") && backendReady) {
+      bundle.phase = "steady";
     }
   }
 
@@ -127,12 +188,29 @@ function overlayBranchInstancesWindowTruth(
     if (windowOpen !== null) {
       window.open = windowOpen;
       window.pid = windowOpen ? Math.max(0, rendererPid) : 0;
-      if (windowOpen) {
+      runtime.window = window;
+      const backend = isRecord(runtime.backend) ? runtime.backend : null;
+      if (backend) {
+        const frontend = isRecord(runtime.frontend) ? runtime.frontend : {};
+        const error = isRecord(runtime.error) ? runtime.error : {};
+        const lifecycleState = composeInstanceLifecycleState({
+          phase: String(runtime.phase || ""),
+          observedState: String(runtime.observedState || ""),
+          backendAlive: backend.alive === true,
+          backendHealthy: backend.healthy === true,
+          backendListening: backend.listening === true,
+          backendConflict: backend.portConflict === true,
+          frontendReady: frontend.ready !== false,
+          windowOpen,
+          failureMessage: String(error.message || "")
+        });
+        runtime.lifecycleState = lifecycleState;
+        const backendLive = backend.alive === true || backend.listening === true;
+        item.alive = windowOpen || backendLive;
+        item.startable = lifecycleState === "closed";
+      } else if (windowOpen) {
         item.alive = true;
         item.startable = false;
-        runtime.window = window;
-      } else {
-        runtime.window = window;
       }
       item.runtime = runtime;
     }

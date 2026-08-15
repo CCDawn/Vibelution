@@ -825,6 +825,48 @@ def test_desktop_session_store_projects_launcher_only_electron_session(tmp_path,
     assert "observedState" not in projection
 
 
+def test_desktop_session_store_closed_workbench_does_not_claim_observed_closed(tmp_path, monkeypatch):
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
+    created = launcher_service.register_desktop_session(
+        {
+            "desktopSessionId": "electron-closed-window-1",
+            "provider": "electron",
+            "workspaceRoot": str(tmp_path),
+            "capabilities": ["desktop_actions.claim"],
+        }
+    )
+    launcher_service.update_desktop_session_window(
+        "electron-closed-window-1",
+        "workbench",
+        {
+            "revision": created["revision"],
+            "provider": "electron",
+            "open": False,
+            "focused": False,
+            "windowId": 0,
+            "rendererProcessId": 0,
+            "url": "",
+        },
+    )
+
+    projection = desktop_session_store.latest_active_window_provider_projection(
+        workspace_root=str(tmp_path)
+    )
+    workbench = desktop_session_store.latest_active_workbench_projection()
+
+    assert projection["browserWindowAlive"] is False
+    assert projection["windowManaged"] is False
+    assert "observedState" not in projection
+    assert workbench["browserWindowAlive"] is False
+    assert "observedState" not in workbench
+
+
 def test_launcher_payload_prefers_launcher_only_electron_provider_projection(tmp_path, monkeypatch):
     from core.launcher import desktop_session_store
 

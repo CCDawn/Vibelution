@@ -47,10 +47,10 @@ export class DesktopSessionMirrorQueue {
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {
-    const result = this.tail.then(operation).catch((error: unknown) => {
+    const result = this.tail.then(operation);
+    this.tail = result.catch((error: unknown) => {
       this.onError(error);
     });
-    this.tail = result;
     return result;
   }
 }

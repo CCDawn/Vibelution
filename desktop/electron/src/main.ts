@@ -762,7 +762,7 @@ function startDesktopSessionHeartbeatIfNeeded(paths: DesktopPaths, bootstrap: La
           revision: desktopSessionRevision
         });
         desktopSessionRevision = result.revision;
-        void desktopSessionMirror.mutate("heartbeat", (mirrorRevision) => heartbeatDesktopSession({
+        await desktopSessionMirror.mutate("heartbeat", (mirrorRevision) => heartbeatDesktopSession({
           ...context,
           revision: mirrorRevision
         }));

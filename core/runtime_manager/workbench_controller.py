@@ -40,7 +40,11 @@ from .scene_logging import (
     runtime_manager_event_phase,
     truncate_event_text,
 )
-from .window_provider_state import window_provider_projection, with_window_provider_projection
+from .window_provider_state import (
+    compose_observed_state,
+    window_provider_projection,
+    with_window_provider_projection,
+)
 
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 INTERNAL_LAUNCHER_VALUE = "1"
@@ -526,6 +530,23 @@ def persist_workbench_launcher_state_after_open(
     browser_launch_pid = int(observed.get("browserLaunchPid") or browser_window_pid or 0)
     backend_launch_pid = int(observed.get("backendLaunchPid") or backend_pid or 0)
     backend_port = int(observed.get("backendPort") or configured_backend_port())
+    window_ready = bool(
+        observed.get("browserWindowAlive")
+        or observed.get("windowManaged")
+        or browser_window_pid > 0
+    )
+    backend_ready = bool(
+        observed.get("backendObserved")
+        or observed.get("backendAlive")
+        or observed.get("backendHealthy")
+        or backend_pid > 0
+    )
+    observed_state = compose_observed_state(backend_ready=backend_ready, window_ready=window_ready)
+    status_line = (
+        "Workbench is running."
+        if observed_state == "open"
+        else "Workbench window is closed; backend is still running."
+    )
     workbench_profile_dir = str(
         observed.get("browserProfileDir")
         or previous_state.get("workbenchBrowserProfileDir")
@@ -539,7 +560,7 @@ def persist_workbench_launcher_state_after_open(
             "sessionRole": "workbench",
             "sessionId": str(observed.get("sessionId") or previous_state.get("sessionId") or "").strip(),
             "desiredState": "open",
-            "observedState": "open",
+            "observedState": observed_state,
             "phase": "steady",
             "backendPid": backend_pid,
             "backendLaunchPid": backend_launch_pid,
@@ -555,7 +576,7 @@ def persist_workbench_launcher_state_after_open(
             "url": str(observed.get("url") or previous_state.get("url") or DEFAULT_URL).strip() or DEFAULT_URL,
             "backendPort": backend_port,
             "port": backend_port,
-            "statusLine": "Workbench is running.",
+            "statusLine": status_line,
             "failureMessage": "",
             "lastReason": str(last_reason or previous_state.get("lastReason") or "runtime_manager_open").strip(),
             "lastSource": str(last_source or previous_state.get("lastSource") or "runtime_manager").strip(),
@@ -1020,11 +1041,18 @@ def observe_workbench(
                         or bool(_visible_top_level_window_handles(browser_window_pid))
                     )
     launcher_browser_window_alive = _is_browser_window_alive(launcher_browser_window_pid)
-    managed_browser_missing = bool(
+    window_provider = str(window_projection.get("windowProvider") or "").strip().lower()
+    electron_window_missing = bool(
         observed_session_role != "launcher_control_surface"
-        and browser_managed
+        and window_provider == "electron"
         and backend_observed
         and not browser_window_alive
+    )
+    managed_browser_missing = bool(
+        observed_session_role != "launcher_control_surface"
+        and backend_observed
+        and not browser_window_alive
+        and (browser_managed or electron_window_missing)
     )
     if observed_session_role == "launcher_control_surface":
         observed_state = "closed"

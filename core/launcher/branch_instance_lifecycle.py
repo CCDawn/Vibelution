@@ -243,8 +243,6 @@ def _instance_lifecycle_state(
     window_open: bool,
     failure_message: str,
 ) -> tuple[str, str]:
-    if phase in {"opening", "starting"}:
-        return "starting", ""
     if phase in {"restarting", "restart"}:
         return "restarting", ""
     if phase in {"closing", "stopping", "force_stopping"}:
@@ -259,6 +257,8 @@ def _instance_lifecycle_state(
         return "error", "runtime_error"
 
     backend_ready = backend_alive and backend_healthy and backend_listening and not backend_conflict
+    if phase in {"opening", "starting"} and not backend_ready and not window_open:
+        return "starting", ""
     if backend_ready and frontend_ready and window_open:
         return "running", ""
     has_runtime_signal = bool(

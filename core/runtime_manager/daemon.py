@@ -65,6 +65,7 @@ from .process_inventory import (
     terminate_unmanaged_workbench_processes,
     terminate_workbench_processes,
 )
+from .window_provider_state import compose_observed_state
 from .workbench_controller import (
     LAUNCHER_ACTION_CANCELLED_RETURN_CODE,
     clear_workbench_launcher_state_after_close,
@@ -1005,12 +1006,12 @@ def _open_window_ready(observation: dict[str, Any]) -> bool:
 
 
 def _open_request_ready(observation: dict[str, Any], *, no_browser: bool, launcher_confirmed: bool = False) -> bool:
-    if str(observation.get("observedState") or "closed") != "open":
-        return False
     if not _open_backend_ready(observation, launcher_confirmed=launcher_confirmed):
         return False
     if no_browser:
         return True
+    if str(observation.get("observedState") or "closed") != "open":
+        return False
     return _open_window_ready(observation)
 
 
@@ -3192,10 +3193,16 @@ class RuntimeManagerDaemon:
     ) -> dict[str, Any]:
         state = load_state()
         workbench = state.setdefault("workbench", {})
+        window_ready = _open_window_ready(verification)
+        backend_ready = _open_backend_ready(verification, launcher_confirmed=True)
+        observed_state = compose_observed_state(backend_ready=backend_ready, window_ready=window_ready)
+        lifecycle_consistency = str(verification.get("lifecycleConsistency") or "consistent")
+        if observed_state == "partial" and backend_ready and not window_ready:
+            lifecycle_consistency = "browser_missing"
         workbench.update(
             {
                 "desiredState": "open",
-                "observedState": "open",
+                "observedState": observed_state,
                 "phase": "steady",
                 "failureMessage": "",
                 "sessionId": str(verification.get("sessionId") or "").strip(),
@@ -3218,15 +3225,15 @@ class RuntimeManagerDaemon:
                 "browserManaged": bool(verification.get("browserManaged", True)),
                 "backendMissing": False,
                 "frontendOrphaned": False,
-                "lifecycleConsistency": str(verification.get("lifecycleConsistency") or "consistent"),
+                "lifecycleConsistency": lifecycle_consistency,
                 "url": str(verification.get("url") or workbench.get("url") or "").strip(),
                 "statusLine": _build_workbench_status_line(
                     desired_state="open",
-                    observed_state="open",
+                    observed_state=observed_state,
                     phase="steady",
                     backend_pid=int(verification.get("backendPid") or 0),
                     browser_pid=int(verification.get("browserWindowPid") or 0),
-                    lifecycle_consistency=str(verification.get("lifecycleConsistency") or "consistent"),
+                    lifecycle_consistency=lifecycle_consistency,
                 ),
             }
         )
