@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
+
+import pytest
 
 from core.chat.conversation_ledger import (
     EVENT_TURN_STARTED,
@@ -239,3 +243,152 @@ def test_steer_guidance_stays_in_model_history_but_is_not_editable() -> None:
     assert session_service._should_omit_message_from_agent_history(steer) is False
     messages = [original, {"role": "assistant", "content": "working"}, steer]
     assert session_service._latest_user_message_index(messages) == 0
+
+
+def _chat_state_lock_held() -> bool:
+    lock = session_service._CHAT_STATE_LOCK
+    return bool(getattr(lock._local, "transactions", None))
+
+
+def _seed_submittable_sessions(tmp_path: Path, session_ids: list[str]) -> None:
+    conversations = [
+        {
+            "conversation_id": session_id,
+            "title": session_id,
+            "updated_at": "2026-05-18T12:00:00",
+            "last_turn_status": "ready",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "seed",
+                    "timestamp": "2026-05-18T11:55:00",
+                }
+            ],
+        }
+        for session_id in session_ids
+    ]
+    _seed_chat_state(tmp_path, conversations=conversations)
+    for session_id in session_ids:
+        _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+
+
+def test_new_turn_ledger_io_runs_outside_chat_state_lock(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services import agent_directory_service
+
+    session_id = "session-live"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_submittable_sessions(tmp_path, [session_id])
+    held_during_ledger: list[tuple[str, bool]] = []
+
+    def fake_reconcile(target_session_id, **kwargs):
+        held_during_ledger.append(("reconcile", _chat_state_lock_held()))
+        assert kwargs.get("reason") == "new_turn_submitted"
+        assert target_session_id == session_id
+
+    def fake_visible(target_session_id):
+        held_during_ledger.append(("visible", _chat_state_lock_held()))
+        assert target_session_id == session_id
+        return []
+
+    monkeypatch.setattr(session_service, "_reconcile_stale_session_ledger", fake_reconcile)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", fake_visible)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    try:
+        result = submit.submit_session_message_lightweight(
+            session_id,
+            "outside lock",
+            mental_model_enabled=False,
+        )
+        assert result["accepted"] is True
+        assert held_during_ledger == [("reconcile", False), ("visible", False)]
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_same_session_second_submit_stays_busy(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services import agent_directory_service
+
+    session_id = "session-live"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_submittable_sessions(tmp_path, [session_id])
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    try:
+        first = submit.submit_session_message_lightweight(
+            session_id,
+            "first turn",
+            mental_model_enabled=False,
+        )
+        assert first["accepted"] is True
+        with pytest.raises(session_service.SessionBusyError) as exc_info:
+            submit.submit_session_message_lightweight(
+                session_id,
+                "second turn",
+                mental_model_enabled=False,
+            )
+        message = str(exc_info.value)
+        assert "仍在运行" in message or "still running" in message.lower()
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_parallel_session_submits_do_not_serialize_on_ledger_io(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services import agent_directory_service
+
+    session_ids = ["session-a", "session-b", "session-c"]
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_submittable_sessions(tmp_path, session_ids)
+
+    barrier = threading.Barrier(len(session_ids))
+    held_during_ledger: list[bool] = []
+    accepted_timings: list[dict] = []
+    results: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def slow_reconcile(session_id, **kwargs):
+        held_during_ledger.append(_chat_state_lock_held())
+        barrier.wait(timeout=2)
+        time.sleep(0.15)
+
+    def capture_accepted(context, timing_fields):
+        accepted_timings.append(dict(timing_fields))
+
+    monkeypatch.setattr(session_service, "_reconcile_stale_session_ledger", slow_reconcile)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda session_id: [])
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    monkeypatch.setattr(session_service, "_record_session_turn_accepted_event", capture_accepted)
+
+    def submit_one(session_id: str) -> None:
+        try:
+            results[session_id] = submit.submit_session_message_lightweight(
+                session_id,
+                f"parallel {session_id}",
+                mental_model_enabled=False,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=submit_one, args=(session_id,), daemon=True)
+        for session_id in session_ids
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    try:
+        assert errors == []
+        assert all(thread.is_alive() is False for thread in threads)
+        assert all(isinstance(results.get(session_id), dict) and results[session_id]["accepted"] for session_id in session_ids)
+        # Reaching the shared barrier means the 150ms ledger sleeps overlapped.
+        # Holding _CHAT_STATE_LOCK across that I/O would deadlock the barrier.
+        assert held_during_ledger == [False, False, False]
+        assert len(accepted_timings) == 3
+    finally:
+        for session_id in session_ids:
+            _reset_seeded_session_runtime(session_id)

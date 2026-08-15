@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Any
+import threading
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
@@ -26,6 +28,54 @@ def _service():
     from core.web.services import session_service
 
     return session_service
+
+
+_SESSION_SUBMIT_ADMIT_LOCKS_GUARD = threading.Lock()
+_SESSION_SUBMIT_ADMIT_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _session_submit_admit_lock(session_id: str) -> threading.Lock:
+    """Serialize admit for one session without blocking other sessions."""
+
+    normalized = str(session_id or "").strip()
+    with _SESSION_SUBMIT_ADMIT_LOCKS_GUARD:
+        lock = _SESSION_SUBMIT_ADMIT_LOCKS.get(normalized)
+        if lock is None:
+            lock = threading.Lock()
+            _SESSION_SUBMIT_ADMIT_LOCKS[normalized] = lock
+        return lock
+
+
+@contextmanager
+def _release_acquired_lock(lock: threading.Lock) -> Iterator[threading.Lock]:
+    try:
+        yield lock
+    finally:
+        lock.release()
+
+
+def _session_still_running_error(service: Any, lang: str) -> Any:
+    return service.SessionBusyError(
+        service.text_for(
+            lang,
+            zh="当前会话仍在运行，请等这一轮结束后再继续发送。",
+            en="This session is still running. Wait for the current turn to finish before sending again.",
+        )
+    )
+
+
+def _require_positive_context_limit(service: Any, conversation: dict[str, Any], lang: str) -> dict[str, Any]:
+    context_limit_payload = service._session_context_limit_payload(conversation)
+    if int(context_limit_payload.get("limit") or 0) <= 0:
+        detail = str(context_limit_payload.get("error") or "").strip()
+        if not detail:
+            detail = service.text_for(
+                lang,
+                zh="未配置模型 max 上下文窗口（禁止默认兜底）。请在设置中为对话模型填写 context_window，或先运行模型发现。",
+                en="Model max context window is not configured (silent defaults are disabled). Set context_window for the dialogue model in settings, or run model discovery first.",
+            )
+        raise service.SessionValidationError(detail)
+    return context_limit_payload
 
 
 def _append_initial_session_journal_markers(
@@ -299,8 +349,47 @@ def submit_session_message(
     if not conversation_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
     s._validate_user_message_not_encoding_replacement(message, lang=lang)
+    if s._is_session_running(conversation_id):
+        raise _session_still_running_error(s, lang)
+
+    # Ledger I/O is per-session. Holding _CHAT_STATE_LOCK across it serializes
+    # every other session's 202 accept (measured 6-way wait ~20s).
+    admit_lock = _session_submit_admit_lock(conversation_id)
+    admit_lock.acquire()
+    prepared_agent: dict[str, Any] | None = None
+    prepared_agent_id = ""
+    prepared_context_limit_ok = False
+    try:
+        if s._is_session_running(conversation_id):
+            raise _session_still_running_error(s, lang)
+        ledger_started_at = s._perf_counter()
+        s._reconcile_stale_session_ledger(conversation_id, reason="new_turn_submitted")
+        previous_messages = s._session_ledger_visible_messages(conversation_id)
+        submit_timing_fields["ledgerReconcileMs"] = s._elapsed_ms(ledger_started_at)
+        prepare_started_at = s._perf_counter()
+        preview_conversation = s._find_conversation_entry(
+            s.load_chat_state(s.PROJECT_ROOT),
+            conversation_id,
+        )
+        if preview_conversation is not None:
+            _require_positive_context_limit(s, preview_conversation, lang)
+            prepared_context_limit_ok = True
+            prepared_agent_id = str(
+                preview_conversation.get("agent_id") or preview_conversation.get("agentId") or ""
+            ).strip()
+            if prepared_agent_id:
+                prepared_agent = s._resolve_active_agent_for_turn(
+                    conversation_id,
+                    prepared_agent_id,
+                    lang=lang,
+                )
+        submit_timing_fields["submitPrepareMs"] = s._elapsed_ms(prepare_started_at)
+    except BaseException:
+        admit_lock.release()
+        raise
+
     lock_wait_started_at = s._perf_counter()
-    with s._CHAT_STATE_LOCK:
+    with _release_acquired_lock(admit_lock), s._CHAT_STATE_LOCK:
         lock_acquired_at = s._perf_counter()
         submit_timing_fields["chatStateLockWaitMs"] = s._elapsed_ms_between(lock_wait_started_at, lock_acquired_at)
         payload = s.load_chat_state(s.PROJECT_ROOT)
@@ -309,17 +398,8 @@ def submit_session_message(
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
         # Fail closed: never run a turn with an invented context window.
-        context_limit_payload = s._session_context_limit_payload(conversation)
-        context_limit = int(context_limit_payload.get("limit") or 0)
-        if context_limit <= 0:
-            detail = str(context_limit_payload.get("error") or "").strip()
-            if not detail:
-                detail = s.text_for(
-                    lang,
-                    zh="未配置模型 max 上下文窗口（禁止默认兜底）。请在设置中为对话模型填写 context_window，或先运行模型发现。",
-                    en="Model max context window is not configured (silent defaults are disabled). Set context_window for the dialogue model in settings, or run model discovery first.",
-                )
-            raise s.SessionValidationError(detail)
+        if not prepared_context_limit_ok:
+            _require_positive_context_limit(s, conversation, lang)
         s._ensure_session_mutable(
             conversation_id,
             conversation=conversation,
@@ -387,13 +467,7 @@ def submit_session_message(
             )
 
         if s._is_session_running(conversation_id):
-            raise s.SessionBusyError(
-                s.text_for(
-                    lang,
-                    zh="当前会话仍在运行，请等这一轮结束后再继续发送。",
-                    en="This session is still running. Wait for the current turn to finish before sending again.",
-                )
-            )
+            raise _session_still_running_error(s, lang)
 
         if normalized_message_source == "supervised_evolution":
             requested_leases = [s.SUPERVISED_EVALUATION_CHAT_LEASE]
@@ -424,13 +498,17 @@ def submit_session_message(
             s.save_chat_state(s.PROJECT_ROOT, payload)
             raise s.SessionBusyError(localized_reason)
 
-        s._ensure_conversation_agent_metadata(conversation)
-        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        agent = s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
+        if prepared_agent is None:
+            s._ensure_conversation_agent_metadata(conversation)
+            agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+            agent = s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
+        else:
+            agent_id = str(
+                conversation.get("agent_id") or conversation.get("agentId") or prepared_agent_id
+            ).strip() or prepared_agent_id
+            agent = prepared_agent
         skill_command = s.parse_skill_slash_command(message)
         skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
-        s._reconcile_stale_session_ledger(conversation_id, reason="new_turn_submitted")
-        previous_messages = s._session_ledger_visible_messages(conversation_id)
         reserved_turn_id = str(
             (existing_development_admission or {}).get("turnId") or ""
         ).strip()
