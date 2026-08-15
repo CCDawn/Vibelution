@@ -29,6 +29,10 @@ from core.web.routes.config_draft_provider_models import (
     ConfigProviderIdSuggestionResponse,
     ConfigProviderRoutePreviewResponse,
 )
+from core.web.routes.config_apply_shell_models import (
+    ConfigImageUploadResponse,
+    ConfigOpenEnvironmentResponse,
+)
 from core.web.routes.config_workspace_models import (
     ConfigWorkspaceResponse,
     PublicConfigSummaryResponse,
@@ -463,7 +467,11 @@ def config_llm_v2_migration_rollback(
         _raise_migration_http_error(exc)
 
 
-@router.post("/config/open-environment")
+@router.post(
+    "/config/open-environment",
+    response_model=ConfigOpenEnvironmentResponse,
+    response_model_exclude_unset=True,
+)
 def config_open_environment() -> dict:
     try:
         return open_system_environment_settings()
@@ -471,7 +479,11 @@ def config_open_environment() -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/avatar-image")
+@router.post(
+    "/config/avatar-image",
+    response_model=ConfigImageUploadResponse,
+    response_model_exclude_unset=True,
+)
 def config_upload_avatar_image(payload: ConfigAvatarImagePayload) -> dict:
     try:
         return store_user_avatar_image(
@@ -483,7 +495,7 @@ def config_upload_avatar_image(payload: ConfigAvatarImagePayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.get("/config/avatar-image/{filename}")
+@router.get("/config/avatar-image/{filename}", response_class=FileResponse)
 def config_get_avatar_image(filename: str) -> FileResponse:
     try:
         path = resolve_user_avatar_file(filename)
@@ -494,7 +506,11 @@ def config_get_avatar_image(filename: str) -> FileResponse:
     return FileResponse(path)
 
 
-@router.post("/config/theme-background-image")
+@router.post(
+    "/config/theme-background-image",
+    response_model=ConfigImageUploadResponse,
+    response_model_exclude_unset=True,
+)
 def config_upload_theme_background_image(payload: ConfigThemeBackgroundImagePayload) -> dict:
     try:
         return store_theme_background_image(
@@ -506,7 +522,7 @@ def config_upload_theme_background_image(payload: ConfigThemeBackgroundImagePayl
         _raise_config_http_error(exc)
 
 
-@router.get("/config/theme-background-image/{filename}")
+@router.get("/config/theme-background-image/{filename}", response_class=FileResponse)
 def config_get_theme_background_image(filename: str) -> FileResponse:
     try:
         path = resolve_theme_background_file(filename)
@@ -817,7 +833,11 @@ def config_discover_models(payload: ConfigDiscoverModelsPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.put("/config/apply")
+@router.put(
+    "/config/apply",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_apply(payload: ConfigDraftPayload) -> dict:
     try:
         return apply_config_workspace(
@@ -830,11 +850,19 @@ def config_apply(payload: ConfigDraftPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.put("/config/intake-mode")
+@router.put(
+    "/config/intake-mode",
+    response_model=PublicConfigSummaryResponse,
+    response_model_exclude_unset=True,
+)
 def set_intake_mode(payload: IntakeModeUpdateRequest) -> dict:
     return update_intake_mode(payload.intakeMode)
 
 
-@router.put("/config/language")
+@router.put(
+    "/config/language",
+    response_model=PublicConfigSummaryResponse,
+    response_model_exclude_unset=True,
+)
 def set_language(payload: LanguageUpdateRequest) -> dict:
     return update_language(payload.language)

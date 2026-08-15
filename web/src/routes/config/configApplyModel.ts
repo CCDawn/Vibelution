@@ -1,6 +1,6 @@
 /**
  * Pure apply-request builders for ConfigRoute.
- * React state, requestJson, and syncWorkspace remain on the route.
+ * React state and syncWorkspace remain on the route.
  */
 import type {
   ConfigDraftMeta,

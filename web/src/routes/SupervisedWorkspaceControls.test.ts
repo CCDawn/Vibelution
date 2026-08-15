@@ -108,6 +108,11 @@ describe("supervised workspace controls", () => {
     expect(tabsStylesSource).toContain("min-w-0");
   });
 
+  it("persists intake mode through the config domain transport", () => {
+    expect(controlsSource).toContain("updateIntakeMode(intakeMode)");
+    expect(controlsSource).not.toContain("/api/config/intake-mode");
+  });
+
   it("explains the governance impact before switching review modes", () => {
     expect(controlsSource).toContain("modeImpactHint");
     expect(controlsSource).toContain("候选池的手工治理动作会被锁定");

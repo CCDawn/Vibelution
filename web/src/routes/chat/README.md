@@ -49,6 +49,7 @@ Chat surface. Rules:
 | Tool approval copy | `toolApprovalLabels.ts`, `ChatToolApprovalDialog.tsx` | left rail JSX |
 | Submit telemetry fields | `chatSubmitTelemetry.ts` | layout resize |
 | Composer draft/attachments/submit pure helpers | `chatComposerSubmitModel.ts` | stream apply, dual EventSource |
+| Running-turn follow-up queue | `../components/conversation/composerFollowupQueueModel.ts` + `ConversationFollowupQueueBar.tsx` | edit-resubmit, stream apply |
 | Composer turn mutations + submit actions | `useChatComposerSubmit.ts` | session EventSource ownership |
 | Session stream connect/grace pure helpers | `chatSessionStreamConnect.ts` | opening EventSource |
 | Direct session detail SSE (sole EventSource) | `useSessionDetailStream.ts` | second session EventSource, group stream |

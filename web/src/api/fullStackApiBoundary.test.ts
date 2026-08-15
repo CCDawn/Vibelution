@@ -25,7 +25,6 @@ const routeTestPattern = /\.test\.(ts|tsx)$/;
 // Counts may only stay equal or decrease from this snapshot without explicit review.
 const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/AgentsRoute.tsx": 1,
-  "routes/ConfigRoute.tsx": 1,
   "routes/EvolutionRoute.tsx": 5,
   "routes/GitRoute.tsx": 8,
   "routes/LogsRoute.tsx": 5,
@@ -36,7 +35,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/SelfEvolutionTrack.tsx": 2,
   "routes/SkillsRoute.tsx": 2,
   "routes/SupervisedReviewRoute.tsx": 7,
-  "routes/SupervisedWorkspaceControls.tsx": 2,
+  "routes/SupervisedWorkspaceControls.tsx": 1,
   "routes/ToolsRoute.tsx": 9,
   "routes/UsageRoute.tsx": 1,
   "routes/agent-create/AgentCreateWizardDialog.tsx": 1,
@@ -64,7 +63,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/teams/useTeamsShellCanvasWorkspace.ts": 1,
 };
 // Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
-const legacyRouteFetchJsonAggregateBudget = 169;
+const legacyRouteFetchJsonAggregateBudget = 167;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {

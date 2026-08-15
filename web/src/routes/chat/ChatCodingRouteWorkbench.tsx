@@ -601,6 +601,7 @@ export function ChatCodingRoute() {
   const [sessionFilter, setSessionFilter] = useState("");
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
+  const [sessionFollowupQueues, setSessionFollowupQueues] = useState<Record<string, Array<{ id: string; text: string }>>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const composerFocusSequenceRef = useRef(0);
   const [composerFocusRequest, setComposerFocusRequest] = useState({ sessionId: "", signal: "" });
@@ -2177,6 +2178,7 @@ export function ChatCodingRoute() {
       ),
   );
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
+  const activeFollowupQueue = activeSessionId ? sessionFollowupQueues[activeSessionId] ?? [] : [];
   const activeComposerRawError = activeSessionId ? sessionComposerErrors[activeSessionId] ?? "" : "";
   const activeLatestTurnErrorMessage = useMemo(
     () => latestVisibleTurnErrorMessage(detail?.messages),
@@ -2339,6 +2341,7 @@ export function ChatCodingRoute() {
       editTargetMessageId: resolvedEditTarget?.messageId,
       editTargetPreview: resolvedEditTarget?.original,
       error: activeComposerError,
+      followupQueue: activeFollowupQueue,
       guidance: activeImageInputGuidance,
       imageAttachments: activeImageAttachments,
       imageInputUnsupported: activeAgentImageInputUnsupported,
@@ -2363,6 +2366,7 @@ export function ChatCodingRoute() {
       activeAgentImageInputUnsupported,
       activeComposerError,
       activeDraftEffective,
+      activeFollowupQueue,
       activeImageAttachments,
       activeReferenceAttachments,
       activeSessionId,
@@ -2383,6 +2387,9 @@ export function ChatCodingRoute() {
     handleSubmitTurn,
     handleStopTurn,
     handleSubmitGuidance,
+    handleFollowupQueueUpdate,
+    handleFollowupQueueRemove,
+    handleFollowupQueueMove,
     handleEditUserMessage,
     handleCancelEditMessage,
     handleComposerChange,
@@ -2401,6 +2408,8 @@ export function ChatCodingRoute() {
     stopTurnMutation,
     sessionGuidanceMutation,
     setSessionDrafts,
+    sessionFollowupQueues,
+    setSessionFollowupQueues,
     setSessionComposerErrors,
     setSessionImageAttachments,
     setSessionReferenceAttachments,
@@ -3634,6 +3643,9 @@ export function ChatCodingRoute() {
                 onStop: handleStopTurn,
                 onSafeGuidance: () => handleSubmitGuidance("safe"),
                 onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
+                onFollowupQueueUpdate: handleFollowupQueueUpdate,
+                onFollowupQueueRemove: handleFollowupQueueRemove,
+                onFollowupQueueMove: handleFollowupQueueMove,
               } : null}
               conversationFocused={statusRailCollapsed}
               filePreview={{
