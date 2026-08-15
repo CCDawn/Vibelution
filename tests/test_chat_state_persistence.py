@@ -411,3 +411,69 @@ def test_stale_full_replace_cannot_prune_parallel_new_session_row(tmp_path, monk
     assert not submit_thread.is_alive()
     assert load_session_chat_state(tmp_path, "session-c")["title"] == "C"
     assert load_session_chat_state(tmp_path, "session-a")["title"] == "A"
+
+
+def test_load_conversations_repair_writes_only_dirty_session_rows(tmp_path, monkeypatch):
+    """List repair must upsert dirty runtime rows instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {
+                    "conversation_id": "session-a",
+                    "title": "A",
+                    "last_turn_status": "running",
+                },
+                {
+                    "conversation_id": "session-b",
+                    "title": "B",
+                    "last_turn_status": "ready",
+                },
+            ],
+        },
+    )
+
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
+    monkeypatch.setattr(session_service, "reconcile_stale_chat_turn_work_runs", lambda **_kwargs: [])
+    monkeypatch.setattr(session_service, "_release_stale_chat_turn_work_run", lambda **_kwargs: None)
+    monkeypatch.setattr(session_service, "_ensure_conversation_agent_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_ensure_conversation_workspace_metadata", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_repair_child_root_agent_direct_session_bindings", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *_args, **_kwargs: None)
+
+    full_saves: list[str] = []
+    original_save_chat_state = session_service.save_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "save_chat_state",
+        lambda *args, **kwargs: full_saves.append("save") or original_save_chat_state(*args, **kwargs),
+    )
+    session_saves: list[str] = []
+    original_save_session = session_service.save_session_chat_state
+
+    def _spy_save_session(project_root, session_id, conversation, **kwargs):
+        session_saves.append(str(session_id))
+        return original_save_session(project_root, session_id, conversation, **kwargs)
+
+    monkeypatch.setattr(session_service, "save_session_chat_state", _spy_save_session)
+
+    _active_id, conversations = session_service._load_conversations(
+        repair=True,
+        agent_by_id={},
+        hidden_team_member_agent_ids=set(),
+        lightweight=True,
+        defer_hidden_previews=True,
+    )
+
+    by_id = {str(item.get("id") or ""): item for item in conversations}
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert by_id["session-a"]["lastTurnStatus"] == "ready"
+    assert by_id["session-b"]["lastTurnStatus"] == "ready"
+    assert by_id["session-b"]["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"

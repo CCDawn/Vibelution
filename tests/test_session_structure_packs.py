@@ -161,6 +161,7 @@ def test_facade_reexports_session_ops_pack() -> None:
     assert facade.prewarm_session_list_cache is session_ops.prewarm_session_list_cache
     assert facade.append_session_assistant_artifact_message is session_ops.append_session_assistant_artifact_message
     assert facade._repair_stale_running_conversations is session_ops._repair_stale_running_conversations
+    assert facade._persist_dirty_session_runtime_rows is session_ops._persist_dirty_session_runtime_rows
     assert facade._session_prompt_cache_partition is session_ops._session_prompt_cache_partition
     assert facade._make_chat_message is session_ops._make_chat_message
 

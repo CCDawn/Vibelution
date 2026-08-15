@@ -4341,7 +4341,6 @@ def _load_conversations(
             payload = s._repair_stale_running_conversations(payload)
         active_id = str(payload.get("active_conversation_id") or s.DEFAULT_CHAT_CONVERSATION_ID).strip()
         conversations: list[dict[str, Any]] = []
-        changed = False
         agent_by_id = agent_by_id if agent_by_id is not None else s._agent_lookup_for_conversations()
         hidden_team_member_agent_ids = (
             hidden_team_member_agent_ids
@@ -4357,11 +4356,14 @@ def _load_conversations(
             except Exception:
                 ledger_workspace_root = None
         if repair:
-            changed = s._repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
+            s._repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id)
+        dirty_runtime_rows: list[dict[str, Any]] = []
         for raw in list(payload.get("conversations") or []):
             if repair and isinstance(raw, dict):
-                changed = s._ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
-                changed = s._ensure_conversation_workspace_metadata(raw) or changed
+                row_changed = s._ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id)
+                row_changed = s._ensure_conversation_workspace_metadata(raw) or row_changed
+                if row_changed:
+                    dirty_runtime_rows.append(raw)
             conversation = s._normalize_conversation(
                 raw,
                 agent_by_id=agent_by_id,
@@ -4388,9 +4390,9 @@ def _load_conversations(
                 conversation["_hasLedgerMessages"] = has_ledger_messages
             if conversation is not None:
                 conversations.append(conversation)
-        if repair and changed:
+        if dirty_runtime_rows:
             payload["updated_at"] = s._now_timestamp()
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s._persist_dirty_session_runtime_rows(dirty_runtime_rows)
         if phase_timings is not None:
             phase_timings["conversationNormalizeMs"] = s._elapsed_ms(normalize_started_at)
         return active_id or s.DEFAULT_CHAT_CONVERSATION_ID, conversations
