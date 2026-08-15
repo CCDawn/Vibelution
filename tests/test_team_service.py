@@ -1,11 +1,14 @@
 import json
+import threading
 
 import pytest
 
 from core.infrastructure import developer_sandbox
 from core.web.services import (
+    agent_bulk_delete_service,
     agent_config_workspace_service,
     agent_directory_service,
+    agent_mode_binding_service,
     agent_role_tool_profile_service,
     chat_room_service,
     project_agent_bus_service,
@@ -21,6 +24,8 @@ from tests.helpers.system_agent_state import (
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_bulk_delete_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -1795,6 +1800,105 @@ def test_archive_custom_team_cascades_member_agents(tmp_path, monkeypatch):
     assert archived_events[-1][1]["fields"]["deletedLinkedChatRoomIds"] == [team["linkedChatRoomId"]]
     room_events = [item for item in events if item[0][2] == "team.chat_room.deleted_for_archive"]
     assert room_events[-1][1]["fields"]["deletedLinkedChatRoomIds"] == [team["linkedChatRoomId"]]
+
+
+def test_archive_custom_team_seals_member_sessions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Cascade Seal Alpha")
+    team = team_service.create_team(
+        name="Cascade Seal Team",
+        members=[{"agentId": alpha["agentId"], "role": "lead"}],
+    )
+
+    archived = team_service.archive_team(team["teamId"])
+
+    assert archived["status"] == "archived"
+    detail = session_service.get_session_detail(alpha["id"])
+    assert detail is not None
+    assert detail["readOnly"] is True
+    assert detail["archiveState"]["status"] == "archived"
+    assert detail["archiveState"]["agentId"] == alpha["agentId"]
+
+
+def test_archive_team_releases_team_lock_before_archiving_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(
+        display_name="Lock Probe Alpha",
+        direct_session_id="session-lock-probe-alpha",
+    )
+    team = team_service.create_team(
+        name="Lock Probe Team",
+        members=[{"agentId": alpha["agentId"], "role": "lead"}],
+    )
+    entered_agent_archive = threading.Event()
+    release_agent_archive = threading.Event()
+    team_lock_free = threading.Event()
+    original_archive = agent_bulk_delete_service.archive_agent_instance
+
+    def blocking_archive(agent_id, *args, **kwargs):
+        entered_agent_archive.set()
+        assert release_agent_archive.wait(timeout=2)
+        return original_archive(agent_id, *args, **kwargs)
+
+    def probe_team_lock():
+        acquired = team_service._TEAM_LOCK.acquire(blocking=False)
+        if acquired:
+            team_service._TEAM_LOCK.release()
+            team_lock_free.set()
+
+    monkeypatch.setattr(agent_bulk_delete_service, "archive_agent_instance", blocking_archive)
+    archive_thread = threading.Thread(target=lambda: team_service.archive_team(team["teamId"]), daemon=True)
+    archive_thread.start()
+    assert entered_agent_archive.wait(timeout=2)
+    try:
+        probe_thread = threading.Thread(target=probe_team_lock, daemon=True)
+        probe_thread.start()
+        assert team_lock_free.wait(timeout=0.5), "Team archive must release _TEAM_LOCK before Agent archive."
+        probe_thread.join(timeout=1)
+    finally:
+        release_agent_archive.set()
+        archive_thread.join(timeout=2)
+    assert not archive_thread.is_alive()
+
+
+def test_create_team_releases_team_lock_before_direct_session_ensure(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Create Lock Probe")
+    entered_session_ensure = threading.Event()
+    release_session_ensure = threading.Event()
+    team_lock_free = threading.Event()
+    original_ensure = session_service.ensure_agent_direct_session
+
+    def blocking_ensure(*args, **kwargs):
+        entered_session_ensure.set()
+        assert release_session_ensure.wait(timeout=2)
+        return original_ensure(*args, **kwargs)
+
+    def probe_team_lock():
+        acquired = team_service._TEAM_LOCK.acquire(blocking=False)
+        if acquired:
+            team_service._TEAM_LOCK.release()
+            team_lock_free.set()
+
+    monkeypatch.setattr(session_service, "ensure_agent_direct_session", blocking_ensure)
+    create_thread = threading.Thread(
+        target=lambda: team_service.create_team(
+            name="Create Lock Probe Team",
+            members=[{"agentId": alpha["agentId"], "role": "lead"}],
+        ),
+        daemon=True,
+    )
+    create_thread.start()
+    assert entered_session_ensure.wait(timeout=2)
+    try:
+        probe_thread = threading.Thread(target=probe_team_lock, daemon=True)
+        probe_thread.start()
+        assert team_lock_free.wait(timeout=0.5), "Team create must release _TEAM_LOCK before direct session ensure."
+        probe_thread.join(timeout=1)
+    finally:
+        release_session_ensure.set()
+        create_thread.join(timeout=2)
+    assert not create_thread.is_alive()
 
 
 def test_archive_custom_team_removes_member_agents_from_extra_chat_rooms(tmp_path, monkeypatch):

@@ -1961,6 +1961,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("isSessionDetailHardLoading");
     expect(routeSource).toContain("mergePreservedCreatedSessions");
     expect(routeAndActionsSource).toContain("createSessionMutation.mutate({ agentId: selectedChatAgentId })");
+    const createMutationSource = routeAndLifecycleSource.slice(
+      routeAndLifecycleSource.indexOf("const createSessionMutation"),
+      routeAndLifecycleSource.indexOf("const createGroupRoomMutation"),
+    );
+    expect(createMutationSource).toContain("void queryClient.cancelQueries({ queryKey: [\"sessions\", \"query\"] })");
+    expect(createMutationSource).not.toContain("await Promise.all([\n        queryClient.cancelQueries({ queryKey: [\"sessions\", \"query\"] })");
     expect(routeSource).not.toContain("updateSessionAgentMutation");
     expect(routeSource).not.toContain("sessionAgentOptions");
     expect(routeSource).not.toContain("handleAgentTemplateChange");

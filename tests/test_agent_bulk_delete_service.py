@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 
 from core.web.services import (
@@ -136,9 +138,11 @@ def test_bulk_archive_restores_teams_when_room_cleanup_fails(tmp_path, monkeypat
         fail_room_cleanup,
     )
 
-    with pytest.raises(chat_room_service.ChatRoomBusyError, match="room cleanup failed"):
-        agent_bulk_delete_service.bulk_archive_agents([agent["agentId"]])
+    result = agent_bulk_delete_service.bulk_archive_agents([agent["agentId"]])
 
+    assert result["status"] == "failed"
+    assert result["summary"]["failedCount"] == 1
+    assert result["failed"][0]["reason"] == "busy"
     assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
     restored_members = team_service.get_team(team["teamId"])["members"]
     assert [member["agentId"] for member in restored_members] == [agent["agentId"]]
@@ -189,12 +193,12 @@ def test_bulk_archive_restores_references_for_failed_agent(tmp_path, monkeypatch
     assert result["timingsMs"]["rollback_teams"] >= 0
 
 
-def test_bulk_archive_reactivates_earlier_success_when_later_agent_fails(tmp_path, monkeypatch):
+def test_bulk_archive_keeps_earlier_success_when_later_agent_fails(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     first = session_service.create_chat_session(title="Bulk Archive First")
     second = session_service.create_chat_session(title="Bulk Archive Second")
     team = team_service.create_team(
-        name="Bulk Archive Atomic Team",
+        name="Bulk Archive Partial Team",
         members=[
             {"agentId": first["agentId"], "role": "lead"},
             {"agentId": second["agentId"], "role": "reviewer"},
@@ -211,17 +215,62 @@ def test_bulk_archive_reactivates_earlier_success_when_later_agent_fails(tmp_pat
 
     result = agent_bulk_delete_service.bulk_archive_agents([first["agentId"], second["agentId"]])
 
-    assert result["status"] == "failed"
-    assert result["summary"]["successCount"] == 0
-    assert result["summary"]["failedCount"] == 2
-    assert {item["reason"] for item in result["failed"]} == {"invalid", "batch_rolled_back"}
-    assert agent_directory_service.get_agent(first["agentId"])["status"] == "active"
-    assert agent_directory_service.get_agent(second["agentId"])["status"] == "active"
-    assert [member["agentId"] for member in team_service.get_team(team["teamId"])["members"]] == [
-        first["agentId"],
-        second["agentId"],
+    assert result["status"] == "partial_failed"
+    assert result["summary"]["successCount"] == 1
+    assert result["summary"]["failedCount"] == 1
+    assert result["failed"] == [
+        {
+            "agentId": second["agentId"],
+            "reason": "invalid",
+            "message": "second archive write failed",
+        }
     ]
-    assert result["timingsMs"]["rollback_archived_agents"] >= 0
+    assert agent_directory_service.get_agent(first["agentId"], include_archived=True)["status"] == "archived"
+    assert agent_directory_service.get_agent(second["agentId"])["status"] == "active"
+    member_ids = [member["agentId"] for member in team_service.get_team(team["teamId"])["members"]]
+    assert first["agentId"] not in member_ids
+    assert second["agentId"] in member_ids
+    assert "rollback_archived_agents" not in result["timingsMs"]
+
+
+def test_bulk_archive_rejects_more_than_max_agent_ids():
+    too_many = [f"agent-{index}" for index in range(agent_bulk_delete_service.MAX_BULK_AGENT_IDS + 1)]
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="at most 100"):
+        agent_bulk_delete_service.bulk_archive_agents(too_many)
+
+
+def test_bulk_archive_rejects_overlapping_in_flight_work(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = session_service.create_chat_session(title="Busy Archive Agent")
+    started = threading.Event()
+    release = threading.Event()
+    original_archive = agent_bulk_delete_service.archive_agent_instance
+
+    def block_archive(agent_id, *args, **kwargs):
+        started.set()
+        assert release.wait(timeout=5)
+        return original_archive(agent_id, *args, **kwargs)
+
+    monkeypatch.setattr(agent_bulk_delete_service, "archive_agent_instance", block_archive)
+
+    first_result: dict = {}
+    first_error: list[BaseException] = []
+
+    def run_first():
+        try:
+            first_result.update(agent_bulk_delete_service.bulk_archive_agents([agent["agentId"]]))
+        except BaseException as exc:
+            first_error.append(exc)
+
+    worker = threading.Thread(target=run_first)
+    worker.start()
+    assert started.wait(timeout=5)
+    with pytest.raises(agent_bulk_delete_service.AgentLifecycleBusyError, match="already in progress"):
+        agent_bulk_delete_service.bulk_archive_agents([agent["agentId"]])
+    release.set()
+    worker.join(timeout=5)
+    assert not first_error
+    assert first_result.get("status") == "completed"
 
 
 def test_bulk_archive_compensation_continues_after_an_earlier_rollback_fails():
@@ -274,7 +323,9 @@ def test_bulk_archive_rollback_does_not_reactivate_legacy_archived_agent(
         [legacy["agentId"], failing["agentId"]]
     )
 
-    assert result["status"] == "failed"
+    assert result["status"] == "partial_failed"
+    assert result["summary"]["successCount"] == 1
+    assert result["summary"]["failedCount"] == 1
     assert agent_directory_service.get_agent(
         legacy["agentId"],
         include_archived=True,

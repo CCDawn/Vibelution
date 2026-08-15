@@ -31,12 +31,63 @@ def _ensure_team_member_agents_can_archive(team: dict[str, Any], agent_ids: list
             raise s.TeamServiceError(str(exc)) from exc
 
 
+def _cascade_archive_member_agents_unlocked(agent_ids: list[str], *, reason: str) -> dict[str, Any]:
+    """Archive member Agents and seal their sessions. Caller must not hold ``_TEAM_LOCK``."""
+
+    s = _service()
+    from core.web.services.agent_bulk_delete_service import MAX_BULK_AGENT_IDS, bulk_archive_agents
+
+    requested = [str(item or "").strip() for item in agent_ids if str(item or "").strip()]
+    if not requested:
+        return {"archivedAgentIds": [], "removedFromRoomIds": [], "roomCleanupByAgentId": {}, "failed": []}
+
+    archived_agent_ids: list[str] = []
+    room_cleanup_by_agent_id: dict[str, list[str]] = {}
+    removed_from_room_ids: list[str] = []
+    failed: list[dict[str, Any]] = []
+    last_result: dict[str, Any] = {}
+    for offset in range(0, len(requested), MAX_BULK_AGENT_IDS):
+        chunk = requested[offset : offset + MAX_BULK_AGENT_IDS]
+        try:
+            result = bulk_archive_agents(chunk, allow_empty_rooms=True)
+        except agent_directory_service.AgentDirectoryError as exc:
+            raise s.TeamServiceError(str(exc)) from exc
+        last_result = result
+        for item in list(result.get("success") or []):
+            if not isinstance(item, dict):
+                continue
+            agent_id = str(item.get("agentId") or "").strip()
+            if not agent_id:
+                continue
+            archived_agent_ids.append(agent_id)
+            archive_summary = item.get("archiveSummary") if isinstance(item.get("archiveSummary"), dict) else {}
+            room_ids = [
+                str(room_id or "").strip()
+                for room_id in list(archive_summary.get("removedFromRoomIds") or [])
+                if str(room_id or "").strip()
+            ]
+            if room_ids:
+                room_cleanup_by_agent_id[agent_id] = room_ids
+                for room_id in room_ids:
+                    if room_id not in removed_from_room_ids:
+                        removed_from_room_ids.append(room_id)
+        failed.extend(item for item in list(result.get("failed") or []) if isinstance(item, dict))
+        if failed and reason == "team_archive":
+            messages = [str(item.get("message") or item.get("reason") or "archive failed") for item in failed]
+            raise s.TeamServiceError("Team member Agents could not be archived: " + "; ".join(messages[:4]))
+    return {
+        "archivedAgentIds": archived_agent_ids,
+        "removedFromRoomIds": removed_from_room_ids,
+        "roomCleanupByAgentId": room_cleanup_by_agent_id,
+        "failed": failed,
+        "bulkResult": last_result,
+    }
+
+
 def _archive_team_member_agents(team: dict[str, Any], agent_ids: list[str], *, reason: str) -> list[str]:
     s = _service()
-    archived_agent_ids: list[str] = []
-    for agent_id in agent_ids:
-        archived_agent = agent_directory_service.archive_agent_instance(agent_id)
-        archived_agent_ids.append(str(archived_agent.get("agentId") or agent_id).strip())
+    cascade = s._cascade_archive_member_agents_unlocked(agent_ids, reason=reason)
+    archived_agent_ids = list(cascade.get("archivedAgentIds") or [])
     if archived_agent_ids and reason != "team_archive":
         s._record_archived_team_member_cascade_repaired(team, archived_agent_ids, reason=reason)
     return archived_agent_ids
@@ -48,19 +99,28 @@ def _repair_archived_team_member_agents(
     reason: str,
     strict: bool,
     agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> bool:
+) -> tuple[bool, list[str]]:
     s = _service()
     changed = False
+    pending_agent_ids: list[str] = []
+    seen_agent_ids: set[str] = set()
     for team in list(state.get("teams") or []):
-        if isinstance(team, dict):
-            changed = s._repair_archived_team_member_agents_for_team(
-                team,
-                state,
-                reason=reason,
-                strict=strict,
-                agent_refs=agent_refs,
-            ) or changed
-    return changed
+        if not isinstance(team, dict):
+            continue
+        team_changed, agent_ids = s._repair_archived_team_member_agents_for_team(
+            team,
+            state,
+            reason=reason,
+            strict=strict,
+            agent_refs=agent_refs,
+        )
+        changed = team_changed or changed
+        for agent_id in agent_ids:
+            if agent_id in seen_agent_ids:
+                continue
+            seen_agent_ids.add(agent_id)
+            pending_agent_ids.append(agent_id)
+    return changed, pending_agent_ids
 
 
 def _repair_archived_team_member_agents_for_team(
@@ -70,35 +130,26 @@ def _repair_archived_team_member_agents_for_team(
     reason: str,
     strict: bool,
     agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> bool:
+) -> tuple[bool, list[str]]:
     s = _service()
     if str(team.get("status") or s.DEFAULT_TEAM_STATUS).strip() != "archived":
-        return False
+        return False, []
     if not s._team_kind_allows_member_agent_cascade(team):
-        return False
+        return False, []
     changed = s._prune_missing_archived_team_members(team, agent_refs=agent_refs)
     agent_ids = s._unique_active_member_agent_ids(team, agent_refs=agent_refs)
     if not agent_ids:
         if changed:
             team["updatedAt"] = s.utc_now_iso()
             state["updatedAt"] = team["updatedAt"]
-        return changed
+        return changed, []
     try:
         s._ensure_team_member_agents_can_archive(team, agent_ids)
     except s.TeamServiceError:
         if strict:
             raise
-        return changed
-    try:
-        s._remove_team_member_agents_from_chat_rooms(team, agent_ids)
-    except s.TeamServiceError:
-        if strict:
-            raise
-        return changed
-    s._archive_team_member_agents(team, agent_ids, reason=reason)
-    team["updatedAt"] = s.utc_now_iso()
-    state["updatedAt"] = team["updatedAt"]
-    return True
+        return changed, []
+    return changed, agent_ids
 
 
 def _prune_missing_archived_team_members(
