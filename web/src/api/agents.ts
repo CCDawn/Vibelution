@@ -4,8 +4,11 @@ import type {
   AgentConfigChanges,
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
+  AgentInboxMessage,
   AgentInstance,
   AgentPermissionPreset,
+  AgentRunHistory,
+  AgentRuntimeEvidence,
   AgentToolGovernanceRequest,
 } from "./types";
 
@@ -162,6 +165,60 @@ export function promoteAgentModel<T = { agent: AgentConfigWorkspaceAgent; modelR
       body: JSON.stringify(payload),
     },
   );
+}
+
+export function fetchAgentRunHistory(
+  agentId: string,
+  options?: { limit?: number; signal?: AbortSignal },
+): Promise<AgentRunHistory> {
+  const search = new URLSearchParams();
+  if (options?.limit != null) {
+    search.set("limit", String(options.limit));
+  }
+  const suffix = search.toString();
+  const path = `/api/agents/${encodeURIComponent(agentId)}/runs`;
+  return fetchJson<AgentRunHistory>(suffix ? `${path}?${suffix}` : path, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchAgentInboxMessages(
+  agentId: string,
+  options?: { status?: string; limit?: number; signal?: AbortSignal },
+): Promise<AgentInboxMessage[]> {
+  const search = new URLSearchParams();
+  if (options?.status) {
+    search.set("status", options.status);
+  }
+  if (options?.limit != null) {
+    search.set("limit", String(options.limit));
+  }
+  const suffix = search.toString();
+  const path = `/api/agents/${encodeURIComponent(agentId)}/messages`;
+  return fetchJson<AgentInboxMessage[]>(suffix ? `${path}?${suffix}` : path, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchAgentRuntimeEvidence(
+  agentId: string,
+  options?: { sessionId?: string; runId?: string; limit?: number; signal?: AbortSignal },
+): Promise<AgentRuntimeEvidence> {
+  const search = new URLSearchParams();
+  if (options?.sessionId !== undefined) {
+    search.set("sessionId", options.sessionId);
+  }
+  if (options?.runId) {
+    search.set("runId", options.runId);
+  }
+  if (options?.limit != null) {
+    search.set("limit", String(options.limit));
+  }
+  const suffix = search.toString();
+  const path = `/api/agents/${encodeURIComponent(agentId)}/runtime-evidence`;
+  return fetchJson<AgentRuntimeEvidence>(suffix ? `${path}?${suffix}` : path, {
+    signal: options?.signal,
+  });
 }
 
 export function resolveAgentToolGovernanceRequest(

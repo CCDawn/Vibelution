@@ -51,4 +51,13 @@ describe("Agent permission preset API", () => {
     expect(apiSource).toContain("/llm-bindings/");
     expect(apiSource).toContain("/promote");
   });
+
+  it("owns agent activity run, inbox, and runtime-evidence transports", () => {
+    expect(apiSource).toContain("export function fetchAgentRunHistory");
+    expect(apiSource).toContain("/runs");
+    expect(apiSource).toContain("export function fetchAgentInboxMessages");
+    expect(apiSource).toContain("/messages");
+    expect(apiSource).toContain("export function fetchAgentRuntimeEvidence");
+    expect(apiSource).toContain("/runtime-evidence");
+  });
 });

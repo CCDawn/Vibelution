@@ -16,6 +16,11 @@ from core.web.routes.agent_catalog_models import (
     AgentDocumentResponse,
     AgentResetResponse,
 )
+from core.web.routes.agent_activity_models import (
+    AgentInboxMessageResponse,
+    AgentRunHistoryResponse,
+    AgentRuntimeEvidenceResponse,
+)
 from core.web.routes.agent_config_change_models import (
     AgentConfigChangesResponse,
     AgentConfigDraftDiscardResponse,
@@ -793,14 +798,22 @@ def agent_tool_policy_configuration_update(agent_id: str, payload: AgentToolPoli
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/agents/{agent_id}/runs")
+@router.get(
+    "/agents/{agent_id}/runs",
+    response_model=AgentRunHistoryResponse,
+    response_model_exclude_unset=True,
+)
 def agent_run_list(agent_id: str, limit: int = 20) -> dict:
     if not get_agent(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
     return list_agent_runs_for_agent(agent_id, limit=limit)
 
 
-@router.get("/agents/{agent_id}/runtime-evidence")
+@router.get(
+    "/agents/{agent_id}/runtime-evidence",
+    response_model=AgentRuntimeEvidenceResponse,
+    response_model_exclude_unset=True,
+)
 def agent_runtime_evidence(agent_id: str, sessionId: str = "", runId: str = "", limit: int = 5) -> dict:
     if not get_agent(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -888,7 +901,11 @@ def agent_tool_governance_request_resolve(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/agents/{agent_id}/messages")
+@router.get(
+    "/agents/{agent_id}/messages",
+    response_model=list[AgentInboxMessageResponse],
+    response_model_exclude_unset=True,
+)
 def agent_message_list(agent_id: str, status: str = "pending", limit: int = 20) -> list[dict]:
     if not get_agent(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")

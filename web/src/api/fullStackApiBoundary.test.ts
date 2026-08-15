@@ -24,7 +24,7 @@ const routeTestPattern = /\.test\.(ts|tsx)$/;
 // Regenerated 2026-08 (R01 Chat workbench extract + current route client imports).
 // Counts may only stay equal or decrease from this snapshot without explicit review.
 const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
-  "routes/AgentsRoute.tsx": 8,
+  "routes/AgentsRoute.tsx": 5,
   "routes/ConfigProviderRegistryPanel.tsx": 4,
   "routes/ConfigRoute.tsx": 1,
   "routes/EvolutionRoute.tsx": 6,
@@ -73,7 +73,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/teams/useTeamsShellCanvasWorkspace.ts": 1,
 };
 // Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
-const legacyRouteFetchJsonAggregateBudget = 211;
+const legacyRouteFetchJsonAggregateBudget = 208;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
