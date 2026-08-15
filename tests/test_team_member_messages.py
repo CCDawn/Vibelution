@@ -41,3 +41,31 @@ def test_member_message_index_stores_summary_not_body(tmp_path, monkeypatch):
     assert "content" not in listed["messages"][0]
     assert body not in json.dumps(listed)
     assert TeamMemberMessageListResponse.model_validate(listed).model_dump() == listed
+
+
+def test_list_member_messages_reads_recent_window(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha")
+    team = team_service.create_team(name="Window Team", members=[{"agentId": alpha["agentId"], "role": "lead"}])
+    for index in range(60):
+        team_service.record_team_member_message(
+            team["teamId"],
+            message_id=f"msg-{index}",
+            source_agent_id="agent-source",
+            source_agent_name="Source",
+            target_agent_id=alpha["agentId"],
+            target_agent_name="Alpha",
+            target_session_id="session-target",
+            summary=f"preview-{index}",
+        )
+    path = team_service._teams_root() / team_service._safe_token(team["teamId"], default="team", max_length=96) / "member_messages.jsonl"
+    path.write_text(path.read_text(encoding="utf-8") + "not-json\n", encoding="utf-8")
+    listed = team_service.list_team_member_messages(team["teamId"], limit=5)
+    assert [item["messageId"] for item in listed["messages"]] == [
+        "msg-59",
+        "msg-58",
+        "msg-57",
+        "msg-56",
+        "msg-55",
+    ]
+    assert all("content" not in item for item in listed["messages"])

@@ -7,6 +7,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
+from core.web.routes.teams_catalog_models import (
+    TeamAiSearchRunListResponse,
+    TeamCanvasResponse,
+    TeamDetailResponse,
+    TeamListResponse,
+)
 from core.web.services.team_service import (
     TeamNotFoundError,
     TeamServiceError,
@@ -95,7 +101,11 @@ class AiSearchRunStartPayload(BaseModel):
     includeSignals: bool = False
 
 
-@router.get("/teams")
+@router.get(
+    "/teams",
+    response_model=TeamListResponse,
+    response_model_exclude_unset=True,
+)
 def team_list(includeArchived: bool = False) -> dict:
     payload = list_teams_compact(include_archived=includeArchived)
     payload["systemTeamBootstrap"] = request_system_team_bootstrap(reason="team_list", allow_sync_check=False)
@@ -115,7 +125,11 @@ def team_create(payload: TeamCreatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/teams/{team_id}")
+@router.get(
+    "/teams/{team_id}",
+    response_model=TeamDetailResponse,
+    response_model_exclude_unset=True,
+)
 def team_detail(team_id: str, detail: str = "full") -> dict:
     try:
         detail_mode = str(detail or "full").strip().lower()
@@ -158,7 +172,11 @@ def team_delete(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/teams/{team_id}/canvas")
+@router.get(
+    "/teams/{team_id}/canvas",
+    response_model=TeamCanvasResponse,
+    response_model_exclude_unset=True,
+)
 def team_canvas(team_id: str) -> dict:
     try:
         return get_team_canvas(team_id)
@@ -178,7 +196,11 @@ def team_canvas_update(team_id: str, payload: TeamCanvasPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/teams/{team_id}/ai-search-runs")
+@router.get(
+    "/teams/{team_id}/ai-search-runs",
+    response_model=TeamAiSearchRunListResponse,
+    response_model_exclude_unset=True,
+)
 def team_ai_search_run_list(team_id: str, limit: int = 6) -> dict:
     try:
         return list_ai_search_source_scope_runs(team_id, limit=limit)

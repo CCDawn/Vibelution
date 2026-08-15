@@ -5,8 +5,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { fetchTeam } from "../../api/teams";
 import type { Team } from "../../api/types";
 import { RESEARCH_TEAM_ID, resolveTeamsRouteEffectiveTeamId } from "../TeamsRoute.canvasData";
 import { useResearchProjectAgentTasks } from "./research-projects/useResearchProjectAgentTasks";
@@ -74,10 +74,7 @@ export function useTeamsSelectedTeamDetail({
   const teamDetailQuery = useQuery<Team>({
     queryKey: queryKeys.team(effectiveTeamId, teamDetailLoadMode),
     queryFn: ({ signal }) =>
-      fetchJson<Team>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`,
-        { signal },
-      ),
+      fetchTeam(effectiveTeamId, { signal, detail: teamDetailLoadMode }),
     enabled: Boolean(effectiveTeamId),
     staleTime: 10_000,
     placeholderData: () =>

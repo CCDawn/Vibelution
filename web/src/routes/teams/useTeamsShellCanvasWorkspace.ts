@@ -9,8 +9,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { fetchTeamCanvas } from "../../api/teams";
 import type { Team, TeamCanvasNode, TeamOrganizationCanvas } from "../../api/types";
 import {
   canvasFromKnownTeamId,
@@ -268,8 +268,7 @@ export function useTeamsCanvasProjection(input: UseTeamsCanvasProjectionInput) {
   });
   const teamCanvasQuery = useQuery({
     queryKey: queryKeys.teamCanvas(effectiveTeamId || "none"),
-    queryFn: ({ signal }) =>
-      fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal }),
+    queryFn: ({ signal }) => fetchTeamCanvas(effectiveTeamId, { signal }),
     enabled: teamCanvasQueryEnabled,
     staleTime: 10_000,
   });
