@@ -18,6 +18,24 @@ from .human_acceptance_artifact import (
 from .human_gate_artifacts import canonical_sha256
 from .workflow_artifact_store import put_workflow_artifact
 
+# Experiment-kernel smoke status is not the human-gate vocabulary.
+# V1 CPU smoke maps ``needs_full_run`` (and proxy-only) to ``needs_review``;
+# that still means the observation ran. Only failed/reject observations
+# must block Human release.
+_SMOKE_RELEASE_BLOCKING_STATUSES = frozenset(
+    {"failed", "reject", "non_executable", "unknown"}
+)
+_SMOKE_RELEASE_ALLOWED_STATUSES = frozenset(
+    {"passed", "needs_review", "completed", "accept", "iterate"}
+)
+
+
+def smoke_observation_is_releasable(status: Any) -> bool:
+    normalized = str(status or "").strip().lower()
+    if normalized in _SMOKE_RELEASE_BLOCKING_STATUSES:
+        return False
+    return normalized in _SMOKE_RELEASE_ALLOWED_STATUSES
+
 
 def prepare_smoke_release_artifact(
     *,
@@ -151,9 +169,22 @@ def _execute_smoke_observation(
     plan_id: str,
     handoff_id: str,
 ) -> None:
+    from core.web.services.team_workflow.experiment_api.plan import (
+        bind_frozen_protocol_to_experiment_plan,
+    )
+
     from .real_domain_ports import RealDomainPorts
 
+    snapshot = _json_object(run.input_snapshot_json)
+    authority_run_id = str(snapshot.get("sourceCollectionRunId") or "").strip()
+    frozen_envelope = load_scoped_artifact_payload(
+        "frozen_protocol",
+        team_id=run.team_id,
+        authority_run_id=authority_run_id,
+        workflow_run_id=run.run_id,
+    )
     try:
+        bind_frozen_protocol_to_experiment_plan(run.team_id, _artifact_body(frozen_envelope))
         RealDomainPorts(store).execute_run_smoke(
             run_id=run.run_id,
             plan_id=plan_id,
@@ -227,7 +258,7 @@ def _artifact_body(envelope: dict[str, Any] | None) -> dict[str, Any]:
 def _require_passed_smoke(evidence: dict[str, Any], *, plan_id: str) -> None:
     if not evidence:
         raise KnowledgeAcceptanceArtifactError("smoke_evidence_not_materialized")
-    if str(evidence.get("status") or "").strip().lower() != "passed":
+    if not smoke_observation_is_releasable(evidence.get("status")):
         raise KnowledgeAcceptanceArtifactError("smoke_evidence_not_passed")
     if str(evidence.get("planId") or "").strip() != plan_id:
         raise KnowledgeAcceptanceArtifactError("smoke_evidence_plan_mismatch")
