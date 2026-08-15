@@ -1045,6 +1045,119 @@ def test_ledger_ports_result_evaluation_bounded_without_agent_binding(
         harness.close()
 
 
+def test_ledger_ports_result_evaluation_fashion_mnist_formal_without_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.web.services.team_workflow.research_runtime import workflow_artifact_store
+    from core.web.services.team_workflow.research_runtime.workflow_artifact_store import (
+        load_workflow_artifact_payload,
+        put_workflow_artifact,
+    )
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / "ledger-eval-formal.sqlite3")
+    try:
+        run_id = "run-eval-formal"
+        _seed_run_with_snapshot(
+            harness,
+            run_id=run_id,
+            snapshot={
+                "snapshotHash": "a" * 64,
+                "teamId": "team-ledger-sys",
+                "sourceCollectionRunId": "sc-ledger-1",
+                "agentBindingSnapshot": [],
+            },
+        )
+        put_workflow_artifact(
+            "team-ledger-sys",
+            kind="run_artifacts",
+            workflow_run_id=run_id,
+            source_collection_run_id="sc-ledger-1",
+            artifact_identity="nr-formal",
+            payload={
+                "execution": {
+                    "status": "completed",
+                    "adapterId": "fashion_mnist_predictive_coding_multi_seed",
+                    "automaticPromotion": False,
+                    "result": {
+                        "status": "completed",
+                        "aggregate": {"meanAccuracy": 0.41},
+                        "logRef": "/tmp/sci096-canvas/out/formal-run-log.json",
+                        "boundaries": [
+                            "does_not_validate_neural_realism",
+                            "not_an_official_competition_submission",
+                        ],
+                        "automaticPromotion": False,
+                    },
+                }
+            },
+        )
+        ports = RealDomainPorts(harness.store)
+        eval_action = PendingAction(
+            action_id="act-eval-formal",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-result_evaluation-a1",
+            node_id="result_evaluation",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        handle = ports.create_agent_task(action=eval_action)
+        assert str(handle.task_id).startswith("bounded-eval")
+        refs = ports.execute_agent_turn(action=eval_action, handle=handle)
+        assert refs and refs[0]["kind"] == "evaluation_report"
+        report = load_workflow_artifact_payload(
+            "evaluation_report",
+            team_id="team-ledger-sys",
+            authority_run_id="sc-ledger-1",
+            workflow_run_id=run_id,
+        )
+        assert report is not None
+        body = report.get("payload") if isinstance(report.get("payload"), dict) else report
+        assert body["baseline_comparison"]["meanAccuracy"] == 0.41
+        assert "does_not_validate_neural_realism" in body["confidence_bounds"]["boundaries"]
+        assert body["confidence_bounds"]["automaticPromotion"] is False
+
+        decision_action = PendingAction(
+            action_id="act-iter-formal",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-iteration_decision-a1",
+            node_id="iteration_decision",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="p-1",
+        )
+        decision_handle = ports.create_agent_task(action=decision_action)
+        assert str(decision_handle.task_id).startswith("bounded-iter")
+        decision_refs = ports.execute_agent_turn(
+            action=decision_action, handle=decision_handle
+        )
+        assert decision_refs and decision_refs[0]["kind"] == "iteration_decision"
+        decision = load_workflow_artifact_payload(
+            "iteration_decision",
+            team_id="team-ledger-sys",
+            authority_run_id="sc-ledger-1",
+            workflow_run_id=run_id,
+        )
+        assert decision is not None
+        decision_body = (
+            decision.get("payload") if isinstance(decision.get("payload"), dict) else decision
+        )
+        assert decision_body["decisionKind"] == "stop"
+        assert decision_body["terminalReason"] == "claim_boundary_no_promotion"
+        assert "do not promote" in decision_body["reason"]
+    finally:
+        harness.close()
+
+
 def test_result_evaluation_binding_heals_from_sibling_freeze(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
