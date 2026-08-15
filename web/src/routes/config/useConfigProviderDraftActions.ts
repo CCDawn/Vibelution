@@ -5,8 +5,17 @@
  */
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
-import { fetchConfigWorkspace } from "../../api/config";
+import {
+  addDraftProvider,
+  deleteDraftProvider,
+  discoverDraftProvider,
+  fetchConfigWorkspace,
+  pinDraftProviderModel,
+  previewDraftProviderRoute,
+  suggestDraftProviderId,
+  unpinDraftProviderModel,
+  updateDraftProvider,
+} from "../../api/config";
 import type {
   ConfigCatalogModel,
   ConfigDraftMeta,
@@ -82,19 +91,8 @@ export type UseConfigProviderDraftActionsOptions = {
   setRouteEditProvider: (value: Record<string, unknown>) => void;
   setRoutePreview: Dispatch<SetStateAction<ProviderRoutePreview | null>>;
   dispatchProviderWizard: Dispatch<ProviderWizardAction>;
-  requestJson?: <T>(url: string, body?: unknown, method?: string) => Promise<T>;
   confirmDeleteProvider?: (providerId: string) => boolean;
 };
-
-async function defaultRequestJson<T>(url: string, body?: unknown, method = "POST"): Promise<T> {
-  return fetchJson<T>(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: body == null ? undefined : JSON.stringify(body),
-  });
-}
 
 export function useConfigProviderDraftActions(options: UseConfigProviderDraftActionsOptions) {
   const {
@@ -124,7 +122,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setRouteEditProvider,
     setRoutePreview,
     dispatchProviderWizard,
-    requestJson = defaultRequestJson,
     confirmDeleteProvider = (providerId: string) => (
       typeof window === "undefined"
       || window.confirm(`删除 Provider ${providerId}？此操作只允许在没有固定模型时继续。`)
@@ -152,8 +149,8 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setProviderActionError("");
     setProviderActionFeedback({ kind: "discover", providerId, phase: "busy", message: "正在发现模型…" });
     try {
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}/discover`,
+      const response = await discoverDraftProvider(
+        providerId,
         buildProviderDraftRequest({ providerId, credentialValue }),
       );
       syncWorkspace(response, "success", { resetBase: false });
@@ -184,7 +181,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     buildProviderDraftRequest,
     providerDiscoveryFailureDetail,
     providerDiscoveryFailureMessage,
-    requestJson,
     setBusyAction,
     setProviderActionError,
     setProviderActionFeedback,
@@ -192,12 +188,11 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
   ]);
 
   const handleSuggestProviderId = useCallback(async (provider: Record<string, unknown>): Promise<string> => {
-    const response = await requestJson<{ suggestedProviderId: string }>(
-      "/api/config/draft/providers/id-suggestion",
+    const response = await suggestDraftProviderId(
       buildProviderDraftRequest({ provider }),
     );
     return response.suggestedProviderId;
-  }, [buildProviderDraftRequest, requestJson]);
+  }, [buildProviderDraftRequest]);
 
   const handleCreateProvider = useCallback(async (state: ProviderWizardState, credentialValue: string): Promise<void> => {
     setBusyAction("正在创建 Provider 草稿…");
@@ -205,8 +200,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     const template = providerPresetOptions.find((item) => item.provider_preset_id === state.templateId);
     const provider = buildProviderWizardDraft(state, template?.provider);
     try {
-      const response = await requestJson<ConfigWorkspace>(
-        "/api/config/draft/providers",
+      const response = await addDraftProvider(
         buildProviderDraftRequest({ providerId: state.providerId, provider, credentialValue }),
       );
       syncWorkspace(response, "success", { resetBase: false });
@@ -224,7 +218,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     markError,
     providerPresetOptions,
     readableErrorMessage,
-    requestJson,
     setBusyAction,
     setProviderActionError,
     setSelectedProviderId,
@@ -299,19 +292,16 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
           continue;
         }
         try {
-          const response = await requestJson<ConfigWorkspace>(
-            `/api/config/draft/providers/${encodeURIComponent(providerId)}/models`,
-            {
-              publicConfig: currentConfig,
-              draftMeta: currentMeta,
-              baseHash: currentBaseHash,
-              providerId,
-              upstreamId,
-              modelKey,
-              label: model.label || upstreamId,
-              overrides: {},
-            },
-          );
+          const response = await pinDraftProviderModel(providerId, {
+            publicConfig: currentConfig,
+            draftMeta: currentMeta,
+            baseHash: currentBaseHash,
+            providerId,
+            upstreamId,
+            modelKey,
+            label: model.label || upstreamId,
+            overrides: {},
+          });
           currentConfig = response.publicConfig;
           currentMeta = response.draftMeta;
           // Do not adopt response.hash (draft). Baseline hash stays frozen until apply/reload.
@@ -372,7 +362,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     markError,
     providerDraftRequestRef,
     readableErrorMessage,
-    requestJson,
     requireDraft,
     setBusyAction,
     setNotice,
@@ -390,10 +379,10 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     const modelKey = modelRef.slice(separator + 1);
     setBusyAction("正在取消固定模型…");
     try {
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelKey)}`,
+      const response = await unpinDraftProviderModel(
+        providerId,
+        modelKey,
         buildProviderDraftRequest({ providerId, upstreamId: resolveUpstreamId(modelRef), modelKey }),
-        "DELETE",
       );
       syncWorkspace(response, "success", { resetBase: false });
       return true;
@@ -408,7 +397,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     buildProviderDraftRequest,
     markError,
     readableErrorMessage,
-    requestJson,
     setBusyAction,
     setProviderActionError,
     syncWorkspace,
@@ -419,10 +407,9 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setBusyAction("正在删除 Provider…");
     try {
       const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
+      const response = await deleteDraftProvider(
+        providerId,
         buildProviderDraftRequest({ providerId, provider }),
-        "DELETE",
       );
       syncWorkspace(response, "success", { resetBase: false });
       setSelectedProviderId("");
@@ -437,7 +424,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     confirmDeleteProvider,
     markError,
     readableErrorMessage,
-    requestJson,
     requireDraft,
     setBusyAction,
     setProviderActionError,
@@ -452,10 +438,9 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setProviderActionFeedback({ kind: "credential", providerId, phase: "busy", message: "正在保存 API Key…" });
     try {
       const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
+      const response = await updateDraftProvider(
+        providerId,
         buildProviderDraftRequest({ providerId, provider, credentialValue }),
-        "PUT",
       );
       syncWorkspace(response, "success", { resetBase: false });
       setProviderCredentialEditId("");
@@ -474,7 +459,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     buildProviderDraftRequest,
     markError,
     readableErrorMessage,
-    requestJson,
     requireDraft,
     setBusyAction,
     setProviderActionError,
@@ -500,10 +484,9 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       } else {
         provider.context_window = null;
       }
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
+      const response = await updateDraftProvider(
+        providerId,
         buildProviderDraftRequest({ providerId, provider }),
-        "PUT",
       );
       syncWorkspace(response, "success", { resetBase: false });
       setProviderActionFeedback({
@@ -528,7 +511,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     buildProviderDraftRequest,
     markError,
     readableErrorMessage,
-    requestJson,
     requireDraft,
     setBusyAction,
     setProviderActionError,
@@ -549,8 +531,8 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setProviderActionError("");
     setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在生成路由预览…" });
     try {
-      const preview = await requestJson<Omit<ProviderRoutePreview, "proposedProvider">>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}/route-preview`,
+      const preview = await previewDraftProviderRoute(
+        providerId,
         buildProviderDraftRequest({ providerId, provider }),
       );
       setRoutePreview({ ...preview, proposedProvider: provider });
@@ -571,7 +553,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     buildProviderDraftRequest,
     markError,
     readableErrorMessage,
-    requestJson,
     setBusyAction,
     setProviderActionError,
     setProviderActionFeedback,
@@ -585,14 +566,13 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setProviderActionError("");
     setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在更新 Provider 路由…" });
     try {
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(routePreview.providerId)}`,
+      const response = await updateDraftProvider(
+        routePreview.providerId,
         buildProviderDraftRequest({
           providerId: routePreview.providerId,
           provider: routePreview.proposedProvider,
           routePreviewToken: routePreview.routePreviewToken,
         }),
-        "PUT",
       );
       syncWorkspace(response, "success", { resetBase: false });
       setRoutePreview(null);
@@ -610,7 +590,6 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     buildProviderDraftRequest,
     markError,
     readableErrorMessage,
-    requestJson,
     setBusyAction,
     setProviderActionError,
     setProviderActionFeedback,

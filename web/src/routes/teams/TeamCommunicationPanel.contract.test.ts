@@ -40,5 +40,9 @@ describe("TeamCommunicationPanel extraction contract", () => {
     expect(panelSource).toContain("Start team round");
     expect(panelSource).toContain("Send to team");
     expect(panelSource).toContain("Recent team broadcasts");
+    expect(panelSource).toContain("Member messages");
+    expect(panelSource).toContain("listTeamMemberMessages");
+    expect(panelSource).toContain("teamMemberMessageSessionHref");
+    expect(panelSource).not.toContain("POST /teams/{id}/messages");
   });
 });

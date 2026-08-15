@@ -45,7 +45,6 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/chat/CliAgentRunTerminalPanel.tsx": 3,
   "routes/chat/useChatCliAgentTerminal.ts": 1,
   "routes/config/useConfigMigrationActions.ts": 1,
-  "routes/config/useConfigProviderDraftActions.ts": 1,
   "routes/config/useConfigWorkspaceQueries.ts": 1,
   "routes/evolution/useEvolutionProposalMutations.ts": 5,
   "routes/evolution/useEvolutionRunMutations.ts": 8,
@@ -67,7 +66,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/teams/useTeamsShellCanvasWorkspace.ts": 1,
 };
 // Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
-const legacyRouteFetchJsonAggregateBudget = 176;
+const legacyRouteFetchJsonAggregateBudget = 175;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {

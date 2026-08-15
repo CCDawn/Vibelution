@@ -169,6 +169,7 @@ def create_team(
         s._save_index(state)
         canvas = s._default_canvas_for_team(team)
         s._write_json(s._team_canvas_path(team_id), canvas)
+        s._ensure_active_member_direct_sessions(team)
         s._ensure_team_chat_room_link(team)
         state["updatedAt"] = team["updatedAt"]
         s._save_index(state)
@@ -280,6 +281,9 @@ def update_team(
         team["canvasPath"] = s._relative_path(s._team_canvas_path(normalized_team_id))
         state["updatedAt"] = team["updatedAt"]
         s._save_index(state)
+        if members is not None:
+            s._ensure_active_member_direct_sessions(team)
+            s._ensure_team_chat_room_link(team)
     s._record_team_event("team.updated", team, fields={"memberCount": len(team.get("members") or [])})
     return s.get_team(normalized_team_id)
 
