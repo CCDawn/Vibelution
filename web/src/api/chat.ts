@@ -1,5 +1,9 @@
 import { fetchJson } from "./client";
 import type {
+  ChatRoomDetail,
+  ChatRoomMode,
+  ChatRoomPurpose,
+  ChatRoomRoundAcceptedResponse,
   ChatWorkbenchBootstrap,
   ConversationAttachment,
   SessionChatReviewCandidateResponse,
@@ -296,6 +300,136 @@ export function submitSessionGuidance(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function listChatRoomModes(): Promise<ChatRoomMode[]> {
+  return fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes");
+}
+
+export function listChatRoomPurposes(): Promise<ChatRoomPurpose[]> {
+  return fetchJson<ChatRoomPurpose[]>("/api/chat-rooms/purposes");
+}
+
+export function fetchChatRoomDetail(
+  roomId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ChatRoomDetail> {
+  return fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}`, {
+    signal: options?.signal,
+  });
+}
+
+export function createChatRoom(payload: {
+  title: string;
+  agentIds: string[];
+  mode: string;
+  purpose: string;
+}): Promise<ChatRoomDetail> {
+  const { title, agentIds, mode, purpose } = payload;
+  return fetchJson<ChatRoomDetail>("/api/chat-rooms", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title, agentIds, mode, purpose }),
+  });
+}
+
+export function updateChatRoom(
+  roomId: string,
+  payload: {
+    title: string;
+    participantSessionIds: string[];
+    mode: string;
+    purpose: string;
+  },
+): Promise<ChatRoomDetail> {
+  return fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      title: payload.title,
+      participantSessionIds: payload.participantSessionIds,
+      mode: payload.mode,
+      purpose: payload.purpose,
+    }),
+  });
+}
+
+export type ChatRoomDeleteResponse = {
+  deleted: boolean;
+  roomId: string;
+};
+
+export function deleteChatRoom(roomId: string): Promise<ChatRoomDeleteResponse> {
+  return fetchJson<ChatRoomDeleteResponse>(`/api/chat-rooms/${encodeURIComponent(roomId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function resetChatRoom(roomId: string): Promise<ChatRoomDetail> {
+  return fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}/reset`, {
+    method: "POST",
+  });
+}
+
+export function stopChatRoomRound(roomId: string): Promise<ChatRoomDetail> {
+  return fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}/stop`, {
+    method: "POST",
+  });
+}
+
+export function startChatRoomRound(
+  roomId: string,
+  payload: {
+    topic: string;
+    mode: string;
+    purpose: string;
+    config?: Record<string, unknown>;
+  },
+  options: { preferAsync: true },
+): Promise<ChatRoomRoundAcceptedResponse>;
+export function startChatRoomRound(
+  roomId: string,
+  payload: {
+    topic: string;
+    mode: string;
+    purpose: string;
+    config?: Record<string, unknown>;
+  },
+  options?: { preferAsync?: false },
+): Promise<ChatRoomDetail>;
+export function startChatRoomRound(
+  roomId: string,
+  payload: {
+    topic: string;
+    mode: string;
+    purpose: string;
+    config?: Record<string, unknown>;
+  },
+  options?: { preferAsync?: boolean },
+): Promise<ChatRoomDetail | ChatRoomRoundAcceptedResponse> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (options?.preferAsync) {
+    headers.Prefer = "respond-async";
+  }
+  return fetchJson<ChatRoomDetail | ChatRoomRoundAcceptedResponse>(
+    `/api/chat-rooms/${encodeURIComponent(roomId)}/rounds`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        topic: payload.topic,
+        mode: payload.mode,
+        purpose: payload.purpose,
+        ...(payload.config == null ? {} : { config: payload.config }),
+      }),
     },
   );
 }

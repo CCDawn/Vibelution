@@ -2,10 +2,16 @@ import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import {
+  createChatRoom,
   createChatSession,
   createSessionChatReviewCandidate,
+  deleteChatRoom,
   deleteChatSession,
   fetchSessionDetail,
+  resetChatRoom,
+  startChatRoomRound,
+  stopChatRoomRound,
+  updateChatRoom,
   updateChatSession,
 } from "../../api/chat";
 import { fetchJson } from "../../api/client";
@@ -525,13 +531,7 @@ export function useChatWorkspaceLifecycle({
     mutationFn: async (
       { title, agentIds, mode, purpose }: { title: string; agentIds: string[]; mode: string; purpose: string },
     ) =>
-      fetchJson<ChatRoomDetail>("/api/chat-rooms", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ title, agentIds, mode, purpose }),
-      }),
+      createChatRoom({ title, agentIds, mode, purpose }),
     onMutate: () => ({
       routeSelectionAtRequest: routeSelectionRef.current,
     }),
@@ -570,14 +570,7 @@ export function useChatWorkspaceLifecycle({
     mutationFn: async (
       { roomId, topic, mode, purpose }: { roomId: string; topic: string; mode: string; purpose: string },
     ) =>
-      fetchJson<ChatRoomRoundAcceptedResponse>(`/api/chat-rooms/${roomId}/rounds`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Prefer: "respond-async",
-        },
-        body: JSON.stringify({ topic, mode, purpose }),
-      }),
+      startChatRoomRound(roomId, { topic, mode, purpose }, { preferAsync: true }),
     onSuccess: (accepted) => {
       setRightIndexPanel("members");
       setGroupTopicDraft("");
@@ -592,9 +585,7 @@ export function useChatWorkspaceLifecycle({
 
   const stopGroupRoundMutation = useMutation({
     mutationFn: async ({ roomId }: { roomId: string }) =>
-      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/stop`, {
-        method: "POST",
-      }),
+      stopChatRoomRound(roomId),
     onSuccess: (room) => {
       setRightIndexPanel("members");
       setGroupRoomActionError("");
@@ -655,17 +646,11 @@ export function useChatWorkspaceLifecycle({
         purpose: string;
       },
     ) =>
-      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          title,
-          participantSessionIds: sessionIds,
-          mode,
-          purpose,
-        }),
+      updateChatRoom(roomId, {
+        title,
+        participantSessionIds: sessionIds,
+        mode,
+        purpose,
       }),
     onSuccess: (room) => {
       setRightIndexPanel("members");
@@ -687,9 +672,7 @@ export function useChatWorkspaceLifecycle({
 
   const deleteGroupRoomMutation = useMutation({
     mutationFn: async ({ roomId }: { roomId: string }) =>
-      fetchJson<{ deleted: boolean; roomId: string }>(`/api/chat-rooms/${roomId}`, {
-        method: "DELETE",
-      }),
+      deleteChatRoom(roomId),
     onSuccess: (_payload, variables) => {
       setRightIndexPanel("conversations");
       setGroupTopicDraft("");
@@ -712,9 +695,7 @@ export function useChatWorkspaceLifecycle({
 
   const resetGroupRoomMutation = useMutation({
     mutationFn: async ({ roomId }: { roomId: string }) =>
-      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/reset`, {
-        method: "POST",
-      }),
+      resetChatRoom(roomId),
     onSuccess: (room) => {
       setRightIndexPanel("members");
       setGroupRoomActionError("");

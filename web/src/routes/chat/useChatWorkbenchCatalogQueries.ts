@@ -7,15 +7,17 @@
 import { useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 
-import { fetchChatWorkbenchBootstrap } from "../../api/chat";
+import {
+  fetchChatRoomDetail,
+  fetchChatWorkbenchBootstrap,
+  listChatRoomModes,
+  listChatRoomPurposes,
+} from "../../api/chat";
 import { listProjectAgentBusTimeline } from "../../api/projectAgentBus";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentInstance,
-  ChatRoomDetail,
-  ChatRoomMode,
-  ChatRoomPurpose,
   ConfigSummary,
   ConversationSummary,
   PetSummary,
@@ -214,17 +216,17 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const slashCommandSuggestions = skillsQuery.data?.skills ?? [];
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
-    queryFn: () => fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes"),
+    queryFn: () => listChatRoomModes(),
     enabled: groupComposerOpen || standardGroupRoomActive,
   });
   const chatRoomPurposesQuery = useQuery({
     queryKey: queryKeys.chatRoomPurposes(),
-    queryFn: () => fetchJson<ChatRoomPurpose[]>("/api/chat-rooms/purposes"),
+    queryFn: () => listChatRoomPurposes(),
     enabled: groupComposerOpen || standardGroupRoomActive,
   });
   const activeGroupRoomQuery = useQuery({
     queryKey: queryKeys.chatRoom(activeGroupRoomId || "none"),
-    queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeGroupRoomId}`),
+    queryFn: () => fetchChatRoomDetail(activeGroupRoomId),
     enabled: standardGroupRoomActive,
     refetchInterval: standardGroupRoomActive
       ? resolvePollingInterval(
