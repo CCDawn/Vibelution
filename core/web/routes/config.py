@@ -19,6 +19,12 @@ from core.web.routes.config_draft_model_models import (
     ConfigLlmTestResponse,
     ConfigModelDiscoveryResponse,
 )
+from core.web.routes.config_migration_models import (
+    ConfigMigrationApplyResponse,
+    ConfigMigrationPreviewResponse,
+    ConfigProviderMergePreviewResponse,
+    ConfigProviderMergeResultResponse,
+)
 from core.web.routes.config_draft_provider_models import (
     ConfigProviderIdSuggestionResponse,
     ConfigProviderRoutePreviewResponse,
@@ -340,7 +346,11 @@ def config_workspace() -> dict:
     return get_config_workspace()
 
 
-@migration_router.post("/config/migration/llm-v2/preview")
+@migration_router.post(
+    "/config/migration/llm-v2/preview",
+    response_model=ConfigMigrationPreviewResponse,
+    response_model_exclude_unset=True,
+)
 def config_llm_v2_migration_preview(
     payload: ConfigMigrationPreviewPayload | None = None,
 ) -> dict:
@@ -364,7 +374,11 @@ def config_llm_v2_migration_preview(
         _raise_migration_http_error(exc)
 
 
-@migration_router.post("/config/migration/llm-v2/apply")
+@migration_router.post(
+    "/config/migration/llm-v2/apply",
+    response_model=ConfigMigrationApplyResponse,
+    response_model_exclude_unset=True,
+)
 def config_llm_v2_migration_apply(payload: ConfigMigrationApplyPayload) -> dict:
     try:
         return provider_config_service.apply_llm_v2_migration(
@@ -375,7 +389,11 @@ def config_llm_v2_migration_apply(payload: ConfigMigrationApplyPayload) -> dict:
         _raise_migration_http_error(exc)
 
 
-@migration_router.post("/config/migration/providers/merge/preview")
+@migration_router.post(
+    "/config/migration/providers/merge/preview",
+    response_model=ConfigProviderMergePreviewResponse,
+    response_model_exclude_unset=True,
+)
 def config_provider_merge_preview(payload: ProviderMergePreviewPayload) -> dict:
     try:
         return provider_config_service.preview_duplicate_provider_merge(
@@ -387,7 +405,11 @@ def config_provider_merge_preview(payload: ProviderMergePreviewPayload) -> dict:
         _raise_migration_http_error(exc)
 
 
-@migration_router.post("/config/migration/providers/merge/apply")
+@migration_router.post(
+    "/config/migration/providers/merge/apply",
+    response_model=ConfigProviderMergeResultResponse,
+    response_model_exclude_unset=True,
+)
 def config_provider_merge_apply(payload: ProviderMergeApplyPayload) -> dict:
     try:
         return provider_config_service.apply_duplicate_provider_merge(
@@ -400,7 +422,9 @@ def config_provider_merge_apply(payload: ProviderMergeApplyPayload) -> dict:
 
 
 @migration_router.post(
-    "/config/migration/providers/merge/{migration_id}/rollback"
+    "/config/migration/providers/merge/{migration_id}/rollback",
+    response_model=ConfigProviderMergeResultResponse,
+    response_model_exclude_unset=True,
 )
 def config_provider_merge_rollback(
     migration_id: str, payload: ProviderMergeRollbackPayload
@@ -419,7 +443,11 @@ def config_provider_merge_rollback(
 router.include_router(migration_router)
 
 
-@router.post("/config/migration/llm-v2/{migration_id}/rollback")
+@router.post(
+    "/config/migration/llm-v2/{migration_id}/rollback",
+    response_model=ConfigMigrationApplyResponse,
+    response_model_exclude_unset=True,
+)
 def config_llm_v2_migration_rollback(
     migration_id: str,
     payload: ConfigMigrationRollbackPayload,

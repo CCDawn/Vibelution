@@ -1,7 +1,11 @@
 import { fetchJson } from "./client";
 import type {
   ConfigLlmTestResult,
+  ConfigMigrationPreview,
+  ConfigMigrationPreviewRequest,
   ConfigModelDiscoveryResult,
+  ConfigProviderMergePreview,
+  ConfigProviderMergeResult,
   ConfigSummary,
   ConfigWorkspace,
 } from "./types";
@@ -162,4 +166,59 @@ export function discoverConfigModels(
   body: ConfigDraftEnvelope,
 ): Promise<ConfigModelDiscoveryResult> {
   return postConfigJson<ConfigModelDiscoveryResult>("/api/config/discover-models", body);
+}
+
+export function previewLlmV2Migration(
+  body: ConfigMigrationPreviewRequest = {},
+): Promise<ConfigMigrationPreview> {
+  return postConfigJson<ConfigMigrationPreview>("/api/config/migration/llm-v2/preview", body);
+}
+
+export function applyLlmV2Migration(body: {
+  previewId: string;
+  baseHash: string;
+}): Promise<{ migrationId: string; updatedReferenceCount?: number }> {
+  return postConfigJson("/api/config/migration/llm-v2/apply", body);
+}
+
+export function rollbackLlmV2Migration(
+  migrationId: string,
+  body: { migrationId: string; baseHash: string },
+): Promise<{ migrationId: string }> {
+  return postConfigJson(
+    `/api/config/migration/llm-v2/${encodeURIComponent(migrationId)}/rollback`,
+    body,
+  );
+}
+
+export function previewProviderMerge(body: {
+  canonicalProviderId: string;
+  duplicateProviderIds: string[];
+  credentialDecisions?: Record<string, string>;
+}): Promise<ConfigProviderMergePreview> {
+  return postConfigJson<ConfigProviderMergePreview>(
+    "/api/config/migration/providers/merge/preview",
+    body,
+  );
+}
+
+export function applyProviderMerge(body: {
+  previewId: string;
+  baseHash: string;
+  confirmed: boolean;
+}): Promise<ConfigProviderMergeResult> {
+  return postConfigJson<ConfigProviderMergeResult>(
+    "/api/config/migration/providers/merge/apply",
+    body,
+  );
+}
+
+export function rollbackProviderMerge(
+  migrationId: string,
+  body: { migrationId: string; baseHash: string },
+): Promise<ConfigProviderMergeResult> {
+  return postConfigJson<ConfigProviderMergeResult>(
+    `/api/config/migration/providers/merge/${encodeURIComponent(migrationId)}/rollback`,
+    body,
+  );
 }

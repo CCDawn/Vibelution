@@ -2780,7 +2780,6 @@ export function ConfigRoute() {
     syncWorkspace,
     markError,
     readableErrorMessage,
-    requestJson,
   });
 
   function resolveDraftForSubmission(): PublicConfigShape {
